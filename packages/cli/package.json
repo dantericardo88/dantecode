@@ -34,7 +34,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --banner.js '#!/usr/bin/env bun'",
+    "build": "tsup",
     "dev": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",

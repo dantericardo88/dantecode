@@ -1,6 +1,6 @@
 # AUTOFORGE_GUIDANCE.md
 
-**Generated:** 2026-03-15 | **Autoforge Iteration:** 13 | **Waves Completed:** 45/45
+**Generated:** 2026-03-15 | **Autoforge Iteration:** 14 | **Waves Completed:** 48/48
 
 ---
 
@@ -151,6 +151,7 @@ Next Transition: RELEASE → PUBLISHED (create GitHub repo + push + CI green + n
 | 11     | `c4d758b` | feat: autoforge iteration 10 — CHANGELOG, tests, publish workflow     |
 | 12     | `2afd4a7` | feat: autoforge iteration 11 — release polish, CONTRIBUTING, SECURITY |
 | 13     | `7bbcc3e` | feat: autoforge iteration 12 — CI fix, HTTP integration tests         |
+| 14     | `c1ab6aa` | feat: autoforge iteration 13 — npm package metadata for all packages  |
 
 ---
 
@@ -203,5 +204,8 @@ Next Transition: RELEASE → PUBLISHED (create GitHub repo + push + CI green + n
 | 43   | npm package metadata                                   | Added license, description, repository, keywords, engines, files to all 8 packages |
 | 44   | Update AUTOFORGE_GUIDANCE.md                           | Iteration 13, git history, session history                                         |
 | 45   | Final verification and commit                          | All gates green                                                                    |
+| 46   | Install dependencies (npm install)                     | 673 packages, all key deps resolved                                                |
+| 47   | Build all 9 packages (tsup)                            | All build successfully, fixed CLI build script (tsup.config.ts)                    |
+| 48   | Smoke-test CLI + cross-package imports                 | CLI runs (help, version, init, config, git), 22 imports OK, 5 runtime calls pass   |
 
-**Cumulative:** 562 tests, 24 suites, 9 packages (all tested). 100% pass rate. 95.23% statement coverage. 99.09% function coverage. ESLint + Prettier with 0 violations. CI pipeline (5 jobs) + Publish pipeline (3 jobs, fixed) + Dependabot. Coverage thresholds enforced (90% stmts, 95% funcs). All npm packages have full metadata (license, description, repository, keywords, engines, files, publishConfig). Real HTTP integration tests. State machine: RELEASE.
+**Cumulative:** 562 tests, 24 suites, 9 packages (all tested, all build, all imports verified). 100% pass rate. 95.23% stmt coverage. CLI verified working: --help, --version, init, config show, git status, skills list. All 9 packages build with tsup. 22 cross-package imports verified at runtime. 5 runtime function calls verified (anti-stub, constitution, git status, sandbox, executor). State machine: RELEASE.
