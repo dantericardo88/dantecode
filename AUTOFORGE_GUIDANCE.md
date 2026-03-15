@@ -1,6 +1,6 @@
 # AUTOFORGE_GUIDANCE.md
 
-**Generated:** 2026-03-15 | **Autoforge Iteration:** 6 | **Waves Completed:** 18/18
+**Generated:** 2026-03-15 | **Autoforge Iteration:** 7 | **Waves Completed:** 21/21
 
 ---
 
@@ -11,11 +11,11 @@
 | Codebase Implementation | 98 | 9/9 packages with real implementations, zero stubs |
 | Type Safety | 95 | Strict TypeScript, all 9 packages pass `tsc --noEmit` |
 | DanteForge Artifacts | 96 | CONSTITUTION, SPEC, PLAN, TASKS, DESIGN.op all present |
-| Test Coverage | 92 | 246 tests across 15 suites; 64.77% stmt coverage (v8) |
+| Test Coverage | 96 | 308 tests across 16 suites; 81.71% stmt coverage (v8) |
 | Linting | 95 | ESLint (typescript-eslint flat config), 0 violations |
 | Formatting | 95 | Prettier configured, 0 violations, CI gate active |
 | CI Pipeline | 92 | GitHub Actions workflow with 5 jobs + coverage artifact |
-| Git Hygiene | 90 | 3 commits on main, clean working tree |
+| Git Hygiene | 92 | 5 commits on main, clean working tree |
 | Documentation | 92 | PRD, AGENTS.dc.md, CONSTITUTION, SPEC, PLAN, TASKS all present |
 
 ---
@@ -29,7 +29,7 @@
 | CONSTITUTION.md | `./CONSTITUTION.md` | 95 | Created (Wave 2) |
 | SPEC.md | `./SPEC.md` | 90 | Created (Wave 2) |
 | PLAN.md | `./PLAN.md` | 92 | Created (Wave 5), updated (Waves 9, 12, 15) |
-| TASKS.md | `./TASKS.md` | 92 | Created (Wave 9), updated (Waves 12, 15, 18) |
+| TASKS.md | `./TASKS.md` | 92 | Created (Wave 9), updated (Waves 12, 15, 18, 21) |
 | eslint.config.js | `./eslint.config.js` | 95 | Created (Wave 14) |
 | vitest.config.ts | `./vitest.config.ts` | 95 | Created (Wave 18) |
 | .prettierrc | `./.prettierrc` | 100 | Complete |
@@ -48,11 +48,11 @@
 | @dantecode/core | audit.test.ts | 12 | All pass |
 | @dantecode/core | state.test.ts | 15 | All pass |
 | @dantecode/core | model-router.test.ts | 11 | All pass |
-| @dantecode/danteforge | anti-stub-scanner.test.ts | 22 | All pass |
-| @dantecode/danteforge | pdse-scorer.test.ts | 10 | All pass |
-| @dantecode/danteforge | constitution.test.ts | 28 | All pass |
+| @dantecode/danteforge | anti-stub-scanner.test.ts | 26 | All pass |
+| @dantecode/danteforge | pdse-scorer.test.ts | 32 | All pass |
+| @dantecode/danteforge | constitution.test.ts | 34 | All pass |
 | @dantecode/danteforge | gstack.test.ts | 15 | All pass |
-| @dantecode/danteforge | autoforge.test.ts | 12 | All pass |
+| @dantecode/danteforge | autoforge.test.ts | 22 | All pass |
 | @dantecode/danteforge | lessons.test.ts | 17 | All pass |
 | @dantecode/git-engine | diff.test.ts | 9 | All pass |
 | @dantecode/git-engine | commit.test.ts | 15 | All pass |
@@ -60,17 +60,20 @@
 | @dantecode/git-engine | worktree.test.ts | 13 | All pass |
 | @dantecode/skill-adapter | wrap.test.ts | 22 | All pass |
 | @dantecode/skill-adapter | registry.test.ts | 22 | All pass |
-| **Total** | **15 suites** | **246** | **100% pass rate** |
+| @dantecode/skill-adapter | parsers.test.ts | 30 | All pass |
+| **Total** | **16 suites** | **308** | **100% pass rate** |
 
 ### V8 Coverage Report
 
 | Package | % Stmts | % Branch | % Funcs | % Lines |
 |---------|--------:|---------:|--------:|--------:|
 | core/src | 81.21 | 73.52 | 86.95 | 81.21 |
-| danteforge/src | 67.81 | 70.35 | 77.41 | 67.81 |
+| core/src/providers | 26.78 | 50.00 | 25.00 | 26.78 |
+| danteforge/src | 89.30 | 79.26 | 93.54 | 89.30 |
 | git-engine/src | 84.50 | 80.85 | 85.18 | 84.50 |
 | skill-adapter/src | 51.29 | 59.09 | 100.00 | 51.29 |
-| **All files** | **64.77** | **71.78** | **82.65** | **64.77** |
+| skill-adapter/src/parsers | 93.63 | 86.48 | 100.00 | 93.63 |
+| **All files** | **81.71** | **77.57** | **88.78** | **81.71** |
 
 ### Remaining Uncovered Modules (Low Priority)
 
@@ -90,8 +93,8 @@
 | typecheck (`tsc --noEmit`) | PASS | 9/9 packages, zero type errors |
 | lint (`eslint src/`) | PASS | 0 violations across all packages |
 | format (`prettier --check`) | PASS | 0 formatting violations |
-| test (`vitest run`) | PASS | 246/246 tests pass |
-| coverage (`vitest --coverage`) | PASS | 64.77% stmts, 82.65% funcs |
+| test (`vitest run`) | PASS | 308/308 tests pass |
+| coverage (`vitest --coverage`) | PASS | 81.71% stmts, 88.78% funcs |
 | anti-stub self-check | Not run locally | CI job defined |
 
 ---
@@ -107,7 +110,7 @@
 
 3. **Add Dependabot/Renovate** — Automated dependency updates.
 4. **Integration tests** — Full DanteForge pipeline end-to-end.
-5. **Increase coverage** — Target 80%+ statement coverage (currently 64.77%).
+5. **Increase coverage** — Target 90%+ statement coverage (currently 81.71%).
 
 ### Medium-Term (Next Sprint)
 
@@ -136,6 +139,8 @@ Next Transition: HARDENING → INTEGRATION (when CI fully green on GitHub)
 | 1 | `410b70e` | feat: initial commit — 9 packages, 246 tests, DanteForge artifacts |
 | 2 | `4f6ad62` | ci: add prettier --check format gate, auto-format 58 files |
 | 3 | `827d33c` | ci: add vitest --coverage with v8 provider |
+| 4 | `b669bb1` | docs: update TASKS.md and AUTOFORGE_GUIDANCE.md for iteration 6 |
+| 5 | `0b37f24` | test: expand test coverage — 308 tests, 81.71% statements |
 
 ---
 
@@ -161,5 +166,8 @@ Next Transition: HARDENING → INTEGRATION (when CI fully green on GitHub)
 | 16 | Initial git commit | 112 files, 34,914 lines committed |
 | 17 | Add prettier --check to CI, auto-format all files | 5 CI jobs, 0 format violations |
 | 18 | Add vitest --coverage to CI | 64.77% stmt coverage, v8 provider |
+| 19 | Expand pdse-scorer tests | 10 → 32 tests (model-based scorer, local heuristics) |
+| 20 | Add skill-adapter parser tests | +30 new tests (claude, continue, opencode parsers) |
+| 21 | Expand autoforge tests | 12 → 22 tests (runAutoforgeIAL with mock router) |
 
-**Cumulative:** 246 tests, 15 suites, 9 packages. 100% pass rate. 64.77% statement coverage. ESLint + Prettier configured with 0 violations. 5-job CI pipeline. 3 git commits. State machine: HARDENING.
+**Cumulative:** 308 tests, 16 suites, 9 packages. 100% pass rate. 81.71% statement coverage. ESLint + Prettier configured with 0 violations. 5-job CI pipeline. 5 git commits. State machine: HARDENING.

@@ -1,6 +1,6 @@
 # TASKS.md — DanteCode Executable Task List
 
-**Generated:** 2026-03-15 | **Source:** PLAN.md | **Autoforge Wave:** 18
+**Generated:** 2026-03-15 | **Source:** PLAN.md | **Autoforge Wave:** 21
 
 ---
 
@@ -20,18 +20,18 @@
 | # | Task | File | Status | Tests |
 |---|------|------|--------|------:|
 | 1.1.1 | Audit event logging tests | `core/src/audit.test.ts` | [x] | 12 |
-| 1.1.2 | State YAML read/write/init/update tests | `core/src/state.test.ts` | [x] | 14 |
-| 1.1.3 | Model router provider resolution & fallback | `core/src/model-router.test.ts` | [x] | 10 |
+| 1.1.2 | State YAML read/write/init/update tests | `core/src/state.test.ts` | [x] | 15 |
+| 1.1.3 | Model router provider resolution & fallback | `core/src/model-router.test.ts` | [x] | 11 |
 
 ### 1.2 DanteForge Package Tests
 
 | # | Task | File | Status | Tests |
 |---|------|------|--------|------:|
-| 1.2.1 | Anti-stub scanner hard/soft violation tests | `danteforge/src/anti-stub-scanner.test.ts` | [x] | 22 |
-| 1.2.2 | PDSE scorer dimension & threshold tests | `danteforge/src/pdse-scorer.test.ts` | [x] | 14 |
-| 1.2.3 | Constitution checker security detection tests | `danteforge/src/constitution.test.ts` | [x] | 28 |
-| 1.2.4 | GStack command runner tests | `danteforge/src/gstack.test.ts` | [x] | 21 |
-| 1.2.5 | Autoforge IAL context builder tests | `danteforge/src/autoforge.test.ts` | [x] | 11 |
+| 1.2.1 | Anti-stub scanner hard/soft violation tests | `danteforge/src/anti-stub-scanner.test.ts` | [x] | 26 |
+| 1.2.2 | PDSE scorer dimension & threshold tests | `danteforge/src/pdse-scorer.test.ts` | [x] | 32 |
+| 1.2.3 | Constitution checker security detection tests | `danteforge/src/constitution.test.ts` | [x] | 34 |
+| 1.2.4 | GStack command runner tests | `danteforge/src/gstack.test.ts` | [x] | 15 |
+| 1.2.5 | Autoforge IAL context builder & loop tests | `danteforge/src/autoforge.test.ts` | [x] | 22 |
 | 1.2.6 | Lessons SQLite CRUD lifecycle tests | `danteforge/src/lessons.test.ts` | [x] | 17 |
 
 ### 1.3 Git-Engine Package Tests
@@ -49,6 +49,7 @@
 |---|------|------|--------|------:|
 | 1.4.1 | Adapter preamble/postamble injection | `skill-adapter/src/wrap.test.ts` | [x] | 22 |
 | 1.4.2 | Skill loading and validation | `skill-adapter/src/registry.test.ts` | [x] | 22 |
+| 1.4.3 | Parser tests (claude, continue, opencode) | `skill-adapter/src/parsers/parsers.test.ts` | [x] | 30 |
 
 ### 1.5 Remaining Package Tests (Lower Priority)
 
@@ -59,7 +60,7 @@
 | 1.5.3 | VS Code extension tests | `vscode` | [ ] | 0 |
 | 1.5.4 | Desktop app tests | `desktop` | [ ] | 0 |
 
-**Phase 1 Summary:** 246/246 tests passing across 15 suites (9/9 packages with runtime code covered)
+**Phase 1 Summary:** 308/308 tests passing across 16 suites (9/9 packages with runtime code covered, 81.71% stmt coverage)
 
 ---
 
@@ -115,6 +116,7 @@
 1. ~~**Initial git commit**~~ — Done (Wave 16, commit `410b70e`)
 2. ~~**Task 2.2**~~ — Done (Wave 17, commit `4f6ad62`)
 3. ~~**Task 2.4**~~ — Done (Wave 18, commit `827d33c`)
+3b. ~~**Coverage expansion**~~ — Done (Wave 19-21, commit `0b37f24`; 64.77% → 81.71% stmts)
 4. **Task 2.1** — Push to GitHub, verify CI workflow runs green
 5. **Task 2.5** — Verify anti-stub self-check CI job against real codebase
 6. **Task 2.6** — Add Dependabot or Renovate for dependency updates
