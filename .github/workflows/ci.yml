@@ -44,9 +44,8 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
-      - run: bun run test
-      - name: Run coverage report
-        run: npx vitest run --coverage
+      - name: Run tests with coverage
+        run: bunx vitest run --coverage
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:

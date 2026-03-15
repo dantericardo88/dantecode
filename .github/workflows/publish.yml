@@ -39,7 +39,7 @@ jobs:
         run: bun run format:check
 
       - name: Test
-        run: npx vitest run
+        run: bunx vitest run
 
   publish-npm:
     name: Publish to npm
@@ -61,7 +61,7 @@ jobs:
         run: bun install
 
       - name: Build all packages
-        run: npx turbo build
+        run: bunx turbo build
 
       - name: Publish @dantecode/config-types
         if: ${{ github.event.inputs.dry-run != 'true' }}
@@ -124,10 +124,10 @@ jobs:
 
       - name: Package extension
         if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: cd packages/vscode && npx @vscode/vsce package
+        run: cd packages/vscode && bunx @vscode/vsce package
 
       - name: Publish to VS Code Marketplace
         if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: cd packages/vscode && npx @vscode/vsce publish
+        run: cd packages/vscode && bunx @vscode/vsce publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

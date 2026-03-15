@@ -47,17 +47,12 @@
     "@dantecode/danteforge": "*",
     "@dantecode/git-engine": "*",
     "@dantecode/skill-adapter": "*",
-    "@dantecode/sandbox": "*",
-    "ink": "^5.1.0",
-    "react": "^18.3.0",
-    "yaml": "^2.6.0",
-    "zod": "^3.24.0"
+    "yaml": "^2.6.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "devDependencies": {
-    "@types/react": "^18.3.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
