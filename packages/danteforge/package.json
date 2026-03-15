@@ -1,6 +1,27 @@
 {
   "name": "@dantecode/danteforge",
   "version": "1.0.0",
+  "description": "DanteForge quality verification engine — PDSE scoring, anti-stub enforcement, constitution checker",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/danteforge"
+  },
+  "keywords": [
+    "dantecode",
+    "danteforge",
+    "quality",
+    "pdse",
+    "anti-stub",
+    "code-quality"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

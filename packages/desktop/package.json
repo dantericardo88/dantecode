@@ -1,6 +1,23 @@
 {
   "name": "@dantecode/desktop",
   "version": "1.0.0",
+  "description": "DanteCode desktop application — Electron wrapper for the AI coding agent",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/desktop"
+  },
+  "keywords": [
+    "dantecode",
+    "desktop",
+    "electron",
+    "ai",
+    "coding-agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "main": "dist/main.js",
   "scripts": {

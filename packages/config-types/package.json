@@ -1,6 +1,25 @@
 {
   "name": "@dantecode/config-types",
   "version": "1.0.0",
+  "description": "Shared TypeScript type definitions for DanteCode configuration",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/config-types"
+  },
+  "keywords": [
+    "dantecode",
+    "config",
+    "types",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

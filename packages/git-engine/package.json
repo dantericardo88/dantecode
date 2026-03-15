@@ -1,6 +1,26 @@
 {
   "name": "@dantecode/git-engine",
   "version": "1.0.0",
+  "description": "Git operations engine — commits, diffs, worktrees, and repo mapping for DanteCode",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/git-engine"
+  },
+  "keywords": [
+    "dantecode",
+    "git",
+    "worktree",
+    "diff",
+    "commit"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

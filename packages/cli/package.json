@@ -1,6 +1,26 @@
 {
   "name": "@dantecode/cli",
   "version": "1.0.0",
+  "description": "DanteCode CLI — interactive AI coding agent with model routing and DanteForge quality gates",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "dantecode",
+    "cli",
+    "ai",
+    "coding-agent",
+    "terminal"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "bin": {
     "dantecode": "./dist/index.js"

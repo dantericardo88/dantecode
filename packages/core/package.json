@@ -1,6 +1,26 @@
 {
   "name": "@dantecode/core",
   "version": "1.0.0",
+  "description": "Core model router, audit logging, and state management for DanteCode",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "dantecode",
+    "ai",
+    "model-router",
+    "llm",
+    "vercel-ai-sdk"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
