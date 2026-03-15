@@ -17,6 +17,9 @@
     "test": "echo 'no tests for types package'",
     "clean": "rm -rf dist"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"

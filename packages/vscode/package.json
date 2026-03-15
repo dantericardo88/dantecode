@@ -33,7 +33,7 @@
     "build": "tsup src/extension.ts --format cjs --dts --external vscode",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "echo 'vscode tests require VS Code test runner'",
+    "test": "vitest run",
     "clean": "rm -rf dist",
     "package": "vsce package"
   },

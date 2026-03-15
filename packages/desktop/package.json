@@ -8,7 +8,7 @@
     "dev": "electron .",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "echo 'desktop tests require electron test runner'",
+    "test": "vitest run",
     "clean": "rm -rf dist",
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",

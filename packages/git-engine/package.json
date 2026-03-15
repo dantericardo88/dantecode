@@ -20,6 +20,9 @@
   "dependencies": {
     "@dantecode/config-types": "*"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsup": "^8.3.0",

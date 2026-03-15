@@ -14,6 +14,11 @@ export default defineConfig({
       exclude: ["**/*.test.ts", "**/*.d.ts", "**/index.ts"],
       reporter: ["text", "text-summary", "json-summary"],
       reportsDirectory: "./coverage",
+      thresholds: {
+        statements: 90,
+        functions: 95,
+        lines: 90,
+      },
     },
   },
 });
