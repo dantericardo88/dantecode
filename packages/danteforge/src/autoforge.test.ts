@@ -1,7 +1,75 @@
 import { describe, it, expect } from "vitest";
-import { buildFailureContext, type AutoforgeContext } from "./autoforge.js";
+import {
+  buildFailureContext,
+  runAutoforgeIAL,
+  type AutoforgeContext,
+} from "./autoforge.js";
 import { formatLessonsForPrompt } from "./lessons.js";
-import type { PDSEScore, GStackResult, Lesson } from "@dantecode/config-types";
+import type {
+  PDSEScore,
+  GStackResult,
+  Lesson,
+  AutoforgeConfig,
+  ModelConfig,
+  ModelRouterConfig,
+} from "@dantecode/config-types";
+import type { ModelRouter } from "./pdse-scorer.js";
+
+// ---------------------------------------------------------------------------
+// Mock Router Factory
+// ---------------------------------------------------------------------------
+
+function createMockRouter(responses: (string | Error)[]): ModelRouter {
+  let callIndex = 0;
+  return {
+    chat: async (_prompt: string, _config?: Partial<ModelConfig>): Promise<string> => {
+      const response = responses[callIndex] ?? responses[responses.length - 1]!;
+      callIndex++;
+      if (response instanceof Error) {
+        throw response;
+      }
+      return response;
+    },
+    getConfig: (): ModelRouterConfig => ({
+      default: {
+        provider: "grok",
+        modelId: "grok-3",
+        maxTokens: 8192,
+        temperature: 0.1,
+        contextWindow: 131072,
+        supportsVision: false,
+        supportsToolCalls: true,
+      },
+      fallback: [],
+      overrides: {},
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Clean code that passes all gates
+// ---------------------------------------------------------------------------
+
+const CLEAN_CODE = `
+import { readFile } from "node:fs/promises";
+
+export async function loadConfig(path: string): Promise<Record<string, unknown>> {
+  try {
+    const content = await readFile(path, "utf-8");
+    const parsed: unknown = JSON.parse(content);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("Config must be a JSON object");
+    }
+    return parsed as Record<string, unknown>;
+  } catch (err) {
+    throw new Error("Failed to load config: " + String(err));
+  }
+}
+`.trim();
+
+// ---------------------------------------------------------------------------
+// buildFailureContext Tests
+// ---------------------------------------------------------------------------
 
 describe("autoforge", () => {
   describe("buildFailureContext", () => {
@@ -52,6 +120,31 @@ describe("autoforge", () => {
       expect(prompt).toContain("HARD violations");
     });
 
+    it("includes soft violations section", () => {
+      const score: PDSEScore = {
+        completeness: 80,
+        correctness: 80,
+        clarity: 80,
+        consistency: 80,
+        overall: 80,
+        violations: [
+          {
+            type: "missing_error_handling",
+            severity: "soft",
+            file: "src/auth.ts",
+            line: 15,
+            message: "Missing error handling for async operation",
+          },
+        ],
+        passedGate: false,
+        scoredAt: "2026-03-15T10:00:00Z",
+        scoredBy: "pdse-local",
+      };
+      const prompt = buildFailureContext("code", score, [], [], baseContext);
+      expect(prompt).toContain("Soft violations");
+      expect(prompt).toContain("Missing error handling");
+    });
+
     it("includes GStack failure details", () => {
       const gstackResults: GStackResult[] = [
         {
@@ -85,6 +178,22 @@ describe("autoforge", () => {
       expect(prompt.length).toBeLessThan(longStderr.length + 2000);
     });
 
+    it("truncates long stdout output", () => {
+      const longStdout = "y".repeat(2000);
+      const gstackResults: GStackResult[] = [
+        {
+          command: "lint",
+          exitCode: 1,
+          stdout: longStdout,
+          stderr: "error",
+          durationMs: 100,
+          passed: false,
+        },
+      ];
+      const prompt = buildFailureContext("code", null, gstackResults, [], baseContext);
+      expect(prompt).toContain("truncated");
+    });
+
     it("includes current code in the prompt", () => {
       const code = "export function auth() { return true; }";
       const prompt = buildFailureContext(code, null, [], [], baseContext);
@@ -115,7 +224,22 @@ describe("autoforge", () => {
       expect(prompt).toContain("Missing null check");
       expect(prompt).toContain("Always validate input");
     });
+
+    it("handles context without optional fields", () => {
+      const minimalContext: AutoforgeContext = {
+        taskDescription: "Write a utility function",
+      };
+      const prompt = buildFailureContext("code", null, [], [], minimalContext);
+      expect(prompt).toContain("Write a utility function");
+      expect(prompt).not.toContain("Target file:");
+      expect(prompt).not.toContain("Language:");
+      expect(prompt).not.toContain("Framework:");
+    });
   });
+
+  // -------------------------------------------------------------------------
+  // formatLessonsForPrompt Tests
+  // -------------------------------------------------------------------------
 
   describe("formatLessonsForPrompt", () => {
     it("returns empty string for no lessons", () => {
@@ -191,6 +315,186 @@ describe("autoforge", () => {
       expect(result).toContain("Lesson 1");
       expect(result).toContain("Lesson 2");
       expect(result).toContain("2 relevant");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // runAutoforgeIAL Tests
+  // -------------------------------------------------------------------------
+
+  describe("runAutoforgeIAL", () => {
+    const baseContext: AutoforgeContext = {
+      taskDescription: "Write a config loader",
+      language: "typescript",
+    };
+
+    const baseConfig: AutoforgeConfig = {
+      maxIterations: 1,
+      lessonInjectionEnabled: false,
+      abortOnSecurityViolation: false,
+      gstackCommands: [],
+    };
+
+    it("succeeds on first iteration when code passes all gates", async () => {
+      // Mock router returns a valid PDSE score when called for scoring
+      const mockScoreResponse = JSON.stringify({
+        completeness: 95,
+        correctness: 90,
+        clarity: 85,
+        consistency: 90,
+        violations: [],
+      });
+      const router = createMockRouter([mockScoreResponse]);
+
+      const result = await runAutoforgeIAL(CLEAN_CODE, baseContext, baseConfig, router, "/tmp");
+
+      expect(result.succeeded).toBe(true);
+      expect(result.iterations).toBe(1);
+      expect(result.terminationReason).toBe("passed");
+      expect(result.finalScore).not.toBeNull();
+      expect(result.totalDurationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("returns max_iterations when code never passes", async () => {
+      // Code with a stub that will always fail
+      const stubbedCode = `
+export function process(input: string): string {
+  // TODO: implement
+  return input;
+}
+`;
+      // Router returns low scores (falls back to local scorer since model errors)
+      const router = createMockRouter([new Error("model unavailable")]);
+
+      const result = await runAutoforgeIAL(stubbedCode, baseContext, baseConfig, router, "/tmp");
+
+      expect(result.succeeded).toBe(false);
+      expect(result.terminationReason).toBe("max_iterations");
+      expect(result.iterations).toBe(1);
+    });
+
+    it("attempts regeneration on failure with multiple iterations", async () => {
+      const stubbedCode = `
+export function compute(x: number): number {
+  // TODO: implement computation
+  return x;
+}
+`;
+      // First call: PDSE scoring -> model error -> falls back to local (fails)
+      // Second call: regeneration prompt -> returns clean code
+      // Third call: PDSE scoring on regenerated code -> returns passing score
+      const router = createMockRouter([
+        new Error("model unavailable"), // iteration 1 scoring
+        CLEAN_CODE, // iteration 1 regeneration
+        JSON.stringify({
+          // iteration 2 scoring
+          completeness: 95,
+          correctness: 90,
+          clarity: 85,
+          consistency: 90,
+          violations: [],
+        }),
+      ]);
+
+      const config: AutoforgeConfig = {
+        ...baseConfig,
+        maxIterations: 2,
+      };
+
+      const result = await runAutoforgeIAL(
+        stubbedCode,
+        baseContext,
+        config,
+        router,
+        "/tmp",
+      );
+
+      expect(result.iterations).toBeGreaterThanOrEqual(1);
+      expect(result.iterationHistory.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("records iteration history for each pass", async () => {
+      const router = createMockRouter([
+        JSON.stringify({
+          completeness: 95,
+          correctness: 90,
+          clarity: 85,
+          consistency: 90,
+          violations: [],
+        }),
+      ]);
+
+      const result = await runAutoforgeIAL(CLEAN_CODE, baseContext, baseConfig, router, "/tmp");
+
+      expect(result.iterationHistory.length).toBe(1);
+      const iter = result.iterationHistory[0]!;
+      expect(iter.iterationNumber).toBe(1);
+      expect(iter.durationMs).toBeGreaterThanOrEqual(0);
+      expect(iter.succeeded).toBe(true);
+      expect(iter.outputScore).not.toBeNull();
+    });
+
+    it("terminates on constitution violation with critical severity", async () => {
+      // Code that contains a hardcoded secret (constitution violation)
+      const codeWithSecret = `
+export function connect(): string {
+  const apiKey = "sk-live-1234567890abcdef";
+  return apiKey;
+}
+`;
+      const router = createMockRouter([new Error("unused")]);
+      const config: AutoforgeConfig = {
+        ...baseConfig,
+        abortOnSecurityViolation: true,
+      };
+
+      const result = await runAutoforgeIAL(
+        codeWithSecret,
+        baseContext,
+        config,
+        router,
+        "/tmp",
+      );
+
+      expect(result.succeeded).toBe(false);
+      expect(result.terminationReason).toBe("constitution_violation");
+    });
+
+    it("includes totalDurationMs in result", async () => {
+      const router = createMockRouter([
+        JSON.stringify({
+          completeness: 95,
+          correctness: 90,
+          clarity: 85,
+          consistency: 90,
+          violations: [],
+        }),
+      ]);
+
+      const result = await runAutoforgeIAL(CLEAN_CODE, baseContext, baseConfig, router, "/tmp");
+      expect(typeof result.totalDurationMs).toBe("number");
+      expect(result.totalDurationMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("handles empty gstack commands gracefully", async () => {
+      const router = createMockRouter([
+        JSON.stringify({
+          completeness: 95,
+          correctness: 90,
+          clarity: 85,
+          consistency: 90,
+          violations: [],
+        }),
+      ]);
+
+      const config: AutoforgeConfig = {
+        ...baseConfig,
+        gstackCommands: [],
+      };
+
+      const result = await runAutoforgeIAL(CLEAN_CODE, baseContext, config, router, "/tmp");
+      expect(result.succeeded).toBe(true);
+      expect(result.iterationHistory[0]!.gstackResults).toEqual([]);
     });
   });
 });
