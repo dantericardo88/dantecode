@@ -1,11 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {
-  loadSkillRegistry,
-  getSkill,
-  listSkills,
-  removeSkill,
-  validateSkill,
-} from "./registry.js";
+import { loadSkillRegistry, getSkill, listSkills, removeSkill, validateSkill } from "./registry.js";
 import { wrapSkillWithAdapter, type ParsedSkill } from "./wrap.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -36,8 +30,7 @@ describe("skill-adapter registry", () => {
       description: "Automated code review skill",
       tools: ["Read", "Grep"],
     },
-    instructions:
-      "Review the code for bugs, style issues, and potential improvements.",
+    instructions: "Review the code for bugs, style issues, and potential improvements.",
     sourcePath: "/skills/code-review.md",
   };
 
@@ -103,10 +96,7 @@ describe("skill-adapter registry", () => {
       // Create a skill with no frontmatter
       const badDir = join(testDir, ".dantecode", "skills", "bad-skill");
       await mkdir(badDir, { recursive: true });
-      await writeFile(
-        join(badDir, "SKILL.dc.md"),
-        "No frontmatter here, just content.",
-      );
+      await writeFile(join(badDir, "SKILL.dc.md"), "No frontmatter here, just content.");
       const registry = await loadSkillRegistry(testDir);
       expect(registry).toHaveLength(1);
       expect(registry[0]?.name).toBe("code-review");
@@ -153,11 +143,7 @@ describe("skill-adapter registry", () => {
     });
 
     it("includes wrappedPath in definition", async () => {
-      const filePath = await createTestSkill(
-        testDir,
-        "code-review",
-        testSkill,
-      );
+      const filePath = await createTestSkill(testDir, "code-review", testSkill);
       const skill = await getSkill("code-review", testDir);
       expect(skill?.wrappedPath).toBe(filePath);
     });

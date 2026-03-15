@@ -6,11 +6,7 @@
 
 import * as vscode from "vscode";
 import type { GStackCommand, Lesson } from "@dantecode/config-types";
-import {
-  readOrInitializeState,
-  initializeState,
-  appendAuditEvent,
-} from "@dantecode/core";
+import { readOrInitializeState, initializeState, appendAuditEvent } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -64,7 +60,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatSidebarProvider.viewType,
     chatSidebarProvider,
-    { webviewOptions: { retainContextWhenHidden: true } }
+    { webviewOptions: { retainContextWhenHidden: true } },
   );
   context.subscriptions.push(chatViewRegistration);
 
@@ -72,17 +68,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const auditViewRegistration = vscode.window.registerWebviewViewProvider(
     AuditPanelProvider.viewType,
     auditPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } }
+    { webviewOptions: { retainContextWhenHidden: true } },
   );
   context.subscriptions.push(auditViewRegistration);
 
   // ── Inline completion provider ──
   completionProvider = new DanteCodeCompletionProvider();
-  const completionRegistration =
-    vscode.languages.registerInlineCompletionItemProvider(
-      { pattern: "**" },
-      completionProvider
-    );
+  const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
+    { pattern: "**" },
+    completionProvider,
+  );
   context.subscriptions.push(completionRegistration);
 
   // ── Status bar ──
@@ -169,9 +164,7 @@ async function commandAddFileToContext(uri?: unknown): Promise<void> {
   } else {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-      void vscode.window.showWarningMessage(
-        "DanteCode: No active file to add to context"
-      );
+      void vscode.window.showWarningMessage("DanteCode: No active file to add to context");
       return;
     }
     filePath = editor.document.uri.fsPath;
@@ -180,7 +173,7 @@ async function commandAddFileToContext(uri?: unknown): Promise<void> {
   if (chatSidebarProvider) {
     chatSidebarProvider.addFileToContext(filePath);
     void vscode.window.showInformationMessage(
-      `DanteCode: Added "${getFileName(filePath)}" to context`
+      `DanteCode: Added "${getFileName(filePath)}" to context`,
     );
   }
 }
@@ -192,9 +185,7 @@ async function commandAddFileToContext(uri?: unknown): Promise<void> {
 async function commandImportClaudeSkills(): Promise<void> {
   const projectRoot = getProjectRoot();
   if (!projectRoot) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: Open a workspace folder first"
-    );
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace folder first");
     return;
   }
 
@@ -218,7 +209,7 @@ async function commandImportClaudeSkills(): Promise<void> {
         }
         if (result.skipped.length > 0) {
           parts.push(
-            `Skipped ${result.skipped.length}: ${result.skipped.map((s: { name: string; reason: string }) => `${s.name} (${s.reason})`).join("; ")}`
+            `Skipped ${result.skipped.length}: ${result.skipped.map((s: { name: string; reason: string }) => `${s.name} (${s.reason})`).join("; ")}`,
           );
         }
         if (result.errors.length > 0) {
@@ -226,21 +217,15 @@ async function commandImportClaudeSkills(): Promise<void> {
         }
 
         if (parts.length === 0) {
-          void vscode.window.showInformationMessage(
-            "DanteCode: No Claude skills found to import"
-          );
+          void vscode.window.showInformationMessage("DanteCode: No Claude skills found to import");
         } else {
-          void vscode.window.showInformationMessage(
-            `DanteCode: ${parts.join(". ")}`
-          );
+          void vscode.window.showInformationMessage(`DanteCode: ${parts.join(". ")}`);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `DanteCode: Failed to import skills: ${message}`
-        );
+        void vscode.window.showErrorMessage(`DanteCode: Failed to import skills: ${message}`);
       }
-    }
+    },
   );
 }
 
@@ -252,9 +237,7 @@ async function commandImportClaudeSkills(): Promise<void> {
 async function commandRunPDSE(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: No active file to score"
-    );
+    void vscode.window.showWarningMessage("DanteCode: No active file to score");
     return;
   }
 
@@ -284,11 +267,7 @@ async function commandRunPDSE(): Promise<void> {
         // Update status bar
         if (statusBarState) {
           const gateStatus = score.passedGate ? "passed" : "failed";
-          updateStatusBar(
-            statusBarState,
-            statusBarState.currentModel,
-            gateStatus
-          );
+          updateStatusBar(statusBarState, statusBarState.currentModel, gateStatus);
         }
 
         // Send score to chat sidebar
@@ -321,23 +300,17 @@ async function commandRunPDSE(): Promise<void> {
         // Show result notification
         const status = score.passedGate ? "PASSED" : "FAILED";
         void vscode.window.showInformationMessage(
-          `DanteCode PDSE: ${status} (score: ${score.overall}, violations: ${score.violations.length})`
+          `DanteCode PDSE: ${status} (score: ${score.overall}, violations: ${score.violations.length})`,
         );
       } catch (err: unknown) {
         if (statusBarState) {
-          updateStatusBar(
-            statusBarState,
-            statusBarState.currentModel,
-            "none"
-          );
+          updateStatusBar(statusBarState, statusBarState.currentModel, "none");
         }
 
         const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `DanteCode: PDSE scoring failed: ${message}`
-        );
+        void vscode.window.showErrorMessage(`DanteCode: PDSE scoring failed: ${message}`);
       }
-    }
+    },
   );
 }
 
@@ -348,9 +321,7 @@ async function commandRunPDSE(): Promise<void> {
 async function commandRunGStack(): Promise<void> {
   const projectRoot = getProjectRoot();
   if (!projectRoot) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: Open a workspace folder first"
-    );
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace folder first");
     return;
   }
 
@@ -367,7 +338,7 @@ async function commandRunGStack(): Promise<void> {
 
         if (commands.length === 0) {
           void vscode.window.showInformationMessage(
-            "DanteCode: No GStack commands configured. Add commands to autoforge.gstackCommands in STATE.yaml."
+            "DanteCode: No GStack commands configured. Add commands to autoforge.gstackCommands in STATE.yaml.",
           );
           return;
         }
@@ -377,16 +348,13 @@ async function commandRunGStack(): Promise<void> {
         const allPassed = allGStackPassed(results);
 
         // Show in output channel
-        const outputChannel =
-          vscode.window.createOutputChannel("DanteCode GStack");
+        const outputChannel = vscode.window.createOutputChannel("DanteCode GStack");
         outputChannel.clear();
         outputChannel.appendLine("=== DanteCode GStack QA Results ===");
         outputChannel.appendLine("");
         outputChannel.appendLine(summary);
         outputChannel.appendLine("");
-        outputChannel.appendLine(
-          allPassed ? "All checks PASSED" : "Some checks FAILED"
-        );
+        outputChannel.appendLine(allPassed ? "All checks PASSED" : "Some checks FAILED");
         outputChannel.show(true);
 
         // Log audit event
@@ -399,10 +367,7 @@ async function commandRunGStack(): Promise<void> {
               commandCount: commands.length,
               passedCount: results.filter((r) => r.passed).length,
               failedCount: results.filter((r) => !r.passed).length,
-              totalDurationMs: results.reduce(
-                (sum, r) => sum + r.durationMs,
-                0
-              ),
+              totalDurationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
             },
             modelId: "gstack",
             projectRoot,
@@ -414,21 +379,19 @@ async function commandRunGStack(): Promise<void> {
         // Show notification
         if (allPassed) {
           void vscode.window.showInformationMessage(
-            `DanteCode GStack: All ${results.length} checks passed`
+            `DanteCode GStack: All ${results.length} checks passed`,
           );
         } else {
           const failCount = results.filter((r) => !r.passed).length;
           void vscode.window.showWarningMessage(
-            `DanteCode GStack: ${failCount} of ${results.length} checks failed`
+            `DanteCode GStack: ${failCount} of ${results.length} checks failed`,
           );
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        void vscode.window.showErrorMessage(
-          `DanteCode: GStack failed: ${message}`
-        );
+        void vscode.window.showErrorMessage(`DanteCode: GStack failed: ${message}`);
       }
-    }
+    },
   );
 }
 
@@ -506,11 +469,7 @@ async function commandSwitchModel(): Promise<void> {
 
   // Update VS Code settings
   const config = vscode.workspace.getConfiguration("dantecode");
-  await config.update(
-    "defaultModel",
-    newModel,
-    vscode.ConfigurationTarget.Global
-  );
+  await config.update("defaultModel", newModel, vscode.ConfigurationTarget.Global);
 
   // Update status bar
   if (statusBarState) {
@@ -522,9 +481,7 @@ async function commandSwitchModel(): Promise<void> {
     completionProvider.clearCache();
   }
 
-  void vscode.window.showInformationMessage(
-    `DanteCode: Switched to ${newModel}`
-  );
+  void vscode.window.showInformationMessage(`DanteCode: Switched to ${newModel}`);
 }
 
 /**
@@ -535,18 +492,14 @@ async function commandToggleSandbox(): Promise<void> {
   const current = config.get<boolean>("sandboxEnabled", false);
   const next = !current;
 
-  await config.update(
-    "sandboxEnabled",
-    next,
-    vscode.ConfigurationTarget.Global
-  );
+  await config.update("sandboxEnabled", next, vscode.ConfigurationTarget.Global);
 
   if (statusBarState) {
     updateSandboxStatus(statusBarState, next);
   }
 
   void vscode.window.showInformationMessage(
-    `DanteCode: Sandbox mode ${next ? "enabled" : "disabled"}`
+    `DanteCode: Sandbox mode ${next ? "enabled" : "disabled"}`,
   );
 }
 
@@ -557,9 +510,7 @@ async function commandToggleSandbox(): Promise<void> {
 async function commandShowLessons(): Promise<void> {
   const projectRoot = getProjectRoot();
   if (!projectRoot) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: Open a workspace folder first"
-    );
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace folder first");
     return;
   }
 
@@ -571,7 +522,7 @@ async function commandShowLessons(): Promise<void> {
 
     if (lessons.length === 0) {
       void vscode.window.showInformationMessage(
-        "DanteCode: No lessons recorded for this project yet"
+        "DanteCode: No lessons recorded for this project yet",
       );
       return;
     }
@@ -599,9 +550,7 @@ async function commandShowLessons(): Promise<void> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(
-      `DanteCode: Failed to load lessons: ${message}`
-    );
+    void vscode.window.showErrorMessage(`DanteCode: Failed to load lessons: ${message}`);
   }
 }
 
@@ -613,9 +562,7 @@ async function commandShowLessons(): Promise<void> {
 async function commandInitProject(): Promise<void> {
   const projectRoot = getProjectRoot();
   if (!projectRoot) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: Open a workspace folder first"
-    );
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace folder first");
     return;
   }
 
@@ -633,7 +580,7 @@ async function commandInitProject(): Promise<void> {
       const choice = await vscode.window.showWarningMessage(
         "DanteCode: Project already initialized. Re-initialize with defaults?",
         "Re-initialize",
-        "Cancel"
+        "Cancel",
       );
       if (choice !== "Re-initialize") {
         return;
@@ -643,7 +590,7 @@ async function commandInitProject(): Promise<void> {
     await initializeState(projectRoot);
 
     void vscode.window.showInformationMessage(
-      "DanteCode: Project initialized. Configuration written to .dantecode/STATE.yaml"
+      "DanteCode: Project initialized. Configuration written to .dantecode/STATE.yaml",
     );
 
     // Log the initialization as an audit event
@@ -661,9 +608,7 @@ async function commandInitProject(): Promise<void> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(
-      `DanteCode: Failed to initialize project: ${message}`
-    );
+    void vscode.window.showErrorMessage(`DanteCode: Failed to initialize project: ${message}`);
   }
 }
 
@@ -674,9 +619,7 @@ async function commandInitProject(): Promise<void> {
 async function commandAcceptDiff(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: No active editor with diff"
-    );
+    void vscode.window.showWarningMessage("DanteCode: No active editor with diff");
     return;
   }
 
@@ -687,9 +630,7 @@ async function commandAcceptDiff(): Promise<void> {
   // Save the current file
   await editor.document.save();
 
-  void vscode.window.showInformationMessage(
-    "DanteCode: Diff hunk accepted"
-  );
+  void vscode.window.showInformationMessage("DanteCode: Diff hunk accepted");
 
   // Log the accept event
   try {
@@ -716,13 +657,10 @@ async function commandAcceptDiff(): Promise<void> {
         name: "DanteCode Commit",
         cwd: projectRoot,
       });
-      const relativePath = editor.document.uri.fsPath.replace(
-        projectRoot,
-        ""
-      );
+      const relativePath = editor.document.uri.fsPath.replace(projectRoot, "");
       terminal.sendText(
         `git add "${relativePath}" && git commit -m "dantecode: accepted edit to ${getFileName(editor.document.uri.fsPath)}"`,
-        true
+        true,
       );
       terminal.show(false);
     } catch {
@@ -738,9 +676,7 @@ async function commandAcceptDiff(): Promise<void> {
 async function commandRejectDiff(): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
-    void vscode.window.showWarningMessage(
-      "DanteCode: No active editor with diff"
-    );
+    void vscode.window.showWarningMessage("DanteCode: No active editor with diff");
     return;
   }
 
@@ -749,9 +685,7 @@ async function commandRejectDiff(): Promise<void> {
   // Revert the document to its saved state
   await vscode.commands.executeCommand("workbench.action.files.revert");
 
-  void vscode.window.showInformationMessage(
-    "DanteCode: Diff hunk rejected"
-  );
+  void vscode.window.showInformationMessage("DanteCode: Diff hunk rejected");
 
   // Log the rejection event
   try {

@@ -76,10 +76,7 @@ This project uses:
  * @param projectRoot - Absolute path to the project root directory.
  * @param force - If true, overwrites existing files without prompting.
  */
-export async function runInitCommand(
-  projectRoot: string,
-  force: boolean = false,
-): Promise<void> {
+export async function runInitCommand(projectRoot: string, force: boolean = false): Promise<void> {
   process.stdout.write(`\n${BOLD}Initializing DanteCode project...${RESET}\n\n`);
 
   const dantecodeDir = join(projectRoot, ".dantecode");

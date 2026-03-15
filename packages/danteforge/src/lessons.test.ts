@@ -77,9 +77,7 @@ describe("lessons system (SQLite)", () => {
         testDir,
       );
 
-      expect(lesson.id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      );
+      expect(lesson.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
 
     it("upserts duplicate patterns (increments occurrences)", async () => {
@@ -202,7 +200,9 @@ describe("lessons system (SQLite)", () => {
       });
       // Should include TS-specific lessons and lessons with null language
       expect(tsLessons.length).toBeGreaterThanOrEqual(1);
-      expect(tsLessons.every((l) => l.language === "typescript" || l.language === undefined)).toBe(true);
+      expect(tsLessons.every((l) => l.language === "typescript" || l.language === undefined)).toBe(
+        true,
+      );
     });
 
     it("respects limit parameter", async () => {

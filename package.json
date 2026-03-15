@@ -20,6 +20,7 @@
     "test": "turbo run test",
     "clean": "turbo run clean",
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx}\"",
     "dantecode": "bun run packages/cli/src/index.ts"
   },
   "devDependencies": {

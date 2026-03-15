@@ -226,9 +226,15 @@ function loadCustomPatterns(projectRoot: string): StubPattern[] {
 
       if (inStubPatterns) {
         // Detect end of stub_patterns section (new top-level key)
-        if (trimmed.length > 0 && !trimmed.startsWith("-") && !trimmed.startsWith("pattern:") &&
-            !trimmed.startsWith("message:") && !trimmed.startsWith("severity:") &&
-            !line.startsWith("    ") && !line.startsWith("\t\t")) {
+        if (
+          trimmed.length > 0 &&
+          !trimmed.startsWith("-") &&
+          !trimmed.startsWith("pattern:") &&
+          !trimmed.startsWith("message:") &&
+          !trimmed.startsWith("severity:") &&
+          !line.startsWith("    ") &&
+          !line.startsWith("\t\t")
+        ) {
           inStubPatterns = false;
           // Flush last pattern
           if (currentPattern.regex && currentPattern.message) {
@@ -398,20 +404,19 @@ export function runAntiStubScanner(
  * @returns AntiStubScanResult
  * @throws If the file cannot be read
  */
-export function scanFile(
-  filePath: string,
-  projectRoot: string,
-): AntiStubScanResult {
+export function scanFile(filePath: string, projectRoot: string): AntiStubScanResult {
   const absolutePath = resolve(projectRoot, filePath);
 
   if (!existsSync(absolutePath)) {
     return {
-      hardViolations: [{
-        type: "stub_detected",
-        severity: "hard",
-        file: absolutePath,
-        message: `File not found: ${absolutePath}`,
-      }],
+      hardViolations: [
+        {
+          type: "stub_detected",
+          severity: "hard",
+          file: absolutePath,
+          message: `File not found: ${absolutePath}`,
+        },
+      ],
       softViolations: [],
       passed: false,
       scannedLines: 0,

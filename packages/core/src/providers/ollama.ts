@@ -25,10 +25,7 @@ const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
  * @returns A configured LanguageModelV1 instance for the specified Ollama model.
  */
 export function buildOllamaProvider(config: ModelConfig): LanguageModelV1 {
-  const baseURL =
-    config.baseUrl ??
-    process.env["OLLAMA_BASE_URL"] ??
-    DEFAULT_OLLAMA_BASE_URL;
+  const baseURL = config.baseUrl ?? process.env["OLLAMA_BASE_URL"] ?? DEFAULT_OLLAMA_BASE_URL;
 
   const provider = createOpenAI({
     apiKey: "ollama",

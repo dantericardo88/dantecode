@@ -3,10 +3,7 @@
 // ============================================================================
 
 import { spawn } from "node:child_process";
-import type {
-  SandboxExecResult,
-  AuditEventType,
-} from "@dantecode/config-types";
+import type { SandboxExecResult, AuditEventType } from "@dantecode/config-types";
 import { appendAuditEvent } from "@dantecode/core";
 import type { AuditLoggerFn } from "./executor.js";
 
@@ -37,10 +34,7 @@ export class LocalExecutor {
    * @param projectRoot - Absolute path to the project root, used as cwd and for audit logging.
    * @param auditLogger - Function to append audit events. Typically `appendAuditEvent`.
    */
-  constructor(
-    projectRoot: string,
-    auditLogger: AuditLoggerFn = appendAuditEvent
-  ) {
+  constructor(projectRoot: string, auditLogger: AuditLoggerFn = appendAuditEvent) {
     this.projectRoot = projectRoot;
     this.auditLogger = auditLogger;
 
@@ -49,7 +43,7 @@ export class LocalExecutor {
       console.warn(
         "[DanteCode Sandbox] WARNING: Docker is not available. " +
           "Commands will execute directly on the host without sandbox isolation. " +
-          "Install Docker and start the daemon for secure sandboxed execution."
+          "Install Docker and start the daemon for secure sandboxed execution.",
       );
     }
   }
@@ -65,10 +59,7 @@ export class LocalExecutor {
    * @param timeoutMs - Optional timeout in milliseconds. 0 or undefined means no timeout.
    * @returns The execution result with exit code, output, timing, and timeout status.
    */
-  async run(
-    command: string,
-    timeoutMs?: number
-  ): Promise<SandboxExecResult> {
+  async run(command: string, timeoutMs?: number): Promise<SandboxExecResult> {
     const startTimestamp = new Date().toISOString();
 
     await this.logAudit("bash_execute", {
@@ -102,9 +93,7 @@ export class LocalExecutor {
    * @param commands - Array of shell command strings to execute in order.
    * @returns An array of SandboxExecResult, one per command, in the same order.
    */
-  async runBatch(
-    commands: string[]
-  ): Promise<SandboxExecResult[]> {
+  async runBatch(commands: string[]): Promise<SandboxExecResult[]> {
     const results: SandboxExecResult[] = [];
 
     for (const command of commands) {
@@ -130,10 +119,7 @@ export class LocalExecutor {
   /**
    * Spawns a child process to run the given command with optional timeout.
    */
-  private spawnCommand(
-    command: string,
-    timeoutMs?: number
-  ): Promise<SandboxExecResult> {
+  private spawnCommand(command: string, timeoutMs?: number): Promise<SandboxExecResult> {
     return new Promise<SandboxExecResult>((resolve) => {
       const startTime = Date.now();
       let timedOut = false;
@@ -209,10 +195,7 @@ export class LocalExecutor {
   /**
    * Logs an audit event through the configured audit logger.
    */
-  private async logAudit(
-    type: AuditEventType,
-    payload: Record<string, unknown>
-  ): Promise<void> {
+  private async logAudit(type: AuditEventType, payload: Record<string, unknown>): Promise<void> {
     try {
       await this.auditLogger(this.projectRoot, {
         sessionId: (payload["sessionId"] as string | undefined) ?? "local-fallback",

@@ -6,6 +6,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run format:check
+
   typecheck:
     runs-on: ubuntu-24.04
     steps:
@@ -38,7 +48,7 @@ jobs:
 
   anti-stub-self-check:
     runs-on: ubuntu-24.04
-    needs: [typecheck, lint, test]
+    needs: [format, typecheck, lint, test]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

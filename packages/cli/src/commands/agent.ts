@@ -78,10 +78,7 @@ below to define the agent's behavior and capabilities.
  * @param args - Arguments after "agent" (e.g., ["list"], ["run", "my-agent"]).
  * @param projectRoot - Absolute path to the project root.
  */
-export async function runAgentCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runAgentCommand(args: string[], projectRoot: string): Promise<void> {
   const subCommand = args[0] || "list";
 
   switch (subCommand) {
@@ -203,9 +200,10 @@ function parseAgentFile(
       subagents: Array.isArray(parsed["subagents"])
         ? (parsed["subagents"] as unknown[]).filter((s): s is string => typeof s === "string")
         : undefined,
-      nomaLane: typeof parsed["nomaLane"] === "string"
-        ? parsed["nomaLane"] as AgentDefinition["nomaLane"]
-        : "worker",
+      nomaLane:
+        typeof parsed["nomaLane"] === "string"
+          ? (parsed["nomaLane"] as AgentDefinition["nomaLane"])
+          : "worker",
       fileLocks: Array.isArray(parsed["fileLocks"])
         ? (parsed["fileLocks"] as unknown[]).filter((f): f is string => typeof f === "string")
         : undefined,
@@ -236,8 +234,8 @@ async function agentList(projectRoot: string): Promise<void> {
   } catch {
     process.stdout.write(
       `\n${DIM}No agents directory found.${RESET}\n` +
-      `${DIM}Run 'dantecode init' to create the project structure,${RESET}\n` +
-      `${DIM}then 'dantecode agent create <name>' to create an agent.${RESET}\n\n`,
+        `${DIM}Run 'dantecode init' to create the project structure,${RESET}\n` +
+        `${DIM}then 'dantecode agent create <name>' to create an agent.${RESET}\n\n`,
     );
     return;
   }
@@ -249,7 +247,7 @@ async function agentList(projectRoot: string): Promise<void> {
   if (agentFiles.length === 0) {
     process.stdout.write(
       `\n${DIM}No agent definitions found in ${agentsDir}${RESET}\n` +
-      `${DIM}Use 'dantecode agent create <name>' to create one.${RESET}\n\n`,
+        `${DIM}Use 'dantecode agent create <name>' to create one.${RESET}\n\n`,
     );
     return;
   }
@@ -265,8 +263,8 @@ async function agentList(projectRoot: string): Promise<void> {
         const { definition } = parsed;
         process.stdout.write(
           `  ${YELLOW}${definition.name.padEnd(24)}${RESET} ` +
-          `${DIM}[${definition.nomaLane}]${RESET} ` +
-          `${definition.description || "(no description)"}\n`,
+            `${DIM}[${definition.nomaLane}]${RESET} ` +
+            `${definition.description || "(no description)"}\n`,
         );
       } else {
         process.stdout.write(`  ${DIM}${file} (parse error)${RESET}\n`);
@@ -302,8 +300,8 @@ async function agentRun(args: string[], projectRoot: string): Promise<void> {
 
   process.stdout.write(
     `\n${CYAN}${BOLD}Running agent: ${definition.name}${RESET}\n` +
-    `${DIM}${definition.description}${RESET}\n` +
-    `${DIM}Lane: ${definition.nomaLane} | Tools: ${definition.tools.join(", ")}${RESET}\n\n`,
+      `${DIM}${definition.description}${RESET}\n` +
+      `${DIM}Lane: ${definition.nomaLane} | Tools: ${definition.tools.join(", ")}${RESET}\n\n`,
   );
 
   // Load state
@@ -411,8 +409,8 @@ async function agentCreate(args: string[], projectRoot: string): Promise<void> {
 
   process.stdout.write(
     `\n${GREEN}Created agent definition:${RESET} ${BOLD}${agentName}${RESET}\n` +
-    `  ${DIM}File: ${filePath}${RESET}\n` +
-    `\n${DIM}Edit the file to customize the agent's behavior, then run it with:${RESET}\n` +
-    `  ${CYAN}dantecode agent run ${sanitizedName}${RESET}\n\n`,
+      `  ${DIM}File: ${filePath}${RESET}\n` +
+      `\n${DIM}Edit the file to customize the agent's behavior, then run it with:${RESET}\n` +
+      `  ${CYAN}dantecode agent run ${sanitizedName}${RESET}\n\n`,
   );
 }

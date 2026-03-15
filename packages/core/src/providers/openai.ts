@@ -25,7 +25,7 @@ export function buildOpenAIProvider(config: ModelConfig): LanguageModelV1 {
     throw new Error(
       "OpenAI API key not found.\n" +
         "Set OPENAI_API_KEY environment variable or configure it in dante.config.yaml\n" +
-        "Get your key at: https://platform.openai.com/api-keys"
+        "Get your key at: https://platform.openai.com/api-keys",
     );
   }
 

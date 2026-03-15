@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {
-  generateRepoMap,
-  formatRepoMapForContext,
-  type RepoMapEntry,
-} from "./repo-map.js";
+import { generateRepoMap, formatRepoMapForContext, type RepoMapEntry } from "./repo-map.js";
 import { execSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -144,9 +140,7 @@ describe("repo-map", () => {
         stdio: "pipe",
       });
       const entries = generateRepoMap(repoDir);
-      expect(entries.some((e) => e.path.includes("src/utils/helper.ts"))).toBe(
-        true,
-      );
+      expect(entries.some((e) => e.path.includes("src/utils/helper.ts"))).toBe(true);
     });
   });
 

@@ -7,9 +7,7 @@ import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  readAuditEvents,
-} from "@dantecode/core";
+import { readAuditEvents } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -18,10 +16,7 @@ import {
   queryLessons,
   formatLessonsForPrompt,
 } from "@dantecode/danteforge";
-import {
-  listSkills,
-  getSkill,
-} from "@dantecode/skill-adapter";
+import { listSkills, getSkill } from "@dantecode/skill-adapter";
 import {
   getStatus,
   getDiff,
@@ -29,11 +24,7 @@ import {
   revertLastCommit,
   createWorktree,
 } from "@dantecode/git-engine";
-import type {
-  Session,
-  DanteCodeState,
-  ModelConfig,
-} from "@dantecode/config-types";
+import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -75,18 +66,16 @@ interface SlashCommand {
 // ----------------------------------------------------------------------------
 
 async function helpCommand(_args: string, _state: ReplState): Promise<string> {
-  const lines = [
-    "",
-    `${BOLD}Available Slash Commands${RESET}`,
-    "",
-  ];
+  const lines = ["", `${BOLD}Available Slash Commands${RESET}`, ""];
 
   for (const cmd of SLASH_COMMANDS) {
     lines.push(`  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`);
   }
 
   lines.push("");
-  lines.push(`${DIM}Type a command with / prefix, or type naturally to chat with the agent.${RESET}`);
+  lines.push(
+    `${DIM}Type a command with / prefix, or type naturally to chat with the agent.${RESET}`,
+  );
   lines.push("");
 
   return lines.join("\n");
@@ -239,7 +228,8 @@ async function commitCommand(_args: string, state: ReplState): Promise<string> {
     const commitResult = autoCommit(
       {
         message: `${state.state.git.commitPrefix} update ${filesToCommit.length} file(s)`,
-        footer: "Generated with DanteCode (https://dantecode.dev)\n\nCo-Authored-By: DanteCode <noreply@dantecode.dev>",
+        footer:
+          "Generated with DanteCode (https://dantecode.dev)\n\nCo-Authored-By: DanteCode <noreply@dantecode.dev>",
         files: filesToCommit,
         allowEmpty: false,
       },
@@ -352,7 +342,9 @@ async function qaCommand(_args: string, state: ReplState): Promise<string> {
     return `${DIM}No GStack commands configured. Configure them in STATE.yaml.${RESET}`;
   }
 
-  process.stdout.write(`${DIM}Running GStack QA pipeline (${gstackCommands.length} commands)...${RESET}\n`);
+  process.stdout.write(
+    `${DIM}Running GStack QA pipeline (${gstackCommands.length} commands)...${RESET}\n`,
+  );
 
   try {
     const results = await runGStack("", gstackCommands, state.projectRoot);
@@ -444,7 +436,7 @@ async function webCommand(args: string, _state: ReplState): Promise<string> {
     const response = await fetch(url, {
       headers: {
         "User-Agent": "DanteCode/1.0.0",
-        "Accept": "text/html,text/plain,application/json",
+        Accept: "text/html,text/plain,application/json",
       },
       signal: AbortSignal.timeout(30000),
     });
@@ -458,9 +450,10 @@ async function webCommand(args: string, _state: ReplState): Promise<string> {
 
     // Truncate to a reasonable size for context
     const maxChars = 50000;
-    const truncated = text.length > maxChars
-      ? text.slice(0, maxChars) + `\n\n... (truncated, ${text.length} chars total)`
-      : text;
+    const truncated =
+      text.length > maxChars
+        ? text.slice(0, maxChars) + `\n\n... (truncated, ${text.length} chars total)`
+        : text;
 
     return `${GREEN}Fetched${RESET} ${url} ${DIM}(${text.length} chars, ${contentType})${RESET}\n\n${truncated}`;
   } catch (err: unknown) {
@@ -572,25 +565,95 @@ async function sandboxCommand(_args: string, state: ReplState): Promise<string> 
 
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
-  { name: "model", description: "Switch model mid-session", usage: "/model <id>", handler: modelCommand },
-  { name: "add", description: "Add file to conversation context", usage: "/add <file>", handler: addCommand },
-  { name: "drop", description: "Remove file from context", usage: "/drop <file>", handler: dropCommand },
-  { name: "files", description: "List files currently in context", usage: "/files", handler: filesCommand },
-  { name: "diff", description: "Show pending changes (unstaged diff)", usage: "/diff", handler: diffCommand },
+  {
+    name: "model",
+    description: "Switch model mid-session",
+    usage: "/model <id>",
+    handler: modelCommand,
+  },
+  {
+    name: "add",
+    description: "Add file to conversation context",
+    usage: "/add <file>",
+    handler: addCommand,
+  },
+  {
+    name: "drop",
+    description: "Remove file from context",
+    usage: "/drop <file>",
+    handler: dropCommand,
+  },
+  {
+    name: "files",
+    description: "List files currently in context",
+    usage: "/files",
+    handler: filesCommand,
+  },
+  {
+    name: "diff",
+    description: "Show pending changes (unstaged diff)",
+    usage: "/diff",
+    handler: diffCommand,
+  },
   { name: "commit", description: "Trigger auto-commit", usage: "/commit", handler: commitCommand },
   { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand },
   { name: "undo", description: "Undo last file edit", usage: "/undo", handler: undoCommand },
-  { name: "lessons", description: "Show project lessons", usage: "/lessons", handler: lessonsCommand },
-  { name: "pdse", description: "Run PDSE scorer on a file", usage: "/pdse <file>", handler: pdseCommand },
+  {
+    name: "lessons",
+    description: "Show project lessons",
+    usage: "/lessons",
+    handler: lessonsCommand,
+  },
+  {
+    name: "pdse",
+    description: "Run PDSE scorer on a file",
+    usage: "/pdse <file>",
+    handler: pdseCommand,
+  },
   { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand },
-  { name: "audit", description: "Show recent audit log entries", usage: "/audit", handler: auditCommand },
-  { name: "clear", description: "Clear conversation history", usage: "/clear", handler: clearCommand },
+  {
+    name: "audit",
+    description: "Show recent audit log entries",
+    usage: "/audit",
+    handler: auditCommand,
+  },
+  {
+    name: "clear",
+    description: "Clear conversation history",
+    usage: "/clear",
+    handler: clearCommand,
+  },
   { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand },
-  { name: "web", description: "Fetch URL content into context", usage: "/web <url>", handler: webCommand },
-  { name: "skill", description: "List or activate a skill", usage: "/skill [name]", handler: skillCommand },
-  { name: "agents", description: "List available agents", usage: "/agents", handler: agentsCommand },
-  { name: "worktree", description: "Create git worktree for isolation", usage: "/worktree", handler: worktreeCommand },
-  { name: "sandbox", description: "Toggle sandbox mode on/off", usage: "/sandbox", handler: sandboxCommand },
+  {
+    name: "web",
+    description: "Fetch URL content into context",
+    usage: "/web <url>",
+    handler: webCommand,
+  },
+  {
+    name: "skill",
+    description: "List or activate a skill",
+    usage: "/skill [name]",
+    handler: skillCommand,
+  },
+  {
+    name: "agents",
+    description: "List available agents",
+    usage: "/agents",
+    handler: agentsCommand,
+  },
+  {
+    name: "worktree",
+    description: "Create git worktree for isolation",
+    usage: "/worktree",
+    handler: worktreeCommand,
+  },
+  {
+    name: "sandbox",
+    description: "Toggle sandbox mode on/off",
+    usage: "/sandbox",
+    handler: sandboxCommand,
+  },
 ];
 
 // ----------------------------------------------------------------------------
@@ -604,10 +667,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
  * @param state - The current REPL state.
  * @returns The output string from the command handler, or an error message.
  */
-export async function routeSlashCommand(
-  input: string,
-  state: ReplState,
-): Promise<string> {
+export async function routeSlashCommand(input: string, state: ReplState): Promise<string> {
   const trimmed = input.trim();
   if (!trimmed.startsWith("/")) {
     return `${RED}Not a slash command: ${trimmed}${RESET}`;
@@ -615,12 +675,11 @@ export async function routeSlashCommand(
 
   const withoutSlash = trimmed.slice(1);
   const spaceIndex = withoutSlash.indexOf(" ");
-  const commandName = spaceIndex === -1
-    ? withoutSlash.toLowerCase()
-    : withoutSlash.slice(0, spaceIndex).toLowerCase();
-  const args = spaceIndex === -1
-    ? ""
-    : withoutSlash.slice(spaceIndex + 1);
+  const commandName =
+    spaceIndex === -1
+      ? withoutSlash.toLowerCase()
+      : withoutSlash.slice(0, spaceIndex).toLowerCase();
+  const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
   const command = SLASH_COMMANDS.find((c) => c.name === commandName);
   if (!command) {

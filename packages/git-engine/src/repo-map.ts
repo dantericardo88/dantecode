@@ -263,10 +263,7 @@ function shouldIgnore(filePath: string, patterns: readonly string[]): boolean {
  * @param options - Optional configuration for filtering and limits.
  * @returns Array of RepoMapEntry objects sorted by recency.
  */
-export function generateRepoMap(
-  projectRoot: string,
-  options?: RepoMapOptions,
-): RepoMapEntry[] {
+export function generateRepoMap(projectRoot: string, options?: RepoMapOptions): RepoMapEntry[] {
   const maxFiles = options?.maxFiles ?? DEFAULT_MAX_FILES;
   const extraPatterns = options?.extraIgnorePatterns ?? [];
   const includeExts = options?.includeExtensions;

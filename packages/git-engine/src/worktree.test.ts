@@ -63,9 +63,7 @@ describe("worktree management", () => {
       const entries = listWorktrees(repoDir);
       expect(entries.length).toBeGreaterThanOrEqual(1);
       // The main worktree is always listed
-      const main = entries.find(
-        (e) => e.branch === "master" || e.branch === "main",
-      );
+      const main = entries.find((e) => e.branch === "master" || e.branch === "main");
       expect(main).toBeDefined();
     });
 
@@ -169,9 +167,7 @@ describe("worktree management", () => {
     });
 
     it("throws for non-existent worktree directory", () => {
-      expect(() =>
-        removeWorktree(join(repoDir, "nonexistent-worktree")),
-      ).toThrow();
+      expect(() => removeWorktree(join(repoDir, "nonexistent-worktree"))).toThrow();
     });
   });
 
@@ -224,11 +220,7 @@ describe("worktree management", () => {
         stdio: "pipe",
       });
 
-      const mergeResult = mergeWorktree(
-        result.directory,
-        currentBranch,
-        repoDir,
-      );
+      const mergeResult = mergeWorktree(result.directory, currentBranch, repoDir);
 
       expect(mergeResult.merged).toBe(true);
       expect(mergeResult.worktreeBranch).toBe("feature-merge");
@@ -260,11 +252,7 @@ describe("worktree management", () => {
         stdio: "pipe",
       });
 
-      const mergeResult = mergeWorktree(
-        result.directory,
-        currentBranch,
-        repoDir,
-      );
+      const mergeResult = mergeWorktree(result.directory, currentBranch, repoDir);
 
       // Verify the hash matches current HEAD
       const currentHead = execSync("git rev-parse HEAD", {

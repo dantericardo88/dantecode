@@ -3,10 +3,7 @@
 // ============================================================================
 
 import Docker from "dockerode";
-import type {
-  SandboxSpec,
-  SandboxExecResult,
-} from "@dantecode/config-types";
+import type { SandboxSpec, SandboxExecResult } from "@dantecode/config-types";
 
 /**
  * Options for executing a command inside the sandbox container.
@@ -56,7 +53,7 @@ export class SandboxManager {
   async start(): Promise<string> {
     if (this.containerId !== null) {
       throw new Error(
-        `SandboxManager: container already running (${this.containerId}). Call stop() first.`
+        `SandboxManager: container already running (${this.containerId}). Call stop() first.`,
       );
     }
 
@@ -68,7 +65,7 @@ export class SandboxManager {
     });
 
     const envArray: string[] = Object.entries(this.spec.env).map(
-      ([key, value]) => `${key}=${value}`
+      ([key, value]) => `${key}=${value}`,
     );
 
     const cpuPeriod = 100000;
@@ -111,14 +108,9 @@ export class SandboxManager {
    * @param options - Optional execution parameters.
    * @returns A SandboxExecResult with exit code, output, timing, and timeout status.
    */
-  async exec(
-    command: string,
-    options?: ExecOptions
-  ): Promise<SandboxExecResult> {
+  async exec(command: string, options?: ExecOptions): Promise<SandboxExecResult> {
     if (this.container === null) {
-      throw new Error(
-        "SandboxManager: no container is running. Call start() first."
-      );
+      throw new Error("SandboxManager: no container is running. Call start() first.");
     }
 
     const execEnv: string[] = options?.env
@@ -141,10 +133,7 @@ export class SandboxManager {
 
     const stream = await execInstance.start({ Detach: false, Tty: options?.tty ?? false });
 
-    const { stdout, stderr, timedOut } = await this.collectOutput(
-      stream,
-      timeoutMs
-    );
+    const { stdout, stderr, timedOut } = await this.collectOutput(stream, timeoutMs);
 
     const durationMs = Date.now() - startTime;
 
@@ -229,9 +218,7 @@ export class SandboxManager {
    */
   async snapshot(): Promise<string> {
     if (this.container === null) {
-      throw new Error(
-        "SandboxManager: no container is running. Call start() first."
-      );
+      throw new Error("SandboxManager: no container is running. Call start() first.");
     }
 
     const repo = "dantecode-sandbox-snapshot";
@@ -279,7 +266,7 @@ export class SandboxManager {
     });
 
     const envArray: string[] = Object.entries(restoreSpec.env).map(
-      ([key, value]) => `${key}=${value}`
+      ([key, value]) => `${key}=${value}`,
     );
 
     const cpuPeriod = 100000;
@@ -331,29 +318,22 @@ export class SandboxManager {
       await new Promise<void>((resolve, reject) => {
         this.docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
           if (err) {
-            reject(
-              new Error(
-                `SandboxManager: failed to pull image "${image}": ${err.message}`
-              )
-            );
+            reject(new Error(`SandboxManager: failed to pull image "${image}": ${err.message}`));
             return;
           }
 
           // Follow the pull progress to completion
-          this.docker.modem.followProgress(
-            stream,
-            (followErr: Error | null) => {
-              if (followErr) {
-                reject(
-                  new Error(
-                    `SandboxManager: error during image pull "${image}": ${followErr.message}`
-                  )
-                );
-              } else {
-                resolve();
-              }
+          this.docker.modem.followProgress(stream, (followErr: Error | null) => {
+            if (followErr) {
+              reject(
+                new Error(
+                  `SandboxManager: error during image pull "${image}": ${followErr.message}`,
+                ),
+              );
+            } else {
+              resolve();
             }
-          );
+          });
         });
       });
     }
@@ -371,7 +351,7 @@ export class SandboxManager {
    */
   private collectOutput(
     stream: NodeJS.ReadableStream,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<{ stdout: string; stderr: string; timedOut: boolean }> {
     return new Promise((resolve) => {
       const stdoutChunks: Buffer[] = [];
@@ -397,7 +377,10 @@ export class SandboxManager {
               timedOut = true;
               try {
                 stream.removeAllListeners();
-                if ("destroy" in stream && typeof (stream as { destroy: unknown }).destroy === "function") {
+                if (
+                  "destroy" in stream &&
+                  typeof (stream as { destroy: unknown }).destroy === "function"
+                ) {
                   (stream as { destroy: () => void }).destroy();
                 }
               } catch {
@@ -435,7 +418,7 @@ export class SandboxManager {
         this.docker.modem.demuxStream(
           stream as NodeJS.ReadWriteStream,
           demuxOutput as unknown as NodeJS.WritableStream,
-          demuxError as unknown as NodeJS.WritableStream
+          demuxError as unknown as NodeJS.WritableStream,
         );
       } catch {
         // If demuxStream is not available, fall back to raw reading

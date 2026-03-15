@@ -4,10 +4,7 @@
 // ============================================================================
 
 import { execSync } from "node:child_process";
-import {
-  getStatus,
-  getDiff,
-} from "@dantecode/git-engine";
+import { getStatus, getDiff } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -52,10 +49,7 @@ function gitExec(command: string, cwd: string): string {
  * @param args - Arguments after "git" (e.g., ["status"], ["diff", "HEAD~3"]).
  * @param projectRoot - Absolute path to the project root.
  */
-export async function runGitCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runGitCommand(args: string[], projectRoot: string): Promise<void> {
   const subCommand = args[0] || "status";
 
   switch (subCommand) {
@@ -71,9 +65,13 @@ export async function runGitCommand(
     default:
       process.stdout.write(`${RED}Unknown git sub-command: ${subCommand}${RESET}\n`);
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
-      process.stdout.write(`  dantecode git status              Show DanteCode-managed git status\n`);
+      process.stdout.write(
+        `  dantecode git status              Show DanteCode-managed git status\n`,
+      );
       process.stdout.write(`  dantecode git log                 Show commit history\n`);
-      process.stdout.write(`  dantecode git diff [ref]          Show diff (optionally against a ref)\n`);
+      process.stdout.write(
+        `  dantecode git diff [ref]          Show diff (optionally against a ref)\n`,
+      );
       break;
   }
 }
@@ -160,8 +158,11 @@ function gitStatus(projectRoot: string): void {
     }
 
     // Summary
-    const total = status.staged.length + status.unstaged.length +
-      status.untracked.length + status.conflicted.length;
+    const total =
+      status.staged.length +
+      status.unstaged.length +
+      status.untracked.length +
+      status.conflicted.length;
     if (total === 0) {
       process.stdout.write(`  ${GREEN}Working tree clean.${RESET}\n\n`);
     }
@@ -179,10 +180,7 @@ function gitLog(args: string[], projectRoot: string): void {
   const count = args[0] || "15";
 
   try {
-    const log = gitExec(
-      `log --oneline --graph --decorate --color=always -${count}`,
-      projectRoot,
-    );
+    const log = gitExec(`log --oneline --graph --decorate --color=always -${count}`, projectRoot);
 
     process.stdout.write(`\n${BOLD}Commit History (last ${count}):${RESET}\n\n`);
     process.stdout.write(log);
@@ -211,9 +209,7 @@ function gitDiffCmd(args: string[], projectRoot: string): void {
       return;
     }
 
-    const header = ref
-      ? `${BOLD}Diff against ${ref}:${RESET}`
-      : `${BOLD}Unstaged changes:${RESET}`;
+    const header = ref ? `${BOLD}Diff against ${ref}:${RESET}` : `${BOLD}Unstaged changes:${RESET}`;
 
     process.stdout.write(`\n${header}\n\n`);
 

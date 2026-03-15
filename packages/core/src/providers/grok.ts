@@ -24,7 +24,7 @@ export function buildGrokProvider(config: ModelConfig): LanguageModelV1 {
     throw new Error(
       "Grok API key not found.\n" +
         "Set GROK_API_KEY environment variable or configure it in dante.config.yaml\n" +
-        "Get your key at: https://console.x.ai/"
+        "Get your key at: https://console.x.ai/",
     );
   }
 

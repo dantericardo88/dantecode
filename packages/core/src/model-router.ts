@@ -44,11 +44,7 @@ export class ModelRouterImpl {
   private readonly sessionId: string;
   private readonly logs: RouterLogEntry[] = [];
 
-  constructor(
-    routerConfig: ModelRouterConfig,
-    projectRoot: string,
-    sessionId: string
-  ) {
+  constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
     this.projectRoot = projectRoot;
     this.sessionId = sessionId;
@@ -65,10 +61,7 @@ export class ModelRouterImpl {
    * @returns The generated text content.
    * @throws The last error encountered if all providers fail.
    */
-  async generate(
-    messages: CoreMessage[],
-    options: GenerateOptions = {}
-  ): Promise<string> {
+  async generate(messages: CoreMessage[], options: GenerateOptions = {}): Promise<string> {
     const modelConfig = this.resolveModelConfig(options.taskType);
     const fallbacks = this.routerConfig.fallback;
 
@@ -82,11 +75,7 @@ export class ModelRouterImpl {
     for (const fallbackConfig of fallbacks) {
       this.logEntry(fallbackConfig, "fallback", 0);
 
-      const fallbackResult = await this.tryGenerate(
-        fallbackConfig,
-        messages,
-        options
-      );
+      const fallbackResult = await this.tryGenerate(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
         return fallbackResult.text;
@@ -110,7 +99,7 @@ export class ModelRouterImpl {
    */
   async stream(
     messages: CoreMessage[],
-    options: GenerateOptions = {}
+    options: GenerateOptions = {},
   ): Promise<StreamTextResult<Record<string, never>, never>> {
     const modelConfig = this.resolveModelConfig(options.taskType);
     const fallbacks = this.routerConfig.fallback;
@@ -125,11 +114,7 @@ export class ModelRouterImpl {
     for (const fallbackConfig of fallbacks) {
       this.logEntry(fallbackConfig, "fallback", 0);
 
-      const fallbackResult = await this.tryStream(
-        fallbackConfig,
-        messages,
-        options
-      );
+      const fallbackResult = await this.tryStream(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
         return fallbackResult.stream;
@@ -167,7 +152,7 @@ export class ModelRouterImpl {
     if (!builder) {
       throw new Error(
         `Unknown model provider: "${config.provider}". ` +
-          `Available providers: ${Object.keys(PROVIDER_BUILDERS).join(", ")}`
+          `Available providers: ${Object.keys(PROVIDER_BUILDERS).join(", ")}`,
       );
     }
     return builder;
@@ -180,10 +165,9 @@ export class ModelRouterImpl {
   private async tryGenerate(
     config: ModelConfig,
     messages: CoreMessage[],
-    options: GenerateOptions
+    options: GenerateOptions,
   ): Promise<
-    | { success: true; text: string; error?: never }
-    | { success: false; text: string; error: Error }
+    { success: true; text: string; error?: never } | { success: false; text: string; error: Error }
   > {
     const startTime = Date.now();
 
@@ -209,14 +193,13 @@ export class ModelRouterImpl {
         config,
         "session_start",
         durationMs,
-        result.usage?.totalTokens ?? 0
+        result.usage?.totalTokens ?? 0,
       );
 
       return { success: true, text: result.text };
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
-      const error =
-        err instanceof Error ? err : new Error(String(err));
+      const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
       return { success: false, text: "", error };
     }
@@ -233,7 +216,7 @@ export class ModelRouterImpl {
   private async tryStream(
     config: ModelConfig,
     messages: CoreMessage[],
-    options: GenerateOptions
+    options: GenerateOptions,
   ): Promise<
     | {
         success: true;
@@ -260,12 +243,7 @@ export class ModelRouterImpl {
           const durationMs = Date.now() - startTime;
           this.logEntry(config, "success", durationMs);
 
-          await this.recordAuditEvent(
-            config,
-            "session_start",
-            durationMs,
-            usage?.totalTokens ?? 0
-          );
+          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
         },
       });
 
@@ -275,8 +253,7 @@ export class ModelRouterImpl {
       };
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
-      const error =
-        err instanceof Error ? err : new Error(String(err));
+      const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
       return { success: false, error } as {
         success: false;
@@ -293,7 +270,7 @@ export class ModelRouterImpl {
     config: ModelConfig,
     type: AuditEventType,
     durationMs: number,
-    tokensUsed: number
+    tokensUsed: number,
   ): Promise<void> {
     try {
       await appendAuditEvent(this.projectRoot, {
@@ -322,7 +299,7 @@ export class ModelRouterImpl {
     config: ModelConfig,
     action: RouterLogEntry["action"],
     durationMs: number,
-    error?: string
+    error?: string,
   ): void {
     this.logs.push({
       timestamp: new Date().toISOString(),

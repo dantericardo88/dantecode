@@ -19,13 +19,7 @@ import { runLocalPDSEScorer } from "@dantecode/danteforge";
  * Inbound message types sent from the webview to the extension host.
  */
 interface WebviewInboundMessage {
-  type:
-    | "chat_request"
-    | "file_add"
-    | "file_remove"
-    | "model_change"
-    | "skill_activate"
-    | "ready";
+  type: "chat_request" | "file_add" | "file_remove" | "model_change" | "skill_activate" | "ready";
   payload: Record<string, unknown>;
 }
 
@@ -81,7 +75,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
 
@@ -93,11 +87,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
 
     // Handle messages from the webview
-    webviewView.webview.onDidReceiveMessage(
-      async (message: WebviewInboundMessage) => {
-        await this.handleWebviewMessage(message);
-      }
-    );
+    webviewView.webview.onDidReceiveMessage(async (message: WebviewInboundMessage) => {
+      await this.handleWebviewMessage(message);
+    });
 
     // When the view becomes visible again, re-send context state
     webviewView.onDidChangeVisibility(() => {
@@ -111,9 +103,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   /**
    * Routes an inbound webview message to the appropriate handler.
    */
-  private async handleWebviewMessage(
-    message: WebviewInboundMessage
-  ): Promise<void> {
+  private async handleWebviewMessage(message: WebviewInboundMessage): Promise<void> {
     switch (message.type) {
       case "chat_request":
         await this.handleChatRequest(String(message.payload["text"] ?? ""));
@@ -128,9 +118,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         await this.handleModelChange(String(message.payload["model"] ?? ""));
         break;
       case "skill_activate":
-        await this.handleSkillActivate(
-          String(message.payload["skillName"] ?? "")
-        );
+        await this.handleSkillActivate(String(message.payload["skillName"] ?? ""));
         break;
       case "ready":
         this.sendContextFilesUpdate();
@@ -171,11 +159,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     };
 
     const projectRoot = this.getProjectRoot();
-    const router = new ModelRouterImpl(
-      routerConfig,
-      projectRoot,
-      this.sessionId
-    );
+    const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
     // Build the system prompt with context files
     const systemParts = [
@@ -278,8 +262,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Audit logging failure should not break the chat flow
       }
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Unknown error occurred";
+      const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
       this.postMessage({
         type: "error",
         payload: { message: errorMessage },
@@ -322,11 +305,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Update VS Code settings to persist the model choice
     const config = vscode.workspace.getConfiguration("dantecode");
-    await config.update(
-      "defaultModel",
-      model,
-      vscode.ConfigurationTarget.Global
-    );
+    await config.update("defaultModel", model, vscode.ConfigurationTarget.Global);
 
     this.sendModelUpdate();
   }
@@ -351,13 +330,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         projectRoot,
       });
 
-      void vscode.window.showInformationMessage(
-        `DanteCode: Activated skill "${skillName}"`
-      );
+      void vscode.window.showInformationMessage(`DanteCode: Activated skill "${skillName}"`);
     } catch {
-      void vscode.window.showErrorMessage(
-        `DanteCode: Failed to activate skill "${skillName}"`
-      );
+      void vscode.window.showErrorMessage(`DanteCode: Failed to activate skill "${skillName}"`);
     }
   }
 
@@ -477,10 +452,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private parseModelString(model: string): [string, string] {
     const slashIndex = model.indexOf("/");
     if (slashIndex >= 0) {
-      return [
-        model.substring(0, slashIndex),
-        model.substring(slashIndex + 1),
-      ];
+      return [model.substring(0, slashIndex), model.substring(slashIndex + 1)];
     }
     return ["grok", model];
   }
@@ -489,7 +461,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
    * Heuristic check for whether a response contains code blocks.
    */
   private containsCode(text: string): boolean {
-    return text.includes("```") || text.includes("function ") || text.includes("const ") || text.includes("class ");
+    return (
+      text.includes("```") ||
+      text.includes("function ") ||
+      text.includes("const ") ||
+      text.includes("class ")
+    );
   }
 
   /**
@@ -1117,8 +1094,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
  * Uses a 32-character alphanumeric random string.
  */
 function getNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
   for (let i = 0; i < 32; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));

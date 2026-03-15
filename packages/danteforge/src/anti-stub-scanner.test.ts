@@ -55,14 +55,13 @@ describe("anti-stub-scanner", () => {
     it("detects raise NotImplementedError (Python)", () => {
       const result = runAntiStubScanner("raise NotImplementedError", PROJECT_ROOT);
       expect(result.passed).toBe(false);
-      expect(result.hardViolations.some((v) => v.message.includes("NotImplementedError"))).toBe(true);
+      expect(result.hardViolations.some((v) => v.message.includes("NotImplementedError"))).toBe(
+        true,
+      );
     });
 
     it("detects throw new Error('not implemented')", () => {
-      const result = runAntiStubScanner(
-        'throw new Error("not implemented")',
-        PROJECT_ROOT,
-      );
+      const result = runAntiStubScanner('throw new Error("not implemented")', PROJECT_ROOT);
       expect(result.passed).toBe(false);
     });
 

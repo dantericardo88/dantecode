@@ -96,18 +96,14 @@ async function findMarkdownFiles(dir: string): Promise<string[]> {
  *                       Defaults to `~/.continue/agents/`.
  * @returns Array of ScannedContinueAgent objects, one per discovered file.
  */
-export async function scanContinueAgents(
-  continueDir?: string
-): Promise<ScannedContinueAgent[]> {
+export async function scanContinueAgents(continueDir?: string): Promise<ScannedContinueAgent[]> {
   const dir = continueDir ?? DEFAULT_CONTINUE_AGENTS_DIR;
   const files = await findMarkdownFiles(dir);
   const agents: ScannedContinueAgent[] = [];
 
   for (const filePath of files) {
     const raw = await readFile(filePath, "utf-8");
-    const name = basename(filePath, ".md")
-      .replace(/[._]/g, "-")
-      .toLowerCase();
+    const name = basename(filePath, ".md").replace(/[._]/g, "-").toLowerCase();
 
     agents.push({ path: filePath, name, raw });
   }
@@ -149,7 +145,12 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
     return [{}, raw];
   }
 
-  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (
+    parsed === null ||
+    parsed === undefined ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed)
+  ) {
     return [{}, raw];
   }
 
@@ -172,31 +173,19 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
  * @param sourcePath - The absolute path where the file was found.
  * @returns A ParsedContinueAgent with extracted frontmatter and instructions.
  */
-export function parseContinueAgent(
-  content: string,
-  sourcePath: string
-): ParsedContinueAgent {
+export function parseContinueAgent(content: string, sourcePath: string): ParsedContinueAgent {
   const [rawFrontmatter, body] = extractFrontmatter(content);
 
-  const fallbackName = basename(sourcePath, ".md")
-    .replace(/[._]/g, "-")
-    .toLowerCase();
+  const fallbackName = basename(sourcePath, ".md").replace(/[._]/g, "-").toLowerCase();
 
   const frontmatter: SkillFrontmatter = {
-    name: typeof rawFrontmatter["name"] === "string"
-      ? rawFrontmatter["name"]
-      : fallbackName,
-    description: typeof rawFrontmatter["description"] === "string"
-      ? rawFrontmatter["description"]
-      : "",
+    name: typeof rawFrontmatter["name"] === "string" ? rawFrontmatter["name"] : fallbackName,
+    description:
+      typeof rawFrontmatter["description"] === "string" ? rawFrontmatter["description"] : "",
     tools: Array.isArray(rawFrontmatter["tools"])
-      ? (rawFrontmatter["tools"] as unknown[]).filter(
-          (t): t is string => typeof t === "string"
-        )
+      ? (rawFrontmatter["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
       : undefined,
-    model: typeof rawFrontmatter["model"] === "string"
-      ? rawFrontmatter["model"]
-      : undefined,
+    model: typeof rawFrontmatter["model"] === "string" ? rawFrontmatter["model"] : undefined,
   };
 
   return {

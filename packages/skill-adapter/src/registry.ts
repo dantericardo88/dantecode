@@ -8,10 +8,7 @@
 import { readdir, readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import YAML from "yaml";
-import {
-  runAntiStubScanner,
-  runConstitutionCheck,
-} from "@dantecode/danteforge";
+import { runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
 import type { SkillFrontmatter, SkillDefinition } from "@dantecode/config-types";
 
 // ----------------------------------------------------------------------------
@@ -87,7 +84,12 @@ function extractFrontmatter(raw: string): Record<string, unknown> | null {
 
   try {
     const parsed: unknown = YAML.parse(yamlBlock);
-    if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (
+      parsed === null ||
+      parsed === undefined ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
       return null;
     }
     return parsed as Record<string, unknown>;
@@ -147,13 +149,9 @@ function buildSkillFrontmatter(fm: Record<string, unknown>): SkillFrontmatter {
     name: typeof fm["name"] === "string" ? fm["name"] : "unnamed",
     description: typeof fm["description"] === "string" ? fm["description"] : "",
     tools: Array.isArray(fm["original_tools"])
-      ? (fm["original_tools"] as unknown[]).filter(
-          (t): t is string => typeof t === "string"
-        )
+      ? (fm["original_tools"] as unknown[]).filter((t): t is string => typeof t === "string")
       : undefined,
-    model: typeof fm["original_model"] === "string"
-      ? fm["original_model"]
-      : undefined,
+    model: typeof fm["original_model"] === "string" ? fm["original_model"] : undefined,
     mode: typeof fm["mode"] === "string" ? fm["mode"] : undefined,
     hidden: typeof fm["hidden"] === "boolean" ? fm["hidden"] : undefined,
     color: typeof fm["color"] === "string" ? fm["color"] : undefined,
@@ -174,9 +172,7 @@ function buildSkillFrontmatter(fm: Record<string, unknown>): SkillFrontmatter {
  * @param projectRoot - Absolute path to the project root directory.
  * @returns Array of SkillRegistryEntry objects for all discovered skills.
  */
-export async function loadSkillRegistry(
-  projectRoot: string
-): Promise<SkillRegistryEntry[]> {
+export async function loadSkillRegistry(projectRoot: string): Promise<SkillRegistryEntry[]> {
   const skillsDir = join(projectRoot, SKILLS_DIR);
   const registry: SkillRegistryEntry[] = [];
 
@@ -222,9 +218,7 @@ export async function loadSkillRegistry(
       wrappedAt: typeof fm["wrapped_at"] === "string" ? fm["wrapped_at"] : "",
       path: skillFilePath,
       originalTools: Array.isArray(fm["original_tools"])
-        ? (fm["original_tools"] as unknown[]).filter(
-            (t): t is string => typeof t === "string"
-          )
+        ? (fm["original_tools"] as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
       mode: typeof fm["mode"] === "string" ? fm["mode"] : undefined,
     };
@@ -250,10 +244,7 @@ export async function loadSkillRegistry(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns The SkillDefinition, or null if not found.
  */
-export async function getSkill(
-  name: string,
-  projectRoot: string
-): Promise<SkillDefinition | null> {
+export async function getSkill(name: string, projectRoot: string): Promise<SkillDefinition | null> {
   const skillsDir = join(projectRoot, SKILLS_DIR);
   const normalizedName = name.toLowerCase();
 
@@ -289,27 +280,22 @@ export async function getSkill(
     const skillName = typeof fm["name"] === "string" ? fm["name"] : entry;
 
     // Match by name (case-insensitive) or by directory name
-    if (
-      skillName.toLowerCase() === normalizedName ||
-      entry.toLowerCase() === normalizedName
-    ) {
+    if (skillName.toLowerCase() === normalizedName || entry.toLowerCase() === normalizedName) {
       const frontmatter = buildSkillFrontmatter(fm);
       const instructions = extractInstructions(content);
 
       const definition: SkillDefinition = {
         frontmatter,
         instructions,
-        sourcePath: typeof fm["original_source_path"] === "string"
-          ? fm["original_source_path"]
-          : skillFilePath,
+        sourcePath:
+          typeof fm["original_source_path"] === "string"
+            ? fm["original_source_path"]
+            : skillFilePath,
         wrappedPath: skillFilePath,
         isWrapped: true,
-        importSource: typeof fm["import_source"] === "string"
-          ? fm["import_source"]
-          : undefined,
-        adapterVersion: typeof fm["adapter_version"] === "string"
-          ? fm["adapter_version"]
-          : "unknown",
+        importSource: typeof fm["import_source"] === "string" ? fm["import_source"] : undefined,
+        adapterVersion:
+          typeof fm["adapter_version"] === "string" ? fm["adapter_version"] : "unknown",
         constitutionCheckPassed: true,
         antiStubScanPassed: true,
       };
@@ -330,9 +316,7 @@ export async function getSkill(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns Array of SkillRegistryEntry objects.
  */
-export async function listSkills(
-  projectRoot: string
-): Promise<SkillRegistryEntry[]> {
+export async function listSkills(projectRoot: string): Promise<SkillRegistryEntry[]> {
   return loadSkillRegistry(projectRoot);
 }
 
@@ -348,10 +332,7 @@ export async function listSkills(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns True if the skill was found and removed, false if not found.
  */
-export async function removeSkill(
-  name: string,
-  projectRoot: string
-): Promise<boolean> {
+export async function removeSkill(name: string, projectRoot: string): Promise<boolean> {
   const skillsDir = join(projectRoot, SKILLS_DIR);
   const normalizedName = name.toLowerCase();
 
@@ -386,10 +367,7 @@ export async function removeSkill(
 
     const skillName = typeof fm["name"] === "string" ? fm["name"] : entry;
 
-    if (
-      skillName.toLowerCase() === normalizedName ||
-      entry.toLowerCase() === normalizedName
-    ) {
+    if (skillName.toLowerCase() === normalizedName || entry.toLowerCase() === normalizedName) {
       await rm(skillDir, { recursive: true, force: true });
       return true;
     }
@@ -411,7 +389,7 @@ export async function removeSkill(
  */
 export async function validateSkill(
   name: string,
-  projectRoot: string
+  projectRoot: string,
 ): Promise<SkillValidationResult | null> {
   const skill = await getSkill(name, projectRoot);
   if (skill === null) {
@@ -419,23 +397,16 @@ export async function validateSkill(
   }
 
   // Run anti-stub scan
-  const antiStubResult = runAntiStubScanner(
-    skill.instructions,
-    projectRoot,
-    skill.wrappedPath
-  );
+  const antiStubResult = runAntiStubScanner(skill.instructions, projectRoot, skill.wrappedPath);
 
   // Run constitution check
-  const constitutionResult = runConstitutionCheck(
-    skill.instructions,
-    skill.wrappedPath
-  );
+  const constitutionResult = runConstitutionCheck(skill.instructions, skill.wrappedPath);
 
   const criticalConstitutionViolations = constitutionResult.violations.filter(
-    (v: { severity: string }) => v.severity === "critical"
+    (v: { severity: string }) => v.severity === "critical",
   );
   const warningConstitutionViolations = constitutionResult.violations.filter(
-    (v: { severity: string }) => v.severity === "warning"
+    (v: { severity: string }) => v.severity === "warning",
   );
 
   const antiStubPassed = antiStubResult.passed;

@@ -51,13 +51,8 @@ const GATE_TOOLTIPS: Record<GateStatus, string> = {
  * @param context - The extension context, used to register the disposable.
  * @returns The StatusBarState object for later updates.
  */
-export function createStatusBar(
-  context: vscode.ExtensionContext
-): StatusBarState {
-  const item = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left,
-    100
-  );
+export function createStatusBar(context: vscode.ExtensionContext): StatusBarState {
+  const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 
   // Read the configured default model from settings
   const config = vscode.workspace.getConfiguration("dantecode");
@@ -85,18 +80,12 @@ export function createStatusBar(
   const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration("dantecode.defaultModel")) {
       const updatedConfig = vscode.workspace.getConfiguration("dantecode");
-      state.currentModel = updatedConfig.get<string>(
-        "defaultModel",
-        "grok/grok-3"
-      );
+      state.currentModel = updatedConfig.get<string>("defaultModel", "grok/grok-3");
       renderStatusBar(state);
     }
     if (e.affectsConfiguration("dantecode.sandboxEnabled")) {
       const updatedConfig = vscode.workspace.getConfiguration("dantecode");
-      state.sandboxEnabled = updatedConfig.get<boolean>(
-        "sandboxEnabled",
-        false
-      );
+      state.sandboxEnabled = updatedConfig.get<boolean>("sandboxEnabled", false);
       renderStatusBar(state);
     }
   });
@@ -115,7 +104,7 @@ export function createStatusBar(
 export function updateStatusBar(
   state: StatusBarState,
   model: string,
-  gateStatus: GateStatus
+  gateStatus: GateStatus,
 ): void {
   state.currentModel = model;
   state.gateStatus = gateStatus;
@@ -128,10 +117,7 @@ export function updateStatusBar(
  * @param state - The StatusBarState to mutate and re-render.
  * @param enabled - Whether sandbox mode is enabled.
  */
-export function updateSandboxStatus(
-  state: StatusBarState,
-  enabled: boolean
-): void {
+export function updateSandboxStatus(state: StatusBarState, enabled: boolean): void {
   state.sandboxEnabled = enabled;
   renderStatusBar(state);
 }
@@ -161,25 +147,15 @@ function renderStatusBar(state: StatusBarState): void {
   switch (gateStatus) {
     case "passed":
       item.backgroundColor = undefined;
-      item.color = new vscode.ThemeColor(
-        "statusBarItem.foreground"
-      );
+      item.color = new vscode.ThemeColor("statusBarItem.foreground");
       break;
     case "failed":
-      item.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.errorBackground"
-      );
-      item.color = new vscode.ThemeColor(
-        "statusBarItem.errorForeground"
-      );
+      item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+      item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
       break;
     case "pending":
-      item.backgroundColor = new vscode.ThemeColor(
-        "statusBarItem.warningBackground"
-      );
-      item.color = new vscode.ThemeColor(
-        "statusBarItem.warningForeground"
-      );
+      item.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+      item.color = new vscode.ThemeColor("statusBarItem.warningForeground");
       break;
     case "none":
       item.backgroundColor = undefined;

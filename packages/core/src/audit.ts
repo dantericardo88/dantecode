@@ -58,7 +58,7 @@ function auditLogPath(projectRoot: string): string {
  */
 export async function appendAuditEvent(
   projectRoot: string,
-  event: AuditEventInput
+  event: AuditEventInput,
 ): Promise<AuditEvent> {
   const logPath = auditLogPath(projectRoot);
 
@@ -96,7 +96,7 @@ export async function appendAuditEvent(
  */
 export async function readAuditEvents(
   projectRoot: string,
-  options: ReadAuditOptions = {}
+  options: ReadAuditOptions = {},
 ): Promise<AuditEvent[]> {
   const logPath = auditLogPath(projectRoot);
 
@@ -135,23 +135,16 @@ export async function readAuditEvents(
 
   if (options.since !== undefined) {
     const sinceDate = new Date(options.since).getTime();
-    events = events.filter(
-      (e) => new Date(e.timestamp).getTime() >= sinceDate
-    );
+    events = events.filter((e) => new Date(e.timestamp).getTime() >= sinceDate);
   }
 
   if (options.until !== undefined) {
     const untilDate = new Date(options.until).getTime();
-    events = events.filter(
-      (e) => new Date(e.timestamp).getTime() <= untilDate
-    );
+    events = events.filter((e) => new Date(e.timestamp).getTime() <= untilDate);
   }
 
   // Sort chronologically
-  events.sort(
-    (a, b) =>
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
+  events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   // Apply pagination
   const offset = options.offset ?? 0;
@@ -178,7 +171,7 @@ export async function readAuditEvents(
  */
 export async function countAuditEvents(
   projectRoot: string,
-  options: Omit<ReadAuditOptions, "limit" | "offset"> = {}
+  options: Omit<ReadAuditOptions, "limit" | "offset"> = {},
 ): Promise<number> {
   const events = await readAuditEvents(projectRoot, options);
   return events.length;

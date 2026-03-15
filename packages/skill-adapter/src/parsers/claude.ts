@@ -98,20 +98,18 @@ async function findMarkdownFiles(dir: string): Promise<string[]> {
  *                     Defaults to `~/.claude/skills/`.
  * @returns Array of ScannedSkill objects, one per discovered markdown file.
  */
-export async function scanClaudeSkills(
-  claudeDir?: string
-): Promise<ScannedSkill[]> {
+export async function scanClaudeSkills(claudeDir?: string): Promise<ScannedSkill[]> {
   const dir = claudeDir ?? DEFAULT_CLAUDE_SKILLS_DIR;
   const files = await findMarkdownFiles(dir);
   const skills: ScannedSkill[] = [];
 
   for (const filePath of files) {
     const raw = await readFile(filePath, "utf-8");
-    const name = basename(filePath, ".md")
-      .replace(/^SKILL[._-]?/i, "")
-      .replace(/[._]/g, "-")
-      .toLowerCase()
-      || basename(filePath, ".md").toLowerCase();
+    const name =
+      basename(filePath, ".md")
+        .replace(/^SKILL[._-]?/i, "")
+        .replace(/[._]/g, "-")
+        .toLowerCase() || basename(filePath, ".md").toLowerCase();
 
     skills.push({ path: filePath, name, raw });
   }
@@ -156,7 +154,12 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
     return [{}, raw];
   }
 
-  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (
+    parsed === null ||
+    parsed === undefined ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed)
+  ) {
     return [{}, raw];
   }
 
@@ -179,34 +182,24 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
  * @param sourcePath - The absolute path where the file was found.
  * @returns A ParsedClaudeSkill with extracted frontmatter and instructions.
  */
-export function parseClaudeSkill(
-  content: string,
-  sourcePath: string
-): ParsedClaudeSkill {
+export function parseClaudeSkill(content: string, sourcePath: string): ParsedClaudeSkill {
   const [rawFrontmatter, body] = extractFrontmatter(content);
 
   // Derive a fallback name from the source path
-  const fallbackName = basename(sourcePath, ".md")
-    .replace(/^SKILL[._-]?/i, "")
-    .replace(/[._]/g, "-")
-    .toLowerCase()
-    || basename(sourcePath, ".md").toLowerCase();
+  const fallbackName =
+    basename(sourcePath, ".md")
+      .replace(/^SKILL[._-]?/i, "")
+      .replace(/[._]/g, "-")
+      .toLowerCase() || basename(sourcePath, ".md").toLowerCase();
 
   const frontmatter: SkillFrontmatter = {
-    name: typeof rawFrontmatter["name"] === "string"
-      ? rawFrontmatter["name"]
-      : fallbackName,
-    description: typeof rawFrontmatter["description"] === "string"
-      ? rawFrontmatter["description"]
-      : "",
+    name: typeof rawFrontmatter["name"] === "string" ? rawFrontmatter["name"] : fallbackName,
+    description:
+      typeof rawFrontmatter["description"] === "string" ? rawFrontmatter["description"] : "",
     tools: Array.isArray(rawFrontmatter["tools"])
-      ? (rawFrontmatter["tools"] as unknown[]).filter(
-          (t): t is string => typeof t === "string"
-        )
+      ? (rawFrontmatter["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
       : undefined,
-    model: typeof rawFrontmatter["model"] === "string"
-      ? rawFrontmatter["model"]
-      : undefined,
+    model: typeof rawFrontmatter["model"] === "string" ? rawFrontmatter["model"] : undefined,
   };
 
   return {

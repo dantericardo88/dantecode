@@ -11,25 +11,14 @@ export {
   HARD_VIOLATION_PATTERNS,
   SOFT_VIOLATION_PATTERNS,
 } from "./anti-stub-scanner.js";
-export type {
-  StubPattern,
-  AntiStubScanResult,
-} from "./anti-stub-scanner.js";
+export type { StubPattern, AntiStubScanResult } from "./anti-stub-scanner.js";
 
 // --- PDSE Scorer ---
-export {
-  runPDSEScorer,
-  runLocalPDSEScorer,
-} from "./pdse-scorer.js";
+export { runPDSEScorer, runLocalPDSEScorer } from "./pdse-scorer.js";
 export type { ModelRouter } from "./pdse-scorer.js";
 
 // --- GStack Runner ---
-export {
-  runGStack,
-  runGStackSingle,
-  allGStackPassed,
-  summarizeGStackResults,
-} from "./gstack.js";
+export { runGStack, runGStackSingle, allGStackPassed, summarizeGStackResults } from "./gstack.js";
 
 // --- Lessons System ---
 export {
@@ -43,14 +32,8 @@ export {
 } from "./lessons.js";
 
 // --- Autoforge IAL ---
-export {
-  runAutoforgeIAL,
-  buildFailureContext,
-} from "./autoforge.js";
-export type {
-  AutoforgeResult,
-  AutoforgeContext,
-} from "./autoforge.js";
+export { runAutoforgeIAL, buildFailureContext } from "./autoforge.js";
+export type { AutoforgeResult, AutoforgeContext } from "./autoforge.js";
 
 // --- Constitution Checker ---
 export {

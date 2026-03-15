@@ -120,7 +120,7 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(
     webviewView: vscode.WebviewView,
     _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
+    _token: vscode.CancellationToken,
   ): void {
     this.view = webviewView;
 
@@ -132,13 +132,11 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
 
     // Handle messages from the webview
-    webviewView.webview.onDidReceiveMessage(
-      async (message: { type: string }) => {
-        if (message.type === "refresh" || message.type === "ready") {
-          await this.refreshEvents();
-        }
+    webviewView.webview.onDidReceiveMessage(async (message: { type: string }) => {
+      if (message.type === "refresh" || message.type === "ready") {
+        await this.refreshEvents();
       }
-    );
+    });
 
     // Start watching the audit.jsonl file for changes
     this.startFileWatcher();
@@ -170,10 +168,7 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const pattern = new vscode.RelativePattern(
-      folders[0]!,
-      ".dantecode/audit.jsonl"
-    );
+    const pattern = new vscode.RelativePattern(folders[0]!, ".dantecode/audit.jsonl");
 
     this.fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
     this.fileWatcher.onDidChange(() => void this.refreshEvents());
@@ -621,8 +616,7 @@ function formatTimestamp(isoTimestamp: string): string {
  * Generates a random nonce string for Content Security Policy script tags.
  */
 function getNonce(): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   let result = "";
   for (let i = 0; i < 32; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));

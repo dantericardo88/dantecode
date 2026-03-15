@@ -99,18 +99,14 @@ async function findMarkdownFiles(dir: string): Promise<string[]> {
  *                       Defaults to `~/.opencode/agent/`.
  * @returns Array of ScannedOpencodeAgent objects, one per discovered file.
  */
-export async function scanOpencodeAgents(
-  opencodeDir?: string
-): Promise<ScannedOpencodeAgent[]> {
+export async function scanOpencodeAgents(opencodeDir?: string): Promise<ScannedOpencodeAgent[]> {
   const dir = opencodeDir ?? DEFAULT_OPENCODE_AGENT_DIR;
   const files = await findMarkdownFiles(dir);
   const agents: ScannedOpencodeAgent[] = [];
 
   for (const filePath of files) {
     const raw = await readFile(filePath, "utf-8");
-    const name = basename(filePath, ".md")
-      .replace(/[._]/g, "-")
-      .toLowerCase();
+    const name = basename(filePath, ".md").replace(/[._]/g, "-").toLowerCase();
 
     agents.push({ path: filePath, name, raw });
   }
@@ -152,7 +148,12 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
     return [{}, raw];
   }
 
-  if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (
+    parsed === null ||
+    parsed === undefined ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed)
+  ) {
     return [{}, raw];
   }
 
@@ -177,15 +178,10 @@ function extractFrontmatter(raw: string): [Record<string, unknown>, string] {
  * @param sourcePath - The absolute path where the file was found.
  * @returns A ParsedOpencodeAgent with extracted frontmatter and instructions.
  */
-export function parseOpencodeAgent(
-  content: string,
-  sourcePath: string
-): ParsedOpencodeAgent {
+export function parseOpencodeAgent(content: string, sourcePath: string): ParsedOpencodeAgent {
   const [rawFrontmatter, body] = extractFrontmatter(content);
 
-  const fallbackName = basename(sourcePath, ".md")
-    .replace(/[._]/g, "-")
-    .toLowerCase();
+  const fallbackName = basename(sourcePath, ".md").replace(/[._]/g, "-").toLowerCase();
 
   // Validate and normalize the mode field
   const rawMode = rawFrontmatter["mode"];
@@ -201,20 +197,13 @@ export function parseOpencodeAgent(
   }
 
   const frontmatter: SkillFrontmatter = {
-    name: typeof rawFrontmatter["name"] === "string"
-      ? rawFrontmatter["name"]
-      : fallbackName,
-    description: typeof rawFrontmatter["description"] === "string"
-      ? rawFrontmatter["description"]
-      : "",
+    name: typeof rawFrontmatter["name"] === "string" ? rawFrontmatter["name"] : fallbackName,
+    description:
+      typeof rawFrontmatter["description"] === "string" ? rawFrontmatter["description"] : "",
     tools: Array.isArray(rawFrontmatter["tools"])
-      ? (rawFrontmatter["tools"] as unknown[]).filter(
-          (t): t is string => typeof t === "string"
-        )
+      ? (rawFrontmatter["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
       : undefined,
-    model: typeof rawFrontmatter["model"] === "string"
-      ? rawFrontmatter["model"]
-      : undefined,
+    model: typeof rawFrontmatter["model"] === "string" ? rawFrontmatter["model"] : undefined,
     mode,
   };
 

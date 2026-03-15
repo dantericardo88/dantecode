@@ -195,10 +195,7 @@ Constitution). Failed generations are never committed.**
  * @param importSource - The source system ("claude" | "continue" | "opencode").
  * @returns The complete SKILL.dc.md content as a string.
  */
-export function wrapSkillWithAdapter(
-  skill: ParsedSkill,
-  importSource: ImportSource
-): string {
+export function wrapSkillWithAdapter(skill: ParsedSkill, importSource: ImportSource): string {
   // Build the enhanced frontmatter with adapter metadata
   const wrappedFrontmatter: Record<string, unknown> = {
     name: skill.frontmatter.name,

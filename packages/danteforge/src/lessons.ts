@@ -5,11 +5,7 @@
 // Uses sql.js (pure JavaScript SQLite) to avoid native compilation dependencies.
 // ============================================================================
 
-import type {
-  Lesson,
-  LessonsQuery,
-  LessonSeverity,
-} from "@dantecode/config-types";
+import type { Lesson, LessonsQuery, LessonSeverity } from "@dantecode/config-types";
 import initSqlJs from "sql.js";
 import type { Database as SqlJsDatabase } from "sql.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -314,10 +310,9 @@ export async function getLessonCount(projectRoot: string): Promise<number> {
   const db = await initLessonsDB(projectRoot);
 
   try {
-    const result = db.exec(
-      `SELECT COUNT(*) as count FROM lessons WHERE project_root = $root`,
-      { $root: resolve(projectRoot) },
-    );
+    const result = db.exec(`SELECT COUNT(*) as count FROM lessons WHERE project_root = $root`, {
+      $root: resolve(projectRoot),
+    });
     if (result.length === 0 || !result[0] || result[0].values.length === 0) return 0;
     const firstRow = result[0].values[0];
     if (!firstRow || firstRow.length === 0) return 0;
@@ -335,13 +330,11 @@ export async function deleteLesson(lessonId: string, projectRoot: string): Promi
   const db = await initLessonsDB(projectRoot);
 
   try {
-    const before = db.exec(
-      `SELECT COUNT(*) FROM lessons WHERE id = $id`,
-      { $id: lessonId },
-    );
-    const beforeCount = before.length > 0 && before[0] && before[0].values.length > 0 && before[0].values[0]
-      ? Number(before[0].values[0][0])
-      : 0;
+    const before = db.exec(`SELECT COUNT(*) FROM lessons WHERE id = $id`, { $id: lessonId });
+    const beforeCount =
+      before.length > 0 && before[0] && before[0].values.length > 0 && before[0].values[0]
+        ? Number(before[0].values[0][0])
+        : 0;
 
     if (beforeCount === 0) return false;
 
@@ -361,13 +354,13 @@ export async function clearLessons(projectRoot: string): Promise<number> {
   const db = await initLessonsDB(projectRoot);
 
   try {
-    const before = db.exec(
-      `SELECT COUNT(*) FROM lessons WHERE project_root = $root`,
-      { $root: resolve(projectRoot) },
-    );
-    const count = before.length > 0 && before[0] && before[0].values.length > 0 && before[0].values[0]
-      ? Number(before[0].values[0][0])
-      : 0;
+    const before = db.exec(`SELECT COUNT(*) FROM lessons WHERE project_root = $root`, {
+      $root: resolve(projectRoot),
+    });
+    const count =
+      before.length > 0 && before[0] && before[0].values.length > 0 && before[0].values[0]
+        ? Number(before[0].values[0][0])
+        : 0;
 
     db.run(`DELETE FROM lessons WHERE project_root = $root`, { $root: resolve(projectRoot) });
     saveDB(db, projectRoot);

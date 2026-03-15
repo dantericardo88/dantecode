@@ -16,15 +16,7 @@ const STATE_YAML_RELATIVE_PATH = ".dantecode/STATE.yaml";
 // ─── Zod Schemas ──────────────────────────────────────────────────────────────
 
 const ModelConfigSchema = z.object({
-  provider: z.enum([
-    "grok",
-    "anthropic",
-    "openai",
-    "google",
-    "groq",
-    "ollama",
-    "custom",
-  ]),
+  provider: z.enum(["grok", "anthropic", "openai", "google", "groq", "ollama", "custom"]),
   modelId: z.string(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
@@ -166,9 +158,7 @@ export const DanteCodeStateSchema = z.object({
  * @returns The parsed and validated DanteCodeState.
  * @throws If the file does not exist, cannot be parsed, or fails validation.
  */
-export async function readStateYaml(
-  projectRoot: string
-): Promise<DanteCodeState> {
+export async function readStateYaml(projectRoot: string): Promise<DanteCodeState> {
   const filePath = join(projectRoot, STATE_YAML_RELATIVE_PATH);
 
   const content = await readFile(filePath, "utf-8");
@@ -177,15 +167,10 @@ export async function readStateYaml(
 
   if (!result.success) {
     const issues = result.error.issues
-      .map(
-        (issue) =>
-          `  - ${issue.path.join(".")}: ${issue.message}`
-      )
+      .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
       .join("\n");
 
-    throw new Error(
-      `Invalid STATE.yaml at ${filePath}:\n${issues}`
-    );
+    throw new Error(`Invalid STATE.yaml at ${filePath}:\n${issues}`);
   }
 
   return result.data as DanteCodeState;
@@ -205,10 +190,7 @@ export async function readStateYaml(
  * @param projectRoot - Absolute path to the project root directory.
  * @param state - The DanteCodeState object to serialize and write.
  */
-export async function writeStateYaml(
-  projectRoot: string,
-  state: DanteCodeState
-): Promise<void> {
+export async function writeStateYaml(projectRoot: string, state: DanteCodeState): Promise<void> {
   const filePath = join(projectRoot, STATE_YAML_RELATIVE_PATH);
   const tmpPath = filePath + ".tmp";
 
@@ -225,15 +207,10 @@ export async function writeStateYaml(
   const result = DanteCodeStateSchema.safeParse(updatedState);
   if (!result.success) {
     const issues = result.error.issues
-      .map(
-        (issue) =>
-          `  - ${issue.path.join(".")}: ${issue.message}`
-      )
+      .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
       .join("\n");
 
-    throw new Error(
-      `Cannot write invalid STATE.yaml:\n${issues}`
-    );
+    throw new Error(`Cannot write invalid STATE.yaml:\n${issues}`);
   }
 
   const yamlContent = YAML.stringify(updatedState, {
@@ -259,9 +236,7 @@ export async function writeStateYaml(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns The initialized DanteCodeState object.
  */
-export async function initializeState(
-  projectRoot: string
-): Promise<DanteCodeState> {
+export async function initializeState(projectRoot: string): Promise<DanteCodeState> {
   const now = new Date().toISOString();
 
   const defaultState: DanteCodeState = {
@@ -400,9 +375,7 @@ export async function initializeState(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns True if the STATE.yaml file exists and is readable.
  */
-export async function stateYamlExists(
-  projectRoot: string
-): Promise<boolean> {
+export async function stateYamlExists(projectRoot: string): Promise<boolean> {
   const filePath = join(projectRoot, STATE_YAML_RELATIVE_PATH);
   try {
     await readFile(filePath, "utf-8");
@@ -421,9 +394,7 @@ export async function stateYamlExists(
  * @param projectRoot - Absolute path to the project root directory.
  * @returns The existing or newly created DanteCodeState.
  */
-export async function readOrInitializeState(
-  projectRoot: string
-): Promise<DanteCodeState> {
+export async function readOrInitializeState(projectRoot: string): Promise<DanteCodeState> {
   const exists = await stateYamlExists(projectRoot);
   if (exists) {
     return readStateYaml(projectRoot);
@@ -443,7 +414,7 @@ export async function readOrInitializeState(
  */
 export async function updateStateYaml(
   projectRoot: string,
-  update: Partial<DanteCodeState>
+  update: Partial<DanteCodeState>,
 ): Promise<DanteCodeState> {
   const current = await readStateYaml(projectRoot);
 

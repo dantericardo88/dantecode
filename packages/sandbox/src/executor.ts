@@ -3,11 +3,7 @@
 // ============================================================================
 
 import { execFile } from "node:child_process";
-import type {
-  SandboxSpec,
-  SandboxExecResult,
-  AuditEventType,
-} from "@dantecode/config-types";
+import type { SandboxSpec, SandboxExecResult, AuditEventType } from "@dantecode/config-types";
 import { appendAuditEvent } from "@dantecode/core";
 import { SandboxManager } from "./container.js";
 import type { ExecOptions } from "./container.js";
@@ -34,11 +30,7 @@ export class SandboxExecutor {
    * @param projectRoot - Absolute path to the project root, used for audit logging.
    * @param auditLogger - Function to append audit events. Typically `appendAuditEvent`.
    */
-  constructor(
-    manager: SandboxManager,
-    projectRoot: string,
-    auditLogger: AuditLoggerFn
-  ) {
+  constructor(manager: SandboxManager, projectRoot: string, auditLogger: AuditLoggerFn) {
     this.manager = manager;
     this.projectRoot = projectRoot;
     this.auditLogger = auditLogger;
@@ -55,10 +47,7 @@ export class SandboxExecutor {
    * @param timeoutMs - Optional timeout in milliseconds. 0 means no timeout.
    * @returns The execution result with exit code, output, timing, and timeout status.
    */
-  async run(
-    command: string,
-    timeoutMs?: number
-  ): Promise<SandboxExecResult> {
+  async run(command: string, timeoutMs?: number): Promise<SandboxExecResult> {
     const execOptions: ExecOptions = {};
     if (timeoutMs !== undefined) {
       execOptions.timeoutMs = timeoutMs;
@@ -79,8 +68,7 @@ export class SandboxExecutor {
     try {
       result = await this.manager.exec(command, execOptions);
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : String(err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
 
       const errorResult: SandboxExecResult = {
         exitCode: -1,
@@ -123,9 +111,7 @@ export class SandboxExecutor {
    * @param commands - Array of shell command strings to execute in order.
    * @returns An array of SandboxExecResult, one per command, in the same order.
    */
-  async runBatch(
-    commands: string[]
-  ): Promise<SandboxExecResult[]> {
+  async runBatch(commands: string[]): Promise<SandboxExecResult[]> {
     const results: SandboxExecResult[] = [];
 
     for (const command of commands) {
@@ -157,10 +143,7 @@ export class SandboxExecutor {
   /**
    * Logs an audit event through the configured audit logger.
    */
-  private async logAudit(
-    type: AuditEventType,
-    payload: Record<string, unknown>
-  ): Promise<void> {
+  private async logAudit(type: AuditEventType, payload: Record<string, unknown>): Promise<void> {
     try {
       await this.auditLogger(this.projectRoot, {
         sessionId: (payload["sessionId"] as string | undefined) ?? "sandbox",

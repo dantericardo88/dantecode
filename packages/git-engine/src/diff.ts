@@ -186,11 +186,7 @@ export function parseDiffHunks(diffOutput: string): DiffHunk[] {
  */
 export function applyDiff(hunk: DiffHunk, projectRoot: string): void {
   // Build a minimal unified diff patch for this single hunk
-  const patchLines: string[] = [
-    `--- a/${hunk.file}`,
-    `+++ b/${hunk.file}`,
-    hunk.content,
-  ];
+  const patchLines: string[] = [`--- a/${hunk.file}`, `+++ b/${hunk.file}`, hunk.content];
 
   // Add trailing newline if not present
   let patch = patchLines.join("\n");

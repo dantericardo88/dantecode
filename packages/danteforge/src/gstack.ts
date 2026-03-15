@@ -271,9 +271,7 @@ export function summarizeGStackResults(results: GStackResult[]): string {
   const lines: string[] = [];
   for (const result of results) {
     const status = result.passed ? "PASS" : "FAIL";
-    lines.push(
-      `[${status}] ${result.command} (exit=${result.exitCode}, ${result.durationMs}ms)`,
-    );
+    lines.push(`[${status}] ${result.command} (exit=${result.exitCode}, ${result.durationMs}ms)`);
     if (!result.passed && result.stderr.length > 0) {
       // Include first 5 lines of stderr for context
       const stderrLines = result.stderr.split("\n").slice(0, 5);

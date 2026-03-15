@@ -3,11 +3,7 @@
 // Sub-commands for viewing and editing configuration: init, show, set, models
 // ============================================================================
 
-import {
-  readStateYaml,
-  writeStateYaml,
-  stateYamlExists,
-} from "@dantecode/core";
+import { readStateYaml, writeStateYaml, stateYamlExists } from "@dantecode/core";
 import type { DanteCodeState } from "@dantecode/config-types";
 import YAML from "yaml";
 import { runInitCommand } from "./init.js";
@@ -34,10 +30,7 @@ const RESET = "\x1b[0m";
  * @param args - Arguments after "config" (e.g., ["show"], ["set", "model.default.modelId", "grok-3"]).
  * @param projectRoot - Absolute path to the project root.
  */
-export async function runConfigCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runConfigCommand(args: string[], projectRoot: string): Promise<void> {
   const subCommand = args[0] || "show";
 
   switch (subCommand) {
@@ -76,7 +69,7 @@ async function configShow(projectRoot: string): Promise<void> {
   if (!exists) {
     process.stdout.write(
       `${YELLOW}No STATE.yaml found.${RESET}\n` +
-      `${DIM}Run 'dantecode init' to create one.${RESET}\n`,
+        `${DIM}Run 'dantecode init' to create one.${RESET}\n`,
     );
     return;
   }
@@ -127,8 +120,7 @@ async function configSet(args: string[], projectRoot: string): Promise<void> {
   const exists = await stateYamlExists(projectRoot);
   if (!exists) {
     process.stdout.write(
-      `${YELLOW}No STATE.yaml found.${RESET}\n` +
-      `${DIM}Run 'dantecode init' first.${RESET}\n`,
+      `${YELLOW}No STATE.yaml found.${RESET}\n` + `${DIM}Run 'dantecode init' first.${RESET}\n`,
     );
     return;
   }
@@ -146,7 +138,9 @@ async function configSet(args: string[], projectRoot: string): Promise<void> {
 
     await writeStateYaml(projectRoot, updated);
 
-    process.stdout.write(`${GREEN}Set${RESET} ${BOLD}${key}${RESET} = ${CYAN}${JSON.stringify(value)}${RESET}\n`);
+    process.stdout.write(
+      `${GREEN}Set${RESET} ${BOLD}${key}${RESET} = ${CYAN}${JSON.stringify(value)}${RESET}\n`,
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stdout.write(`${RED}Error setting config: ${message}${RESET}\n`);
@@ -169,8 +163,7 @@ function parseConfigValue(raw: string): unknown {
   if (raw === "null") return null;
 
   // Strip quotes from strings
-  if ((raw.startsWith('"') && raw.endsWith('"')) ||
-      (raw.startsWith("'") && raw.endsWith("'"))) {
+  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
     return raw.slice(1, -1);
   }
 
@@ -190,11 +183,7 @@ function parseConfigValue(raw: string): unknown {
  * Sets a nested value in an object using a dot-notation path.
  * Returns the updated object, or null if the path is invalid.
  */
-function setNestedValue(
-  obj: DanteCodeState,
-  path: string,
-  value: unknown,
-): DanteCodeState | null {
+function setNestedValue(obj: DanteCodeState, path: string, value: unknown): DanteCodeState | null {
   const keys = path.split(".");
   if (keys.length === 0) return null;
 
@@ -232,8 +221,7 @@ async function configModels(projectRoot: string): Promise<void> {
   const exists = await stateYamlExists(projectRoot);
   if (!exists) {
     process.stdout.write(
-      `${YELLOW}No STATE.yaml found.${RESET}\n` +
-      `${DIM}Run 'dantecode init' first.${RESET}\n`,
+      `${YELLOW}No STATE.yaml found.${RESET}\n` + `${DIM}Run 'dantecode init' first.${RESET}\n`,
     );
     return;
   }
@@ -261,7 +249,7 @@ async function configModels(projectRoot: string): Promise<void> {
       for (const fallback of state.model.fallback) {
         process.stdout.write(
           `    ${DIM}-${RESET} ${fallback.provider}/${fallback.modelId}` +
-          ` ${DIM}(${fallback.contextWindow.toLocaleString()} ctx)${RESET}\n`,
+            ` ${DIM}(${fallback.contextWindow.toLocaleString()} ctx)${RESET}\n`,
         );
       }
     }

@@ -7,11 +7,7 @@
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { readOrInitializeState } from "@dantecode/core";
-import type {
-  Session,
-  DanteCodeState,
-  ModelConfig,
-} from "@dantecode/config-types";
+import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
 import type { ReplState } from "./slash-commands.js";
@@ -129,7 +125,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(
       `${RED}Error loading project state: ${message}${RESET}\n` +
-      `${DIM}Run 'dantecode init' to initialize a new project.${RESET}\n`,
+        `${DIM}Run 'dantecode init' to initialize a new project.${RESET}\n`,
     );
     process.exit(1);
   }
@@ -256,11 +252,7 @@ async function processInput(
       process.stdout.write(`${output}\n`);
     } else {
       // Route to agent loop
-      replState.session = await runAgentLoop(
-        input,
-        replState.session,
-        agentConfig,
-      );
+      replState.session = await runAgentLoop(input, replState.session, agentConfig);
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -280,10 +272,7 @@ async function processInput(
  * Executes a single prompt in non-interactive mode.
  * Sends the prompt to the agent, prints the response, and exits.
  */
-export async function runOneShotPrompt(
-  prompt: string,
-  options: ReplOptions,
-): Promise<void> {
+export async function runOneShotPrompt(prompt: string, options: ReplOptions): Promise<void> {
   // Load or initialize state
   let state: DanteCodeState;
   try {

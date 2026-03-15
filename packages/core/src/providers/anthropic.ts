@@ -24,7 +24,7 @@ export function buildAnthropicProvider(config: ModelConfig): LanguageModelV1 {
     throw new Error(
       "Anthropic API key not found.\n" +
         "Set ANTHROPIC_API_KEY environment variable or configure it in dante.config.yaml\n" +
-        "Get your key at: https://console.anthropic.com/"
+        "Get your key at: https://console.anthropic.com/",
     );
   }
 

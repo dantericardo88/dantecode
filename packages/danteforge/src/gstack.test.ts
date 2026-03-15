@@ -39,7 +39,7 @@ describe("gstack runner", () => {
     it("passes soft-failure commands even when exit code is non-zero", async () => {
       const command: GStackCommand = {
         name: "soft-fail",
-        command: "node -e \"process.exit(1)\"",
+        command: 'node -e "process.exit(1)"',
         runInSandbox: false,
         timeoutMs: 5000,
         failureIsSoft: true,
@@ -93,7 +93,7 @@ describe("gstack runner", () => {
     it("records duration in milliseconds", async () => {
       const command: GStackCommand = {
         name: "duration-test",
-        command: "node -e \"setTimeout(() => {}, 100)\"",
+        command: 'node -e "setTimeout(() => {}, 100)"',
         runInSandbox: false,
         timeoutMs: 5000,
         failureIsSoft: false,
@@ -131,7 +131,7 @@ describe("gstack runner", () => {
       const commands: GStackCommand[] = [
         {
           name: "fail",
-          command: "node -e \"process.exit(1)\"",
+          command: 'node -e "process.exit(1)"',
           runInSandbox: false,
           timeoutMs: 5000,
           failureIsSoft: false,
@@ -181,8 +181,22 @@ describe("gstack runner", () => {
   describe("summarizeGStackResults", () => {
     it("produces PASS/FAIL summary lines", () => {
       const results = [
-        { command: "typecheck", exitCode: 0, stdout: "", stderr: "", durationMs: 100, passed: true },
-        { command: "lint", exitCode: 1, stdout: "", stderr: "error found", durationMs: 50, passed: false },
+        {
+          command: "typecheck",
+          exitCode: 0,
+          stdout: "",
+          stderr: "",
+          durationMs: 100,
+          passed: true,
+        },
+        {
+          command: "lint",
+          exitCode: 1,
+          stdout: "",
+          stderr: "error found",
+          durationMs: 50,
+          passed: false,
+        },
       ];
       const summary = summarizeGStackResults(results);
       expect(summary).toContain("[PASS] typecheck");

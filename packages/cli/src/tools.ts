@@ -52,10 +52,7 @@ function resolvePath(filePath: string, projectRoot: string): string {
 /**
  * Read tool: reads a file from disk and returns its content with line numbers.
  */
-async function toolRead(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolRead(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   if (!filePath) {
     return { content: "Error: file_path parameter is required", isError: true };
@@ -87,10 +84,7 @@ async function toolRead(
 /**
  * Write tool: writes content to a file, creating parent directories as needed.
  */
-async function toolWrite(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolWrite(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const content = input["content"] as string | undefined;
 
@@ -120,10 +114,7 @@ async function toolWrite(
 /**
  * Edit tool: performs exact string replacement within a file.
  */
-async function toolEdit(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolEdit(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const oldString = input["old_string"] as string | undefined;
   const newString = input["new_string"] as string | undefined;
@@ -172,9 +163,7 @@ async function toolEdit(
 
     await writeFile(resolved, updated, "utf-8");
 
-    const replacementCount = replaceAll
-      ? existing.split(oldString).length - 1
-      : 1;
+    const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
 
     return {
       content: `Successfully edited ${resolved} (${replacementCount} replacement${replacementCount !== 1 ? "s" : ""})`,
@@ -189,18 +178,13 @@ async function toolEdit(
 /**
  * Bash tool: executes a shell command and returns stdout/stderr.
  */
-async function toolBash(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolBash(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const command = input["command"] as string | undefined;
   if (!command) {
     return { content: "Error: command parameter is required", isError: true };
   }
 
-  const timeoutMs = typeof input["timeout"] === "number"
-    ? input["timeout"]
-    : 120000;
+  const timeoutMs = typeof input["timeout"] === "number" ? input["timeout"] : 120000;
 
   try {
     const result = execSync(command, {
@@ -236,18 +220,14 @@ async function toolBash(
 /**
  * Glob tool: finds files matching a glob pattern using a recursive directory walk.
  */
-async function toolGlob(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolGlob(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const pattern = input["pattern"] as string | undefined;
   if (!pattern) {
     return { content: "Error: pattern parameter is required", isError: true };
   }
 
-  const searchPath = typeof input["path"] === "string"
-    ? resolvePath(input["path"], projectRoot)
-    : projectRoot;
+  const searchPath =
+    typeof input["path"] === "string" ? resolvePath(input["path"], projectRoot) : projectRoot;
 
   try {
     // Convert glob pattern to regex for matching
@@ -346,8 +326,15 @@ async function walkDir(
   if (depth > 20 || matches.length >= maxFiles) return;
 
   const skipDirs = new Set([
-    "node_modules", ".git", "dist", ".next", "__pycache__",
-    ".dantecode/worktrees", ".cache", ".turbo", "coverage",
+    "node_modules",
+    ".git",
+    "dist",
+    ".next",
+    "__pycache__",
+    ".dantecode/worktrees",
+    ".cache",
+    ".turbo",
+    "coverage",
   ]);
 
   let entries: string[];
@@ -384,18 +371,14 @@ async function walkDir(
 /**
  * Grep tool: searches file contents for a regex pattern.
  */
-async function toolGrep(
-  input: Record<string, unknown>,
-  projectRoot: string,
-): Promise<ToolResult> {
+async function toolGrep(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const pattern = input["pattern"] as string | undefined;
   if (!pattern) {
     return { content: "Error: pattern parameter is required", isError: true };
   }
 
-  const searchPath = typeof input["path"] === "string"
-    ? resolvePath(input["path"], projectRoot)
-    : projectRoot;
+  const searchPath =
+    typeof input["path"] === "string" ? resolvePath(input["path"], projectRoot) : projectRoot;
 
   const caseInsensitive = input["-i"] === true;
   const contextLines = typeof input["context"] === "number" ? input["context"] : 0;
@@ -411,14 +394,19 @@ async function toolGrep(
     const pathStat = await stat(searchPath);
     if (pathStat.isFile()) {
       const content = await readFile(searchPath, "utf-8");
-      const fileResults = searchFileContent(
-        searchPath, content, regex, outputMode, contextLines,
-      );
+      const fileResults = searchFileContent(searchPath, content, regex, outputMode, contextLines);
       results.push(...fileResults);
     } else {
       // Search directory recursively
       await grepDir(
-        searchPath, projectRoot, regex, outputMode, contextLines, results, 0, headLimit,
+        searchPath,
+        projectRoot,
+        regex,
+        outputMode,
+        contextLines,
+        results,
+        0,
+        headLimit,
       );
     }
 
@@ -500,18 +488,54 @@ async function grepDir(
   if (depth > 20 || results.length >= maxResults) return;
 
   const skipDirs = new Set([
-    "node_modules", ".git", "dist", ".next", "__pycache__",
-    ".dantecode/worktrees", ".cache", ".turbo", "coverage",
+    "node_modules",
+    ".git",
+    "dist",
+    ".next",
+    "__pycache__",
+    ".dantecode/worktrees",
+    ".cache",
+    ".turbo",
+    "coverage",
   ]);
 
   const textExtensions = new Set([
-    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-    ".json", ".yaml", ".yml", ".toml", ".md", ".mdx",
-    ".css", ".scss", ".html", ".xml", ".svg",
-    ".py", ".rb", ".rs", ".go", ".java", ".c", ".cpp", ".h",
-    ".sh", ".bash", ".zsh", ".fish",
-    ".env", ".gitignore", ".dockerignore",
-    ".txt", ".csv", ".sql", ".graphql",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".md",
+    ".mdx",
+    ".css",
+    ".scss",
+    ".html",
+    ".xml",
+    ".svg",
+    ".py",
+    ".rb",
+    ".rs",
+    ".go",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".env",
+    ".gitignore",
+    ".dockerignore",
+    ".txt",
+    ".csv",
+    ".sql",
+    ".graphql",
   ]);
 
   let entries: string[];
@@ -535,7 +559,14 @@ async function grepDir(
 
     if (entryStat.isDirectory()) {
       await grepDir(
-        fullPath, baseDir, regex, outputMode, contextLines, results, depth + 1, maxResults,
+        fullPath,
+        baseDir,
+        regex,
+        outputMode,
+        contextLines,
+        results,
+        depth + 1,
+        maxResults,
       );
     } else if (entryStat.isFile()) {
       // Only search text files
@@ -549,9 +580,7 @@ async function grepDir(
 
       try {
         const content = await readFile(fullPath, "utf-8");
-        const fileResults = searchFileContent(
-          fullPath, content, regex, outputMode, contextLines,
-        );
+        const fileResults = searchFileContent(fullPath, content, regex, outputMode, contextLines);
         results.push(...fileResults);
       } catch {
         // Skip files that can't be read
@@ -572,9 +601,7 @@ async function toolGitCommit(
     return { content: "Error: message parameter is required", isError: true };
   }
 
-  const files = Array.isArray(input["files"])
-    ? (input["files"] as string[])
-    : [];
+  const files = Array.isArray(input["files"]) ? (input["files"] as string[]) : [];
 
   try {
     // Dynamic import to avoid circular dependency issues at startup
@@ -583,7 +610,8 @@ async function toolGitCommit(
     const result = autoCommit(
       {
         message,
-        footer: "Generated with DanteCode (https://dantecode.dev)\n\nCo-Authored-By: DanteCode <noreply@dantecode.dev>",
+        footer:
+          "Generated with DanteCode (https://dantecode.dev)\n\nCo-Authored-By: DanteCode <noreply@dantecode.dev>",
         files,
         allowEmpty: false,
       },
@@ -621,12 +649,13 @@ async function toolTodoWrite(
     completedAt: t["status"] === "completed" ? new Date().toISOString() : undefined,
   }));
 
-  const display = formattedTodos.map((t) => {
-    const statusIcon = t.status === "completed" ? "[x]"
-      : t.status === "in_progress" ? "[~]"
-      : "[ ]";
-    return `${statusIcon} ${t.text}`;
-  }).join("\n");
+  const display = formattedTodos
+    .map((t) => {
+      const statusIcon =
+        t.status === "completed" ? "[x]" : t.status === "in_progress" ? "[~]" : "[ ]";
+      return `${statusIcon} ${t.text}`;
+    })
+    .join("\n");
 
   return {
     content: `Updated ${formattedTodos.length} to-do items:\n${display}`,
@@ -767,7 +796,8 @@ export function getToolDefinitions(): Array<{
     },
     {
       name: "Edit",
-      description: "Perform an exact string replacement in a file. The old_string must appear exactly once (unless replace_all is true).",
+      description:
+        "Perform an exact string replacement in a file. The old_string must appear exactly once (unless replace_all is true).",
       parameters: {
         type: "object",
         properties: {
@@ -797,7 +827,10 @@ export function getToolDefinitions(): Array<{
       parameters: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "Glob pattern (e.g., '**/*.ts', 'src/**/*.tsx')" },
+          pattern: {
+            type: "string",
+            description: "Glob pattern (e.g., '**/*.ts', 'src/**/*.tsx')",
+          },
           path: { type: "string", description: "Base directory to search in" },
         },
         required: ["pattern"],
@@ -811,7 +844,10 @@ export function getToolDefinitions(): Array<{
         properties: {
           pattern: { type: "string", description: "Regular expression pattern to search for" },
           path: { type: "string", description: "File or directory to search in" },
-          output_mode: { type: "string", description: "Output mode: files_with_matches, content, or count" },
+          output_mode: {
+            type: "string",
+            description: "Output mode: files_with_matches, content, or count",
+          },
           context: { type: "number", description: "Lines of context around matches" },
           "-i": { type: "boolean", description: "Case-insensitive search" },
           head_limit: { type: "number", description: "Limit number of results" },
@@ -826,7 +862,11 @@ export function getToolDefinitions(): Array<{
         type: "object",
         properties: {
           message: { type: "string", description: "The commit message" },
-          files: { type: "array", items: { type: "string" }, description: "Files to stage and commit" },
+          files: {
+            type: "array",
+            items: { type: "string" },
+            description: "Files to stage and commit",
+          },
         },
         required: ["message"],
       },

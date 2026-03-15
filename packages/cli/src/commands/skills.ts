@@ -36,10 +36,7 @@ const RESET = "\x1b[0m";
  * @param args - The argument list after "skills" (e.g., ["list"], ["import", "--from-claude"]).
  * @param projectRoot - Absolute path to the project root.
  */
-export async function runSkillsCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runSkillsCommand(args: string[], projectRoot: string): Promise<void> {
   const subCommand = args[0] || "list";
 
   switch (subCommand) {
@@ -66,9 +63,15 @@ export async function runSkillsCommand(
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
       process.stdout.write(`  dantecode skills list                   List registered skills\n`);
       process.stdout.write(`  dantecode skills import --from-claude   Import skills from Claude\n`);
-      process.stdout.write(`  dantecode skills import --from-continue Import skills from Continue.dev\n`);
-      process.stdout.write(`  dantecode skills import --from-opencode Import skills from OpenCode\n`);
-      process.stdout.write(`  dantecode skills import --file <path>   Import a single skill file\n`);
+      process.stdout.write(
+        `  dantecode skills import --from-continue Import skills from Continue.dev\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import --from-opencode Import skills from OpenCode\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import --file <path>   Import a single skill file\n`,
+      );
       process.stdout.write(`  dantecode skills wrap <name>            Wrap an existing skill\n`);
       process.stdout.write(`  dantecode skills show <name>            Show skill definition\n`);
       process.stdout.write(`  dantecode skills validate <name>        Validate a skill\n`);
@@ -90,7 +93,7 @@ async function skillsList(projectRoot: string): Promise<void> {
   if (skills.length === 0) {
     process.stdout.write(
       `\n${DIM}No skills registered.${RESET}\n` +
-      `${DIM}Use 'dantecode skills import' to import skills from Claude, Continue.dev, or OpenCode.${RESET}\n\n`,
+        `${DIM}Use 'dantecode skills import' to import skills from Claude, Continue.dev, or OpenCode.${RESET}\n\n`,
     );
     return;
   }
@@ -115,7 +118,9 @@ async function skillsList(projectRoot: string): Promise<void> {
     const version = skill.adapterVersion.slice(0, versionWidth).padEnd(versionWidth);
     const desc = skill.description.slice(0, 60);
 
-    process.stdout.write(`  ${YELLOW}${name}${RESET} ${DIM}${source}${RESET} ${DIM}${version}${RESET} ${desc}\n`);
+    process.stdout.write(
+      `  ${YELLOW}${name}${RESET} ${DIM}${source}${RESET} ${DIM}${version}${RESET} ${desc}\n`,
+    );
   }
 
   process.stdout.write("\n");
@@ -162,11 +167,11 @@ async function skillsImport(args: string[], projectRoot: string): Promise<void> 
   if (!source) {
     process.stdout.write(
       `${RED}No import source specified.${RESET}\n\n` +
-      `${BOLD}Usage:${RESET}\n` +
-      `  dantecode skills import --from-claude\n` +
-      `  dantecode skills import --from-continue\n` +
-      `  dantecode skills import --from-opencode\n` +
-      `  dantecode skills import --file <path>\n`,
+        `${BOLD}Usage:${RESET}\n` +
+        `  dantecode skills import --from-claude\n` +
+        `  dantecode skills import --from-continue\n` +
+        `  dantecode skills import --from-opencode\n` +
+        `  dantecode skills import --file <path>\n`,
     );
     return;
   }
@@ -228,9 +233,7 @@ async function importSingleFile(filePath: string, projectRoot: string): Promise<
     }
 
     // Extract instructions (everything after frontmatter)
-    const instructions = fmMatch
-      ? content.slice(content.indexOf("---", 3) + 3).trim()
-      : content;
+    const instructions = fmMatch ? content.slice(content.indexOf("---", 3) + 3).trim() : content;
 
     // Wrap with adapter
     const parsedSkill: ParsedSkill = {
@@ -245,7 +248,10 @@ async function importSingleFile(filePath: string, projectRoot: string): Promise<
     const wrappedContent = wrapSkillWithAdapter(parsedSkill, "claude");
 
     // Write to .dantecode/skills/<name>/SKILL.dc.md
-    const sanitizedName = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-{2,}/g, "-");
+    const sanitizedName = name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-{2,}/g, "-");
     const skillDir = join(projectRoot, ".dantecode", "skills", sanitizedName);
     await mkdir(skillDir, { recursive: true });
 
@@ -254,8 +260,8 @@ async function importSingleFile(filePath: string, projectRoot: string): Promise<
 
     process.stdout.write(
       `\n${GREEN}Imported skill:${RESET} ${BOLD}${name}${RESET}\n` +
-      `  ${DIM}Source: ${resolved}${RESET}\n` +
-      `  ${DIM}Output: ${outputPath}${RESET}\n\n`,
+        `  ${DIM}Source: ${resolved}${RESET}\n` +
+        `  ${DIM}Output: ${outputPath}${RESET}\n\n`,
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -294,7 +300,7 @@ async function skillsWrap(args: string[], projectRoot: string): Promise<void> {
     await writeFile(skill.wrappedPath, wrappedContent, "utf-8");
     process.stdout.write(
       `${GREEN}Re-wrapped skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n` +
-      `  ${DIM}Output: ${skill.wrappedPath}${RESET}\n`,
+        `  ${DIM}Output: ${skill.wrappedPath}${RESET}\n`,
     );
   } else {
     process.stdout.write(`${RED}No wrapped path found for skill: ${skillName}${RESET}\n`);
@@ -359,7 +365,9 @@ async function skillsValidate(args: string[], projectRoot: string): Promise<void
   process.stdout.write(`    Soft violations:  ${result.antiStubSoftViolations}\n`);
 
   // Constitution results
-  const constitutionIcon = result.constitutionPassed ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`;
+  const constitutionIcon = result.constitutionPassed
+    ? `${GREEN}PASS${RESET}`
+    : `${RED}FAIL${RESET}`;
   process.stdout.write(`  Constitution Check: ${constitutionIcon}\n`);
   process.stdout.write(`    Critical:         ${result.constitutionCriticalViolations}\n`);
   process.stdout.write(`    Warnings:         ${result.constitutionWarningViolations}\n`);

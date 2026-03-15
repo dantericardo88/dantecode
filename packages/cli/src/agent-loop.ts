@@ -13,11 +13,7 @@ import {
   runLocalPDSEScorer,
   runConstitutionCheck,
 } from "@dantecode/danteforge";
-import type {
-  Session,
-  SessionMessage,
-  DanteCodeState,
-} from "@dantecode/config-types";
+import type { Session, SessionMessage, DanteCodeState } from "@dantecode/config-types";
 import { executeTool, getToolDefinitions } from "./tools.js";
 
 // ----------------------------------------------------------------------------
@@ -154,7 +150,8 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
   }
 
   // Pattern 2: JSON blocks with tool call structure
-  const jsonBlockPattern = /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|TodoWrite)"[\s\S]*?\})\s*\n```/g;
+  const jsonBlockPattern =
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|TodoWrite)"[\s\S]*?\})\s*\n```/g;
 
   while ((match = jsonBlockPattern.exec(text)) !== null) {
     try {
@@ -204,7 +201,10 @@ async function runDanteForge(
       `${RED}Anti-stub scan: FAILED${RESET} (${antiStub.hardViolations.length} hard violations)`,
     );
     if (verbose) {
-      for (const v of antiStub.hardViolations.slice(0, 5) as Array<{ line?: number; message: string }>) {
+      for (const v of antiStub.hardViolations.slice(0, 5) as Array<{
+        line?: number;
+        message: string;
+      }>) {
         summaryLines.push(`  ${DIM}Line ${v.line ?? "?"}: ${v.message}${RESET}`);
       }
     }
@@ -240,13 +240,9 @@ async function runDanteForge(
   const pdse = runLocalPDSEScorer(code, projectRoot);
   if (!pdse.passedGate) {
     passed = false;
-    summaryLines.push(
-      `${RED}PDSE score: ${pdse.overall}/100 (BELOW threshold)${RESET}`,
-    );
+    summaryLines.push(`${RED}PDSE score: ${pdse.overall}/100 (BELOW threshold)${RESET}`);
   } else {
-    summaryLines.push(
-      `${GREEN}PDSE score: ${pdse.overall}/100${RESET}`,
-    );
+    summaryLines.push(`${GREEN}PDSE score: ${pdse.overall}/100${RESET}`);
   }
 
   if (verbose) {
@@ -265,17 +261,26 @@ async function runDanteForge(
 /**
  * Checks if a tool call writes code to a file and returns the file path.
  */
-function getWrittenFilePath(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-): string | null {
+function getWrittenFilePath(toolName: string, toolInput: Record<string, unknown>): string | null {
   if (toolName === "Write" || toolName === "Edit") {
     const filePath = toolInput["file_path"] as string | undefined;
     if (filePath) {
       // Only run DanteForge on code files
       const codeExtensions = [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-        ".py", ".rb", ".rs", ".go", ".java", ".c", ".cpp", ".h",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".py",
+        ".rb",
+        ".rs",
+        ".go",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
       ];
       const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
       if (codeExtensions.includes(ext)) {
@@ -335,9 +340,10 @@ export async function runAgentLoop(
   // Convert session messages to the format expected by the AI SDK
   const messages = session.messages.map((msg) => ({
     role: msg.role as "user" | "assistant" | "system",
-    content: typeof msg.content === "string"
-      ? msg.content
-      : msg.content.map((b) => b.text || "").join("\n"),
+    content:
+      typeof msg.content === "string"
+        ? msg.content
+        : msg.content.map((b) => b.text || "").join("\n"),
   }));
 
   // Tool call loop: keep sending to the model until no more tool calls
@@ -399,14 +405,10 @@ export async function runAgentLoop(
     const toolResults: string[] = [];
 
     for (const toolCall of toolCalls) {
-      process.stdout.write(
-        `\n${DIM}[tool: ${toolCall.name}]${RESET} `,
-      );
+      process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
 
       if (config.verbose) {
-        process.stdout.write(
-          `${DIM}${JSON.stringify(toolCall.input).slice(0, 200)}${RESET}\n`,
-        );
+        process.stdout.write(`${DIM}${JSON.stringify(toolCall.input).slice(0, 200)}${RESET}\n`);
       }
 
       const result = await executeTool(
@@ -436,9 +438,7 @@ export async function runAgentLoop(
         process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
       }
 
-      toolResults.push(
-        `Tool "${toolCall.name}" result:\n${result.content}`,
-      );
+      toolResults.push(`Tool "${toolCall.name}" result:\n${result.content}`);
 
       // Record the tool call in the session
       const toolUseMessage: SessionMessage = {
@@ -490,7 +490,10 @@ export async function runAgentLoop(
       try {
         const content = await readFile(filePath, "utf-8");
         const { summary } = await runDanteForge(
-          content, filePath, session.projectRoot, config.verbose,
+          content,
+          filePath,
+          session.projectRoot,
+          config.verbose,
         );
         process.stdout.write(`\n${DIM}File: ${filePath}${RESET}\n${summary}\n`);
 
@@ -499,9 +502,7 @@ export async function runAgentLoop(
           session.activeFiles.push(filePath);
         }
       } catch {
-        process.stdout.write(
-          `${DIM}Could not read ${filePath} for DanteForge analysis${RESET}\n`,
-        );
+        process.stdout.write(`${DIM}Could not read ${filePath} for DanteForge analysis${RESET}\n`);
       }
     }
   }

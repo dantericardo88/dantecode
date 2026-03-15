@@ -66,7 +66,8 @@ const CREDENTIAL_PATTERNS: ConstitutionPattern[] = [
     message: "Hardcoded secret/secret key detected in string literal",
   },
   {
-    regex: /(?:access[_-]?token|auth[_-]?token|bearer[_-]?token)\s*[:=]\s*['"`][A-Za-z0-9_\-/.]{16,}['"`]/i,
+    regex:
+      /(?:access[_-]?token|auth[_-]?token|bearer[_-]?token)\s*[:=]\s*['"`][A-Za-z0-9_\-/.]{16,}['"`]/i,
     type: "credential_exposure",
     severity: "critical",
     message: "Hardcoded access/auth token detected in string literal",
@@ -90,7 +91,8 @@ const CREDENTIAL_PATTERNS: ConstitutionPattern[] = [
     message: "AWS secret access key detected in string literal",
   },
   {
-    regex: /(?:database[_-]?url|db[_-]?url|connection[_-]?string)\s*[:=]\s*['"`](?:postgres|mysql|mongodb|redis):\/\/[^'"`]+['"`]/i,
+    regex:
+      /(?:database[_-]?url|db[_-]?url|connection[_-]?string)\s*[:=]\s*['"`](?:postgres|mysql|mongodb|redis):\/\/[^'"`]+['"`]/i,
     type: "credential_exposure",
     severity: "critical",
     message: "Database connection string with potential credentials detected",
@@ -356,10 +358,7 @@ const ALL_PATTERNS: ConstitutionPattern[] = [
  * @param filePath - Optional file path for violation reporting
  * @returns ConstitutionCheckResult with pass/fail and violation details
  */
-export function runConstitutionCheck(
-  code: string,
-  filePath?: string,
-): ConstitutionCheckResult {
+export function runConstitutionCheck(code: string, filePath?: string): ConstitutionCheckResult {
   const violations: ConstitutionViolation[] = [];
   const lines = code.split("\n");
 
@@ -388,13 +387,17 @@ export function runConstitutionCheck(
           // Skip lines in comments that describe the pattern (e.g., "// Set API_KEY env var")
           if (/^\s*\/\//.test(line) && !/:=/.test(line.replace(/\/\/.*/, ""))) continue;
           // Skip environment variable references (process.env.*)
-          if (/process\.env\.\w+/.test(line) && !/['"`][A-Za-z0-9_\-]{16,}['"`]/.test(line)) continue;
+          if (/process\.env\.\w+/.test(line) && !/['"`][A-Za-z0-9_\-]{16,}['"`]/.test(line))
+            continue;
         }
 
         // For background process: skip if it's inside a string that's a comment or docs
         if (pattern.type === "background_process" && /&\s*$/.test(line)) {
           // Only flag & at end of line if it looks like a shell command
-          if (!/(?:exec|spawn|system|sh |bash |cmd )/.test(line) && !/['"`].*&\s*['"`]/.test(line)) {
+          if (
+            !/(?:exec|spawn|system|sh |bash |cmd )/.test(line) &&
+            !/['"`].*&\s*['"`]/.test(line)
+          ) {
             // Skip TypeScript/JavaScript & operator usage (bitwise AND, logical AND)
             if (/&&/.test(line) || /&\s*\w/.test(line)) continue;
           }

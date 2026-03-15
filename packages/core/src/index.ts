@@ -20,11 +20,7 @@ export type { ProviderBuilder } from "./providers/index.js";
 
 // ─── Audit Logger ─────────────────────────────────────────────────────────────
 
-export {
-  appendAuditEvent,
-  readAuditEvents,
-  countAuditEvents,
-} from "./audit.js";
+export { appendAuditEvent, readAuditEvents, countAuditEvents } from "./audit.js";
 export type { AuditEventInput, ReadAuditOptions } from "./audit.js";
 
 // ─── State Management ─────────────────────────────────────────────────────────

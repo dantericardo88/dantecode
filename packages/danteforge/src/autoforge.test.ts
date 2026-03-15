@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildFailureContext,
-  type AutoforgeContext,
-} from "./autoforge.js";
+import { buildFailureContext, type AutoforgeContext } from "./autoforge.js";
 import { formatLessonsForPrompt } from "./lessons.js";
 import type { PDSEScore, GStackResult, Lesson } from "@dantecode/config-types";
 

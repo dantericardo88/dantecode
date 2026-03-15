@@ -6,15 +6,8 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  runAntiStubScanner,
-  runConstitutionCheck,
-} from "@dantecode/danteforge";
-import {
-  appendAuditEvent,
-  readOrInitializeState,
-  updateStateYaml,
-} from "@dantecode/core";
+import { runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
+import { appendAuditEvent, readOrInitializeState, updateStateYaml } from "@dantecode/core";
 import type { SkillFrontmatter } from "@dantecode/config-types";
 
 import {
@@ -86,7 +79,7 @@ interface UnifiedParsedSkill {
  */
 async function scanAndParse(
   source: ImportSource,
-  sourceDir?: string
+  sourceDir?: string,
 ): Promise<UnifiedParsedSkill[]> {
   switch (source) {
     case "claude": {
@@ -110,12 +103,13 @@ async function scanAndParse(
  * and collapses consecutive hyphens.
  */
 function sanitizeSkillName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-|-$/g, "")
-    || "unnamed-skill";
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^-|-$/g, "") || "unnamed-skill"
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -142,9 +136,7 @@ function sanitizeSkillName(name: string): string {
  * @param options - Import configuration specifying source, directory, and project root.
  * @returns An ImportResult with lists of imported, skipped, and errored skills.
  */
-export async function importSkills(
-  options: ImportOptions
-): Promise<ImportResult> {
+export async function importSkills(options: ImportOptions): Promise<ImportResult> {
   const {
     source,
     sourceDir,
@@ -190,7 +182,7 @@ export async function importSkills(
         const antiStubResult = runAntiStubScanner(
           skill.instructions,
           projectRoot,
-          skill.sourcePath
+          skill.sourcePath,
         );
 
         if (!antiStubResult.passed) {
@@ -228,14 +220,11 @@ export async function importSkills(
 
       // Step 4: Run constitution check on the skill instructions
       if (!skipConstitution) {
-        const constitutionResult = runConstitutionCheck(
-          skill.instructions,
-          skill.sourcePath
-        );
+        const constitutionResult = runConstitutionCheck(skill.instructions, skill.sourcePath);
 
         // Only block on critical violations; warnings are allowed through
         const criticalViolations = constitutionResult.violations.filter(
-          (v: { severity: string }) => v.severity === "critical"
+          (v: { severity: string }) => v.severity === "critical",
         );
 
         if (criticalViolations.length > 0) {
@@ -260,11 +249,13 @@ export async function importSkills(
               source,
               sourcePath: skill.sourcePath,
               criticalViolations: criticalViolations.length,
-              violations: criticalViolations.map((v: { type: string; message: string; line?: number }) => ({
-                type: v.type,
-                message: v.message,
-                line: v.line,
-              })),
+              violations: criticalViolations.map(
+                (v: { type: string; message: string; line?: number }) => ({
+                  type: v.type,
+                  message: v.message,
+                  line: v.line,
+                }),
+              ),
             },
             modelId,
             projectRoot,

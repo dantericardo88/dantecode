@@ -220,12 +220,7 @@ export interface AutoforgeConfig {
 export type LessonSeverity = "info" | "warning" | "error" | "critical";
 
 /** Source that produced a lesson entry. */
-export type LessonSource =
-  | "pdse"
-  | "autoforge"
-  | "user"
-  | "constitution"
-  | "review";
+export type LessonSource = "pdse" | "autoforge" | "user" | "constitution" | "review";
 
 /** A single learned lesson that can be injected into future prompts. */
 export interface Lesson {

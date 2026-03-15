@@ -43,8 +43,8 @@ const DEFAULT_GATE_CONFIG: PDSEGateConfig = {
   maxRegenerationAttempts: 3,
   weights: {
     completeness: 0.35,
-    correctness: 0.30,
-    clarity: 0.20,
+    correctness: 0.3,
+    clarity: 0.2,
     consistency: 0.15,
   },
 };
@@ -238,8 +238,7 @@ export async function runPDSEScorer(
   // Step 8: Determine gate pass/fail
   const hardViolationCount = allViolations.filter((v) => v.severity === "hard").length;
   const passedGate =
-    overall >= config.threshold &&
-    hardViolationCount <= config.hardViolationsAllowed;
+    overall >= config.threshold && hardViolationCount <= config.hardViolationsAllowed;
 
   return {
     completeness: modelScores.completeness,
@@ -303,10 +302,7 @@ function mapViolationType(raw: string): PDSEViolation["type"] {
  * @param projectRoot - Project root for anti-stub scanner
  * @returns PDSEScore
  */
-export function runLocalPDSEScorer(
-  code: string,
-  projectRoot: string,
-): PDSEScore {
+export function runLocalPDSEScorer(code: string, projectRoot: string): PDSEScore {
   const lines = code.split("\n");
   const violations: PDSEViolation[] = [];
 
@@ -318,7 +314,8 @@ export function runLocalPDSEScorer(
   let completenessScore = 100;
 
   // Count functions and check for empty/stub bodies
-  const functionPattern = /(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>|(?:async\s+)?\w+\s*\([^)]*\)\s*{)/g;
+  const functionPattern =
+    /(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>|(?:async\s+)?\w+\s*\([^)]*\)\s*{)/g;
   const functionMatches = code.match(functionPattern) ?? [];
   const functionCount = functionMatches.length;
 
@@ -494,8 +491,12 @@ export function runLocalPDSEScorer(
   }
 
   // Check for mixed semicolon usage
-  const linesWithSemicolon = lines.filter((l) =>
-    l !== undefined && l.trim().endsWith(";") && !l.trim().startsWith("//") && !l.trim().startsWith("*"),
+  const linesWithSemicolon = lines.filter(
+    (l) =>
+      l !== undefined &&
+      l.trim().endsWith(";") &&
+      !l.trim().startsWith("//") &&
+      !l.trim().startsWith("*"),
   ).length;
   const linesWithoutSemicolon = lines.filter((l) => {
     if (l === undefined) return false;

@@ -83,10 +83,7 @@ export function createWorktree(spec: WorktreeSpec): WorktreeCreateResult {
   // Resolve the worktree directory to an absolute path relative to repo root
   const worktreeDir = path.resolve(repoRoot, ".dantecode", "worktrees", spec.sessionId);
 
-  git(
-    `worktree add -b "${spec.branch}" "${worktreeDir}" "${spec.baseBranch}"`,
-    repoRoot,
-  );
+  git(`worktree add -b "${spec.branch}" "${worktreeDir}" "${spec.baseBranch}"`, repoRoot);
 
   return {
     directory: worktreeDir,

@@ -79,7 +79,7 @@ export function fetchData(url: string): Promise<unknown> {
       // With default weights: C*0.35 + R*0.30 + Cl*0.20 + Co*0.15
       // If Clarity = 0, max = 100*0.35 + 100*0.30 + 0*0.20 + 100*0.15 = 80
       // 80 < 85 (PRD threshold) — this is a design invariant
-      const maxWithoutClarity = 100 * 0.35 + 100 * 0.30 + 0 * 0.20 + 100 * 0.15;
+      const maxWithoutClarity = 100 * 0.35 + 100 * 0.3 + 0 * 0.2 + 100 * 0.15;
       expect(maxWithoutClarity).toBeLessThan(85);
     });
   });
@@ -148,8 +148,8 @@ export async function fetchUsers(): Promise<string[]> {
       // Default weights: completeness 0.35, correctness 0.30, clarity 0.20, consistency 0.15
       const expected =
         score.completeness * 0.35 +
-        score.correctness * 0.30 +
-        score.clarity * 0.20 +
+        score.correctness * 0.3 +
+        score.clarity * 0.2 +
         score.consistency * 0.15;
       // Allow small floating-point rounding difference
       expect(Math.abs(score.overall - Math.round(expected * 100) / 100)).toBeLessThan(1);

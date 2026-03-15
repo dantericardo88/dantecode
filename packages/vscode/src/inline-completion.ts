@@ -6,10 +6,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import type {
-  ModelConfig,
-  ModelRouterConfig,
-} from "@dantecode/config-types";
+import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
 import { ModelRouterImpl } from "@dantecode/core";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 
@@ -51,9 +48,7 @@ const CACHE_TTL_MS = 30_000;
  * - Annotates completions with PDSE gate status in the detail field
  * - Supports cancellation via VS Code's CancellationToken
  */
-export class DanteCodeCompletionProvider
-  implements vscode.InlineCompletionItemProvider
-{
+export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemProvider {
   private readonly cache: CacheEntry[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private lastRequestId = 0;
@@ -75,20 +70,18 @@ export class DanteCodeCompletionProvider
     document: vscode.TextDocument,
     position: vscode.Position,
     _context: vscode.InlineCompletionContext,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[]> {
     // Generate a unique request ID so stale debounced callbacks can be discarded
     const requestId = ++this.lastRequestId;
 
     // Build the completion context from the document
-    const prefix = document.getText(
-      new vscode.Range(new vscode.Position(0, 0), position)
-    );
+    const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
     const suffix = document.getText(
       new vscode.Range(
         position,
-        new vscode.Position(document.lineCount - 1, Number.MAX_SAFE_INTEGER)
-      )
+        new vscode.Position(document.lineCount - 1, Number.MAX_SAFE_INTEGER),
+      ),
     );
     const language = document.languageId;
     const filePath = document.uri.fsPath;
@@ -105,43 +98,41 @@ export class DanteCodeCompletionProvider
     }
 
     // Debounce: wait DEBOUNCE_MS after the last keystroke
-    const completions = await new Promise<vscode.InlineCompletionItem[]>(
-      (resolve) => {
-        if (this.debounceTimer !== undefined) {
-          clearTimeout(this.debounceTimer);
+    const completions = await new Promise<vscode.InlineCompletionItem[]>((resolve) => {
+      if (this.debounceTimer !== undefined) {
+        clearTimeout(this.debounceTimer);
+      }
+
+      this.debounceTimer = setTimeout(async () => {
+        // If the request was superseded by a newer one, return empty
+        if (requestId !== this.lastRequestId) {
+          resolve([]);
+          return;
         }
 
-        this.debounceTimer = setTimeout(async () => {
-          // If the request was superseded by a newer one, return empty
-          if (requestId !== this.lastRequestId) {
-            resolve([]);
-            return;
-          }
+        // If already cancelled, return empty
+        if (token.isCancellationRequested) {
+          resolve([]);
+          return;
+        }
 
-          // If already cancelled, return empty
-          if (token.isCancellationRequested) {
-            resolve([]);
-            return;
-          }
-
-          try {
-            const items = await this.fetchCompletions(
-              prefix,
-              suffix,
-              language,
-              filePath,
-              position,
-              token
-            );
-            resolve(items);
-          } catch {
-            // Silently return empty on error — inline completions should
-            // never disrupt the user's editing experience
-            resolve([]);
-          }
-        }, DEBOUNCE_MS);
-      }
-    );
+        try {
+          const items = await this.fetchCompletions(
+            prefix,
+            suffix,
+            language,
+            filePath,
+            position,
+            token,
+          );
+          resolve(items);
+        } catch {
+          // Silently return empty on error — inline completions should
+          // never disrupt the user's editing experience
+          resolve([]);
+        }
+      }, DEBOUNCE_MS);
+    });
 
     // Store successful non-empty completions in the cache
     if (completions.length > 0) {
@@ -161,7 +152,7 @@ export class DanteCodeCompletionProvider
     language: string,
     filePath: string,
     position: vscode.Position,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[]> {
     // Resolve the model configuration from VS Code settings
     const config = vscode.workspace.getConfiguration("dantecode");
@@ -190,11 +181,7 @@ export class DanteCodeCompletionProvider
     const workspaceFolders = vscode.workspace.workspaceFolders;
     const projectRoot = workspaceFolders?.[0]?.uri.fsPath ?? "";
 
-    const router = new ModelRouterImpl(
-      routerConfig,
-      projectRoot,
-      "inline-completion"
-    );
+    const router = new ModelRouterImpl(routerConfig, projectRoot, "inline-completion");
 
     // Build the fill-in-the-middle prompt
     const systemPrompt = [
@@ -221,10 +208,10 @@ export class DanteCodeCompletionProvider
       return [];
     }
 
-    const completionText = await router.generate(
-      [{ role: "user", content: userPrompt }],
-      { system: systemPrompt, maxTokens: 256 }
-    );
+    const completionText = await router.generate([{ role: "user", content: userPrompt }], {
+      system: systemPrompt,
+      maxTokens: 256,
+    });
 
     // Check for cancellation after the network request completes
     if (token.isCancellationRequested) {
@@ -252,10 +239,7 @@ export class DanteCodeCompletionProvider
     }
 
     // Create the inline completion item
-    const item = new vscode.InlineCompletionItem(
-      cleaned,
-      new vscode.Range(position, position)
-    );
+    const item = new vscode.InlineCompletionItem(cleaned, new vscode.Range(position, position));
 
     // Attach PDSE gate info as a filter text that VS Code uses for sorting
     item.filterText = `dantecode${gateLabel}`;
@@ -290,10 +274,7 @@ export class DanteCodeCompletionProvider
    * Stores a completion result in the cache. Evicts the oldest entry
    * if the cache is at capacity.
    */
-  private storeCache(
-    key: string,
-    items: vscode.InlineCompletionItem[]
-  ): void {
+  private storeCache(key: string, items: vscode.InlineCompletionItem[]): void {
     // Remove existing entry for this key if present
     const existingIndex = this.cache.findIndex((entry) => entry.key === key);
     if (existingIndex !== -1) {

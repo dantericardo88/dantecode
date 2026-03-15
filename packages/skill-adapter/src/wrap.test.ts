@@ -6,7 +6,6 @@ import {
   type ImportSource,
 } from "./wrap.js";
 
-
 describe("skill-adapter wrap", () => {
   const baseSkill: ParsedSkill = {
     frontmatter: {
@@ -80,9 +79,7 @@ describe("skill-adapter wrap", () => {
 
     it("includes original skill instructions verbatim", () => {
       const result = wrapSkillWithAdapter(baseSkill, "claude");
-      expect(result).toContain(
-        "Write clean TypeScript code following best practices.",
-      );
+      expect(result).toContain("Write clean TypeScript code following best practices.");
     });
 
     it("includes ORIGINAL SKILL INSTRUCTIONS comment marker", () => {

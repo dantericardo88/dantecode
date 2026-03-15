@@ -132,9 +132,7 @@ describe("model-router", () => {
       const config = makeRouterConfig({ fallback: [] });
       const router = new ModelRouterImpl(config, "/tmp/test", "s1");
 
-      await expect(
-        router.generate([{ role: "user", content: "test" }]),
-      ).rejects.toThrow();
+      await expect(router.generate([{ role: "user", content: "test" }])).rejects.toThrow();
     });
   });
 });

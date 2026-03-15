@@ -84,14 +84,12 @@ export function buildFailureContext(
   // Header
   sections.push(
     "# Code Regeneration Request\n\n" +
-    "The previous code generation did not pass quality gates. " +
-    "Please regenerate the code addressing ALL of the issues listed below.\n"
+      "The previous code generation did not pass quality gates. " +
+      "Please regenerate the code addressing ALL of the issues listed below.\n",
   );
 
   // Original task description
-  sections.push(
-    `## Original Task\n\n${context.taskDescription}\n`
-  );
+  sections.push(`## Original Task\n\n${context.taskDescription}\n`);
 
   if (context.filePath) {
     sections.push(`**Target file:** ${context.filePath}`);
@@ -107,11 +105,11 @@ export function buildFailureContext(
   if (score) {
     sections.push(
       "\n## PDSE Quality Score (Failed)\n\n" +
-      `- **Overall:** ${score.overall}/100 (gate threshold requires >= 70)\n` +
-      `- **Completeness:** ${score.completeness}/100 (weight: 35%)\n` +
-      `- **Correctness:** ${score.correctness}/100 (weight: 30%)\n` +
-      `- **Clarity:** ${score.clarity}/100 (weight: 20%)\n` +
-      `- **Consistency:** ${score.consistency}/100 (weight: 15%)\n`
+        `- **Overall:** ${score.overall}/100 (gate threshold requires >= 70)\n` +
+        `- **Completeness:** ${score.completeness}/100 (weight: 35%)\n` +
+        `- **Correctness:** ${score.correctness}/100 (weight: 30%)\n` +
+        `- **Clarity:** ${score.clarity}/100 (weight: 20%)\n` +
+        `- **Consistency:** ${score.consistency}/100 (weight: 15%)\n`,
     );
 
     // List violations
@@ -150,15 +148,17 @@ export function buildFailureContext(
       sections.push(`- **Duration:** ${result.durationMs}ms`);
       if (result.stderr.trim().length > 0) {
         // Truncate stderr to avoid enormous prompts
-        const truncatedStderr = result.stderr.length > 2000
-          ? result.stderr.slice(0, 2000) + "\n... (truncated)"
-          : result.stderr;
+        const truncatedStderr =
+          result.stderr.length > 2000
+            ? result.stderr.slice(0, 2000) + "\n... (truncated)"
+            : result.stderr;
         sections.push(`- **Error output:**\n\`\`\`\n${truncatedStderr}\n\`\`\``);
       }
       if (result.stdout.trim().length > 0) {
-        const truncatedStdout = result.stdout.length > 1000
-          ? result.stdout.slice(0, 1000) + "\n... (truncated)"
-          : result.stdout;
+        const truncatedStdout =
+          result.stdout.length > 1000
+            ? result.stdout.slice(0, 1000) + "\n... (truncated)"
+            : result.stdout;
         sections.push(`- **Standard output:**\n\`\`\`\n${truncatedStdout}\n\`\`\``);
       }
       sections.push("");
@@ -172,21 +172,18 @@ export function buildFailureContext(
   }
 
   // The current code
-  sections.push(
-    "\n## Current Code (needs fixes)\n\n" +
-    "```\n" + currentCode + "\n```\n"
-  );
+  sections.push("\n## Current Code (needs fixes)\n\n" + "```\n" + currentCode + "\n```\n");
 
   // Instructions
   sections.push(
     "\n## Instructions\n\n" +
-    "1. Fix ALL hard violations listed above — these are blocking.\n" +
-    "2. Address soft violations where possible.\n" +
-    "3. Ensure the code passes all GStack commands (build, test, lint).\n" +
-    "4. Apply corrections from the lessons section.\n" +
-    "5. Return ONLY the complete, corrected source code.\n" +
-    "6. Do NOT include markdown fences, explanations, or comments about changes.\n" +
-    "7. The code must be complete — no stubs, no TODOs, no placeholders.\n"
+      "1. Fix ALL hard violations listed above — these are blocking.\n" +
+      "2. Address soft violations where possible.\n" +
+      "3. Ensure the code passes all GStack commands (build, test, lint).\n" +
+      "4. Apply corrections from the lessons section.\n" +
+      "5. Return ONLY the complete, corrected source code.\n" +
+      "6. Do NOT include markdown fences, explanations, or comments about changes.\n" +
+      "7. The code must be complete — no stubs, no TODOs, no placeholders.\n",
   );
 
   return sections.join("\n");
@@ -213,7 +210,9 @@ function extractCodeFromResponse(response: string): string {
   // If the response starts with an import/export or common code patterns,
   // assume the entire response is code
   if (
-    /^(?:import|export|const|let|var|function|class|interface|type|enum|\/\/|\/\*|#!)/m.test(trimmed)
+    /^(?:import|export|const|let|var|function|class|interface|type|enum|\/\/|\/\*|#!)/m.test(
+      trimmed,
+    )
   ) {
     // Strip any trailing explanation after the code
     // Look for a line that starts with an explanation marker
@@ -289,7 +288,10 @@ export async function runAutoforgeIAL(
       if (!constitutionResult.passed) {
         // Convert constitution violations to PDSE violations for recording
         const constitutionViolations: PDSEViolation[] = constitutionResult.violations.map((v) => ({
-          type: v.type === "credential_exposure" ? "hardcoded_secret" as const : "background_process" as const,
+          type:
+            v.type === "credential_exposure"
+              ? ("hardcoded_secret" as const)
+              : ("background_process" as const),
           severity: "hard" as const,
           file: "<evaluated>",
           line: v.line,
@@ -439,7 +441,8 @@ export async function runAutoforgeIAL(
           {
             projectRoot,
             pattern: `Anti-stub violation: ${topViolation.type} — ${topViolation.message}`,
-            correction: `Ensure generated code does not contain ${topViolation.type} patterns. ` +
+            correction:
+              `Ensure generated code does not contain ${topViolation.type} patterns. ` +
               `The code must be complete with no stubs, TODOs, or placeholder implementations.`,
             filePattern: context.filePath,
             language: context.language,
@@ -460,7 +463,8 @@ export async function runAutoforgeIAL(
           {
             projectRoot,
             pattern: `GStack failure: ${topFailed.command} exited with code ${topFailed.exitCode}`,
-            correction: `Ensure generated code passes the command: ${topFailed.command}. ` +
+            correction:
+              `Ensure generated code passes the command: ${topFailed.command}. ` +
               `Previous error: ${stderrSummary}`,
             filePattern: context.filePath,
             language: context.language,

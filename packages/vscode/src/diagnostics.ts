@@ -20,9 +20,7 @@ const DIAGNOSTIC_SOURCE = "DanteCode PDSE";
  * - "soft" violations map to Warning (yellow squiggly) because they
  *   are advisory and do not block the gate on their own.
  */
-function mapSeverity(
-  severity: PDSEViolation["severity"]
-): vscode.DiagnosticSeverity {
+function mapSeverity(severity: PDSEViolation["severity"]): vscode.DiagnosticSeverity {
   switch (severity) {
     case "hard":
       return vscode.DiagnosticSeverity.Error;
@@ -66,9 +64,7 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
   private readonly collection: vscode.DiagnosticCollection;
 
   constructor() {
-    this.collection = vscode.languages.createDiagnosticCollection(
-      DIAGNOSTIC_SOURCE
-    );
+    this.collection = vscode.languages.createDiagnosticCollection(DIAGNOSTIC_SOURCE);
   }
 
   /**
@@ -99,17 +95,13 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
 
       const range = new vscode.Range(
         new vscode.Position(safeLineNumber, 0),
-        new vscode.Position(safeLineNumber, Number.MAX_SAFE_INTEGER)
+        new vscode.Position(safeLineNumber, Number.MAX_SAFE_INTEGER),
       );
 
       const label = violationLabel(violation.type);
       const message = `[${label}] ${violation.message}`;
 
-      const diagnostic = new vscode.Diagnostic(
-        range,
-        message,
-        mapSeverity(violation.severity)
-      );
+      const diagnostic = new vscode.Diagnostic(range, message, mapSeverity(violation.severity));
 
       diagnostic.source = DIAGNOSTIC_SOURCE;
 
@@ -117,9 +109,7 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
       // can see it at a glance in the Problems panel.
       diagnostic.code = {
         value: `PDSE ${score.overall}`,
-        target: vscode.Uri.parse(
-          "https://github.com/dantecode/dantecode/blob/main/docs/pdse.md"
-        ),
+        target: vscode.Uri.parse("https://github.com/dantecode/dantecode/blob/main/docs/pdse.md"),
       };
 
       // If the violation includes a regex pattern, add it as related info
@@ -127,7 +117,7 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
         diagnostic.relatedInformation = [
           new vscode.DiagnosticRelatedInformation(
             new vscode.Location(uri, range),
-            `Matched pattern: ${violation.pattern}`
+            `Matched pattern: ${violation.pattern}`,
           ),
         ];
       }
@@ -145,12 +135,9 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
     // add a summary diagnostic so the user knows the gate did not pass.
     if (!score.passedGate && diagnostics.length === 0) {
       const summaryDiag = new vscode.Diagnostic(
-        new vscode.Range(
-          new vscode.Position(0, 0),
-          new vscode.Position(0, 0)
-        ),
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
         `PDSE quality gate failed: overall score ${score.overall} is below threshold`,
-        vscode.DiagnosticSeverity.Error
+        vscode.DiagnosticSeverity.Error,
       );
       summaryDiag.source = DIAGNOSTIC_SOURCE;
       summaryDiag.code = `PDSE ${score.overall}`;
@@ -160,12 +147,9 @@ export class PDSEDiagnosticProvider implements vscode.Disposable {
     // Add a passing summary as an information diagnostic when the gate passes
     if (score.passedGate && diagnostics.length === 0) {
       const passDiag = new vscode.Diagnostic(
-        new vscode.Range(
-          new vscode.Position(0, 0),
-          new vscode.Position(0, 0)
-        ),
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 0)),
         `PDSE quality gate passed: overall score ${score.overall}`,
-        vscode.DiagnosticSeverity.Information
+        vscode.DiagnosticSeverity.Information,
       );
       passDiag.source = DIAGNOSTIC_SOURCE;
       passDiag.code = `PDSE ${score.overall}`;

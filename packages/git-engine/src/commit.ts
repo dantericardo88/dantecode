@@ -120,10 +120,7 @@ function buildCommitMessage(spec: GitCommitSpec): string {
  * @param projectRoot - Absolute path to the repository root.
  * @returns The hash, message, and list of committed files.
  */
-export function autoCommit(
-  spec: GitCommitSpec,
-  projectRoot: string,
-): CommitResult {
+export function autoCommit(spec: GitCommitSpec, projectRoot: string): CommitResult {
   // Stage the requested files
   if (spec.files.length > 0) {
     // Stage in batches to avoid command-line length limits
@@ -141,25 +138,19 @@ export function autoCommit(
   // Create the commit using a stdin-fed message to avoid shell escaping issues
   const allowEmptyFlag = spec.allowEmpty ? "--allow-empty " : "";
   try {
-    execSync(
-      `git commit ${allowEmptyFlag}--file=-`,
-      {
-        cwd: projectRoot,
-        encoding: "utf-8",
-        input: fullMessage,
-        stdio: ["pipe", "pipe", "pipe"],
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    );
+    execSync(`git commit ${allowEmptyFlag}--file=-`, {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      input: fullMessage,
+      stdio: ["pipe", "pipe", "pipe"],
+      maxBuffer: 10 * 1024 * 1024,
+    });
   } catch (error: unknown) {
     const err = error as { stderr?: string; stdout?: string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
     const stdout = typeof err.stdout === "string" ? err.stdout.trim() : "";
     // If nothing to commit and allowEmpty was not set, that's an error
-    if (
-      stderr.includes("nothing to commit") ||
-      stdout.includes("nothing to commit")
-    ) {
+    if (stderr.includes("nothing to commit") || stdout.includes("nothing to commit")) {
       throw new Error("git commit: nothing to commit (working tree clean)");
     }
     throw new Error(`git commit: ${stderr || err.message || "Unknown error"}`);
