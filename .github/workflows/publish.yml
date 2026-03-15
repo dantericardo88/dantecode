@@ -27,16 +27,16 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Typecheck
-        run: npx turbo typecheck
+        run: bun run typecheck
 
       - name: Lint
-        run: npx turbo lint
+        run: bun run lint
 
       - name: Format check
-        run: npx prettier --check .
+        run: bun run format:check
 
       - name: Test
         run: npx vitest run
@@ -58,7 +58,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build all packages
         run: npx turbo build
@@ -117,7 +117,7 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build extension
         run: cd packages/vscode && bun run build

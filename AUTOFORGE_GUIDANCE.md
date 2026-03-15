@@ -1,6 +1,6 @@
 # AUTOFORGE_GUIDANCE.md
 
-**Generated:** 2026-03-15 | **Autoforge Iteration:** 11 | **Waves Completed:** 39/39
+**Generated:** 2026-03-15 | **Autoforge Iteration:** 12 | **Waves Completed:** 42/42
 
 ---
 
@@ -11,10 +11,10 @@
 | Codebase Implementation |    99 | 9/9 packages with real implementations, zero stubs             |
 | Type Safety             |    99 | Strict TypeScript, all 9 packages pass `tsc --noEmit`          |
 | DanteForge Artifacts    |    98 | All artifacts present: CONSTITUTION, SPEC, PLAN, TASKS, DESIGN |
-| Test Coverage           |   100 | 555 tests across 23 suites; 94.55% stmt coverage (v8)          |
+| Test Coverage           |   100 | 562 tests across 24 suites; 95.23% stmt coverage (v8)          |
 | Linting                 |    98 | ESLint (typescript-eslint flat config), 0 violations           |
 | Formatting              |    98 | Prettier configured, 0 violations, CI gate active              |
-| CI Pipeline             |    99 | CI (5 jobs) + Publish (3 jobs) + Dependabot                    |
+| CI Pipeline             |    99 | CI (5 jobs) + Publish (3 jobs, fixed) + Dependabot             |
 | Git Hygiene             |    99 | Clean working tree, remote configured, CHANGELOG present       |
 | Documentation           |   100 | README, CHANGELOG, CONTRIBUTING, SECURITY, PRD, AGENTS, etc.   |
 
@@ -55,6 +55,7 @@
 | @dantecode/core          | state.test.ts             |      15 | All pass           |
 | @dantecode/core          | model-router.test.ts      |      33 | All pass           |
 | @dantecode/core          | providers.test.ts         |      21 | All pass           |
+| @dantecode/core          | integration.test.ts       |       7 | All pass (NEW)     |
 | @dantecode/danteforge    | anti-stub-scanner.test.ts |      36 | All pass           |
 | @dantecode/danteforge    | pdse-scorer.test.ts       |      32 | All pass           |
 | @dantecode/danteforge    | constitution.test.ts      |      42 | All pass (+8 NEW)  |
@@ -74,7 +75,7 @@
 | @dantecode/sandbox       | sandbox.test.ts           |      14 | All pass           |
 | dantecode (vscode)       | vscode.test.ts            |      51 | All pass (NEW)     |
 | @dantecode/desktop       | desktop.test.ts           |      18 | All pass (NEW)     |
-| **Total**                | **23 suites**             | **555** | **100% pass rate** |
+| **Total**                | **24 suites**             | **562** | **100% pass rate** |
 
 ### V8 Coverage Report
 
@@ -97,7 +98,7 @@
 | typecheck (`tsc --noEmit`)     | PASS   | 9/9 packages, zero type errors                  |
 | lint (`eslint src/`)           | PASS   | 0 violations across all packages                |
 | format (`prettier --check`)    | PASS   | 0 formatting violations                         |
-| test (`vitest run`)            | PASS   | 555/555 tests pass                              |
+| test (`vitest run`)            | PASS   | 562/562 tests pass                              |
 | coverage (`vitest --coverage`) | PASS   | 95.23% stmts, 99.09% funcs, thresholds enforced |
 
 ---
@@ -153,46 +154,49 @@ Next Transition: RELEASE → PUBLISHED (create GitHub repo + push + CI green + n
 
 ## Session History
 
-| Wave | Action                                                 | Result                                                    |
-| ---- | ------------------------------------------------------ | --------------------------------------------------------- |
-| 1    | GStack typecheck                                       | 9/9 PASS                                                  |
-| 2    | Generate CONSTITUTION.md + SPEC.md                     | Created (10 rules, 9 package specs)                       |
-| 3    | Create test foundation (anti-stub, PDSE, audit)        | 48 tests, all pass                                        |
-| 4    | Expand tests (constitution, gstack, diff)              | +58 tests, all pass                                       |
-| 5    | Generate PLAN.md                                       | Created (5 phases)                                        |
-| 6    | Write AUTOFORGE_GUIDANCE.md                            | Created                                                   |
-| 7    | Add core tests (state, model-router)                   | +24 tests, all pass                                       |
-| 8    | Add danteforge tests (autoforge, lessons)              | +29 tests, all pass                                       |
-| 9    | Generate TASKS.md, update artifacts                    | Iteration 3 complete                                      |
-| 10   | Add git-engine/commit + skill-adapter/wrap tests       | +37 tests, all pass                                       |
-| 11   | Add git-engine/repo-map + skill-adapter/registry tests | +35 tests, all pass                                       |
-| 12   | Update artifacts                                       | Iteration 4 checkpoint                                    |
-| 13   | Add git-engine/worktree tests                          | +13 tests, all pass                                       |
-| 14   | Configure ESLint (typescript-eslint flat config)       | 0 violations, 9 packages updated                          |
-| 15   | Update PLAN.md, TASKS.md, AUTOFORGE_GUIDANCE.md        | Iteration 5 complete                                      |
-| 16   | Initial git commit                                     | 112 files, 34,914 lines committed                         |
-| 17   | Add prettier --check to CI, auto-format all files      | 5 CI jobs, 0 format violations                            |
-| 18   | Add vitest --coverage to CI                            | 64.77% stmt coverage, v8 provider                         |
-| 19   | Expand pdse-scorer tests                               | 10 → 32 tests (model-based scorer, local heuristics)      |
-| 20   | Add skill-adapter parser tests                         | +30 new tests (claude, continue, opencode parsers)        |
-| 21   | Expand autoforge tests                                 | 12 → 22 tests (runAutoforgeIAL with mock router)          |
-| 22   | Provider tests + anti-stub scanFile                    | +21 provider tests, +10 anti-stub tests                   |
-| 23   | Model router + diff tests                              | 11 → 33 router tests, 9 → 23 diff tests                   |
-| 24   | Importer orchestration tests                           | +28 new tests, importer.ts 0% → 99% coverage              |
-| 25   | Add git remote                                         | origin -> github.com/dantecode/dantecode                  |
-| 26   | Write README.md                                        | Install, quickstart, architecture, config docs            |
-| 27   | Fix anti-stub CI job                                   | Skip test files, improve line skip logic                  |
-| 28   | Add Dependabot config                                  | Weekly npm + GitHub Actions updates                       |
-| 29   | E2E integration test                                   | +20 tests: full pipeline anti-stub→constitution→PDSE→IAL  |
-| 30   | CLI smoke tests + sandbox tests                        | +30 CLI tests, +14 sandbox tests                          |
-| 31   | CHANGELOG.md for v1.0.0                                | Keep-a-changelog format, comprehensive                    |
-| 32   | VS Code extension tests                                | +51 tests: diagnostics, status bar, sidebar, lifecycle    |
-| 33   | Desktop app tests                                      | +18 tests: IPC, menu, window config, HTML branding        |
-| 34   | npm publish workflow                                   | 3-job pipeline: validate + npm + VS Code Marketplace      |
-| 35   | Branch coverage improvements                           | +19 tests: constitution filtering, registry edge cases    |
-| 36   | Update artifacts, commit                               | Iteration 10 complete — RELEASE state                     |
-| 37   | CONTRIBUTING.md + SECURITY.md                          | Contributor guide + vulnerability disclosure policy       |
-| 38   | Package hardening                                      | publishConfig (7 pkgs), test scripts, coverage thresholds |
-| 39   | Create GitHub repo + push                              | Blocked — repo does not exist yet                         |
+| Wave | Action                                                 | Result                                                     |
+| ---- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| 1    | GStack typecheck                                       | 9/9 PASS                                                   |
+| 2    | Generate CONSTITUTION.md + SPEC.md                     | Created (10 rules, 9 package specs)                        |
+| 3    | Create test foundation (anti-stub, PDSE, audit)        | 48 tests, all pass                                         |
+| 4    | Expand tests (constitution, gstack, diff)              | +58 tests, all pass                                        |
+| 5    | Generate PLAN.md                                       | Created (5 phases)                                         |
+| 6    | Write AUTOFORGE_GUIDANCE.md                            | Created                                                    |
+| 7    | Add core tests (state, model-router)                   | +24 tests, all pass                                        |
+| 8    | Add danteforge tests (autoforge, lessons)              | +29 tests, all pass                                        |
+| 9    | Generate TASKS.md, update artifacts                    | Iteration 3 complete                                       |
+| 10   | Add git-engine/commit + skill-adapter/wrap tests       | +37 tests, all pass                                        |
+| 11   | Add git-engine/repo-map + skill-adapter/registry tests | +35 tests, all pass                                        |
+| 12   | Update artifacts                                       | Iteration 4 checkpoint                                     |
+| 13   | Add git-engine/worktree tests                          | +13 tests, all pass                                        |
+| 14   | Configure ESLint (typescript-eslint flat config)       | 0 violations, 9 packages updated                           |
+| 15   | Update PLAN.md, TASKS.md, AUTOFORGE_GUIDANCE.md        | Iteration 5 complete                                       |
+| 16   | Initial git commit                                     | 112 files, 34,914 lines committed                          |
+| 17   | Add prettier --check to CI, auto-format all files      | 5 CI jobs, 0 format violations                             |
+| 18   | Add vitest --coverage to CI                            | 64.77% stmt coverage, v8 provider                          |
+| 19   | Expand pdse-scorer tests                               | 10 → 32 tests (model-based scorer, local heuristics)       |
+| 20   | Add skill-adapter parser tests                         | +30 new tests (claude, continue, opencode parsers)         |
+| 21   | Expand autoforge tests                                 | 12 → 22 tests (runAutoforgeIAL with mock router)           |
+| 22   | Provider tests + anti-stub scanFile                    | +21 provider tests, +10 anti-stub tests                    |
+| 23   | Model router + diff tests                              | 11 → 33 router tests, 9 → 23 diff tests                    |
+| 24   | Importer orchestration tests                           | +28 new tests, importer.ts 0% → 99% coverage               |
+| 25   | Add git remote                                         | origin -> github.com/dantecode/dantecode                   |
+| 26   | Write README.md                                        | Install, quickstart, architecture, config docs             |
+| 27   | Fix anti-stub CI job                                   | Skip test files, improve line skip logic                   |
+| 28   | Add Dependabot config                                  | Weekly npm + GitHub Actions updates                        |
+| 29   | E2E integration test                                   | +20 tests: full pipeline anti-stub→constitution→PDSE→IAL   |
+| 30   | CLI smoke tests + sandbox tests                        | +30 CLI tests, +14 sandbox tests                           |
+| 31   | CHANGELOG.md for v1.0.0                                | Keep-a-changelog format, comprehensive                     |
+| 32   | VS Code extension tests                                | +51 tests: diagnostics, status bar, sidebar, lifecycle     |
+| 33   | Desktop app tests                                      | +18 tests: IPC, menu, window config, HTML branding         |
+| 34   | npm publish workflow                                   | 3-job pipeline: validate + npm + VS Code Marketplace       |
+| 35   | Branch coverage improvements                           | +19 tests: constitution filtering, registry edge cases     |
+| 36   | Update artifacts, commit                               | Iteration 10 complete — RELEASE state                      |
+| 37   | CONTRIBUTING.md + SECURITY.md                          | Contributor guide + vulnerability disclosure policy        |
+| 38   | Package hardening                                      | publishConfig (7 pkgs), test scripts, coverage thresholds  |
+| 39   | Create GitHub repo + push                              | Blocked — repo does not exist yet                          |
+| 40   | Fix publish.yml CI issues                              | Removed --frozen-lockfile, fixed turbo/prettier commands   |
+| 41   | Real HTTP integration tests for model router           | +7 tests: mock server, fallback, overrides, error handling |
+| 42   | Verify VS Code webview HTML                            | Already complete (1104 lines sidebar + 625 lines audit)    |
 
-**Cumulative:** 555 tests, 23 suites, 9 packages (all tested). 100% pass rate. 95.23% statement coverage. 99.09% function coverage. ESLint + Prettier with 0 violations. CI pipeline (5 jobs) + Publish pipeline (3 jobs) + Dependabot. Coverage thresholds enforced (90% stmts, 95% funcs). CONTRIBUTING.md + SECURITY.md added. All packages have publishConfig. State machine: RELEASE.
+**Cumulative:** 562 tests, 24 suites, 9 packages (all tested). 100% pass rate. 95.23% statement coverage. 99.09% function coverage. ESLint + Prettier with 0 violations. CI pipeline (5 jobs) + Publish pipeline (3 jobs, fixed) + Dependabot. Coverage thresholds enforced (90% stmts, 95% funcs). CONTRIBUTING.md + SECURITY.md added. All packages have publishConfig. Real HTTP integration tests added. State machine: RELEASE.
