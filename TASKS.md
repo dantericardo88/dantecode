@@ -1,6 +1,6 @@
 # TASKS.md — DanteCode Executable Task List
 
-**Generated:** 2026-03-15 | **Source:** PLAN.md | **Autoforge Wave:** 15
+**Generated:** 2026-03-15 | **Source:** PLAN.md | **Autoforge Wave:** 18
 
 ---
 
@@ -68,9 +68,9 @@
 | # | Task | Status |
 |---|------|--------|
 | 2.1 | Verify CI workflow runs correctly on GitHub Actions | [ ] |
-| 2.2 | Add `prettier --check` format gate to CI | [ ] |
+| 2.2 | Add `prettier --check` format gate to CI | [x] |
 | 2.3 | Configure ESLint with real rules (replace typecheck duplicate) | [x] |
-| 2.4 | Add `vitest --coverage` reporting to CI | [ ] |
+| 2.4 | Add `vitest --coverage` reporting to CI | [x] |
 | 2.5 | Verify anti-stub self-check CI job against real codebase | [ ] |
 | 2.6 | Add Dependabot or Renovate for dependency updates | [ ] |
 
@@ -112,7 +112,9 @@
 
 ## Immediate Next Actions
 
-1. **Initial git commit** — Preserve all work (246 tests, 6 artifacts, 9 packages, ESLint configured)
-2. **Task 2.1** — Push to GitHub, verify CI workflow runs green
-3. **Task 2.2** — Add `prettier --check` format gate to CI
-4. **Task 2.4** — Add vitest --coverage reporting to CI
+1. ~~**Initial git commit**~~ — Done (Wave 16, commit `410b70e`)
+2. ~~**Task 2.2**~~ — Done (Wave 17, commit `4f6ad62`)
+3. ~~**Task 2.4**~~ — Done (Wave 18, commit `827d33c`)
+4. **Task 2.1** — Push to GitHub, verify CI workflow runs green
+5. **Task 2.5** — Verify anti-stub self-check CI job against real codebase
+6. **Task 2.6** — Add Dependabot or Renovate for dependency updates

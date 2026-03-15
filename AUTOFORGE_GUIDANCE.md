@@ -1,20 +1,21 @@
 # AUTOFORGE_GUIDANCE.md
 
-**Generated:** 2026-03-15 | **Autoforge Iteration:** 5 | **Waves Completed:** 15/15
+**Generated:** 2026-03-15 | **Autoforge Iteration:** 6 | **Waves Completed:** 18/18
 
 ---
 
-## Overall Project Health: 92/100
+## Overall Project Health: 95/100
 
 | Category | Score | Notes |
 |----------|------:|-------|
 | Codebase Implementation | 98 | 9/9 packages with real implementations, zero stubs |
 | Type Safety | 95 | Strict TypeScript, all 9 packages pass `tsc --noEmit` |
-| DanteForge Artifacts | 95 | CONSTITUTION, SPEC, PLAN, TASKS all present |
-| Test Coverage | 92 | 246 tests across 15 suites; 9/9 packages covered |
+| DanteForge Artifacts | 96 | CONSTITUTION, SPEC, PLAN, TASKS, DESIGN.op all present |
+| Test Coverage | 92 | 246 tests across 15 suites; 64.77% stmt coverage (v8) |
 | Linting | 95 | ESLint (typescript-eslint flat config), 0 violations |
-| CI Pipeline | 88 | GitHub Actions workflow with 4 jobs, ESLint configured |
-| Git Hygiene | 10 | No commits yet — all files untracked |
+| Formatting | 95 | Prettier configured, 0 violations, CI gate active |
+| CI Pipeline | 92 | GitHub Actions workflow with 5 jobs + coverage artifact |
+| Git Hygiene | 90 | 3 commits on main, clean working tree |
 | Documentation | 92 | PRD, AGENTS.dc.md, CONSTITUTION, SPEC, PLAN, TASKS all present |
 
 ---
@@ -25,13 +26,18 @@
 |----------|------|------:|--------|
 | STATE.yaml | `./STATE.yaml` | 95 | Complete |
 | AGENTS.dc.md | `./AGENTS.dc.md` | 92 | Complete |
-| CONSTITUTION.md | `./CONSTITUTION.md` | 92 | Created (Wave 2) |
+| CONSTITUTION.md | `./CONSTITUTION.md` | 95 | Created (Wave 2) |
 | SPEC.md | `./SPEC.md` | 90 | Created (Wave 2) |
 | PLAN.md | `./PLAN.md` | 92 | Created (Wave 5), updated (Waves 9, 12, 15) |
-| TASKS.md | `./TASKS.md` | 92 | Created (Wave 9), updated (Waves 12, 15) |
+| TASKS.md | `./TASKS.md` | 92 | Created (Wave 9), updated (Waves 12, 15, 18) |
 | eslint.config.js | `./eslint.config.js` | 95 | Created (Wave 14) |
+| vitest.config.ts | `./vitest.config.ts` | 95 | Created (Wave 18) |
+| .prettierrc | `./.prettierrc` | 100 | Complete |
+| DESIGN.op | `.danteforge/DESIGN.op` | 95 | Created (pre-Wave 16) |
+| design-tokens.yaml | `.danteforge/design-tokens.yaml` | 95 | Created (pre-Wave 16) |
+| sidebar-preview.svg | `.danteforge/sidebar-preview.svg` | 90 | Created (pre-Wave 16) |
 | PRD | `./Docs/DanteCode_PRD_v1.0.md` | 88 | Comprehensive (89KB) |
-| CI Pipeline | `.github/workflows/ci.yml` | 85 | 4-job workflow |
+| CI Pipeline | `.github/workflows/ci.yml` | 92 | 5-job workflow with coverage |
 
 ---
 
@@ -56,6 +62,16 @@
 | @dantecode/skill-adapter | registry.test.ts | 22 | All pass |
 | **Total** | **15 suites** | **246** | **100% pass rate** |
 
+### V8 Coverage Report
+
+| Package | % Stmts | % Branch | % Funcs | % Lines |
+|---------|--------:|---------:|--------:|--------:|
+| core/src | 81.21 | 73.52 | 86.95 | 81.21 |
+| danteforge/src | 67.81 | 70.35 | 77.41 | 67.81 |
+| git-engine/src | 84.50 | 80.85 | 85.18 | 84.50 |
+| skill-adapter/src | 51.29 | 59.09 | 100.00 | 51.29 |
+| **All files** | **64.77** | **71.78** | **82.65** | **64.77** |
+
 ### Remaining Uncovered Modules (Low Priority)
 
 | Module | Risk | Priority |
@@ -72,9 +88,11 @@
 | Command | Result | Details |
 |---------|--------|---------|
 | typecheck (`tsc --noEmit`) | PASS | 9/9 packages, zero type errors |
-| lint (`eslint src/`) | PASS | 0 violations across all 4 covered packages |
+| lint (`eslint src/`) | PASS | 0 violations across all packages |
+| format (`prettier --check`) | PASS | 0 formatting violations |
 | test (`vitest run`) | PASS | 246/246 tests pass |
-| anti-stub self-check | Not run locally | CI job defined but not executed in autoforge |
+| coverage (`vitest --coverage`) | PASS | 64.77% stmts, 82.65% funcs |
+| anti-stub self-check | Not run locally | CI job defined |
 
 ---
 
@@ -82,32 +100,42 @@
 
 ### Immediate (Next Session)
 
-1. **Initial git commit** — All files are untracked. Create initial commit to preserve 246 tests, ESLint config, and all artifacts.
-2. **Push to GitHub** — Verify CI pipeline runs green.
+1. **Push to GitHub** — Verify CI pipeline runs green with all 5 jobs.
+2. **Verify anti-stub self-check** — Ensure CI job works against real codebase.
 
 ### Short-Term (Next 3 Sessions)
 
-3. **Add `prettier --check`** — Format gate in CI pipeline.
-4. **Add `vitest --coverage`** — Coverage reporting in CI.
-5. **Verify anti-stub self-check** — Ensure CI job works against real codebase.
+3. **Add Dependabot/Renovate** — Automated dependency updates.
+4. **Integration tests** — Full DanteForge pipeline end-to-end.
+5. **Increase coverage** — Target 80%+ statement coverage (currently 64.77%).
 
 ### Medium-Term (Next Sprint)
 
-6. **Integration tests** — Full DanteForge pipeline end-to-end.
-7. **CLI tests** — Argument parsing, slash command routing.
-8. **VS Code extension tests** — Requires VS Code test harness setup.
+6. **CLI tests** — Argument parsing, slash command routing.
+7. **VS Code extension tests** — Requires VS Code test harness setup.
+8. **npm publish workflow** — @dantecode/* packages to registry.
 
 ---
 
 ## Autoforge State Machine
 
 ```
-Current State: HARDENING (test coverage threshold MET)
+Current State: HARDENING (CI pipeline operational, coverage reporting active)
 Previous: BUILDING → ARTIFACT_GENERATION → TESTING → HARDENING
 
-Next Transition: HARDENING → INTEGRATION (when CI fully green)
+Next Transition: HARDENING → INTEGRATION (when CI fully green on GitHub)
                  INTEGRATION → RELEASE (when E2E tests pass)
 ```
+
+---
+
+## Git History
+
+| Commit | Hash | Description |
+|--------|------|-------------|
+| 1 | `410b70e` | feat: initial commit — 9 packages, 246 tests, DanteForge artifacts |
+| 2 | `4f6ad62` | ci: add prettier --check format gate, auto-format 58 files |
+| 3 | `827d33c` | ci: add vitest --coverage with v8 provider |
 
 ---
 
@@ -129,6 +157,9 @@ Next Transition: HARDENING → INTEGRATION (when CI fully green)
 | 12 | Update artifacts | Iteration 4 checkpoint |
 | 13 | Add git-engine/worktree tests | +13 tests, all pass |
 | 14 | Configure ESLint (typescript-eslint flat config) | 0 violations, 9 packages updated |
-| 15 | Update PLAN.md, TASKS.md, AUTOFORGE_GUIDANCE.md | This update |
+| 15 | Update PLAN.md, TASKS.md, AUTOFORGE_GUIDANCE.md | Iteration 5 complete |
+| 16 | Initial git commit | 112 files, 34,914 lines committed |
+| 17 | Add prettier --check to CI, auto-format all files | 5 CI jobs, 0 format violations |
+| 18 | Add vitest --coverage to CI | 64.77% stmt coverage, v8 provider |
 
-**Cumulative:** 246 tests across 15 suites in 9 packages. 100% pass rate. ESLint configured with 0 violations. State machine transitioned to HARDENING.
+**Cumulative:** 246 tests, 15 suites, 9 packages. 100% pass rate. 64.77% statement coverage. ESLint + Prettier configured with 0 violations. 5-job CI pipeline. 3 git commits. State machine: HARDENING.
