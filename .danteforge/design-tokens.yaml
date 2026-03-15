@@ -42,8 +42,8 @@ colors:
 
   # ---- Accent colors ----
   accent:
-    user-message: "--vscode-textLink-foreground"       # Blue — user messages
-    assistant-message: "--vscode-charts-green"          # Green — assistant messages
+    user-message: "--vscode-textLink-foreground" # Blue — user messages
+    assistant-message: "--vscode-charts-green" # Green — assistant messages
     button-bg: "--vscode-button-background"
     button-fg: "--vscode-button-foreground"
     button-hover: "--vscode-button-hoverBackground"
@@ -63,8 +63,8 @@ colors:
   status:
     gate-passed: "--vscode-testing-iconPassed"
     gate-failed: "--vscode-testing-iconFailed"
-    gate-passed-overlay: "#FFFFFF"                      # White text on green badge
-    gate-failed-overlay: "#FFFFFF"                      # White text on red badge
+    gate-passed-overlay: "#FFFFFF" # White text on green badge
+    gate-failed-overlay: "#FFFFFF" # White text on red badge
     statusbar-fg: "--vscode-statusBarItem-foreground"
     statusbar-error-bg: "--vscode-statusBarItem-errorBackground"
     statusbar-error-fg: "--vscode-statusBarItem-errorForeground"
@@ -88,22 +88,22 @@ typography:
   editor-font-size: "--vscode-editor-font-size"
 
   scale:
-    xs: 10       # event timestamps, counters
-    sm: 11       # labels, pills, descriptions
-    base: 12     # dropdown text, filter input
-    md: 13       # message body, input text, buttons, header title
-    lg: 16       # welcome heading
+    xs: 10 # event timestamps, counters
+    sm: 11 # labels, pills, descriptions
+    base: 12 # dropdown text, filter input
+    md: 13 # message body, input text, buttons, header title
+    lg: 16 # welcome heading
 
   weight:
     normal: 400
-    medium: 500  # event labels
-    semibold: 600  # header title, welcome heading, PDSE badge
+    medium: 500 # event labels
+    semibold: 600 # header title, welcome heading, PDSE badge
 
   line-height:
     tight: 1.0
-    normal: 1.4   # textarea input
-    relaxed: 1.5   # message body
-    loose: 1.6     # welcome text
+    normal: 1.4 # textarea input
+    relaxed: 1.5 # message body
+    loose: 1.6 # welcome text
 
 # ============================================================================
 # SPACING TOKENS
@@ -114,13 +114,13 @@ spacing:
   unit: 2
 
   # Named spacing values (in px)
-  xxs: 2    # pill internal padding-y, badge padding-y
-  xs: 4     # gaps (pills, context-bar, filter bar), pill padding-y, code inline padding-y
-  sm: 6     # model-bar padding-y, context-bar padding-y, input-area gap, filter gap, audit-event padding-y
-  md: 8     # header padding-y, input padding-y, pre-block padding, model-bar gap, audit-event gap, welcome gap-inner
-  lg: 12    # header padding-x, model-bar padding-x, context-bar padding-x, input-area padding-x/y, messages padding, messages gap
-  xl: 16    # welcome padding-x
-  xxl: 32   # welcome padding-y
+  xxs: 2 # pill internal padding-y, badge padding-y
+  xs: 4 # gaps (pills, context-bar, filter bar), pill padding-y, code inline padding-y
+  sm: 6 # model-bar padding-y, context-bar padding-y, input-area gap, filter gap, audit-event padding-y
+  md: 8 # header padding-y, input padding-y, pre-block padding, model-bar gap, audit-event gap, welcome gap-inner
+  lg: 12 # header padding-x, model-bar padding-x, context-bar padding-x, input-area padding-x/y, messages padding, messages gap
+  xl: 16 # welcome padding-x
+  xxl: 32 # welcome padding-y
 
 # ============================================================================
 # BORDER TOKENS
@@ -128,15 +128,15 @@ spacing:
 
 borders:
   width:
-    thin: 1          # panel borders, input borders
-    accent: 3        # message left accent border
+    thin: 1 # panel borders, input borders
+    accent: 3 # message left accent border
 
   radius:
-    xs: 2             # dropdown, filter input
-    sm: 3             # inline code, keybinding label
-    md: 4             # textarea, send button, pre-block
-    lg: 6             # message body card
-    pill: 10          # context pills, PDSE badge
+    xs: 2 # dropdown, filter input
+    sm: 3 # inline code, keybinding label
+    md: 4 # textarea, send button, pre-block
+    lg: 6 # message body card
+    pill: 10 # context pills, PDSE badge
 
 # ============================================================================
 # DIMENSION TOKENS
@@ -155,7 +155,7 @@ dimensions:
     height: 32
 
   context-bar:
-    height-min: 0       # hidden when no files
+    height-min: 0 # hidden when no files
     height-max: 80
 
   input:
@@ -185,7 +185,7 @@ dimensions:
 
 icons:
   # Activity bar
-  sidebar: "dante-fire"             # Custom registered icon
+  sidebar: "dante-fire" # Custom registered icon
 
   # Status bar gate
   gate-passed: "pass-filled"
@@ -223,7 +223,7 @@ icons:
 
   # UI controls
   refresh: "refresh"
-  remove: "\u00D7"                  # multiplication sign
+  remove: "\u00D7" # multiplication sign
 
 # ============================================================================
 # ANIMATION TOKENS

@@ -45,9 +45,7 @@ import {
   scanClaudeSkills,
   parseClaudeSkill,
   scanContinueAgents,
-  parseContinueAgent,
   scanOpencodeAgents,
-  parseOpencodeAgent,
 } from "./parsers/index.js";
 import { wrapSkillWithAdapter } from "./wrap.js";
 

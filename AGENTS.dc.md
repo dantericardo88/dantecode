@@ -1,4 +1,5 @@
 # AGENTS.dc.md
+
 # DanteCode project context — loaded automatically on every session start.
 
 ## Project

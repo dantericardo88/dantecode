@@ -5,11 +5,29 @@
   "version": "1.0.0",
   "publisher": "dantecode",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/dantecode/dantecode" },
-  "engines": { "vscode": "^1.95.0" },
-  "categories": ["AI", "Programming Languages", "Other"],
-  "keywords": ["ai", "coding", "agent", "grok", "model-agnostic", "danteforge"],
-  "activationEvents": ["onStartupFinished"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dantecode/dantecode"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "grok",
+    "model-agnostic",
+    "danteforge"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "scripts": {
     "build": "tsup src/extension.ts --format cjs --dts --external vscode",
@@ -32,48 +50,137 @@
   },
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{
-        "id": "dantecode",
-        "title": "DanteCode",
-        "icon": "assets/sidebar-icon.svg"
-      }]
+      "activitybar": [
+        {
+          "id": "dantecode",
+          "title": "DanteCode",
+          "icon": "assets/sidebar-icon.svg"
+        }
+      ]
     },
     "views": {
       "dantecode": [
-        { "type": "webview", "id": "dantecode.chatView", "name": "Chat" },
-        { "type": "webview", "id": "dantecode.auditView", "name": "Audit Log" }
+        {
+          "type": "webview",
+          "id": "dantecode.chatView",
+          "name": "Chat"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.auditView",
+          "name": "Audit Log"
+        }
       ]
     },
     "commands": [
-      { "command": "dantecode.openChat", "title": "DanteCode: Open Chat", "category": "DanteCode" },
-      { "command": "dantecode.addFileToContext", "title": "DanteCode: Add File to Context", "category": "DanteCode" },
-      { "command": "dantecode.importClaudeSkills", "title": "DanteCode: Import Claude Skills", "category": "DanteCode" },
-      { "command": "dantecode.runPDSE", "title": "DanteCode: Run PDSE Score on File", "category": "DanteCode" },
-      { "command": "dantecode.runGStack", "title": "DanteCode: Run GStack QA", "category": "DanteCode" },
-      { "command": "dantecode.switchModel", "title": "DanteCode: Switch Model", "category": "DanteCode" },
-      { "command": "dantecode.toggleSandbox", "title": "DanteCode: Toggle Sandbox Mode", "category": "DanteCode" },
-      { "command": "dantecode.showLessons", "title": "DanteCode: Show Project Lessons", "category": "DanteCode" },
-      { "command": "dantecode.initProject", "title": "DanteCode: Initialize Project", "category": "DanteCode" },
-      { "command": "dantecode.acceptDiff", "title": "DanteCode: Accept Diff Hunk", "category": "DanteCode" },
-      { "command": "dantecode.rejectDiff", "title": "DanteCode: Reject Diff Hunk", "category": "DanteCode" }
+      {
+        "command": "dantecode.openChat",
+        "title": "DanteCode: Open Chat",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.addFileToContext",
+        "title": "DanteCode: Add File to Context",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.importClaudeSkills",
+        "title": "DanteCode: Import Claude Skills",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.runPDSE",
+        "title": "DanteCode: Run PDSE Score on File",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.runGStack",
+        "title": "DanteCode: Run GStack QA",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.switchModel",
+        "title": "DanteCode: Switch Model",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.toggleSandbox",
+        "title": "DanteCode: Toggle Sandbox Mode",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.showLessons",
+        "title": "DanteCode: Show Project Lessons",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.initProject",
+        "title": "DanteCode: Initialize Project",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.acceptDiff",
+        "title": "DanteCode: Accept Diff Hunk",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rejectDiff",
+        "title": "DanteCode: Reject Diff Hunk",
+        "category": "DanteCode"
+      }
     ],
     "keybindings": [
-      { "command": "dantecode.openChat", "key": "ctrl+shift+d", "mac": "cmd+shift+d" },
-      { "command": "dantecode.addFileToContext", "key": "ctrl+shift+a", "mac": "cmd+shift+a", "when": "editorFocus" }
+      {
+        "command": "dantecode.openChat",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d"
+      },
+      {
+        "command": "dantecode.addFileToContext",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorFocus"
+      }
     ],
     "configuration": {
       "title": "DanteCode",
       "properties": {
-        "dantecode.defaultModel": { "type": "string", "default": "grok/grok-3", "description": "Default model for DanteCode. Format: provider/model-id" },
-        "dantecode.pdseThreshold": { "type": "number", "default": 85, "minimum": 0, "maximum": 100, "description": "Minimum PDSE score to pass quality gate" },
-        "dantecode.autoCommit": { "type": "boolean", "default": true, "description": "Automatically commit accepted edits" },
-        "dantecode.sandboxEnabled": { "type": "boolean", "default": false, "description": "Run bash commands in Docker sandbox" }
+        "dantecode.defaultModel": {
+          "type": "string",
+          "default": "grok/grok-3",
+          "description": "Default model for DanteCode. Format: provider/model-id"
+        },
+        "dantecode.pdseThreshold": {
+          "type": "number",
+          "default": 85,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Minimum PDSE score to pass quality gate"
+        },
+        "dantecode.autoCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically commit accepted edits"
+        },
+        "dantecode.sandboxEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run bash commands in Docker sandbox"
+        }
       }
     },
     "menus": {
       "editor/context": [
-        { "command": "dantecode.addFileToContext", "group": "dantecode", "when": "editorFocus" },
-        { "command": "dantecode.runPDSE", "group": "dantecode", "when": "editorFocus" }
+        {
+          "command": "dantecode.addFileToContext",
+          "group": "dantecode",
+          "when": "editorFocus"
+        },
+        {
+          "command": "dantecode.runPDSE",
+          "group": "dantecode",
+          "when": "editorFocus"
+        }
       ]
     }
   }

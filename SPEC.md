@@ -31,6 +31,7 @@ Foundation         →  Config Types (shared interfaces & schemas)
 **Purpose**: Foundation type library. All shared TypeScript interfaces and type definitions.
 
 **Key exports**:
+
 - `ModelProvider` — Union: `"grok" | "anthropic" | "openai" | "google" | "groq" | "ollama" | "custom"`
 - `ModelConfig` — Provider, modelId, apiKey, baseUrl, maxTokens (8192), temperature (0.1), contextWindow
 - `SessionMessage` — id, role, content, timestamp, modelId, toolUse/Result blocks, PDSE scores
@@ -60,19 +61,21 @@ Foundation         →  Config Types (shared interfaces & schemas)
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `state.ts` | Parse/write STATE.yaml with Zod validation, atomic writes, sensible defaults |
-| `model-router.ts` | Resolve provider, generate text/stream, fallback cascade, audit logging |
-| `audit.ts` | Append-only JSONL logger, filtering, pagination, rotation at 100MB |
-| `providers/*.ts` | Per-provider adapters: grok, anthropic, openai, ollama |
+| Module            | Responsibility                                                               |
+| ----------------- | ---------------------------------------------------------------------------- |
+| `state.ts`        | Parse/write STATE.yaml with Zod validation, atomic writes, sensible defaults |
+| `model-router.ts` | Resolve provider, generate text/stream, fallback cascade, audit logging      |
+| `audit.ts`        | Append-only JSONL logger, filtering, pagination, rotation at 100MB           |
+| `providers/*.ts`  | Per-provider adapters: grok, anthropic, openai, ollama                       |
 
 **Model Router resolution order**:
+
 1. Task-specific override (from `STATE.yaml model.task_overrides`)
 2. Default provider (Grok-3)
 3. Fallback chain (Anthropic → user-configured)
 
 **State management**:
+
 - Read: `loadState(projectRoot)` → parse YAML → validate with Zod → return typed config
 - Write: `saveState(projectRoot, state)` → validate → write temp file → atomic rename
 - Update: `updateState(projectRoot, partial)` → merge → save
@@ -87,16 +90,17 @@ Foundation         →  Config Types (shared interfaces & schemas)
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `pdse-scorer.ts` | Score code on 4 dimensions, model-based + local heuristic fallback |
-| `anti-stub-scanner.ts` | Detect stub patterns, classify hard/soft violations |
-| `autoforge.ts` | Iterative auto-correction loop (max 3 iterations) |
-| `gstack.ts` | Run typecheck/lint/test commands, capture results |
-| `lessons.ts` | SQLite-backed pattern database, query by file/language/severity |
-| `constitution.ts` | Security enforcement — credential detection, hard reject |
+| Module                 | Responsibility                                                     |
+| ---------------------- | ------------------------------------------------------------------ |
+| `pdse-scorer.ts`       | Score code on 4 dimensions, model-based + local heuristic fallback |
+| `anti-stub-scanner.ts` | Detect stub patterns, classify hard/soft violations                |
+| `autoforge.ts`         | Iterative auto-correction loop (max 3 iterations)                  |
+| `gstack.ts`            | Run typecheck/lint/test commands, capture results                  |
+| `lessons.ts`           | SQLite-backed pattern database, query by file/language/severity    |
+| `constitution.ts`      | Security enforcement — credential detection, hard reject           |
 
 **PDSE Scoring**:
+
 ```
 Overall = (Completeness × 0.35) + (Correctness × 0.30) + (Clarity × 0.20) + (Consistency × 0.15)
 Threshold: 85 | Hard violations allowed: 0
@@ -106,14 +110,17 @@ If stub present → Clarity = 0 → Max achievable = 80 → Gate FAILS
 ```
 
 **Scoring modes**:
+
 1. **Model-based**: Send code to LLM, parse structured response with Zod validation
 2. **Local heuristic fallback**: Analyze function length, error handling, naming, null checks, magic numbers, consistency
 
 **Anti-Stub Scanner patterns**:
+
 - Hard: `TODO`, `FIXME`, `HACK`, `XXX`, `NotImplementedError`, `pass #`, `...`, `throw Error("not implemented")`, `@ts-ignore`, `as any`, `placeholder`, `shim`
 - Soft: Configurable via `STATE.yaml pdse.stub_patterns`
 
 **Autoforge IAL loop**:
+
 ```
 for iteration in 1..maxIterations:
   1. Check constitution (security scan)
@@ -137,14 +144,15 @@ If all iterations fail → record lesson, mark BLOCKED
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `commit.ts` | Structured auto-commits with HEREDOC format, DanteCode footer |
-| `worktree.ts` | Create/list/merge worktrees in `.dantecode/worktrees/` |
-| `diff.ts` | Parse unified diffs, extract hunks, staged/unstaged diff retrieval |
+| Module        | Responsibility                                                      |
+| ------------- | ------------------------------------------------------------------- |
+| `commit.ts`   | Structured auto-commits with HEREDOC format, DanteCode footer       |
+| `worktree.ts` | Create/list/merge worktrees in `.dantecode/worktrees/`              |
+| `diff.ts`     | Parse unified diffs, extract hunks, staged/unstaged diff retrieval  |
 | `repo-map.ts` | Aider-derived repository indexing, language detection, file scoring |
 
 **Commit message format**:
+
 ```
 <72-char subject>
 
@@ -167,16 +175,17 @@ Co-Authored-By: DanteCode <noreply@dantecode.dev>
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `importer.ts` | Scan source directories, orchestrate import pipeline |
-| `registry.ts` | Load/validate skills from `.dantecode/skills/`, frontmatter extraction |
-| `wrap.ts` | Inject DanteForge adapter (preamble + postamble) around skill instructions |
-| `parsers/claude.ts` | Parse Claude Code SKILL.md format |
-| `parsers/continue.ts` | Parse Continue.dev agent definitions |
-| `parsers/opencode.ts` | Parse OpenCode agent format |
+| Module                | Responsibility                                                             |
+| --------------------- | -------------------------------------------------------------------------- |
+| `importer.ts`         | Scan source directories, orchestrate import pipeline                       |
+| `registry.ts`         | Load/validate skills from `.dantecode/skills/`, frontmatter extraction     |
+| `wrap.ts`             | Inject DanteForge adapter (preamble + postamble) around skill instructions |
+| `parsers/claude.ts`   | Parse Claude Code SKILL.md format                                          |
+| `parsers/continue.ts` | Parse Continue.dev agent definitions                                       |
+| `parsers/opencode.ts` | Parse OpenCode agent format                                                |
 
 **Adapter wrapping**:
+
 ```
 [PREAMBLE: Anti-Stub Doctrine + PDSE Clarity Gate + Constitution Rules]
 [ORIGINAL SKILL INSTRUCTIONS — unmodified]
@@ -193,13 +202,14 @@ Co-Authored-By: DanteCode <noreply@dantecode.dev>
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
+| Module         | Responsibility                                               |
+| -------------- | ------------------------------------------------------------ |
 | `container.ts` | Docker container lifecycle — pull, create, start, exec, stop |
-| `executor.ts` | High-level command execution with timeout and audit |
-| `fallback.ts` | Local (unsandboxed) executor when Docker unavailable |
+| `executor.ts`  | High-level command execution with timeout and audit          |
+| `fallback.ts`  | Local (unsandboxed) executor when Docker unavailable         |
 
 **Container configuration**:
+
 - Image: `ghcr.io/dantecode/sandbox:latest`
 - Network: bridge mode (no host access)
 - Memory: 2GB | CPU: 2 cores | Timeout: 5 minutes
@@ -216,16 +226,17 @@ Co-Authored-By: DanteCode <noreply@dantecode.dev>
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `index.ts` | CLI argument parsing, route dispatch |
-| `repl.ts` | Interactive readline loop, slash command routing |
-| `agent-loop.ts` | Core agent interaction — system prompt, tool execution, streaming |
-| `slash-commands.ts` | /help, /model, /pdse, /gstack, /diff, /commit, /lessons, etc. |
-| `tools.ts` | Tool handlers — Read, Write, Edit, Bash, Glob, Grep, WebFetch |
-| `commands/*.ts` | Sub-commands: init, skills, agent, config, git |
+| Module              | Responsibility                                                    |
+| ------------------- | ----------------------------------------------------------------- |
+| `index.ts`          | CLI argument parsing, route dispatch                              |
+| `repl.ts`           | Interactive readline loop, slash command routing                  |
+| `agent-loop.ts`     | Core agent interaction — system prompt, tool execution, streaming |
+| `slash-commands.ts` | /help, /model, /pdse, /gstack, /diff, /commit, /lessons, etc.     |
+| `tools.ts`          | Tool handlers — Read, Write, Edit, Bash, Glob, Grep, WebFetch     |
+| `commands/*.ts`     | Sub-commands: init, skills, agent, config, git                    |
 
 **CLI entry points**:
+
 - `dantecode` — Start interactive REPL
 - `dantecode "prompt"` — One-shot execution
 - `dantecode --model <id>` — Override model
@@ -244,14 +255,14 @@ Co-Authored-By: DanteCode <noreply@dantecode.dev>
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `extension.ts` | Extension activation, provider registration, command binding |
-| `sidebar-provider.ts` | Chat webview panel (React + Tailwind) |
-| `inline-completion.ts` | InlineCompletionItemProvider for ghost text |
-| `diagnostics.ts` | PDSE violations as VS Code diagnostics (Problems panel) |
-| `audit-panel-provider.ts` | Audit log viewer webview |
-| `status-bar.ts` | Model + gate status in status bar |
+| Module                    | Responsibility                                               |
+| ------------------------- | ------------------------------------------------------------ |
+| `extension.ts`            | Extension activation, provider registration, command binding |
+| `sidebar-provider.ts`     | Chat webview panel (React + Tailwind)                        |
+| `inline-completion.ts`    | InlineCompletionItemProvider for ghost text                  |
+| `diagnostics.ts`          | PDSE violations as VS Code diagnostics (Problems panel)      |
+| `audit-panel-provider.ts` | Audit log viewer webview                                     |
+| `status-bar.ts`           | Model + gate status in status bar                            |
 
 **Activation**: < 500ms target
 **Inline suggestion**: < 2s latency target
@@ -266,10 +277,10 @@ Co-Authored-By: DanteCode <noreply@dantecode.dev>
 
 **Modules**:
 
-| Module | Responsibility |
-|--------|---------------|
-| `main.ts` | Electron main process, window management, IPC, menus |
-| `preload.ts` | Secure IPC bridge (contextIsolation enabled) |
+| Module       | Responsibility                                       |
+| ------------ | ---------------------------------------------------- |
+| `main.ts`    | Electron main process, window management, IPC, menus |
+| `preload.ts` | Secure IPC bridge (contextIsolation enabled)         |
 
 **Security**: contextIsolation=true, nodeIntegration=false
 **Distribution**: macOS .dmg, Windows .exe, Linux .AppImage
@@ -344,8 +355,8 @@ autoforge:
   abort_on_security_violation: true
   gstack_commands:
     - { name: "typecheck", command: "bun run typecheck", timeout_ms: 60000, failure_is_soft: false }
-    - { name: "lint",      command: "bun run lint",      timeout_ms: 30000, failure_is_soft: false }
-    - { name: "test",      command: "bun run test",      timeout_ms: 120000, failure_is_soft: true }
+    - { name: "lint", command: "bun run lint", timeout_ms: 30000, failure_is_soft: false }
+    - { name: "test", command: "bun run test", timeout_ms: 120000, failure_is_soft: true }
 
 git:
   auto_commit: true
@@ -373,11 +384,11 @@ project: { name, language, framework, agents_file, repo_map_enabled }
 
 ### Test Pyramid
 
-| Layer | Coverage | Runner | Scope |
-|-------|----------|--------|-------|
-| Unit | 75% | Vitest | Pure functions, mocked I/O |
-| Integration | 20% | Vitest | Real filesystem/git, mocked model |
-| E2E | 5% | Vitest + Bun | Real model calls, real git |
+| Layer       | Coverage | Runner       | Scope                             |
+| ----------- | -------- | ------------ | --------------------------------- |
+| Unit        | 75%      | Vitest       | Pure functions, mocked I/O        |
+| Integration | 20%      | Vitest       | Real filesystem/git, mocked model |
+| E2E         | 5%       | Vitest + Bun | Real model calls, real git        |
 
 ### Critical Test Suites
 
@@ -407,13 +418,13 @@ Jobs:
 
 ## S6 Success Metrics
 
-| Metric | Target |
-|--------|--------|
-| Install-to-first-edit | < 90 seconds |
-| Stub rate in generated code | 0% (enforced) |
-| PDSE first-attempt pass rate | ≥ 95% |
-| Claude skill import success | ≥ 98% |
-| Model switch latency | < 2 seconds |
-| VS Code activation | < 500ms |
-| Inline suggestion latency | < 2 seconds |
-| Typecheck pass | 100% (all 9 packages) |
+| Metric                       | Target                |
+| ---------------------------- | --------------------- |
+| Install-to-first-edit        | < 90 seconds          |
+| Stub rate in generated code  | 0% (enforced)         |
+| PDSE first-attempt pass rate | ≥ 95%                 |
+| Claude skill import success  | ≥ 98%                 |
+| Model switch latency         | < 2 seconds           |
+| VS Code activation           | < 500ms               |
+| Inline suggestion latency    | < 2 seconds           |
+| Typecheck pass               | 100% (all 9 packages) |

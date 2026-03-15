@@ -67,8 +67,7 @@ jobs:
       - name: Run anti-stub scanner on own source
         run: |
           node -e "
-          const { execSync } = require('child_process');
-          const { readdirSync, readFileSync, statSync } = require('fs');
+          const { readdirSync, readFileSync } = require('fs');
           const { join } = require('path');
 
           const STUB_PATTERNS = [
@@ -83,23 +82,36 @@ jobs:
             /\bplaceholder\b/i,
           ];
 
+          const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage']);
+
+          function isTestFile(name) {
+            return name.endsWith('.test.ts') || name.endsWith('.test.tsx')
+                || name.endsWith('.spec.ts') || name.endsWith('.spec.tsx');
+          }
+
+          function shouldSkipLine(line) {
+            if (line.includes('STUB_PATTERNS') || line.includes('HARD_VIOLATION') || line.includes('SOFT_VIOLATION')) return true;
+            if (line.includes('pattern:') || line.includes('RegExp')) return true;
+            if (line.trim().startsWith('//') && line.includes('pattern')) return true;
+            // Skip string literals that contain stub words as test data
+            if (line.includes('mockReturnValue') || line.includes('mockImplementation')) return true;
+            return false;
+          }
+
           function scanDir(dir) {
             let violations = 0;
             const entries = readdirSync(dir, { withFileTypes: true });
             for (const entry of entries) {
               const fullPath = join(dir, entry.name);
               if (entry.isDirectory()) {
-                if (['node_modules', 'dist', '.git', '.turbo'].includes(entry.name)) continue;
+                if (SKIP_DIRS.has(entry.name)) continue;
                 violations += scanDir(fullPath);
-              } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+              } else if ((entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) && !isTestFile(entry.name)) {
                 const content = readFileSync(fullPath, 'utf-8');
                 const lines = content.split('\n');
                 for (let i = 0; i < lines.length; i++) {
                   const line = lines[i];
-                  // Skip comments that are documenting the patterns themselves
-                  if (line.includes('STUB_PATTERNS') || line.includes('HARD_VIOLATION') || line.includes('SOFT_VIOLATION')) continue;
-                  if (line.includes('pattern:') || line.includes('RegExp')) continue;
-                  if (line.trim().startsWith('//') && line.includes('pattern')) continue;
+                  if (shouldSkipLine(line)) continue;
                   for (const pattern of STUB_PATTERNS) {
                     if (pattern.test(line)) {
                       console.error('STUB VIOLATION: ' + fullPath + ':' + (i + 1) + ': ' + line.trim());

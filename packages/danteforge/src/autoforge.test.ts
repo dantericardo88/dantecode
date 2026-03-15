@@ -275,7 +275,7 @@ describe("autoforge", () => {
           occurrences: 1,
           lastSeen: "2026-03-15",
           severity: "warning",
-          source: "manual",
+          source: "user",
         },
       ];
       const result = formatLessonsForPrompt(lessons);
@@ -304,7 +304,7 @@ describe("autoforge", () => {
           occurrences: 2,
           lastSeen: "2026-03-15",
           severity: "error",
-          source: "gstack_failure",
+          source: "review",
         },
       ];
       const result = formatLessonsForPrompt(lessons);
@@ -325,6 +325,7 @@ describe("autoforge", () => {
     };
 
     const baseConfig: AutoforgeConfig = {
+      enabled: true,
       maxIterations: 1,
       lessonInjectionEnabled: false,
       abortOnSecurityViolation: false,

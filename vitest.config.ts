@@ -11,11 +11,7 @@ export default defineConfig({
         "packages/git-engine/src/**/*.ts",
         "packages/skill-adapter/src/**/*.ts",
       ],
-      exclude: [
-        "**/*.test.ts",
-        "**/*.d.ts",
-        "**/index.ts",
-      ],
+      exclude: ["**/*.test.ts", "**/*.d.ts", "**/index.ts"],
       reporter: ["text", "text-summary", "json-summary"],
       reportsDirectory: "./coverage",
     },

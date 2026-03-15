@@ -22,6 +22,7 @@ describe("audit logger", () => {
         timestamp: new Date().toISOString(),
         type: "session_start",
         payload: { source: "test" },
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -35,6 +36,7 @@ describe("audit logger", () => {
         timestamp: new Date().toISOString(),
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -47,6 +49,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:00:00Z",
         type: "session_start",
         payload: { msg: "hello" },
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -62,6 +65,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -69,6 +73,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:01:00Z",
         type: "file_read",
         payload: { path: "/src/index.ts" },
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -76,6 +81,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:02:00Z",
         type: "session_end",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -99,6 +105,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -106,6 +113,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:01:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -120,6 +128,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -127,6 +136,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:01:00Z",
         type: "file_read",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -141,6 +151,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T08:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -148,6 +159,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T12:00:00Z",
         type: "session_end",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -165,6 +177,7 @@ describe("audit logger", () => {
           timestamp: `2026-03-15T10:0${i}:00Z`,
           type: "file_read",
           payload: { index: i },
+          modelId: "test-model",
           projectRoot: testDir,
         });
       }
@@ -182,6 +195,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T12:00:00Z",
         type: "session_end",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -189,6 +203,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T08:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 
@@ -210,6 +225,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:00:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -217,6 +233,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:01:00Z",
         type: "file_read",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
       await appendAuditEvent(testDir, {
@@ -224,6 +241,7 @@ describe("audit logger", () => {
         timestamp: "2026-03-15T10:02:00Z",
         type: "session_start",
         payload: {},
+        modelId: "test-model",
         projectRoot: testDir,
       });
 

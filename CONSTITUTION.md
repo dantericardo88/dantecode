@@ -13,23 +13,24 @@
 
 The following patterns are **build failures** when found in generated or modified code:
 
-| Pattern | Type |
-|---------|------|
-| `TODO` | Hard violation |
-| `FIXME` | Hard violation |
-| `HACK` | Hard violation |
-| `XXX` | Hard violation |
-| `raise NotImplementedError` | Hard violation |
-| `pass` followed by comment | Hard violation |
-| `...` (ellipsis body) | Hard violation |
+| Pattern                              | Type           |
+| ------------------------------------ | -------------- |
+| `TODO`                               | Hard violation |
+| `FIXME`                              | Hard violation |
+| `HACK`                               | Hard violation |
+| `XXX`                                | Hard violation |
+| `raise NotImplementedError`          | Hard violation |
+| `pass` followed by comment           | Hard violation |
+| `...` (ellipsis body)                | Hard violation |
 | `throw new Error("not implemented")` | Hard violation |
-| `// @ts-ignore` | Hard violation |
-| `as any` | Hard violation |
-| `placeholder` | Hard violation |
-| `shim` | Hard violation |
-| Empty function/method bodies | Hard violation |
+| `// @ts-ignore`                      | Hard violation |
+| `as any`                             | Hard violation |
+| `placeholder`                        | Hard violation |
+| `shim`                               | Hard violation |
+| Empty function/method bodies         | Hard violation |
 
 **Enforcement layers:**
+
 1. **Layer 1** — Anti-Stub Scanner (pre-write)
 2. **Layer 2** — PDSE Clarity gate (score = 0 on stubs)
 3. **Layer 3** — GStack (typecheck + lint catch remaining)
@@ -45,12 +46,12 @@ If a stub is detected, the file is **not written to disk**. The Autoforge IAL re
 
 Every generated file must pass PDSE scoring before being written to disk.
 
-| Metric | Weight | Description |
-|--------|-------:|-------------|
-| Completeness | 35% | All requirements addressed, no missing implementations |
-| Correctness | 30% | Logic is sound, edge cases handled, no obvious bugs |
-| Clarity | 20% | Readable, well-named, no dead code, no stubs |
-| Consistency | 15% | Matches project conventions, naming patterns, style |
+| Metric       | Weight | Description                                            |
+| ------------ | -----: | ------------------------------------------------------ |
+| Completeness |    35% | All requirements addressed, no missing implementations |
+| Correctness  |    30% | Logic is sound, edge cases handled, no obvious bugs    |
+| Clarity      |    20% | Readable, well-named, no dead code, no stubs           |
+| Consistency  |    15% | Matches project conventions, naming patterns, style    |
 
 - **Threshold**: 85/100
 - **Hard violations allowed**: 0
@@ -79,14 +80,14 @@ Every generated file must pass PDSE scoring before being written to disk.
 
 Generated code must **never** contain:
 
-| Category | Examples |
-|----------|---------|
-| API keys | `sk-...`, `xai-...`, `AKIA...`, hardcoded key strings |
-| Passwords | Plaintext passwords, default credentials |
-| Secrets | JWT secrets, encryption keys, signing keys |
-| Tokens | OAuth tokens, session tokens, bearer tokens |
-| Connection strings | Database URLs with embedded credentials |
-| Private keys | PEM files, SSH keys, certificate private keys |
+| Category           | Examples                                              |
+| ------------------ | ----------------------------------------------------- |
+| API keys           | `sk-...`, `xai-...`, `AKIA...`, hardcoded key strings |
+| Passwords          | Plaintext passwords, default credentials              |
+| Secrets            | JWT secrets, encryption keys, signing keys            |
+| Tokens             | OAuth tokens, session tokens, bearer tokens           |
+| Connection strings | Database URLs with embedded credentials               |
+| Private keys       | PEM files, SSH keys, certificate private keys         |
 
 **Enforcement**: Constitution checker scans all generated output. Violations are hard-rejected — no regeneration, no override.
 
@@ -162,15 +163,15 @@ Generated code must **never** contain:
 
 ## Rule Classification
 
-| Rule | Type | On Violation |
-|------|------|-------------|
-| Anti-Stub Absolute | HARD | Block write, regenerate, log lesson |
-| PDSE Quality Gate | HARD | Block write, regenerate, log lesson |
-| Model Agnosticism | HARD | Build failure |
-| Security/Credentials | HARD | Hard reject, no retry |
-| NOMA Compliance | HARD | Build failure |
-| Evidence Chain | HARD | System error |
-| Git-Native | SOFT | Degraded functionality |
-| Sandbox Boundaries | SOFT | Warning + local fallback |
-| Skill Portability | SOFT | Skip + log |
-| Actionable Errors | SOFT | Poor UX (non-blocking) |
+| Rule                 | Type | On Violation                        |
+| -------------------- | ---- | ----------------------------------- |
+| Anti-Stub Absolute   | HARD | Block write, regenerate, log lesson |
+| PDSE Quality Gate    | HARD | Block write, regenerate, log lesson |
+| Model Agnosticism    | HARD | Build failure                       |
+| Security/Credentials | HARD | Hard reject, no retry               |
+| NOMA Compliance      | HARD | Build failure                       |
+| Evidence Chain       | HARD | System error                        |
+| Git-Native           | SOFT | Degraded functionality              |
+| Sandbox Boundaries   | SOFT | Warning + local fallback            |
+| Skill Portability    | SOFT | Skip + log                          |
+| Actionable Errors    | SOFT | Poor UX (non-blocking)              |

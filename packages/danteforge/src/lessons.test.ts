@@ -72,7 +72,7 @@ describe("lessons system (SQLite)", () => {
           occurrences: 1,
           lastSeen: "2026-03-15",
           severity: "info",
-          source: "manual",
+          source: "user",
         },
         testDir,
       );
@@ -123,7 +123,7 @@ describe("lessons system (SQLite)", () => {
           occurrences: 1,
           lastSeen: "2026-03-15",
           severity: "info",
-          source: "manual",
+          source: "user",
         },
         testDir,
       );
