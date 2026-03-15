@@ -450,7 +450,8 @@ export function process(input: string): string {
 
   describe("model response parsing", () => {
     it("handles JSON wrapped in markdown code fences", async () => {
-      const modelResponse = '```json\n{"completeness": 85, "correctness": 90, "clarity": 80, "consistency": 88, "violations": []}\n```';
+      const modelResponse =
+        '```json\n{"completeness": 85, "correctness": 90, "clarity": 80, "consistency": 88, "violations": []}\n```';
       const router = createMockRouter(modelResponse);
       const code = `export const X = 1;`;
 

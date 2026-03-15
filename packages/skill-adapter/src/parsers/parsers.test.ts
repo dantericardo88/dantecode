@@ -332,8 +332,14 @@ Instructions.
     });
 
     it("discovers agent files", async () => {
-      await writeFile(join(tempDir, "primary.md"), "---\nname: primary\nmode: primary\n---\nInstructions.");
-      await writeFile(join(tempDir, "helper.md"), "---\nname: helper\nmode: subagent\n---\nHelper.");
+      await writeFile(
+        join(tempDir, "primary.md"),
+        "---\nname: primary\nmode: primary\n---\nInstructions.",
+      );
+      await writeFile(
+        join(tempDir, "helper.md"),
+        "---\nname: helper\nmode: subagent\n---\nHelper.",
+      );
 
       const result = await scanOpencodeAgents(tempDir);
       expect(result.length).toBe(2);

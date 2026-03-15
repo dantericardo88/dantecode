@@ -235,7 +235,10 @@ export async function loadConfig(path: string): Promise<Config> {
     it("scans a real file with no violations", () => {
       tmpDir = mkdtempSync(join(tmpdir(), "anti-stub-scanfile-"));
       const filePath = join(tmpDir, "clean.ts");
-      writeFileSync(filePath, "export function greet(name: string): string {\n  return `Hello ${name}`;\n}\n");
+      writeFileSync(
+        filePath,
+        "export function greet(name: string): string {\n  return `Hello ${name}`;\n}\n",
+      );
       const result = scanFile("clean.ts", tmpDir);
       expect(result.passed).toBe(true);
       expect(result.hardViolations.length).toBe(0);
@@ -300,9 +303,9 @@ export async function loadConfig(path: string): Promise<Config> {
 
       const result = runAntiStubScanner("FINAL_FLUSH_TEST in code", tmpDir);
       expect(result.passed).toBe(false);
-      expect(
-        result.hardViolations.some((v) => v.message.includes("Final flush pattern")),
-      ).toBe(true);
+      expect(result.hardViolations.some((v) => v.message.includes("Final flush pattern"))).toBe(
+        true,
+      );
     });
 
     it("does not load patterns when STATE.yaml is missing", () => {
@@ -349,9 +352,7 @@ export async function loadConfig(path: string): Promise<Config> {
 
       const result = runAntiStubScanner("SECTION_END_TEST in code", tmpDir);
       expect(result.passed).toBe(false);
-      expect(
-        result.hardViolations.some((v) => v.message.includes("Section end test")),
-      ).toBe(true);
+      expect(result.hardViolations.some((v) => v.message.includes("Section end test"))).toBe(true);
     });
 
     it("loads multiple custom patterns", () => {

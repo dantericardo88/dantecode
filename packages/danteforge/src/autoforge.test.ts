@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildFailureContext,
-  runAutoforgeIAL,
-  type AutoforgeContext,
-} from "./autoforge.js";
+import { buildFailureContext, runAutoforgeIAL, type AutoforgeContext } from "./autoforge.js";
 import { formatLessonsForPrompt } from "./lessons.js";
 import type {
   PDSEScore,
@@ -401,13 +397,7 @@ export function compute(x: number): number {
         maxIterations: 2,
       };
 
-      const result = await runAutoforgeIAL(
-        stubbedCode,
-        baseContext,
-        config,
-        router,
-        "/tmp",
-      );
+      const result = await runAutoforgeIAL(stubbedCode, baseContext, config, router, "/tmp");
 
       expect(result.iterations).toBeGreaterThanOrEqual(1);
       expect(result.iterationHistory.length).toBeGreaterThanOrEqual(1);
@@ -448,13 +438,7 @@ export function connect(): string {
         abortOnSecurityViolation: true,
       };
 
-      const result = await runAutoforgeIAL(
-        codeWithSecret,
-        baseContext,
-        config,
-        router,
-        "/tmp",
-      );
+      const result = await runAutoforgeIAL(codeWithSecret, baseContext, config, router, "/tmp");
 
       expect(result.succeeded).toBe(false);
       expect(result.terminationReason).toBe("constitution_violation");

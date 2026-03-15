@@ -115,9 +115,7 @@ describe("providers", () => {
 
     it("falls back to OPENAI_API_KEY env var", () => {
       process.env["OPENAI_API_KEY"] = "sk-oai-env";
-      const model = buildOpenAIProvider(
-        makeConfig({ provider: "openai", modelId: "gpt-4.1" }),
-      );
+      const model = buildOpenAIProvider(makeConfig({ provider: "openai", modelId: "gpt-4.1" }));
       expect(model).toBe(mockOpenAIModel);
       expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "sk-oai-env" });
     });
@@ -162,9 +160,9 @@ describe("providers", () => {
   describe("buildGrokProvider", () => {
     it("throws when no API key is available", () => {
       delete process.env["GROK_API_KEY"];
-      expect(() =>
-        buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" })),
-      ).toThrow("Grok API key not found");
+      expect(() => buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }))).toThrow(
+        "Grok API key not found",
+      );
     });
 
     it("uses config.apiKey when provided", () => {
@@ -265,9 +263,7 @@ describe("providers", () => {
 
     it("returns the model from the factory", () => {
       delete process.env["OLLAMA_BASE_URL"];
-      const model = buildOllamaProvider(
-        makeConfig({ provider: "ollama", modelId: "llama3" }),
-      );
+      const model = buildOllamaProvider(makeConfig({ provider: "ollama", modelId: "llama3" }));
       expect(model).toBe(mockOpenAIModel);
       expect(mockOpenAIFactory).toHaveBeenCalledWith("llama3");
     });

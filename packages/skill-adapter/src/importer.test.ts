@@ -40,11 +40,7 @@ vi.mock("./wrap.js", async (importOriginal) => {
 import { importSkills, type ImportOptions } from "./importer.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
-import {
-  appendAuditEvent,
-  readOrInitializeState,
-  updateStateYaml,
-} from "@dantecode/core";
+import { appendAuditEvent, readOrInitializeState, updateStateYaml } from "@dantecode/core";
 import {
   scanClaudeSkills,
   parseClaudeSkill,
