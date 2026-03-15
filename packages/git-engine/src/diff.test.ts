@@ -1,5 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { parseDiffHunks } from "./diff.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { DiffHunk } from "@dantecode/config-types";
+
+// ---------------------------------------------------------------------------
+// Mock child_process and fs for getDiff/getStagedDiff/applyDiff tests
+// ---------------------------------------------------------------------------
+
+vi.mock("node:child_process", () => ({
+  execSync: vi.fn(),
+}));
+
+vi.mock("node:fs", () => ({
+  writeFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
+}));
+
+import { parseDiffHunks, getDiff, getStagedDiff, applyDiff } from "./diff.js";
+import { execSync } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+
+// ---------------------------------------------------------------------------
+// parseDiffHunks (pure string parser — no mocks needed)
+// ---------------------------------------------------------------------------
 
 describe("diff parser", () => {
   describe("parseDiffHunks", () => {
@@ -139,6 +160,212 @@ diff --git a/src/b.ts b/src/b.ts
       expect(hunks[0]?.oldLines).toBe(50);
       expect(hunks[0]?.newStart).toBe(100);
       expect(hunks[0]?.newLines).toBe(55);
+    });
+
+    it("flushes hunk when 'diff ' line appears mid-hunk (combined diff)", () => {
+      const diff = `diff --git a/src/a.ts b/src/a.ts
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,2 +1,3 @@
+ line1
++added
+diff src/b.ts
+@@ -1,2 +1,2 @@
+-old
++new`;
+      const hunks = parseDiffHunks(diff);
+      // First hunk should be flushed when "diff src/b.ts" is encountered
+      expect(hunks.length).toBeGreaterThanOrEqual(1);
+      expect(hunks[0]?.file).toBe("src/a.ts");
+      expect(hunks[0]?.content).toContain("+added");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDiff / getStagedDiff (mocked execSync)
+  // -------------------------------------------------------------------------
+
+  describe("getDiff", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("calls git diff without ref", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("diff output");
+      const result = getDiff("/project");
+      expect(result).toBe("diff output");
+      expect(execSync).toHaveBeenCalledWith(
+        "git diff",
+        expect.objectContaining({ cwd: "/project" }),
+      );
+    });
+
+    it("calls git diff with ref when provided", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("ref diff output");
+      const result = getDiff("/project", "HEAD~2");
+      expect(result).toBe("ref diff output");
+      expect(execSync).toHaveBeenCalledWith(
+        'git diff "HEAD~2"',
+        expect.objectContaining({ cwd: "/project" }),
+      );
+    });
+
+    it("treats exit code 1 with stdout as success (differences found)", () => {
+      const exitOneError = Object.assign(new Error("exit 1"), {
+        status: 1,
+        stdout: "diff --git a/file.ts b/file.ts\n",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw exitOneError;
+      });
+      const result = getDiff("/project");
+      expect(result).toBe("diff --git a/file.ts b/file.ts\n");
+    });
+
+    it("throws on real git errors", () => {
+      const realError = Object.assign(new Error("git error"), {
+        status: 128,
+        stderr: "fatal: not a git repository",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw realError;
+      });
+      expect(() => getDiff("/project")).toThrow("git diff: fatal: not a git repository");
+    });
+
+    it("uses error message when stderr is empty", () => {
+      const err = Object.assign(new Error("some error"), {
+        status: 2,
+        stderr: "",
+        message: "some error",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw err;
+      });
+      expect(() => getDiff("/project")).toThrow("git diff: some error");
+    });
+
+    it("uses 'Unknown git error' when no stderr or message", () => {
+      const err = Object.assign(new Error(""), { status: 2, stderr: "" });
+      err.message = "";
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw err;
+      });
+      expect(() => getDiff("/project")).toThrow("Unknown git error");
+    });
+  });
+
+  describe("getStagedDiff", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("calls git diff --cached", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("staged diff");
+      const result = getStagedDiff("/project");
+      expect(result).toBe("staged diff");
+      expect(execSync).toHaveBeenCalledWith(
+        "git diff --cached",
+        expect.objectContaining({ cwd: "/project" }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // applyDiff (mocked execSync, writeFileSync, unlinkSync)
+  // -------------------------------------------------------------------------
+
+  describe("applyDiff", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    const testHunk: DiffHunk = {
+      file: "src/test.ts",
+      oldStart: 1,
+      oldLines: 3,
+      newStart: 1,
+      newLines: 4,
+      content: "@@ -1,3 +1,4 @@\n line1\n+added\n line2\n line3",
+    };
+
+    it("writes patch to temp file and runs git apply", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+
+      applyDiff(testHunk, "/project");
+
+      expect(writeFileSync).toHaveBeenCalledTimes(1);
+      const [tmpPath, content] = (writeFileSync as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      expect(tmpPath).toContain("dantecode-patch-");
+      expect(tmpPath).toContain(".patch");
+      expect(content).toContain("--- a/src/test.ts");
+      expect(content).toContain("+++ b/src/test.ts");
+      expect(content).toContain("@@ -1,3 +1,4 @@");
+
+      expect(execSync).toHaveBeenCalledWith(
+        expect.stringContaining("git apply --allow-empty"),
+        expect.objectContaining({ cwd: "/project" }),
+      );
+    });
+
+    it("ensures patch ends with newline", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+      applyDiff(testHunk, "/project");
+
+      const [, content] = (writeFileSync as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      expect(content.endsWith("\n")).toBe(true);
+    });
+
+    it("cleans up temp file after success", () => {
+      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+      applyDiff(testHunk, "/project");
+
+      expect(unlinkSync).toHaveBeenCalledTimes(1);
+    });
+
+    it("throws on git apply error with stderr", () => {
+      const err = Object.assign(new Error("apply failed"), {
+        stderr: "error: patch does not apply",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw err;
+      });
+
+      expect(() => applyDiff(testHunk, "/project")).toThrow(
+        "git apply: error: patch does not apply",
+      );
+    });
+
+    it("cleans up temp file even after error", () => {
+      const err = Object.assign(new Error("apply failed"), {
+        stderr: "error",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw err;
+      });
+
+      try {
+        applyDiff(testHunk, "/project");
+      } catch {
+        // expected
+      }
+
+      expect(unlinkSync).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates git error even when cleanup fails", () => {
+      const applyError = Object.assign(new Error("apply failed"), {
+        stderr: "patch error",
+      });
+      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw applyError;
+      });
+      (unlinkSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        throw new Error("cleanup failed");
+      });
+
+      // The git apply error should propagate, not the cleanup error
+      expect(() => applyDiff(testHunk, "/project")).toThrow("git apply: patch error");
     });
   });
 });
