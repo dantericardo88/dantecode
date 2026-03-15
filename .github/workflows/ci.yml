@@ -1,0 +1,103 @@
+name: CI
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run typecheck
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run lint
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run test
+
+  anti-stub-self-check:
+    runs-on: ubuntu-24.04
+    needs: [typecheck, lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bun run build
+      - name: Run anti-stub scanner on own source
+        run: |
+          node -e "
+          const { execSync } = require('child_process');
+          const { readdirSync, readFileSync, statSync } = require('fs');
+          const { join } = require('path');
+
+          const STUB_PATTERNS = [
+            /\bTODO\b/i,
+            /\bFIXME\b/i,
+            /\bHACK\b(?!.*HACK marker)/i,
+            /raise NotImplementedError/i,
+            /throw new Error\(['\"]not implemented['\"]?\)/i,
+            /\bas\s+any\b/,
+            /@ts-ignore/,
+            /@ts-nocheck/,
+            /\bplaceholder\b/i,
+          ];
+
+          function scanDir(dir) {
+            let violations = 0;
+            const entries = readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const fullPath = join(dir, entry.name);
+              if (entry.isDirectory()) {
+                if (['node_modules', 'dist', '.git', '.turbo'].includes(entry.name)) continue;
+                violations += scanDir(fullPath);
+              } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+                const content = readFileSync(fullPath, 'utf-8');
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                  const line = lines[i];
+                  // Skip comments that are documenting the patterns themselves
+                  if (line.includes('STUB_PATTERNS') || line.includes('HARD_VIOLATION') || line.includes('SOFT_VIOLATION')) continue;
+                  if (line.includes('pattern:') || line.includes('RegExp')) continue;
+                  if (line.trim().startsWith('//') && line.includes('pattern')) continue;
+                  for (const pattern of STUB_PATTERNS) {
+                    if (pattern.test(line)) {
+                      console.error('STUB VIOLATION: ' + fullPath + ':' + (i + 1) + ': ' + line.trim());
+                      violations++;
+                    }
+                  }
+                }
+              }
+            }
+            return violations;
+          }
+
+          const violations = scanDir('packages');
+          if (violations > 0) {
+            console.error('\n' + violations + ' stub violation(s) found. Anti-Stub Doctrine violated.');
+            process.exit(1);
+          }
+          console.log('Anti-stub self-check passed. Zero stubs found.');
+          "

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+.dantecode/worktrees/
+.dantecode/audit.jsonl
+.dantecode/lessons.db
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+bun.lockb

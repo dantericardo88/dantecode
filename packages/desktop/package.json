@@ -1,0 +1,45 @@
+{
+  "name": "@dantecode/desktop",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsup src/main.ts --format cjs --dts",
+    "dev": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "echo 'desktop tests require electron test runner'",
+    "clean": "rm -rf dist",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "@dantecode/config-types": "*",
+    "@dantecode/core": "*",
+    "@dantecode/cli": "*"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  },
+  "build": {
+    "appId": "dev.dantecode.desktop",
+    "productName": "DanteCode",
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
+    }
+  }
+}

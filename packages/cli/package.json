@@ -1,0 +1,39 @@
+{
+  "name": "@dantecode/cli",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "dantecode": "./dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --banner.js '#!/usr/bin/env bun'",
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@dantecode/config-types": "*",
+    "@dantecode/core": "*",
+    "@dantecode/danteforge": "*",
+    "@dantecode/git-engine": "*",
+    "@dantecode/skill-adapter": "*",
+    "@dantecode/sandbox": "*",
+    "ink": "^5.1.0",
+    "react": "^18.3.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
