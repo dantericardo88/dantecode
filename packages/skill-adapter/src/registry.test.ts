@@ -231,4 +231,123 @@ describe("skill-adapter registry", () => {
       expect(result).toHaveProperty("overallPassed");
     });
   });
+
+  describe("edge cases — branch coverage", () => {
+    it("loadSkillRegistry skips non-directory entries in skills dir", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      await mkdir(skillsDir, { recursive: true });
+      // Create a regular file (not a directory) in skills dir
+      await writeFile(join(skillsDir, "not-a-directory.txt"), "just a file");
+      await createTestSkill(testDir, "valid-skill", testSkill);
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+      expect(registry[0]?.name).toBe("code-review");
+    });
+
+    it("loadSkillRegistry skips skills with YAML parsing errors", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const badDir = join(skillsDir, "bad-yaml");
+      await mkdir(badDir, { recursive: true });
+      // Invalid YAML frontmatter
+      await writeFile(join(badDir, "SKILL.dc.md"), "---\n: : invalid yaml [[[\n---\nContent");
+      await createTestSkill(testDir, "good-skill", testSkill);
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+    });
+
+    it("loadSkillRegistry skips frontmatter that parses to null", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const nullDir = join(skillsDir, "null-fm");
+      await mkdir(nullDir, { recursive: true });
+      // Frontmatter that parses to null in YAML
+      await writeFile(join(nullDir, "SKILL.dc.md"), "---\nnull\n---\nContent");
+      await createTestSkill(testDir, "good-skill", testSkill);
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+    });
+
+    it("loadSkillRegistry skips frontmatter that parses to array", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const arrayDir = join(skillsDir, "array-fm");
+      await mkdir(arrayDir, { recursive: true });
+      // Frontmatter that parses to an array
+      await writeFile(join(arrayDir, "SKILL.dc.md"), "---\n- item1\n- item2\n---\nContent");
+      await createTestSkill(testDir, "good-skill", testSkill);
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+    });
+
+    it("loadSkillRegistry handles missing frontmatter closing marker", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const noCloseDir = join(skillsDir, "no-close");
+      await mkdir(noCloseDir, { recursive: true });
+      // Frontmatter without closing ---
+      await writeFile(join(noCloseDir, "SKILL.dc.md"), "---\nname: orphan\ncontent here");
+      await createTestSkill(testDir, "good-skill", testSkill);
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+    });
+
+    it("removeSkill skips non-directory entries", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      await mkdir(skillsDir, { recursive: true });
+      await writeFile(join(skillsDir, "random-file.txt"), "not a skill");
+      const removed = await removeSkill("random-file", testDir);
+      expect(removed).toBe(false);
+    });
+
+    it("removeSkill skips entries with unreadable SKILL.dc.md", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const emptyDir = join(skillsDir, "no-skill-file");
+      await mkdir(emptyDir, { recursive: true });
+      // Directory exists but has no SKILL.dc.md
+      const removed = await removeSkill("no-skill-file", testDir);
+      expect(removed).toBe(false);
+    });
+
+    it("removeSkill skips entries with null frontmatter", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const noFmDir = join(skillsDir, "no-frontmatter");
+      await mkdir(noFmDir, { recursive: true });
+      await writeFile(join(noFmDir, "SKILL.dc.md"), "No frontmatter, just text content.");
+      const removed = await removeSkill("some-name", testDir);
+      expect(removed).toBe(false);
+    });
+
+    it("removeSkill matches by directory name when frontmatter name differs", async () => {
+      await createTestSkill(testDir, "dir-name-match", testSkill);
+      // testSkill has frontmatter name "code-review", but dir is "dir-name-match"
+      const removed = await removeSkill("dir-name-match", testDir);
+      expect(removed).toBe(true);
+    });
+
+    it("getSkill handles skills with no original instructions markers", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const plainDir = join(skillsDir, "plain-skill");
+      await mkdir(plainDir, { recursive: true });
+      await writeFile(
+        join(plainDir, "SKILL.dc.md"),
+        "---\nname: plain\ndescription: test\nimport_source: claude\nadapter_version: '1.0.0'\nwrapped_at: '2026-03-15T00:00:00Z'\n---\nPlain instructions here.",
+      );
+      const skill = await getSkill("plain", testDir);
+      expect(skill).not.toBeNull();
+      expect(skill?.instructions).toContain("Plain instructions here");
+    });
+
+    it("buildSkillFrontmatter uses defaults for missing fields", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const minDir = join(skillsDir, "minimal-skill");
+      await mkdir(minDir, { recursive: true });
+      // Frontmatter with only minimal fields — no tools, mode, hidden, color
+      await writeFile(
+        join(minDir, "SKILL.dc.md"),
+        "---\nimport_source: claude\nadapter_version: '1.0.0'\nwrapped_at: '2026-03-15T00:00:00Z'\n---\nMinimal.",
+      );
+      const skill = await getSkill("minimal-skill", testDir);
+      expect(skill).not.toBeNull();
+      // Name defaults to "unnamed" when not in frontmatter
+      expect(skill?.frontmatter.name).toBe("unnamed");
+      expect(skill?.frontmatter.description).toBe("");
+    });
+  });
 });

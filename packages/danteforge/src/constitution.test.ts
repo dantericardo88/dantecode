@@ -246,4 +246,68 @@ export async function loadConfig(path: string): Promise<Record<string, string>> 
       expect(DANGEROUS_OPERATION_PATTERNS.length).toBeGreaterThanOrEqual(10);
     });
   });
+
+  describe("context-aware filtering — credential branch coverage", () => {
+    it("skips type annotation lines without string literals", () => {
+      const code = `interface Config {\n  apiKey: string;\n  secret: string;\n}`;
+      const result = runConstitutionCheck(code);
+      // Type annotations should not be flagged as credential exposure
+      const credViolations = result.violations.filter((v) => v.type === "credential_exposure");
+      expect(credViolations).toHaveLength(0);
+    });
+
+    it("flags real credential even next to type annotation syntax", () => {
+      // This line has : string but also a real secret literal — should still flag
+      const code = `const config = { apiKey: "sk-1234567890abcdef1234567890abcdef1234567890" };`;
+      const result = runConstitutionCheck(code);
+      const credViolations = result.violations.filter((v) => v.type === "credential_exposure");
+      expect(credViolations.length).toBeGreaterThan(0);
+    });
+
+    it("skips comment lines describing environment variables", () => {
+      const code = `// Set your API_KEY as an environment variable\nconst key = process.env.API_KEY;`;
+      const result = runConstitutionCheck(code);
+      // Comment about API_KEY should not be flagged
+      const commentViolations = result.violations.filter(
+        (v) => v.type === "credential_exposure" && v.line === 1,
+      );
+      expect(commentViolations).toHaveLength(0);
+    });
+
+    it("skips process.env references without hardcoded secrets", () => {
+      const code = `const secret = process.env.SECRET_KEY;\nconst apiKey = process.env.API_KEY;`;
+      const result = runConstitutionCheck(code);
+      const credViolations = result.violations.filter((v) => v.type === "credential_exposure");
+      expect(credViolations).toHaveLength(0);
+    });
+  });
+
+  describe("context-aware filtering — background process branch coverage", () => {
+    it("flags nohup with & at end of line as background process", () => {
+      const code = `nohup long-running-process &`;
+      const result = runConstitutionCheck(code);
+      const bgViolations = result.violations.filter((v) => v.type === "background_process");
+      expect(bgViolations.length).toBeGreaterThan(0);
+    });
+
+    it("skips logical AND (&&) as non-background process", () => {
+      const code = `const result = a && b;`;
+      const result = runConstitutionCheck(code);
+      const bgViolations = result.violations.filter((v) => v.type === "background_process");
+      expect(bgViolations).toHaveLength(0);
+    });
+
+    it("skips bitwise AND followed by word character", () => {
+      const code = `const mask = flags & permissions;`;
+      const result = runConstitutionCheck(code);
+      const bgViolations = result.violations.filter((v) => v.type === "background_process");
+      expect(bgViolations).toHaveLength(0);
+    });
+
+    it("handles JSDoc comment lines without false positives", () => {
+      const code = ` * This is a JSDoc comment line`;
+      const result = runConstitutionCheck(code);
+      expect(result.passed).toBe(true);
+    });
+  });
 });

@@ -1,0 +1,133 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        default: "false"
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: npx turbo typecheck
+
+      - name: Lint
+        run: npx turbo lint
+
+      - name: Format check
+        run: npx prettier --check .
+
+      - name: Test
+        run: npx vitest run
+
+  publish-npm:
+    name: Publish to npm
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build all packages
+        run: npx turbo build
+
+      - name: Publish @dantecode/config-types
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/config-types --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/core
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/core --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/danteforge
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/danteforge --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/git-engine
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/git-engine --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/skill-adapter
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/skill-adapter --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/sandbox
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/sandbox --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @dantecode/cli
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: npm publish --workspace packages/cli --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-vscode:
+    name: Publish VS Code Extension
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build extension
+        run: cd packages/vscode && bun run build
+
+      - name: Package extension
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: cd packages/vscode && npx @vscode/vsce package
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ github.event.inputs.dry-run != 'true' }}
+        run: cd packages/vscode && npx @vscode/vsce publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
