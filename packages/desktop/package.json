@@ -18,6 +18,9 @@
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    "dist"
+  ],
   "main": "dist/main.cjs",
   "scripts": {
     "build": "tsup src/main.ts --format cjs --dts",

@@ -22,10 +22,9 @@
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\"",
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx}\"",
     "test:coverage": "vitest run --coverage",
-    "dantecode": "bun run packages/cli/src/index.ts"
+    "dantecode": "node packages/cli/dist/index.js"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
     "@vitest/coverage-v8": "^3.2.4",
@@ -37,7 +36,7 @@
     "vitest": "^3.0.0"
   },
   "engines": {
-    "bun": ">=1.2.0"
+    "node": ">=18"
   },
-  "packageManager": "bun@1.2.0"
+  "packageManager": "npm@11.8.0"
 }

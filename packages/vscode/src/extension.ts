@@ -17,16 +17,16 @@ import {
 } from "@dantecode/danteforge";
 import { importSkills } from "@dantecode/skill-adapter";
 
-import { ChatSidebarProvider } from "./sidebar-provider";
-import { AuditPanelProvider } from "./audit-panel-provider";
-import { DanteCodeCompletionProvider } from "./inline-completion";
+import { ChatSidebarProvider } from "./sidebar-provider.js";
+import { AuditPanelProvider } from "./audit-panel-provider.js";
+import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import {
   createStatusBar,
   updateStatusBar,
   updateSandboxStatus,
   type StatusBarState,
-} from "./status-bar";
-import { PDSEDiagnosticProvider } from "./diagnostics";
+} from "./status-bar.js";
+import { PDSEDiagnosticProvider } from "./diagnostics.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 

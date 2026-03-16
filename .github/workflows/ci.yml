@@ -10,42 +10,46 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
-      - run: bun run format:check
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run format:check
 
   typecheck:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
-      - run: bun run typecheck
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
 
   lint:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
-      - run: bun run lint
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
 
   test:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
       - name: Run tests with coverage
-        run: bunx vitest run --coverage
+        run: npx vitest run --coverage
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
@@ -58,11 +62,12 @@ jobs:
     needs: [format, typecheck, lint, test]
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: latest
-      - run: bun install
-      - run: bun run build
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
       - name: Run anti-stub scanner on own source
         run: |
           node -e "

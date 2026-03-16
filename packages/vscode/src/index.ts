@@ -5,4 +5,4 @@
 // (via dist/extension.js) and as a library import.
 // ============================================================================
 
-export { activate, deactivate } from "./extension";
+export { activate, deactivate } from "./extension.js";

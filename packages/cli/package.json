@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "dev": "bun run src/index.ts",
+    "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run",
