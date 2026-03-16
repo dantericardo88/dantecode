@@ -171,7 +171,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     private readonly globalState: vscode.Memento,
   ) {
     const config = vscode.workspace.getConfiguration("dantecode");
-    this.currentModel = config.get<string>("defaultModel", "grok/grok-4.2");
+    this.currentModel = config.get<string>("defaultModel", "grok/grok-4-1-fast-non-reasoning");
     this.sessionId = `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.currentChatId = this.generateChatId();
 
@@ -342,9 +342,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       supportsToolCalls: true,
     };
 
+    // Build auto-fallback chain for Grok models
+    const fallbackModels: ModelConfig[] = [];
+    if (provider === "grok" && apiKey) {
+      const grokFallbacks = ["grok-3", "grok-3-mini"];
+      for (const fbId of grokFallbacks) {
+        if (fbId !== modelId) {
+          fallbackModels.push({ ...modelConfig, modelId: fbId });
+        }
+      }
+    }
+
     const routerConfig: ModelRouterConfig = {
       default: modelConfig,
-      fallback: [],
+      fallback: fallbackModels,
       overrides: {},
     };
 
@@ -594,10 +605,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         if (fullResponse.trim().length === 0) {
-          const hint = provider === "ollama"
-            ? `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`
-            : `The model "${modelId}" returned an empty response.`;
-          this.postMessage({ type: "error", payload: { message: `No response from ${this.currentModel}. ${hint}` } });
+          let hint: string;
+          if (provider === "ollama") {
+            hint = `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`;
+          } else if (provider === "grok") {
+            hint = `The model "${modelId}" returned an empty response. Check that this model ID exists at docs.x.ai/developers/models. Try switching to "Grok 4.1 Fast" or "Grok 3" in the model selector.`;
+          } else {
+            hint = `The model "${modelId}" returned an empty response. The model ID may be invalid or your API key may lack access.`;
+          }
+          this.postMessage({ type: "error", payload: { message: `No response from ${this.currentModel}.\n${hint}` } });
           break;
         }
 
@@ -2321,8 +2337,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     <label for="model-select">Model:</label>
     <select class="model-select" id="model-select">
       <optgroup label="xAI / Grok">
-        <option value="grok/grok-4.2">Grok 4.2</option>
-        <option value="grok/grok-4.2-fast">Grok 4.2 Fast</option>
+        <option value="grok/grok-4.20-beta-0309-non-reasoning">Grok 4.20 Beta</option>
+        <option value="grok/grok-4.20-beta-0309-reasoning">Grok 4.20 (Reasoning)</option>
+        <option value="grok/grok-4.20-multi-agent-beta-0309">Grok 4.20 Multi-Agent</option>
+        <option value="grok/grok-4-0709">Grok 4</option>
+        <option value="grok/grok-4-1-fast-reasoning">Grok 4.1 Fast (Reasoning)</option>
+        <option value="grok/grok-4-1-fast-non-reasoning" selected>Grok 4.1 Fast</option>
+        <option value="grok/grok-4-fast-reasoning">Grok 4 Fast (Reasoning)</option>
+        <option value="grok/grok-4-fast-non-reasoning">Grok 4 Fast</option>
+        <option value="grok/grok-code-fast-1">Grok Code Fast</option>
+        <option value="grok/grok-3">Grok 3</option>
+        <option value="grok/grok-3-mini">Grok 3 Mini</option>
       </optgroup>
       <optgroup label="Anthropic">
         <option value="anthropic/claude-opus-4-6">Claude Opus 4.6</option>
@@ -2330,7 +2355,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5</option>
       </optgroup>
       <optgroup label="OpenAI">
-        <option value="openai/gpt-5.4">GPT-5.4</option>
         <option value="openai/gpt-4.1">GPT-4.1</option>
         <option value="openai/o3-pro">o3-pro</option>
       </optgroup>

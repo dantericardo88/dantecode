@@ -16,15 +16,23 @@ export interface ModelEntry {
 
 /** The canonical list of frontier models DanteCode supports. */
 export const FRONTIER_MODELS: ModelEntry[] = [
-  // xAI / Grok
-  { id: "grok/grok-4.2", label: "Grok 4.2", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4.2-fast", label: "Grok 4.2 Fast", provider: "grok", envVar: "XAI_API_KEY" },
+  // xAI / Grok (verified model IDs from docs.x.ai/developers/models)
+  { id: "grok/grok-4.20-beta-0309-non-reasoning", label: "Grok 4.20 Beta", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4.20-beta-0309-reasoning", label: "Grok 4.20 Beta (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4.20-multi-agent-beta-0309", label: "Grok 4.20 Multi-Agent", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4-0709", label: "Grok 4", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4-1-fast-reasoning", label: "Grok 4.1 Fast (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4-1-fast-non-reasoning", label: "Grok 4.1 Fast", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4-fast-reasoning", label: "Grok 4 Fast (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-4-fast-non-reasoning", label: "Grok 4 Fast", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-code-fast-1", label: "Grok Code Fast", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-3", label: "Grok 3", provider: "grok", envVar: "XAI_API_KEY" },
+  { id: "grok/grok-3-mini", label: "Grok 3 Mini", provider: "grok", envVar: "XAI_API_KEY" },
   // Anthropic
   { id: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
   { id: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
   { id: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
   // OpenAI
-  { id: "openai/gpt-5.4", label: "GPT-5.4", provider: "openai", envVar: "OPENAI_API_KEY" },
   { id: "openai/gpt-4.1", label: "GPT-4.1", provider: "openai", envVar: "OPENAI_API_KEY" },
   { id: "openai/o3-pro", label: "o3-pro", provider: "openai", envVar: "OPENAI_API_KEY" },
   // Google

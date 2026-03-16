@@ -153,7 +153,7 @@
       "properties": {
         "dantecode.defaultModel": {
           "type": "string",
-          "default": "grok/grok-4.2",
+          "default": "grok/grok-4-1-fast-non-reasoning",
           "description": "Default model for DanteCode. Format: provider/model-id"
         },
         "dantecode.pdseThreshold": {
