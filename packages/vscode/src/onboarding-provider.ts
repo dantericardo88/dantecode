@@ -30,10 +30,10 @@ export const FRONTIER_MODELS: ModelEntry[] = [
   // Google
   { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "google", envVar: "GOOGLE_API_KEY" },
   { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "google", envVar: "GOOGLE_API_KEY" },
-  // Local — Ollama
-  { id: "ollama/llama4", label: "Llama 4 (local)", provider: "ollama", envVar: "" },
-  { id: "ollama/codellama", label: "CodeLlama (local)", provider: "ollama", envVar: "" },
-  { id: "ollama/deepseek-r2", label: "DeepSeek-R2 (local)", provider: "ollama", envVar: "" },
+  // Local — Ollama (auto-discovered at runtime, these are common defaults)
+  { id: "ollama/llama3.1:8b", label: "Llama 3.1 8B (local)", provider: "ollama", envVar: "" },
+  { id: "ollama/qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B (local)", provider: "ollama", envVar: "" },
+  { id: "ollama/mistral:7b", label: "Mistral 7B (local)", provider: "ollama", envVar: "" },
 ];
 
 /** Unique provider groups that need API keys. */
@@ -158,7 +158,7 @@ export class OnboardingProvider {
 
   /** Generate the onboarding HTML. */
   private getHtml(
-    webview: vscode.Webview,
+    _webview: vscode.Webview,
     existingKeys: Record<string, string>,
     ollamaStatus: OllamaStatus,
   ): string {
@@ -184,11 +184,6 @@ export class OnboardingProvider {
         </div>
         <span class="env-hint">env: ${p.envVar}</span>
       </div>`,
-    ).join("\n");
-
-    const modelOptions = FRONTIER_MODELS.map(
-      (m) =>
-        `<option value="${m.id}"${m.id === "grok/grok-4.2" ? " selected" : ""}>${m.label}</option>`,
     ).join("\n");
 
     const ollamaSection = ollamaStatus.running

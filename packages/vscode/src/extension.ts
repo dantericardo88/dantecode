@@ -58,7 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const extensionUri = context.extensionUri;
 
   // ── Sidebar providers ──
-  chatSidebarProvider = new ChatSidebarProvider(extensionUri);
+  chatSidebarProvider = new ChatSidebarProvider(extensionUri, context.secrets, context.globalState);
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatSidebarProvider.viewType,
     chatSidebarProvider,

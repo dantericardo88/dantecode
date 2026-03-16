@@ -4,9 +4,9 @@ dist/
 *.tsbuildinfo
 .env
 .env.local
-.dantecode/worktrees/
-.dantecode/audit.jsonl
-.dantecode/lessons.db
+.env.*
+.dantecode/
+*.vsix
 coverage/
 *.log
 .DS_Store

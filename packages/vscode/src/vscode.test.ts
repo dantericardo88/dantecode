@@ -808,31 +808,45 @@ describe("VS Code Extension", () => {
   // -------------------------------------------------------------------------
 
   describe("ChatSidebarProvider", () => {
+    const mockSecrets = {
+      get: vi.fn().mockResolvedValue(undefined),
+      store: vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+      onDidChange: vi.fn(),
+    } as unknown as vscode.SecretStorage;
+
+    const mockGlobalState = {
+      get: vi.fn().mockReturnValue([]),
+      update: vi.fn().mockResolvedValue(undefined),
+      keys: vi.fn().mockReturnValue([]),
+      setKeysForSync: vi.fn(),
+    } as unknown as vscode.Memento;
+
     it("has correct viewType", () => {
       expect(ChatSidebarProvider.viewType).toBe("dantecode.chatView");
     });
 
     it("constructs without throwing", () => {
       const uri = vscode.Uri.file("/test");
-      expect(() => new ChatSidebarProvider(uri as unknown as vscode.Uri)).not.toThrow();
+      expect(() => new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState)).not.toThrow();
     });
 
     it("getCurrentModel returns default model from config", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri);
+      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
       // Default from mock: getConfiguration().get("defaultModel", "grok/grok-4.2") → "grok/grok-4.2"
       expect(provider.getCurrentModel()).toBe("grok/grok-4.2");
     });
 
     it("addFileToContext does not throw", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri);
+      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
       expect(() => provider.addFileToContext("/some/file.ts")).not.toThrow();
     });
 
     it("sendPDSEScore does not throw when view is not set", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri);
+      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
       const score: PDSEScore = {
         overall: 90,
         completeness: 90,
