@@ -54,7 +54,7 @@ interface ParsedArgs {
  * Handles flags, commands, and quoted prompt strings.
  */
 function parseArgs(argv: string[]): ParsedArgs {
-  // Skip the first two args (node/bun executable and script path)
+  // Skip the first two args (runtime executable and script path)
   const args = argv.slice(2);
 
   const result: ParsedArgs = {

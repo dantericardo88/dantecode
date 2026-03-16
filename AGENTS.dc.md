@@ -6,17 +6,17 @@
 
 Name: DanteCode
 Language: TypeScript
-Framework: Bun + Turborepo Monorepo
-Runtime: Bun v1.2+
+Framework: npm + Turborepo Monorepo
+Runtime: Node.js 20+
 
 ## Build Commands
 
-- Typecheck: `bun run typecheck`
-- Lint: `bun run lint`
-- Test: `bun run test`
-- Build: `bun run build`
-- Dev: `bun run dev`
-- Format: `bun run format`
+- Typecheck: `npm run typecheck`
+- Lint: `npm run lint`
+- Test: `npm test`
+- Build: `npm run build`
+- Dev: `npm run dev`
+- Format: `npm run format`
 
 ## Code Style
 
@@ -34,7 +34,7 @@ Runtime: Bun v1.2+
 - Monorepo with 9 packages in `packages/` directory
 - Dependency order: config-types → core → danteforge → git-engine → skill-adapter → sandbox → cli → vscode → desktop
 - `config-types` is the foundation — all interfaces and types live here
-- `core` contains model routing (Grok-first with Anthropic fallback), STATE.yaml management, and audit logging
+- `core` contains model routing (Grok default with Anthropic fallback), STATE.yaml management, and audit logging
 - `danteforge` is the "brain" — PDSE scoring, anti-stub scanning, autoforge IAL, GStack, lessons
 - `git-engine` handles auto-commits, worktrees, diffs, and repo-map generation
 - `skill-adapter` imports/wraps skills from Claude Code, Continue.dev, and OpenCode
@@ -60,7 +60,7 @@ Anti-Stub enforcement: Layer 1 (scanner) + Layer 2 (PDSE Clarity=0) + Layer 3 (G
 ## Do Not Touch
 
 - `Docs/` — original PRD documents (read-only reference)
-- `node_modules/` — managed by Bun
+- `node_modules/` — managed by npm
 - `.dantecode/worktrees/` — managed by git-engine
 - `.dantecode/audit.jsonl` — append-only audit log
 - `.dantecode/lessons.db` — managed by danteforge lessons system

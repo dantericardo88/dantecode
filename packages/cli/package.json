@@ -1,11 +1,11 @@
 {
   "name": "@dantecode/cli",
   "version": "1.0.0",
-  "description": "DanteCode CLI — interactive AI coding agent with model routing and DanteForge quality gates",
+  "description": "DanteCode CLI - portable skill runtime and coding agent with DanteForge verification",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dantecode/dantecode.git",
+    "url": "git+https://github.com/dantecode/dantecode.git",
     "directory": "packages/cli"
   },
   "keywords": [
@@ -23,7 +23,7 @@
   ],
   "type": "module",
   "bin": {
-    "dantecode": "./dist/index.js"
+    "dantecode": "dist/index.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -38,15 +38,15 @@
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.package.config.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@dantecode/config-types": "*",
-    "@dantecode/core": "*",
-    "@dantecode/danteforge": "*",
-    "@dantecode/git-engine": "*",
-    "@dantecode/skill-adapter": "*",
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0",
+    "@dantecode/danteforge": "1.0.0",
+    "@dantecode/git-engine": "1.0.0",
+    "@dantecode/skill-adapter": "1.0.0",
     "yaml": "^2.6.0"
   },
   "publishConfig": {

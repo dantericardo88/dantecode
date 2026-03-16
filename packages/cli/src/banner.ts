@@ -72,7 +72,7 @@ export function getBanner(
   const lines = [
     "",
     `${CYAN}${BOLD}+==============================================================+${RESET}`,
-    `${CYAN}${BOLD}|${RESET}  ${BOLD}DanteCode v${version}${RESET} ${DIM}-- Open-Source AI Coding Agent${RESET}              ${CYAN}${BOLD}|${RESET}`,
+    `${CYAN}${BOLD}|${RESET}  ${BOLD}DanteCode v${version}${RESET} ${DIM}-- Portable Skill Runtime${RESET}             ${CYAN}${BOLD}|${RESET}`,
     `${CYAN}${BOLD}|${RESET}  Powered by ${BOLD}DanteForge${RESET} ${DIM}+ PDSE + Autoforge IAL${RESET}              ${CYAN}${BOLD}|${RESET}`,
     `${CYAN}${BOLD}+==============================================================+${RESET}`,
     "",
@@ -101,7 +101,7 @@ export function getOneShotBanner(model: ModelConfig, version: string = "1.0.0"):
  */
 export function getHelpText(): string {
   return `
-${BOLD}DanteCode${RESET} - Open-Source AI Coding Agent
+${BOLD}DanteCode${RESET} - Portable Skill Runtime and Coding Agent
 
 ${BOLD}USAGE${RESET}
   dantecode                       Start interactive REPL

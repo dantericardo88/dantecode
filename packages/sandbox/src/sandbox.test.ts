@@ -26,6 +26,11 @@ import { SandboxManager } from "./container.js";
 import { execFile, spawn } from "node:child_process";
 import { appendAuditEvent } from "@dantecode/core";
 
+type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void;
+type DataListener = (chunk: Buffer) => void;
+type CloseListener = (exitCode: number) => void;
+type ErrorListener = (error: Error) => void;
+
 // ---------------------------------------------------------------------------
 // createDefaultSandboxSpec tests
 // ---------------------------------------------------------------------------
@@ -94,7 +99,7 @@ describe("sandbox", () => {
 
     it("returns true when docker info succeeds", async () => {
       (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-        (_cmd: string, _args: string[], _opts: unknown, callback: Function) => {
+        (_cmd: string, _args: string[], _opts: unknown, callback: ExecFileCallback) => {
           callback(null, "Docker version 24.0.0", "");
         },
       );
@@ -109,13 +114,13 @@ describe("sandbox", () => {
         "docker",
         ["info"],
         expect.objectContaining({ timeout: 10_000 }),
-        expect.any(Function),
+        expect.anything(),
       );
     });
 
     it("returns false when docker info fails", async () => {
       (execFile as unknown as ReturnType<typeof vi.fn>).mockImplementation(
-        (_cmd: string, _args: string[], _opts: unknown, callback: Function) => {
+        (_cmd: string, _args: string[], _opts: unknown, callback: ExecFileCallback) => {
           callback(new Error("docker not found"), "", "");
         },
       );
@@ -165,17 +170,17 @@ describe("sandbox", () => {
       // Auto-resolve after microtask queue flushes (so spawn listeners are registered)
       setTimeout(() => {
         const stdoutCb = mockStdout.on.mock.calls.find((c: unknown[]) => c[0] === "data")?.[1] as
-          | Function
+          | DataListener
           | undefined;
         if (stdoutCb && stdout) stdoutCb(Buffer.from(stdout));
 
         const stderrCb = mockStderr.on.mock.calls.find((c: unknown[]) => c[0] === "data")?.[1] as
-          | Function
+          | DataListener
           | undefined;
         if (stderrCb && stderr) stderrCb(Buffer.from(stderr));
 
         const closeCb = child.on.mock.calls.find((c: unknown[]) => c[0] === "close")?.[1] as
-          | Function
+          | CloseListener
           | undefined;
         if (closeCb) closeCb(exitCode);
       }, 0);
@@ -196,7 +201,7 @@ describe("sandbox", () => {
 
       setTimeout(() => {
         const errorCb = child.on.mock.calls.find((c: unknown[]) => c[0] === "error")?.[1] as
-          | Function
+          | ErrorListener
           | undefined;
         if (errorCb) errorCb(new Error(errorMsg));
       }, 0);

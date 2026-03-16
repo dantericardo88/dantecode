@@ -229,7 +229,7 @@ export async function writeStateYaml(projectRoot: string, state: DanteCodeState)
  * Creates a default STATE.yaml for a new project.
  *
  * Uses sensible defaults for all configuration sections. The default model
- * is set to Grok (grok-3) to align with DanteCode's xAI-first architecture.
+ * is set to Grok (grok-3) as DanteCode's default provider choice.
  *
  * If the `.dantecode/` directory does not exist, it is created automatically.
  *

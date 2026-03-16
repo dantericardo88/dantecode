@@ -1,110 +1,74 @@
-# PLAN.md — DanteCode Remaining Work
+# PLAN.md - DanteCode Public OSS v1 Ship Plan
 
-**Status:** Code-complete across 9 packages. Focus shifts to testing, hardening, and release.
-**Date:** 2026-03-15
+**Date:** 2026-03-16  
+**Target:** Public OSS v1
 
----
+## Ship target
 
-## Phase 1: Test Coverage (Current Priority)
+DanteCode ships first as a portable, model-agnostic skill runtime and coding agent with:
 
-### Goal: Achieve ≥80% unit test coverage across all packages
+- stable CLI
+- published npm libraries
+- preview VS Code extension
+- beta desktop shell
 
-| Package                 | Status                                | Tests | Priority |
-| ----------------------- | ------------------------------------- | ----: | -------- |
-| config-types            | ✅ No runtime code to test            |     0 | N/A      |
-| core/audit              | ✅ Covered                            |    12 | Done     |
-| core/state              | ✅ Covered                            |    14 | Done     |
-| core/model-router       | ✅ Covered                            |    10 | Done     |
-| danteforge/anti-stub    | ✅ Covered                            |    22 | Done     |
-| danteforge/pdse-scorer  | ✅ Covered                            |    14 | Done     |
-| danteforge/constitution | ✅ Covered                            |    28 | Done     |
-| danteforge/gstack       | ✅ Covered                            |    21 | Done     |
-| danteforge/autoforge    | ✅ Covered                            |    11 | Done     |
-| danteforge/lessons      | ✅ Covered                            |    17 | Done     |
-| git-engine/diff         | ✅ Covered                            |     9 | Done     |
-| git-engine/commit       | ✅ Covered                            |    15 | Done     |
-| git-engine/worktree     | ✅ Covered                            |    13 | Done     |
-| git-engine/repo-map     | ✅ Covered                            |    13 | Done     |
-| skill-adapter/wrap      | ✅ Covered                            |    22 | Done     |
-| skill-adapter/registry  | ✅ Covered                            |    22 | Done     |
-| sandbox/\*              | ❌ Needs tests (mock Docker)          |     0 | Low      |
-| cli/\*                  | ❌ Needs tests                        |     0 | Low      |
-| vscode/\*               | ❌ Needs tests (VS Code test harness) |     0 | Low      |
-| desktop/\*              | ❌ Needs tests                        |     0 | Low      |
+## Completed locally
 
-**Deliverables:**
+### 1. Repo truth and root gates
 
-- [x] core/state.test.ts — read/write/initialize/update with Zod validation (14 tests)
-- [x] core/model-router.test.ts — provider resolution, fallback, task overrides (10 tests)
-- [x] danteforge/autoforge.test.ts — IAL loop with mocked model + gstack (11 tests)
-- [x] danteforge/lessons.test.ts — SQLite record/query lifecycle (17 tests)
-- [x] git-engine/commit.test.ts — commit message building, status parsing (15 tests)
-- [x] git-engine/repo-map.test.ts — repo map generation and formatting (13 tests)
-- [x] skill-adapter/wrap.test.ts — adapter preamble/postamble injection (22 tests)
-- [x] skill-adapter/registry.test.ts — skill loading and validation (22 tests)
-- [x] git-engine/worktree.test.ts — worktree create/remove/merge/detect (13 tests)
+- npm-first workspace flow is the canonical toolchain
+- root `build`, `typecheck`, `lint`, and `test` paths are green
+- package-local Vitest execution works
+- Windows GStack execution now handles shell built-ins correctly
+- root-only stale config references have been removed from runtime and docs
 
----
+### 2. Public positioning
 
-## Phase 2: CI/CD Hardening
+- product story now centers on portability and skill interoperability
+- `.dantecode/STATE.yaml` is the canonical config path
+- Grok is framed as the default provider, not the product boundary
+- DanteForge is framed as the verification and trust layer
 
-### Goal: Green CI pipeline with all gates passing
+### 3. Release/install alignment
 
-**Deliverables:**
+- npm is the official install path
+- publish workflow validates the repaired root gates
+- install script now aligns with npm package distribution instead of missing binaries
 
-- [ ] Verify CI workflow runs correctly on GitHub Actions
-- [ ] Add format check to CI (`prettier --check`)
-- [x] Add ESLint configuration (typescript-eslint flat config, all packages updated)
-- [ ] Add code coverage reporting (vitest --coverage)
-- [ ] Verify anti-stub self-check job works against real codebase
-- [ ] Add dependabot or renovate for dependency updates
+## Remaining external work
 
----
+### 4. GitHub proof
 
-## Phase 3: Integration Testing
+- set real git identity
+- create or confirm the public GitHub repo
+- push and verify the first green Actions run
 
-### Goal: End-to-end validation of the DanteForge pipeline
+### 5. Registry and marketplace credentials
 
-**Deliverables:**
+- add `NPM_TOKEN`
+- add `VSCE_PAT`
+- run publish workflow dry-run in GitHub Actions
 
-- [ ] Integration test: generate code → anti-stub scan → PDSE score → constitution check
-- [ ] Integration test: autoforge IAL loop with real GStack commands
-- [ ] Integration test: skill import from Claude fixture → adapter wrapping → validation
-- [ ] Integration test: git worktree create → task → merge → cleanup
+### 6. Real-world acceptance
 
----
+- run `npm run release:doctor` until no blockers remain
+- run `npm run smoke:provider -- --require-provider` with a real API key
+- optionally run one real third-party Claude-style skill import beyond the local fixture smoke test
+- record the acceptance results in the repo
 
-## Phase 4: Documentation & Distribution
+## Release criteria
 
-### Goal: One-command install, published packages
+OSS v1 is ready when:
 
-**Deliverables:**
+1. Local root gates are green.
+2. GitHub Actions is green on first push.
+3. npm publish dry-run succeeds.
+4. One live provider route succeeds.
+5. The scripted skill-import smoke test is green, plus one real-world import if desired.
 
-- [ ] npm publish workflow for @dantecode/\* packages
-- [ ] VS Code Marketplace extension publishing
-- [ ] Install script (`curl -fsSL https://get.dantecode.dev | bash`)
-- [ ] API documentation generation (TypeDoc or similar)
-- [ ] CHANGELOG.md
+## Non-goals for this release
 
----
-
-## Phase 5: Benchmarking & Polish
-
-### Goal: Competitive validation and UX refinement
-
-**Deliverables:**
-
-- [ ] Benchmark suite: stub rate comparison vs. raw model output
-- [ ] Performance profiling: PDSE scoring latency, model routing latency
-- [ ] CLI UX polish: colored output, progress indicators, error messages
-- [ ] VS Code extension UX: sidebar polish, keybindings, settings UI
-
----
-
-## Critical Path
-
-```
-Phase 1 (Tests) → Phase 2 (CI) → Phase 3 (Integration) → Phase 4 (Distribution) → Phase 5 (Polish)
-```
-
-Phases 1 and 2 can partially overlap. Phases 4 and 5 can run in parallel.
+- full desktop GA
+- full VS Code GA
+- binary installer distribution
+- every surface held to the same coverage threshold as the core runtime

@@ -6,7 +6,7 @@ DanteCode incorporates code, design patterns, and architectural concepts from th
 
 - **License**: MIT
 - **URL**: https://github.com/anomalyco/opencode
-- **What we use**: CLI skeleton, Ink TUI patterns, Bun runtime approach, AI SDK model routing, MCP client patterns, agent definition format
+- **What we use**: CLI skeleton, Ink TUI patterns, AI SDK model routing, MCP client patterns, agent definition format
 
 ## continue (continuedev)
 
@@ -61,14 +61,6 @@ DanteCode incorporates code, design patterns, and architectural concepts from th
 - **License**: MIT
 - **URL**: https://github.com/vercel/turborepo
 - **What we use**: Monorepo build orchestration
-
-## Bun
-
-- **License**: MIT
-- **URL**: https://github.com/oven-sh/bun
-- **What we use**: Runtime and package manager
-
----
 
 ## System Prompt Attribution
 

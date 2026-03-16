@@ -1,116 +1,106 @@
 # Contributing to DanteCode
 
-Thank you for your interest in contributing to DanteCode! This guide covers the development workflow, code standards, and submission process.
+Thanks for helping build DanteCode.
+
+This repo is shipping toward a Public OSS v1 where the CLI is the primary surface, the VS Code extension is preview, and the desktop app is beta. Contributions should keep that boundary honest.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) v1.2+
-- [Node.js](https://nodejs.org/) v20+
-- [Git](https://git-scm.com/)
+- Node.js 20+
+- npm 11+
+- Git
 
-## Getting Started
+## Local setup
 
 ```bash
 git clone https://github.com/dantecode/dantecode.git
 cd dantecode
-bun install
-bun run build
-bun run test
+npm ci
+npm run release:doctor
+npm run build
+npm test
+npm run release:check
 ```
 
-## Development Workflow
+## Quality gates
 
-### Branch Strategy
+Every contribution should pass the local root gates before review:
 
-1. Fork the repository and create a feature branch from `main`:
-   ```bash
-   git checkout -b feat/your-feature main
-   ```
-2. Make your changes following the code standards below.
-3. Push and open a pull request against `main`.
+| Gate | Command | Expectation |
+| --- | --- | --- |
+| Build | `npm run build` | All workspaces build |
+| Typecheck | `npm run typecheck` | Zero type errors |
+| Lint | `npm run lint` | Zero lint violations |
+| Format | `npm run format:check` | No formatting drift |
+| Tests | `npm test` | All suites pass |
+| Coverage | `npm run test:coverage` | Stable runtime packages stay above gate |
 
-### Code Standards
+Coverage note:
 
-DanteCode enforces strict quality gates. All contributions must pass:
+- The strict coverage gate applies to the stable runtime packages: `core`, `danteforge`, `git-engine`, and `skill-adapter`.
+- CLI, VS Code, desktop, and sandbox are still exercised in `npm test`, but preview/beta surfaces do not currently set the release coverage threshold.
+- `npm run release:check` is the fastest way to run the full ship-readiness sweep, including install, skill-import, and publish smoke checks.
+- `npm run release:doctor` is the fastest way to see the remaining git, auth, provider, and publish blockers before a public push.
 
-| Gate       | Command                 | Requirement                                     |
-| ---------- | ----------------------- | ----------------------------------------------- |
-| TypeScript | `bun run typecheck`     | Zero type errors across all 9 packages          |
-| ESLint     | `bun run lint`          | Zero violations (typescript-eslint flat config) |
-| Prettier   | `bun run format:check`  | Zero formatting violations                      |
-| Tests      | `bun run test`          | All tests pass                                  |
-| Coverage   | `bun run test:coverage` | No coverage regressions                         |
-| Anti-Stub  | CI self-check           | No TODO, FIXME, placeholder, or stub patterns   |
+## Workflow
 
-### Running Checks Locally
+1. Branch from `main`.
+2. Make the smallest coherent change.
+3. Update docs when behavior, install steps, or product positioning changes.
+4. Run the root gates.
+5. Open a focused pull request with a clear why.
 
-```bash
-# Run all gates in sequence
-bun run typecheck && bun run lint && bun run format:check && bun run test
+## Repo shape
 
-# Auto-format code
-bun run format
-
-# Run tests with coverage
-bun run test:coverage
-```
-
-## Project Structure
-
-```
+```text
 packages/
-  config-types/   # Shared TypeScript interfaces
-  core/           # Model router, audit logger, state management
-  danteforge/     # Anti-stub, PDSE, constitution, autoforge
-  git-engine/     # Diff parsing, commits, worktrees, repo-map
-  skill-adapter/  # Skill import, registry, wrapping, parsers
-  sandbox/        # Docker sandbox with local fallback
-  cli/            # Interactive REPL and one-shot CLI
-  vscode/         # VS Code extension
-  desktop/        # Electron desktop app
+  config-types/
+  core/
+  danteforge/
+  git-engine/
+  skill-adapter/
+  sandbox/
+  cli/
+  vscode/
+  desktop/
 ```
 
-### Adding a New Package
+## Guidance
 
-1. Create `packages/your-package/` with `package.json`, `tsconfig.json`, and `src/index.ts`.
-2. Follow the naming convention: `@dantecode/your-package`.
-3. Add the package to `turbo.json` pipeline if it has custom build steps.
-4. Add tests in `src/*.test.ts` — the root vitest config auto-discovers them.
+- Preserve the portability-first product direction. DanteCode is not just another agent shell.
+- Prefer capability-oriented designs over vendor-specific assumptions.
+- Keep `.dantecode/STATE.yaml` as the canonical project config path for OSS v1.
+- Do not reintroduce Bun-first instructions into public docs or workflows.
+- Treat skill import as clean-room translation and validation work, not prompt harvesting.
 
-## Writing Tests
+## Tests
 
-- Tests live alongside source files as `*.test.ts`.
-- Use [Vitest](https://vitest.dev/) with `describe`/`it`/`expect`.
-- Mock external dependencies (VS Code API, Electron, Docker) — never require real runtimes in unit tests.
-- Aim for meaningful coverage, not 100% line coverage. Test behavior, not implementation.
+- Put tests next to source as `*.test.ts`.
+- Prefer behavior-focused tests over implementation snapshots.
+- When fixing a bug, reproduce it with a failing test first if practical.
+- Mock external systems unless the test is explicitly an integration or acceptance test.
 
-## Commit Messages
+## Commit style
 
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
+Conventional Commits are preferred:
 
+```text
+feat: add portable skill manifest validation
+fix: run gstack shell builtins correctly on windows
+docs: align README with npm-first OSS v1 release plan
 ```
-feat: add skill validation endpoint
-fix: correct PDSE score rounding for edge case
-test: expand constitution checker branch coverage
-docs: update README with new provider setup
-ci: add npm audit step to CI pipeline
-```
 
-## Pull Request Process
+## External release-only steps
 
-1. Ensure all CI checks pass (format, typecheck, lint, test, anti-stub).
-2. Write a clear PR description explaining **what** and **why**.
-3. Keep PRs focused — one feature or fix per PR.
-4. Update documentation if your change affects public APIs or configuration.
+Some acceptance steps cannot be completed in a normal contribution without maintainer credentials:
 
-## Reporting Issues
+- GitHub push and Actions verification
+- npm publish
+- VS Code Marketplace publish
+- `npm run smoke:provider -- --require-provider` with real API keys
 
-Open an issue on GitHub with:
-
-- Steps to reproduce
-- Expected vs. actual behavior
-- Environment details (OS, Bun version, Node version)
+Call those out clearly if your work depends on them.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
+By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

@@ -3,7 +3,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateText, type LanguageModelV1 } from "ai";
 import { ModelRouterImpl } from "./model-router.js";
-import type { ModelRouterConfig } from "@dantecode/config-types";
+import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
 
 /**
  * Integration tests for the model router with a real HTTP mock server.
@@ -16,7 +16,36 @@ import type { ModelRouterConfig } from "@dantecode/config-types";
 let server: Server;
 let baseURL: string;
 let requestCount = 0;
-let lastRequestBody: Record<string, unknown> | null = null;
+let lastRequestBody: RecordedRequestBody | null = null;
+
+interface RecordedRequestBody {
+  model?: string;
+  messages?: unknown;
+  [key: string]: unknown;
+}
+
+function createOpenAIModelConfig(
+  modelId: string,
+  overrides: Partial<ModelConfig> = {},
+): ModelConfig {
+  return {
+    provider: "openai",
+    modelId,
+    apiKey: "test-key",
+    baseUrl: baseURL,
+    maxTokens: 100,
+    temperature: 0,
+    contextWindow: 128_000,
+    supportsVision: false,
+    supportsToolCalls: true,
+    ...overrides,
+  };
+}
+
+function getLastRequestBody(): RecordedRequestBody {
+  expect(lastRequestBody).not.toBeNull();
+  return lastRequestBody ?? {};
+}
 
 function createMockResponse(content: string) {
   return JSON.stringify({
@@ -43,7 +72,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse) {
   });
   req.on("end", () => {
     try {
-      lastRequestBody = JSON.parse(body) as Record<string, unknown>;
+      lastRequestBody = JSON.parse(body) as RecordedRequestBody;
     } catch {
       lastRequestBody = null;
     }
@@ -106,14 +135,7 @@ describe("model router — HTTP integration", () => {
 
   it("model router generates text via real HTTP call", async () => {
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "mock-model",
-        apiKey: "test-key",
-        baseUrl: baseURL,
-        maxTokens: 100,
-        temperature: 0,
-      },
+      default: createOpenAIModelConfig("mock-model"),
       fallback: [],
       overrides: {},
     };
@@ -129,14 +151,7 @@ describe("model router — HTTP integration", () => {
 
   it("model router records provider and modelId in logs", async () => {
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "mock-model",
-        apiKey: "test-key",
-        baseUrl: baseURL,
-        maxTokens: 100,
-        temperature: 0,
-      },
+      default: createOpenAIModelConfig("mock-model"),
       fallback: [],
       overrides: {},
     };
@@ -154,14 +169,10 @@ describe("model router — HTTP integration", () => {
     lastRequestBody = null;
 
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "mock-model",
-        apiKey: "test-key",
-        baseUrl: baseURL,
+      default: createOpenAIModelConfig("mock-model", {
         maxTokens: 200,
         temperature: 0.5,
-      },
+      }),
       fallback: [],
       overrides: {},
     };
@@ -172,33 +183,17 @@ describe("model router — HTTP integration", () => {
     });
 
     expect(requestCount).toBeGreaterThan(0);
-    expect(lastRequestBody).not.toBeNull();
+    const requestBody = getLastRequestBody();
     // Verify the API received the correct model
-    expect(lastRequestBody?.model).toBe("mock-model");
+    expect(requestBody.model).toBe("mock-model");
     // Verify messages were sent (the AI SDK serializes them)
-    expect(lastRequestBody?.messages).toBeDefined();
+    expect(requestBody.messages).toBeDefined();
   });
 
   it("model router falls back when primary fails", async () => {
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "fail-primary",
-        apiKey: "test-key",
-        baseUrl: baseURL,
-        maxTokens: 100,
-        temperature: 0,
-      },
-      fallback: [
-        {
-          provider: "openai",
-          modelId: "fallback-model",
-          apiKey: "test-key",
-          baseUrl: baseURL,
-          maxTokens: 100,
-          temperature: 0,
-        },
-      ],
+      default: createOpenAIModelConfig("fail-primary"),
+      fallback: [createOpenAIModelConfig("fallback-model")],
       overrides: {},
     };
 
@@ -216,24 +211,13 @@ describe("model router — HTTP integration", () => {
     lastRequestBody = null;
 
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "default-model",
-        apiKey: "test-key",
-        baseUrl: baseURL,
-        maxTokens: 100,
-        temperature: 0,
-      },
+      default: createOpenAIModelConfig("default-model"),
       fallback: [],
       overrides: {
-        codegen: {
-          provider: "openai",
-          modelId: "codegen-model",
-          apiKey: "test-key",
-          baseUrl: baseURL,
+        codegen: createOpenAIModelConfig("codegen-model", {
           maxTokens: 500,
           temperature: 0.2,
-        },
+        }),
       },
     };
 
@@ -243,29 +227,14 @@ describe("model router — HTTP integration", () => {
     });
 
     // The codegen override model should have been used
-    expect(lastRequestBody?.model).toBe("codegen-model");
+    const requestBody = getLastRequestBody();
+    expect(requestBody.model).toBe("codegen-model");
   });
 
   it("model router throws when all providers fail", async () => {
     const config: ModelRouterConfig = {
-      default: {
-        provider: "openai",
-        modelId: "fail-primary",
-        apiKey: "test-key",
-        baseUrl: baseURL,
-        maxTokens: 100,
-        temperature: 0,
-      },
-      fallback: [
-        {
-          provider: "openai",
-          modelId: "fail-secondary",
-          apiKey: "test-key",
-          baseUrl: baseURL,
-          maxTokens: 100,
-          temperature: 0,
-        },
-      ],
+      default: createOpenAIModelConfig("fail-primary"),
+      fallback: [createOpenAIModelConfig("fail-secondary")],
       overrides: {},
     };
 

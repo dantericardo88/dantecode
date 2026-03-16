@@ -9,6 +9,51 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
+const WINDOWS_SHELL_BUILTINS = new Set([
+  "assoc",
+  "break",
+  "call",
+  "cd",
+  "chdir",
+  "cls",
+  "color",
+  "copy",
+  "date",
+  "del",
+  "dir",
+  "echo",
+  "endlocal",
+  "erase",
+  "for",
+  "ftype",
+  "goto",
+  "if",
+  "md",
+  "mkdir",
+  "mklink",
+  "move",
+  "path",
+  "pause",
+  "popd",
+  "prompt",
+  "pushd",
+  "rd",
+  "rem",
+  "ren",
+  "rename",
+  "rmdir",
+  "set",
+  "setlocal",
+  "shift",
+  "start",
+  "time",
+  "title",
+  "type",
+  "ver",
+  "verify",
+  "vol",
+]);
+
 // ----------------------------------------------------------------------------
 // Single Command Runner
 // ----------------------------------------------------------------------------
@@ -64,7 +109,7 @@ export function runGStackSingle(
 
     // Determine if we should use shell mode
     // Shell mode is needed for commands with pipes, redirects, or shell builtins
-    const needsShell = /[|><;&]/.test(command.command) || /\$\(/.test(command.command);
+    const needsShell = shouldUseShell(command.command, executable);
 
     let child;
     if (needsShell) {
@@ -160,6 +205,18 @@ export function runGStackSingle(
       });
     });
   });
+}
+
+function shouldUseShell(command: string, executable: string): boolean {
+  if (/[|><;&]/.test(command) || /\$\(/.test(command)) {
+    return true;
+  }
+
+  if (process.platform !== "win32") {
+    return false;
+  }
+
+  return WINDOWS_SHELL_BUILTINS.has(executable.toLowerCase());
 }
 
 // ----------------------------------------------------------------------------

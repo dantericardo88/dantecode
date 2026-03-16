@@ -547,10 +547,10 @@ export interface DanteCodeState {
 }
 
 // ----------------------------------------------------------------------------
-// DanteCode Config (dante.config.yaml schema as TypeScript)
+// DanteCode STATE.yaml schema aliases
 // ----------------------------------------------------------------------------
 
-/** Model section of dante.config.yaml. */
+/** Model section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigModel {
   default: {
     provider: ModelProvider;
@@ -577,7 +577,7 @@ export interface DanteCodeConfigModel {
   >;
 }
 
-/** PDSE section of dante.config.yaml. */
+/** PDSE section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigPDSE {
   threshold: number;
   hardViolationsAllowed: number;
@@ -590,7 +590,7 @@ export interface DanteCodeConfigPDSE {
   };
 }
 
-/** Autoforge section of dante.config.yaml. */
+/** Autoforge section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigAutoforge {
   enabled: boolean;
   maxIterations: number;
@@ -605,7 +605,7 @@ export interface DanteCodeConfigAutoforge {
   abortOnSecurityViolation: boolean;
 }
 
-/** Git section of dante.config.yaml. */
+/** Git section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigGit {
   autoCommit: boolean;
   commitPrefix: string;
@@ -614,7 +614,7 @@ export interface DanteCodeConfigGit {
   signCommits: boolean;
 }
 
-/** Sandbox section of dante.config.yaml. */
+/** Sandbox section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigSandbox {
   enabled: boolean;
   defaultImage: string;
@@ -625,7 +625,7 @@ export interface DanteCodeConfigSandbox {
   autoStart: boolean;
 }
 
-/** Skills section of dante.config.yaml. */
+/** Skills section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigSkills {
   directories: string[];
   autoImport: boolean;
@@ -633,7 +633,7 @@ export interface DanteCodeConfigSkills {
   antiStubEnabled: boolean;
 }
 
-/** Agents section of dante.config.yaml. */
+/** Agents section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigAgents {
   maxConcurrent: number;
   nomaEnabled: boolean;
@@ -641,7 +641,7 @@ export interface DanteCodeConfigAgents {
   defaultLane: NomaLane;
 }
 
-/** Audit section of dante.config.yaml. */
+/** Audit section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigAudit {
   enabled: boolean;
   logDirectory: string;
@@ -650,7 +650,7 @@ export interface DanteCodeConfigAudit {
   sensitiveFieldMask: string[];
 }
 
-/** Lessons section of dante.config.yaml. */
+/** Lessons section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigLessons {
   enabled: boolean;
   maxPerProject: number;
@@ -658,7 +658,7 @@ export interface DanteCodeConfigLessons {
   minSeverity: LessonSeverity;
 }
 
-/** Project section of dante.config.yaml. */
+/** Project section of .dantecode/STATE.yaml. */
 export interface DanteCodeConfigProject {
   name: string;
   language: string;
@@ -670,7 +670,7 @@ export interface DanteCodeConfigProject {
   excludePatterns: string[];
 }
 
-/** Complete dante.config.yaml schema as a TypeScript interface. */
+/** Complete .dantecode/STATE.yaml schema as a TypeScript interface. */
 export interface DanteCodeConfig {
   version: string;
   projectRoot: string;

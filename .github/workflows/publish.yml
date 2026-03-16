@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build
+        run: npm run build
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -41,7 +44,22 @@ jobs:
         run: npm run format:check
 
       - name: Test
-        run: npx vitest run
+        run: npm test
+
+      - name: Coverage
+        run: npm run test:coverage
+
+      - name: CLI smoke
+        run: npm run smoke:cli
+
+      - name: Install smoke
+        run: npm run smoke:install
+
+      - name: Skill import smoke
+        run: npm run smoke:skill-import
+
+      - name: Publish dry-run
+        run: npm run publish:dry-run
 
   publish-npm:
     name: Publish to npm
@@ -60,47 +78,26 @@ jobs:
         run: npm ci
 
       - name: Build all packages
-        run: npx turbo build
+        run: npm run build
 
-      - name: Publish @dantecode/config-types
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/config-types --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish npm workspaces
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry-run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
 
-      - name: Publish @dantecode/core
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/core --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @dantecode/danteforge
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/danteforge --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @dantecode/git-engine
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/git-engine --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @dantecode/skill-adapter
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/skill-adapter --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @dantecode/sandbox
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/sandbox --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @dantecode/cli
-        if: ${{ github.event.inputs.dry-run != 'true' }}
-        run: npm publish --workspace packages/cli --access public --provenance
+          for workspace in \
+            packages/config-types \
+            packages/core \
+            packages/danteforge \
+            packages/git-engine \
+            packages/skill-adapter \
+            packages/sandbox \
+            packages/cli
+          do
+            npm publish --workspace "$workspace" --access public --provenance ${DRY_RUN_FLAG}
+          done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -123,7 +120,6 @@ jobs:
         run: cd packages/vscode && npm run build
 
       - name: Package extension
-        if: ${{ github.event.inputs.dry-run != 'true' }}
         run: cd packages/vscode && npx @vscode/vsce package
 
       - name: Publish to VS Code Marketplace

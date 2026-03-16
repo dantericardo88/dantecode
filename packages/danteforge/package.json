@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dantecode/dantecode.git",
+    "url": "git+https://github.com/dantecode/dantecode.git",
     "directory": "packages/danteforge"
   },
   "keywords": [
@@ -35,12 +35,12 @@
     "build": "tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.package.config.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@dantecode/config-types": "*",
-    "@dantecode/core": "*",
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0",
     "sql.js": "^1.11.0",
     "zod": "^3.24.0"
   },

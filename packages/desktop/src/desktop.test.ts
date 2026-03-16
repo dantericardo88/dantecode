@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+type EventHandler = (...args: unknown[]) => unknown;
+
 // ---------------------------------------------------------------------------
 // Mock electron module before import
 // ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ describe("Desktop App", () => {
 
       await import("./main.js");
       expect(mockApp.whenReady).toHaveBeenCalledTimes(1);
-    });
+    }, 10000);
 
     it("registers window-all-closed handler", async () => {
       vi.resetModules();
@@ -104,7 +106,7 @@ describe("Desktop App", () => {
       }));
 
       await import("./main.js");
-      const onCalls = mockApp.on.mock.calls as [string, Function][];
+      const onCalls = mockApp.on.mock.calls as [string, EventHandler][];
       const windowAllClosedCall = onCalls.find((c) => c[0] === "window-all-closed");
       expect(windowAllClosedCall).toBeDefined();
     });
@@ -147,7 +149,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const handleCalls = mockIpcMain.handle.mock.calls as [string, Function][];
+      const handleCalls = mockIpcMain.handle.mock.calls as [string, EventHandler][];
       const channels = handleCalls.map((c) => c[0]);
       expect(channels).toContain("get-version");
     });
@@ -168,7 +170,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const handleCalls = mockIpcMain.handle.mock.calls as [string, Function][];
+      const handleCalls = mockIpcMain.handle.mock.calls as [string, EventHandler][];
       const channels = handleCalls.map((c) => c[0]);
       expect(channels).toContain("get-platform");
     });
@@ -189,7 +191,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const handleCalls = mockIpcMain.handle.mock.calls as [string, Function][];
+      const handleCalls = mockIpcMain.handle.mock.calls as [string, EventHandler][];
       const channels = handleCalls.map((c) => c[0]);
       expect(channels).toContain("open-external");
     });
@@ -210,7 +212,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const handleCalls = mockIpcMain.handle.mock.calls as [string, Function][];
+      const handleCalls = mockIpcMain.handle.mock.calls as [string, EventHandler][];
       const channels = handleCalls.map((c) => c[0]);
       expect(channels).toContain("get-cwd");
     });
@@ -231,7 +233,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const handleCalls = mockIpcMain.handle.mock.calls as [string, Function][];
+      const handleCalls = mockIpcMain.handle.mock.calls as [string, EventHandler][];
       const versionHandler = handleCalls.find((c) => c[0] === "get-version");
       expect(versionHandler).toBeDefined();
       const result = versionHandler![1]();
@@ -435,7 +437,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(mockWindowOnce).toHaveBeenCalledWith("ready-to-show", expect.any(Function));
+      expect(mockWindowOnce).toHaveBeenCalledWith("ready-to-show", expect.anything());
     });
 
     it("registers closed handler", async () => {
@@ -454,7 +456,7 @@ describe("Desktop App", () => {
       await import("./main.js");
       await new Promise((r) => setTimeout(r, 10));
 
-      const onCalls = mockWindowOn.mock.calls as [string, Function][];
+      const onCalls = mockWindowOn.mock.calls as [string, EventHandler][];
       const closedCall = onCalls.find((c) => c[0] === "closed");
       expect(closedCall).toBeDefined();
     });

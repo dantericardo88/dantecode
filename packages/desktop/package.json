@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dantecode/dantecode.git",
+    "url": "git+https://github.com/dantecode/dantecode.git",
     "directory": "packages/desktop"
   },
   "keywords": [
@@ -27,15 +27,15 @@
     "dev": "electron .",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "vitest run",
+    "test": "vitest run --config ../../vitest.package.config.ts",
     "clean": "rm -rf dist",
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux"
   },
   "dependencies": {
-    "@dantecode/config-types": "*",
-    "@dantecode/core": "*"
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0"
   },
   "devDependencies": {
     "electron": "^33.0.0",

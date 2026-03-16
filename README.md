@@ -1,147 +1,176 @@
 # DanteCode
 
-Open-source, model-agnostic AI coding agent with built-in quality gates.
+DanteCode is a portable, model-agnostic skill runtime and coding agent.
 
-DanteCode pairs an interactive REPL with **DanteForge** — a verification engine that enforces zero-stub discipline, PDSE quality scoring, and an iterative auto-correction loop (Autoforge IAL) so generated code is production-ready from the start.
+Grok is the default provider, not the product identity. The real product center is interoperability: bringing reusable coding workflows and Claude-style skills into a verification-first runtime that does not lock developers to a single model vendor.
 
-## Features
+**DanteForge** is the verification layer behind DanteCode. It runs the anti-stub gate, PDSE scoring, constitution checks, and GStack validation so imported or generated workflows have to earn trust before they land.
 
-- **Model-agnostic** — Anthropic, OpenAI, Grok (xAI), Ollama, or any OpenAI-compatible endpoint
-- **Anti-Stub Doctrine** — Hard gate rejects TODO/FIXME/placeholder code before it lands
-- **PDSE Scoring** — 4-dimension quality metric (Completeness, Correctness, Clarity, Consistency)
-- **Autoforge IAL** — Iterative auto-correction: generate → scan → score → regenerate on failure
-- **Constitution Checker** — Blocks hardcoded secrets, credential leaks, and policy violations
-- **Skill Adapter** — Import skills from Claude Code, Continue, and OpenCode with automatic wrapping
-- **Git Engine** — Diff parsing, auto-commit, worktree isolation, repo-map generation
-- **Sandbox** — Docker container isolation with snapshot/restore (optional)
-- **GStack** — Sequential guard pipeline: typecheck → lint → test → coverage
+## OSS v1 status
 
-## Quick Start
+- CLI: ship target for Public OSS v1
+- VS Code extension: preview
+- Desktop app: beta
 
-### Prerequisites
+## Why DanteCode
 
-- [Bun](https://bun.sh/) v1.2+ (package manager and runtime)
-- [Node.js](https://nodejs.org/) v20+ (for TypeScript compilation)
-- An API key for at least one supported provider
+- Portable skill runtime: keep workflows reusable across providers instead of rebuilding them per agent.
+- Model-agnostic core: route between Grok, Anthropic, OpenAI, Ollama, or compatible endpoints.
+- Verification-first execution: DanteForge checks for stubs, policy violations, and weak outputs before accepting changes.
+- Clean-room skill import path: import Claude Code, Continue, and OpenCode style skills through adapters instead of prompt-copy lock-in.
+- Git-native workflow support: diff parsing, commits, worktrees, and repo mapping are built in.
 
-### Install
+## Install
+
+### Published CLI
+
+```bash
+npm install -g @dantecode/cli
+# or
+npx @dantecode/cli --help
+```
+
+### From source
 
 ```bash
 git clone https://github.com/dantecode/dantecode.git
 cd dantecode
-bun install
+npm ci
+npm run build
+npm run cli -- init
+npm run cli
 ```
 
-### Set up an API key
+## Provider setup
+
+Set at least one provider key before using remote models:
 
 ```bash
-# Pick your provider:
-export ANTHROPIC_API_KEY="sk-ant-..."    # Anthropic (Claude)
-export OPENAI_API_KEY="sk-..."           # OpenAI (GPT-4)
-export GROK_API_KEY="xai-..."            # xAI (Grok)
-# Ollama runs locally — no key needed
+export GROK_API_KEY="xai-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
 ```
 
-### Run
+Ollama can run locally without an API key.
 
-```bash
-# Interactive REPL
-bun run cli
+## Canonical config path
 
-# One-shot prompt
-bun run cli "explain this codebase"
+DanteCode reads project state from `.dantecode/STATE.yaml`.
 
-# Commands
-bun run cli init              # Initialize .dantecode/ config
-bun run cli skills list       # List imported skills
-bun run cli config show       # Show current configuration
-```
-
-### Run the test suite
-
-```bash
-bun run test                  # 403 tests across 18 suites
-bun run typecheck             # tsc --noEmit across all packages
-bun run lint                  # ESLint
-bun run format:check          # Prettier
-```
-
-## Architecture
-
-```
-packages/
-  config-types/   Type definitions shared across all packages
-  core/           Model router, provider builders, state management, audit logging
-  danteforge/     Anti-stub scanner, PDSE scorer, constitution checker, autoforge IAL
-  git-engine/     Git diff parser, commit helper, worktree manager, repo-map
-  skill-adapter/  Skill importer, parser (Claude/Continue/OpenCode), registry, wrapper
-  sandbox/        Docker container manager, command executor, local fallback
-  cli/            Argument parser, REPL, slash commands, agent loop
-  vscode/         VS Code extension (WIP)
-  desktop/        Desktop app shell (WIP)
-```
-
-## Configuration
-
-DanteCode reads configuration from `.dantecode/config.yaml` in your project root:
+`dantecode init` creates that file and the surrounding `.dantecode/` structure for you. A minimal example looks like this:
 
 ```yaml
+version: "1.0.0"
+projectRoot: "."
+createdAt: "2026-03-16T00:00:00.000Z"
+updatedAt: "2026-03-16T00:00:00.000Z"
+
 model:
-  provider: anthropic
-  modelId: claude-sonnet-4-6
-  maxTokens: 8192
-  temperature: 0.1
-  contextWindow: 200000
+  default:
+    provider: grok
+    modelId: grok-3
+    maxTokens: 8192
+    temperature: 0.1
+    contextWindow: 131072
+    supportsVision: false
+    supportsToolCalls: true
+  fallback:
+    - provider: anthropic
+      modelId: claude-sonnet-4-20250514
+      maxTokens: 8192
+      temperature: 0.1
+      contextWindow: 200000
+      supportsVision: true
+      supportsToolCalls: true
+  taskOverrides: {}
 
-sandbox:
-  enabled: false
-  image: ghcr.io/dantecode/sandbox:latest
-
-git:
-  autoCommit: true
-  worktree: false
+pdse:
+  threshold: 85
+  hardViolationsAllowed: 0
+  maxRegenerationAttempts: 3
+  weights:
+    completeness: 0.3
+    correctness: 0.3
+    clarity: 0.2
+    consistency: 0.2
 ```
 
-Override the model at runtime with `--model`:
+## Validation
 
 ```bash
-bun run cli --model grok/grok-3 "refactor this function"
-bun run cli --model ollama/llama3 "explain this code"
+npm run release:doctor
+npm run release:check
 ```
 
-## Quality Gates
-
-Every code generation pass can be verified through the DanteForge pipeline:
-
-1. **Anti-Stub Scan** — Regex + AST patterns detect TODO, FIXME, `as any`, `@ts-ignore`, placeholder functions
-2. **Constitution Check** — Blocks hardcoded secrets, credential patterns, and policy violations
-3. **PDSE Score** — Weighted quality metric: Completeness (35%), Correctness (30%), Clarity (20%), Consistency (15%)
-4. **Autoforge IAL** — If scan or score fails, regenerate with feedback up to N iterations
-
-## Supported Providers
-
-| Provider   | Env Variable        | Models                                       |
-| ---------- | ------------------- | -------------------------------------------- |
-| Anthropic  | `ANTHROPIC_API_KEY` | claude-sonnet-4-6, claude-opus-4-6, etc.     |
-| OpenAI     | `OPENAI_API_KEY`    | gpt-4.1, gpt-4.1-mini, o3, etc.              |
-| Grok (xAI) | `GROK_API_KEY`      | grok-3, grok-3-mini                          |
-| Ollama     | None (local)        | llama3, codellama, mistral, etc.             |
-| Custom     | `OPENAI_API_KEY`    | Any OpenAI-compatible endpoint via `baseUrl` |
-
-## Development
+For the individual gates:
 
 ```bash
-# Build all packages
-bun run build
-
-# Run tests with coverage
-npx vitest run --coverage
-
-# Lint and format
-bun run lint
-bun run format:check
-bun run format                # Auto-fix formatting
+npm run build
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run test:coverage
+npm run smoke:cli
+npm run smoke:install
+npm run smoke:skill-import
+npm run publish:dry-run
 ```
+
+Current local validation baseline:
+
+- `npm run release:doctor`: reports remaining external blockers and remediation steps
+- `npm run release:check`: full local ship-readiness sweep is green
+- `npm test`: 562 tests across 24 suites
+- `npm run test:coverage`: strict coverage gate for the stable runtime packages
+- `npm run smoke:cli`: built CLI help/init/config/skills flow passes
+- `npm run smoke:install`: packed npm install path and installed CLI bootstrap pass
+- `npm run smoke:skill-import`: fixture-based Claude-style skill import, wrap, registry, and validation pass
+- `npm run publish:dry-run`: publishable packages pack cleanly; only npm auth warnings remain without login
+- Stable runtime coverage gate: `core`, `danteforge`, `git-engine`, `skill-adapter`
+- Preview and beta surfaces still run in `npm test`, but do not block OSS v1 coverage thresholds
+
+## Package map
+
+```text
+packages/
+  config-types/   Shared types and schemas
+  core/           Model router, provider adapters, STATE.yaml handling, audit log
+  danteforge/     PDSE, anti-stub, constitution, lessons, autoforge, GStack
+  git-engine/     Diff parsing, commits, worktrees, repo map
+  skill-adapter/  Skill import, registry, wrapping, parser adapters
+  sandbox/        Docker and local execution helpers
+  cli/            Public OSS v1 command-line client
+  vscode/         Preview VS Code extension
+  desktop/        Beta desktop shell
+```
+
+## Release model
+
+- npm packages are the primary OSS v1 distribution path.
+- `@dantecode/cli` is the default install target.
+- Core libraries publish as scoped npm packages.
+- VS Code packaging and publish remain in workflow, but the extension is still preview.
+- Desktop remains beta and is not launch-critical for OSS v1.
+
+## Remaining external ship checks
+
+These require credentials or an external service and are not completed by the local repo alone:
+
+- Push to GitHub and observe the first green Actions run
+- Set real git identity for public commit attribution
+- Add `NPM_TOKEN` and `VSCE_PAT` secrets when publishing
+- Run `npm run smoke:provider -- --require-provider` with a real provider key
+- Optionally run one real third-party skill import beyond the local fixture smoke test
+
+## More docs
+
+- [VISION.md](VISION.md)
+- [RELEASE.md](RELEASE.md)
+- [SPEC.md](SPEC.md)
+- [PLAN.md](PLAN.md)
+- [TASKS.md](TASKS.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
