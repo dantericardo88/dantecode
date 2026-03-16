@@ -9,6 +9,7 @@ export default defineConfig({
     "@dantecode/config-types",
     "@dantecode/core",
     "@dantecode/danteforge",
+    "@dantecode/git-engine",
     "@dantecode/skill-adapter",
   ],
 });
