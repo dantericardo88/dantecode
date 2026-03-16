@@ -55,7 +55,9 @@ interface WebviewInboundMessage {
     | "pick_file"
     | "pick_image"
     | "remove_attachment"
-    | "paste_image";
+    | "paste_image"
+    | "save_agent_config"
+    | "load_agent_config";
   payload: Record<string, unknown>;
 }
 
@@ -78,9 +80,42 @@ interface WebviewOutboundMessage {
     | "generation_stopped"
     | "file_attached"
     | "image_attached"
-    | "ollama_models";
+    | "ollama_models"
+    | "agent_config_data"
+    | "mode_update";
   payload: Record<string, unknown>;
 }
+
+// ─── Agent Mode & Permission Types ──────────────────────────────────────────
+
+/** Agent execution modes — Plan (read-only), Build (default), YOLO (full autonomous). */
+type AgentMode = "plan" | "build" | "yolo";
+
+/** Permission levels for tool categories. */
+type PermissionLevel = "allow" | "ask" | "deny";
+
+/** Persisted agent configuration stored in globalState + .dantecode/config.json. */
+interface AgentConfig {
+  agentMode: AgentMode;
+  permissions: {
+    edit: PermissionLevel;
+    bash: PermissionLevel;
+    tools: PermissionLevel;
+  };
+  maxToolRounds: number;
+  runUntilComplete: boolean;
+}
+
+/** Default config for new users. */
+const DEFAULT_AGENT_CONFIG: AgentConfig = {
+  agentMode: "build",
+  permissions: { edit: "allow", bash: "ask", tools: "allow" },
+  maxToolRounds: 15,
+  runUntilComplete: false,
+};
+
+/** Read-only tools allowed in Plan mode. */
+const PLAN_MODE_TOOLS = new Set(["Read", "ListDir", "Glob", "Grep"]);
 
 /** Maps model provider names to SecretStorage key names. */
 const PROVIDER_SECRET_KEYS: Record<string, string> = {
@@ -128,6 +163,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private stopRequested = false;
   private abortController: AbortController | null = null;
   private pendingImages: string[] = [];
+  private agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -138,6 +174,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.currentModel = config.get<string>("defaultModel", "grok/grok-4.2");
     this.sessionId = `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.currentChatId = this.generateChatId();
+
+    // Restore agent config from globalState
+    const savedConfig = this.globalState.get<AgentConfig>("dantecode.agentConfig");
+    if (savedConfig) {
+      this.agentConfig = { ...DEFAULT_AGENT_CONFIG, ...savedConfig };
+    }
   }
 
   /**
@@ -230,9 +272,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Image data comes as base64 from the webview; store for next request
         this.pendingImages.push(String(message.payload["data"] ?? ""));
         break;
+      case "save_agent_config":
+        await this.handleSaveAgentConfig(message.payload as Partial<AgentConfig>);
+        break;
+      case "load_agent_config":
+        this.handleLoadAgentConfig();
+        break;
       case "ready":
         this.sendContextFilesUpdate();
         this.sendModelUpdate();
+        this.handleLoadAgentConfig();
         void this.scanOllamaModels();
         break;
     }
@@ -302,14 +351,43 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const projectRoot = this.getProjectRoot();
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
+    // Resolve agent mode settings
+    const { agentMode, permissions, runUntilComplete } = this.agentConfig;
+    const effectiveMaxRounds = agentMode === "yolo" ? 50
+      : runUntilComplete ? 30
+      : this.agentConfig.maxToolRounds;
+
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
       "You are DanteCode, an autonomous AI coding agent.",
       "You help users write, review, and improve code with quality-first principles.",
       "Always provide complete, production-ready code. Never use stubs, TODOs, or placeholders.",
       "",
-      getToolDefinitionsPrompt(),
     ];
+
+    // Mode-specific instructions
+    if (agentMode === "plan") {
+      systemParts.push("## Mode: PLAN (Read-Only)");
+      systemParts.push("You are in PLAN mode. You can ONLY use read-only tools: Read, ListDir, Glob, Grep.");
+      systemParts.push("Do NOT write, edit, or execute any commands. Analyze and plan only.");
+      systemParts.push("Present a detailed implementation plan the user can approve before switching to Build mode.");
+      systemParts.push("");
+    } else if (agentMode === "yolo") {
+      systemParts.push("## Mode: YOLO (Full Autonomous)");
+      systemParts.push("You are in YOLO mode. Execute tasks fully and autonomously. Do NOT stop to ask for confirmation.");
+      systemParts.push("Plan your approach, then execute every step including file edits, builds, and tests.");
+      systemParts.push("Continue working through all tool rounds until the task is 100% complete.");
+      systemParts.push("If you encounter an error, fix it and continue. Only stop when the task is done.");
+      systemParts.push("");
+    } else {
+      systemParts.push("## Mode: BUILD");
+      if (runUntilComplete) {
+        systemParts.push("The user has enabled 'Run Until Complete'. Execute the full task without stopping early.");
+      }
+      systemParts.push("");
+    }
+
+    systemParts.push(getToolDefinitionsPrompt());
 
     // Inject workspace context so the model knows about the open project
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -458,7 +536,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       ...this.messages.map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content })),
     ];
 
-    let maxToolRounds = 15;
+    let maxToolRounds = effectiveMaxRounds;
     let finalResponse = "";
     const touchedFiles: string[] = [];
 
@@ -552,6 +630,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             },
           });
 
+          // Mode-aware tool filtering
+          const isWriteTool = toolCall.name === "Write" || toolCall.name === "Edit";
+          const isBashTool = toolCall.name === "Bash";
+
+          if (agentMode === "plan" && !PLAN_MODE_TOOLS.has(toolCall.name)) {
+            toolResultParts.push(`Tool "${toolCall.name}" blocked: Plan mode only allows read-only tools.`);
+            continue;
+          }
+          if (permissions.edit === "deny" && isWriteTool) {
+            toolResultParts.push(`Tool "${toolCall.name}" blocked: File editing is denied by permissions.`);
+            continue;
+          }
+          if (permissions.bash === "deny" && isBashTool) {
+            toolResultParts.push(`Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`);
+            continue;
+          }
+
           // Execute the tool
           const result: ToolResult = await executeTool(toolCall.name, toolCall.input, projectRoot);
 
@@ -644,7 +739,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             userMessageLength: text.length,
             assistantResponseLength: finalResponse.length,
             model: this.currentModel,
-            toolRoundsUsed: 15 - maxToolRounds,
+            toolRoundsUsed: effectiveMaxRounds - maxToolRounds,
             filesWritten: touchedFiles,
           },
           modelId: this.currentModel,
@@ -815,6 +910,56 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.postMessage({
       type: "key_saved",
       payload: { provider, success: true },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Agent config handlers
+  // --------------------------------------------------------------------------
+
+  private async handleSaveAgentConfig(partial: Partial<AgentConfig>): Promise<void> {
+    // Merge incoming values
+    if (partial.agentMode) this.agentConfig.agentMode = partial.agentMode;
+    if (partial.permissions) {
+      this.agentConfig.permissions = { ...this.agentConfig.permissions, ...partial.permissions };
+    }
+    if (typeof partial.maxToolRounds === "number") this.agentConfig.maxToolRounds = partial.maxToolRounds;
+    if (typeof partial.runUntilComplete === "boolean") this.agentConfig.runUntilComplete = partial.runUntilComplete;
+
+    // Apply YOLO presets
+    if (this.agentConfig.agentMode === "yolo") {
+      this.agentConfig.permissions = { edit: "allow", bash: "allow", tools: "allow" };
+      this.agentConfig.maxToolRounds = 50;
+      this.agentConfig.runUntilComplete = true;
+    }
+
+    // Persist to globalState
+    await this.globalState.update("dantecode.agentConfig", this.agentConfig);
+
+    // Also write to .dantecode/config.json for CLI compatibility
+    const projectRoot = this.getProjectRoot();
+    if (projectRoot) {
+      try {
+        const configDir = vscode.Uri.joinPath(vscode.Uri.file(projectRoot), ".dantecode");
+        await vscode.workspace.fs.createDirectory(configDir);
+        const configUri = vscode.Uri.joinPath(configDir, "config.json");
+        const content = Buffer.from(JSON.stringify(this.agentConfig, null, 2), "utf-8");
+        await vscode.workspace.fs.writeFile(configUri, content);
+      } catch { /* non-critical — .dantecode/ may not exist */ }
+    }
+
+    // Send updated config back to webview
+    this.handleLoadAgentConfig();
+  }
+
+  private handleLoadAgentConfig(): void {
+    this.postMessage({
+      type: "agent_config_data",
+      payload: { config: this.agentConfig },
+    });
+    this.postMessage({
+      type: "mode_update",
+      payload: { mode: this.agentConfig.agentMode },
     });
   }
 
@@ -2041,12 +2186,126 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .toast.visible { opacity: 1; }
+
+    /* ---- Mode Indicator Badge ---- */
+    .mode-badge {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .mode-badge.plan { background: var(--vscode-charts-blue); color: #fff; }
+    .mode-badge.build { background: var(--vscode-charts-green); color: #fff; }
+    .mode-badge.yolo { background: var(--vscode-charts-orange, #e8912d); color: #fff; }
+
+    /* ---- Mode Selector (in settings) ---- */
+    .mode-selector {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 8px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--vscode-font-family);
+      text-align: center;
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .mode-btn:hover { border-color: var(--vscode-focusBorder); }
+    .mode-btn.active {
+      border-color: var(--vscode-focusBorder);
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+    }
+    .mode-btn .mode-icon { display: block; font-size: 16px; margin-bottom: 2px; }
+    .mode-desc { font-size: 9px; font-weight: 400; opacity: 0.7; display: block; }
+
+    /* ---- Permission Row ---- */
+    .perm-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .perm-row:last-child { border-bottom: none; }
+    .perm-label { font-size: 12px; font-weight: 500; }
+    .perm-select {
+      padding: 3px 6px;
+      font-size: 11px;
+      font-family: var(--vscode-font-family);
+      color: var(--vscode-dropdown-foreground);
+      background: var(--vscode-dropdown-background);
+      border: 1px solid var(--vscode-dropdown-border);
+      border-radius: 3px;
+    }
+
+    /* ---- Toggle Switch ---- */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+    .toggle-label { font-size: 12px; font-weight: 500; }
+    .toggle-desc { font-size: 10px; color: var(--vscode-descriptionForeground); }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--vscode-input-border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 2px;
+      top: 2px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background: var(--vscode-button-background);
+    }
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(16px);
+    }
+
+    .settings-divider {
+      height: 1px;
+      background: var(--vscode-panel-border);
+      margin: 4px 0;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="header-left">
       <span class="header-title">DanteCode Chat</span>
+      <span class="mode-badge build" id="mode-badge">BUILD</span>
       <span class="pdse-badge" id="pdse-badge">
         PDSE: <span id="pdse-score">--</span>
       </span>
@@ -2114,6 +2373,77 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       <h3>Settings</h3>
     </div>
     <div class="settings-body" id="settings-body">
+      <!-- Agent Mode -->
+      <div class="settings-section">
+        <h4>Agent Mode</h4>
+        <p>Controls how DanteCode executes tasks.</p>
+        <div class="mode-selector" id="mode-selector">
+          <button class="mode-btn" data-mode="plan">
+            <span class="mode-icon">&#128270;</span>Plan
+            <span class="mode-desc">Read-only analysis</span>
+          </button>
+          <button class="mode-btn active" data-mode="build">
+            <span class="mode-icon">&#128736;</span>Build
+            <span class="mode-desc">Edit with permissions</span>
+          </button>
+          <button class="mode-btn" data-mode="yolo">
+            <span class="mode-icon">&#9889;</span>YOLO
+            <span class="mode-desc">Full autonomous</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Permissions -->
+      <div class="settings-section" id="permissions-section">
+        <h4>Permissions</h4>
+        <p>Control what the agent can do. YOLO mode overrides all to "allow".</p>
+        <div class="perm-row">
+          <span class="perm-label">File Edit (Write/Edit)</span>
+          <select class="perm-select" id="perm-edit" data-perm="edit">
+            <option value="allow">Allow</option>
+            <option value="ask">Ask</option>
+            <option value="deny">Deny</option>
+          </select>
+        </div>
+        <div class="perm-row">
+          <span class="perm-label">Shell Commands (Bash)</span>
+          <select class="perm-select" id="perm-bash" data-perm="bash">
+            <option value="allow">Allow</option>
+            <option value="ask" selected>Ask</option>
+            <option value="deny">Deny</option>
+          </select>
+        </div>
+        <div class="perm-row">
+          <span class="perm-label">All Tools</span>
+          <select class="perm-select" id="perm-tools" data-perm="tools">
+            <option value="allow">Allow</option>
+            <option value="ask">Ask</option>
+            <option value="deny">Deny</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Run Until Complete Toggle -->
+      <div class="settings-section">
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Run Until Complete</span>
+            <span class="toggle-desc">Agent continues without stopping until task is done</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-run-complete">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- API Keys -->
       <div class="settings-section">
         <h4>API Keys</h4>
         <p>Keys are stored securely in your OS keychain via VS Code SecretStorage.</p>
@@ -2160,9 +2490,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       const attachmentsBar = document.getElementById('attachments-bar');
       const dropZone = document.getElementById('drop-zone');
 
+      const modeBadge = document.getElementById('mode-badge');
+      const modeSelector = document.getElementById('mode-selector');
+      const permEdit = document.getElementById('perm-edit');
+      const permBash = document.getElementById('perm-bash');
+      const permTools = document.getElementById('perm-tools');
+      const toggleRunComplete = document.getElementById('toggle-run-complete');
+      const permissionsSection = document.getElementById('permissions-section');
+
       let isStreaming = false;
       let currentAssistantEl = null;
       var pendingImagePreviews = []; // { dataUrl, fileName }
+      var currentAgentMode = 'build';
 
       // ---- Toast ----
       function showToast(msg, durationMs) {
@@ -2303,6 +2642,64 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       document.getElementById('settings-back').addEventListener('click', function() {
         settingsOverlay.classList.remove('visible');
+      });
+
+      // ---- Agent Mode selector ----
+      modeSelector.addEventListener('click', function(e) {
+        var btn = e.target.closest('.mode-btn');
+        if (!btn) return;
+        var mode = btn.dataset.mode;
+        if (!mode) return;
+
+        // Update UI
+        modeSelector.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        currentAgentMode = mode;
+
+        // In YOLO mode, force all permissions to allow and disable dropdowns
+        if (mode === 'yolo') {
+          permEdit.value = 'allow'; permBash.value = 'allow'; permTools.value = 'allow';
+          permEdit.disabled = true; permBash.disabled = true; permTools.disabled = true;
+          toggleRunComplete.checked = true;
+        } else {
+          permEdit.disabled = false; permBash.disabled = false; permTools.disabled = false;
+        }
+
+        // In Plan mode, force edit+bash to deny
+        if (mode === 'plan') {
+          permEdit.value = 'deny'; permBash.value = 'deny';
+          permEdit.disabled = true; permBash.disabled = true;
+        }
+
+        // Save
+        vscode.postMessage({
+          type: 'save_agent_config',
+          payload: {
+            agentMode: mode,
+            permissions: { edit: permEdit.value, bash: permBash.value, tools: permTools.value },
+            runUntilComplete: toggleRunComplete.checked,
+          },
+        });
+      });
+
+      // ---- Permission dropdowns ----
+      [permEdit, permBash, permTools].forEach(function(sel) {
+        sel.addEventListener('change', function() {
+          vscode.postMessage({
+            type: 'save_agent_config',
+            payload: {
+              permissions: { edit: permEdit.value, bash: permBash.value, tools: permTools.value },
+            },
+          });
+        });
+      });
+
+      // ---- Run Until Complete toggle ----
+      toggleRunComplete.addEventListener('change', function() {
+        vscode.postMessage({
+          type: 'save_agent_config',
+          payload: { runUntilComplete: toggleRunComplete.checked },
+        });
       });
 
       // ---- File Attachment ----
@@ -2757,6 +3154,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 }
               }
             }
+            break;
+
+          case 'agent_config_data':
+            var cfg = message.payload.config || {};
+            currentAgentMode = cfg.agentMode || 'build';
+            // Update mode selector buttons
+            modeSelector.querySelectorAll('.mode-btn').forEach(function(b) {
+              b.classList.toggle('active', b.dataset.mode === currentAgentMode);
+            });
+            // Update permission dropdowns
+            if (cfg.permissions) {
+              permEdit.value = cfg.permissions.edit || 'allow';
+              permBash.value = cfg.permissions.bash || 'ask';
+              permTools.value = cfg.permissions.tools || 'allow';
+            }
+            // Update toggle
+            toggleRunComplete.checked = !!cfg.runUntilComplete;
+            // Disable controls based on mode
+            var isYolo = currentAgentMode === 'yolo';
+            var isPlan = currentAgentMode === 'plan';
+            permEdit.disabled = isYolo || isPlan;
+            permBash.disabled = isYolo || isPlan;
+            permTools.disabled = isYolo;
+            break;
+
+          case 'mode_update':
+            var m = message.payload.mode || 'build';
+            modeBadge.textContent = m.toUpperCase();
+            modeBadge.className = 'mode-badge ' + m;
             break;
 
           case 'audit_event':
