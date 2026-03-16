@@ -13,8 +13,16 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
-import { ModelRouterImpl, appendAuditEvent } from "@dantecode/core";
-import { runLocalPDSEScorer } from "@dantecode/danteforge";
+import { ModelRouterImpl, appendAuditEvent, readOrInitializeState } from "@dantecode/core";
+import { runLocalPDSEScorer, runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
+import { generateRepoMap, formatRepoMapForContext, getStatus } from "@dantecode/git-engine";
+import {
+  executeTool,
+  extractToolCalls,
+  getToolDefinitionsPrompt,
+  getWrittenFilePath,
+  type ToolResult,
+} from "./agent-tools.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -291,11 +299,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const projectRoot = this.getProjectRoot();
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
-    // Build system prompt with workspace context
+    // Build system prompt with full workspace context + tool definitions
     const systemParts = [
-      "You are DanteCode, a model-agnostic AI coding assistant.",
+      "You are DanteCode, an autonomous AI coding agent.",
       "You help users write, review, and improve code with quality-first principles.",
       "Always provide complete, production-ready code. Never use stubs, TODOs, or placeholders.",
+      "",
+      getToolDefinitionsPrompt(),
     ];
 
     // Inject workspace context so the model knows about the open project
@@ -304,16 +314,102 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     if (wsFolder) {
       const projectName = wsFolder.name;
       const projectPath = wsFolder.uri.fsPath;
+      const ideName = vscode.env.appName || "VS Code";
+
       systemParts.push("");
       systemParts.push("## Current Workspace");
       systemParts.push(`- Project: ${projectName}`);
       systemParts.push(`- Path: ${projectPath}`);
-
-      // Detect IDE name from environment
-      const ideName = vscode.env.appName || "VS Code";
       systemParts.push(`- IDE: ${ideName}`);
+      systemParts.push("");
+      systemParts.push("You have FULL access to this project. The complete file tree, key files, git status,");
+      systemParts.push("and project configuration are provided below. When the user asks you to scan, review,");
+      systemParts.push("or analyze the project — use this context directly. Do NOT say you lack access.");
 
-      // List open editor tabs for additional context
+      // ── Git-engine repo map (structured file listing with metadata) ──
+      try {
+        const repoMap = generateRepoMap(projectPath, { maxFiles: 150 });
+        if (repoMap.length > 0) {
+          const formatted = formatRepoMapForContext(repoMap);
+          systemParts.push("");
+          systemParts.push(formatted);
+        }
+      } catch {
+        // Fallback to VS Code API tree if git-engine fails (non-git project)
+        try {
+          const tree = await this.buildWorkspaceTree(wsFolder.uri);
+          if (tree.length > 0) {
+            systemParts.push("");
+            systemParts.push("## Project File Tree");
+            systemParts.push("```");
+            systemParts.push(tree);
+            systemParts.push("```");
+          }
+        } catch { /* non-critical */ }
+      }
+
+      // ── Git status + branch info ──
+      try {
+        const gitStatus = getStatus(projectPath);
+        const stagedCount = gitStatus.staged.length;
+        const unstagedCount = gitStatus.unstaged.length;
+        const untrackedCount = gitStatus.untracked.length;
+
+        systemParts.push("");
+        systemParts.push("## Git Status");
+        if (stagedCount === 0 && unstagedCount === 0 && untrackedCount === 0) {
+          systemParts.push("Working tree is clean.");
+        } else {
+          if (stagedCount > 0) {
+            systemParts.push(`**Staged (${stagedCount}):** ${gitStatus.staged.map((e) => e.path).join(", ")}`);
+          }
+          if (unstagedCount > 0) {
+            systemParts.push(`**Modified (${unstagedCount}):** ${gitStatus.unstaged.map((e) => e.path).join(", ")}`);
+          }
+          if (untrackedCount > 0) {
+            systemParts.push(`**Untracked (${untrackedCount}):** ${gitStatus.untracked.map((e) => e.path).join(", ")}`);
+          }
+        }
+      } catch { /* non-git repo — skip */ }
+
+      // ── STATE.yaml (DanteForge project config) ──
+      try {
+        const state = await readOrInitializeState(projectPath);
+        systemParts.push("");
+        systemParts.push("## DanteForge Configuration");
+        systemParts.push(`- Default model: ${state.model.default.provider}/${state.model.default.modelId}`);
+        systemParts.push(`- PDSE threshold: ${state.pdse.threshold}`);
+        systemParts.push(`- Autoforge enabled: ${state.autoforge.enabled}`);
+        if (state.autoforge.gstackCommands.length > 0) {
+          systemParts.push(`- GStack commands: ${state.autoforge.gstackCommands.map((c: { name: string }) => c.name).join(", ")}`);
+        }
+      } catch { /* no STATE.yaml — skip */ }
+
+      // ── Key project files (package.json, README, tsconfig, etc.) ──
+      try {
+        const keyFiles = await this.readKeyProjectFiles(wsFolder.uri);
+        if (keyFiles.size > 0) {
+          systemParts.push("");
+          systemParts.push("## Key Project Files");
+          for (const [fileName, content] of keyFiles) {
+            systemParts.push(`\n### ${fileName}\n\`\`\`\n${content}\n\`\`\``);
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // ── Currently active editor file ──
+      const activeFile = this.getActiveEditorContent();
+      if (activeFile) {
+        const relative = activeFile.path.startsWith(projectPath)
+          ? activeFile.path.substring(projectPath.length + 1).replace(/\\/g, "/")
+          : activeFile.path;
+        systemParts.push("");
+        systemParts.push("## Currently Active File");
+        systemParts.push(`The user has \`${relative}\` open in the editor right now.`);
+        systemParts.push(`\`\`\`\n${activeFile.content}\n\`\`\``);
+      }
+
+      // ── Open editor tabs ──
       const openEditors = vscode.window.tabGroups.all
         .flatMap((g) => g.tabs)
         .filter((tab) => tab.input && typeof (tab.input as { uri?: vscode.Uri }).uri !== "undefined")
@@ -324,7 +420,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         systemParts.push("");
         systemParts.push("## Open Files in Editor");
         for (const editorPath of openEditors) {
-          // Show relative path if possible
           const relative = editorPath.startsWith(projectPath)
             ? editorPath.substring(projectPath.length + 1).replace(/\\/g, "/")
             : editorPath;
@@ -352,63 +447,147 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     const systemPrompt = systemParts.join("\n");
 
-    const conversationMessages = this.messages.map((msg) => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-    }));
+    // ────────────────────────────────────────────────────────────────────────
+    // Autonomous Agent Loop — streams response, extracts tool calls, loops
+    // ────────────────────────────────────────────────────────────────────────
+
+    const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...this.messages.map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content })),
+    ];
+
+    let maxToolRounds = 15;
+    let finalResponse = "";
+    const touchedFiles: string[] = [];
 
     try {
-      const streamResult = await router.stream(conversationMessages, {
-        system: systemPrompt,
-        maxTokens: 8192,
-      });
+      while (maxToolRounds > 0) {
+        maxToolRounds--;
 
-      let fullResponse = "";
+        // Stream the model response
+        const streamResult = await router.stream(agentMessages, {
+          system: systemPrompt,
+          maxTokens: 8192,
+        });
 
-      for await (const chunk of streamResult.textStream) {
+        let fullResponse = "";
+
+        for await (const chunk of streamResult.textStream) {
+          if (this.stopRequested) break;
+          fullResponse += chunk;
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: { chunk, partial: fullResponse },
+          });
+        }
+
         if (this.stopRequested) {
+          if (fullResponse.length > 0) {
+            this.messages.push({ role: "assistant", content: fullResponse + "\n\n_(generation stopped)_" });
+          }
+          this.postMessage({ type: "generation_stopped", payload: { text: fullResponse } });
+          finalResponse = fullResponse;
           break;
         }
-        fullResponse += chunk;
+
+        if (fullResponse.trim().length === 0) {
+          const hint = provider === "ollama"
+            ? `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`
+            : `The model "${modelId}" returned an empty response.`;
+          this.postMessage({ type: "error", payload: { message: `No response from ${this.currentModel}. ${hint}` } });
+          break;
+        }
+
+        // Extract tool calls from the response
+        const { cleanText, toolCalls } = extractToolCalls(fullResponse);
+
+        // No tool calls → final response, exit the loop
+        if (toolCalls.length === 0) {
+          this.messages.push({ role: "assistant", content: fullResponse });
+          this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
+          finalResponse = fullResponse;
+          break;
+        }
+
+        // ── Tool calls found — execute them ──
+        // Show the clean text part as the assistant's reasoning
+        if (cleanText.length > 0) {
+          this.postMessage({ type: "chat_response_done", payload: { text: cleanText } });
+        }
+
+        const toolResultParts: string[] = [];
+
+        for (const toolCall of toolCalls) {
+          // Show tool execution in the UI
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk: `\n\n> **Tool: ${toolCall.name}** ${this.summarizeToolInput(toolCall.name, toolCall.input)}\n`,
+              partial: "",
+            },
+          });
+
+          // Execute the tool
+          const result: ToolResult = await executeTool(toolCall.name, toolCall.input, projectRoot);
+
+          // Track files written for DanteForge verification
+          const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
+          if (writtenFile && !touchedFiles.includes(writtenFile)) {
+            touchedFiles.push(writtenFile);
+          }
+
+          // Show abbreviated result
+          const preview = result.content.split("\n").slice(0, 5).join("\n");
+          const statusIcon = result.isError ? "Error" : "OK";
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk: `> _${statusIcon}:_ \`${preview.slice(0, 200)}\`\n`,
+              partial: "",
+            },
+          });
+
+          // Run DanteForge gate on written code files immediately
+          if (writtenFile && !result.isError) {
+            try {
+              const { readFile } = await import("node:fs/promises");
+              const fileContent = await readFile(writtenFile, "utf-8");
+              const stubCheck = runAntiStubScanner(fileContent, projectRoot);
+              const constCheck = runConstitutionCheck(fileContent, writtenFile);
+              const criticals = constCheck.violations.filter((v) => v.severity === "critical");
+
+              if (!stubCheck.passed || criticals.length > 0) {
+                const warnings: string[] = [];
+                if (!stubCheck.passed) warnings.push(`${stubCheck.hardViolations.length} anti-stub violations`);
+                if (criticals.length > 0) warnings.push(`${criticals.length} constitution violations`);
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk: `> **DanteForge Warning:** ${warnings.join(", ")} in ${writtenFile}\n`, partial: "" },
+                });
+              }
+            } catch { /* verification failure non-critical */ }
+          }
+
+          toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
+        }
+
+        // Append the assistant response + tool results to the conversation for next round
+        agentMessages.push({ role: "assistant", content: fullResponse });
+        agentMessages.push({ role: "user", content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.` });
+
+        // Signal the UI that a new round is starting
         this.postMessage({
           type: "chat_response_chunk",
-          payload: { chunk, partial: fullResponse },
-        });
-      }
-
-      if (this.stopRequested) {
-        // Add partial response to history
-        if (fullResponse.length > 0) {
-          this.messages.push({ role: "assistant", content: fullResponse + "\n\n_(generation stopped)_" });
-        }
-        this.postMessage({
-          type: "generation_stopped",
-          payload: { text: fullResponse },
-        });
-      } else if (fullResponse.trim().length === 0) {
-        // Empty response — likely model not found or connection issue
-        const hint = provider === "ollama"
-          ? `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`
-          : `The model "${modelId}" returned an empty response.`;
-        this.postMessage({
-          type: "error",
-          payload: { message: `No response from ${this.currentModel}. ${hint}` },
-        });
-      } else {
-        this.messages.push({ role: "assistant", content: fullResponse });
-        this.postMessage({
-          type: "chat_response_done",
-          payload: { text: fullResponse },
+          payload: { chunk: "\n\n---\n_Continuing..._\n\n", partial: "" },
         });
       }
 
       // Auto-save current chat to history
       await this.saveChatToHistory();
 
-      // Run PDSE score on code responses
-      if (this.containsCode(fullResponse)) {
+      // Run PDSE scoring on the final response's code blocks
+      if (finalResponse.length > 0 && this.containsCode(finalResponse)) {
         try {
-          const codeBlocks = this.extractCodeBlocks(fullResponse);
+          const codeBlocks = this.extractCodeBlocks(finalResponse);
           for (const block of codeBlocks) {
             const score = runLocalPDSEScorer(block, projectRoot);
             this.postMessage({
@@ -424,9 +603,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               },
             });
           }
-        } catch {
-          // PDSE scoring failure should not break the chat flow
-        }
+        } catch { /* non-critical */ }
       }
 
       // Audit log
@@ -436,37 +613,43 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           timestamp: new Date().toISOString(),
           type: "session_start",
           payload: {
-            action: "chat_message",
+            action: "agent_loop",
             chatId: this.currentChatId,
             userMessageLength: text.length,
-            assistantMessageLength: fullResponse.length,
+            assistantResponseLength: finalResponse.length,
             model: this.currentModel,
-            contextFileCount: this.contextFiles.length,
-            stopped: this.stopRequested,
+            toolRoundsUsed: 15 - maxToolRounds,
+            filesWritten: touchedFiles,
           },
           modelId: this.currentModel,
           projectRoot,
         });
-      } catch {
-        // Audit failure is non-critical
-      }
+      } catch { /* audit non-critical */ }
     } catch (err: unknown) {
       const rawMessage = err instanceof Error ? err.message : String(err);
-
-      // Build a diagnostic error message with provider context
       let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
       if (provider !== "ollama" && !apiKey) {
         diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
       } else if (provider !== "ollama") {
-        diagnostic += `\n\nAPI key is configured for "${provider}" — this may be an authentication or model name issue.`;
+        diagnostic += `\n\nAPI key is configured — this may be an authentication or model name issue.`;
       } else {
         diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
       }
+      this.postMessage({ type: "error", payload: { message: diagnostic } });
+    }
+  }
 
-      this.postMessage({
-        type: "error",
-        payload: { message: diagnostic },
-      });
+  /** Summarize tool input for display in the chat. */
+  private summarizeToolInput(name: string, input: Record<string, unknown>): string {
+    switch (name) {
+      case "Read": return `\`${input["file_path"] ?? ""}\``;
+      case "Write": return `\`${input["file_path"] ?? ""}\``;
+      case "Edit": return `\`${input["file_path"] ?? ""}\``;
+      case "ListDir": return `\`${input["path"] ?? "."}\``;
+      case "Bash": return `\`${String(input["command"] ?? "").slice(0, 60)}\``;
+      case "Glob": return `\`${input["pattern"] ?? ""}\``;
+      case "Grep": return `\`${input["pattern"] ?? ""}\``;
+      default: return "";
     }
   }
 
@@ -858,6 +1041,120 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private getProjectRoot(): string {
     const folders = vscode.workspace.workspaceFolders;
     return folders?.[0]?.uri.fsPath ?? "";
+  }
+
+  // --------------------------------------------------------------------------
+  // Workspace scanning — gives the model real project context
+  // --------------------------------------------------------------------------
+
+  /**
+   * Builds a directory tree string for the workspace, respecting common
+   * ignore patterns. Limits depth and file count to stay within token budget.
+   */
+  private async buildWorkspaceTree(rootUri: vscode.Uri, maxDepth = 3, maxFiles = 200): Promise<string> {
+    const IGNORE_DIRS = new Set([
+      "node_modules", ".git", ".turbo", "dist", "build", ".next", ".nuxt",
+      "coverage", "__pycache__", ".venv", "venv", ".dantecode", ".vscode",
+      ".idea", "out", ".cache", ".parcel-cache", "target",
+    ]);
+    const IGNORE_EXTS = new Set([
+      ".vsix", ".lock", ".log", ".tsbuildinfo", ".map", ".min.js", ".min.css",
+    ]);
+
+    const lines: string[] = [];
+    let fileCount = 0;
+
+    const walk = async (dirUri: vscode.Uri, prefix: string, depth: number): Promise<void> => {
+      if (depth > maxDepth || fileCount >= maxFiles) return;
+
+      let entries: [string, vscode.FileType][];
+      try {
+        entries = await vscode.workspace.fs.readDirectory(dirUri);
+      } catch {
+        return;
+      }
+
+      // Sort: directories first, then files
+      entries.sort((a, b) => {
+        if (a[1] === b[1]) return a[0].localeCompare(b[0]);
+        return a[1] === vscode.FileType.Directory ? -1 : 1;
+      });
+
+      for (const [name, type] of entries) {
+        if (fileCount >= maxFiles) {
+          lines.push(`${prefix}... (truncated)`);
+          return;
+        }
+
+        if (name.startsWith(".") && name !== ".env.example") continue;
+
+        if (type === vscode.FileType.Directory) {
+          if (IGNORE_DIRS.has(name)) continue;
+          lines.push(`${prefix}${name}/`);
+          const childUri = vscode.Uri.joinPath(dirUri, name);
+          await walk(childUri, prefix + "  ", depth + 1);
+        } else {
+          const ext = name.includes(".") ? "." + name.split(".").pop() : "";
+          if (IGNORE_EXTS.has(ext)) continue;
+          lines.push(`${prefix}${name}`);
+          fileCount++;
+        }
+      }
+    };
+
+    await walk(rootUri, "", 0);
+    return lines.join("\n");
+  }
+
+  /**
+   * Reads key project files that give the model high-level understanding
+   * of the project: package.json, README, config files, etc.
+   * Returns a map of relative path → file content (truncated to stay in budget).
+   */
+  private async readKeyProjectFiles(rootUri: vscode.Uri): Promise<Map<string, string>> {
+    const KEY_FILES = [
+      "package.json",
+      "README.md",
+      "tsconfig.json",
+      ".env.example",
+      "CLAUDE.md",
+    ];
+    const MAX_FILE_SIZE = 4000; // chars per file
+
+    const results = new Map<string, string>();
+
+    for (const fileName of KEY_FILES) {
+      try {
+        const fileUri = vscode.Uri.joinPath(rootUri, fileName);
+        const content = await vscode.workspace.fs.readFile(fileUri);
+        let text = Buffer.from(content).toString("utf-8");
+        if (text.length > MAX_FILE_SIZE) {
+          text = text.substring(0, MAX_FILE_SIZE) + "\n... (truncated)";
+        }
+        results.set(fileName, text);
+      } catch {
+        // File doesn't exist — skip
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Gets the content of the currently active editor tab.
+   */
+  private getActiveEditorContent(): { path: string; content: string } | null {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) return null;
+
+    const doc = editor.document;
+    const MAX_ACTIVE_FILE = 8000;
+    let content = doc.getText();
+    if (content.length > MAX_ACTIVE_FILE) {
+      content = content.substring(0, MAX_ACTIVE_FILE) + "\n... (truncated)";
+    }
+
+    return { path: doc.uri.fsPath, content };
   }
 
   private parseModelString(model: string): [string, string] {
