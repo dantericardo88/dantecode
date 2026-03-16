@@ -101,7 +101,43 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
  * @param model - The new model identifier (e.g. "grok/grok-3").
  * @param gateStatus - The current PDSE gate status.
  */
-export function updateStatusBar(
+export function updateStatusBar(state: StatusBarState, model: string, gateStatus: 'passed' | 'failed' | 'pending' | 'none') {
+  state.currentModel = model;
+  state.gateStatus = gateStatus;
+
+  const modelLabel = model.split('/').pop() || model;
+  let icon = '';
+  let bgColor: vscode.ThemeColor | undefined;
+  let tooltip = `Model: ${model}\nPDSE Gate: ${gateStatus.toUpperCase()}\nClick to switch model`;
+
+  switch (gateStatus) {
+    case 'passed':
+      icon = '$(pass-filled) ';
+      tooltip += '\n✅ Quality gate passed';
+      break;
+    case 'failed':
+      icon = '$(error) ';
+      bgColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      tooltip += '\n❌ Quality gate failed';
+      break;
+    case 'pending':
+      icon = '$(loading~spin) ';
+      tooltip += '\n⏳ Verifying...';
+      break;
+    default:
+      icon = '$(dash) ';
+  }
+
+  state.item.text = `$(dante-fire) ${icon}DanteCode: ${modelLabel}`;
+  state.item.tooltip = tooltip;
+  state.item.backgroundColor = bgColor;
+
+  // Animation: subtle pulse on status change
+  state.item.color = new vscode.ThemeColor('statusBarItem.foreground');
+  setTimeout(() => {
+    state.item.color = undefined;
+  }, 500);
+}(
   state: StatusBarState,
   model: string,
   gateStatus: GateStatus,

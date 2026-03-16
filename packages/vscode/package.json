@@ -60,6 +60,23 @@
       ]
     },
     "views": {
+            "dantecode": [
+              {
+                "type": "webview",
+                "id": "dantecode.chatView",
+                "name": "Chat"
+              },
+              {
+                "type": "webview",
+                "id": "dantecode.auditView",
+                "name": "Audit Log"
+              },
+              {
+                "id": "dantecode.repoMap",
+                "name": "Repo Map",
+                "type": "tree"
+              }
+            ]
       "dantecode": [
         {
           "type": "webview",

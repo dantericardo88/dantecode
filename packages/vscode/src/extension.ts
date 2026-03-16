@@ -54,7 +54,29 @@ let onboardingProvider: OnboardingProvider | undefined;
  *
  * @param context - The extension context provided by VS Code.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext) {
+  // Existing...
+
+  // Repo map tree
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  if (projectRoot) {
+    const treeProvider = new RepoMapTreeDataProvider(projectRoot);
+    const repoTree = vscode.window.createTreeView('dantecode.repoMap', {
+      treeDataProvider: treeProvider
+    });
+    context.subscriptions.push(repoTree);
+  }
+
+  // Status bar with animation
+  const statusState = createStatusBar(context);
+  updateStatusBar(statusState, 'grok/grok-4-1-fast-non-reasoning', 'none');
+
+  // Onboarding
+  if (!OnboardingProvider.hasOnboarded(context)) {
+    const onboarding = new OnboardingProvider(context.extensionUri, context.secrets, context);
+    onboarding.show();
+  }
+}: void {
   const extensionUri = context.extensionUri;
 
   // ── Sidebar providers ──

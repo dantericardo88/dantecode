@@ -1,0 +1,59 @@
+/* DanteCode Theme — Generated from .danteforge/design-tokens.yaml */
+
+:root {
+  /* Surfaces */
+  --surface-sidebar-bg: var(--vscode-sideBar-background);
+  --surface-editor-bg: var(--vscode-editor-background);
+  --surface-section-header-bg: var(--vscode-sideBarSectionHeader-background);
+  --surface-input-bg: var(--vscode-input-background);
+  --surface-dropdown-bg: var(--vscode-dropdown-background);
+  --surface-code-block-bg: var(--vscode-textCodeBlock-background);
+
+  /* Text */
+  --text-foreground: var(--vscode-foreground);
+  --text-section-header-fg: var(--vscode-sideBarSectionHeader-foreground);
+  --text-description: var(--vscode-descriptionForeground);
+
+  /* Accents */
+  --accent-user-message: var(--vscode-textLink-foreground);
+  --accent-assistant-message: var(--vscode-charts-green);
+
+  /* Borders */
+  --border-panel: var(--vscode-panel-border);
+  --border-input: var(--vscode-input-border);
+  --border-accent: 3px solid var(--vscode-textLink-foreground);
+
+  /* Status */
+  --status-gate-passed: var(--vscode-testing-iconPassed);
+  --status-gate-failed: var(--vscode-testing-iconFailed);
+
+  /* Typography */
+  --font-family: var(--vscode-font-family);
+  --font-size-base: var(--vscode-font-size);
+  --editor-font-family: var(--vscode-editor-font-family);
+  --editor-font-size: var(--vscode-editor-font-size);
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 6px;
+  --spacing-md: 8px;
+  --spacing-lg: 12px;
+
+  /* Dimensions */
+  --pill-height: 22px;
+  --header-height: 36px;
+}
+
+/* Message role accents */
+.user .message-body { border-left: var(--border-accent-user, var(--accent-user-message)); }
+.assistant .message-body { border-left: var(--border-accent-assistant, var(--accent-assistant-message)); }
+
+/* PDSE Badge */
+.pdse-badge.passed { 
+  background: var(--status-gate-passed); 
+  color: var(--status-gate-passed-overlay, #fff); 
+}
+.pdse-badge.failed { 
+  background: var(--status-gate-failed); 
+  color: var(--status-gate-failed-overlay, #fff); 
+}
