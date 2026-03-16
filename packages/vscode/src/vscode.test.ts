@@ -130,6 +130,9 @@ vi.mock("vscode", () => {
       createTerminal: vi.fn(() => ({ sendText: vi.fn(), show: vi.fn() })),
     },
     workspace: {
+      registerTextDocumentContentProvider: vi.fn(() => ({
+        provideTextDocumentContent: vi.fn(() => ""),
+      })),
       getConfiguration: vi.fn(() => ({
         get: vi.fn((_key: string, defaultValue: unknown) => defaultValue),
         update: vi.fn(),
@@ -828,25 +831,39 @@ describe("VS Code Extension", () => {
 
     it("constructs without throwing", () => {
       const uri = vscode.Uri.file("/test");
-      expect(() => new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState)).not.toThrow();
+      expect(
+        () => new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState),
+      ).not.toThrow();
     });
 
     it("getCurrentModel returns default model from config", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
-      // Default from mock: getConfiguration().get("defaultModel", "grok/grok-4.2") → "grok/grok-4.2"
-      expect(provider.getCurrentModel()).toBe("grok/grok-4.2");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+      // Default from mock: getConfiguration().get("defaultModel", "grok/grok-4-1-fast-non-reasoning") → returns the defaultValue
+      expect(provider.getCurrentModel()).toBe("grok/grok-4-1-fast-non-reasoning");
     });
 
     it("addFileToContext does not throw", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
       expect(() => provider.addFileToContext("/some/file.ts")).not.toThrow();
     });
 
     it("sendPDSEScore does not throw when view is not set", () => {
       const uri = vscode.Uri.file("/test");
-      const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri, mockSecrets, mockGlobalState);
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
       const score: PDSEScore = {
         overall: 90,
         completeness: 90,
@@ -902,8 +919,14 @@ describe("VS Code Extension", () => {
         subscriptions: [] as { dispose: () => void }[],
         extensionUri: vscode.Uri.file("/test"),
         extensionPath: "/test",
-        secrets: { get: vi.fn().mockResolvedValue(undefined), store: vi.fn().mockResolvedValue(undefined) },
-        globalState: { get: vi.fn().mockReturnValue(true), update: vi.fn().mockResolvedValue(undefined) },
+        secrets: {
+          get: vi.fn().mockResolvedValue(undefined),
+          store: vi.fn().mockResolvedValue(undefined),
+        },
+        globalState: {
+          get: vi.fn().mockReturnValue(true),
+          update: vi.fn().mockResolvedValue(undefined),
+        },
       } as unknown as vscode.ExtensionContext;
     }
 

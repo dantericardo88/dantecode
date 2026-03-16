@@ -6,6 +6,11 @@
 // ============================================================================
 
 import * as vscode from "vscode";
+import {
+  resolve as pathResolve,
+  relative as pathRelative,
+  basename as pathBasename,
+} from "node:path";
 import type {
   ModelConfig,
   ModelRouterConfig,
@@ -14,7 +19,11 @@ import type {
   AuditEvent,
 } from "@dantecode/config-types";
 import { ModelRouterImpl, appendAuditEvent, readOrInitializeState } from "@dantecode/core";
-import { runLocalPDSEScorer, runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
+import {
+  runLocalPDSEScorer,
+  runAntiStubScanner,
+  runConstitutionCheck,
+} from "@dantecode/danteforge";
 import { generateRepoMap, formatRepoMapForContext, getStatus } from "@dantecode/git-engine";
 import {
   executeTool,
@@ -104,6 +113,7 @@ interface AgentConfig {
   };
   maxToolRounds: number;
   runUntilComplete: boolean;
+  showLiveDiffs: boolean;
 }
 
 /** Default config for new users. */
@@ -112,6 +122,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   permissions: { edit: "allow", bash: "ask", tools: "allow" },
   maxToolRounds: 15,
   runUntilComplete: false,
+  showLiveDiffs: true,
 };
 
 /** Read-only tools allowed in Plan mode. */
@@ -128,9 +139,24 @@ const PROVIDER_SECRET_KEYS: Record<string, string> = {
 /** Provider metadata for the settings panel. */
 const SETTINGS_PROVIDERS = [
   { id: "grok", label: "xAI / Grok", placeholder: "xai-...", url: "https://console.x.ai/" },
-  { id: "anthropic", label: "Anthropic", placeholder: "sk-ant-...", url: "https://console.anthropic.com/" },
-  { id: "openai", label: "OpenAI", placeholder: "sk-...", url: "https://platform.openai.com/api-keys" },
-  { id: "google", label: "Google AI", placeholder: "AIza...", url: "https://aistudio.google.com/apikey" },
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    placeholder: "sk-ant-...",
+    url: "https://console.anthropic.com/",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    placeholder: "sk-...",
+    url: "https://platform.openai.com/api-keys",
+  },
+  {
+    id: "google",
+    label: "Google AI",
+    placeholder: "AIza...",
+    url: "https://aistudio.google.com/apikey",
+  },
 ];
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -164,6 +190,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private abortController: AbortController | null = null;
   private pendingImages: string[] = [];
   private agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
+  private readonly diffContents = new Map<string, string>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -180,6 +207,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     if (savedConfig) {
       this.agentConfig = { ...DEFAULT_AGENT_CONFIG, ...savedConfig };
     }
+
+    // Register virtual document provider for diff "before" content
+    vscode.workspace.registerTextDocumentContentProvider("dantecode-diff", {
+      provideTextDocumentContent: (uri: vscode.Uri) => {
+        return this.diffContents.get(uri.toString()) ?? "";
+      },
+    });
   }
 
   /**
@@ -345,7 +379,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Build auto-fallback chain for Grok models
     const fallbackModels: ModelConfig[] = [];
     if (provider === "grok" && apiKey) {
-      const grokFallbacks = ["grok-3", "grok-3-mini"];
+      const grokFallbacks = ["grok-4-1-fast-non-reasoning", "grok-3", "grok-3-mini"];
       for (const fbId of grokFallbacks) {
         if (fbId !== modelId) {
           fallbackModels.push({ ...modelConfig, modelId: fbId });
@@ -364,9 +398,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Resolve agent mode settings
     const { agentMode, permissions, runUntilComplete } = this.agentConfig;
-    const effectiveMaxRounds = agentMode === "yolo" ? 50
-      : runUntilComplete ? 30
-      : this.agentConfig.maxToolRounds;
+    const effectiveMaxRounds =
+      agentMode === "yolo" ? 50 : runUntilComplete ? 30 : this.agentConfig.maxToolRounds;
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -374,29 +407,85 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "You help users write, review, and improve code with quality-first principles.",
       "Always provide complete, production-ready code. Never use stubs, TODOs, or placeholders.",
       "",
+      "## CRITICAL RULES — NEVER VIOLATE THESE",
+      "1. NEVER claim you completed work unless you actually used a tool (Read/Write/Edit/Bash) and received a real result back.",
+      "2. NEVER say 'deployed', 'live', 'complete', 'done', or '✅' for work you did not do with actual tool calls.",
+      "3. If you cannot do something (e.g., git push, install extension), say so honestly. Do NOT pretend you did it.",
+      "4. Every claim of a file change MUST be preceded by a real Edit or Write tool call that returned a success result.",
+      "5. Do NOT fabricate tool outputs, diffs, test results, coverage numbers, or PDSE scores. Only report real tool results.",
+      "6. Do NOT make up file names, test counts, or progress percentages. If you haven't read or run something, say 'not verified'.",
+      "7. When asked about progress, report ONLY what tool calls have actually confirmed. Everything else is 'pending' or 'unverified'.",
+      "",
+      "## Response Formatting",
+      "Format every response for maximum readability in the VS Code sidebar:",
+      "- Start with a brief **Summary** of what you did or will do.",
+      "- Use ## headings to organize sections (e.g., ## Analysis, ## Changes Made, ## Recommendations).",
+      "- Use **bold** for key terms, `inline code` for file names, functions, and commands.",
+      "- Use bullet lists and numbered lists for multi-point information.",
+      "- Use markdown tables when comparing options, listing files changed, or showing structured data.",
+      "- Use > blockquotes for important warnings or callouts.",
+      "- Use ```language for all code blocks with the correct language identifier.",
+      "- Keep paragraphs short (2-3 sentences max).",
+      "",
     ];
 
     // Mode-specific instructions
     if (agentMode === "plan") {
       systemParts.push("## Mode: PLAN (Read-Only)");
-      systemParts.push("You are in PLAN mode. You can ONLY use read-only tools: Read, ListDir, Glob, Grep.");
+      systemParts.push(
+        "You are in PLAN mode. You can ONLY use read-only tools: Read, ListDir, Glob, Grep.",
+      );
       systemParts.push("Do NOT write, edit, or execute any commands. Analyze and plan only.");
-      systemParts.push("Present a detailed implementation plan the user can approve before switching to Build mode.");
+      systemParts.push(
+        "Present a detailed implementation plan the user can approve before switching to Build mode.",
+      );
       systemParts.push("");
     } else if (agentMode === "yolo") {
       systemParts.push("## Mode: YOLO (Full Autonomous)");
-      systemParts.push("You are in YOLO mode. Execute tasks fully and autonomously. Do NOT stop to ask for confirmation.");
-      systemParts.push("Plan your approach, then execute every step including file edits, builds, and tests.");
+      systemParts.push(
+        "You are in YOLO mode. Execute tasks fully and autonomously. Do NOT stop to ask for confirmation.",
+      );
+      systemParts.push(
+        "IMMEDIATELY use <tool_use> blocks to read files, write code, and run commands.",
+      );
+      systemParts.push(
+        "Plan briefly (2-3 sentences max), then execute EVERY step using tools: Read → Edit/Write → Bash.",
+      );
       systemParts.push("Continue working through all tool rounds until the task is 100% complete.");
-      systemParts.push("If you encounter an error, fix it and continue. Only stop when the task is done.");
+      systemParts.push(
+        "If you encounter an error, fix it and continue. Only stop when the task is done.",
+      );
+      systemParts.push(
+        "IMPORTANT: Do NOT write fake progress updates or claim things are 'deployed' or 'live' unless a tool call confirmed it.",
+      );
+      systemParts.push(
+        "Only report actual tool results. If a task requires more steps, use more tools — do not skip steps by pretending they happened.",
+      );
       systemParts.push("");
     } else {
       systemParts.push("## Mode: BUILD");
+      systemParts.push(
+        "When the user asks you to build, implement, or fix something, USE tools immediately.",
+      );
+      systemParts.push(
+        "Do NOT just describe what you would do. Actually do it with <tool_use> blocks.",
+      );
       if (runUntilComplete) {
-        systemParts.push("The user has enabled 'Run Until Complete'. Execute the full task without stopping early.");
+        systemParts.push(
+          "The user has enabled 'Run Until Complete'. Execute the full task without stopping early.",
+        );
       }
       systemParts.push("");
     }
+
+    // Git commit attribution — use the active model name dynamically
+    const modelLabel = this.currentModel.replace(/^[^/]+\//, ""); // strip provider prefix
+    systemParts.push("## Git Commits");
+    systemParts.push(
+      `When making git commits via the Bash tool, always include this Co-Authored-By trailer:`,
+    );
+    systemParts.push(`Co-Authored-By: DanteCode (${modelLabel}) <noreply@dantecode.dev>`);
+    systemParts.push("");
 
     systemParts.push(getToolDefinitionsPrompt());
 
@@ -414,9 +503,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       systemParts.push(`- Path: ${projectPath}`);
       systemParts.push(`- IDE: ${ideName}`);
       systemParts.push("");
-      systemParts.push("You have FULL access to this project. The complete file tree, key files, git status,");
-      systemParts.push("and project configuration are provided below. When the user asks you to scan, review,");
-      systemParts.push("or analyze the project — use this context directly. Do NOT say you lack access.");
+      systemParts.push(
+        "You have FULL access to this project. The complete file tree, key files, git status,",
+      );
+      systemParts.push(
+        "and project configuration are provided below. When the user asks you to scan, review,",
+      );
+      systemParts.push(
+        "or analyze the project — use this context directly. Do NOT say you lack access.",
+      );
 
       // ── Git-engine repo map (structured file listing with metadata) ──
       try {
@@ -437,7 +532,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             systemParts.push(tree);
             systemParts.push("```");
           }
-        } catch { /* non-critical */ }
+        } catch {
+          /* non-critical */
+        }
       }
 
       // ── Git status + branch info ──
@@ -453,29 +550,43 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           systemParts.push("Working tree is clean.");
         } else {
           if (stagedCount > 0) {
-            systemParts.push(`**Staged (${stagedCount}):** ${gitStatus.staged.map((e) => e.path).join(", ")}`);
+            systemParts.push(
+              `**Staged (${stagedCount}):** ${gitStatus.staged.map((e) => e.path).join(", ")}`,
+            );
           }
           if (unstagedCount > 0) {
-            systemParts.push(`**Modified (${unstagedCount}):** ${gitStatus.unstaged.map((e) => e.path).join(", ")}`);
+            systemParts.push(
+              `**Modified (${unstagedCount}):** ${gitStatus.unstaged.map((e) => e.path).join(", ")}`,
+            );
           }
           if (untrackedCount > 0) {
-            systemParts.push(`**Untracked (${untrackedCount}):** ${gitStatus.untracked.map((e) => e.path).join(", ")}`);
+            systemParts.push(
+              `**Untracked (${untrackedCount}):** ${gitStatus.untracked.map((e) => e.path).join(", ")}`,
+            );
           }
         }
-      } catch { /* non-git repo — skip */ }
+      } catch {
+        /* non-git repo — skip */
+      }
 
       // ── STATE.yaml (DanteForge project config) ──
       try {
         const state = await readOrInitializeState(projectPath);
         systemParts.push("");
         systemParts.push("## DanteForge Configuration");
-        systemParts.push(`- Default model: ${state.model.default.provider}/${state.model.default.modelId}`);
+        systemParts.push(
+          `- Default model: ${state.model.default.provider}/${state.model.default.modelId}`,
+        );
         systemParts.push(`- PDSE threshold: ${state.pdse.threshold}`);
         systemParts.push(`- Autoforge enabled: ${state.autoforge.enabled}`);
         if (state.autoforge.gstackCommands.length > 0) {
-          systemParts.push(`- GStack commands: ${state.autoforge.gstackCommands.map((c: { name: string }) => c.name).join(", ")}`);
+          systemParts.push(
+            `- GStack commands: ${state.autoforge.gstackCommands.map((c: { name: string }) => c.name).join(", ")}`,
+          );
         }
-      } catch { /* no STATE.yaml — skip */ }
+      } catch {
+        /* no STATE.yaml — skip */
+      }
 
       // ── Key project files (package.json, README, tsconfig, etc.) ──
       try {
@@ -487,7 +598,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             systemParts.push(`\n### ${fileName}\n\`\`\`\n${content}\n\`\`\``);
           }
         }
-      } catch { /* non-critical */ }
+      } catch {
+        /* non-critical */
+      }
 
       // ── Currently active editor file ──
       const activeFile = this.getActiveEditorContent();
@@ -504,7 +617,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       // ── Open editor tabs ──
       const openEditors = vscode.window.tabGroups.all
         .flatMap((g) => g.tabs)
-        .filter((tab) => tab.input && typeof (tab.input as { uri?: vscode.Uri }).uri !== "undefined")
+        .filter(
+          (tab) => tab.input && typeof (tab.input as { uri?: vscode.Uri }).uri !== "undefined",
+        )
         .map((tab) => (tab.input as { uri: vscode.Uri }).uri.fsPath)
         .slice(0, 20);
 
@@ -544,16 +659,22 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // ────────────────────────────────────────────────────────────────────────
 
     const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
-      ...this.messages.map((msg) => ({ role: msg.role as "user" | "assistant", content: msg.content })),
+      ...this.messages.map((msg) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      })),
     ];
 
     let maxToolRounds = effectiveMaxRounds;
     let finalResponse = "";
     const touchedFiles: string[] = [];
+    let roundNumber = 0; // Track which round we're on
 
     try {
       while (maxToolRounds > 0) {
         maxToolRounds--;
+        roundNumber++;
+        const isFirstRound = roundNumber === 1;
 
         // Stream the model response
         const streamResult = await router.stream(agentMessages, {
@@ -564,40 +685,82 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         let fullResponse = "";
 
-        // Set a 30-second timeout for the first chunk; abort if no response
+        // Set a 60-second timeout for the first chunk (up from 30s for slower models)
         const firstChunkTimeout = setTimeout(() => {
           if (fullResponse.length === 0 && this.abortController) {
             this.abortController.abort();
           }
-        }, 30_000);
+        }, 60_000);
+
+        // Heartbeat while waiting for model to start responding
+        // On round 2+, use chunk-only mode to APPEND to the existing buffer
+        let heartbeatTick = 0;
+        const streamHeartbeat = setInterval(() => {
+          if (fullResponse.length === 0) {
+            heartbeatTick++;
+            if (isFirstRound && heartbeatTick <= 1) {
+              // First tick on first round: show "thinking..." as temporary display
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk: "", partial: "_thinking..._" },
+              });
+            } else {
+              // Subsequent ticks: append visible progress to buffer
+              const dots = ".".repeat(((heartbeatTick - 1) % 3) + 1);
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk: `\n> _waiting for model${dots}_\n`, partial: "" },
+              });
+            }
+          }
+        }, 4000);
 
         try {
           for await (const chunk of streamResult.textStream) {
-            if (fullResponse.length === 0) clearTimeout(firstChunkTimeout);
+            if (fullResponse.length === 0) {
+              clearTimeout(firstChunkTimeout);
+              clearInterval(streamHeartbeat);
+            }
             if (this.stopRequested) break;
             fullResponse += chunk;
-            this.postMessage({
-              type: "chat_response_chunk",
-              payload: { chunk, partial: fullResponse },
-            });
+            if (isFirstRound) {
+              // First round: send partial (full response so far) for clean rendering
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk, partial: fullResponse },
+              });
+            } else {
+              // Subsequent rounds: chunk-only mode — APPENDS to existing buffer
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk, partial: "" },
+              });
+            }
           }
         } catch (streamErr: unknown) {
           clearTimeout(firstChunkTimeout);
+          clearInterval(streamHeartbeat);
           // If aborted by timeout and no response yet, show a timeout error
           if (signal.aborted && fullResponse.length === 0) {
             this.postMessage({
               type: "error",
-              payload: { message: `Request to ${this.currentModel} timed out after 30 seconds.\nCheck your API key and network connection.` },
+              payload: {
+                message: `Request to ${this.currentModel} timed out after 30 seconds.\nCheck your API key and network connection.`,
+              },
             });
             break;
           }
           throw streamErr; // re-throw other errors to outer catch
         }
         clearTimeout(firstChunkTimeout);
+        clearInterval(streamHeartbeat);
 
         if (this.stopRequested) {
           if (fullResponse.length > 0) {
-            this.messages.push({ role: "assistant", content: fullResponse + "\n\n_(generation stopped)_" });
+            this.messages.push({
+              role: "assistant",
+              content: fullResponse + "\n\n_(generation stopped)_",
+            });
           }
           this.postMessage({ type: "generation_stopped", payload: { text: fullResponse } });
           finalResponse = fullResponse;
@@ -605,43 +768,113 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         if (fullResponse.trim().length === 0) {
-          let hint: string;
-          if (provider === "ollama") {
-            hint = `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`;
-          } else if (provider === "grok") {
-            hint = `The model "${modelId}" returned an empty response. Check that this model ID exists at docs.x.ai/developers/models. Try switching to "Grok 4.1 Fast" or "Grok 3" in the model selector.`;
-          } else {
-            hint = `The model "${modelId}" returned an empty response. The model ID may be invalid or your API key may lack access.`;
+          // Auto-retry with fallback models before showing error
+          let retried = false;
+          for (const fb of fallbackModels) {
+            try {
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: {
+                  chunk: `\n\n_(${modelId} returned empty — retrying with ${fb.modelId}...)_\n`,
+                  partial: `_(retrying with ${fb.modelId}...)_`,
+                },
+              });
+              const fbRouter = new ModelRouterImpl(
+                { default: fb, fallback: [], overrides: {} },
+                projectRoot,
+                this.sessionId,
+              );
+              const fbStream = await fbRouter.stream(agentMessages, {
+                system: systemPrompt,
+                maxTokens: 8192,
+                abortSignal: signal,
+              });
+              for await (const chunk of fbStream.textStream) {
+                if (this.stopRequested) break;
+                fullResponse += chunk;
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk, partial: fullResponse },
+                });
+              }
+              if (fullResponse.trim().length > 0) {
+                retried = true;
+                break;
+              }
+            } catch {
+              /* try next fallback */
+            }
           }
-          this.postMessage({ type: "error", payload: { message: `No response from ${this.currentModel}.\n${hint}` } });
-          break;
+          if (!retried || fullResponse.trim().length === 0) {
+            let hint: string;
+            if (provider === "ollama") {
+              hint = `The model "${modelId}" may not be installed. Run: ollama pull ${modelId}`;
+            } else if (provider === "grok") {
+              hint = `The model "${modelId}" returned an empty response. Try switching to "Grok 4.1 Fast" or "Grok 3" in the model selector.`;
+            } else {
+              hint = `The model "${modelId}" returned an empty response. The model ID may be invalid or your API key may lack access.`;
+            }
+            this.postMessage({
+              type: "error",
+              payload: { message: `No response from ${this.currentModel}.\n${hint}` },
+            });
+            break;
+          }
         }
 
         // Extract tool calls from the response
-        const { cleanText, toolCalls } = extractToolCalls(fullResponse);
+        const { toolCalls } = extractToolCalls(fullResponse);
 
-        // No tool calls → final response, exit the loop
+        // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
+          const isFirstRound = roundNumber === 1;
+          const isExecutionMode = agentMode === "yolo" || agentMode === "build";
+          const looksLikePlan =
+            /\b(plan|will|step|phase|first|then|next)\b/i.test(fullResponse) &&
+            fullResponse.length > 100;
+
+          // If the model just described a plan without acting, nudge it to use tools
+          if (isFirstRound && isExecutionMode && looksLikePlan && maxToolRounds > 1) {
+            // Do NOT send chat_response_done here — keep the streaming element alive
+            agentMessages.push({ role: "assistant", content: fullResponse });
+            agentMessages.push({
+              role: "user",
+              content:
+                "Good plan. Now EXECUTE it. Use <tool_use> blocks to read files and make changes. Start with the first step immediately. Do not describe — act.",
+            });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: { chunk: "\n\n---\n> **Executing plan...**\n\n", partial: "" },
+            });
+            continue; // Go back to the top of the agent loop
+          }
+
           this.messages.push({ role: "assistant", content: fullResponse });
-          this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
+          if (roundNumber <= 1) {
+            // Single-round response (no tool execution) — send final text
+            this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
+          } else {
+            // Multi-round: buffer has accumulated tool output + model text — keep it
+            this.postMessage({ type: "chat_response_done", payload: {} });
+          }
           finalResponse = fullResponse;
           break;
         }
 
         // ── Tool calls found — execute them ──
-        // Show the clean text part as the assistant's reasoning
-        if (cleanText.length > 0) {
-          this.postMessage({ type: "chat_response_done", payload: { text: cleanText } });
-        }
+        // Do NOT send chat_response_done here — keep the streaming element alive
+        // so tool execution output is visible in the chat in real-time
 
         const toolResultParts: string[] = [];
 
-        for (const toolCall of toolCalls) {
-          // Show tool execution in the UI
+        for (let ti = 0; ti < toolCalls.length; ti++) {
+          const toolCall = toolCalls[ti]!;
+          // Show tool execution in the UI with progress
+          const toolProgress = toolCalls.length > 1 ? ` (${ti + 1}/${toolCalls.length})` : "";
           this.postMessage({
             type: "chat_response_chunk",
             payload: {
-              chunk: `\n\n> **Tool: ${toolCall.name}** ${this.summarizeToolInput(toolCall.name, toolCall.input)}\n`,
+              chunk: `\n\n> **Running: ${toolCall.name}**${toolProgress} ${this.summarizeToolInput(toolCall.name, toolCall.input)}\n`,
               partial: "",
             },
           });
@@ -651,20 +884,57 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const isBashTool = toolCall.name === "Bash";
 
           if (agentMode === "plan" && !PLAN_MODE_TOOLS.has(toolCall.name)) {
-            toolResultParts.push(`Tool "${toolCall.name}" blocked: Plan mode only allows read-only tools.`);
+            toolResultParts.push(
+              `Tool "${toolCall.name}" blocked: Plan mode only allows read-only tools.`,
+            );
             continue;
           }
           if (permissions.edit === "deny" && isWriteTool) {
-            toolResultParts.push(`Tool "${toolCall.name}" blocked: File editing is denied by permissions.`);
+            toolResultParts.push(
+              `Tool "${toolCall.name}" blocked: File editing is denied by permissions.`,
+            );
             continue;
           }
           if (permissions.bash === "deny" && isBashTool) {
-            toolResultParts.push(`Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`);
+            toolResultParts.push(
+              `Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`,
+            );
             continue;
           }
 
-          // Execute the tool
-          const result: ToolResult = await executeTool(toolCall.name, toolCall.input, projectRoot);
+          // Capture original file content before tool execution (for diff view)
+          let originalContent: string | null = null;
+          const isFileOp = toolCall.name === "Write" || toolCall.name === "Edit";
+          const toolFilePath = toolCall.input["file_path"] as string | undefined;
+          if (isFileOp && toolFilePath && this.agentConfig.showLiveDiffs) {
+            try {
+              const { readFile: rf } = await import("node:fs/promises");
+              const absPath =
+                toolFilePath.startsWith("/") || toolFilePath.includes(":")
+                  ? toolFilePath
+                  : pathResolve(projectRoot, toolFilePath);
+              originalContent = await rf(absPath, "utf-8");
+            } catch {
+              originalContent = null; // New file — no original
+            }
+          }
+
+          // Execute the tool with heartbeat for long-running operations
+          let toolTick = 0;
+          const heartbeat = setInterval(() => {
+            toolTick++;
+            const elapsed = toolTick * 3;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: { chunk: `\n> _executing${".".repeat((toolTick % 3) + 1)} (${elapsed}s)_\n`, partial: "" },
+            });
+          }, 3000); // pulse every 3 seconds
+          let result: ToolResult;
+          try {
+            result = await executeTool(toolCall.name, toolCall.input, projectRoot);
+          } finally {
+            clearInterval(heartbeat);
+          }
 
           // Track files written for DanteForge verification
           const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
@@ -672,16 +942,82 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             touchedFiles.push(writtenFile);
           }
 
-          // Show abbreviated result
-          const preview = result.content.split("\n").slice(0, 5).join("\n");
-          const statusIcon = result.isError ? "Error" : "OK";
-          this.postMessage({
-            type: "chat_response_chunk",
-            payload: {
-              chunk: `> _${statusIcon}:_ \`${preview.slice(0, 200)}\`\n`,
-              partial: "",
-            },
-          });
+          // Show tool result with diff for write operations
+          if (isFileOp && !result.isError) {
+            // Show confirmation that changes were APPLIED to disk, with diff
+            const lines = result.content.split("\n");
+            const summary = lines[0] ?? "";
+            const diffContent = lines.slice(2).join("\n");
+            const relPath =
+              toolFilePath && projectRoot
+                ? pathRelative(
+                    projectRoot,
+                    toolFilePath.startsWith("/") || toolFilePath.includes(":")
+                      ? toolFilePath
+                      : pathResolve(projectRoot, toolFilePath),
+                  ).replace(/\\/g, "/")
+                : (toolFilePath ?? "");
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **Applied** \`${relPath}\` — ${summary}\n\`\`\`diff\n${diffContent.slice(0, 1000)}\n\`\`\`\n`,
+                partial: "",
+              },
+            });
+
+            // Auto-open file in VS Code editor with diff view
+            if (toolFilePath) {
+              try {
+                const absPath =
+                  toolFilePath.startsWith("/") || toolFilePath.includes(":")
+                    ? toolFilePath
+                    : pathResolve(projectRoot, toolFilePath);
+                const modifiedUri = vscode.Uri.file(absPath);
+
+                if (this.agentConfig.showLiveDiffs && originalContent !== null) {
+                  // Remove diff computation timeout to prevent "stopped early" warning
+                  const diffConfig = vscode.workspace.getConfiguration("diffEditor");
+                  if (diffConfig.get<number>("maxComputationTime") !== 0) {
+                    await diffConfig.update(
+                      "maxComputationTime",
+                      0,
+                      vscode.ConfigurationTarget.Global,
+                    );
+                  }
+                  // Show diff: original vs modified using a virtual "before" document
+                  const beforeUri = modifiedUri.with({
+                    scheme: "dantecode-diff",
+                    query: `before-${Date.now()}`,
+                  });
+                  this.registerDiffContent(beforeUri.toString(), originalContent);
+                  const fileName = pathBasename(absPath);
+                  await vscode.commands.executeCommand(
+                    "vscode.diff",
+                    beforeUri,
+                    modifiedUri,
+                    `DanteCode: ${fileName} (saved to disk)`,
+                    { preview: true, preserveFocus: true },
+                  );
+                } else {
+                  // Just open the file (new file or diffs disabled)
+                  const doc = await vscode.workspace.openTextDocument(modifiedUri);
+                  await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+                }
+              } catch {
+                /* non-critical: editor open */
+              }
+            }
+          } else {
+            const icon = result.isError ? "Error" : "OK";
+            const preview = result.content.split("\n").slice(0, 5).join("\n");
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `> _${icon}:_ \`${preview.slice(0, 200)}\`\n`,
+                partial: "",
+              },
+            });
+          }
 
           // Run DanteForge gate on written code files immediately
           if (writtenFile && !result.isError) {
@@ -694,14 +1030,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
               if (!stubCheck.passed || criticals.length > 0) {
                 const warnings: string[] = [];
-                if (!stubCheck.passed) warnings.push(`${stubCheck.hardViolations.length} anti-stub violations`);
-                if (criticals.length > 0) warnings.push(`${criticals.length} constitution violations`);
+                if (!stubCheck.passed)
+                  warnings.push(`${stubCheck.hardViolations.length} anti-stub violations`);
+                if (criticals.length > 0)
+                  warnings.push(`${criticals.length} constitution violations`);
                 this.postMessage({
                   type: "chat_response_chunk",
-                  payload: { chunk: `> **DanteForge Warning:** ${warnings.join(", ")} in ${writtenFile}\n`, partial: "" },
+                  payload: {
+                    chunk: `> **DanteForge Warning:** ${warnings.join(", ")} in ${writtenFile}\n`,
+                    partial: "",
+                  },
                 });
               }
-            } catch { /* verification failure non-critical */ }
+            } catch {
+              /* verification failure non-critical */
+            }
           }
 
           toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
@@ -709,13 +1052,34 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Append the assistant response + tool results to the conversation for next round
         agentMessages.push({ role: "assistant", content: fullResponse });
-        agentMessages.push({ role: "user", content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.` });
+        agentMessages.push({
+          role: "user",
+          content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.`,
+        });
 
-        // Signal the UI that a new round is starting
+        // Signal the UI that a new round is starting with real progress
+        const toolsRan = toolCalls.length;
+        const filesChanged = touchedFiles.length;
         this.postMessage({
           type: "chat_response_chunk",
-          payload: { chunk: "\n\n---\n_Continuing..._\n\n", partial: "" },
+          payload: {
+            chunk: `\n\n---\n> **Round ${roundNumber}/${effectiveMaxRounds}** — ${toolsRan} tool${toolsRan !== 1 ? "s" : ""} executed${filesChanged > 0 ? `, ${filesChanged} file${filesChanged !== 1 ? "s" : ""} modified` : ""}\n\n`,
+            partial: "",
+          },
         });
+      }
+
+      // If the loop exited by exhaustion (maxToolRounds === 0) and tool rounds ran,
+      // finalize the streaming UI without replacing content
+      if (maxToolRounds === 0 && roundNumber > 1) {
+        this.postMessage({
+          type: "chat_response_chunk",
+          payload: {
+            chunk: "\n\n---\n> **Max tool rounds reached.** Review the results above.\n",
+            partial: "",
+          },
+        });
+        this.postMessage({ type: "chat_response_done", payload: {} });
       }
 
       // Auto-save current chat to history
@@ -740,7 +1104,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               },
             });
           }
-        } catch { /* non-critical */ }
+        } catch {
+          /* non-critical */
+        }
       }
 
       // Audit log
@@ -761,7 +1127,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           modelId: this.currentModel,
           projectRoot,
         });
-      } catch { /* audit non-critical */ }
+      } catch {
+        /* audit non-critical */
+      }
     } catch (err: unknown) {
       // Handle abort (stop button or timeout) gracefully
       if (err instanceof Error && (err.name === "AbortError" || signal.aborted)) {
@@ -783,17 +1151,32 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Store original file content for a virtual diff URI. Auto-cleans after 60s. */
+  private registerDiffContent(uriString: string, content: string): void {
+    this.diffContents.set(uriString, content);
+    // Auto-cleanup after 60 seconds to prevent memory leaks
+    setTimeout(() => this.diffContents.delete(uriString), 60_000);
+  }
+
   /** Summarize tool input for display in the chat. */
   private summarizeToolInput(name: string, input: Record<string, unknown>): string {
     switch (name) {
-      case "Read": return `\`${input["file_path"] ?? ""}\``;
-      case "Write": return `\`${input["file_path"] ?? ""}\``;
-      case "Edit": return `\`${input["file_path"] ?? ""}\``;
-      case "ListDir": return `\`${input["path"] ?? "."}\``;
-      case "Bash": return `\`${String(input["command"] ?? "").slice(0, 60)}\``;
-      case "Glob": return `\`${input["pattern"] ?? ""}\``;
-      case "Grep": return `\`${input["pattern"] ?? ""}\``;
-      default: return "";
+      case "Read":
+        return `\`${input["file_path"] ?? ""}\``;
+      case "Write":
+        return `\`${input["file_path"] ?? ""}\``;
+      case "Edit":
+        return `\`${input["file_path"] ?? ""}\``;
+      case "ListDir":
+        return `\`${input["path"] ?? "."}\``;
+      case "Bash":
+        return `\`${String(input["command"] ?? "").slice(0, 60)}\``;
+      case "Glob":
+        return `\`${input["pattern"] ?? ""}\``;
+      case "Grep":
+        return `\`${input["pattern"] ?? ""}\``;
+      default:
+        return "";
     }
   }
 
@@ -939,8 +1322,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     if (partial.permissions) {
       this.agentConfig.permissions = { ...this.agentConfig.permissions, ...partial.permissions };
     }
-    if (typeof partial.maxToolRounds === "number") this.agentConfig.maxToolRounds = partial.maxToolRounds;
-    if (typeof partial.runUntilComplete === "boolean") this.agentConfig.runUntilComplete = partial.runUntilComplete;
+    if (typeof partial.maxToolRounds === "number")
+      this.agentConfig.maxToolRounds = partial.maxToolRounds;
+    if (typeof partial.runUntilComplete === "boolean")
+      this.agentConfig.runUntilComplete = partial.runUntilComplete;
+    if (typeof partial.showLiveDiffs === "boolean")
+      this.agentConfig.showLiveDiffs = partial.showLiveDiffs;
 
     // Apply YOLO presets
     if (this.agentConfig.agentMode === "yolo") {
@@ -961,7 +1348,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         const configUri = vscode.Uri.joinPath(configDir, "config.json");
         const content = Buffer.from(JSON.stringify(this.agentConfig, null, 2), "utf-8");
         await vscode.workspace.fs.writeFile(configUri, content);
-      } catch { /* non-critical — .dantecode/ may not exist */ }
+      } catch {
+        /* non-critical — .dantecode/ may not exist */
+      }
     }
 
     // Send updated config back to webview
@@ -1249,14 +1638,39 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
    * Builds a directory tree string for the workspace, respecting common
    * ignore patterns. Limits depth and file count to stay within token budget.
    */
-  private async buildWorkspaceTree(rootUri: vscode.Uri, maxDepth = 3, maxFiles = 200): Promise<string> {
+  private async buildWorkspaceTree(
+    rootUri: vscode.Uri,
+    maxDepth = 3,
+    maxFiles = 200,
+  ): Promise<string> {
     const IGNORE_DIRS = new Set([
-      "node_modules", ".git", ".turbo", "dist", "build", ".next", ".nuxt",
-      "coverage", "__pycache__", ".venv", "venv", ".dantecode", ".vscode",
-      ".idea", "out", ".cache", ".parcel-cache", "target",
+      "node_modules",
+      ".git",
+      ".turbo",
+      "dist",
+      "build",
+      ".next",
+      ".nuxt",
+      "coverage",
+      "__pycache__",
+      ".venv",
+      "venv",
+      ".dantecode",
+      ".vscode",
+      ".idea",
+      "out",
+      ".cache",
+      ".parcel-cache",
+      "target",
     ]);
     const IGNORE_EXTS = new Set([
-      ".vsix", ".lock", ".log", ".tsbuildinfo", ".map", ".min.js", ".min.css",
+      ".vsix",
+      ".lock",
+      ".log",
+      ".tsbuildinfo",
+      ".map",
+      ".min.js",
+      ".min.css",
     ]);
 
     const lines: string[] = [];
@@ -1310,13 +1724,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
    * Returns a map of relative path → file content (truncated to stay in budget).
    */
   private async readKeyProjectFiles(rootUri: vscode.Uri): Promise<Map<string, string>> {
-    const KEY_FILES = [
-      "package.json",
-      "README.md",
-      "tsconfig.json",
-      ".env.example",
-      "CLAUDE.md",
-    ];
+    const KEY_FILES = ["package.json", "README.md", "tsconfig.json", ".env.example", "CLAUDE.md"];
     const MAX_FILE_SIZE = 4000; // chars per file
 
     const results = new Map<string, string>();
@@ -1747,26 +2155,97 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     .message-body strong { font-weight: 600; }
     .message-body em { font-style: italic; }
-    .message-body ul, .message-body ol { margin: 4px 0; padding-left: 20px; }
-    .message-body li { margin: 2px 0; }
-    .message-body h1, .message-body h2, .message-body h3 {
-      margin: 8px 0 4px;
+    .message-body del { text-decoration: line-through; opacity: 0.7; }
+    .message-body ul, .message-body ol { margin: 6px 0; padding-left: 22px; }
+    .message-body li { margin: 3px 0; line-height: 1.5; }
+    .message-body h1, .message-body h2, .message-body h3, .message-body h4 {
+      margin: 12px 0 6px;
       font-weight: 600;
+      color: var(--vscode-foreground);
     }
-    .message-body h1 { font-size: 16px; }
-    .message-body h2 { font-size: 14px; }
-    .message-body h3 { font-size: 13px; }
+    .message-body h1 { font-size: 17px; border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 4px; }
+    .message-body h2 { font-size: 15px; }
+    .message-body h3 { font-size: 13.5px; }
+    .message-body h4 { font-size: 13px; font-style: italic; }
     .message-body blockquote {
-      border-left: 3px solid var(--vscode-textBlockQuote-border);
-      padding: 4px 12px;
-      margin: 4px 0;
+      border-left: 3px solid var(--vscode-textLink-foreground);
+      padding: 8px 14px;
+      margin: 8px 0;
+      background: rgba(255,255,255,0.03);
+      border-radius: 0 4px 4px 0;
       color: var(--vscode-descriptionForeground);
+      font-size: 12.5px;
+    }
+    .message-body hr {
+      border: none;
+      border-top: 1px solid var(--vscode-panel-border);
+      margin: 12px 0;
     }
     .message-body a {
       color: var(--vscode-textLink-foreground);
       text-decoration: none;
     }
     .message-body a:hover { text-decoration: underline; }
+
+    /* ---- Tables ---- */
+    .table-wrapper {
+      overflow-x: auto;
+      margin: 8px 0;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-panel-border);
+    }
+    .message-body table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .message-body thead {
+      background: rgba(255,255,255,0.05);
+    }
+    .message-body th {
+      padding: 6px 10px;
+      font-weight: 600;
+      text-align: left;
+      border-bottom: 2px solid var(--vscode-panel-border);
+      color: var(--vscode-foreground);
+    }
+    .message-body td {
+      padding: 5px 10px;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+    .message-body tr:last-child td { border-bottom: none; }
+    .message-body tr:hover { background: rgba(255,255,255,0.02); }
+
+    /* ---- Task lists ---- */
+    .message-body .task-item {
+      list-style: none;
+      margin-left: -20px;
+      padding: 2px 0;
+    }
+    .message-body .task-item.done { opacity: 0.7; }
+    .message-body .task-check { margin-right: 6px; }
+
+    /* ---- Diff Highlighting ---- */
+    .diff-block pre { background: var(--vscode-editor-background); }
+    .diff-add { color: var(--vscode-gitDecoration-addedResourceForeground, #4ec9b0); background: rgba(78, 201, 176, 0.1); display: inline-block; width: 100%; }
+    .diff-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f44747); background: rgba(244, 71, 71, 0.1); display: inline-block; width: 100%; }
+    .diff-hunk { color: var(--vscode-textLink-foreground); font-weight: 600; }
+    .diff-file { color: var(--vscode-descriptionForeground); font-weight: 600; }
+
+    /* ---- Progress Bar ---- */
+    .progress-bar {
+      background: var(--vscode-panel-border);
+      border-radius: 3px;
+      height: 6px;
+      margin: 4px 0;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      background: var(--vscode-charts-green);
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
 
     .typing-indicator {
       display: none;
@@ -2467,6 +2946,22 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       <div class="settings-divider"></div>
 
+      <!-- Show Live Diffs Toggle -->
+      <div class="settings-section">
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">Show Live Diffs</span>
+            <span class="toggle-desc">Open modified files in the editor with before/after diff view</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-live-diffs" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
       <!-- API Keys -->
       <div class="settings-section">
         <h4>API Keys</h4>
@@ -2524,6 +3019,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       let isStreaming = false;
       let currentAssistantEl = null;
+      var streamBuffer = ''; // accumulates all content for current assistant message
       var pendingImagePreviews = []; // { dataUrl, fileName }
       var currentAgentMode = 'build';
 
@@ -2534,58 +3030,161 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         setTimeout(function() { toastEl.classList.remove('visible'); }, durationMs || 2000);
       }
 
-      // ---- Markdown rendering ----
+      // ---- Markdown rendering (premium) ----
       function renderMarkdown(text) {
-        // Escape HTML first
-        var html = text
+        if (!text) return '';
+
+        var BT = String.fromCharCode(96); // backtick
+        var BT3 = BT + BT + BT;
+
+        // Protect code blocks from processing — extract and replace with placeholders
+        var codeBlocks = [];
+        var cbRegex = new RegExp(BT3 + '(\\\\w*)\\\\n([\\\\s\\\\S]*?)' + BT3, 'g');
+        var processed = text.replace(cbRegex, function(_match, lang, code) {
+          var idx = codeBlocks.length;
+          var langLabel = lang || 'code';
+          var id = 'cb-' + Math.random().toString(36).slice(2, 8);
+          // Escape HTML inside code blocks
+          var escaped = code
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          // Apply diff syntax highlighting for diff/patch blocks
+          var codeHtml = escaped;
+          if (langLabel === 'diff' || langLabel === 'patch') {
+            codeHtml = escaped.split('\\n').map(function(line) {
+              if (line.match(/^\\+(?!\\+\\+)/)) return '<span class="diff-add">' + line + '</span>';
+              if (line.match(/^-(?!--)/)) return '<span class="diff-del">' + line + '</span>';
+              if (line.match(/^@@/)) return '<span class="diff-hunk">' + line + '</span>';
+              if (line.match(/^(---\\s|\\+\\+\\+\\s)/)) return '<span class="diff-file">' + line + '</span>';
+              return line;
+            }).join('\\n');
+          }
+          codeBlocks.push(
+            '<div class="code-block-wrapper' + (langLabel === 'diff' || langLabel === 'patch' ? ' diff-block' : '') + '">' +
+              '<div class="code-block-header">' +
+                '<span class="code-lang">' + langLabel + '</span>' +
+                '<button class="copy-code-btn" data-code-id="' + id + '">Copy</button>' +
+              '</div>' +
+              '<pre><code id="' + id + '">' + codeHtml + '</code></pre>' +
+            '</div>'
+          );
+          return '%%CODEBLOCK_' + idx + '%%';
+        });
+
+        // Escape HTML in non-code content
+        processed = processed
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
           .replace(/>/g, '&gt;');
 
-        // Code blocks
-        html = html.replace(/\`\`\`(\\w*)\\n([\\s\\S]*?)\`\`\`/g, function(match, lang, code) {
-          var langLabel = lang || 'code';
-          var id = 'cb-' + Math.random().toString(36).slice(2, 8);
-          return '<div class="code-block-wrapper">' +
-            '<div class="code-block-header">' +
-              '<span class="code-lang">' + langLabel + '</span>' +
-              '<button class="copy-code-btn" data-code-id="' + id + '">Copy</button>' +
-            '</div>' +
-            '<pre><code id="' + id + '">' + code + '</code></pre>' +
-          '</div>';
+        // ── Tables ──
+        processed = processed.replace(/((?:^\\|.+\\|[ \\t]*$\\n?)+)/gm, function(tableBlock) {
+          var rows = tableBlock.trim().split('\\n').filter(function(r) { return r.trim().length > 0; });
+          if (rows.length < 2) return tableBlock;
+          var sepTest = rows[1].replace(/\\s/g, '');
+          var isSep = /^\\|?[-:|]+(\\|[-:|]+)+\\|?$/.test(sepTest);
+          if (!isSep) return tableBlock;
+
+          var sepCells = rows[1].split('|').filter(function(c) { return c.trim().length > 0; });
+          var aligns = sepCells.map(function(c) {
+            c = c.trim();
+            if (c.charAt(0) === ':' && c.charAt(c.length - 1) === ':') return 'center';
+            if (c.charAt(c.length - 1) === ':') return 'right';
+            return 'left';
+          });
+
+          var html = '<div class="table-wrapper"><table>';
+          var headerCells = rows[0].split('|').filter(function(c) { return c.trim().length > 0; });
+          html += '<thead><tr>';
+          headerCells.forEach(function(cell, i) {
+            var align = aligns[i] || 'left';
+            html += '<th style="text-align:' + align + '">' + cell.trim() + '</th>';
+          });
+          html += '</tr></thead>';
+          html += '<tbody>';
+          for (var r = 2; r < rows.length; r++) {
+            var cells = rows[r].split('|').filter(function(c) { return c.trim().length > 0; });
+            html += '<tr>';
+            cells.forEach(function(cell, i) {
+              var align = aligns[i] || 'left';
+              html += '<td style="text-align:' + align + '">' + cell.trim() + '</td>';
+            });
+            html += '</tr>';
+          }
+          html += '</tbody></table></div>';
+          return html;
         });
 
-        // Inline code
-        html = html.replace(/\`([^\`]+)\`/g, '<code>$1</code>');
+        // ── Horizontal rules ──
+        processed = processed.replace(/^(---|\\*\\*\\*|___)\\s*$/gm, '<hr>');
 
-        // Headers
-        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        // ── Inline code (before other inline formatting) ──
+        var icRegex = new RegExp(BT + '([^' + BT + ']+)' + BT, 'g');
+        processed = processed.replace(icRegex, '<code>$1</code>');
 
-        // Bold and italic
-        html = html.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
-        html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
-        html = html.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
+        // ── Headers ──
+        processed = processed.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+        processed = processed.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        processed = processed.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        processed = processed.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-        // Blockquotes
-        html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+        // ── Bold and italic ──
+        processed = processed.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
+        processed = processed.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
+        processed = processed.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
+        processed = processed.replace(/~~(.+?)~~/g, '<del>$1</del>');
 
-        // Unordered lists
-        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-        html = html.replace(/(<li>.*<\\/li>\\n?)+/g, '<ul>$&</ul>');
+        // ── Blockquotes (multi-line aware) ──
+        processed = processed.replace(/(^&gt; .+$\\n?)+/gm, function(block) {
+          var inner = block.replace(/^&gt; /gm, '').trim();
+          return '<blockquote>' + inner + '</blockquote>';
+        });
 
-        // Links
-        html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>');
+        // ── Task lists (checkboxes) ──
+        processed = processed.replace(/^- \\[x\\] (.+)$/gm, '<li class="task-item done"><span class="task-check">&#9989;</span> $1</li>');
+        processed = processed.replace(/^- \\[ \\] (.+)$/gm, '<li class="task-item"><span class="task-check">&#9744;</span> $1</li>');
 
-        // Paragraphs: wrap remaining non-tag lines
-        html = html.replace(/^(?!<[a-z/])(.*\\S.*)$/gm, '<p>$1</p>');
+        // ── Ordered lists ──
+        processed = processed.replace(/(^(\\d+)\\. .+$\\n?)+/gm, function(block) {
+          var items = block.trim().split('\\n');
+          var html = '<ol>';
+          items.forEach(function(item) {
+            var content = item.replace(/^\\d+\\.\\s+/, '');
+            html += '<li>' + content + '</li>';
+          });
+          html += '</ol>';
+          return html;
+        });
 
-        // Clean up double-wrapped paragraphs inside lists
-        html = html.replace(/<ul><p>/g, '<ul>');
-        html = html.replace(/<\\/p><\\/ul>/g, '</ul>');
+        // ── Unordered lists ──
+        processed = processed.replace(/(^- .+$\\n?)+/gm, function(block) {
+          var items = block.trim().split('\\n');
+          var html = '<ul>';
+          items.forEach(function(item) {
+            var content = item.replace(/^- /, '');
+            html += '<li>' + content + '</li>';
+          });
+          html += '</ul>';
+          return html;
+        });
 
-        return html;
+        // ── Links ──
+        processed = processed.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>');
+
+        // ── Paragraphs: wrap remaining non-tag lines ──
+        processed = processed.replace(/^(?!<[a-z/]|%%CODEBLOCK)(.*\\S.*)$/gm, '<p>$1</p>');
+
+        // ── Clean up: merge adjacent blockquotes, remove empty paragraphs ──
+        processed = processed.replace(/<\\/blockquote>\\s*<blockquote>/g, '<br>');
+        processed = processed.replace(/<p>\\s*<\\/p>/g, '');
+
+        // ── Restore code blocks ──
+        codeBlocks.forEach(function(block, idx) {
+          processed = processed.replace('%%CODEBLOCK_' + idx + '%%', block);
+        });
+
+        return processed;
       }
 
       // ---- Send message ----
@@ -2604,6 +3203,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         stopBtn.classList.add('visible');
         typingIndicator.classList.add('visible');
 
+        streamBuffer = '';
         currentAssistantEl = appendMessage('assistant', '', false);
 
         vscode.postMessage({ type: 'chat_request', payload: { text: text } });
@@ -2723,6 +3323,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         vscode.postMessage({
           type: 'save_agent_config',
           payload: { runUntilComplete: toggleRunComplete.checked },
+        });
+      });
+
+      // ---- Show Live Diffs toggle ----
+      var toggleLiveDiffs = document.getElementById('toggle-live-diffs');
+      toggleLiveDiffs.addEventListener('change', function() {
+        vscode.postMessage({
+          type: 'save_agent_config',
+          payload: { showLiveDiffs: toggleLiveDiffs.checked },
         });
       });
 
@@ -3042,19 +3651,55 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         switch (message.type) {
           case 'chat_response_chunk':
-            if (currentAssistantEl) {
-              // Show raw text during streaming, render markdown on completion
-              currentAssistantEl.textContent = message.payload.partial || '';
-              messagesEl.scrollTop = messagesEl.scrollHeight;
+            // Safety net: if currentAssistantEl was cleared (e.g. by finishStreaming),
+            // create a new assistant message element so tool output isn't dropped
+            if (!currentAssistantEl) {
+              currentAssistantEl = appendMessage('assistant', '', false);
+              streamBuffer = '';
+              isStreaming = true;
+              sendBtn.style.display = 'none';
+              stopBtn.classList.add('visible');
+              typingIndicator.classList.add('visible');
             }
+            var partial = message.payload.partial || '';
+            var chunk = message.payload.chunk || '';
+            if (chunk.length > 0) {
+              // ALWAYS accumulate chunks — this is the primary content path.
+              // Never replace buffer; always append. This prevents tool output,
+              // diffs, and round progress from being wiped.
+              streamBuffer += chunk;
+              currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+            } else if (partial.length > 0 && streamBuffer.length === 0) {
+              // Temporary display only when buffer is empty (e.g., "thinking...")
+              // Does NOT modify streamBuffer — real chunks will take over
+              currentAssistantEl.innerHTML = renderMarkdown(partial);
+            }
+            attachCopyCodeHandlers(currentAssistantEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
             break;
 
           case 'chat_response_done':
-            finishStreaming(message.payload.text || '');
+            // If text is provided, render it as final content (single-round response).
+            // If text is empty/missing, keep the accumulated stream buffer (multi-round).
+            var doneText = message.payload.text;
+            if (doneText && doneText.length > 0) {
+              finishStreaming(doneText);
+            } else {
+              finishStreaming(undefined);
+            }
             break;
 
           case 'generation_stopped':
-            finishStreaming(message.payload.text ? message.payload.text + '\\n\\n_(generation stopped)_' : '');
+            if (message.payload.text && message.payload.text.length > 0) {
+              finishStreaming(message.payload.text + '\\n\\n_(generation stopped)_');
+            } else {
+              // Keep accumulated buffer, just append stopped notice
+              if (currentAssistantEl && streamBuffer) {
+                streamBuffer += '\\n\\n_(generation stopped)_';
+                currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+              }
+              finishStreaming(undefined);
+            }
             showToast('Generation stopped');
             break;
 
@@ -3193,8 +3838,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               permBash.value = cfg.permissions.bash || 'ask';
               permTools.value = cfg.permissions.tools || 'allow';
             }
-            // Update toggle
+            // Update toggles
             toggleRunComplete.checked = !!cfg.runUntilComplete;
+            toggleLiveDiffs.checked = cfg.showLiveDiffs !== false; // default true
             // Disable controls based on mode
             var isYolo = currentAgentMode === 'yolo';
             var isPlan = currentAgentMode === 'plan';
