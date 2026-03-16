@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dantecode/dantecode.git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
     "directory": "packages/danteforge"
   },
   "keywords": [

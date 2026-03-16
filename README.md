@@ -33,7 +33,7 @@ npx @dantecode/cli --help
 ### From source
 
 ```bash
-git clone https://github.com/dantecode/dantecode.git
+git clone https://github.com/dantericardo88/dantecode.git
 cd dantecode
 npm ci
 npm run build

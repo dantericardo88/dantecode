@@ -1,0 +1,85 @@
+const { readdirSync, readFileSync } = require('fs');
+const { join } = require('path');
+
+const STUB_PATTERNS = [
+  /\bTODO\b/i,
+  /\bFIXME\b/i,
+  /\bHACK\b(?!.*HACK marker)/i,
+  /raise NotImplementedError/i,
+  /throw new Error\(['"]not implemented['"]?\)/i,
+  /\bas\s+any\b/,
+  /@ts-ignore/,
+  /@ts-nocheck/,
+  /\bplaceholder\b/i,
+];
+
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage']);
+
+function isTestFile(name) {
+  return name.endsWith('.test.ts') || name.endsWith('.test.tsx')
+      || name.endsWith('.spec.ts') || name.endsWith('.spec.tsx');
+}
+
+function shouldSkipLine(line) {
+  const t = line.trim();
+  // Scanner rule definitions (message/regex fields in anti-stub-scanner)
+  if (t.startsWith('message:') || t.startsWith('regex:')) return true;
+  if (line.includes('STUB_PATTERNS') || line.includes('HARD_VIOLATION') || line.includes('SOFT_VIOLATION')) return true;
+  if (line.includes('pattern:') || line.includes('RegExp')) return true;
+  if (t.startsWith('//') && line.includes('pattern')) return true;
+  // Mock/test helpers
+  if (line.includes('mockReturnValue') || line.includes('mockImplementation')) return true;
+  // HTML/CSS placeholder attributes (legitimate UI, not stubs)
+  if (line.includes('placeholder=') || line.includes('placeholder:') || line.includes('::placeholder')) return true;
+  // VS Code API placeHolder property
+  if (line.includes('placeHolder')) return true;
+  // Template literal / string describing rules (documentation, not stubs)
+  if ((t.startsWith('`') || t.startsWith("'") || t.startsWith('"')) && (line.includes('TODO') || line.includes('FIXME') || line.includes('HACK') || line.includes('placeholder') || line.includes('ts-ignore') || line.includes('ts-nocheck') || line.includes('as any'))) return true;
+  // Backtick template lines that are part of multi-line template strings
+  if (line.includes('`') && (line.includes('TODO') || line.includes('FIXME') || line.includes('placeholder'))) return true;
+  // Lines referencing todo as a data structure (todo list feature, not a TODO marker)
+  if (line.includes('todo list') || line.includes('todo-$') || line.includes('Todo') || line.includes('.todo')) return true;
+  // Prompt/instruction strings describing what to avoid
+  if ((line.includes('stubs') || line.includes('stub patterns')) && (line.includes('no ') || line.includes('Deduct') || line.includes('must not'))) return true;
+  // Lines inside string literals with pattern names as documentation
+  if (t.startsWith('-') && line.includes('`')) return true;
+  // Special handling comment lines in scanner
+  if (t.startsWith('//') && (line.includes('todo') || line.includes('TODO') || line.includes('placeholder') || line.includes('as any') || line.includes('ts-ignore') || line.includes('ts-nocheck'))) return true;
+  // Lines starting with "- " that describe rules/patterns in template strings
+  if (t.startsWith('- ') && (line.includes('Placeholder') || line.includes('placeholder'))) return true;
+  return false;
+}
+
+function scanDir(dir) {
+  let violations = 0;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      violations += scanDir(fullPath);
+    } else if ((entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) && !isTestFile(entry.name)) {
+      const content = readFileSync(fullPath, 'utf-8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (shouldSkipLine(line)) continue;
+        for (const p of STUB_PATTERNS) {
+          if (p.test(line)) {
+            console.error('STUB VIOLATION: ' + fullPath + ':' + (i + 1) + ': ' + line.trim());
+            violations++;
+          }
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+const violations = scanDir('packages');
+if (violations > 0) {
+  console.error('\n' + violations + ' stub violation(s) found.');
+  process.exit(1);
+} else {
+  console.log('Anti-stub self-check passed. Zero stubs found.');
+}

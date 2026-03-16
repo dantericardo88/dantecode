@@ -1471,7 +1471,7 @@ export class ModelRouterImpl {
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dantecode/dantecode"
+    "url": "https://github.com/dantericardo88/dantecode"
   },
   "engines": {
     "vscode": "^1.95.0"
@@ -2123,7 +2123,7 @@ DanteCode incorporates code and design patterns from:
   OpenHands (MIT) — https://github.com/OpenHands/OpenHands
 
 Full third-party license text available at:
-  https://github.com/dantecode/dantecode/blob/main/THIRD_PARTY_LICENSES.md
+  https://github.com/dantericardo88/dantecode/blob/main/THIRD_PARTY_LICENSES.md
 ```
 
 ### System Prompt Attribution

@@ -183,7 +183,7 @@ Next Transition: RELEASE → PUBLISHED (create GitHub repo + push + CI green + n
 | 22   | Provider tests + anti-stub scanFile                    | +21 provider tests, +10 anti-stub tests                                            |
 | 23   | Model router + diff tests                              | 11 → 33 router tests, 9 → 23 diff tests                                            |
 | 24   | Importer orchestration tests                           | +28 new tests, importer.ts 0% → 99% coverage                                       |
-| 25   | Add git remote                                         | origin -> github.com/dantecode/dantecode                                           |
+| 25   | Add git remote                                         | origin -> github.com/dantericardo88/dantecode                                           |
 | 26   | Write README.md                                        | Install, quickstart, architecture, config docs                                     |
 | 27   | Fix anti-stub CI job                                   | Skip test files, improve line skip logic                                           |
 | 28   | Add Dependabot config                                  | Weekly npm + GitHub Actions updates                                                |

@@ -13,7 +13,7 @@ This repo is shipping toward a Public OSS v1 where the CLI is the primary surfac
 ## Local setup
 
 ```bash
-git clone https://github.com/dantecode/dantecode.git
+git clone https://github.com/dantericardo88/dantecode.git
 cd dantecode
 npm ci
 npm run release:doctor
