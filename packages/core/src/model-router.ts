@@ -17,6 +17,8 @@ export interface GenerateOptions {
   system?: string;
   /** Optional task type key used to look up per-task model overrides. */
   taskType?: string;
+  /** Abort signal for cancellation support. */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -183,6 +185,7 @@ export class ModelRouterImpl {
         maxTokens: options.maxTokens ?? config.maxTokens,
         temperature: config.temperature,
         ...(options.system ? { system: options.system } : {}),
+        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
       });
 
       const durationMs = Date.now() - startTime;
@@ -239,6 +242,7 @@ export class ModelRouterImpl {
         maxTokens: options.maxTokens ?? config.maxTokens,
         temperature: config.temperature,
         ...(options.system ? { system: options.system } : {}),
+        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
         onFinish: async ({ usage }) => {
           const durationMs = Date.now() - startTime;
           this.logEntry(config, "success", durationMs);

@@ -126,6 +126,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private sessionId: string;
   private currentChatId: string;
   private stopRequested = false;
+  private abortController: AbortController | null = null;
   private pendingImages: string[] = [];
 
   constructor(
@@ -248,6 +249,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     this.messages.push({ role: "user", content: text });
     this.stopRequested = false;
+    this.abortController = new AbortController();
+    const { signal } = this.abortController;
 
     // Build model configuration — retrieve API key from SecretStorage
     const [provider, modelId] = this.parseModelString(this.currentModel);
@@ -467,18 +470,41 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         const streamResult = await router.stream(agentMessages, {
           system: systemPrompt,
           maxTokens: 8192,
+          abortSignal: signal,
         });
 
         let fullResponse = "";
 
-        for await (const chunk of streamResult.textStream) {
-          if (this.stopRequested) break;
-          fullResponse += chunk;
-          this.postMessage({
-            type: "chat_response_chunk",
-            payload: { chunk, partial: fullResponse },
-          });
+        // Set a 30-second timeout for the first chunk; abort if no response
+        const firstChunkTimeout = setTimeout(() => {
+          if (fullResponse.length === 0 && this.abortController) {
+            this.abortController.abort();
+          }
+        }, 30_000);
+
+        try {
+          for await (const chunk of streamResult.textStream) {
+            if (fullResponse.length === 0) clearTimeout(firstChunkTimeout);
+            if (this.stopRequested) break;
+            fullResponse += chunk;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: { chunk, partial: fullResponse },
+            });
+          }
+        } catch (streamErr: unknown) {
+          clearTimeout(firstChunkTimeout);
+          // If aborted by timeout and no response yet, show a timeout error
+          if (signal.aborted && fullResponse.length === 0) {
+            this.postMessage({
+              type: "error",
+              payload: { message: `Request to ${this.currentModel} timed out after 30 seconds.\nCheck your API key and network connection.` },
+            });
+            break;
+          }
+          throw streamErr; // re-throw other errors to outer catch
         }
+        clearTimeout(firstChunkTimeout);
 
         if (this.stopRequested) {
           if (fullResponse.length > 0) {
@@ -626,16 +652,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         });
       } catch { /* audit non-critical */ }
     } catch (err: unknown) {
-      const rawMessage = err instanceof Error ? err.message : String(err);
-      let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
-      if (provider !== "ollama" && !apiKey) {
-        diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
-      } else if (provider !== "ollama") {
-        diagnostic += `\n\nAPI key is configured — this may be an authentication or model name issue.`;
+      // Handle abort (stop button or timeout) gracefully
+      if (err instanceof Error && (err.name === "AbortError" || signal.aborted)) {
+        this.postMessage({ type: "generation_stopped", payload: { text: "" } });
       } else {
-        diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
+        if (provider !== "ollama" && !apiKey) {
+          diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
+        } else if (provider !== "ollama") {
+          diagnostic += `\n\nAPI key is configured — this may be an authentication or model name issue.`;
+        } else {
+          diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
+        }
+        this.postMessage({ type: "error", payload: { message: diagnostic } });
       }
-      this.postMessage({ type: "error", payload: { message: diagnostic } });
+    } finally {
+      this.abortController = null;
     }
   }
 
@@ -733,6 +766,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   private handleStopGeneration(): void {
     this.stopRequested = true;
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 
   // --------------------------------------------------------------------------
