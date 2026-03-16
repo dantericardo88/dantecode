@@ -820,8 +820,8 @@ describe("VS Code Extension", () => {
     it("getCurrentModel returns default model from config", () => {
       const uri = vscode.Uri.file("/test");
       const provider = new ChatSidebarProvider(uri as unknown as vscode.Uri);
-      // Default from mock: getConfiguration().get("defaultModel", "grok/grok-3") → "grok/grok-3"
-      expect(provider.getCurrentModel()).toBe("grok/grok-3");
+      // Default from mock: getConfiguration().get("defaultModel", "grok/grok-4.2") → "grok/grok-4.2"
+      expect(provider.getCurrentModel()).toBe("grok/grok-4.2");
     });
 
     it("addFileToContext does not throw", () => {
@@ -888,14 +888,16 @@ describe("VS Code Extension", () => {
         subscriptions: [] as { dispose: () => void }[],
         extensionUri: vscode.Uri.file("/test"),
         extensionPath: "/test",
+        secrets: { get: vi.fn().mockResolvedValue(undefined), store: vi.fn().mockResolvedValue(undefined) },
+        globalState: { get: vi.fn().mockReturnValue(true), update: vi.fn().mockResolvedValue(undefined) },
       } as unknown as vscode.ExtensionContext;
     }
 
-    it("activate registers all 11 commands", () => {
+    it("activate registers all 12 commands", () => {
       const context = createMockContext();
       activate(context);
 
-      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(11);
+      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(12);
     });
 
     it("activate registers webview view providers", () => {

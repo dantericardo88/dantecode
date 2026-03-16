@@ -127,13 +127,18 @@
         "command": "dantecode.rejectDiff",
         "title": "DanteCode: Reject Diff Hunk",
         "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.setupApiKeys",
+        "title": "DanteCode: Setup API Keys",
+        "category": "DanteCode"
       }
     ],
     "keybindings": [
       {
         "command": "dantecode.openChat",
-        "key": "ctrl+shift+o",
-        "mac": "cmd+shift+o"
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d"
       },
       {
         "command": "dantecode.addFileToContext",
@@ -147,7 +152,7 @@
       "properties": {
         "dantecode.defaultModel": {
           "type": "string",
-          "default": "grok/grok-3",
+          "default": "grok/grok-4.2",
           "description": "Default model for DanteCode. Format: provider/model-id"
         },
         "dantecode.pdseThreshold": {

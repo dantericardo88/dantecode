@@ -27,6 +27,7 @@ import {
   type StatusBarState,
 } from "./status-bar.js";
 import { PDSEDiagnosticProvider } from "./diagnostics.js";
+import { OnboardingProvider, FRONTIER_MODELS } from "./onboarding-provider.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ let chatSidebarProvider: ChatSidebarProvider | undefined;
 let auditPanelProvider: AuditPanelProvider | undefined;
 let completionProvider: DanteCodeCompletionProvider | undefined;
 let diagnosticProvider: PDSEDiagnosticProvider | undefined;
+let onboardingProvider: OnboardingProvider | undefined;
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 
@@ -87,6 +89,13 @@ export function activate(context: vscode.ExtensionContext): void {
   diagnosticProvider = new PDSEDiagnosticProvider();
   context.subscriptions.push(diagnosticProvider);
 
+  // ── Onboarding ──
+  onboardingProvider = new OnboardingProvider(
+    extensionUri,
+    context.secrets,
+    context,
+  );
+
   // ── Commands ──
   registerCommands(context);
 
@@ -94,6 +103,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = vscode.window.createOutputChannel("DanteCode");
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine("DanteCode extension activated");
+
+  // ── First-run onboarding ──
+  if (!OnboardingProvider.hasOnboarded(context)) {
+    void onboardingProvider.show();
+  }
 }
 
 // ─── Deactivate ──────────────────────────────────────────────────────────────
@@ -112,6 +126,7 @@ export function deactivate(): void {
     diagnosticProvider.clearAll();
     diagnosticProvider = undefined;
   }
+  onboardingProvider = undefined;
 }
 
 // ─── Command Registration ────────────────────────────────────────────────────
@@ -134,6 +149,7 @@ function registerCommands(context: vscode.ExtensionContext): void {
     ["dantecode.initProject", commandInitProject],
     ["dantecode.acceptDiff", commandAcceptDiff],
     ["dantecode.rejectDiff", commandRejectDiff],
+    ["dantecode.setupApiKeys", commandSetupApiKeys],
   ];
 
   for (const [id, handler] of commands) {
@@ -400,53 +416,11 @@ async function commandRunGStack(): Promise<void> {
  * Updates the VS Code setting, status bar, and notifies the chat sidebar.
  */
 async function commandSwitchModel(): Promise<void> {
-  const models: vscode.QuickPickItem[] = [
-    {
-      label: "grok/grok-3",
-      description: "Grok 3 (default)",
-      detail: "xAI's flagship model with 131K context",
-    },
-    {
-      label: "grok/grok-3-mini",
-      description: "Grok 3 Mini",
-      detail: "Smaller, faster variant of Grok 3",
-    },
-    {
-      label: "anthropic/claude-sonnet-4-20250514",
-      description: "Claude Sonnet 4",
-      detail: "Anthropic's balanced model with 200K context",
-    },
-    {
-      label: "anthropic/claude-opus-4-20250514",
-      description: "Claude Opus 4",
-      detail: "Anthropic's most capable model",
-    },
-    {
-      label: "openai/gpt-4o",
-      description: "GPT-4o",
-      detail: "OpenAI's multimodal flagship",
-    },
-    {
-      label: "openai/o3-mini",
-      description: "o3-mini",
-      detail: "OpenAI's fast reasoning model",
-    },
-    {
-      label: "google/gemini-2.5-pro",
-      description: "Gemini 2.5 Pro",
-      detail: "Google's frontier model",
-    },
-    {
-      label: "ollama/llama3",
-      description: "Llama 3 (local)",
-      detail: "Run locally via Ollama",
-    },
-    {
-      label: "ollama/codellama",
-      description: "CodeLlama (local)",
-      detail: "Code-specialized local model",
-    },
-  ];
+  const models: vscode.QuickPickItem[] = FRONTIER_MODELS.map((m) => ({
+    label: m.id,
+    description: m.label,
+    detail: m.provider === "ollama" ? "Run locally via Ollama" : `${m.provider} cloud API`,
+  }));
 
   // Mark the current model
   const currentModel = statusBarState?.currentModel ?? "grok/grok-3";
@@ -702,6 +676,15 @@ async function commandRejectDiff(): Promise<void> {
     });
   } catch {
     // Audit logging failure should not block diff rejection
+  }
+}
+
+/**
+ * Opens the API key setup / onboarding panel.
+ */
+async function commandSetupApiKeys(): Promise<void> {
+  if (onboardingProvider) {
+    await onboardingProvider.show();
   }
 }
 

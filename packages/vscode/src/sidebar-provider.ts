@@ -63,7 +63,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   constructor(private readonly extensionUri: vscode.Uri) {
     const config = vscode.workspace.getConfiguration("dantecode");
-    this.currentModel = config.get<string>("defaultModel", "grok/grok-3");
+    this.currentModel = config.get<string>("defaultModel", "grok/grok-4.2");
     this.sessionId = `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
@@ -842,15 +842,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <div class="model-bar">
     <label for="model-select">Model:</label>
     <select class="model-select" id="model-select">
-      <option value="grok/grok-3">grok-3</option>
-      <option value="grok/grok-3-mini">grok-3-mini</option>
-      <option value="anthropic/claude-sonnet-4-20250514">claude-sonnet-4</option>
-      <option value="anthropic/claude-opus-4-20250514">claude-opus-4</option>
-      <option value="openai/gpt-4o">gpt-4o</option>
-      <option value="openai/o3-mini">o3-mini</option>
-      <option value="google/gemini-2.5-pro">gemini-2.5-pro</option>
-      <option value="ollama/llama3">llama3 (local)</option>
-      <option value="ollama/codellama">codellama (local)</option>
+      <optgroup label="xAI / Grok">
+        <option value="grok/grok-4.2">Grok 4.2</option>
+        <option value="grok/grok-4.2-fast">Grok 4.2 Fast</option>
+      </optgroup>
+      <optgroup label="Anthropic">
+        <option value="anthropic/claude-opus-4-6">Claude Opus 4.6</option>
+        <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6</option>
+        <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5</option>
+      </optgroup>
+      <optgroup label="OpenAI">
+        <option value="openai/gpt-5.4">GPT-5.4</option>
+        <option value="openai/gpt-4.1">GPT-4.1</option>
+        <option value="openai/o3-pro">o3-pro</option>
+      </optgroup>
+      <optgroup label="Google">
+        <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+      </optgroup>
+      <optgroup label="Local (Ollama)">
+        <option value="ollama/llama4">Llama 4 (local)</option>
+        <option value="ollama/codellama">CodeLlama (local)</option>
+        <option value="ollama/deepseek-r2">DeepSeek-R2 (local)</option>
+      </optgroup>
     </select>
   </div>
 
