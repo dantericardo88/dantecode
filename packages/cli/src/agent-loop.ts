@@ -7,12 +7,15 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { ModelRouterImpl } from "@dantecode/core";
+import { ModelRouterImpl, estimateMessageTokens } from "@dantecode/core";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
 import type { Session, SessionMessage, DanteCodeState } from "@dantecode/config-types";
-import { getStatus, autoCommit } from "@dantecode/git-engine";
+import { getStatus, autoCommit, generateRepoMap, formatRepoMapForContext } from "@dantecode/git-engine";
 import { executeTool, getToolDefinitions } from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
+import { StreamRenderer } from "./stream-renderer.js";
+import { getAISDKTools } from "./tool-schemas.js";
+import type { SandboxBridge } from "./sandbox-bridge.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -38,6 +41,12 @@ export interface AgentLoopConfig {
   enableSandbox: boolean;
   /** Silent mode (Ruflo pattern): suppress per-tool output, show only compact progress. */
   silent?: boolean;
+  /** Called for each streaming token chunk, enabling real-time UI updates. */
+  onToken?: (token: string) => void;
+  /** Signal to abort the current generation (e.g., on Ctrl+C). */
+  abortSignal?: AbortSignal;
+  /** Sandbox bridge for isolated command execution (when --sandbox is set). */
+  sandboxBridge?: SandboxBridge;
 }
 
 // ----------------------------------------------------------------------------
@@ -92,6 +101,16 @@ function buildSystemPrompt(session: Session, config: AgentLoopConfig): string {
     for (const file of session.activeFiles) {
       sections.push(`- ${file}`);
     }
+  }
+
+  // Repo map injection: give the model a structural overview of the project
+  try {
+    const repoMap = generateRepoMap(session.projectRoot, { maxFiles: 150 });
+    if (repoMap.length > 0) {
+      sections.push("", "## Repository Structure", "", formatRepoMapForContext(repoMap));
+    }
+  } catch {
+    // Non-fatal: repo map generation failure should not break the agent
   }
 
   // First-turn complexity rating instruction (model-assisted scoring)
@@ -209,22 +228,53 @@ function getVerifyCommands(config: AgentLoopConfig): Array<{ name: string; comma
 
 /**
  * Compacts messages when approaching the context window limit.
- * Keeps the first message (system prompt) and the most recent messages,
- * replacing older messages with a brief summary note.
+ * Three-tier strategy:
+ *   Tier 1 (< 50%): No compaction.
+ *   Tier 2 (50-75%): Summarize old tool results, keep tool call names.
+ *   Tier 3 (> 75%): Keep first + recent 10, inject summary of dropped range.
  * (Pattern from opencode/OpenHands)
  */
 function compactMessages(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
   contextWindow: number,
 ): Array<{ role: "user" | "assistant" | "system"; content: string }> {
-  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-  const estimatedTokens = Math.ceil(totalChars / 4);
+  const tokens = estimateMessageTokens(messages);
 
-  // Only compact when above 75% of context window
-  if (estimatedTokens < contextWindow * 0.75) {
+  // Tier 1: Under 50% — no compaction needed
+  if (tokens < contextWindow * 0.5) {
     return messages;
   }
 
+  // Tier 2: 50-75% — summarize old tool results, keep recent 5 tool calls intact
+  if (tokens < contextWindow * 0.75) {
+    const KEEP_RECENT_TOOLS = 5;
+    let toolResultCount = 0;
+    const result: typeof messages = [];
+
+    // Walk from end to start, counting tool results
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]!;
+      const isToolResult =
+        msg.role === "user" && msg.content.startsWith("Tool execution results:");
+
+      if (isToolResult) {
+        toolResultCount++;
+        if (toolResultCount > KEEP_RECENT_TOOLS) {
+          // Summarize old tool result to one line
+          const firstLine = msg.content.split("\n")[1] ?? "tool result";
+          result.unshift({
+            role: msg.role,
+            content: `[Summarized] ${firstLine.slice(0, 120)}`,
+          });
+          continue;
+        }
+      }
+      result.unshift(msg);
+    }
+    return result;
+  }
+
+  // Tier 3: Over 75% — aggressive compaction
   const KEEP_RECENT = 10;
   if (messages.length <= KEEP_RECENT + 1) {
     return messages;
@@ -324,17 +374,76 @@ export async function runAgentLoop(
       }
     }
 
-    // Generate response from model
+    // Generate response from model (streaming with tool calling support)
     let responseText: string;
+    let toolCalls: ExtractedToolCall[] = [];
+    let cleanText: string;
     try {
-      if (!config.silent) {
-        process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET} ${DIM}(thinking...)${RESET}\n\n`);
+      const renderer = new StreamRenderer(!!config.silent);
+      renderer.printHeader();
+      const useNativeTools = config.state.model.default.supportsToolCalls;
+      let nativeSuccess = false;
+
+      if (useNativeTools) {
+        // Native AI SDK tool calling: stream with Zod-schema tools
+        try {
+          const aiSdkTools = getAISDKTools();
+          const streamResult = await router.streamWithTools(messages, aiSdkTools, {
+            system: systemPrompt,
+            maxTokens: config.state.model.default.maxTokens,
+            abortSignal: config.abortSignal,
+          });
+          for await (const part of streamResult.fullStream) {
+            if (part.type === "text-delta") {
+              renderer.write(part.textDelta);
+              config.onToken?.(part.textDelta);
+            } else if (part.type === "tool-call") {
+              toolCalls.push({
+                id: part.toolCallId,
+                name: part.toolName,
+                input: part.args as Record<string, unknown>,
+              });
+            }
+          }
+          responseText = renderer.getFullText();
+          renderer.finish();
+          cleanText = responseText;
+          nativeSuccess = true;
+        } catch {
+          // Native tool calling failed — fall through to XML fallback
+          renderer.reset();
+        }
       }
 
-      responseText = await router.generate(messages, {
-        system: systemPrompt,
-        maxTokens: config.state.model.default.maxTokens,
-      });
+      if (!nativeSuccess) {
+        // XML parsing fallback: stream text, then extract tool calls from response
+        try {
+          const streamResult = await router.stream(messages, {
+            system: systemPrompt,
+            maxTokens: config.state.model.default.maxTokens,
+            abortSignal: config.abortSignal,
+          });
+          for await (const chunk of streamResult.textStream) {
+            renderer.write(chunk);
+            config.onToken?.(chunk);
+          }
+          responseText = renderer.getFullText();
+          renderer.finish();
+        } catch {
+          // Fallback to blocking generate if streaming is not supported
+          renderer.reset();
+          if (!config.silent) {
+            process.stdout.write(`${DIM}(thinking...)${RESET}\n`);
+          }
+          responseText = await router.generate(messages, {
+            system: systemPrompt,
+            maxTokens: config.state.model.default.maxTokens,
+          });
+        }
+        const extracted = extractToolCalls(responseText);
+        cleanText = extracted.cleanText;
+        toolCalls = extracted.toolCalls;
+      }
 
       totalTokensUsed += responseText.length; // Approximate token count
 
@@ -360,9 +469,6 @@ export async function runAgentLoop(
       session.messages.push(errorMsg);
       return session;
     }
-
-    // Extract tool calls from the response
-    const { cleanText, toolCalls } = extractToolCalls(responseText);
 
     // Display the assistant's text response (suppressed in silent mode)
     if (cleanText.length > 0 && !config.silent) {
@@ -478,12 +584,17 @@ export async function runAgentLoop(
         }
       }
 
-      const result = await executeTool(
-        toolCall.name,
-        toolCall.input,
-        session.projectRoot,
-        session.id,
-      );
+      // Route Bash commands through sandbox when available
+      const useSandbox =
+        toolCall.name === "Bash" &&
+        config.sandboxBridge &&
+        typeof toolCall.input["command"] === "string";
+      const result = useSandbox
+        ? await config.sandboxBridge!.runInSandbox(
+            toolCall.input["command"] as string,
+            (toolCall.input["timeout"] as number | undefined) ?? 120000,
+          )
+        : await executeTool(toolCall.name, toolCall.input, session.projectRoot, session.id);
 
       // Tool output truncation (opencode pattern): cap large outputs to avoid
       // blowing the context window. Truncate to 2000 lines / 50KB.

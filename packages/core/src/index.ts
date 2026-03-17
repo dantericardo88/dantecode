@@ -38,3 +38,7 @@ export {
 // ─── Multi-Agent ───────────────────────────────────────────────────────────────
 
 export { MultiAgent, type MultiAgentConfig, type MultiAgentProgressCallback } from "./multi-agent.js";
+
+// ─── Token Counter ───────────────────────────────────────────────────────────
+
+export { estimateTokens, estimateMessageTokens } from "./token-counter.js";

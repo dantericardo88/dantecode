@@ -1211,7 +1211,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       } else {
         const rawMessage = err instanceof Error ? err.message : String(err);
         let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
-        if (provider !== "ollama" && !apiKey) {
+
+        // Provider-specific and HTTP-status-aware diagnostics
+        const is401 = rawMessage.includes("401") || rawMessage.includes("Unauthorized");
+        const is429 = rawMessage.includes("429") || rawMessage.includes("rate limit");
+        const is503 = rawMessage.includes("503") || rawMessage.includes("Service Unavailable");
+
+        if (is401) {
+          diagnostic += `\n\nAPI key is invalid or expired. Open settings (gear icon) to update your ${provider} key.`;
+        } else if (is429) {
+          diagnostic += `\n\nRate limit exceeded. Wait a moment and try again, or switch to a different model.`;
+        } else if (is503) {
+          diagnostic += `\n\nThe ${provider} service is temporarily unavailable. Try again in a few minutes.`;
+        } else if (provider !== "ollama" && !apiKey) {
           diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
         } else if (provider !== "ollama") {
           diagnostic += `\n\nAPI key is configured — this may be an authentication or model name issue.`;
@@ -2163,6 +2175,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-inputValidation-errorBackground);
       border-left: 3px solid var(--vscode-inputValidation-errorBorder);
       color: var(--vscode-errorForeground);
+    }
+    .retry-btn {
+      margin-top: 8px;
+      padding: 4px 12px;
+      font-size: 12px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .retry-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
     }
 
     .message-body code {
@@ -3815,7 +3840,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             stopBtn.classList.remove('visible');
             typingIndicator.classList.remove('visible');
             currentAssistantEl = null;
-            appendMessage('error', 'Error: ' + (message.payload.message || 'Unknown error'), false);
+            var errorBody = appendMessage('error', 'Error: ' + (message.payload.message || 'Unknown error'), false);
+            // Add retry button to error messages
+            var retryBtn = document.createElement('button');
+            retryBtn.className = 'retry-btn';
+            retryBtn.textContent = 'Retry';
+            retryBtn.addEventListener('click', function() {
+              var lastUserMsg = document.querySelectorAll('.message.user .message-body');
+              if (lastUserMsg.length > 0) {
+                var lastText = lastUserMsg[lastUserMsg.length - 1].innerText;
+                inputEl.value = lastText;
+                sendBtn.click();
+              }
+            });
+            errorBody.appendChild(retryBtn);
             break;
 
           case 'context_files_update':

@@ -1,5 +1,10 @@
 # DanteCode
 
+[![CI](https://github.com/dantericardo88/dantecode/actions/workflows/ci.yml/badge.svg)](https://github.com/dantericardo88/dantecode/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@dantecode/cli)](https://www.npmjs.com/package/@dantecode/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+
 DanteCode is a portable, model-agnostic skill runtime and coding agent.
 
 Grok is the default provider, not the product identity. The real product center is interoperability: bringing reusable coding workflows and Claude-style skills into a verification-first runtime that does not lock developers to a single model vendor.
@@ -19,6 +24,38 @@ Grok is the default provider, not the product identity. The real product center 
 - Verification-first execution: DanteForge checks for stubs, policy violations, and weak outputs before accepting changes.
 - Clean-room skill import path: import Claude Code, Continue, and OpenCode style skills through adapters instead of prompt-copy lock-in.
 - Git-native workflow support: diff parsing, commits, worktrees, and repo mapping are built in.
+
+## Architecture
+
+```mermaid
+graph TD
+    CLI["@dantecode/cli<br/>Agent Loop + REPL"]
+    VSCode["@dantecode/vscode<br/>VS Code Extension"]
+    Desktop["@dantecode/desktop<br/>Electron Shell"]
+
+    Core["@dantecode/core<br/>Model Router + Providers"]
+    DanteForge["@dantecode/danteforge<br/>Quality Gates"]
+    GitEngine["@dantecode/git-engine<br/>Diff, Commits, Repo Map"]
+    Sandbox["@dantecode/sandbox<br/>Docker Isolation"]
+    SkillAdapter["@dantecode/skill-adapter<br/>Skill Import + Registry"]
+    ConfigTypes["@dantecode/config-types<br/>Shared Types"]
+
+    CLI --> Core
+    CLI --> DanteForge
+    CLI --> GitEngine
+    CLI --> Sandbox
+    CLI --> SkillAdapter
+    VSCode --> Core
+    VSCode --> DanteForge
+    VSCode --> GitEngine
+    Desktop --> Core
+
+    Core --> ConfigTypes
+    DanteForge --> ConfigTypes
+    GitEngine --> ConfigTypes
+    Sandbox --> ConfigTypes
+    SkillAdapter --> ConfigTypes
+```
 
 ## Install
 
@@ -121,7 +158,7 @@ Current local validation baseline:
 
 - `npm run release:doctor`: reports remaining external blockers and remediation steps
 - `npm run release:check`: full local ship-readiness sweep is green
-- `npm test`: 562 tests across 24 suites
+- `npm test`: 700+ tests across 25+ suites
 - `npm run test:coverage`: strict coverage gate for the stable runtime packages
 - `npm run smoke:cli`: built CLI help/init/config/skills flow passes
 - `npm run smoke:install`: packed npm install path and installed CLI bootstrap pass

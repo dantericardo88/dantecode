@@ -60,6 +60,8 @@ export interface ReplState {
   recentToolCalls: string[];
   /** When set by a slash command, processInput will feed this prompt to the agent loop. */
   pendingAgentPrompt: string | null;
+  /** Active abort controller for cancelling streaming generation via Ctrl+C. */
+  activeAbortController: AbortController | null;
 }
 
 /** A single slash command handler. */

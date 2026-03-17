@@ -15,6 +15,7 @@
   "categories": [
     "AI",
     "Programming Languages",
+    "Machine Learning",
     "Other"
   ],
   "keywords": [
@@ -23,6 +24,9 @@
     "agent",
     "grok",
     "model-agnostic",
+    "copilot",
+    "code-review",
+    "quality",
     "danteforge"
   ],
   "activationEvents": [

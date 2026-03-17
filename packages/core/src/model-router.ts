@@ -2,7 +2,7 @@
 // @dantecode/core — Model Router Implementation
 // ============================================================================
 
-import { generateText, streamText, type CoreMessage, type StreamTextResult } from "ai";
+import { generateText, streamText, type CoreMessage, type StreamTextResult, type CoreTool } from "ai";
 import type {
   ModelConfig,
   ModelRouterConfig,
@@ -199,6 +199,51 @@ export class ModelRouterImpl {
   }
 
   /**
+   * Streams model output with native tool calling support.
+   * Tools are defined with Zod schemas (from the AI SDK `tool` format).
+   * Unlike `stream()`, the returned stream includes `tool-call` events
+   * that the caller can handle without XML parsing.
+   *
+   * @param messages - The conversation messages.
+   * @param tools - Record of tool name → CoreTool definitions (Zod schemas, optional execute).
+   * @param options - Optional generation parameters.
+   * @returns A StreamTextResult with tool call events in the fullStream.
+   */
+  async streamWithTools<T extends Record<string, CoreTool>>(
+    messages: CoreMessage[],
+    tools: T,
+    options: GenerateOptions = {},
+  ): Promise<StreamTextResult<T, never>> {
+    const modelConfig = this.resolveModelConfig(options.taskType);
+
+    // Guard: if the model doesn't support tool calls, throw so the caller
+    // can fall back to the XML-parsing path
+    if (!modelConfig.supportsToolCalls) {
+      throw new Error(`Model ${modelConfig.provider}/${modelConfig.modelId} does not support native tool calling`);
+    }
+
+    const fallbacks = this.routerConfig.fallback;
+
+    // Try the primary model
+    const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
+    if (primaryResult.success) {
+      return primaryResult.stream;
+    }
+
+    // Cascade through fallback models that support tool calls
+    for (const fallbackConfig of fallbacks) {
+      if (!fallbackConfig.supportsToolCalls) continue;
+      this.logEntry(fallbackConfig, "fallback", 0);
+      const fallbackResult = await this.tryStreamWithTools(fallbackConfig, messages, tools, options);
+      if (fallbackResult.success) {
+        return fallbackResult.stream;
+      }
+    }
+
+    throw primaryResult.error;
+  }
+
+  /**
    * Resolves the appropriate ModelConfig based on an optional task type.
    * If the task type has a per-task override in the router config, that
    * override is returned; otherwise the default model config is used.
@@ -345,6 +390,55 @@ export class ModelRouterImpl {
         stream: never;
         error: Error;
       };
+    }
+  }
+
+  /**
+   * Attempts a streamText call with tools using a single provider.
+   */
+  private async tryStreamWithTools<T extends Record<string, CoreTool>>(
+    config: ModelConfig,
+    messages: CoreMessage[],
+    tools: T,
+    options: GenerateOptions,
+  ): Promise<
+    | { success: true; stream: StreamTextResult<T, never>; error?: never }
+    | { success: false; stream: never; error: Error }
+  > {
+    const startTime = Date.now();
+
+    try {
+      const builder = this.resolveProvider(config);
+      const model = builder(config);
+
+      this.logEntry(config, "attempt", 0);
+
+      const result = streamText({
+        model,
+        messages,
+        tools,
+        maxTokens: options.maxTokens ?? config.maxTokens,
+        temperature: config.temperature,
+        ...(options.system ? { system: options.system } : {}),
+        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+        onFinish: async ({ usage }) => {
+          const durationMs = Date.now() - startTime;
+          this.logEntry(config, "success", durationMs);
+
+          const inputTk = usage?.promptTokens ?? 0;
+          const outputTk = usage?.completionTokens ?? 0;
+          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+
+          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+        },
+      });
+
+      return { success: true, stream: result as StreamTextResult<T, never> };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - startTime;
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.logEntry(config, "error", durationMs, error.message);
+      return { success: false, error } as { success: false; stream: never; error: Error };
     }
   }
 

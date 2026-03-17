@@ -13,6 +13,7 @@ import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
 import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
+import { SandboxBridge } from "./sandbox-bridge.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -159,6 +160,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    activeAbortController: null,
   };
 
   // Agent loop config
@@ -170,6 +172,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     silent: options.silent,
   };
 
+  // Initialize sandbox bridge when --sandbox is enabled
+  if (options.enableSandbox) {
+    agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
+  }
+
   // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
@@ -178,9 +185,17 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     terminal: true,
   });
 
-  // Handle Ctrl+C gracefully
+  // Handle Ctrl+C gracefully — first press aborts streaming, second exits
   let ctrlCCount = 0;
   rl.on("SIGINT", () => {
+    // If a generation is in progress, abort it first
+    if (replState.activeAbortController) {
+      replState.activeAbortController.abort();
+      replState.activeAbortController = null;
+      process.stdout.write(`\n${DIM}(generation aborted)${RESET}\n`);
+      ctrlCCount = 0;
+      return;
+    }
     ctrlCCount++;
     if (ctrlCCount >= 2) {
       process.stdout.write(`\n${DIM}Goodbye!${RESET}\n`);
@@ -235,7 +250,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     await processInput(line, replState, agentConfig, rl);
   });
 
-  rl.on("close", () => {
+  rl.on("close", async () => {
+    // Shut down sandbox container if running
+    if (agentConfig.sandboxBridge) {
+      await agentConfig.sandboxBridge.shutdown();
+    }
     process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
     process.exit(0);
   });
@@ -264,12 +283,18 @@ async function processInput(
         const agentPrompt = replState.pendingAgentPrompt;
         replState.pendingAgentPrompt = null;
         agentConfig.silent = replState.silent; // Sync toggle state
+        replState.activeAbortController = new AbortController();
+        agentConfig.abortSignal = replState.activeAbortController.signal;
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
+        replState.activeAbortController = null;
       }
     } else {
       // Route to agent loop
       agentConfig.silent = replState.silent; // Sync toggle state
+      replState.activeAbortController = new AbortController();
+      agentConfig.abortSignal = replState.activeAbortController.signal;
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
+      replState.activeAbortController = null;
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

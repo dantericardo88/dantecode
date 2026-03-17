@@ -35,6 +35,22 @@ vi.mock("@dantecode/core", () => {
       return result.text;
     }
 
+    async stream(
+      messages: Array<{ role: string; content: string }>,
+      _options?: Record<string, unknown>,
+    ): Promise<{ textStream: AsyncIterable<string> }> {
+      const result = await mockGenerateText({
+        model: { modelId: "mock" },
+        messages,
+      });
+      const text = result.text;
+      return {
+        textStream: (async function* () {
+          yield text;
+        })(),
+      };
+    }
+
     extractModelComplexityRating(_responseText: string, _userPrompt?: string): number | null {
       if (this._firstTurnCompleted) return this._modelRatedComplexity;
       this._firstTurnCompleted = true;
@@ -55,6 +71,10 @@ vi.mock("@dantecode/core", () => {
     ModelRouterImpl: MockModelRouterImpl,
     appendAuditEvent: vi.fn().mockResolvedValue(undefined),
     shouldContinueLoop: vi.fn(() => true),
+    estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
+    estimateMessageTokens: vi.fn((msgs: Array<{ content: string }>) =>
+      msgs.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0),
+    ),
   };
 });
 
@@ -74,6 +94,11 @@ vi.mock("@dantecode/danteforge", () => ({
 vi.mock("@dantecode/git-engine", () => ({
   getStatus: vi.fn(() => ({ staged: [], unstaged: [], untracked: [] })),
   autoCommit: vi.fn(),
+  generateRepoMap: vi.fn(() => [
+    { path: "src/index.ts", size: 1024, language: "typescript", lastModified: "2025-01-01" },
+    { path: "src/utils.ts", size: 512, language: "typescript", lastModified: "2025-01-01" },
+  ]),
+  formatRepoMapForContext: vi.fn(() => "src/index.ts (1.0 KB, typescript)\nsrc/utils.ts (0.5 KB, typescript)"),
 }));
 
 vi.mock("./tools.js", () => ({
@@ -83,6 +108,10 @@ vi.mock("./tools.js", () => ({
     { name: "Write", description: "Write a file", parameters: {} },
     { name: "Bash", description: "Run command", parameters: {} },
   ]),
+}));
+
+vi.mock("./tool-schemas.js", () => ({
+  getAISDKTools: vi.fn(() => ({})),
 }));
 
 // Safety module is NOT mocked — we test it for real
@@ -108,7 +137,7 @@ function makeSession(overrides?: Partial<Session>): Session {
       temperature: 0.1,
       contextWindow: 131072,
       supportsVision: false,
-      supportsToolCalls: true,
+      supportsToolCalls: false,
     },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -129,7 +158,7 @@ function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
           temperature: 0.1,
           contextWindow: 131072,
           supportsVision: false,
-          supportsToolCalls: true,
+          supportsToolCalls: false,
         },
         fallback: [],
         taskOverrides: {},

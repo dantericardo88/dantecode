@@ -73,6 +73,17 @@ packages/
 - Do not reintroduce Bun-first instructions into public docs or workflows.
 - Treat skill import as clean-room translation and validation work, not prompt harvesting.
 
+## DanteForge Anti-Stub Doctrine
+
+DanteCode enforces a zero-stub policy. The CI pipeline runs an anti-stub scanner on all source files. The following patterns are **forbidden** in non-test files:
+
+- `TODO`, `FIXME`, `HACK` (code markers)
+- `throw new Error("not implemented")` or `raise NotImplementedError`
+- `as any`, `@ts-ignore`, `@ts-nocheck` (type escape hatches)
+- `placeholder` (stub content markers)
+
+If you are generating code with an AI assistant, ensure it produces **complete, production-ready implementations**. The CI will reject stubs.
+
 ## Tests
 
 - Put tests next to source as `*.test.ts`.
