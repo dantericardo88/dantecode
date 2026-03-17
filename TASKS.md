@@ -58,9 +58,9 @@
 - [x] Integration tests: CLI + MCP (19 new tests)
 - [x] vitest.config: MCP package added to coverage gate
 - [x] Documentation: README features table, SPEC new packages, TASKS Phase 5, CHANGELOG
-- [ ] Runtime catalog: model + provider metadata for UI dropdowns
+- [x] Runtime catalog: model + provider metadata for UI dropdowns (7 providers, 22 models, 3 surfaces)
 - [x] First GitHub push + CI green (all 8 jobs: format, typecheck, lint, test x3, windows-smoke, anti-stub)
-- [ ] Tag v1.0.0-beta.1
+- [x] Tag v1.0.0-beta.1
 
 ## Current local baseline
 
