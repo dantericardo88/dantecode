@@ -60,23 +60,6 @@
       ]
     },
     "views": {
-            "dantecode": [
-              {
-                "type": "webview",
-                "id": "dantecode.chatView",
-                "name": "Chat"
-              },
-              {
-                "type": "webview",
-                "id": "dantecode.auditView",
-                "name": "Audit Log"
-              },
-              {
-                "id": "dantecode.repoMap",
-                "name": "Repo Map",
-                "type": "tree"
-              }
-            ]
       "dantecode": [
         {
           "type": "webview",
@@ -87,6 +70,11 @@
           "type": "webview",
           "id": "dantecode.auditView",
           "name": "Audit Log"
+        },
+        {
+          "id": "dantecode.repoMap",
+          "name": "Repo Map",
+          "type": "tree"
         }
       ]
     },
@@ -170,7 +158,7 @@
       "properties": {
         "dantecode.defaultModel": {
           "type": "string",
-          "default": "grok/grok-4-1-fast-non-reasoning",
+          "default": "grok/grok-3",
           "description": "Default model for DanteCode. Format: provider/model-id"
         },
         "dantecode.pdseThreshold": {

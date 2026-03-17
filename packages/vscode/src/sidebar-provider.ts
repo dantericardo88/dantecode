@@ -177,27 +177,8 @@ const SETTINGS_PROVIDERS = [
  * - Stop generation support
  * - Skill activation from the webview
  */
-import * as vscode from "vscode";
-import { RepoMapTreeDataProvider } from "./repo-map-tree-provider.js";
 
 export class ChatSidebarProvider implements vscode.WebviewViewProvider {
-  private treeView: vscode.TreeView<vscode.TreeItem>;
-
-  constructor(/* existing params */, private projectRoot: string) {
-    // Existing constructor...
-    const treeProvider = new RepoMapTreeDataProvider(this.projectRoot);
-    this.treeView = vscode.window.createTreeView('dantecode.repoMap', {
-      treeDataProvider: treeProvider,
-      showCollapseAll: true
-    });
-  }
-
-  // Existing methods...
-
-  refreshRepoMap() {
-    // Trigger tree refresh
-  }
-}
   public static readonly viewType = "dantecode.chatView";
 
   private view: vscode.WebviewView | undefined;
@@ -1515,7 +1496,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // File, model, and skill handlers (existing)
   // --------------------------------------------------------------------------
 
-  private handleFileAdd(filePath: string): void {
+  public handleFileAdd(filePath: string): void {
     if (filePath.length === 0) {
       return;
     }

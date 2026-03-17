@@ -44,7 +44,7 @@ describe("constitution checker", () => {
     });
 
     it("detects GitHub tokens (ghp_ pattern)", () => {
-      const code = `const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij1234";`;
+      const code = `const token = "ghp_xxxxxxxxxxxxxxxxxxFAKExxxxxxxxxxxxxxxxxx";`;
       const result = runConstitutionCheck(code);
       expect(result.passed).toBe(false);
       expect(result.violations.some((v) => v.message.includes("GitHub"))).toBe(true);

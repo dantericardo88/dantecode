@@ -81,6 +81,40 @@ vi.mock("vscode", () => {
     ) {}
   }
 
+  class EventEmitter {
+    private listeners: Array<(...args: unknown[]) => void> = [];
+    event = (listener: (...args: unknown[]) => void) => {
+      this.listeners.push(listener);
+      return { dispose: () => {} };
+    };
+    fire(data?: unknown) {
+      this.listeners.forEach((l) => l(data));
+    }
+    dispose() {
+      this.listeners = [];
+    }
+  }
+
+  class TreeItem {
+    label?: string;
+    description?: string;
+    tooltip?: string;
+    iconPath?: unknown;
+    command?: unknown;
+    collapsibleState?: number;
+    resourceUri?: unknown;
+    constructor(labelOrUri: unknown, collapsibleState?: number) {
+      if (typeof labelOrUri === "string") {
+        this.label = labelOrUri;
+      } else {
+        this.resourceUri = labelOrUri;
+      }
+      this.collapsibleState = collapsibleState;
+    }
+  }
+
+  const TreeItemCollapsibleState = { None: 0, Collapsed: 1, Expanded: 2 };
+
   const StatusBarAlignment = { Left: 1, Right: 2 };
   const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
   const ProgressLocation = { Notification: 15 };
@@ -100,6 +134,9 @@ vi.mock("vscode", () => {
     ThemeColor,
     InlineCompletionItem,
     RelativePattern,
+    EventEmitter,
+    TreeItem,
+    TreeItemCollapsibleState,
     StatusBarAlignment,
     ConfigurationTarget,
     ProgressLocation,
@@ -126,6 +163,7 @@ vi.mock("vscode", () => {
         dispose: vi.fn(),
       })),
       registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
       activeTextEditor: undefined,
       createTerminal: vi.fn(() => ({ sendText: vi.fn(), show: vi.fn() })),
     },
@@ -183,6 +221,10 @@ vi.mock("@dantecode/danteforge", () => ({
   allGStackPassed: vi.fn().mockReturnValue(true),
   queryLessons: vi.fn().mockResolvedValue([]),
   formatLessonsForPrompt: vi.fn().mockReturnValue(""),
+}));
+
+vi.mock("@dantecode/git-engine", () => ({
+  generateRepoMap: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("@dantecode/skill-adapter", () => ({
