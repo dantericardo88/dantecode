@@ -4,7 +4,7 @@
 // OpenCode into the DanteCode project as wrapped SKILL.dc.md files.
 // ============================================================================
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
 import { appendAuditEvent, readOrInitializeState, updateStateYaml } from "@dantecode/core";
@@ -136,16 +136,6 @@ function sanitizeSkillName(name: string): string {
  * @param options - Import configuration specifying source, directory, and project root.
  * @returns An ImportResult with lists of imported, skipped, and errored skills.
  */
-export async function loadChecks(projectRoot: string): Promise<ParsedSkill[]> {
-  const checksDir = join(projectRoot, '.dantecode', 'checks');
-  const checks = await glob('**/*.md', { cwd: checksDir });
-  return Promise.all(checks.map(async (c) => {
-    const path = join(checksDir, c);
-    const raw = await readFile(path, 'utf-8');
-    return parseClaudeSkill(raw, path);
-  }));
-}
-
 export async function importSkills(options: ImportOptions): Promise<ImportResult> {
   const {
     source,
@@ -362,4 +352,33 @@ export async function importSkills(options: ImportOptions): Promise<ImportResult
   }
 
   return result;
+}
+
+// ----------------------------------------------------------------------------
+// Checks Loader (continue-style .dantecode/checks/*.md)
+// ----------------------------------------------------------------------------
+
+/**
+ * Loads check files from `.dantecode/checks/` and parses them as Claude skills.
+ * Inspired by Continue.dev's `.continue/checks/` pattern.
+ *
+ * @param projectRoot - Absolute path to the project root.
+ * @returns Array of parsed skills from check markdown files.
+ */
+export async function loadChecks(projectRoot: string): Promise<ParsedSkill[]> {
+  const checksDir = join(projectRoot, ".dantecode", "checks");
+  let entries: string[];
+  try {
+    entries = await readdir(checksDir);
+  } catch {
+    return [];
+  }
+  const mdFiles = entries.filter((e) => e.endsWith(".md"));
+  return Promise.all(
+    mdFiles.map(async (filename) => {
+      const filePath = join(checksDir, filename);
+      const raw = await readFile(filePath, "utf-8");
+      return parseClaudeSkill(raw, filePath);
+    }),
+  );
 }

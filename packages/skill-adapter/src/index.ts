@@ -28,7 +28,7 @@ export { wrapSkillWithAdapter, ADAPTER_VERSION } from "./wrap.js";
 export type { ParsedSkill, ImportSource } from "./wrap.js";
 
 // --- Import Orchestrator ---
-export { importSkills } from "./importer.js";
+export { importSkills, loadChecks } from "./importer.js";
 export type { ImportOptions, ImportResult, SkippedSkill } from "./importer.js";
 
 // --- Skill Registry ---
