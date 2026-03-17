@@ -3,7 +3,14 @@
 // ============================================================================
 
 import { generateText, streamText, type CoreMessage, type StreamTextResult } from "ai";
-import type { ModelConfig, ModelRouterConfig, AuditEventType } from "@dantecode/config-types";
+import type {
+  ModelConfig,
+  ModelRouterConfig,
+  AuditEventType,
+  RoutingContext,
+  CostEstimate,
+  BladeAutoforgeConfig,
+} from "@dantecode/config-types";
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
 
@@ -33,6 +40,50 @@ interface RouterLogEntry {
   error?: string;
 }
 
+// ----------------------------------------------------------------------------
+// Blade v1.2 — Cost Routing Constants
+// ----------------------------------------------------------------------------
+
+const GROK_FAST_INPUT_PER_MTK = 0.30;
+const GROK_FAST_OUTPUT_PER_MTK = 0.60;
+const GROK_CAPABLE_INPUT_PER_MTK = 3.00;
+const GROK_CAPABLE_OUTPUT_PER_MTK = 6.00;
+const ANTHROPIC_INPUT_PER_MTK = 3.00;
+const ANTHROPIC_OUTPUT_PER_MTK = 15.00;
+
+// ----------------------------------------------------------------------------
+// Blade v1.2 — Persistent Loop (D4)
+// ----------------------------------------------------------------------------
+
+/** Exit reason for the agent loop. */
+export type LoopExitReason = "natural_completion" | "hard_ceiling_reached" | "quality_gate_passed" | "user_stopped" | "error";
+
+/**
+ * Three-condition exit gate for the persistent agent loop.
+ * Replaces the simple `round >= maxToolRounds` check.
+ */
+export function shouldContinueLoop(
+  toolCallCount: number,
+  roundsRemaining: number,
+  gstackPassed: boolean,
+  pdseScore: number,
+  config: BladeAutoforgeConfig,
+): { shouldContinue: boolean; reason: LoopExitReason } {
+  // Condition 1: Natural completion (model produced no tool calls)
+  if (toolCallCount === 0) {
+    return { shouldContinue: false, reason: "natural_completion" };
+  }
+  // Condition 2: Hard ceiling (decremented counter, cannot be reset by model)
+  if (roundsRemaining <= 0) {
+    return { shouldContinue: false, reason: "hard_ceiling_reached" };
+  }
+  // Condition 3: Quality gate met (only checked when persistUntilGreen=true)
+  if (config.persistUntilGreen && gstackPassed && pdseScore >= 90) {
+    return { shouldContinue: false, reason: "quality_gate_passed" };
+  }
+  return { shouldContinue: true, reason: "natural_completion" };
+}
+
 /**
  * ModelRouterImpl is the central model dispatch engine for DanteCode.
  *
@@ -45,6 +96,12 @@ export class ModelRouterImpl {
   private readonly projectRoot: string;
   private readonly sessionId: string;
   private readonly logs: RouterLogEntry[] = [];
+
+  // Blade v1.2 — Cost Routing State (D6)
+  private _sessionCostUsd = 0;
+  private _sessionTokensUsed = 0;
+  private _currentTier: "fast" | "capable" = "fast";
+  private _consecutiveGstackFailures = 0;
 
   constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
@@ -191,6 +248,12 @@ export class ModelRouterImpl {
       const durationMs = Date.now() - startTime;
       this.logEntry(config, "success", durationMs);
 
+      // D6: Track cost for this request
+      const inputTokens = result.usage?.promptTokens ?? 0;
+      const outputTokens = result.usage?.completionTokens ?? 0;
+      const providerType = config.provider === "anthropic" ? "anthropic" as const : "grok" as const;
+      this.recordRequestCost(inputTokens, outputTokens, this._currentTier, providerType);
+
       // Record the generation event in the audit log
       await this.recordAuditEvent(
         config,
@@ -246,6 +309,12 @@ export class ModelRouterImpl {
         onFinish: async ({ usage }) => {
           const durationMs = Date.now() - startTime;
           this.logEntry(config, "success", durationMs);
+
+          // D6: Track cost for this streaming request
+          const inputTk = usage?.promptTokens ?? 0;
+          const outputTk = usage?.completionTokens ?? 0;
+          const pType = config.provider === "anthropic" ? "anthropic" as const : "grok" as const;
+          this.recordRequestCost(inputTk, outputTk, this._currentTier, pType);
 
           await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
         },
@@ -327,5 +396,124 @@ export class ModelRouterImpl {
    */
   clearLogs(): void {
     this.logs.length = 0;
+  }
+
+  // --------------------------------------------------------------------------
+  // Blade v1.2 — Smart Cost Routing (D6)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Selects the appropriate model tier based on routing context.
+   * Tier escalation is one-way within a session — once "capable" is selected,
+   * it remains "capable" for all subsequent requests.
+   */
+  selectTier(context: RoutingContext): "fast" | "capable" {
+    if (
+      this._currentTier === "capable" ||
+      context.forceCapable ||
+      context.estimatedInputTokens > 2000 ||
+      context.taskType === "autoforge" ||
+      context.consecutiveGstackFailures >= 2 ||
+      context.filesInScope >= 3
+    ) {
+      if (this._currentTier !== "capable") {
+        this._currentTier = "capable";
+        void this.recordAuditEvent(
+          this.routerConfig.default,
+          "tier_escalation",
+          0,
+          0,
+        );
+      }
+      return "capable";
+    }
+    return "fast";
+  }
+
+  /**
+   * Estimates token count from character count using chars/4 heuristic.
+   */
+  estimateTokens(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Records the cost of a completed request and accumulates session totals.
+   */
+  recordRequestCost(
+    inputTokens: number,
+    outputTokens: number,
+    tier: "fast" | "capable",
+    provider: "grok" | "anthropic",
+  ): CostEstimate {
+    let inputRate: number;
+    let outputRate: number;
+    if (provider === "anthropic") {
+      inputRate = ANTHROPIC_INPUT_PER_MTK;
+      outputRate = ANTHROPIC_OUTPUT_PER_MTK;
+    } else if (tier === "capable") {
+      inputRate = GROK_CAPABLE_INPUT_PER_MTK;
+      outputRate = GROK_CAPABLE_OUTPUT_PER_MTK;
+    } else {
+      inputRate = GROK_FAST_INPUT_PER_MTK;
+      outputRate = GROK_FAST_OUTPUT_PER_MTK;
+    }
+    const lastCost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
+    this._sessionCostUsd += lastCost;
+    this._sessionTokensUsed += inputTokens + outputTokens;
+    return {
+      sessionTotalUsd: this._sessionCostUsd,
+      lastRequestUsd: lastCost,
+      modelTier: this._currentTier,
+      tokensUsedSession: this._sessionTokensUsed,
+    };
+  }
+
+  /**
+   * Resets session cost accumulator. Called on "new_chat" inbound message.
+   */
+  resetSessionCost(): void {
+    this._sessionCostUsd = 0;
+    this._sessionTokensUsed = 0;
+    this._currentTier = "fast";
+    this._consecutiveGstackFailures = 0;
+  }
+
+  /**
+   * Returns the current cost estimate for the session.
+   */
+  getCostEstimate(): CostEstimate {
+    return {
+      sessionTotalUsd: this._sessionCostUsd,
+      lastRequestUsd: 0,
+      modelTier: this._currentTier,
+      tokensUsedSession: this._sessionTokensUsed,
+    };
+  }
+
+  /**
+   * Records a GStack failure to track consecutive failures for tier escalation.
+   */
+  recordGstackFailure(): void {
+    this._consecutiveGstackFailures++;
+  }
+
+  /**
+   * Resets the GStack failure counter (on success).
+   */
+  resetGstackFailures(): void {
+    this._consecutiveGstackFailures = 0;
+  }
+
+  /**
+   * Forces escalation to the capable tier for this session.
+   */
+  forceCapable(): void {
+    this._currentTier = "capable";
+  }
+
+  /** Returns the current model tier. */
+  getCurrentTier(): "fast" | "capable" {
+    return this._currentTier;
   }
 }

@@ -44,6 +44,12 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   constitution_violation: "Constitution Violation",
   sandbox_start: "Sandbox Started",
   sandbox_stop: "Sandbox Stopped",
+  self_modification_attempt: "Self-Modification Attempt",
+  self_modification_allowed: "Self-Modification Allowed",
+  self_modification_denied: "Self-Modification Denied",
+  loop_terminated: "Loop Terminated",
+  tier_escalation: "Tier Escalation",
+  cost_update: "Cost Update",
 };
 
 /**

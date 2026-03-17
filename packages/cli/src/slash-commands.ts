@@ -559,6 +559,25 @@ async function sandboxCommand(_args: string, state: ReplState): Promise<string> 
   return `${BOLD}Sandbox mode:${RESET} ${statusText}`;
 }
 
+async function autoforgeCommand(args: string, state: ReplState): Promise<string> {
+  const flags = args.trim().split(/\s+/);
+  const silentMode = flags.includes("--silent");
+  const persistUntilGreen = flags.includes("--persist");
+  const hardCeiling = persistUntilGreen ? 200 : state.state.autoforge.maxIterations;
+
+  const lines: string[] = [
+    `${BOLD}Autoforge Configuration:${RESET}`,
+    `  Silent mode: ${silentMode ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
+    `  Persist until green: ${persistUntilGreen ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
+    `  Hard ceiling: ${hardCeiling} rounds`,
+    `  GStack commands: ${state.state.autoforge.gstackCommands.length}`,
+    "",
+    `${DIM}Autoforge will run on the next agent task with these settings.${RESET}`,
+  ];
+
+  return lines.join("\n");
+}
+
 // ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
@@ -653,6 +672,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Toggle sandbox mode on/off",
     usage: "/sandbox",
     handler: sandboxCommand,
+  },
+  {
+    name: "autoforge",
+    description: "Configure autoforge settings (--silent --persist)",
+    usage: "/autoforge [--silent] [--persist]",
+    handler: autoforgeCommand,
   },
 ];
 

@@ -14,7 +14,7 @@ vi.mock("node:fs", () => ({
   unlinkSync: vi.fn(),
 }));
 
-import { parseDiffHunks, getDiff, getStagedDiff, applyDiff } from "./diff.js";
+import { parseDiffHunks, getDiff, getStagedDiff, applyDiff, generateColoredHunk } from "./diff.js";
 import { execSync } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 
@@ -367,5 +367,79 @@ diff src/b.ts
       // The git apply error should propagate, not the cleanup error
       expect(() => applyDiff(testHunk, "/project")).toThrow("git apply: patch error");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateColoredHunk (pure function — no mocks needed)
+// ---------------------------------------------------------------------------
+
+describe("generateColoredHunk", () => {
+  it("new file: all lines are type 'add' with correct newLineNo", () => {
+    const result = generateColoredHunk("", "line1\nline2\nline3", "test.ts");
+    expect(result.lines.every(l => l.type === "add")).toBe(true);
+    expect(result.linesAdded).toBe(3);
+    expect(result.linesRemoved).toBe(0);
+    expect(result.lines[0]?.newLineNo).toBe(1);
+    expect(result.lines[2]?.newLineNo).toBe(3);
+  });
+
+  it("deleted file: all lines are type 'remove' with correct oldLineNo", () => {
+    const result = generateColoredHunk("line1\nline2", "", "test.ts");
+    expect(result.lines.every(l => l.type === "remove")).toBe(true);
+    expect(result.linesRemoved).toBe(2);
+    expect(result.linesAdded).toBe(0);
+    expect(result.lines[0]?.oldLineNo).toBe(1);
+  });
+
+  it("modified file: produces correct mix of add/remove/context lines", () => {
+    const result = generateColoredHunk("line1\nline2\nline3", "line1\nchanged\nline3", "test.ts");
+    const types = result.lines.map(l => l.type);
+    expect(types).toContain("remove");
+    expect(types).toContain("add");
+  });
+
+  it("hunk headers appear before changed sections", () => {
+    const result = generateColoredHunk("a\nb\nc", "a\nx\nc", "test.ts");
+    const headerIdx = result.lines.findIndex(l => l.type === "hunk_header");
+    expect(headerIdx).toBeGreaterThanOrEqual(0);
+    expect(result.lines[headerIdx]?.content).toContain("@@");
+  });
+
+  it("truncation at MAX_DIFF_LINES sets truncated=true and fullLineCount", () => {
+    const oldLines = Array.from({ length: 100 }, (_, i) => `old-${i}`).join("\n");
+    const newLines = Array.from({ length: 100 }, (_, i) => `new-${i}`).join("\n");
+    const result = generateColoredHunk(oldLines, newLines, "big.ts");
+    if (result.fullLineCount > 80) {
+      expect(result.truncated).toBe(true);
+      expect(result.lines.length).toBeLessThanOrEqual(80);
+    }
+  });
+
+  it("binary file detection returns single hunk_header line", () => {
+    const result = generateColoredHunk("hello\x00world", "new content", "image.png");
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]?.type).toBe("hunk_header");
+    expect(result.lines[0]?.content).toContain("Binary file");
+    expect(result.linesAdded).toBe(0);
+    expect(result.linesRemoved).toBe(0);
+  });
+
+  it("linesAdded count matches add-type lines in DiffLine[]", () => {
+    const result = generateColoredHunk("a", "a\nb\nc", "test.ts");
+    const addCount = result.lines.filter(l => l.type === "add").length;
+    expect(result.linesAdded).toBe(addCount);
+  });
+
+  it("linesRemoved count matches remove-type lines in DiffLine[]", () => {
+    const result = generateColoredHunk("a\nb\nc", "a", "test.ts");
+    const removeCount = result.lines.filter(l => l.type === "remove").length;
+    expect(result.linesRemoved).toBe(removeCount);
+  });
+
+  it("CRLF line endings handled correctly", () => {
+    const result = generateColoredHunk("", "line1\r\nline2\r\n", "test.ts");
+    expect(result.linesAdded).toBeGreaterThan(0);
+    expect(result.lines.some(l => l.content.includes("\r"))).toBe(false);
   });
 });

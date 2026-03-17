@@ -20,8 +20,8 @@ export type { WorktreeCreateResult, WorktreeEntry, WorktreeMergeResult } from ".
 
 // ─── Diff Parsing & Review ──────────────────────────────────────────────────
 
-export { getDiff, getStagedDiff, parseDiffHunks, applyDiff } from "./diff.js";
-export type { DiffHunk } from "./diff.js";
+export { getDiff, getStagedDiff, parseDiffHunks, applyDiff, generateColoredHunk } from "./diff.js";
+export type { DiffHunk, DiffLine, ColoredDiffHunk } from "./diff.js";
 
 // ─── Repository Map Generation ──────────────────────────────────────────────
 

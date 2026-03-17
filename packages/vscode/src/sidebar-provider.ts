@@ -18,7 +18,7 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
-import { ModelRouterImpl, appendAuditEvent, readOrInitializeState } from "@dantecode/core";
+import { ModelRouterImpl, appendAuditEvent, readOrInitializeState, shouldContinueLoop } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runAntiStubScanner,
@@ -31,6 +31,7 @@ import {
   getToolDefinitionsPrompt,
   getWrittenFilePath,
   type ToolResult,
+  type ToolExecutionContext,
 } from "./agent-tools.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -66,7 +67,8 @@ interface WebviewInboundMessage {
     | "remove_attachment"
     | "paste_image"
     | "save_agent_config"
-    | "load_agent_config";
+    | "load_agent_config"
+    | "user_confirmed_self_mod";
   payload: Record<string, unknown>;
 }
 
@@ -91,7 +93,12 @@ interface WebviewOutboundMessage {
     | "image_attached"
     | "ollama_models"
     | "agent_config_data"
-    | "mode_update";
+    | "mode_update"
+    | "autoforge_progress"
+    | "self_modification_blocked"
+    | "loop_terminated"
+    | "diff_hunk"
+    | "cost_update";
   payload: Record<string, unknown>;
 }
 
@@ -677,10 +684,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         roundNumber++;
         const isFirstRound = roundNumber === 1;
 
+        // D6: Select model tier before each request
+        const tier = router.selectTier({
+          estimatedInputTokens: router.estimateTokens(
+            agentMessages.map((m) => m.content).join(""),
+          ),
+          taskType: agentMode === "yolo" ? "autoforge" : "chat",
+          consecutiveGstackFailures: 0,
+          filesInScope: touchedFiles.length,
+          forceCapable: false,
+        });
+
         // Stream the model response
         const streamResult = await router.stream(agentMessages, {
           system: systemPrompt,
-          maxTokens: 8192,
+          maxTokens: tier === "capable" ? 16384 : 8192,
           abortSignal: signal,
         });
 
@@ -823,6 +841,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
         }
 
+        // D6: Emit cost update after each model response
+        const costEstimate = router.getCostEstimate();
+        this.postMessage({
+          type: "cost_update",
+          payload: {
+            sessionTotalUsd: costEstimate.sessionTotalUsd,
+            lastRequestUsd: costEstimate.lastRequestUsd,
+            modelTier: costEstimate.modelTier,
+            tokensUsedSession: costEstimate.tokensUsedSession,
+          },
+        });
+
         // Extract tool calls from the response
         const { toolCalls } = extractToolCalls(fullResponse);
 
@@ -933,9 +963,25 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               },
             });
           }, 3000); // pulse every 3 seconds
+          // D3+D5: Build tool execution context with diff and self-mod callbacks
+          const toolContext: ToolExecutionContext = {
+            projectRoot,
+            silentMode: this.agentConfig.agentMode === "yolo",
+            currentModelId: this.currentModel,
+            roundId: `round-${roundNumber}`,
+            onDiffHunk: (hunk) => {
+              this.postMessage({ type: "diff_hunk", payload: { ...hunk } as unknown as Record<string, unknown> });
+            },
+            onSelfModificationAttempt: (filePath) => {
+              this.postMessage({
+                type: "self_modification_blocked",
+                payload: { filePath, requiresConfirmation: true },
+              });
+            },
+          };
           let result: ToolResult;
           try {
-            result = await executeTool(toolCall.name, toolCall.input, projectRoot);
+            result = await executeTool(toolCall.name, toolCall.input, projectRoot, toolContext);
           } finally {
             clearInterval(heartbeat);
           }
@@ -1076,6 +1122,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       // If the loop exited by exhaustion (maxToolRounds === 0) and tool rounds ran,
       // finalize the streaming UI without replacing content
       if (maxToolRounds === 0 && roundNumber > 1) {
+        // D4: Emit loop_terminated with reason
+        const loopCheck = shouldContinueLoop(
+          0, // no tool calls left
+          maxToolRounds,
+          false, // gstack not checked in chat loop
+          0,     // pdse not checked in chat loop
+          { enabled: true, maxIterations: effectiveMaxRounds, gstackCommands: [], abortOnSecurityViolation: false, lessonInjectionEnabled: false },
+        );
+        this.postMessage({
+          type: "loop_terminated",
+          payload: { reason: loopCheck.reason, roundsCompleted: roundNumber },
+        });
         this.postMessage({
           type: "chat_response_chunk",
           payload: {
@@ -2808,6 +2866,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       <span class="pdse-badge" id="pdse-badge">
         PDSE: <span id="pdse-score">--</span>
       </span>
+      <span class="cost-bar" id="cost-bar" style="display:none;">
+        <span class="cost-tier" id="cost-tier">fast</span>
+        <span id="cost-amount">$0.000</span>
+      </span>
     </div>
     <div class="header-actions">
       <button class="icon-btn" id="btn-new-chat" title="New Chat"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14 7H9V2H7v5H2v2h5v5h2V9h5z"/></svg></button>
@@ -3005,6 +3067,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       const typingIndicator = document.getElementById('typing-indicator');
       const pdseBadge = document.getElementById('pdse-badge');
       const pdseScoreEl = document.getElementById('pdse-score');
+      const costBar = document.getElementById('cost-bar');
+      const costTierEl = document.getElementById('cost-tier');
+      const costAmountEl = document.getElementById('cost-amount');
       const settingsOverlay = document.getElementById('settings-overlay');
       const historyOverlay = document.getElementById('history-overlay');
       const historyList = document.getElementById('history-list');
@@ -3857,6 +3922,58 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             var m = message.payload.mode || 'build';
             modeBadge.textContent = m.toUpperCase();
             modeBadge.className = 'mode-badge ' + m;
+            break;
+
+          case 'cost_update':
+            if (costBar && costTierEl && costAmountEl) {
+              costBar.style.display = 'flex';
+              costTierEl.textContent = message.payload.modelTier || 'fast';
+              costAmountEl.textContent = '$' + (Number(message.payload.sessionTotalUsd) || 0).toFixed(3);
+            }
+            break;
+
+          case 'diff_hunk':
+            if (currentAssistantEl) {
+              var hunk = message.payload;
+              var diffEl = document.createElement('div');
+              diffEl.className = 'diff-hunk-container';
+              var headerEl = document.createElement('div');
+              headerEl.className = 'diff-hunk-header';
+              headerEl.innerHTML = '<span class="diff-filename">' + (hunk.filePath || '') + '</span>'
+                + '<span class="diff-stats">+' + (hunk.linesAdded || 0) + ' -' + (hunk.linesRemoved || 0) + '</span>';
+              diffEl.appendChild(headerEl);
+              var bodyEl = document.createElement('pre');
+              bodyEl.className = 'diff-body';
+              var lines = hunk.lines || [];
+              lines.forEach(function(line) {
+                var span = document.createElement('span');
+                span.className = 'diff-line diff-' + (line.type || 'context');
+                span.textContent = line.content || '';
+                bodyEl.appendChild(span);
+              });
+              diffEl.appendChild(bodyEl);
+              currentAssistantEl.appendChild(diffEl);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            break;
+
+          case 'self_modification_blocked':
+            if (currentAssistantEl) {
+              var modPath = message.payload.filePath || 'unknown';
+              streamBuffer += '\\n\\n> **Self-modification blocked:** \\x60' + modPath + '\\x60 — This file is protected.\\n';
+              currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            break;
+
+          case 'loop_terminated':
+            if (currentAssistantEl) {
+              var reason = message.payload.reason || 'unknown';
+              var rounds = message.payload.roundsCompleted || 0;
+              streamBuffer += '\\n\\n> **Loop terminated:** ' + reason + ' after ' + rounds + ' rounds.\\n';
+              currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
             break;
 
           case 'audit_event':

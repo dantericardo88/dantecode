@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
+import type { ModelConfig, ModelRouterConfig, RoutingContext, BladeAutoforgeConfig } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
 // Mock external dependencies BEFORE importing the module under test
@@ -25,7 +25,7 @@ vi.mock("./providers/index.js", () => ({
   },
 }));
 
-import { ModelRouterImpl } from "./model-router.js";
+import { ModelRouterImpl, shouldContinueLoop } from "./model-router.js";
 import { generateText, streamText } from "ai";
 import { appendAuditEvent } from "./audit.js";
 
@@ -494,5 +494,297 @@ describe("model-router", () => {
       const logs = router.getLogs();
       expect(logs[0]!.provider).toBe("anthropic");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — shared routerConfig for new test blocks
+// ---------------------------------------------------------------------------
+
+const routerConfig: ModelRouterConfig = {
+  default: grokConfig,
+  fallback: [anthropicConfig],
+  overrides: {},
+};
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — selectTier tests (D6)
+// ---------------------------------------------------------------------------
+
+describe("selectTier", () => {
+  let router: ModelRouterImpl;
+
+  beforeEach(() => {
+    router = new ModelRouterImpl(routerConfig, "/test", "session-1");
+  });
+
+  it("returns 'fast' for 500-token chat context", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 500, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    expect(router.selectTier(ctx)).toBe("fast");
+  });
+
+  it("returns 'capable' for 3000-token context", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 3000, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("returns 'capable' for autoforge task type", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "autoforge", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("returns 'capable' when consecutiveGstackFailures >= 2", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "chat", consecutiveGstackFailures: 2, filesInScope: 1, forceCapable: false };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("returns 'capable' when filesInScope >= 3", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 3, forceCapable: false };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("returns 'capable' when forceCapable=true regardless of tokens", () => {
+    const ctx: RoutingContext = { estimatedInputTokens: 10, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: true };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("always returns 'capable' once escalated (no de-escalation)", () => {
+    const escalateCtx: RoutingContext = { estimatedInputTokens: 5000, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    router.selectTier(escalateCtx);
+    const smallCtx: RoutingContext = { estimatedInputTokens: 10, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    expect(router.selectTier(smallCtx)).toBe("capable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — Cost Accumulator tests (D6)
+// ---------------------------------------------------------------------------
+
+describe("recordRequestCost", () => {
+  let router: ModelRouterImpl;
+
+  beforeEach(() => {
+    router = new ModelRouterImpl(routerConfig, "/test", "session-1");
+  });
+
+  it("accumulates correctly across 3 mock requests", () => {
+    router.recordRequestCost(1000, 500, "fast", "grok");
+    router.recordRequestCost(2000, 1000, "fast", "grok");
+    const result = router.recordRequestCost(500, 200, "fast", "grok");
+    expect(result.sessionTotalUsd).toBeGreaterThan(0);
+    expect(result.tokensUsedSession).toBe(1000 + 500 + 2000 + 1000 + 500 + 200);
+  });
+
+  it("estimateTokens returns ceil(chars/4)", () => {
+    expect(router.estimateTokens("hello world!")).toBe(3); // 12 chars / 4 = 3
+    expect(router.estimateTokens("a")).toBe(1);
+    expect(router.estimateTokens("ab")).toBe(1);
+    expect(router.estimateTokens("abc")).toBe(1);
+    expect(router.estimateTokens("abcd")).toBe(1);
+    expect(router.estimateTokens("abcde")).toBe(2);
+  });
+
+  it("resetSessionCost resets all accumulators to zero", () => {
+    router.recordRequestCost(5000, 3000, "capable", "grok");
+    router.resetSessionCost();
+    const estimate = router.getCostEstimate();
+    expect(estimate.sessionTotalUsd).toBe(0);
+    expect(estimate.tokensUsedSession).toBe(0);
+    expect(estimate.modelTier).toBe("fast");
+  });
+
+  it("getCostEstimate reflects current session state", () => {
+    router.recordRequestCost(1000, 500, "fast", "grok");
+    const estimate = router.getCostEstimate();
+    expect(estimate.sessionTotalUsd).toBeGreaterThan(0);
+    expect(estimate.modelTier).toBe("fast");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — shouldContinueLoop tests (D4)
+// ---------------------------------------------------------------------------
+
+describe("shouldContinueLoop", () => {
+  const baseConfig: BladeAutoforgeConfig = {
+    enabled: true, maxIterations: 5, gstackCommands: [],
+    lessonInjectionEnabled: false, abortOnSecurityViolation: false,
+    persistUntilGreen: false,
+  };
+
+  it("stops when toolCallCount === 0 regardless of roundsRemaining", () => {
+    const result = shouldContinueLoop(0, 100, false, 50, baseConfig);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reason).toBe("natural_completion");
+  });
+
+  it("stops when roundsRemaining reaches 0 even if quality not met", () => {
+    const result = shouldContinueLoop(3, 0, false, 50, baseConfig);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reason).toBe("hard_ceiling_reached");
+  });
+
+  it("stops when persistUntilGreen=true AND gstackPassed AND pdse>=90", () => {
+    const cfg = { ...baseConfig, persistUntilGreen: true };
+    const result = shouldContinueLoop(2, 100, true, 95, cfg);
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reason).toBe("quality_gate_passed");
+  });
+
+  it("continues past maxToolRounds when persistUntilGreen=true and quality not met", () => {
+    const cfg = { ...baseConfig, persistUntilGreen: true };
+    const result = shouldContinueLoop(2, 50, false, 70, cfg);
+    expect(result.shouldContinue).toBe(true);
+  });
+
+  it("continues when there are tool calls and rounds remaining", () => {
+    const result = shouldContinueLoop(3, 10, false, 50, baseConfig);
+    expect(result.shouldContinue).toBe(true);
+  });
+
+  it("does not trigger quality_gate_passed when persistUntilGreen=false", () => {
+    const result = shouldContinueLoop(2, 100, true, 95, baseConfig);
+    expect(result.shouldContinue).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — D6 cost tracking integration tests
+// ---------------------------------------------------------------------------
+
+describe("D6 cost tracking integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("generate() tracks cost after successful completion", async () => {
+    (generateText as Mock).mockResolvedValueOnce({
+      text: "cost-tracked response",
+      usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+    });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-1");
+    await router.generate(testMessages);
+
+    const estimate = router.getCostEstimate();
+    expect(estimate.sessionTotalUsd).toBeGreaterThan(0);
+    expect(estimate.tokensUsedSession).toBe(150);
+  });
+
+  it("stream() tracks cost in onFinish callback", async () => {
+    let capturedOnFinish: (opts: { usage?: { promptTokens: number; completionTokens: number; totalTokens: number } }) => Promise<void>;
+
+    (streamText as Mock).mockImplementationOnce((opts: { onFinish: typeof capturedOnFinish }) => {
+      capturedOnFinish = opts.onFinish;
+      return { type: "mock-stream" };
+    });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-2");
+    await router.stream(testMessages);
+
+    // Simulate the AI SDK calling onFinish after stream completes
+    await capturedOnFinish!({ usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 } });
+
+    const estimate = router.getCostEstimate();
+    expect(estimate.sessionTotalUsd).toBeGreaterThan(0);
+    expect(estimate.tokensUsedSession).toBe(300);
+  });
+
+  it("cost accumulates across multiple generate calls", async () => {
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: "first",
+        usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+      })
+      .mockResolvedValueOnce({
+        text: "second",
+        usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 },
+      });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-3");
+    await router.generate(testMessages);
+    const afterFirst = router.getCostEstimate();
+
+    await router.generate(testMessages);
+    const afterSecond = router.getCostEstimate();
+
+    expect(afterSecond.sessionTotalUsd).toBeGreaterThan(afterFirst.sessionTotalUsd);
+    expect(afterSecond.tokensUsedSession).toBe(150 + 280);
+  });
+
+  it("anthropic provider uses anthropic rates", async () => {
+    (generateText as Mock).mockResolvedValueOnce({
+      text: "anthropic response",
+      usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 1500 },
+    });
+
+    // Use anthropic as the default provider
+    const anthropicRouterConfig = makeRouterConfig({
+      default: anthropicConfig,
+      fallback: [],
+    });
+    const router = new ModelRouterImpl(anthropicRouterConfig, "/tmp", "s-cost-4");
+    await router.generate(testMessages);
+
+    const estimate = router.getCostEstimate();
+    // Anthropic rates: input=3.00/MTk, output=15.00/MTk
+    // Expected: (1000 * 3.00 + 500 * 15.00) / 1_000_000 = (3000 + 7500) / 1_000_000 = 0.0105
+    const expectedCost = (1000 * 3.0 + 500 * 15.0) / 1_000_000;
+    expect(estimate.sessionTotalUsd).toBeCloseTo(expectedCost, 8);
+  });
+
+  it("grok fast tier uses lower rates", async () => {
+    (generateText as Mock).mockResolvedValueOnce({
+      text: "grok fast response",
+      usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 1500 },
+    });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-5");
+    await router.generate(testMessages);
+
+    const estimate = router.getCostEstimate();
+    // Grok fast rates: input=0.30/MTk, output=0.60/MTk
+    // Expected: (1000 * 0.30 + 500 * 0.60) / 1_000_000 = (300 + 300) / 1_000_000 = 0.0006
+    const expectedCost = (1000 * 0.3 + 500 * 0.6) / 1_000_000;
+    expect(estimate.sessionTotalUsd).toBeCloseTo(expectedCost, 8);
+  });
+
+  it("grok capable tier uses higher rates", async () => {
+    (generateText as Mock).mockResolvedValueOnce({
+      text: "grok capable response",
+      usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 1500 },
+    });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-6");
+    // Force escalation to capable tier before generating
+    router.forceCapable();
+    await router.generate(testMessages);
+
+    const estimate = router.getCostEstimate();
+    // Grok capable rates: input=3.00/MTk, output=6.00/MTk
+    // Expected: (1000 * 3.00 + 500 * 6.00) / 1_000_000 = (3000 + 3000) / 1_000_000 = 0.006
+    const expectedCost = (1000 * 3.0 + 500 * 6.0) / 1_000_000;
+    expect(estimate.sessionTotalUsd).toBeCloseTo(expectedCost, 8);
+  });
+
+  it("resetSessionCost clears accumulated cost", async () => {
+    (generateText as Mock).mockResolvedValueOnce({
+      text: "will be cleared",
+      usage: { promptTokens: 500, completionTokens: 200, totalTokens: 700 },
+    });
+
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-7");
+    await router.generate(testMessages);
+
+    // Verify cost was tracked
+    const beforeReset = router.getCostEstimate();
+    expect(beforeReset.sessionTotalUsd).toBeGreaterThan(0);
+    expect(beforeReset.tokensUsedSession).toBe(700);
+
+    // Reset and verify everything is cleared
+    router.resetSessionCost();
+    const afterReset = router.getCostEstimate();
+    expect(afterReset.sessionTotalUsd).toBe(0);
+    expect(afterReset.tokensUsedSession).toBe(0);
   });
 });

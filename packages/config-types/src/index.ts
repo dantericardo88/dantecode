@@ -212,6 +212,34 @@ export interface AutoforgeConfig {
   abortOnSecurityViolation: boolean;
 }
 
+/** Extended autoforge config for Blade v1.2. */
+export interface BladeAutoforgeConfig extends AutoforgeConfig {
+  /** When true, ignore maxIterations and continue until allGStackPassed && pdse >= 90. */
+  persistUntilGreen?: boolean;
+  /** Absolute maximum rounds even when persistUntilGreen=true. Default 200. */
+  hardCeiling?: number;
+  /** Enable silent progress UX (suppress per-tool webview messages). Default false. */
+  silentMode?: boolean;
+}
+
+/** Live state of a blade autoforge run, emitted as webview progress events. */
+export interface BladeProgressState {
+  /** Current autoforge phase number (1-based). */
+  phase: number;
+  /** Total phases configured in AutoforgeConfig.maxIterations. */
+  totalPhases: number;
+  /** Percent complete: floor((phase - 1) / totalPhases * 100). */
+  percentComplete: number;
+  /** Last PDSE score from runLocalPDSEScorer on the most recently written file. */
+  pdseScore: number;
+  /** Accumulated session cost in USD from ModelRouterImpl.getCostEstimate(). */
+  estimatedCostUsd: number;
+  /** Human-readable current task label (e.g., "Running GStack typecheck"). */
+  currentTask: string;
+  /** When true, tool logs and bash output are suppressed in the webview. */
+  silentMode: boolean;
+}
+
 // ----------------------------------------------------------------------------
 // Lessons System Types
 // ----------------------------------------------------------------------------
@@ -329,6 +357,37 @@ export interface DiffHunk {
   accepted?: boolean;
 }
 
+/** A single line in a colored diff hunk for webview rendering. */
+export interface DiffLine {
+  /** "add" = green, "remove" = red, "context" = gray, "hunk_header" = dim */
+  type: "add" | "remove" | "context" | "hunk_header";
+  /** The line content (without the leading +/-/space prefix character). */
+  content: string;
+  /** Line number in the old file (null for added lines). */
+  oldLineNo: number | null;
+  /** Line number in the new file (null for removed lines). */
+  newLineNo: number | null;
+}
+
+/** A complete colored diff result for one file, ready for webview rendering. */
+export interface ColoredDiffHunk {
+  /** Relative file path from project root. */
+  filePath: string;
+  /** Total lines added across all hunks. */
+  linesAdded: number;
+  /** Total lines removed across all hunks. */
+  linesRemoved: number;
+  /** Ordered array of all diff lines across all hunks. */
+  lines: DiffLine[];
+  /** True if diff exceeded MAX_DIFF_LINES and was truncated. */
+  truncated: boolean;
+  /** Total line count in the full diff (for "Show N more lines" label). */
+  fullLineCount: number;
+}
+
+/** Maximum diff lines to include before truncation. */
+export const MAX_DIFF_LINES = 80;
+
 // ----------------------------------------------------------------------------
 // Audit Log Types
 // ----------------------------------------------------------------------------
@@ -359,7 +418,13 @@ export type AuditEventType =
   | "noma_violation"
   | "constitution_violation"
   | "sandbox_start"
-  | "sandbox_stop";
+  | "sandbox_stop"
+  | "self_modification_attempt"
+  | "self_modification_allowed"
+  | "self_modification_denied"
+  | "loop_terminated"
+  | "tier_escalation"
+  | "cost_update";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {
@@ -405,6 +470,36 @@ export interface SandboxExecResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+}
+
+// ----------------------------------------------------------------------------
+// Cost Routing Types (Blade v1.2)
+// ----------------------------------------------------------------------------
+
+/** Context used to select the appropriate model tier for a request. */
+export interface RoutingContext {
+  /** Estimated input tokens (character count / 4 heuristic). */
+  estimatedInputTokens: number;
+  /** Task type influences tier selection. */
+  taskType: "chat" | "autoforge" | "edit" | "read";
+  /** Number of consecutive GStack failures in this session. */
+  consecutiveGstackFailures: number;
+  /** Number of files in scope for this operation. */
+  filesInScope: number;
+  /** User manually forced Tier 2 for the session. */
+  forceCapable: boolean;
+}
+
+/** Live cost estimate for the current session. */
+export interface CostEstimate {
+  /** Total session cost in USD since last "New Chat". */
+  sessionTotalUsd: number;
+  /** Cost of the most recent request in USD. */
+  lastRequestUsd: number;
+  /** Current model tier in use. */
+  modelTier: "fast" | "capable";
+  /** Total tokens used this session. */
+  tokensUsedSession: number;
 }
 
 // ----------------------------------------------------------------------------

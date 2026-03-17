@@ -7,10 +7,11 @@ import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import type { DiffHunk } from "@dantecode/config-types";
+import type { DiffHunk, DiffLine, ColoredDiffHunk } from "@dantecode/config-types";
+import { MAX_DIFF_LINES } from "@dantecode/config-types";
 
 // Re-export the DiffHunk type so consumers can import from this module
-export type { DiffHunk } from "@dantecode/config-types";
+export type { DiffHunk, DiffLine, ColoredDiffHunk } from "@dantecode/config-types";
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -184,6 +185,219 @@ export function parseDiffHunks(diffOutput: string): DiffHunk[] {
  * @param hunk - The diff hunk to apply.
  * @param projectRoot - Absolute path to the repository root.
  */
+// ----------------------------------------------------------------------------
+// Blade v1.2 — Colored Diff Generation
+// ----------------------------------------------------------------------------
+
+/**
+ * Generates a structured colored diff hunk between old and new file content.
+ * Uses a simple LCS-based diff algorithm (no external deps required).
+ * Returns a ColoredDiffHunk ready for webview rendering.
+ *
+ * @param oldContent - Previous file content (empty string for new files)
+ * @param newContent - New file content
+ * @param filePath - Relative path for display (e.g. "packages/core/src/model-router.ts")
+ * @returns ColoredDiffHunk with typed DiffLine[] for webview rendering
+ */
+export function generateColoredHunk(
+  oldContent: string,
+  newContent: string,
+  filePath: string,
+): ColoredDiffHunk {
+  // Binary file detection: if either content contains a null byte
+  if (oldContent.includes("\x00") || newContent.includes("\x00")) {
+    const size = Math.max(oldContent.length, newContent.length);
+    return {
+      filePath,
+      linesAdded: 0,
+      linesRemoved: 0,
+      lines: [{ type: "hunk_header", content: `[Binary file — ${size} bytes]`, oldLineNo: null, newLineNo: null }],
+      truncated: false,
+      fullLineCount: 1,
+    };
+  }
+
+  const oldLines = oldContent.length === 0 ? [] : oldContent.replace(/\r\n/g, "\n").split("\n");
+  const newLines = newContent.length === 0 ? [] : newContent.replace(/\r\n/g, "\n").split("\n");
+
+  // New file: all lines are adds
+  if (oldLines.length === 0) {
+    const lines: DiffLine[] = newLines.map((line, i) => ({
+      type: "add" as const,
+      content: line,
+      oldLineNo: null,
+      newLineNo: i + 1,
+    }));
+    return buildColoredResult(filePath, lines);
+  }
+
+  // Deleted file: all lines are removes
+  if (newLines.length === 0) {
+    const lines: DiffLine[] = oldLines.map((line, i) => ({
+      type: "remove" as const,
+      content: line,
+      oldLineNo: i + 1,
+      newLineNo: null,
+    }));
+    return buildColoredResult(filePath, lines);
+  }
+
+  // Modified file: compute unified diff with 3-line context
+  const diffLines = computeUnifiedDiff(oldLines, newLines, 3);
+  return buildColoredResult(filePath, diffLines);
+}
+
+/**
+ * Computes a unified diff between two line arrays with context lines.
+ */
+function computeUnifiedDiff(oldLines: string[], newLines: string[], contextSize: number): DiffLine[] {
+  // Simple O(NM) LCS for moderate-size files
+  const n = oldLines.length;
+  const m = newLines.length;
+
+  // For very large files, fall back to a simpler line-by-line comparison
+  if (n * m > 10_000_000) {
+    return simpleDiff(oldLines, newLines);
+  }
+
+  // Build LCS table
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (oldLines[i - 1] === newLines[j - 1]) {
+        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
+      } else {
+        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+      }
+    }
+  }
+
+  // Backtrack to produce edit script
+  interface EditOp { type: "equal" | "remove" | "add"; oldIdx: number; newIdx: number; line: string }
+  const edits: EditOp[] = [];
+  let i = n;
+  let j = m;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      edits.push({ type: "equal", oldIdx: i, newIdx: j, line: oldLines[i - 1]! });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
+      edits.push({ type: "add", oldIdx: -1, newIdx: j, line: newLines[j - 1]! });
+      j--;
+    } else {
+      edits.push({ type: "remove", oldIdx: i, newIdx: -1, line: oldLines[i - 1]! });
+      i--;
+    }
+  }
+  edits.reverse();
+
+  // Group edits into hunks with context
+  const result: DiffLine[] = [];
+  const changes: number[] = [];
+  for (let idx = 0; idx < edits.length; idx++) {
+    if (edits[idx]!.type !== "equal") changes.push(idx);
+  }
+
+  if (changes.length === 0) return [];
+
+  // Merge change regions with context
+  const regions: Array<{ start: number; end: number }> = [];
+  let regionStart = Math.max(0, changes[0]! - contextSize);
+  let regionEnd = Math.min(edits.length - 1, changes[0]! + contextSize);
+
+  for (let ci = 1; ci < changes.length; ci++) {
+    const changeStart = Math.max(0, changes[ci]! - contextSize);
+    const changeEnd = Math.min(edits.length - 1, changes[ci]! + contextSize);
+    if (changeStart <= regionEnd + 1) {
+      regionEnd = changeEnd;
+    } else {
+      regions.push({ start: regionStart, end: regionEnd });
+      regionStart = changeStart;
+      regionEnd = changeEnd;
+    }
+  }
+  regions.push({ start: regionStart, end: regionEnd });
+
+  // Emit hunks
+  for (const region of regions) {
+    // Compute hunk header line numbers
+    const firstEdit = edits[region.start]!;
+    const oldStart = firstEdit.type === "add" ? (firstEdit.oldIdx === -1 ? 1 : firstEdit.oldIdx) : firstEdit.oldIdx;
+    const newStart = firstEdit.type === "remove" ? (firstEdit.newIdx === -1 ? 1 : firstEdit.newIdx) : firstEdit.newIdx;
+    result.push({
+      type: "hunk_header",
+      content: `@@ -${oldStart} +${newStart} @@`,
+      oldLineNo: null,
+      newLineNo: null,
+    });
+
+    for (let idx = region.start; idx <= region.end; idx++) {
+      const edit = edits[idx]!;
+      switch (edit.type) {
+        case "equal":
+          result.push({ type: "context", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: edit.newIdx });
+          break;
+        case "add":
+          result.push({ type: "add", content: edit.line, oldLineNo: null, newLineNo: edit.newIdx });
+          break;
+        case "remove":
+          result.push({ type: "remove", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: null });
+          break;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Simple line-by-line diff for very large files where LCS is too expensive.
+ */
+function simpleDiff(oldLines: string[], newLines: string[]): DiffLine[] {
+  const result: DiffLine[] = [];
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  for (let i = 0; i < maxLen; i++) {
+    const oldLine = i < oldLines.length ? oldLines[i]! : undefined;
+    const newLine = i < newLines.length ? newLines[i]! : undefined;
+    if (oldLine === newLine) {
+      result.push({ type: "context", content: oldLine!, oldLineNo: i + 1, newLineNo: i + 1 });
+    } else {
+      if (oldLine !== undefined) {
+        result.push({ type: "remove", content: oldLine, oldLineNo: i + 1, newLineNo: null });
+      }
+      if (newLine !== undefined) {
+        result.push({ type: "add", content: newLine, oldLineNo: null, newLineNo: i + 1 });
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Builds the final ColoredDiffHunk from a DiffLine array, applying truncation if needed.
+ */
+function buildColoredResult(filePath: string, lines: DiffLine[]): ColoredDiffHunk {
+  const linesAdded = lines.filter((l) => l.type === "add").length;
+  const linesRemoved = lines.filter((l) => l.type === "remove").length;
+  const fullLineCount = lines.length;
+  const truncated = lines.length > MAX_DIFF_LINES;
+  const displayLines = truncated ? lines.slice(0, MAX_DIFF_LINES) : lines;
+
+  return {
+    filePath,
+    linesAdded,
+    linesRemoved,
+    lines: displayLines,
+    truncated,
+    fullLineCount,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Git Apply
+// ----------------------------------------------------------------------------
+
 export function applyDiff(hunk: DiffHunk, projectRoot: string): void {
   // Build a minimal unified diff patch for this single hunk
   const patchLines: string[] = [`--- a/${hunk.file}`, `+++ b/${hunk.file}`, hunk.content];

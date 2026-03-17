@@ -8,7 +8,9 @@
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { accessSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join, dirname, resolve, relative, isAbsolute, extname } from "node:path";
+import { join, dirname, resolve, relative, isAbsolute, extname, sep } from "node:path";
+import type { ColoredDiffHunk } from "@dantecode/config-types";
+import { generateColoredHunk } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -23,6 +25,64 @@ export interface ExtractedToolCall {
   id: string;
   name: string;
   input: Record<string, unknown>;
+}
+
+/** Extended tool execution context for Blade v1.2. */
+export interface ToolExecutionContext {
+  projectRoot: string;
+  silentMode: boolean;
+  currentModelId: string;
+  roundId: string;
+  onDiffHunk?: (hunk: ColoredDiffHunk) => void;
+  onSelfModificationAttempt?: (filePath: string) => void;
+  awaitSelfModConfirmation?: () => Promise<boolean>;
+  runReleaseCheck?: () => Promise<boolean>;
+}
+
+// ----------------------------------------------------------------------------
+// Self-Modification Guard (Blade v1.2 — D5)
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns true if the given file path targets DanteCode's own source files,
+ * configuration, or constitutional documents.
+ *
+ * This guard is ALWAYS active regardless of agent mode (plan/build/yolo).
+ * It fires before ANY Write or Edit tool dispatch.
+ *
+ * @param filePath - The file path the agent wants to write (relative or absolute)
+ * @param projectRoot - The project root from STATE.yaml
+ */
+export function isSelfModificationTarget(
+  filePath: string,
+  projectRoot: string,
+): boolean {
+  const resolved = resolve(projectRoot, filePath);
+  const selfPaths: string[] = [
+    resolve(projectRoot, "packages", "vscode"),
+    resolve(projectRoot, "packages", "cli"),
+    resolve(projectRoot, "packages", "danteforge"),
+    resolve(projectRoot, "packages", "core"),
+    resolve(projectRoot, ".dantecode"),
+    resolve(projectRoot, "CONSTITUTION.md"),
+  ];
+  return selfPaths.some((sp) => resolved === sp || resolved.startsWith(sp + sep));
+}
+
+/** Bash command patterns that could write to self-owned paths. */
+const SELF_MOD_BASH_PATTERNS = [
+  />\s*packages\/(vscode|cli|danteforge|core)\//,
+  />\s*\.dantecode\//,
+  />\s*CONSTITUTION\.md/,
+  /echo\s+.*>\s*packages\//,
+  /tee\s+packages\//,
+];
+
+/**
+ * Returns true if a bash command appears to write to a self-owned path.
+ */
+export function isSelfModificationBashCommand(command: string): boolean {
+  return SELF_MOD_BASH_PATTERNS.some((p) => p.test(command));
 }
 
 // ----------------------------------------------------------------------------
@@ -454,27 +514,85 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   projectRoot: string,
+  context?: ToolExecutionContext,
 ): Promise<ToolResult> {
+  const filePath = input["file_path"] as string | undefined;
+  const isFileOp = name === "Write" || name === "Edit";
+
+  // D5: Self-modification guard for Write/Edit
+  if (context && isFileOp && filePath && isSelfModificationTarget(filePath, projectRoot)) {
+    context.onSelfModificationAttempt?.(filePath);
+    if (context.awaitSelfModConfirmation) {
+      const confirmed = await context.awaitSelfModConfirmation();
+      if (!confirmed) {
+        return { content: `Self-modification blocked: ${filePath}`, isError: true };
+      }
+    } else {
+      return { content: `Self-modification blocked: ${filePath}`, isError: true };
+    }
+  }
+
+  // D5: Self-modification guard for Bash
+  if (context && name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && isSelfModificationBashCommand(command)) {
+      return { content: "Self-modification blocked: bash command targets protected paths", isError: true };
+    }
+  }
+
+  // D3: Capture old content for colored diff
+  let oldContent: string | null = null;
+  if (context?.onDiffHunk && isFileOp && filePath) {
+    try {
+      oldContent = await readFile(resolvePath(filePath, projectRoot), "utf-8");
+    } catch {
+      oldContent = null;
+    }
+  }
+
+  // Dispatch to tool implementation
+  let result: ToolResult;
   switch (name) {
     case "Read":
-      return toolRead(input, projectRoot);
+      result = await toolRead(input, projectRoot);
+      break;
     case "Write":
-      return toolWrite(input, projectRoot);
+      result = await toolWrite(input, projectRoot);
+      break;
     case "Edit":
-      return toolEdit(input, projectRoot);
+      result = await toolEdit(input, projectRoot);
+      break;
     case "ListDir":
-      return toolListDir(input, projectRoot);
+      result = await toolListDir(input, projectRoot);
+      break;
     case "Bash":
-      return toolBash(input, projectRoot);
+      result = await toolBash(input, projectRoot);
+      break;
     case "Glob":
-      return toolGlob(input, projectRoot);
+      result = await toolGlob(input, projectRoot);
+      break;
     case "Grep":
-      return toolGrep(input, projectRoot);
+      result = await toolGrep(input, projectRoot);
+      break;
     case "SelfUpdate":
-      return toolSelfUpdate(input, projectRoot);
+      result = await toolSelfUpdate(input, projectRoot);
+      break;
     default:
-      return { content: `Unknown tool: ${name}`, isError: true };
+      result = { content: `Unknown tool: ${name}`, isError: true };
   }
+
+  // D3: Emit colored diff hunk after successful file operations
+  if (context?.onDiffHunk && isFileOp && filePath && !result.isError) {
+    try {
+      const newContent = await readFile(resolvePath(filePath, projectRoot), "utf-8");
+      const hunk = generateColoredHunk(oldContent ?? "", newContent, filePath);
+      context.onDiffHunk(hunk);
+    } catch {
+      /* non-critical: diff generation */
+    }
+  }
+
+  return result;
 }
 
 // ----------------------------------------------------------------------------

@@ -225,6 +225,14 @@ vi.mock("@dantecode/danteforge", () => ({
 
 vi.mock("@dantecode/git-engine", () => ({
   generateRepoMap: vi.fn().mockReturnValue([]),
+  generateColoredHunk: vi.fn().mockReturnValue({
+    filePath: "test.ts",
+    linesAdded: 1,
+    linesRemoved: 0,
+    lines: [{ type: "add", content: "new line", oldLineNo: null, newLineNo: 1 }],
+    truncated: false,
+    fullLineCount: 1,
+  }),
 }));
 
 vi.mock("@dantecode/skill-adapter", () => ({
@@ -235,18 +243,51 @@ vi.mock("@dantecode/skill-adapter", () => ({
   }),
 }));
 
+// Mock node:fs/promises for executeTool integration tests
+const mockReadFile = vi.fn();
+const mockWriteFile = vi.fn();
+const mockMkdir = vi.fn();
+const mockReaddir = vi.fn();
+const mockStat = vi.fn();
+vi.mock("node:fs/promises", () => ({
+  readFile: (...args: unknown[]) => mockReadFile(...args),
+  writeFile: (...args: unknown[]) => mockWriteFile(...args),
+  mkdir: (...args: unknown[]) => mockMkdir(...args),
+  readdir: (...args: unknown[]) => mockReaddir(...args),
+  stat: (...args: unknown[]) => mockStat(...args),
+}));
+
+// Mock node:fs (sync) for resolveShell in toolBash
+vi.mock("node:fs", () => ({
+  accessSync: vi.fn(),
+}));
+
+// Mock node:child_process for toolBash
+const mockExecSync = vi.fn();
+vi.mock("node:child_process", () => ({
+  execSync: (...args: unknown[]) => mockExecSync(...args),
+}));
+
 import type { PDSEScore } from "@dantecode/config-types";
 import { PDSEDiagnosticProvider } from "./diagnostics.js";
 import {
   createStatusBar,
   updateStatusBar,
   updateSandboxStatus,
+  updateStatusBarWithCost,
   type StatusBarState,
 } from "./status-bar.js";
+import {
+  isSelfModificationTarget,
+  isSelfModificationBashCommand,
+  executeTool,
+  type ToolExecutionContext,
+} from "./agent-tools.js";
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
 import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import { activate, deactivate } from "./extension.js";
+import { generateColoredHunk } from "@dantecode/git-engine";
 import * as vscode from "vscode";
 
 // ---------------------------------------------------------------------------
@@ -697,6 +738,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "anthropic/claude-sonnet-4", "passed");
@@ -714,6 +757,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "passed");
@@ -727,6 +772,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -740,6 +787,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "pending");
@@ -753,6 +802,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -769,6 +820,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "none");
@@ -783,6 +836,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateSandboxStatus(state, true);
@@ -797,6 +852,8 @@ describe("VS Code Extension", () => {
         currentModel: "grok/grok-3",
         gateStatus: "none",
         sandboxEnabled: true,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateSandboxStatus(state, false);
@@ -811,6 +868,8 @@ describe("VS Code Extension", () => {
         currentModel: "openai/gpt-4o",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "openai/gpt-4o", "passed");
@@ -826,6 +885,8 @@ describe("VS Code Extension", () => {
         currentModel: "google/gemini-2.5-pro",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "google/gemini-2.5-pro", "none");
@@ -840,6 +901,8 @@ describe("VS Code Extension", () => {
         currentModel: "llama3",
         gateStatus: "none",
         sandboxEnabled: false,
+        modelTier: "fast",
+        sessionCostUsd: 0,
       };
 
       updateStatusBar(state, "llama3", "none");
@@ -1057,5 +1120,291 @@ describe("VS Code Extension", () => {
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
       expect(commandIds).toContain("dantecode.runPDSE");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared mock context for Blade v1.2 tests
+// ---------------------------------------------------------------------------
+
+const mockExtensionContext = {
+  subscriptions: [] as { dispose: () => void }[],
+  extensionUri: vscode.Uri.file("/test"),
+  extensionPath: "/test",
+} as unknown as vscode.ExtensionContext;
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — isSelfModificationTarget tests (D5)
+// ---------------------------------------------------------------------------
+
+describe("isSelfModificationTarget", () => {
+  const projectRoot = "/projects/dantecode";
+
+  it("returns true for packages/vscode path", () => {
+    expect(isSelfModificationTarget("packages/vscode/src/sidebar-provider.ts", projectRoot)).toBe(true);
+  });
+
+  it("returns true for packages/cli path", () => {
+    expect(isSelfModificationTarget("packages/cli/src/agent-loop.ts", projectRoot)).toBe(true);
+  });
+
+  it("returns true for packages/danteforge path", () => {
+    expect(isSelfModificationTarget("packages/danteforge/src/autoforge.ts", projectRoot)).toBe(true);
+  });
+
+  it("returns true for packages/core path", () => {
+    expect(isSelfModificationTarget("packages/core/src/model-router.ts", projectRoot)).toBe(true);
+  });
+
+  it("returns true for .dantecode directory", () => {
+    expect(isSelfModificationTarget(".dantecode/STATE.yaml", projectRoot)).toBe(true);
+  });
+
+  it("returns true for CONSTITUTION.md", () => {
+    expect(isSelfModificationTarget("CONSTITUTION.md", projectRoot)).toBe(true);
+  });
+
+  it("returns false for user project files", () => {
+    expect(isSelfModificationTarget("src/app.ts", projectRoot)).toBe(false);
+  });
+
+  it("returns false for packages/sandbox path", () => {
+    expect(isSelfModificationTarget("packages/sandbox/src/runner.ts", projectRoot)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — isSelfModificationBashCommand tests (D5)
+// ---------------------------------------------------------------------------
+
+describe("isSelfModificationBashCommand", () => {
+  it("catches echo redirect to cli source", () => {
+    expect(isSelfModificationBashCommand('echo "code" > packages/cli/src/index.ts')).toBe(true);
+  });
+
+  it("catches tee to packages", () => {
+    expect(isSelfModificationBashCommand("cat file | tee packages/core/src/router.ts")).toBe(true);
+  });
+
+  it("catches redirect to .dantecode", () => {
+    expect(isSelfModificationBashCommand('echo "data" > .dantecode/STATE.yaml')).toBe(true);
+  });
+
+  it("catches redirect to CONSTITUTION.md", () => {
+    expect(isSelfModificationBashCommand('echo "x" > CONSTITUTION.md')).toBe(true);
+  });
+
+  it("returns false for safe commands", () => {
+    expect(isSelfModificationBashCommand("npm test")).toBe(false);
+    expect(isSelfModificationBashCommand("echo hello")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blade v1.2 — Status bar cost display tests (D6)
+// ---------------------------------------------------------------------------
+
+describe("updateStatusBarWithCost", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = "";
+    mockStatusBarItem.tooltip = "";
+    mockStatusBarItem.command = undefined;
+    mockStatusBarItem.backgroundColor = undefined;
+    mockStatusBarItem.color = undefined;
+    (mockExtensionContext as unknown as { subscriptions: vscode.Disposable[] }).subscriptions = [];
+  });
+
+  it("displays cost in status bar text", () => {
+    const state = createStatusBar(mockExtensionContext);
+    updateStatusBarWithCost(state, "fast", 0.014);
+    expect(state.item.text).toContain("$0.014");
+  });
+
+  it("displays capable tier label when escalated", () => {
+    const state = createStatusBar(mockExtensionContext);
+    updateStatusBarWithCost(state, "capable", 0.5);
+    expect(state.item.text).toContain("[capable]");
+  });
+
+  it("includes tier info in tooltip", () => {
+    const state = createStatusBar(mockExtensionContext);
+    updateStatusBarWithCost(state, "fast", 0.001);
+    expect(state.item.tooltip).toContain("Tier: fast");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// executeTool integration tests (Blade v1.2)
+// ---------------------------------------------------------------------------
+
+describe("executeTool integration", () => {
+  function makeContext(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
+    return {
+      projectRoot: "/proj",
+      silentMode: false,
+      currentModelId: "grok/grok-4-1-fast-non-reasoning",
+      roundId: "round-001",
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockReadFile.mockReset();
+    mockWriteFile.mockReset();
+    mockMkdir.mockReset();
+    mockReaddir.mockReset();
+    mockStat.mockReset();
+    mockExecSync.mockReset();
+  });
+
+  it("blocks Write to self-owned path without confirmation", async () => {
+    const onSelfModificationAttempt = vi.fn();
+    const context = makeContext({ onSelfModificationAttempt });
+
+    const result = await executeTool(
+      "Write",
+      { file_path: "packages/vscode/src/test.ts", content: "x" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Self-modification blocked");
+    expect(onSelfModificationAttempt).toHaveBeenCalledWith("packages/vscode/src/test.ts");
+  });
+
+  it("allows Write to self-owned path when confirmation returns true", async () => {
+    const onSelfModificationAttempt = vi.fn();
+    const awaitSelfModConfirmation = vi.fn().mockResolvedValue(true);
+    const context = makeContext({
+      onSelfModificationAttempt,
+      awaitSelfModConfirmation,
+    });
+
+    // Mock fs: readFile returns null on first call (file doesn't exist),
+    // then returns new content for diff generation
+    mockReadFile
+      .mockRejectedValueOnce(new Error("ENOENT"))  // old content check (inside toolWrite)
+      .mockResolvedValueOnce("x");                   // new content read for diff hunk
+    mockMkdir.mockResolvedValue(undefined);
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Write",
+      { file_path: "packages/vscode/src/test.ts", content: "x" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Created");
+    expect(awaitSelfModConfirmation).toHaveBeenCalled();
+  });
+
+  it("blocks Bash with self-modification pattern", async () => {
+    const context = makeContext();
+
+    const result = await executeTool(
+      "Bash",
+      { command: 'echo "x" > packages/cli/src/index.ts' },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Self-modification blocked");
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it("allows safe Bash commands", async () => {
+    const context = makeContext();
+    mockExecSync.mockReturnValue("file1.ts\nfile2.ts\n");
+
+    const result = await executeTool(
+      "Bash",
+      { command: "ls" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("file1.ts");
+    expect(mockExecSync).toHaveBeenCalled();
+  });
+
+  it("calls onDiffHunk after successful Write", async () => {
+    const onDiffHunk = vi.fn();
+    const context = makeContext({ onDiffHunk });
+
+    // File does not target self-owned paths, so no self-mod guard
+    // First readFile: old content capture for diff (before write)
+    // Second readFile: inside toolWrite to check if file existed
+    // Third readFile: new content read for diff hunk (after write)
+    mockReadFile
+      .mockRejectedValueOnce(new Error("ENOENT"))  // D3: old content capture (file doesn't exist)
+      .mockRejectedValueOnce(new Error("ENOENT"))  // toolWrite: existed check
+      .mockResolvedValueOnce("hello world");         // D3: new content read for diff
+    mockMkdir.mockResolvedValue(undefined);
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Write",
+      { file_path: "src/app.ts", content: "hello world" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(generateColoredHunk).toHaveBeenCalledWith("", "hello world", "src/app.ts");
+    expect(onDiffHunk).toHaveBeenCalledTimes(1);
+    expect(onDiffHunk).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "test.ts", linesAdded: 1 }),
+    );
+  });
+
+  it("calls onDiffHunk after successful Edit", async () => {
+    const onDiffHunk = vi.fn();
+    const context = makeContext({ onDiffHunk });
+
+    const oldContent = 'const x = "old";';
+    const newContent = 'const x = "new";';
+
+    // readFile calls:
+    // 1. D3: old content capture for diff (before dispatch)
+    // 2. toolEdit: read existing content for replacement
+    // 3. D3: new content read for diff (after dispatch)
+    mockReadFile
+      .mockResolvedValueOnce(oldContent)   // D3: old content capture
+      .mockResolvedValueOnce(oldContent)   // toolEdit: read existing
+      .mockResolvedValueOnce(newContent);   // D3: new content for diff
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Edit",
+      { file_path: "src/app.ts", old_string: '"old"', new_string: '"new"' },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Successfully edited");
+    expect(generateColoredHunk).toHaveBeenCalledWith(oldContent, newContent, "src/app.ts");
+    expect(onDiffHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("works without context (backward compatible)", async () => {
+    mockReadFile.mockResolvedValue("line1\nline2\nline3\n");
+
+    const result = await executeTool(
+      "Read",
+      { file_path: "test.txt" },
+      "/proj",
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("line1");
+    expect(result.content).toContain("line2");
   });
 });

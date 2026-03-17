@@ -7,6 +7,8 @@
 import type {
   AutoforgeConfig,
   AutoforgeIteration,
+  BladeAutoforgeConfig,
+  BladeProgressState,
   GStackResult,
   Lesson,
   PDSEScore,
@@ -17,6 +19,31 @@ import { runGStack, allGStackPassed } from "./gstack.js";
 import { runPDSEScorer, type ModelRouter, runLocalPDSEScorer } from "./pdse-scorer.js";
 import { queryLessons, recordLesson, formatLessonsForPrompt } from "./lessons.js";
 import { runConstitutionCheck } from "./constitution.js";
+
+// ----------------------------------------------------------------------------
+// Blade v1.2 — Progress Bar Utilities
+// ----------------------------------------------------------------------------
+
+/**
+ * Generates a 10-block unicode progress bar string.
+ * Example: percentComplete=65 → "██████░░░░"
+ */
+export function generateProgressBar(percentComplete: number): string {
+  const clamped = Math.max(0, Math.min(100, percentComplete));
+  const filled = Math.floor(clamped / 10);
+  const empty = 10 - filled;
+  return "\u2588".repeat(filled) + "\u2591".repeat(empty);
+}
+
+/**
+ * Formats a BladeProgressState into the canonical single-line status string.
+ * Output: "Autoforge Phase 2/5  [██████░░░░]  62%  •  PDSE 91  •  Est. $0.003"
+ */
+export function formatBladeProgressLine(state: BladeProgressState): string {
+  const bar = generateProgressBar(state.percentComplete);
+  const cost = state.estimatedCostUsd.toFixed(3);
+  return `Autoforge Phase ${state.phase}/${state.totalPhases}  [${bar}]  ${state.percentComplete}%  •  PDSE ${state.pdseScore}  •  Est. $${cost}`;
+}
 
 // ----------------------------------------------------------------------------
 // Autoforge Result
@@ -266,14 +293,39 @@ export async function runAutoforgeIAL(
   config: AutoforgeConfig,
   router: ModelRouter,
   projectRoot: string,
+  onProgress?: (state: BladeProgressState) => void,
 ): Promise<AutoforgeResult> {
   const iterationHistory: AutoforgeIteration[] = [];
   let currentCode = code;
   let finalScore: PDSEScore | null = null;
   const totalStartTime = Date.now();
 
-  for (let iteration = 1; iteration <= config.maxIterations; iteration++) {
+  // D4: Use hardCeiling from BladeAutoforgeConfig if available
+  const bladeConfig = config as Partial<BladeAutoforgeConfig>;
+  const hardCeiling = bladeConfig.hardCeiling ?? 200;
+  // hardCeiling always caps iterations; persistUntilGreen starts at maxIterations but can grow
+  let maxIter = bladeConfig.hardCeiling !== undefined
+    ? Math.min(config.maxIterations, hardCeiling)
+    : config.maxIterations;
+  if (bladeConfig.persistUntilGreen) {
+    // Start at maxIterations but allow growing up to hardCeiling
+    maxIter = config.maxIterations;
+  }
+  let lastPdseScore = 0;
+
+  for (let iteration = 1; iteration <= maxIter; iteration++) {
     const iterStartTime = Date.now();
+
+    // D1: Emit progress at iteration start
+    onProgress?.({
+      phase: iteration,
+      totalPhases: maxIter,
+      percentComplete: Math.floor(((iteration - 1) / maxIter) * 100),
+      pdseScore: lastPdseScore,
+      estimatedCostUsd: 0,
+      currentTask: `Running iteration ${iteration}...`,
+      silentMode: bladeConfig.silentMode ?? false,
+    });
 
     // ---------- Step 1: Anti-Stub Scan ----------
     const antiStubResult = runAntiStubScanner(currentCode, projectRoot);
@@ -353,6 +405,18 @@ export async function runAutoforgeIAL(
       score = runLocalPDSEScorer(currentCode, projectRoot);
     }
     finalScore = score;
+    lastPdseScore = score.overall;
+
+    // D1: Emit progress after scoring
+    onProgress?.({
+      phase: iteration,
+      totalPhases: maxIter,
+      percentComplete: Math.floor((iteration / maxIter) * 100),
+      pdseScore: score.overall,
+      estimatedCostUsd: 0,
+      currentTask: `PDSE scored: ${score.overall}/100`,
+      silentMode: bladeConfig.silentMode ?? false,
+    });
 
     // ---------- Step 4: Check if all gates pass ----------
     const gstackPassed = allGStackPassed(gstackResults);
@@ -382,8 +446,14 @@ export async function runAutoforgeIAL(
       };
     }
 
+    // D4: persistUntilGreen — extend loop by one iteration if quality gate not met
+    // maxIter can only grow (never shrink) and never exceed hardCeiling
+    if (bladeConfig.persistUntilGreen && !allPassed && iteration >= maxIter && maxIter < hardCeiling) {
+      maxIter = Math.min(maxIter + 1, hardCeiling);
+    }
+
     // ---------- Step 5: If fail and not last iteration -> regenerate ----------
-    if (iteration < config.maxIterations) {
+    if (iteration < maxIter) {
       // Query relevant lessons for injection
       let lessons: Lesson[] = [];
       if (config.lessonInjectionEnabled) {
@@ -430,7 +500,7 @@ export async function runAutoforgeIAL(
     }
 
     // ---------- Step 6: Final iteration failed -> record lesson ----------
-    if (iteration === config.maxIterations && !allPassed) {
+    if (iteration === maxIter && !allPassed) {
       // Record a lesson about this failure for future reference
       const hardViolations = score.violations.filter((v) => v.severity === "hard");
       const failedCommands = gstackResults.filter((r) => !r.passed);
@@ -493,7 +563,7 @@ export async function runAutoforgeIAL(
   // Should never reach here, but handle gracefully
   return {
     finalCode: currentCode,
-    iterations: config.maxIterations,
+    iterations: maxIter,
     succeeded: false,
     iterationHistory,
     finalScore,

@@ -11,6 +11,10 @@ export interface StatusBarState {
   currentModel: string;
   gateStatus: GateStatus;
   sandboxEnabled: boolean;
+  /** Blade v1.2: current model tier for cost routing display. */
+  modelTier: "fast" | "capable";
+  /** Blade v1.2: accumulated session cost in USD. */
+  sessionCostUsd: number;
 }
 
 const GATE_ICONS: Record<GateStatus, string> = {
@@ -46,6 +50,8 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     currentModel: defaultModel,
     gateStatus: "none",
     sandboxEnabled,
+    modelTier: "fast",
+    sessionCostUsd: 0,
   };
 
   item.command = "dantecode.switchModel";
@@ -82,6 +88,19 @@ export function updateSandboxStatus(state: StatusBarState, enabled: boolean): vo
   renderStatusBar(state);
 }
 
+/**
+ * Blade v1.2: Update status bar with cost and tier information.
+ */
+export function updateStatusBarWithCost(
+  state: StatusBarState,
+  modelTier: "fast" | "capable",
+  costUsd: number,
+): void {
+  state.modelTier = modelTier;
+  state.sessionCostUsd = costUsd;
+  renderStatusBar(state);
+}
+
 function renderStatusBar(state: StatusBarState): void {
   const { item, currentModel, gateStatus, sandboxEnabled } = state;
 
@@ -89,10 +108,15 @@ function renderStatusBar(state: StatusBarState): void {
   const sandboxLabel = sandboxEnabled ? ` ${SANDBOX_ICON}` : "";
   const shortModel = formatModelName(currentModel);
 
-  item.text = `${gateIcon} DanteCode: ${shortModel}${sandboxLabel}`;
+  const costLabel = state.sessionCostUsd > 0 ? `  ~$${state.sessionCostUsd.toFixed(3)}` : "";
+  const tierLabel = state.modelTier === "capable" ? " [capable]" : "";
+
+  item.text = `${gateIcon} DanteCode: ${shortModel}${tierLabel}${sandboxLabel}${costLabel}`;
   item.tooltip = [
     `Model: ${currentModel}`,
+    `Tier: ${state.modelTier}`,
     GATE_TOOLTIPS[gateStatus],
+    `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
     "",
     "Click to switch model",
