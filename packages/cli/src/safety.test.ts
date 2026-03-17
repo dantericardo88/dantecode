@@ -76,7 +76,9 @@ describe("safety module", () => {
     });
 
     it("catches base64 payloads piped to shell", () => {
-      expect(normalizeAndCheckBash("echo YmFzaCAtaSA+IC9kZXYvdGNwLw== | base64 -d | bash")).not.toBeNull();
+      expect(
+        normalizeAndCheckBash("echo YmFzaCAtaSA+IC9kZXYvdGNwLw== | base64 -d | bash"),
+      ).not.toBeNull();
     });
 
     it("catches eval with env expansion", () => {

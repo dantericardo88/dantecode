@@ -6,6 +6,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { DEFAULT_MODEL_ID, MODEL_CATALOG } from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
@@ -14,6 +15,7 @@ import {
   createStatusBar,
   updateStatusBar,
   updateSandboxStatus,
+  updateStatusBarWithCost,
   type StatusBarState,
 } from "./status-bar.js";
 import { PDSEDiagnosticProvider } from "./diagnostics.js";
@@ -50,7 +52,34 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   // ── Sidebar providers ──
-  chatSidebarProvider = new ChatSidebarProvider(extensionUri, context.secrets, context.globalState);
+  chatSidebarProvider = new ChatSidebarProvider(
+    extensionUri,
+    context.secrets,
+    context.globalState,
+    {
+      onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
+        if (!statusBarState) {
+          return;
+        }
+
+        updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+        updateStatusBarWithCost(statusBarState, modelTier, sessionTotalUsd);
+      },
+      onDiffReview: ({ filePath, oldContent, newContent }) => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const resolvedPath =
+          workspaceRoot && !path.isAbsolute(filePath)
+            ? path.resolve(workspaceRoot, filePath)
+            : filePath;
+        setPendingDiff(resolvedPath, oldContent, newContent);
+      },
+      onModelChange: (model) => {
+        if (statusBarState) {
+          updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+        }
+      },
+    },
+  );
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatSidebarProvider.viewType,
     chatSidebarProvider,
@@ -76,7 +105,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Status bar ──
   statusBarState = createStatusBar(context);
-  updateStatusBar(statusBarState, "grok/grok-3", "none");
+  updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
 
   // ── Diagnostics ──
   diagnosticProvider = new PDSEDiagnosticProvider();
@@ -182,9 +211,9 @@ async function commandImportClaudeSkills(): Promise<void> {
     {
       location: vscode.ProgressLocation.Notification,
       title: "DanteCode: Importing Claude skills...",
-      cancellable: false,
+      cancellable: true,
     },
-    async () => {
+    async (_progress, token) => {
       try {
         const { scanClaudeSkills, importSkills } = await import("@dantecode/skill-adapter");
         const scanned = await scanClaudeSkills(projectRoot);
@@ -192,9 +221,14 @@ async function commandImportClaudeSkills(): Promise<void> {
           void vscode.window.showInformationMessage("DanteCode: No Claude skills found in project");
           return;
         }
+        if (token.isCancellationRequested) return;
         const result = await importSkills({ projectRoot, source: "claude" });
+        if (token.isCancellationRequested) return;
+        const names = result.imported.join(", ");
+        const detail =
+          result.imported.length > 0 ? ` (${names})` : "";
         void vscode.window.showInformationMessage(
-          `DanteCode: Imported ${result.imported.length} skill(s), ${result.skipped.length} skipped`,
+          `DanteCode: Imported ${result.imported.length} skill(s)${detail}, ${result.skipped.length} skipped`,
         );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -232,9 +266,9 @@ async function commandRunPDSE(): Promise<void> {
             `clarity: ${score.clarity}, consistency: ${score.consistency}`,
         );
 
-        // Push violations to diagnostics
-        if (diagnosticProvider && score.violations.length > 0) {
-          diagnosticProvider.clearAll();
+        // Push violations to diagnostics panel
+        if (diagnosticProvider) {
+          diagnosticProvider.updateDiagnostics(editor.document.uri, score);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -251,35 +285,54 @@ async function commandRunGStack(): Promise<void> {
     return;
   }
 
+  // Try to read commands from STATE.yaml, fall back to defaults
+  let commands = "npm run typecheck && npm run lint && npm test";
+  try {
+    const { readStateYaml } = await import("@dantecode/core");
+    const state = await readStateYaml(projectRoot);
+    if (state?.autoforge?.gstackCommands?.length) {
+      commands = state.autoforge.gstackCommands
+        .map((c: { command?: string; name?: string }) => c.command ?? c.name ?? "")
+        .filter(Boolean)
+        .join(" && ");
+    }
+  } catch {
+    // Use defaults
+  }
+
   const terminal = vscode.window.createTerminal({
     name: "DanteCode GStack",
     cwd: projectRoot,
   });
-  terminal.sendText("npm run typecheck && npm run lint && npm test");
+  terminal.sendText(commands);
   terminal.show();
-  void vscode.window.showInformationMessage("DanteCode: GStack pipeline running in terminal");
+  void vscode.window.showInformationMessage(
+    `DanteCode: GStack running ${commands.split("&&").length} command(s)`,
+  );
 }
 
 async function commandSwitchModel(): Promise<void> {
-  const models = [
-    "grok/grok-3",
-    "grok/grok-4-1-fast-reasoning",
-    "anthropic/claude-sonnet-4-6",
-    "openai/gpt-4o",
-    "google/gemini-2.5-pro",
-    "groq/llama-3.3-70b-versatile",
-    "ollama/llama3",
-  ];
+  const models = MODEL_CATALOG.filter((entry) => entry.supportTier === "tier1").map((entry) => ({
+    label: entry.label,
+    description: entry.id,
+  }));
   const selected = await vscode.window.showQuickPick(models, { placeHolder: "Select model" });
-  if (selected && statusBarState) {
-    updateStatusBar(statusBarState, selected, "none");
-    void vscode.window.showInformationMessage(`DanteCode: Switched to ${selected}`);
+  if (selected) {
+    const nextModel = selected.description ?? DEFAULT_MODEL_ID;
+    const config = vscode.workspace.getConfiguration("dantecode");
+    await config.update("defaultModel", nextModel, vscode.ConfigurationTarget.Global);
+    if (statusBarState) {
+      updateStatusBar(statusBarState, nextModel, "none");
+    }
+    void vscode.window.showInformationMessage(`DanteCode: Switched to ${nextModel}`);
   }
 }
 
 async function commandToggleSandbox(): Promise<void> {
   if (statusBarState) {
     const enabled = statusBarState.sandboxEnabled;
+    const config = vscode.workspace.getConfiguration("dantecode");
+    await config.update("sandboxEnabled", !enabled, vscode.ConfigurationTarget.Global);
     updateSandboxStatus(statusBarState, !enabled);
     void vscode.window.showInformationMessage(
       `DanteCode: Sandbox ${!enabled ? "enabled" : "disabled"}`,
@@ -298,7 +351,10 @@ async function commandShowLessons(): Promise<void> {
     const { queryLessons, formatLessonsForPrompt } = await import("@dantecode/danteforge");
     const lessons = await queryLessons({ projectRoot, limit: 20 });
     if (lessons.length === 0) {
-      void vscode.window.showInformationMessage("DanteCode: No lessons recorded for this project");
+      void vscode.window.showInformationMessage(
+        "DanteCode: No lessons recorded yet. Lessons are captured automatically during autoforge runs " +
+          "when corrections or failures occur. Run /forge or /magic to get started.",
+      );
       return;
     }
 
@@ -307,6 +363,9 @@ async function commandShowLessons(): Promise<void> {
       language: "markdown",
     });
     await vscode.window.showTextDocument(doc, { preview: true });
+    void vscode.window.showInformationMessage(
+      `DanteCode: Showing ${lessons.length} lesson(s) for this project`,
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     void vscode.window.showErrorMessage(`DanteCode: Failed to load lessons — ${msg}`);
@@ -320,6 +379,21 @@ async function commandInitProject(): Promise<void> {
     return;
   }
 
+  // Check if already initialized
+  const dantecodeDir = path.join(projectRoot, ".dantecode");
+  const statePath = path.join(dantecodeDir, "STATE.yaml");
+  try {
+    await readFile(statePath, "utf-8");
+    const reinit = await vscode.window.showInformationMessage(
+      "DanteCode: Project already initialized. Re-initialize?",
+      "Re-initialize",
+      "Cancel",
+    );
+    if (reinit !== "Re-initialize") return;
+  } catch {
+    // Not initialized yet — continue
+  }
+
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -328,39 +402,34 @@ async function commandInitProject(): Promise<void> {
     },
     async () => {
       try {
-        const dantecodeDir = path.join(projectRoot, ".dantecode");
         await mkdir(dantecodeDir, { recursive: true });
         await mkdir(path.join(dantecodeDir, "agents"), { recursive: true });
         await mkdir(path.join(dantecodeDir, "lessons"), { recursive: true });
+        await mkdir(path.join(dantecodeDir, "sessions"), { recursive: true });
 
-        const statePath = path.join(dantecodeDir, "STATE.yaml");
-        try {
-          await readFile(statePath, "utf-8");
-        } catch {
-          await writeFile(
-            statePath,
-            [
-              "# DanteCode project configuration",
-              "model:",
-              "  default:",
-              '    provider: "grok"',
-              '    modelId: "grok-3"',
-              "    maxTokens: 8192",
-              "    temperature: 0.1",
-              "    contextWindow: 131072",
-              "    supportsVision: false",
-              "    supportsToolCalls: true",
-              "autoforge:",
-              "  maxIterations: 5",
-              "  gstackCommands:",
-              '    - "npm run typecheck"',
-              '    - "npm run lint"',
-              '    - "npm test"',
-              "",
-            ].join("\n"),
-            "utf-8",
-          );
-        }
+        await writeFile(
+          statePath,
+          [
+            "# DanteCode project configuration",
+            "model:",
+            "  default:",
+            '    provider: "grok"',
+            '    modelId: "grok-3"',
+            "    maxTokens: 8192",
+            "    temperature: 0.1",
+            "    contextWindow: 131072",
+            "    supportsVision: false",
+            "    supportsToolCalls: true",
+            "autoforge:",
+            "  maxIterations: 5",
+            "  gstackCommands:",
+            '    - "npm run typecheck"',
+            '    - "npm run lint"',
+            '    - "npm test"',
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
 
         void vscode.window.showInformationMessage(
           `DanteCode: Project initialized at ${dantecodeDir}`,
@@ -412,6 +481,11 @@ async function commandRejectDiff(): Promise<void> {
 }
 
 async function commandSetupApiKeys(): Promise<void> {
+  if (onboardingProvider) {
+    await onboardingProvider.show();
+    return;
+  }
+
   void vscode.commands.executeCommand("workbench.action.openSettings", "dantecode");
 }
 

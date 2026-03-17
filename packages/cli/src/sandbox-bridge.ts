@@ -4,6 +4,7 @@
 // execution. Falls back to LocalExecutor when Docker is not available.
 // ============================================================================
 
+import { appendAuditEvent } from "@dantecode/core";
 import {
   SandboxManager,
   SandboxExecutor,
@@ -56,14 +57,16 @@ export class SandboxBridge {
       const spec = createDefaultSandboxSpec(this.projectRoot);
       this.manager = new SandboxManager(spec);
       await this.manager.start();
-      this.executor = new SandboxExecutor(this.manager, this.projectRoot, () => {});
+      this.executor = new SandboxExecutor(this.manager, this.projectRoot, appendAuditEvent);
       if (this.verbose) {
         process.stdout.write(`${DIM}[sandbox: Docker container started]${RESET}\n`);
       }
     } else {
-      this.executor = new LocalExecutor(this.projectRoot);
+      this.executor = new LocalExecutor(this.projectRoot, appendAuditEvent);
       if (this.verbose) {
-        process.stdout.write(`${DIM}[sandbox: Docker not available, using local fallback]${RESET}\n`);
+        process.stdout.write(
+          `${DIM}[sandbox: Docker not available, using local fallback]${RESET}\n`,
+        );
       }
     }
 

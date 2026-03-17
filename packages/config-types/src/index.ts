@@ -770,6 +770,114 @@ export interface DanteCodeConfigProject {
   excludePatterns: string[];
 }
 
+// ----------------------------------------------------------------------------
+// MCP Protocol Types
+// ----------------------------------------------------------------------------
+
+/** Transport protocol for MCP server connections. */
+export type MCPTransport = "stdio" | "sse";
+
+/** Configuration for a single MCP server connection. */
+export interface MCPServerConfig {
+  /** Human-readable server name. */
+  name: string;
+  /** Transport protocol. */
+  transport: MCPTransport;
+  /** For stdio: the command to spawn. */
+  command?: string;
+  /** For stdio: arguments to the command. */
+  args?: string[];
+  /** For sse: the endpoint URL. */
+  url?: string;
+  /** Environment variables passed to the server process. */
+  env?: Record<string, string>;
+  /** Whether this server is enabled. */
+  enabled: boolean;
+}
+
+/** Complete MCP configuration from .dantecode/mcp.json. */
+export interface MCPConfig {
+  servers: MCPServerConfig[];
+}
+
+/** A tool definition discovered from an MCP server. */
+export interface MCPToolDefinition {
+  /** Name of the tool as declared by the MCP server. */
+  name: string;
+  /** Human-readable description. */
+  description: string;
+  /** JSON Schema for the tool's input parameters. */
+  inputSchema: Record<string, unknown>;
+  /** The MCP server that provides this tool. */
+  serverName: string;
+}
+
+// ----------------------------------------------------------------------------
+// Chat Persistence Types
+// ----------------------------------------------------------------------------
+
+/** A persisted chat session file stored in .dantecode/sessions/. */
+export interface ChatSessionFile {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  model: string;
+  messages: Array<{
+    role: "user" | "assistant" | "system" | "tool";
+    content: string;
+    timestamp: string;
+  }>;
+  contextFiles: string[];
+  totalTokens?: number;
+  totalCostUsd?: number;
+}
+
+// ----------------------------------------------------------------------------
+// Background Agent Types
+// ----------------------------------------------------------------------------
+
+/** Status of a background agent task. */
+export type BackgroundAgentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+/** A background agent task that runs asynchronously. */
+export interface BackgroundAgentTask {
+  id: string;
+  prompt: string;
+  status: BackgroundAgentStatus;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  progress: string;
+  output?: string;
+  touchedFiles: string[];
+  error?: string;
+  worktreeDir?: string;
+}
+
+// ----------------------------------------------------------------------------
+// Code Index Types
+// ----------------------------------------------------------------------------
+
+/** A chunk of code extracted from a source file for indexing. */
+export interface CodeChunk {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+  symbols: string[];
+}
+
+/** Configuration for the semantic code index. */
+export interface CodeIndexConfig {
+  /** Glob patterns to exclude from indexing. */
+  excludePatterns: string[];
+  /** Use provider-API embeddings when available (default: false). */
+  useEmbeddings: boolean;
+  /** Maximum lines per chunk (default: 200). */
+  maxChunkLines: number;
+}
+
 /** Complete .dantecode/STATE.yaml schema as a TypeScript interface. */
 export interface DanteCodeConfig {
   version: string;

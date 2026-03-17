@@ -7,7 +7,13 @@ import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readAuditEvents, MultiAgent, ModelRouterImpl } from "@dantecode/core";
+import {
+  getProviderCatalogEntry,
+  parseModelReference,
+  readAuditEvents,
+  MultiAgent,
+  ModelRouterImpl,
+} from "@dantecode/core";
 import type { MultiAgentProgressCallback } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -27,7 +33,14 @@ import {
   revertLastCommit,
   createWorktree,
 } from "@dantecode/git-engine";
-import type { Session, SessionMessage, DanteCodeState, ModelConfig } from "@dantecode/config-types";
+import type {
+  Session,
+  SessionMessage,
+  DanteCodeState,
+  ModelConfig,
+  ModelRouterConfig,
+} from "@dantecode/config-types";
+import { SandboxBridge } from "./sandbox-bridge.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -62,6 +75,18 @@ export interface ReplState {
   pendingAgentPrompt: string | null;
   /** Active abort controller for cancelling streaming generation via Ctrl+C. */
   activeAbortController: AbortController | null;
+  /** Live sandbox bridge when sandbox mode is enabled. */
+  sandboxBridge: SandboxBridge | null;
+  /** MCP client manager for external tool integration. */
+  mcpClient?: {
+    isConnected: () => boolean;
+    getConnectedServers: () => string[];
+    listTools: () => Array<{ name: string; description: string; serverName: string }>;
+  };
+  /** Background agent runner (lazily initialized by /bg). */
+  _bgRunner?: unknown;
+  /** Code index (lazily initialized by /index and /search). */
+  _codeIndex?: unknown;
 }
 
 /** A single slash command handler. */
@@ -93,46 +118,29 @@ async function helpCommand(_args: string, _state: ReplState): Promise<string> {
 }
 
 async function modelCommand(args: string, state: ReplState): Promise<string> {
-  const modelId = args.trim();
-  if (!modelId) {
+  const modelReference = args.trim();
+  if (!modelReference) {
     const current = state.state.model.default;
     return `${DIM}Current model:${RESET} ${BOLD}${current.provider}/${current.modelId}${RESET}\n\n${DIM}Usage: /model <provider/modelId> (e.g. /model grok/grok-3)${RESET}`;
   }
 
-  // Parse provider/modelId format
-  const parts = modelId.split("/");
-  let provider: string;
-  let model: string;
+  const parsed = parseModelReference(modelReference, state.state.model.default.provider);
+  const providerEntry = getProviderCatalogEntry(parsed.provider);
 
-  if (parts.length >= 2) {
-    provider = parts[0]!;
-    model = parts.slice(1).join("/");
-  } else {
-    // Infer provider from model name
-    if (modelId.startsWith("grok")) {
-      provider = "grok";
-    } else if (modelId.startsWith("claude")) {
-      provider = "anthropic";
-    } else if (modelId.startsWith("gpt") || modelId.startsWith("o1") || modelId.startsWith("o3")) {
-      provider = "openai";
-    } else if (modelId.startsWith("gemini")) {
-      provider = "google";
-    } else {
-      provider = "grok";
-    }
-    model = modelId;
+  if (!providerEntry) {
+    return `${RED}Unknown provider:${RESET} ${parsed.provider}`;
   }
 
   const newModelConfig: ModelConfig = {
     ...state.state.model.default,
-    provider: provider as ModelConfig["provider"],
-    modelId: model,
+    provider: parsed.provider,
+    modelId: parsed.modelId,
   };
 
   state.state.model.default = newModelConfig;
   state.session.model = newModelConfig;
 
-  return `${GREEN}Model switched to${RESET} ${BOLD}${provider}/${model}${RESET}`;
+  return `${GREEN}Model switched to${RESET} ${BOLD}${parsed.id}${RESET} ${DIM}(${providerEntry.label})${RESET}`;
 }
 
 async function addCommand(args: string, state: ReplState): Promise<string> {
@@ -632,12 +640,18 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
 async function architectCommand(_args: string, state: ReplState): Promise<string> {
   const ARCHITECT_MARKER = "[ARCHITECT MODE]";
   const hasArchitect = state.session.messages.some(
-    (m) => m.role === "system" && typeof m.content === "string" && m.content.includes(ARCHITECT_MARKER),
+    (m) =>
+      m.role === "system" && typeof m.content === "string" && m.content.includes(ARCHITECT_MARKER),
   );
 
   if (hasArchitect) {
     state.session.messages = state.session.messages.filter(
-      (m) => !(m.role === "system" && typeof m.content === "string" && m.content.includes(ARCHITECT_MARKER)),
+      (m) =>
+        !(
+          m.role === "system" &&
+          typeof m.content === "string" &&
+          m.content.includes(ARCHITECT_MARKER)
+        ),
     );
     return `${YELLOW}Architect mode OFF${RESET} — direct coding mode resumed.`;
   }
@@ -706,9 +720,25 @@ Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. V
 }
 
 async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
-  state.enableSandbox = !state.enableSandbox;
-  const statusText = state.enableSandbox ? `${GREEN}ON${RESET}` : `${RED}OFF${RESET}`;
-  return `${BOLD}Sandbox mode:${RESET} ${statusText}`;
+  if (state.enableSandbox) {
+    if (state.sandboxBridge) {
+      await state.sandboxBridge.shutdown();
+    }
+    state.sandboxBridge = null;
+    state.enableSandbox = false;
+    return `${BOLD}Sandbox mode:${RESET} ${RED}OFF${RESET}`;
+  }
+
+  const bridge = new SandboxBridge(state.projectRoot, state.verbose);
+  const dockerAvailable = await bridge.isAvailable();
+  state.sandboxBridge = bridge;
+  state.enableSandbox = true;
+
+  if (dockerAvailable) {
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker isolation active for the next tool run)${RESET}`;
+  }
+
+  return `${BOLD}Sandbox mode:${RESET} ${YELLOW}HOST FALLBACK${RESET} ${DIM}(Docker unavailable; commands will run on the host until sandbox support is restored)${RESET}`;
 }
 
 async function silentCommand(_args: string, state: ReplState): Promise<string> {
@@ -739,34 +769,34 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
 
   // Get the code to autoforge from the last edited file or the first active file
   const targetFile = state.lastEditFile ?? state.session.activeFiles[0]!;
+  const resolvedTargetFile = resolve(state.projectRoot, targetFile);
+  const displayTargetFile = relative(state.projectRoot, resolvedTargetFile) || resolvedTargetFile;
   let code: string;
   try {
-    code = await readFile(resolve(state.projectRoot, targetFile), "utf-8");
+    code = await readFile(resolvedTargetFile, "utf-8");
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return `${RED}Error reading target file: ${msg}${RESET}`;
   }
 
   process.stdout.write(
-    `${DIM}Starting Autoforge IAL on ${targetFile} (max ${hardCeiling} iterations)...${RESET}\n`,
+    `${DIM}Starting Autoforge IAL on ${displayTargetFile} (max ${hardCeiling} iterations)...${RESET}\n`,
   );
 
-  // Build a simple ModelRouter adapter for the REPL
+  const routerConfig: ModelRouterConfig = {
+    default: state.state.model.default,
+    fallback: state.state.model.fallback,
+    overrides: state.state.model.taskOverrides,
+  };
+  const modelRouter = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
   const router = {
-    chat: async (prompt: string, _opts?: { temperature?: number; maxTokens?: number }) => {
-      // In CLI mode without a live model connection, return the prompt as-is.
-      // The full agent loop provides model-backed autoforge.
-      return prompt;
-    },
-    getConfig: () => ({
-      default: state.state.model.default,
-      fallback: state.state.model.fallback,
-      overrides:
-        ((state.state.model as Record<string, unknown>)["taskOverrides"] as Record<
-          string,
-          import("@dantecode/config-types").ModelConfig
-        >) ?? {},
-    }),
+    chat: async (prompt: string, opts?: { temperature?: number; maxTokens?: number }) =>
+      modelRouter.generate([{ role: "user", content: prompt }], {
+        maxTokens: opts?.maxTokens,
+        taskType: "autoforge",
+      }),
+    getConfig: () => routerConfig,
+    getCostEstimate: () => modelRouter.getCostEstimate(),
   };
 
   try {
@@ -782,8 +812,8 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     const result = await runAutoforgeIAL(
       code,
       {
-        taskDescription: `Autoforge quality improvement for ${targetFile}`,
-        filePath: targetFile,
+        taskDescription: `Autoforge quality improvement for ${displayTargetFile}`,
+        filePath: resolvedTargetFile,
       },
       autoforgeConfig,
       router,
@@ -810,7 +840,28 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
       lines.push(`  PDSE Score: ${result.finalScore.overall}/100`);
     }
 
+    const lastIteration = result.iterationHistory[result.iterationHistory.length - 1];
+    const failedCommands = lastIteration?.gstackResults.filter((entry) => !entry.passed) ?? [];
+    if (failedCommands.length > 0) {
+      lines.push(`  Failed checks: ${failedCommands.map((entry) => entry.command).join(", ")}`);
+    }
+    if ((lastIteration?.lessonsInjected.length ?? 0) > 0) {
+      lines.push(`  Lessons injected: ${lastIteration?.lessonsInjected.length ?? 0}`);
+    }
+
     lines.push(`  Duration: ${(result.totalDurationMs / 1000).toFixed(1)}s`);
+
+    if (result.succeeded) {
+      await writeFile(resolvedTargetFile, result.finalCode, "utf-8");
+      state.lastEditFile = resolvedTargetFile;
+      state.lastEditContent = code;
+      if (!state.session.activeFiles.includes(resolvedTargetFile)) {
+        state.session.activeFiles.push(resolvedTargetFile);
+      }
+      lines.push(`  Applied to disk: ${displayTargetFile}`);
+    } else {
+      lines.push(`  Disk state: unchanged (${displayTargetFile})`);
+    }
 
     return lines.join("\n");
   } catch (err: unknown) {
@@ -891,6 +942,137 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     const message = err instanceof Error ? err.message : String(err);
     return `${RED}Party error: ${message}${RESET}`;
   }
+}
+
+async function mcpCommand(_args: string, state: ReplState): Promise<string> {
+  if (!state.mcpClient || !state.mcpClient.isConnected()) {
+    return `${DIM}No MCP servers connected.${RESET}\n${DIM}Configure servers in .dantecode/mcp.json:${RESET}\n${DIM}  { "servers": [{ "name": "fs", "transport": "stdio", "command": "mcp-fs", "enabled": true }] }${RESET}`;
+  }
+
+  const servers = state.mcpClient.getConnectedServers();
+  const tools = state.mcpClient.listTools();
+  const lines = [
+    "",
+    `${BOLD}MCP Servers${RESET} (${servers.length} connected)`,
+    "",
+  ];
+
+  for (const serverName of servers) {
+    const serverTools = tools.filter((t) => t.serverName === serverName);
+    lines.push(`  ${GREEN}${serverName}${RESET} — ${serverTools.length} tools`);
+    for (const tool of serverTools) {
+      lines.push(`    ${DIM}${tool.name}${RESET}: ${tool.description.slice(0, 80)}`);
+    }
+  }
+
+  lines.push("", `${DIM}Total: ${tools.length} MCP tools available to the agent.${RESET}`);
+  return lines.join("\n");
+}
+
+async function bgCommand(args: string, state: ReplState): Promise<string> {
+  // Lazy import to avoid circular dependency
+  const { BackgroundAgentRunner } = await import("@dantecode/core");
+
+  // Access or create the runner on the state
+  if (!state._bgRunner) {
+    state._bgRunner = new BackgroundAgentRunner(1);
+  }
+  const runner = state._bgRunner as InstanceType<typeof BackgroundAgentRunner>;
+
+  const trimmed = args.trim();
+
+  // /bg with no args — list tasks
+  if (!trimmed) {
+    const tasks = runner.listTasks();
+    if (tasks.length === 0) {
+      return `${DIM}No background tasks. Use /bg <task description> to start one.${RESET}`;
+    }
+    const lines = ["", `${BOLD}Background Tasks${RESET}`, ""];
+    for (const task of tasks) {
+      const icon =
+        task.status === "running" ? `${YELLOW}⟳${RESET}` :
+        task.status === "completed" ? `${GREEN}✓${RESET}` :
+        task.status === "failed" ? `${RED}✗${RESET}` :
+        task.status === "cancelled" ? `${DIM}⊘${RESET}` :
+        `${DIM}…${RESET}`;
+      lines.push(`  ${icon} [${task.id}] ${task.status} — ${task.prompt.slice(0, 60)}`);
+      lines.push(`    ${DIM}${task.progress}${RESET}`);
+    }
+    return lines.join("\n");
+  }
+
+  // /bg cancel <id>
+  if (trimmed.startsWith("cancel ")) {
+    const taskId = trimmed.slice(7).trim();
+    const cancelled = runner.cancel(taskId);
+    return cancelled
+      ? `${GREEN}Task ${taskId} cancelled.${RESET}`
+      : `${RED}Could not cancel task ${taskId} (not found or already finished).${RESET}`;
+  }
+
+  // /bg clear
+  if (trimmed === "clear") {
+    const cleared = runner.clearFinished();
+    return `${DIM}Cleared ${cleared} finished tasks.${RESET}`;
+  }
+
+  // /bg <prompt> — enqueue a new task
+  const taskId = runner.enqueue(trimmed);
+  return `${GREEN}Background task ${taskId} queued.${RESET} Use ${DIM}/bg${RESET} to check status.`;
+}
+
+async function indexCommand(_args: string, state: ReplState): Promise<string> {
+  const { CodeIndex } = await import("@dantecode/core");
+
+  if (!state._codeIndex) {
+    state._codeIndex = new CodeIndex();
+  }
+  const index = state._codeIndex as InstanceType<typeof CodeIndex>;
+
+  process.stdout.write(`${DIM}Building code index for ${state.projectRoot}...${RESET}\n`);
+  const count = await index.buildIndex(state.projectRoot, {
+    excludePatterns: state.state.project.excludePatterns,
+  });
+
+  await index.save(state.projectRoot);
+  return `${GREEN}Indexed ${count} code chunks.${RESET} Use ${DIM}/search <query>${RESET} to search.`;
+}
+
+async function searchCommand(args: string, state: ReplState): Promise<string> {
+  const { CodeIndex } = await import("@dantecode/core");
+
+  if (!args.trim()) {
+    return `${RED}Usage: /search <query>${RESET}`;
+  }
+
+  if (!state._codeIndex) {
+    state._codeIndex = new CodeIndex();
+    // Try to load existing index
+    const loaded = await (state._codeIndex as InstanceType<typeof CodeIndex>).load(state.projectRoot);
+    if (!loaded) {
+      return `${YELLOW}No index found. Run /index first.${RESET}`;
+    }
+  }
+
+  const index = state._codeIndex as InstanceType<typeof CodeIndex>;
+  const results = index.search(args.trim(), 10);
+
+  if (results.length === 0) {
+    return `${DIM}No results for "${args.trim()}"${RESET}`;
+  }
+
+  const lines = ["", `${BOLD}Search Results${RESET} for "${args.trim()}"`, ""];
+  for (let i = 0; i < results.length; i++) {
+    const chunk = results[i]!;
+    lines.push(`  ${GREEN}${i + 1}.${RESET} ${chunk.filePath}:${chunk.startLine}-${chunk.endLine}`);
+    if (chunk.symbols.length > 0) {
+      lines.push(`     ${DIM}symbols: ${chunk.symbols.slice(0, 5).join(", ")}${RESET}`);
+    }
+    // Show first 2 lines of content
+    const preview = chunk.content.split("\n").slice(0, 2).join(" ").slice(0, 100);
+    lines.push(`     ${DIM}${preview}${RESET}`);
+  }
+  return lines.join("\n");
 }
 
 // ----------------------------------------------------------------------------
@@ -1029,6 +1211,30 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Multi-agent coordination — parallel lanes for complex tasks",
     usage: "/party <task>",
     handler: partyCommand,
+  },
+  {
+    name: "mcp",
+    description: "List MCP servers and tools",
+    usage: "/mcp",
+    handler: mcpCommand,
+  },
+  {
+    name: "bg",
+    description: "Background agent tasks — run, list, cancel",
+    usage: "/bg [task | cancel <id> | clear]",
+    handler: bgCommand,
+  },
+  {
+    name: "index",
+    description: "Build semantic code index for the project",
+    usage: "/index",
+    handler: indexCommand,
+  },
+  {
+    name: "search",
+    description: "Search code index for relevant code",
+    usage: "/search <query>",
+    handler: searchCommand,
   },
 ];
 

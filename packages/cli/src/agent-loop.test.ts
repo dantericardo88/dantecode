@@ -62,7 +62,9 @@ vi.mock("@dantecode/core", () => {
       return this._modelRatedComplexity;
     }
 
-    selectTier() { return "fast"; }
+    selectTier() {
+      return "fast";
+    }
     recordRequestCost() {}
     resetSessionCost() {}
   }
@@ -98,7 +100,9 @@ vi.mock("@dantecode/git-engine", () => ({
     { path: "src/index.ts", size: 1024, language: "typescript", lastModified: "2025-01-01" },
     { path: "src/utils.ts", size: 512, language: "typescript", lastModified: "2025-01-01" },
   ]),
-  formatRepoMapForContext: vi.fn(() => "src/index.ts (1.0 KB, typescript)\nsrc/utils.ts (0.5 KB, typescript)"),
+  formatRepoMapForContext: vi.fn(
+    () => "src/index.ts (1.0 KB, typescript)\nsrc/utils.ts (0.5 KB, typescript)",
+  ),
 }));
 
 vi.mock("./tools.js", () => ({
@@ -254,9 +258,7 @@ describe("runAgentLoop smoke tests", () => {
     // Instead, the safety hook injects a blocking message into the tool results
     // which gets sent back to the model as a user message.
     const bashToolResult = result.messages.find(
-      (m) =>
-        m.role === "tool" &&
-        m.toolResult?.content.includes("rm -rf"),
+      (m) => m.role === "tool" && m.toolResult?.content.includes("rm -rf"),
     );
     expect(bashToolResult).toBeUndefined();
 
@@ -287,19 +289,14 @@ describe("runAgentLoop smoke tests", () => {
   });
 
   it("handles model generation errors gracefully", async () => {
-    mockGenerateText.mockRejectedValueOnce(
-      new Error("API rate limit exceeded"),
-    );
+    mockGenerateText.mockRejectedValueOnce(new Error("API rate limit exceeded"));
 
     const session = makeSession();
     const result = await runAgentLoop("Do something", session, makeConfig());
 
     // Should produce an error message in the session
     const errorMsg = result.messages.find(
-      (m) =>
-        m.role === "assistant" &&
-        typeof m.content === "string" &&
-        m.content.includes("error"),
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("error"),
     );
     expect(errorMsg).toBeDefined();
   });

@@ -90,6 +90,7 @@ jobs:
           for workspace in \
             packages/config-types \
             packages/core \
+            packages/mcp \
             packages/danteforge \
             packages/git-engine \
             packages/skill-adapter \

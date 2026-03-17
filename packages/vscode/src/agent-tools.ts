@@ -21,6 +21,13 @@ export interface ToolResult {
   isError: boolean;
 }
 
+export interface DiffReviewPayload {
+  filePath: string;
+  hunk: ColoredDiffHunk;
+  newContent: string;
+  oldContent: string;
+}
+
 export interface ExtractedToolCall {
   id: string;
   name: string;
@@ -34,7 +41,7 @@ export interface ToolExecutionContext {
   currentModelId: string;
   roundId: string;
   sandboxEnabled?: boolean;
-  onDiffHunk?: (hunk: ColoredDiffHunk) => void;
+  onDiffHunk?: (payload: DiffReviewPayload) => void;
   onSelfModificationAttempt?: (filePath: string) => void;
   awaitSelfModConfirmation?: () => Promise<boolean>;
   runReleaseCheck?: () => Promise<boolean>;
@@ -627,7 +634,25 @@ export async function executeTool(
     try {
       const newContent = await readFile(resolvePath(filePath, projectRoot), "utf-8");
       const hunk = generateColoredHunk(oldContent ?? "", newContent, filePath);
-      context.onDiffHunk(hunk);
+
+      // Truncate large diffs to keep the webview responsive
+      const MAX_HUNK_LINES = 80;
+      if (hunk.lines && hunk.lines.length > MAX_HUNK_LINES) {
+        const omitted = hunk.lines.length - MAX_HUNK_LINES;
+        hunk.fullLineCount = hunk.lines.length;
+        hunk.truncated = true;
+        hunk.lines = [
+          ...hunk.lines.slice(0, MAX_HUNK_LINES),
+          { type: "context", content: `... ${omitted} more lines omitted ...`, oldLineNo: null, newLineNo: null },
+        ];
+      }
+
+      context.onDiffHunk({
+        filePath,
+        hunk,
+        newContent,
+        oldContent: oldContent ?? "",
+      });
     } catch {
       /* non-critical: diff generation */
     }

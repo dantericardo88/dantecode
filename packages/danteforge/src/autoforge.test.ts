@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildFailureContext,
   runAutoforgeIAL,
@@ -411,6 +414,59 @@ export function compute(x: number): number {
 
       expect(result.iterations).toBeGreaterThanOrEqual(1);
       expect(result.iterationHistory.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("evaluates gstack against the candidate file without persisting failed-or-pending disk state", async () => {
+      const tempRoot = await mkdtemp(join(tmpdir(), "dantecode-autoforge-"));
+      const targetFile = "src/autoforge-target.ts";
+      const targetPath = join(tempRoot, targetFile);
+      const originalCode = 'export const status = "before";\n';
+      const candidateCode = 'export const status = "pass gate";\n';
+
+      await mkdir(join(tempRoot, "src"), { recursive: true });
+      await writeFile(targetPath, originalCode, "utf-8");
+
+      const router = createMockRouter([
+        JSON.stringify({
+          completeness: 95,
+          correctness: 95,
+          clarity: 90,
+          consistency: 90,
+          violations: [],
+        }),
+      ]);
+
+      const config: AutoforgeConfig = {
+        ...baseConfig,
+        gstackCommands: [
+          {
+            name: "candidate-file-check",
+            command:
+              "node -e \"const fs = require('node:fs'); const text = fs.readFileSync('src/autoforge-target.ts', 'utf8'); if (!text.includes('pass gate')) { console.error('candidate code not applied'); process.exit(1); }\"",
+            runInSandbox: false,
+            timeoutMs: 10_000,
+            failureIsSoft: false,
+          },
+        ],
+      };
+
+      try {
+        const result = await runAutoforgeIAL(
+          candidateCode,
+          {
+            ...baseContext,
+            filePath: targetFile,
+          },
+          config,
+          router,
+          tempRoot,
+        );
+
+        expect(result.succeeded).toBe(true);
+        expect(await readFile(targetPath, "utf-8")).toBe(originalCode);
+      } finally {
+        await rm(tempRoot, { recursive: true, force: true });
+      }
     });
 
     it("records iteration history for each pass", async () => {

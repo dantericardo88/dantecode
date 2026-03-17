@@ -31,9 +31,7 @@ export function estimateTokens(text: string): number {
 /**
  * Estimates total tokens across an array of messages.
  */
-export function estimateMessageTokens(
-  messages: Array<{ role: string; content: string }>,
-): number {
+export function estimateMessageTokens(messages: Array<{ role: string; content: string }>): number {
   let total = 0;
   for (const msg of messages) {
     // Each message has ~4 tokens of overhead (role, delimiters)

@@ -10,7 +10,12 @@ import { resolve } from "node:path";
 import { ModelRouterImpl, estimateMessageTokens } from "@dantecode/core";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
 import type { Session, SessionMessage, DanteCodeState } from "@dantecode/config-types";
-import { getStatus, autoCommit, generateRepoMap, formatRepoMapForContext } from "@dantecode/git-engine";
+import {
+  getStatus,
+  autoCommit,
+  generateRepoMap,
+  formatRepoMapForContext,
+} from "@dantecode/git-engine";
 import { executeTool, getToolDefinitions } from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
 import { StreamRenderer } from "./stream-renderer.js";
@@ -47,6 +52,10 @@ export interface AgentLoopConfig {
   abortSignal?: AbortSignal;
   /** Sandbox bridge for isolated command execution (when --sandbox is set). */
   sandboxBridge?: SandboxBridge;
+  /** MCP tools converted to AI SDK schema (from MCPClientManager). */
+  mcpTools?: Record<string, { description: string; parameters: import("zod").ZodTypeAny }>;
+  /** MCP client for dispatching tool calls to external MCP servers. */
+  mcpClient?: { callToolByName: (name: string, args: Record<string, unknown>) => Promise<string> };
 }
 
 // ----------------------------------------------------------------------------
@@ -118,8 +127,8 @@ function buildSystemPrompt(session: Session, config: AgentLoopConfig): string {
     sections.push("");
     sections.push(
       "On your FIRST response only, include at the very end: [COMPLEXITY: X.X] " +
-      "where X.X is your 0-1 self-assessment of task complexity. " +
-      "0.0 = trivial, 1.0 = extremely complex multi-file refactor.",
+        "where X.X is your 0-1 self-assessment of task complexity. " +
+        "0.0 = trivial, 1.0 = extremely complex multi-file refactor.",
     );
   }
 
@@ -204,7 +213,6 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
   return { cleanText: cleanText.trim(), toolCalls };
 }
 
-
 // ----------------------------------------------------------------------------
 // Reflection Loop Helpers
 // ----------------------------------------------------------------------------
@@ -254,8 +262,7 @@ function compactMessages(
     // Walk from end to start, counting tool results
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]!;
-      const isToolResult =
-        msg.role === "user" && msg.content.startsWith("Tool execution results:");
+      const isToolResult = msg.role === "user" && msg.content.startsWith("Tool execution results:");
 
       if (isToolResult) {
         toolResultCount++;
@@ -293,7 +300,6 @@ function compactMessages(
     ...recent,
   ];
 }
-
 
 // ----------------------------------------------------------------------------
 // Main Agent Loop
@@ -370,14 +376,16 @@ export async function runAgentLoop(
     if (compacted.length < messages.length) {
       messages.splice(0, messages.length, ...compacted);
       if (config.verbose) {
-        process.stdout.write(`${DIM}[context compacted: ${messages.length} messages remaining]${RESET}\n`);
+        process.stdout.write(
+          `${DIM}[context compacted: ${messages.length} messages remaining]${RESET}\n`,
+        );
       }
     }
 
     // Generate response from model (streaming with tool calling support)
-    let responseText: string;
+    let responseText = "";
     let toolCalls: ExtractedToolCall[] = [];
-    let cleanText: string;
+    let cleanText = "";
     try {
       const renderer = new StreamRenderer(!!config.silent);
       renderer.printHeader();
@@ -387,7 +395,7 @@ export async function runAgentLoop(
       if (useNativeTools) {
         // Native AI SDK tool calling: stream with Zod-schema tools
         try {
-          const aiSdkTools = getAISDKTools();
+          const aiSdkTools = getAISDKTools(config.mcpTools);
           const streamResult = await router.streamWithTools(messages, aiSdkTools, {
             system: systemPrompt,
             maxTokens: config.state.model.default.maxTokens,
@@ -451,9 +459,7 @@ export async function runAgentLoop(
       if (!router.getModelRatedComplexity()) {
         const modelScore = router.extractModelComplexityRating(responseText, prompt);
         if (config.verbose && modelScore !== null) {
-          process.stdout.write(
-            `${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`,
-          );
+          process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
         }
       }
     } catch (err: unknown) {
@@ -537,7 +543,7 @@ export async function runAgentLoop(
       if (config.silent) {
         process.stdout.write(
           `\r${DIM}[${toolIndex}/${toolCalls.length} tools] ${toolCall.name}${RESET}` +
-          " ".repeat(20),
+            " ".repeat(20),
         );
       } else {
         process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
@@ -584,17 +590,32 @@ export async function runAgentLoop(
         }
       }
 
+      // Route MCP tool calls to the MCP client
+      const isMCPTool = toolCall.name.startsWith("mcp_") && config.mcpClient;
+
       // Route Bash commands through sandbox when available
       const useSandbox =
         toolCall.name === "Bash" &&
         config.sandboxBridge &&
         typeof toolCall.input["command"] === "string";
-      const result = useSandbox
-        ? await config.sandboxBridge!.runInSandbox(
+
+      let result: { content: string; isError: boolean };
+      if (isMCPTool) {
+        try {
+          const mcpResult = await config.mcpClient!.callToolByName(toolCall.name, toolCall.input);
+          result = { content: mcpResult, isError: false };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          result = { content: `MCP tool error: ${msg}`, isError: true };
+        }
+      } else if (useSandbox) {
+        result = await config.sandboxBridge!.runInSandbox(
             toolCall.input["command"] as string,
             (toolCall.input["timeout"] as number | undefined) ?? 120000,
-          )
-        : await executeTool(toolCall.name, toolCall.input, session.projectRoot, session.id);
+          );
+      } else {
+        result = await executeTool(toolCall.name, toolCall.input, session.projectRoot, session.id);
+      }
 
       // Tool output truncation (opencode pattern): cap large outputs to avoid
       // blowing the context window. Truncate to 2000 lines / 50KB.
@@ -667,7 +688,9 @@ export async function runAgentLoop(
 
     // Clear silent mode progress line after tool loop
     if (config.silent && toolCalls.length > 0) {
-      process.stdout.write(`\r${DIM}[${toolCalls.length}/${toolCalls.length} tools done]${RESET}\n`);
+      process.stdout.write(
+        `\r${DIM}[${toolCalls.length}/${toolCalls.length} tools done]${RESET}\n`,
+      );
     }
 
     // Reflection loop (aider/Cursor pattern): after code edits, auto-run

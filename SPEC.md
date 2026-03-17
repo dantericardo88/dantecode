@@ -2,7 +2,7 @@
 
 **Version:** OSS v1 prep  
 **Date:** 2026-03-16  
-**Status:** Local validation green, external release steps pending
+**Status:** Release posture is tracked by `npm run release:matrix`; ship readiness is tracked by `npm run release:check`
 
 ## 1. System overview
 
@@ -11,14 +11,14 @@ DanteCode is a portable, model-agnostic skill runtime and coding agent with Dant
 High-level architecture:
 
 ```text
-Client surfaces     -> CLI | VS Code (preview) | Desktop (beta)
+Client surfaces     -> CLI | VS Code (preview) | Desktop (experimental)
 Orchestration       -> core (model router, STATE.yaml, audit)
 Verification        -> danteforge (PDSE, anti-stub, constitution, GStack, autoforge)
 Execution helpers   -> git-engine | skill-adapter | sandbox
 Foundation          -> config-types
 ```
 
-The CLI is the Public OSS v1 ship surface. VS Code is preview. Desktop is beta.
+The CLI is the Public OSS v1 ship surface. VS Code is a preview primary surface. Desktop is experimental.
 
 ## 2. Product direction
 
@@ -37,9 +37,21 @@ Shared runtime interfaces, schemas, and config types used across every package.
 ### `@dantecode/core`
 
 - `.dantecode/STATE.yaml` parsing and writing
-- provider construction
+- provider construction (Grok, Anthropic, OpenAI, Google, Groq, Ollama, custom)
 - model routing with fallback and task overrides
 - audit logging
+- background agent runner with queue and concurrency control
+- TF-IDF semantic code indexing and search
+- file-based session store for chat persistence
+- token estimation
+
+### `@dantecode/mcp`
+
+- MCP client manager: connect to external MCP servers via stdio/SSE
+- tool discovery and bridging: JSON Schema to Zod schema conversion
+- MCP-prefixed tool routing in the agent loop
+- DanteCode MCP server: exposes DanteForge tools (PDSE, anti-stub, constitution, lessons) to external agents
+- config parsing from `.dantecode/mcp.json`
 
 ### `@dantecode/danteforge`
 
@@ -74,11 +86,19 @@ Primary Public OSS v1 interface for:
 
 - REPL and one-shot prompts
 - init/config/git/skills commands
+- `/mcp` server management, `/bg` background tasks, `/index` and `/search` code search
+- `/party` multi-agent mode, `/forge` and `/magic` autoforge pipelines
 - local runtime entrypoint
 
 ### `dantecode` VS Code extension
 
-Preview extension for chat, diagnostics, inline completion, and skill import flows.
+Preview extension for:
+
+- Chat sidebar with streaming, tool use, and live diff rendering
+- PDSE diagnostics in the Problems panel
+- Inline completion provider
+- Skill import, model switching, sandbox toggle
+- File-based chat persistence (SessionStore)
 
 ### `@dantecode/desktop`
 
@@ -144,6 +164,7 @@ Core rules:
 Root commands:
 
 ```bash
+npm run release:matrix
 npm run build
 npm run typecheck
 npm run lint
@@ -151,11 +172,11 @@ npm test
 npm run test:coverage
 ```
 
-Current local baseline:
+Current local contract:
 
-- 562 passing tests across 24 suites
+- `npm run release:matrix` is the machine-readable support and release-ring source of truth
 - `npm test` covers all package suites
-- coverage gate is enforced against stable runtime packages:
+- the coverage gate is enforced against stable runtime packages:
   - `core`
   - `danteforge`
   - `git-engine`

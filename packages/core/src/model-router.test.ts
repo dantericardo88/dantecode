@@ -686,7 +686,8 @@ describe("extractModelComplexityRating", () => {
     const router2 = new ModelRouterImpl(routerConfig, "/test", "s2");
 
     const simple = router1.extractModelComplexityRating("ok", "rename this variable");
-    const complex = router2.extractModelComplexityRating("ok",
+    const complex = router2.extractModelComplexityRating(
+      "ok",
       "Refactor the entire database migration pipeline across all services, handle edge cases with retry logic and parallel transaction rollback",
     );
 

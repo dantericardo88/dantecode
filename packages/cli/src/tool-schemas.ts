@@ -20,9 +20,12 @@ export interface ToolSchema {
 /**
  * Returns AI SDK-compatible tool schemas for all available tools.
  * These are Zod-schema versions of the JSON Schema definitions in tools.ts.
+ * When mcpTools are provided, they are merged with native tools.
  */
-export function getAISDKTools(): Record<string, ToolSchema> {
-  return {
+export function getAISDKTools(
+  mcpTools?: Record<string, ToolSchema>,
+): Record<string, ToolSchema> {
+  const nativeTools: Record<string, ToolSchema> = {
     Read: {
       description: "Read a file from disk. Returns content with line numbers.",
       parameters: z.object({
@@ -104,4 +107,10 @@ export function getAISDKTools(): Record<string, ToolSchema> {
       }),
     },
   };
+
+  // Merge MCP tools when available
+  if (mcpTools && Object.keys(mcpTools).length > 0) {
+    return { ...nativeTools, ...mcpTools };
+  }
+  return nativeTools;
 }

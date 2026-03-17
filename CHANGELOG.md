@@ -2,6 +2,29 @@
 
 All notable changes to DanteCode are documented here.
 
+## [Unreleased] - 2026-03-17
+
+### Added (Phase 5 — Market Leader Features)
+
+- **MCP Protocol** (`@dantecode/mcp`): New package with MCP client manager (stdio/SSE), tool bridge (JSON Schema to Zod), and DanteCode MCP server exposing DanteForge tools to external agents.
+- **Background Agents** (`@dantecode/core`): `BackgroundAgentRunner` with task queue, concurrency control, progress callbacks, and cancellation. CLI `/bg` command for task management.
+- **Semantic Code Indexing** (`@dantecode/core`): `CodeIndex` with TF-IDF scoring, function/class boundary chunking, cosine similarity search, and persistence. CLI `/index` and `/search` commands.
+- **Chat Persistence** (`@dantecode/core`): `SessionStore` with file-based session storage in `.dantecode/sessions/`. VS Code sidebar now persists chat history to disk with automatic globalState migration.
+- **MCP CLI Integration**: `/mcp` command, MCP tool merging in `getAISDKTools()`, 3-way tool dispatch (MCP/sandbox/native) in agent loop.
+- **VS Code Command Polish**: PDSE diagnostics now correctly populate the Problems panel. GStack reads commands from STATE.yaml. Lessons shows empty-state guidance. Init checks for already-initialized projects.
+- **VS Code Streaming UX**: Diff truncation at 80 lines, cancellation flag on `chat_response_done`, error recovery to prevent stuck loading.
+- **Integration Tests**: 19 new integration tests covering background agents, code indexing, session persistence, MCP tool bridge, and config parsing.
+- **Runtime Catalog** (`@dantecode/core`): Model and provider metadata with support tiers for UI model pickers.
+
+### Validation
+
+- `npm run typecheck` — 16 packages, zero errors
+- `npm run lint` — 16 packages, zero violations
+- `npm test` — 828 tests across 37 suites (up from 562)
+- Coverage gate now includes `@dantecode/mcp`
+
+---
+
 ## [Unreleased] - 2026-03-16
 
 ### Changed

@@ -13,16 +13,31 @@ import type { ToolResult } from "./tools.js";
 /** Dangerous Bash command patterns that should be blocked. */
 export const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // Filesystem destruction
-  { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/\s*$/m, reason: "recursive delete of root filesystem" },
-  { pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r?\s+\/\s*$/m, reason: "forced delete of root filesystem" },
+  {
+    pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/\s*$/m,
+    reason: "recursive delete of root filesystem",
+  },
+  {
+    pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r?\s+\/\s*$/m,
+    reason: "forced delete of root filesystem",
+  },
   { pattern: /\brm\s+-rf\s+\/(?:\s|$)/m, reason: "rm -rf / — catastrophic filesystem delete" },
   { pattern: /\brm\s+-rf\s+~\s*$/m, reason: "rm -rf ~ — delete entire home directory" },
   // Git destructive operations
-  { pattern: /\bgit\s+push\s+--force\s+(origin\s+)?(main|master)\b/, reason: "force push to main/master" },
-  { pattern: /\bgit\s+reset\s+--hard\s+origin\/(main|master)\b/, reason: "hard reset to remote main/master" },
+  {
+    pattern: /\bgit\s+push\s+--force\s+(origin\s+)?(main|master)\b/,
+    reason: "force push to main/master",
+  },
+  {
+    pattern: /\bgit\s+reset\s+--hard\s+origin\/(main|master)\b/,
+    reason: "hard reset to remote main/master",
+  },
   // System attacks
   { pattern: /:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;?\s*:/, reason: "fork bomb detected" },
-  { pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/, reason: "disk overwrite with dd" },
+  {
+    pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/,
+    reason: "disk overwrite with dd",
+  },
   { pattern: /\bmkfs\b/, reason: "filesystem format command" },
   { pattern: /\bchmod\s+-R\s+777\s+\/\s*$/, reason: "chmod 777 on root filesystem" },
   // Pipe-to-shell
@@ -33,12 +48,27 @@ export const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }>
   { pattern: /\bfind\s+\/\s+.*-exec\s+rm\b/, reason: "find with -exec rm on root filesystem" },
   { pattern: /\bfind\s+~\s+.*-delete\b/, reason: "find with -delete on home directory" },
   // Scripting language destructive commands
-  { pattern: /\bpython[23]?\s+(-c\s+)?.*shutil\.rmtree\s*\(/, reason: "Python shutil.rmtree — recursive delete" },
-  { pattern: /\bnode\s+(-e\s+)?.*fs\.(rmSync|rmdirSync)\s*\(/, reason: "Node.js destructive fs operation" },
+  {
+    pattern: /\bpython[23]?\s+(-c\s+)?.*shutil\.rmtree\s*\(/,
+    reason: "Python shutil.rmtree — recursive delete",
+  },
+  {
+    pattern: /\bnode\s+(-e\s+)?.*fs\.(rmSync|rmdirSync)\s*\(/,
+    reason: "Node.js destructive fs operation",
+  },
   // Env exfiltration
-  { pattern: /\benv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "environment variable exfiltration via network" },
-  { pattern: /\bprintenv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "printenv piped to network tool" },
-  { pattern: /\bcat\s+.*\.env\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: ".env file exfiltration via network" },
+  {
+    pattern: /\benv\b.*\|\s*(curl|wget|nc|netcat)\b/,
+    reason: "environment variable exfiltration via network",
+  },
+  {
+    pattern: /\bprintenv\b.*\|\s*(curl|wget|nc|netcat)\b/,
+    reason: "printenv piped to network tool",
+  },
+  {
+    pattern: /\bcat\s+.*\.env\b.*\|\s*(curl|wget|nc|netcat)\b/,
+    reason: ".env file exfiltration via network",
+  },
   // Privilege escalation
   { pattern: /\bchown\s+-R\s+root\b/, reason: "recursive chown to root" },
   { pattern: /\bchmod\s+[ugo]*\+s\b/, reason: "setuid/setgid bit modification" },
@@ -197,7 +227,10 @@ export function checkWriteSafety(filePath: string): string | null {
  */
 export function checkContentForSecrets(content: string): string | null {
   const secretPatterns: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/, reason: "Private key detected in content" },
+    {
+      pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/,
+      reason: "Private key detected in content",
+    },
     { pattern: /AKIA[0-9A-Z]{16}/, reason: "AWS access key ID detected" },
     { pattern: /ghp_[A-Za-z0-9]{36}/, reason: "GitHub personal access token detected" },
     { pattern: /gho_[A-Za-z0-9]{36}/, reason: "GitHub OAuth token detected" },

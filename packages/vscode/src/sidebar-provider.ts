@@ -12,6 +12,7 @@ import {
   basename as pathBasename,
 } from "node:path";
 import type {
+  ChatSessionFile,
   ModelConfig,
   ModelRouterConfig,
   PDSEScore,
@@ -19,8 +20,13 @@ import type {
   AuditEvent,
 } from "@dantecode/config-types";
 import {
+  DEFAULT_MODEL_ID,
+  MODEL_CATALOG,
   ModelRouterImpl,
+  SessionStore,
   appendAuditEvent,
+  getProviderCatalogEntry,
+  groupCatalogModels,
   readOrInitializeState,
   shouldContinueLoop,
 } from "@dantecode/core";
@@ -35,6 +41,7 @@ import {
   extractToolCalls,
   getToolDefinitionsPrompt,
   getWrittenFilePath,
+  type DiffReviewPayload,
   type ToolResult,
   type ToolExecutionContext,
 } from "./agent-tools.js";
@@ -128,6 +135,16 @@ interface AgentConfig {
   showLiveDiffs: boolean;
 }
 
+interface SidebarHostCallbacks {
+  onCostUpdate?: (update: {
+    model: string;
+    modelTier: "fast" | "capable";
+    sessionTotalUsd: number;
+  }) => void;
+  onDiffReview?: (payload: DiffReviewPayload) => void;
+  onModelChange?: (model: string) => void;
+}
+
 /** Default config for new users. */
 const DEFAULT_AGENT_CONFIG: AgentConfig = {
   agentMode: "build",
@@ -149,27 +166,28 @@ const PROVIDER_SECRET_KEYS: Record<string, string> = {
 };
 
 /** Provider metadata for the settings panel. */
-const SETTINGS_PROVIDERS = [
-  { id: "grok", label: "xAI / Grok", placeholder: "xai-...", url: "https://console.x.ai/" },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    placeholder: "sk-ant-...",
-    url: "https://console.anthropic.com/",
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    placeholder: "sk-...",
-    url: "https://platform.openai.com/api-keys",
-  },
-  {
-    id: "google",
-    label: "Google AI",
-    placeholder: "AIza...",
-    url: "https://aistudio.google.com/apikey",
-  },
-];
+const SETTINGS_PROVIDER_IDS = new Set(Object.keys(PROVIDER_SECRET_KEYS));
+const PROVIDER_PLACEHOLDERS: Partial<Record<keyof typeof PROVIDER_SECRET_KEYS, string>> = {
+  grok: "xai-...",
+  anthropic: "sk-ant-...",
+  openai: "sk-...",
+  google: "AIza...",
+};
+const SETTINGS_PROVIDERS = Array.from(SETTINGS_PROVIDER_IDS)
+  .map((providerId) => {
+    const provider = getProviderCatalogEntry(providerId);
+    if (!provider) {
+      return null;
+    }
+
+    return {
+      id: provider.id,
+      label: provider.label,
+      placeholder: PROVIDER_PLACEHOLDERS[provider.id] ?? "",
+      url: provider.docsUrl ?? "",
+    };
+  })
+  .filter((provider): provider is NonNullable<typeof provider> => provider !== null);
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -204,14 +222,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private pendingImages: string[] = [];
   private agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
   private readonly diffContents = new Map<string, string>();
+  private sessionStore: SessionStore | null = null;
+  private sessionStoreMigrated = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly secrets: vscode.SecretStorage,
     private readonly globalState: vscode.Memento,
+    private readonly hostCallbacks: SidebarHostCallbacks = {},
   ) {
     const config = vscode.workspace.getConfiguration("dantecode");
-    this.currentModel = config.get<string>("defaultModel", "grok/grok-4-1-fast-non-reasoning");
+    this.currentModel = config.get<string>("defaultModel", DEFAULT_MODEL_ID);
     this.sessionId = `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.currentChatId = this.generateChatId();
 
@@ -785,6 +806,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
           }
           this.postMessage({ type: "generation_stopped", payload: { text: fullResponse } });
+          this.postMessage({ type: "chat_response_done", payload: { cancelled: true } });
           finalResponse = fullResponse;
           break;
         }
@@ -854,6 +876,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             modelTier: costEstimate.modelTier,
             tokensUsedSession: costEstimate.tokensUsedSession,
           },
+        });
+        this.hostCallbacks.onCostUpdate?.({
+          model: this.currentModel,
+          modelTier: costEstimate.modelTier,
+          sessionTotalUsd: costEstimate.sessionTotalUsd,
         });
 
         // Extract tool calls from the response
@@ -972,17 +999,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             silentMode: this.agentConfig.agentMode === "yolo",
             currentModelId: this.currentModel,
             roundId: `round-${roundNumber}`,
-            onDiffHunk: (hunk) => {
+            onDiffHunk: (diffReview) => {
               this.postMessage({
                 type: "diff_hunk",
-                payload: { ...hunk } as unknown as Record<string, unknown>,
+                payload: { ...diffReview.hunk } as unknown as Record<string, unknown>,
               });
+              this.hostCallbacks.onDiffReview?.(diffReview);
             },
             onSelfModificationAttempt: (filePath) => {
               this.postMessage({
                 type: "self_modification_blocked",
                 payload: { filePath, requiresConfirmation: true },
               });
+            },
+            awaitSelfModConfirmation: async () => {
+              const selection = await vscode.window.showWarningMessage(
+                "DanteCode wants to modify protected project files. Allow this write once?",
+                { modal: true },
+                "Allow once",
+                "Block",
+              );
+              return selection === "Allow once";
             },
           };
           let result: ToolResult;
@@ -1208,6 +1245,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       // Handle abort (stop button or timeout) gracefully
       if (err instanceof Error && (err.name === "AbortError" || signal.aborted)) {
         this.postMessage({ type: "generation_stopped", payload: { text: "" } });
+        this.postMessage({ type: "chat_response_done", payload: { cancelled: true } });
       } else {
         const rawMessage = err instanceof Error ? err.message : String(err);
         let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
@@ -1231,6 +1269,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
         }
         this.postMessage({ type: "error", payload: { message: diagnostic } });
+        this.postMessage({ type: "chat_response_done", payload: { error: true } });
       }
     } finally {
       this.abortController = null;
@@ -1283,17 +1322,68 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.sendContextFilesUpdate();
   }
 
+  /** Lazily initializes SessionStore, migrating from globalState if needed. */
+  private async getSessionStore(): Promise<SessionStore | null> {
+    const projectRoot = this.getProjectRoot();
+    if (!projectRoot) return null;
+
+    if (!this.sessionStore) {
+      this.sessionStore = new SessionStore(projectRoot);
+    }
+
+    // One-time migration from globalState → disk
+    if (!this.sessionStoreMigrated) {
+      this.sessionStoreMigrated = true;
+      const legacy = this.globalState.get<ChatSession[]>("dantecode.chatHistory", []);
+      if (legacy.length > 0) {
+        for (const session of legacy) {
+          const now = new Date().toISOString();
+          const file: ChatSessionFile = {
+            id: session.id,
+            title: session.title,
+            createdAt: session.createdAt,
+            updatedAt: now,
+            model: session.model,
+            messages: session.messages.map((m) => ({
+              ...m,
+              timestamp: now,
+            })),
+            contextFiles: [],
+          };
+          try {
+            await this.sessionStore.save(file);
+          } catch {
+            /* migration is best-effort */
+          }
+        }
+        // Clear legacy after successful migration
+        await this.globalState.update("dantecode.chatHistory", undefined);
+      }
+    }
+
+    return this.sessionStore;
+  }
+
   private async handleLoadHistory(): Promise<void> {
-    const sessions = this.globalState.get<ChatSession[]>("dantecode.chatHistory", []);
+    const store = await this.getSessionStore();
+    if (!store) {
+      this.postMessage({
+        type: "chat_history",
+        payload: { sessions: [], currentChatId: this.currentChatId },
+      });
+      return;
+    }
+
+    const entries = await store.list();
     this.postMessage({
       type: "chat_history",
       payload: {
-        sessions: sessions.map((s) => ({
+        sessions: entries.map((s) => ({
           id: s.id,
           title: s.title,
           createdAt: s.createdAt,
-          model: s.model,
-          messageCount: s.messages.length,
+          model: "",
+          messageCount: s.messageCount,
         })),
         currentChatId: this.currentChatId,
       },
@@ -1301,20 +1391,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleSelectChat(chatId: string): Promise<void> {
-    if (chatId.length === 0) {
-      return;
-    }
+    if (chatId.length === 0) return;
 
     // Save current conversation first
     if (this.messages.length > 0) {
       await this.saveChatToHistory();
     }
 
-    const sessions = this.globalState.get<ChatSession[]>("dantecode.chatHistory", []);
-    const session = sessions.find((s) => s.id === chatId);
+    const store = await this.getSessionStore();
+    if (!store) return;
+
+    const session = await store.load(chatId);
     if (session) {
       this.currentChatId = session.id;
-      this.messages = [...session.messages];
+      this.messages = session.messages.map((m) => ({
+        role: m.role === "user" || m.role === "assistant" ? m.role : "assistant",
+        content: m.content,
+      }));
       this.currentModel = session.model;
 
       this.postMessage({
@@ -1326,13 +1419,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleDeleteChat(chatId: string): Promise<void> {
-    if (chatId.length === 0) {
-      return;
-    }
+    if (chatId.length === 0) return;
 
-    const sessions = this.globalState.get<ChatSession[]>("dantecode.chatHistory", []);
-    const filtered = sessions.filter((s) => s.id !== chatId);
-    await this.globalState.update("dantecode.chatHistory", filtered);
+    const store = await this.getSessionStore();
+    if (store) {
+      await store.delete(chatId);
+    }
 
     // If we deleted the current chat, start fresh
     if (chatId === this.currentChatId) {
@@ -1709,6 +1801,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       type: "model_update",
       payload: { model: this.currentModel },
     });
+    this.hostCallbacks.onModelChange?.(this.currentModel);
   }
 
   private getProjectRoot(): string {
@@ -1899,34 +1992,32 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Persists the current chat session to globalState history.
+   * Persists the current chat session to file-based SessionStore.
    */
   private async saveChatToHistory(): Promise<void> {
-    if (this.messages.length === 0) {
-      return;
-    }
+    if (this.messages.length === 0) return;
 
-    const sessions = this.globalState.get<ChatSession[]>("dantecode.chatHistory", []);
+    const store = await this.getSessionStore();
+    if (!store) return;
 
-    // Update existing session or create new one
-    const existingIndex = sessions.findIndex((s) => s.id === this.currentChatId);
-    const session: ChatSession = {
+    const now = new Date().toISOString();
+    const existing = await store.load(this.currentChatId);
+
+    const session: ChatSessionFile = {
       id: this.currentChatId,
       title: this.generateChatTitle(),
-      createdAt: existingIndex >= 0 ? sessions[existingIndex]!.createdAt : new Date().toISOString(),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
       model: this.currentModel,
-      messages: [...this.messages],
+      messages: this.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        timestamp: now,
+      })),
+      contextFiles: [...this.contextFiles],
     };
 
-    if (existingIndex >= 0) {
-      sessions[existingIndex] = session;
-    } else {
-      sessions.unshift(session); // Most recent first
-    }
-
-    // Keep only the last 50 chats
-    const trimmed = sessions.slice(0, 50);
-    await this.globalState.update("dantecode.chatHistory", trimmed);
+    await store.save(session);
   }
 
   // --------------------------------------------------------------------------
@@ -1935,6 +2026,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   private getHtmlForWebview(_webview: vscode.Webview): string {
     const nonce = getNonce();
+    const modelOptionGroups = renderModelOptionGroups(this.currentModel);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -2918,35 +3010,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <div class="model-bar">
     <label for="model-select">Model:</label>
     <select class="model-select" id="model-select">
-      <optgroup label="xAI / Grok">
-        <option value="grok/grok-4.20-beta-0309-non-reasoning">Grok 4.20 Beta</option>
-        <option value="grok/grok-4.20-beta-0309-reasoning">Grok 4.20 (Reasoning)</option>
-        <option value="grok/grok-4.20-multi-agent-beta-0309">Grok 4.20 Multi-Agent</option>
-        <option value="grok/grok-4-0709">Grok 4</option>
-        <option value="grok/grok-4-1-fast-reasoning">Grok 4.1 Fast (Reasoning)</option>
-        <option value="grok/grok-4-1-fast-non-reasoning" selected>Grok 4.1 Fast</option>
-        <option value="grok/grok-4-fast-reasoning">Grok 4 Fast (Reasoning)</option>
-        <option value="grok/grok-4-fast-non-reasoning">Grok 4 Fast</option>
-        <option value="grok/grok-code-fast-1">Grok Code Fast</option>
-        <option value="grok/grok-3">Grok 3</option>
-        <option value="grok/grok-3-mini">Grok 3 Mini</option>
-      </optgroup>
-      <optgroup label="Anthropic">
-        <option value="anthropic/claude-opus-4-6">Claude Opus 4.6</option>
-        <option value="anthropic/claude-sonnet-4-6">Claude Sonnet 4.6</option>
-        <option value="anthropic/claude-haiku-4-5">Claude Haiku 4.5</option>
-      </optgroup>
-      <optgroup label="OpenAI">
-        <option value="openai/gpt-4.1">GPT-4.1</option>
-        <option value="openai/o3-pro">o3-pro</option>
-      </optgroup>
-      <optgroup label="Google">
-        <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
-        <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
-      </optgroup>
-      <optgroup label="Local (Ollama)" id="ollama-optgroup">
-        <option value="" disabled>Scanning...</option>
-      </optgroup>
+      ${modelOptionGroups}
     </select>
   </div>
 
@@ -4038,6 +4102,33 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderModelOptionGroups(selectedModel: string): string {
+  const tierOneModels = MODEL_CATALOG.filter((entry) => entry.supportTier === "tier1");
+
+  return groupCatalogModels(tierOneModels)
+    .map(({ groupLabel, models }) => {
+      const groupId = groupLabel === "Local (Ollama)" ? ' id="ollama-optgroup"' : "";
+      const options = models
+        .map((model) => {
+          const selected = model.id === selectedModel ? " selected" : "";
+          return `<option value="${escapeHtml(model.id)}"${selected}>${escapeHtml(model.label)}</option>`;
+        })
+        .join("");
+
+      return `<optgroup label="${escapeHtml(groupLabel)}"${groupId}>${options}</optgroup>`;
+    })
+    .join("");
 }
 
 /**

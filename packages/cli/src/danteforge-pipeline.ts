@@ -94,7 +94,10 @@ export async function runDanteForge(
 /**
  * Checks if a tool call writes code to a file and returns the file path.
  */
-export function getWrittenFilePath(toolName: string, toolInput: Record<string, unknown>): string | null {
+export function getWrittenFilePath(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): string | null {
   if (toolName === "Write" || toolName === "Edit") {
     const filePath = toolInput["file_path"] as string | undefined;
     if (filePath) {

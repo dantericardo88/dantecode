@@ -6,7 +6,7 @@
 
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import { readOrInitializeState } from "@dantecode/core";
+import { parseModelReference, readOrInitializeState } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
@@ -68,28 +68,7 @@ function createSession(projectRoot: string, model: ModelConfig): Session {
  * Accepts formats like "grok/grok-3", "anthropic/claude-sonnet-4-20250514", or plain "grok-3".
  */
 function applyModelOverride(state: DanteCodeState, modelOverride: string): DanteCodeState {
-  const parts = modelOverride.split("/");
-  let provider: string;
-  let modelId: string;
-
-  if (parts.length >= 2) {
-    provider = parts[0]!;
-    modelId = parts.slice(1).join("/");
-  } else {
-    // Infer provider from model name
-    modelId = modelOverride;
-    if (modelId.startsWith("grok")) {
-      provider = "grok";
-    } else if (modelId.startsWith("claude")) {
-      provider = "anthropic";
-    } else if (modelId.startsWith("gpt") || modelId.startsWith("o1") || modelId.startsWith("o3")) {
-      provider = "openai";
-    } else if (modelId.startsWith("gemini")) {
-      provider = "google";
-    } else {
-      provider = state.model.default.provider;
-    }
-  }
+  const parsed = parseModelReference(modelOverride, state.model.default.provider);
 
   return {
     ...state,
@@ -97,11 +76,20 @@ function applyModelOverride(state: DanteCodeState, modelOverride: string): Dante
       ...state.model,
       default: {
         ...state.model.default,
-        provider: provider as ModelConfig["provider"],
-        modelId,
+        provider: parsed.provider,
+        modelId: parsed.modelId,
       },
     },
   };
+}
+
+function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig): void {
+  agentConfig.state = replState.state;
+  agentConfig.enableSandbox = replState.enableSandbox;
+  agentConfig.silent = replState.silent;
+  agentConfig.sandboxBridge = replState.enableSandbox
+    ? (replState.sandboxBridge ?? undefined)
+    : undefined;
 }
 
 // ----------------------------------------------------------------------------
@@ -161,6 +149,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     recentToolCalls: [],
     pendingAgentPrompt: null,
     activeAbortController: null,
+    sandboxBridge: null,
   };
 
   // Agent loop config
@@ -175,6 +164,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Initialize sandbox bridge when --sandbox is enabled
   if (options.enableSandbox) {
     agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
+    replState.sandboxBridge = agentConfig.sandboxBridge;
   }
 
   // Create readline interface
@@ -252,8 +242,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   rl.on("close", async () => {
     // Shut down sandbox container if running
-    if (agentConfig.sandboxBridge) {
-      await agentConfig.sandboxBridge.shutdown();
+    if (replState.sandboxBridge) {
+      await replState.sandboxBridge.shutdown();
     }
     process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
     process.exit(0);
@@ -282,7 +272,7 @@ async function processInput(
       if (replState.pendingAgentPrompt) {
         const agentPrompt = replState.pendingAgentPrompt;
         replState.pendingAgentPrompt = null;
-        agentConfig.silent = replState.silent; // Sync toggle state
+        syncAgentLoopConfig(replState, agentConfig);
         replState.activeAbortController = new AbortController();
         agentConfig.abortSignal = replState.activeAbortController.signal;
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
@@ -290,7 +280,7 @@ async function processInput(
       }
     } else {
       // Route to agent loop
-      agentConfig.silent = replState.silent; // Sync toggle state
+      syncAgentLoopConfig(replState, agentConfig);
       replState.activeAbortController = new AbortController();
       agentConfig.abortSignal = replState.activeAbortController.signal;
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
@@ -342,6 +332,10 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     silent: options.silent,
   };
 
+  if (options.enableSandbox) {
+    agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
+  }
+
   // Run the agent loop once
   try {
     await runAgentLoop(prompt, session, agentConfig);
@@ -349,5 +343,9 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${RED}Error: ${message}${RESET}\n`);
     process.exit(1);
+  } finally {
+    if (agentConfig.sandboxBridge) {
+      await agentConfig.sandboxBridge.shutdown();
+    }
   }
 }

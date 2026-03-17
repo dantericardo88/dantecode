@@ -18,6 +18,31 @@ export {
 } from "./providers/index.js";
 export type { ProviderBuilder } from "./providers/index.js";
 
+// ----------------------------------------------------------------------------
+// Runtime Catalog
+// ----------------------------------------------------------------------------
+
+export {
+  DEFAULT_MODEL_ID,
+  MODEL_CATALOG,
+  PROVIDER_CATALOG,
+  SURFACE_RELEASE_MATRIX,
+  getDefaultModelCatalogEntry,
+  getModelCatalogEntry,
+  getModelsForProvider,
+  getProviderCatalogEntry,
+  groupCatalogModels,
+  inferProviderFromModelId,
+  parseModelReference,
+} from "./runtime-catalog.js";
+export type {
+  ModelCatalogEntry,
+  ProviderCatalogEntry,
+  ProviderSupportTier,
+  SurfaceReleaseEntry,
+  SurfaceReleaseRing,
+} from "./runtime-catalog.js";
+
 // ─── Audit Logger ─────────────────────────────────────────────────────────────
 
 export { appendAuditEvent, readAuditEvents, countAuditEvents } from "./audit.js";
@@ -37,8 +62,25 @@ export {
 
 // ─── Multi-Agent ───────────────────────────────────────────────────────────────
 
-export { MultiAgent, type MultiAgentConfig, type MultiAgentProgressCallback } from "./multi-agent.js";
+export {
+  MultiAgent,
+  type MultiAgentConfig,
+  type MultiAgentProgressCallback,
+} from "./multi-agent.js";
 
 // ─── Token Counter ───────────────────────────────────────────────────────────
 
 export { estimateTokens, estimateMessageTokens } from "./token-counter.js";
+
+// ─── Session Store ───────────────────────────────────────────────────────────
+
+export { SessionStore } from "./session-store.js";
+
+// ─── Background Agent ────────────────────────────────────────────────────────
+
+export { BackgroundAgentRunner } from "./background-agent.js";
+export type { BackgroundProgressCallback, AgentWorkFn } from "./background-agent.js";
+
+// ─── Code Index ──────────────────────────────────────────────────────────────
+
+export { CodeIndex, chunkFile, tokenize } from "./code-index.js";

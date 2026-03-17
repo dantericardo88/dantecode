@@ -3,6 +3,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
+import { DEFAULT_MODEL_ID } from "@dantecode/core";
 
 export type GateStatus = "passed" | "failed" | "pending" | "none";
 
@@ -42,7 +43,7 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 
   const config = vscode.workspace.getConfiguration("dantecode");
-  const defaultModel = config.get<string>("defaultModel", "grok/grok-3");
+  const defaultModel = config.get<string>("defaultModel", DEFAULT_MODEL_ID);
   const sandboxEnabled = config.get<boolean>("sandboxEnabled", false);
 
   const state: StatusBarState = {
@@ -63,7 +64,7 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
   const configWatcher = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration("dantecode")) {
       const updatedConfig = vscode.workspace.getConfiguration("dantecode");
-      state.currentModel = updatedConfig.get<string>("defaultModel", "grok/grok-3");
+      state.currentModel = updatedConfig.get<string>("defaultModel", DEFAULT_MODEL_ID);
       state.sandboxEnabled = updatedConfig.get<boolean>("sandboxEnabled", false);
       renderStatusBar(state);
     }

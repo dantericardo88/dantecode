@@ -159,6 +159,7 @@ describe("providers", () => {
 
   describe("buildGrokProvider", () => {
     it("throws when no API key is available", () => {
+      delete process.env["XAI_API_KEY"];
       delete process.env["GROK_API_KEY"];
       expect(() => buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }))).toThrow(
         "Grok API key not found",
@@ -166,6 +167,7 @@ describe("providers", () => {
     });
 
     it("uses config.apiKey when provided", () => {
+      delete process.env["XAI_API_KEY"];
       delete process.env["GROK_API_KEY"];
       const config = makeConfig({ provider: "grok", modelId: "grok-3", apiKey: "xai-key" });
       const model = buildGrokProvider(config);
@@ -179,7 +181,19 @@ describe("providers", () => {
       );
     });
 
+    it("falls back to XAI_API_KEY env var first", () => {
+      process.env["XAI_API_KEY"] = "xai-primary-env-key";
+      buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
+      expect(createOpenAI).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: "xai-primary-env-key",
+          baseURL: "https://api.x.ai/v1",
+        }),
+      );
+    });
+
     it("falls back to GROK_API_KEY env var", () => {
+      delete process.env["XAI_API_KEY"];
       process.env["GROK_API_KEY"] = "xai-env-key";
       buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
       expect(createOpenAI).toHaveBeenCalledWith(
@@ -191,6 +205,7 @@ describe("providers", () => {
     });
 
     it("includes X-Client header", () => {
+      delete process.env["XAI_API_KEY"];
       process.env["GROK_API_KEY"] = "xai-env-key";
       buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
       expect(createOpenAI).toHaveBeenCalledWith(
@@ -201,11 +216,12 @@ describe("providers", () => {
     });
 
     it("error message includes setup instructions", () => {
+      delete process.env["XAI_API_KEY"];
       delete process.env["GROK_API_KEY"];
       try {
         buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
       } catch (err) {
-        expect(String(err)).toContain("GROK_API_KEY");
+        expect(String(err)).toContain("XAI_API_KEY");
         expect(String(err)).toContain("console.x.ai");
       }
     });

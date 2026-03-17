@@ -13,9 +13,9 @@ Grok is the default provider, not the product identity. The real product center 
 
 ## OSS v1 status
 
-- CLI: ship target for Public OSS v1
-- VS Code extension: preview
-- Desktop app: beta
+- CLI: GA ship target for Public OSS v1
+- VS Code extension: preview primary surface
+- Desktop app: experimental
 
 ## Why DanteCode
 
@@ -25,6 +25,21 @@ Grok is the default provider, not the product identity. The real product center 
 - Clean-room skill import path: import Claude Code, Continue, and OpenCode style skills through adapters instead of prompt-copy lock-in.
 - Git-native workflow support: diff parsing, commits, worktrees, and repo mapping are built in.
 
+## Key features
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Multi-provider routing | GA | Grok, Anthropic, OpenAI, Google, Groq, Ollama, custom endpoints |
+| DanteForge verification | GA | Anti-stub, PDSE scoring, constitution checks, GStack validation |
+| MCP protocol | New | Consume and expose tools via Model Context Protocol |
+| Background agents | New | Queue async agent tasks with `/bg` command and concurrency control |
+| Semantic code search | New | TF-IDF code index with `/index` and `/search` commands |
+| Chat persistence | New | File-based session storage in `.dantecode/sessions/` |
+| Skill import | GA | Claude, Continue, OpenCode skill adapters |
+| Git-native workflows | GA | Diff parsing, commits, worktrees, repo mapping |
+| Multi-agent mode | GA | `/party` for parallel worktree-isolated agents |
+| VS Code extension | Preview | Chat sidebar, inline completion, PDSE diagnostics, live diffs |
+
 ## Architecture
 
 ```mermaid
@@ -33,7 +48,8 @@ graph TD
     VSCode["@dantecode/vscode<br/>VS Code Extension"]
     Desktop["@dantecode/desktop<br/>Electron Shell"]
 
-    Core["@dantecode/core<br/>Model Router + Providers"]
+    Core["@dantecode/core<br/>Model Router + Providers<br/>Background Agents + Code Index"]
+    MCP["@dantecode/mcp<br/>MCP Client + Server"]
     DanteForge["@dantecode/danteforge<br/>Quality Gates"]
     GitEngine["@dantecode/git-engine<br/>Diff, Commits, Repo Map"]
     Sandbox["@dantecode/sandbox<br/>Docker Isolation"]
@@ -41,6 +57,7 @@ graph TD
     ConfigTypes["@dantecode/config-types<br/>Shared Types"]
 
     CLI --> Core
+    CLI --> MCP
     CLI --> DanteForge
     CLI --> GitEngine
     CLI --> Sandbox
@@ -50,7 +67,9 @@ graph TD
     VSCode --> GitEngine
     Desktop --> Core
 
+    MCP --> DanteForge
     Core --> ConfigTypes
+    MCP --> ConfigTypes
     DanteForge --> ConfigTypes
     GitEngine --> ConfigTypes
     Sandbox --> ConfigTypes
@@ -83,7 +102,8 @@ npm run cli
 Set at least one provider key before using remote models:
 
 ```bash
-export GROK_API_KEY="xai-..."
+export XAI_API_KEY="xai-..."
+# GROK_API_KEY also works
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 ```
@@ -154,25 +174,25 @@ npm run smoke:skill-import
 npm run publish:dry-run
 ```
 
-Current local validation baseline:
+Validation and release-truth commands:
 
-- `npm run release:doctor`: reports remaining external blockers and remediation steps
-- `npm run release:check`: full local ship-readiness sweep is green
-- `npm test`: 700+ tests across 25+ suites
-- `npm run test:coverage`: strict coverage gate for the stable runtime packages
-- `npm run smoke:cli`: built CLI help/init/config/skills flow passes
-- `npm run smoke:install`: packed npm install path and installed CLI bootstrap pass
-- `npm run smoke:skill-import`: fixture-based Claude-style skill import, wrap, registry, and validation pass
-- `npm run publish:dry-run`: publishable packages pack cleanly; only npm auth warnings remain without login
-- Stable runtime coverage gate: `core`, `danteforge`, `git-engine`, `skill-adapter`
-- Preview and beta surfaces still run in `npm test`, but do not block OSS v1 coverage thresholds
+- `npm run release:matrix`: prints the machine-readable support matrix from `release-matrix.json`
+- `npm run release:doctor`: reports external blockers and remediation steps
+- `npm run release:check`: canonical local ship gate
+- `npm test`: runs the shared workspace test suites
+- `npm run test:coverage`: enforces the scoped coverage gate for `core`, `danteforge`, `git-engine`, and `skill-adapter`
+- `npm run smoke:cli`: validates the built CLI help/init/config/skills flow
+- `npm run smoke:install`: validates the packed npm install path and installed CLI bootstrap
+- `npm run smoke:skill-import`: validates fixture-based Claude-style skill import, wrapping, registry, and verification
+- `npm run publish:dry-run`: checks that publishable packages still pack cleanly
 
 ## Package map
 
 ```text
 packages/
   config-types/   Shared types and schemas
-  core/           Model router, provider adapters, STATE.yaml handling, audit log
+  core/           Model router, providers, background agents, code index, session store
+  mcp/            MCP client manager + DanteForge MCP server
   danteforge/     PDSE, anti-stub, constitution, lessons, autoforge, GStack
   git-engine/     Diff parsing, commits, worktrees, repo map
   skill-adapter/  Skill import, registry, wrapping, parser adapters
@@ -188,7 +208,7 @@ packages/
 - `@dantecode/cli` is the default install target.
 - Core libraries publish as scoped npm packages.
 - VS Code packaging and publish remain in workflow, but the extension is still preview.
-- Desktop remains beta and is not launch-critical for OSS v1.
+- Desktop remains experimental and is not launch-critical for OSS v1.
 
 ## Remaining external ship checks
 

@@ -167,7 +167,7 @@ describe("MultiAgent", () => {
       progressUpdates.push({ lane: update.lane, status: update.status });
     };
 
-    const result = await agent.coordinate("Test task", {}, onProgress);
+    await agent.coordinate("Test task", {}, onProgress);
 
     const failedUpdates = progressUpdates.filter((u) => u.status === "failed");
     expect(failedUpdates.length).toBeGreaterThanOrEqual(1);
@@ -188,14 +188,16 @@ describe("MultiAgent", () => {
 
     const progressUpdates: Array<{ lane: string; status: string; pdseScore?: number }> = [];
     const onProgress: MultiAgentProgressCallback = (update) => {
-      progressUpdates.push({ lane: update.lane, status: update.status, pdseScore: update.pdseScore });
+      progressUpdates.push({
+        lane: update.lane,
+        status: update.status,
+        pdseScore: update.pdseScore,
+      });
     };
 
     await agent.coordinate("Implement feature", {}, onProgress);
 
-    const coderStarted = progressUpdates.find(
-      (u) => u.lane === "coder" && u.status === "started",
-    );
+    const coderStarted = progressUpdates.find((u) => u.lane === "coder" && u.status === "started");
     const coderCompleted = progressUpdates.find(
       (u) => u.lane === "coder" && u.status === "completed",
     );

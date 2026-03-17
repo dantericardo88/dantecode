@@ -23,6 +23,7 @@
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx}\" \"scripts/**/*.mjs\"",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
     "release:doctor": "node scripts/release-doctor.mjs",
+    "release:matrix": "node scripts/release-matrix.mjs",
     "smoke:cli": "node scripts/smoke-cli.mjs",
     "smoke:install": "node scripts/smoke-install.mjs",
     "smoke:skill-import": "node scripts/smoke-skill-import.mjs",

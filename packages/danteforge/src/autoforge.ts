@@ -4,6 +4,8 @@
 // PDSE scoring, and lesson injection to progressively improve generated code.
 // ============================================================================
 
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import type {
   AutoforgeConfig,
   AutoforgeIteration,
@@ -81,6 +83,68 @@ export interface AutoforgeContext {
   framework?: string;
   /** Additional context from the user or session. */
   additionalContext?: string;
+}
+
+interface DiskEvaluationContext {
+  existedOnDisk: boolean;
+  originalContent: string | null;
+  targetPath: string;
+}
+
+function getEstimatedRouterCost(router: ModelRouter): number {
+  const maybeCostAwareRouter = router as ModelRouter & {
+    getCostEstimate?: () => { sessionTotalUsd?: number };
+  };
+  return maybeCostAwareRouter.getCostEstimate?.().sessionTotalUsd ?? 0;
+}
+
+async function createDiskEvaluationContext(
+  context: AutoforgeContext,
+  projectRoot: string,
+): Promise<DiskEvaluationContext | null> {
+  if (!context.filePath) {
+    return null;
+  }
+
+  const targetPath = resolve(projectRoot, context.filePath);
+
+  try {
+    const originalContent = await readFile(targetPath, "utf-8");
+    return {
+      existedOnDisk: true,
+      originalContent,
+      targetPath,
+    };
+  } catch {
+    return {
+      existedOnDisk: false,
+      originalContent: null,
+      targetPath,
+    };
+  }
+}
+
+async function withCandidateCodeApplied<T>(
+  candidateCode: string,
+  diskContext: DiskEvaluationContext | null,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (!diskContext) {
+    return run();
+  }
+
+  await mkdir(dirname(diskContext.targetPath), { recursive: true });
+  await writeFile(diskContext.targetPath, candidateCode, "utf-8");
+
+  try {
+    return await run();
+  } finally {
+    if (diskContext.existedOnDisk && diskContext.originalContent !== null) {
+      await writeFile(diskContext.targetPath, diskContext.originalContent, "utf-8");
+    } else {
+      await unlink(diskContext.targetPath).catch(() => undefined);
+    }
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -299,6 +363,7 @@ export async function runAutoforgeIAL(
   let currentCode = code;
   let finalScore: PDSEScore | null = null;
   const totalStartTime = Date.now();
+  const diskContext = await createDiskEvaluationContext(context, projectRoot);
 
   // D4: Use hardCeiling from BladeAutoforgeConfig if available
   const bladeConfig = config as Partial<BladeAutoforgeConfig>;
@@ -323,7 +388,7 @@ export async function runAutoforgeIAL(
       totalPhases: maxIter,
       percentComplete: Math.floor(((iteration - 1) / maxIter) * 100),
       pdseScore: lastPdseScore,
-      estimatedCostUsd: 0,
+      estimatedCostUsd: getEstimatedRouterCost(router),
       currentTask: `Running iteration ${iteration}...`,
       silentMode: bladeConfig.silentMode ?? false,
     });
@@ -394,7 +459,9 @@ export async function runAutoforgeIAL(
     // ---------- Step 2: Run GStack Commands ----------
     let gstackResults: GStackResult[] = [];
     if (config.gstackCommands.length > 0) {
-      gstackResults = await runGStack(currentCode, config.gstackCommands, projectRoot);
+      gstackResults = await withCandidateCodeApplied(currentCode, diskContext, async () =>
+        runGStack(currentCode, config.gstackCommands, projectRoot),
+      );
     }
 
     // ---------- Step 3: Run PDSE Scorer ----------
@@ -414,7 +481,7 @@ export async function runAutoforgeIAL(
       totalPhases: maxIter,
       percentComplete: Math.floor((iteration / maxIter) * 100),
       pdseScore: score.overall,
-      estimatedCostUsd: 0,
+      estimatedCostUsd: getEstimatedRouterCost(router),
       currentTask: `PDSE scored: ${score.overall}/100`,
       silentMode: bladeConfig.silentMode ?? false,
     });

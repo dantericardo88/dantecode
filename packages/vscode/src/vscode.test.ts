@@ -196,6 +196,101 @@ vi.mock("vscode", () => {
 
 // Mock DanteCode packages
 vi.mock("@dantecode/core", () => ({
+  DEFAULT_MODEL_ID: "grok/grok-3",
+  MODEL_CATALOG: [
+    {
+      id: "grok/grok-3",
+      provider: "grok",
+      modelId: "grok-3",
+      label: "Grok 3",
+      groupLabel: "xAI / Grok",
+      supportTier: "tier1",
+      defaultSelected: true,
+    },
+    {
+      id: "anthropic/claude-sonnet-4-6",
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      label: "Claude Sonnet 4.6",
+      groupLabel: "Anthropic",
+      supportTier: "tier1",
+    },
+    {
+      id: "ollama/llama3.1:8b",
+      provider: "ollama",
+      modelId: "llama3.1:8b",
+      label: "Llama 3.1 8B (local)",
+      groupLabel: "Local (Ollama)",
+      supportTier: "tier1",
+    },
+  ],
+  getProviderCatalogEntry: vi.fn((providerId: string) => {
+    const providers: Record<
+      string,
+      {
+        id: string;
+        label: string;
+        docsUrl?: string;
+        envVars: string[];
+        requiresApiKey: boolean;
+        supportTier: "tier1" | "advanced";
+      }
+    > = {
+      grok: {
+        id: "grok",
+        label: "xAI / Grok",
+        docsUrl: "https://console.x.ai/",
+        envVars: ["XAI_API_KEY", "GROK_API_KEY"],
+        requiresApiKey: true,
+        supportTier: "tier1",
+      },
+      anthropic: {
+        id: "anthropic",
+        label: "Anthropic",
+        docsUrl: "https://console.anthropic.com/",
+        envVars: ["ANTHROPIC_API_KEY"],
+        requiresApiKey: true,
+        supportTier: "tier1",
+      },
+      openai: {
+        id: "openai",
+        label: "OpenAI",
+        docsUrl: "https://platform.openai.com/api-keys",
+        envVars: ["OPENAI_API_KEY"],
+        requiresApiKey: true,
+        supportTier: "tier1",
+      },
+      google: {
+        id: "google",
+        label: "Google AI",
+        docsUrl: "https://aistudio.google.com/apikey",
+        envVars: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        requiresApiKey: true,
+        supportTier: "tier1",
+      },
+      ollama: {
+        id: "ollama",
+        label: "Local (Ollama)",
+        docsUrl: "https://ollama.com/",
+        envVars: ["OLLAMA_BASE_URL"],
+        requiresApiKey: false,
+        supportTier: "tier1",
+      },
+    };
+    return providers[providerId];
+  }),
+  groupCatalogModels: vi.fn((models: Array<{ groupLabel: string }>) => {
+    const grouped = new Map<string, Array<{ groupLabel: string }>>();
+    for (const model of models) {
+      const existing = grouped.get(model.groupLabel) ?? [];
+      existing.push(model);
+      grouped.set(model.groupLabel, existing);
+    }
+    return Array.from(grouped.entries()).map(([groupLabel, groupedModels]) => ({
+      groupLabel,
+      models: groupedModels,
+    }));
+  }),
   readOrInitializeState: vi.fn().mockResolvedValue({
     autoforge: { gstackCommands: [] },
   }),
@@ -949,7 +1044,7 @@ describe("VS Code Extension", () => {
         mockGlobalState,
       );
       // Default from mock: getConfiguration().get("defaultModel", "grok/grok-4-1-fast-non-reasoning") → returns the defaultValue
-      expect(provider.getCurrentModel()).toBe("grok/grok-4-1-fast-non-reasoning");
+      expect(provider.getCurrentModel()).toBe("grok/grok-3");
     });
 
     it("addFileToContext does not throw", () => {
@@ -1359,7 +1454,12 @@ describe("executeTool integration", () => {
     expect(generateColoredHunk).toHaveBeenCalledWith("", "hello world", "src/app.ts");
     expect(onDiffHunk).toHaveBeenCalledTimes(1);
     expect(onDiffHunk).toHaveBeenCalledWith(
-      expect.objectContaining({ filePath: "test.ts", linesAdded: 1 }),
+      expect.objectContaining({
+        filePath: "src/app.ts",
+        newContent: "hello world",
+        oldContent: "",
+        hunk: expect.objectContaining({ filePath: "test.ts", linesAdded: 1 }),
+      }),
     );
   });
 

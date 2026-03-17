@@ -2,7 +2,13 @@
 // @dantecode/core — Model Router Implementation
 // ============================================================================
 
-import { generateText, streamText, type CoreMessage, type StreamTextResult, type CoreTool } from "ai";
+import {
+  generateText,
+  streamText,
+  type CoreMessage,
+  type StreamTextResult,
+  type CoreTool,
+} from "ai";
 import type {
   ModelConfig,
   ModelRouterConfig,
@@ -219,7 +225,9 @@ export class ModelRouterImpl {
     // Guard: if the model doesn't support tool calls, throw so the caller
     // can fall back to the XML-parsing path
     if (!modelConfig.supportsToolCalls) {
-      throw new Error(`Model ${modelConfig.provider}/${modelConfig.modelId} does not support native tool calling`);
+      throw new Error(
+        `Model ${modelConfig.provider}/${modelConfig.modelId} does not support native tool calling`,
+      );
     }
 
     const fallbacks = this.routerConfig.fallback;
@@ -234,7 +242,12 @@ export class ModelRouterImpl {
     for (const fallbackConfig of fallbacks) {
       if (!fallbackConfig.supportsToolCalls) continue;
       this.logEntry(fallbackConfig, "fallback", 0);
-      const fallbackResult = await this.tryStreamWithTools(fallbackConfig, messages, tools, options);
+      const fallbackResult = await this.tryStreamWithTools(
+        fallbackConfig,
+        messages,
+        tools,
+        options,
+      );
       if (fallbackResult.success) {
         return fallbackResult.stream;
       }
@@ -519,14 +532,38 @@ export class ModelRouterImpl {
 
     // Lexical complexity: presence of high-complexity keywords
     const complexKeywords = [
-      "refactor", "architect", "redesign", "migrate", "optimize",
-      "debug", "investigate", "security", "vulnerability", "performance",
-      "concurrent", "parallel", "distributed", "transaction", "rollback",
-      "implement", "integration", "pipeline", "orchestrat",
+      "refactor",
+      "architect",
+      "redesign",
+      "migrate",
+      "optimize",
+      "debug",
+      "investigate",
+      "security",
+      "vulnerability",
+      "performance",
+      "concurrent",
+      "parallel",
+      "distributed",
+      "transaction",
+      "rollback",
+      "implement",
+      "integration",
+      "pipeline",
+      "orchestrat",
     ];
     const simpleKeywords = [
-      "read", "list", "show", "what is", "explain", "print",
-      "rename", "typo", "comment", "log", "hello",
+      "read",
+      "list",
+      "show",
+      "what is",
+      "explain",
+      "print",
+      "rename",
+      "typo",
+      "comment",
+      "log",
+      "hello",
     ];
 
     const complexHits = complexKeywords.filter((kw) => lower.includes(kw)).length;
@@ -535,7 +572,8 @@ export class ModelRouterImpl {
     score -= Math.min(simpleHits * 0.1, 0.3);
 
     // Semantic depth: multi-step instructions (numbered lists, "then", "after that")
-    const stepIndicators = (lower.match(/\b(then|next|after that|step \d|finally|\d+\.)\b/g) || []).length;
+    const stepIndicators = (lower.match(/\b(then|next|after that|step \d|finally|\d+\.)\b/g) || [])
+      .length;
     score += Math.min(stepIndicators * 0.08, 0.25);
 
     // Scope factor: long prompts tend to be more complex
@@ -561,9 +599,7 @@ export class ModelRouterImpl {
     this._firstTurnCompleted = true;
 
     // Strategy 1: explicit [COMPLEXITY: X.X] annotation from model response
-    const explicitMatch = responseText.match(
-      /\[COMPLEXITY:\s*(0(?:\.\d+)?|1(?:\.0)?)\]/i,
-    );
+    const explicitMatch = responseText.match(/\[COMPLEXITY:\s*(0(?:\.\d+)?|1(?:\.0)?)\]/i);
     if (explicitMatch) {
       const score = parseFloat(explicitMatch[1]!);
       if (!isNaN(score) && score >= 0 && score <= 1) {
@@ -578,14 +614,32 @@ export class ModelRouterImpl {
     const lower = analyzeText.toLowerCase();
 
     const indicators = {
-      fileRefs: (analyzeText.match(/\b[\w\-./]+\.(ts|tsx|js|jsx|py|rs|go|java|rb|yaml|json)\b/g) || []).length,
+      fileRefs: (
+        analyzeText.match(/\b[\w\-./]+\.(ts|tsx|js|jsx|py|rs|go|java|rb|yaml|json)\b/g) || []
+      ).length,
       techKeywords: [
-        "refactor", "migrate", "auth", "database", "api", "deploy", "security",
-        "integrate", "architect", "redesign", "optimize", "concurrent", "parallel",
-        "distributed", "transaction", "pipeline",
+        "refactor",
+        "migrate",
+        "auth",
+        "database",
+        "api",
+        "deploy",
+        "security",
+        "integrate",
+        "architect",
+        "redesign",
+        "optimize",
+        "concurrent",
+        "parallel",
+        "distributed",
+        "transaction",
+        "pipeline",
       ].filter((kw) => lower.includes(kw)).length,
-      scopeWords: (lower.match(/\b(all|every|across|entire|each|whole|throughout)\b/g) || []).length,
-      conditionals: (lower.match(/\b(edge case|handle error|fallback|retry|unless|except)\b/g) || []).length,
+      scopeWords: (lower.match(/\b(all|every|across|entire|each|whole|throughout)\b/g) || [])
+        .length,
+      conditionals: (
+        lower.match(/\b(edge case|handle error|fallback|retry|unless|except)\b/g) || []
+      ).length,
       wordCount: analyzeText.split(/\s+/).filter(Boolean).length,
     };
 

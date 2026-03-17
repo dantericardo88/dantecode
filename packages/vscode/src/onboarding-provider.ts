@@ -5,6 +5,12 @@
 // ============================================================================
 
 import * as vscode from "vscode";
+import {
+  DEFAULT_MODEL_ID,
+  MODEL_CATALOG,
+  getProviderCatalogEntry,
+  groupCatalogModels,
+} from "@dantecode/core";
 
 /** Provider model entry for the onboarding UI. */
 export interface ModelEntry {
@@ -13,6 +19,20 @@ export interface ModelEntry {
   provider: string;
   envVar: string;
 }
+
+export interface ApiProviderEntry {
+  id: string;
+  label: string;
+  envVar: string;
+  placeholder: string;
+}
+
+const PROVIDER_PLACEHOLDERS: Record<string, string> = {
+  grok: "xai-...",
+  anthropic: "sk-ant-...",
+  openai: "sk-...",
+  google: "AIza...",
+};
 
 /** The canonical list of frontier models DanteCode supports. */
 export const FRONTIER_MODELS: ModelEntry[] = [
@@ -110,12 +130,24 @@ export const FRONTIER_MODELS: ModelEntry[] = [
 ];
 
 /** Unique provider groups that need API keys. */
-export const API_PROVIDERS = [
-  { id: "grok", label: "xAI / Grok", envVar: "XAI_API_KEY", placeholder: "xai-..." },
-  { id: "anthropic", label: "Anthropic", envVar: "ANTHROPIC_API_KEY", placeholder: "sk-ant-..." },
-  { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY", placeholder: "sk-..." },
-  { id: "google", label: "Google AI", envVar: "GOOGLE_API_KEY", placeholder: "AIza..." },
-] as const;
+export const API_PROVIDERS: ApiProviderEntry[] = Array.from(
+  new Set(
+    MODEL_CATALOG.filter((entry) => entry.supportTier === "tier1").map((entry) => entry.provider),
+  ),
+).reduce<ApiProviderEntry[]>((providers, provider) => {
+  const metadata = getProviderCatalogEntry(provider);
+  if (!metadata || !metadata.requiresApiKey || metadata.supportTier !== "tier1") {
+    return providers;
+  }
+
+  providers.push({
+    id: metadata.id,
+    label: metadata.label,
+    envVar: metadata.envVars[0] ?? "",
+    placeholder: PROVIDER_PLACEHOLDERS[metadata.id] ?? "",
+  });
+  return providers;
+}, []);
 
 /**
  * Manages the onboarding webview panel. Shows on first run or when
@@ -200,7 +232,7 @@ export class OnboardingProvider {
     this.panel?.webview.postMessage({
       type: "save_result",
       success: true,
-      message: `Saved ${savedCount} API key(s). Default model: ${defaultModel || "grok/grok-4.2"}`,
+      message: `Saved ${savedCount} API key(s). Default model: ${defaultModel || DEFAULT_MODEL_ID}`,
     });
 
     void vscode.window.showInformationMessage(
@@ -441,34 +473,7 @@ export class OnboardingProvider {
   <h2>Default Model</h2>
   <div class="model-section">
     <select id="default-model">
-      <optgroup label="xAI / Grok">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "grok")
-          .map(
-            (m) =>
-              `<option value="${m.id}"${m.id === "grok/grok-4.2" ? " selected" : ""}>${m.label}</option>`,
-          )
-          .join("")}
-      </optgroup>
-      <optgroup label="Anthropic">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "anthropic")
-          .map((m) => `<option value="${m.id}">${m.label}</option>`)
-          .join("")}
-      </optgroup>
-      <optgroup label="OpenAI">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "openai")
-          .map((m) => `<option value="${m.id}">${m.label}</option>`)
-          .join("")}
-      </optgroup>
-      <optgroup label="Google">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "google")
-          .map((m) => `<option value="${m.id}">${m.label}</option>`)
-          .join("")}
-      </optgroup>
-      <optgroup label="Local (Ollama)">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "ollama")
-          .map((m) => `<option value="${m.id}">${m.label}</option>`)
-          .join("")}
-      </optgroup>
+      ${renderDefaultModelOptionGroups()}
     </select>
   </div>
 
@@ -582,4 +587,30 @@ function getNonce(): string {
 function maskKey(key: string): string {
   if (key.length <= 8) return "***";
   return key.slice(0, 4) + "***" + key.slice(-4);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderDefaultModelOptionGroups(): string {
+  const tierOneModels = MODEL_CATALOG.filter((entry) => entry.supportTier === "tier1");
+
+  return groupCatalogModels(tierOneModels)
+    .map(({ groupLabel, models }) => {
+      const options = models
+        .map((model) => {
+          const selected = model.id === DEFAULT_MODEL_ID ? " selected" : "";
+          return `<option value="${escapeHtml(model.id)}"${selected}>${escapeHtml(model.label)}</option>`;
+        })
+        .join("");
+
+      return `<optgroup label="${escapeHtml(groupLabel)}">${options}</optgroup>`;
+    })
+    .join("");
 }
