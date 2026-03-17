@@ -972,11 +972,11 @@ describe("VS Code Extension", () => {
       } as unknown as vscode.ExtensionContext;
     }
 
-    it("activate registers all 12 commands", () => {
+    it("activate registers all 13 commands", () => {
       const context = createMockContext();
       activate(context);
 
-      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(12);
+      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(13);
     });
 
     it("activate registers webview view providers", () => {

@@ -17,30 +17,95 @@ export interface ModelEntry {
 /** The canonical list of frontier models DanteCode supports. */
 export const FRONTIER_MODELS: ModelEntry[] = [
   // xAI / Grok (verified model IDs from docs.x.ai/developers/models)
-  { id: "grok/grok-4.20-beta-0309-non-reasoning", label: "Grok 4.20 Beta", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4.20-beta-0309-reasoning", label: "Grok 4.20 Beta (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4.20-multi-agent-beta-0309", label: "Grok 4.20 Multi-Agent", provider: "grok", envVar: "XAI_API_KEY" },
+  {
+    id: "grok/grok-4.20-beta-0309-non-reasoning",
+    label: "Grok 4.20 Beta",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
+  {
+    id: "grok/grok-4.20-beta-0309-reasoning",
+    label: "Grok 4.20 Beta (Reasoning)",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
+  {
+    id: "grok/grok-4.20-multi-agent-beta-0309",
+    label: "Grok 4.20 Multi-Agent",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
   { id: "grok/grok-4-0709", label: "Grok 4", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4-1-fast-reasoning", label: "Grok 4.1 Fast (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4-1-fast-non-reasoning", label: "Grok 4.1 Fast", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4-fast-reasoning", label: "Grok 4 Fast (Reasoning)", provider: "grok", envVar: "XAI_API_KEY" },
-  { id: "grok/grok-4-fast-non-reasoning", label: "Grok 4 Fast", provider: "grok", envVar: "XAI_API_KEY" },
+  {
+    id: "grok/grok-4-1-fast-reasoning",
+    label: "Grok 4.1 Fast (Reasoning)",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
+  {
+    id: "grok/grok-4-1-fast-non-reasoning",
+    label: "Grok 4.1 Fast",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
+  {
+    id: "grok/grok-4-fast-reasoning",
+    label: "Grok 4 Fast (Reasoning)",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
+  {
+    id: "grok/grok-4-fast-non-reasoning",
+    label: "Grok 4 Fast",
+    provider: "grok",
+    envVar: "XAI_API_KEY",
+  },
   { id: "grok/grok-code-fast-1", label: "Grok Code Fast", provider: "grok", envVar: "XAI_API_KEY" },
   { id: "grok/grok-3", label: "Grok 3", provider: "grok", envVar: "XAI_API_KEY" },
   { id: "grok/grok-3-mini", label: "Grok 3 Mini", provider: "grok", envVar: "XAI_API_KEY" },
   // Anthropic
-  { id: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
-  { id: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
-  { id: "anthropic/claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic", envVar: "ANTHROPIC_API_KEY" },
+  {
+    id: "anthropic/claude-opus-4-6",
+    label: "Claude Opus 4.6",
+    provider: "anthropic",
+    envVar: "ANTHROPIC_API_KEY",
+  },
+  {
+    id: "anthropic/claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6",
+    provider: "anthropic",
+    envVar: "ANTHROPIC_API_KEY",
+  },
+  {
+    id: "anthropic/claude-haiku-4-5",
+    label: "Claude Haiku 4.5",
+    provider: "anthropic",
+    envVar: "ANTHROPIC_API_KEY",
+  },
   // OpenAI
   { id: "openai/gpt-4.1", label: "GPT-4.1", provider: "openai", envVar: "OPENAI_API_KEY" },
   { id: "openai/o3-pro", label: "o3-pro", provider: "openai", envVar: "OPENAI_API_KEY" },
   // Google
-  { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "google", envVar: "GOOGLE_API_KEY" },
-  { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "google", envVar: "GOOGLE_API_KEY" },
+  {
+    id: "google/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+    provider: "google",
+    envVar: "GOOGLE_API_KEY",
+  },
+  {
+    id: "google/gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+    provider: "google",
+    envVar: "GOOGLE_API_KEY",
+  },
   // Local — Ollama (auto-discovered at runtime, these are common defaults)
   { id: "ollama/llama3.1:8b", label: "Llama 3.1 8B (local)", provider: "ollama", envVar: "" },
-  { id: "ollama/qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B (local)", provider: "ollama", envVar: "" },
+  {
+    id: "ollama/qwen2.5-coder:7b",
+    label: "Qwen 2.5 Coder 7B (local)",
+    provider: "ollama",
+    envVar: "",
+  },
   { id: "ollama/mistral:7b", label: "Mistral 7B (local)", provider: "ollama", envVar: "" },
 ];
 
@@ -93,11 +158,7 @@ export class OnboardingProvider {
     // Detect Ollama
     const ollamaStatus = await detectOllama();
 
-    this.panel.webview.html = this.getHtml(
-      this.panel.webview,
-      existingKeys,
-      ollamaStatus,
-    );
+    this.panel.webview.html = this.getHtml(this.panel.webview, existingKeys, ollamaStatus);
 
     this.panel.webview.onDidReceiveMessage(async (msg) => {
       if (msg.type === "save_keys") {
@@ -117,10 +178,7 @@ export class OnboardingProvider {
   }
 
   /** Save API keys to SecretStorage and set the default model. */
-  private async handleSaveKeys(
-    keys: Record<string, string>,
-    defaultModel: string,
-  ): Promise<void> {
+  private async handleSaveKeys(keys: Record<string, string>, defaultModel: string): Promise<void> {
     let savedCount = 0;
 
     for (const p of API_PROVIDERS) {
@@ -134,11 +192,7 @@ export class OnboardingProvider {
     // Set default model in VS Code settings
     if (defaultModel) {
       const config = vscode.workspace.getConfiguration("dantecode");
-      await config.update(
-        "defaultModel",
-        defaultModel,
-        vscode.ConfigurationTarget.Global,
-      );
+      await config.update("defaultModel", defaultModel, vscode.ConfigurationTarget.Global);
     }
 
     this.markOnboarded();
@@ -388,19 +442,32 @@ export class OnboardingProvider {
   <div class="model-section">
     <select id="default-model">
       <optgroup label="xAI / Grok">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "grok").map((m) => `<option value="${m.id}"${m.id === "grok/grok-4.2" ? " selected" : ""}>${m.label}</option>`).join("")}
+        ${FRONTIER_MODELS.filter((m) => m.provider === "grok")
+          .map(
+            (m) =>
+              `<option value="${m.id}"${m.id === "grok/grok-4.2" ? " selected" : ""}>${m.label}</option>`,
+          )
+          .join("")}
       </optgroup>
       <optgroup label="Anthropic">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "anthropic").map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+        ${FRONTIER_MODELS.filter((m) => m.provider === "anthropic")
+          .map((m) => `<option value="${m.id}">${m.label}</option>`)
+          .join("")}
       </optgroup>
       <optgroup label="OpenAI">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "openai").map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+        ${FRONTIER_MODELS.filter((m) => m.provider === "openai")
+          .map((m) => `<option value="${m.id}">${m.label}</option>`)
+          .join("")}
       </optgroup>
       <optgroup label="Google">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "google").map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+        ${FRONTIER_MODELS.filter((m) => m.provider === "google")
+          .map((m) => `<option value="${m.id}">${m.label}</option>`)
+          .join("")}
       </optgroup>
       <optgroup label="Local (Ollama)">
-        ${FRONTIER_MODELS.filter((m) => m.provider === "ollama").map((m) => `<option value="${m.id}">${m.label}</option>`).join("")}
+        ${FRONTIER_MODELS.filter((m) => m.provider === "ollama")
+          .map((m) => `<option value="${m.id}">${m.label}</option>`)
+          .join("")}
       </optgroup>
     </select>
   </div>

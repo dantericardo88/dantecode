@@ -115,5 +115,4 @@ function renderStatusBar(state: StatusBarState): void {
       item.color = new vscode.ThemeColor("statusBarItem.foreground");
       break;
   }
-
 }

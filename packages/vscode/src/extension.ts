@@ -34,11 +34,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const extensionUri = context.extensionUri;
 
   // ── Repo map tree ──
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
   if (projectRoot) {
     const treeProvider = new RepoMapTreeDataProvider(projectRoot);
-    const repoTree = vscode.window.createTreeView('dantecode.repoMap', {
-      treeDataProvider: treeProvider
+    const repoTree = vscode.window.createTreeView("dantecode.repoMap", {
+      treeDataProvider: treeProvider,
     });
     context.subscriptions.push(repoTree);
   }
@@ -70,18 +70,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Status bar ──
   statusBarState = createStatusBar(context);
-  updateStatusBar(statusBarState, 'grok/grok-3', 'none');
+  updateStatusBar(statusBarState, "grok/grok-3", "none");
 
   // ── Diagnostics ──
   diagnosticProvider = new PDSEDiagnosticProvider();
   context.subscriptions.push(diagnosticProvider);
 
   // ── Onboarding ──
-  onboardingProvider = new OnboardingProvider(
-    extensionUri,
-    context.secrets,
-    context,
-  );
+  onboardingProvider = new OnboardingProvider(extensionUri, context.secrets, context);
 
   // ── Commands ──
   registerCommands(context);
@@ -116,6 +112,7 @@ export function deactivate(): void {
 
 function registerCommands(context: vscode.ExtensionContext): void {
   const commands: Array<[string, (...args: unknown[]) => unknown]> = [
+    ["dantecode.selfUpdate", commandSelfUpdate],
     ["dantecode.openChat", commandOpenChat],
     ["dantecode.addFileToContext", commandAddFileToContext],
     ["dantecode.importClaudeSkills", commandImportClaudeSkills],
@@ -158,7 +155,9 @@ async function commandAddFileToContext(uri?: unknown): Promise<void> {
 
   if (chatSidebarProvider) {
     // Assume method exists post-sidebar fix
-    (chatSidebarProvider as unknown as { handleFileAdd: (filePath: string) => void }).handleFileAdd(filePath);  
+    (chatSidebarProvider as unknown as { handleFileAdd: (filePath: string) => void }).handleFileAdd(
+      filePath,
+    );
     void vscode.window.showInformationMessage(
       `DanteCode: Added ${path.basename(filePath)} to context`,
     );
@@ -181,27 +180,33 @@ async function commandImportClaudeSkills(): Promise<void> {
       cancellable: false,
     },
     async () => {
-      void vscode.window.showInformationMessage("DanteCode: Claude skills import stub - coming soon (uses @dantecode/skill-adapter)");
+      void vscode.window.showInformationMessage(
+        "DanteCode: Claude skills import stub - coming soon (uses @dantecode/skill-adapter)",
+      );
     },
   );
 }
 
 async function commandRunPDSE(): Promise<void> {
   if (diagnosticProvider) {
-    void vscode.window.showInformationMessage('DanteCode: PDSE diagnostics ready - trigger via sidebar/agent or CLI');
+    void vscode.window.showInformationMessage(
+      "DanteCode: PDSE diagnostics ready - trigger via sidebar/agent or CLI",
+    );
     void vscode.window.showInformationMessage("DanteCode: PDSE scoring started");
   }
 }
 
 async function commandRunGStack(): Promise<void> {
-  void vscode.window.showInformationMessage("DanteCode: GStack validation stub - integrates @dantecode/danteforge");
+  void vscode.window.showInformationMessage(
+    "DanteCode: GStack validation stub - integrates @dantecode/danteforge",
+  );
 }
 
 async function commandSwitchModel(): Promise<void> {
-  const models = ['grok/grok-3', 'anthropic/claude-3.5-sonnet', 'openai/gpt-4o'];
-  const selected = await vscode.window.showQuickPick(models, { placeHolder: 'Select model' });
+  const models = ["grok/grok-3", "anthropic/claude-3.5-sonnet", "openai/gpt-4o"];
+  const selected = await vscode.window.showQuickPick(models, { placeHolder: "Select model" });
   if (selected && statusBarState) {
-    updateStatusBar(statusBarState, selected, 'none');
+    updateStatusBar(statusBarState, selected, "none");
     void vscode.window.showInformationMessage(`DanteCode: Switched to ${selected}`);
   }
 }
@@ -210,25 +215,33 @@ async function commandToggleSandbox(): Promise<void> {
   if (statusBarState) {
     const enabled = statusBarState.sandboxEnabled;
     updateSandboxStatus(statusBarState, !enabled);
-    void vscode.window.showInformationMessage(`DanteCode: Sandbox ${!enabled ? 'enabled' : 'disabled'}`);
+    void vscode.window.showInformationMessage(
+      `DanteCode: Sandbox ${!enabled ? "enabled" : "disabled"}`,
+    );
   }
 }
 
 async function commandShowLessons(): Promise<void> {
-  void vscode.window.showInformationMessage("DanteCode: Lessons stub - queries @dantecode/danteforge lessons");
+  void vscode.window.showInformationMessage(
+    "DanteCode: Lessons stub - queries @dantecode/danteforge lessons",
+  );
 }
 
 async function commandInitProject(): Promise<void> {
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (projectRoot) {
-    void vscode.window.showInformationMessage(`DanteCode: Init stub for ${projectRoot} - runs dantecode init`);
+    void vscode.window.showInformationMessage(
+      `DanteCode: Init stub for ${projectRoot} - runs dantecode init`,
+    );
   } else {
     void vscode.window.showWarningMessage("DanteCode: Open workspace first");
   }
 }
 
 async function commandAcceptDiff(): Promise<void> {
-  void vscode.window.showInformationMessage("DanteCode: Accept diff stub - applies git-engine diff");
+  void vscode.window.showInformationMessage(
+    "DanteCode: Accept diff stub - applies git-engine diff",
+  );
 }
 
 async function commandRejectDiff(): Promise<void> {
@@ -237,4 +250,19 @@ async function commandRejectDiff(): Promise<void> {
 
 async function commandSetupApiKeys(): Promise<void> {
   void vscode.commands.executeCommand("workbench.action.openSettings", "dantecode");
+}
+
+async function commandSelfUpdate(): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+  const terminal = vscode.window.createTerminal({
+    name: "DanteCode Self-Update",
+    cwd: projectRoot,
+  });
+  terminal.sendText("npx dantecode self-update --verbose");
+  terminal.show();
+  void vscode.window.showInformationMessage("DanteCode: Self-update started in terminal");
 }

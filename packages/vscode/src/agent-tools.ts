@@ -424,6 +424,32 @@ async function grepDir(
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
+async function toolSelfUpdate(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  try {
+    // PDSE gate first
+    const gate = await toolBash({ command: "npm run release:check" }, projectRoot);
+    if (gate.isError) {
+      return { content: `SelfUpdate blocked: gates failed\n${gate.content}`, isError: true };
+    }
+
+    const dryRun = input["dryRun"] === true;
+    const cmd = dryRun
+      ? 'echo "[dry-run] Would: git pull && npm ci && npm run build && vsce package && code --install-extension *.vsix"'
+      : 'git pull origin main && npm ci && npm run build && cd packages/vscode && npx @vscode/vsce package && code --install-extension *.vsix --force && echo "Reload VS Code window!"';
+
+    const result = await toolBash({ command: cmd, timeout: 600000 }, projectRoot);
+    return {
+      content: `SelfUpdate ${dryRun ? "dry-run" : "complete"}:\n${result.content}`,
+      isError: result.isError,
+    };
+  } catch (err: unknown) {
+    return { content: `SelfUpdate error: ${String(err)}`, isError: true };
+  }
+}
+
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -444,6 +470,8 @@ export async function executeTool(
       return toolGlob(input, projectRoot);
     case "Grep":
       return toolGrep(input, projectRoot);
+    case "SelfUpdate":
+      return toolSelfUpdate(input, projectRoot);
     default:
       return { content: `Unknown tool: ${name}`, isError: true };
   }
@@ -537,6 +565,9 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 
 ### Grep — Search file contents with regex
   Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }
+
+### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)
+  Input: { "dryRun": true/false }
 
 ## CRITICAL: Tool Execution Rules
 - You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.

@@ -5,3 +5,4 @@ node_modules/
 !dist/**
 tsconfig.json
 .gitignore
+**/dist/**\n**/node_modules/**\npackages/**/coverage/**

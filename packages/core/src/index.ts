@@ -34,3 +34,7 @@ export {
   updateStateYaml,
   DanteCodeStateSchema,
 } from "./state.js";
+
+// ─── Multi-Agent ───────────────────────────────────────────────────────────────
+
+export { MultiAgent, type MultiAgentConfig } from "./multi-agent.js";

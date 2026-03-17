@@ -927,7 +927,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             const elapsed = toolTick * 3;
             this.postMessage({
               type: "chat_response_chunk",
-              payload: { chunk: `\n> _executing${".".repeat((toolTick % 3) + 1)} (${elapsed}s)_\n`, partial: "" },
+              payload: {
+                chunk: `\n> _executing${".".repeat((toolTick % 3) + 1)} (${elapsed}s)_\n`,
+                partial: "",
+              },
             });
           }, 3000); // pulse every 3 seconds
           let result: ToolResult;
