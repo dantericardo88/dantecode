@@ -1,6 +1,6 @@
 # TASKS.md - OSS v1 Execution Checklist
 
-**Date:** 2026-03-16
+**Date:** 2026-03-17
 
 ## Legend
 
@@ -36,8 +36,8 @@
 
 ## Phase 4 - External acceptance
 
-- [!] Set real git identity for public history
-- [!] Push to GitHub and verify first Actions run
+- [x] Set real git identity for public history
+- [x] Push to GitHub and verify first Actions run (CI green: all 8 jobs pass)
 - [!] Add `NPM_TOKEN`
 - [!] Add `VSCE_PAT`
 - [ ] Run `npm run smoke:provider -- --require-provider` with real credentials
@@ -59,7 +59,7 @@
 - [x] vitest.config: MCP package added to coverage gate
 - [x] Documentation: README features table, SPEC new packages, TASKS Phase 5, CHANGELOG
 - [ ] Runtime catalog: model + provider metadata for UI dropdowns
-- [ ] First GitHub push + CI green
+- [x] First GitHub push + CI green (all 8 jobs: format, typecheck, lint, test x3, windows-smoke, anti-stub)
 - [ ] Tag v1.0.0-beta.1
 
 ## Current local baseline
