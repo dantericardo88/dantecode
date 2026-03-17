@@ -643,7 +643,12 @@ export async function executeTool(
         hunk.truncated = true;
         hunk.lines = [
           ...hunk.lines.slice(0, MAX_HUNK_LINES),
-          { type: "context", content: `... ${omitted} more lines omitted ...`, oldLineNo: null, newLineNo: null },
+          {
+            type: "context",
+            content: `... ${omitted} more lines omitted ...`,
+            oldLineNo: null,
+            newLineNo: null,
+          },
         ];
       }
 

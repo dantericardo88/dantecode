@@ -3,20 +3,18 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  createMCPServer,
-  setToolHandlers,
-  EXPOSED_TOOL_NAMES,
-} from "./server.js";
+import { createMCPServer, setToolHandlers, EXPOSED_TOOL_NAMES } from "./server.js";
 
 // Mock the MCP SDK
 vi.mock("@modelcontextprotocol/sdk/server/index.js", () => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   return {
     Server: vi.fn().mockImplementation(() => ({
-      setRequestHandler: vi.fn((schema: { method: string }, handler: (...args: unknown[]) => unknown) => {
-        handlers.set(schema.method, handler);
-      }),
+      setRequestHandler: vi.fn(
+        (schema: { method: string }, handler: (...args: unknown[]) => unknown) => {
+          handlers.set(schema.method, handler);
+        },
+      ),
       connect: vi.fn(),
       close: vi.fn(),
       _handlers: handlers,
@@ -57,9 +55,11 @@ describe("MCP Server", () => {
 
     it("tools/list returns all DanteForge tools", async () => {
       const server = createMCPServer();
-      const handlers = (server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> })._handlers;
+      const handlers = (
+        server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> }
+      )._handlers;
       const listHandler = handlers.get("tools/list")!;
-      const result = await listHandler() as { tools: Array<{ name: string }> };
+      const result = (await listHandler()) as { tools: Array<{ name: string }> };
       const toolNames = result.tools.map((t) => t.name);
       expect(toolNames).toEqual(EXPOSED_TOOL_NAMES);
     });
@@ -69,12 +69,14 @@ describe("MCP Server", () => {
       setToolHandlers({ pdse_score: mockHandler });
 
       const server = createMCPServer();
-      const handlers = (server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> })._handlers;
+      const handlers = (
+        server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> }
+      )._handlers;
       const callHandler = handlers.get("tools/call")!;
 
-      const result = await callHandler({
+      const result = (await callHandler({
         params: { name: "pdse_score", arguments: { code: "const x = 1;" } },
-      }) as { content: Array<{ text: string }> };
+      })) as { content: Array<{ text: string }> };
 
       expect(mockHandler).toHaveBeenCalledWith({ code: "const x = 1;" });
       expect(result.content[0]!.text).toBe("score: 85");
@@ -82,12 +84,14 @@ describe("MCP Server", () => {
 
     it("tools/call returns error for unknown tool", async () => {
       const server = createMCPServer();
-      const handlers = (server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> })._handlers;
+      const handlers = (
+        server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> }
+      )._handlers;
       const callHandler = handlers.get("tools/call")!;
 
-      const result = await callHandler({
+      const result = (await callHandler({
         params: { name: "unknown_tool", arguments: {} },
-      }) as { content: Array<{ text: string }>; isError: boolean };
+      })) as { content: Array<{ text: string }>; isError: boolean };
 
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain("Unknown tool");
@@ -99,12 +103,14 @@ describe("MCP Server", () => {
       });
 
       const server = createMCPServer();
-      const handlers = (server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> })._handlers;
+      const handlers = (
+        server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> }
+      )._handlers;
       const callHandler = handlers.get("tools/call")!;
 
-      const result = await callHandler({
+      const result = (await callHandler({
         params: { name: "pdse_score", arguments: {} },
-      }) as { content: Array<{ text: string }>; isError: boolean };
+      })) as { content: Array<{ text: string }>; isError: boolean };
 
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain("scoring failed");

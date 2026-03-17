@@ -225,8 +225,7 @@ async function commandImportClaudeSkills(): Promise<void> {
         const result = await importSkills({ projectRoot, source: "claude" });
         if (token.isCancellationRequested) return;
         const names = result.imported.join(", ");
-        const detail =
-          result.imported.length > 0 ? ` (${names})` : "";
+        const detail = result.imported.length > 0 ? ` (${names})` : "";
         void vscode.window.showInformationMessage(
           `DanteCode: Imported ${result.imported.length} skill(s)${detail}, ${result.skipped.length} skipped`,
         );

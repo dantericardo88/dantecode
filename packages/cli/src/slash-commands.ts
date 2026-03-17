@@ -951,11 +951,7 @@ async function mcpCommand(_args: string, state: ReplState): Promise<string> {
 
   const servers = state.mcpClient.getConnectedServers();
   const tools = state.mcpClient.listTools();
-  const lines = [
-    "",
-    `${BOLD}MCP Servers${RESET} (${servers.length} connected)`,
-    "",
-  ];
+  const lines = ["", `${BOLD}MCP Servers${RESET} (${servers.length} connected)`, ""];
 
   for (const serverName of servers) {
     const serverTools = tools.filter((t) => t.serverName === serverName);
@@ -990,11 +986,15 @@ async function bgCommand(args: string, state: ReplState): Promise<string> {
     const lines = ["", `${BOLD}Background Tasks${RESET}`, ""];
     for (const task of tasks) {
       const icon =
-        task.status === "running" ? `${YELLOW}⟳${RESET}` :
-        task.status === "completed" ? `${GREEN}✓${RESET}` :
-        task.status === "failed" ? `${RED}✗${RESET}` :
-        task.status === "cancelled" ? `${DIM}⊘${RESET}` :
-        `${DIM}…${RESET}`;
+        task.status === "running"
+          ? `${YELLOW}⟳${RESET}`
+          : task.status === "completed"
+            ? `${GREEN}✓${RESET}`
+            : task.status === "failed"
+              ? `${RED}✗${RESET}`
+              : task.status === "cancelled"
+                ? `${DIM}⊘${RESET}`
+                : `${DIM}…${RESET}`;
       lines.push(`  ${icon} [${task.id}] ${task.status} — ${task.prompt.slice(0, 60)}`);
       lines.push(`    ${DIM}${task.progress}${RESET}`);
     }
@@ -1048,7 +1048,9 @@ async function searchCommand(args: string, state: ReplState): Promise<string> {
   if (!state._codeIndex) {
     state._codeIndex = new CodeIndex();
     // Try to load existing index
-    const loaded = await (state._codeIndex as InstanceType<typeof CodeIndex>).load(state.projectRoot);
+    const loaded = await (state._codeIndex as InstanceType<typeof CodeIndex>).load(
+      state.projectRoot,
+    );
     if (!loaded) {
       return `${YELLOW}No index found. Run /index first.${RESET}`;
     }

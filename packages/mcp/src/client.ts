@@ -39,10 +39,7 @@ export class MCPClientManager {
 
   /** Connect to a single MCP server. */
   private async connectOne(serverConfig: MCPServerConfig): Promise<void> {
-    const client = new Client(
-      { name: "dantecode", version: "1.0.0" },
-      { capabilities: {} },
-    );
+    const client = new Client({ name: "dantecode", version: "1.0.0" }, { capabilities: {} });
 
     let transport;
     if (serverConfig.transport === "stdio") {
@@ -114,10 +111,7 @@ export class MCPClientManager {
   }
 
   /** Call a tool by name, auto-routing to the correct server. */
-  async callToolByName(
-    toolName: string,
-    args: Record<string, unknown>,
-  ): Promise<string> {
+  async callToolByName(toolName: string, args: Record<string, unknown>): Promise<string> {
     const serverName = this.findToolServer(toolName);
     if (!serverName) {
       throw new Error(`No MCP server provides tool "${toolName}"`);

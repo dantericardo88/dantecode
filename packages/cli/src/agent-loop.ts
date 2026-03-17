@@ -610,9 +610,9 @@ export async function runAgentLoop(
         }
       } else if (useSandbox) {
         result = await config.sandboxBridge!.runInSandbox(
-            toolCall.input["command"] as string,
-            (toolCall.input["timeout"] as number | undefined) ?? 120000,
-          );
+          toolCall.input["command"] as string,
+          (toolCall.input["timeout"] as number | undefined) ?? 120000,
+        );
       } else {
         result = await executeTool(toolCall.name, toolCall.input, session.projectRoot, session.id);
       }

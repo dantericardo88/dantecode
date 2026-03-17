@@ -49,10 +49,9 @@ describe("SessionStore", () => {
   describe("save", () => {
     it("creates sessions directory and writes JSON", async () => {
       await store.save(sampleSession);
-      expect(mockMkdir).toHaveBeenCalledWith(
-        expect.stringContaining("sessions"),
-        { recursive: true },
-      );
+      expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining("sessions"), {
+        recursive: true,
+      });
       expect(mockWriteFile).toHaveBeenCalledWith(
         expect.stringContaining("session-123.json"),
         expect.any(String),
@@ -94,7 +93,9 @@ describe("SessionStore", () => {
         updatedAt: "2026-03-17T10:00:00Z",
       };
 
-      mockReaddir.mockResolvedValue(["old.json", "new.json"] as unknown as Awaited<ReturnType<typeof readdir>>);
+      mockReaddir.mockResolvedValue(["old.json", "new.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
       mockReadFile.mockImplementation((path) => {
         const p = path as string;
         if (p.includes("old.json")) return Promise.resolve(JSON.stringify(session1));
@@ -115,7 +116,9 @@ describe("SessionStore", () => {
     });
 
     it("skips corrupt files", async () => {
-      mockReaddir.mockResolvedValue(["good.json", "bad.json"] as unknown as Awaited<ReturnType<typeof readdir>>);
+      mockReaddir.mockResolvedValue(["good.json", "bad.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
       mockReadFile.mockImplementation((path) => {
         const p = path as string;
         if (p.includes("good.json")) return Promise.resolve(JSON.stringify(sampleSession));
@@ -127,7 +130,9 @@ describe("SessionStore", () => {
     });
 
     it("only reads .json files", async () => {
-      mockReaddir.mockResolvedValue(["session.json", "readme.md", ".gitkeep"] as unknown as Awaited<ReturnType<typeof readdir>>);
+      mockReaddir.mockResolvedValue(["session.json", "readme.md", ".gitkeep"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
       mockReadFile.mockResolvedValue(JSON.stringify(sampleSession));
       const list = await store.list();
       expect(list).toHaveLength(1);

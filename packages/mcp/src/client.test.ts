@@ -71,9 +71,7 @@ describe("MCPClientManager", () => {
 
     it("skips disabled servers", async () => {
       const config: MCPConfig = {
-        servers: [
-          { name: "off", transport: "stdio", command: "cmd", enabled: false },
-        ],
+        servers: [{ name: "off", transport: "stdio", command: "cmd", enabled: false }],
       };
       await manager.connectAll(config);
       expect(mockConnect).not.toHaveBeenCalled();
@@ -126,7 +124,10 @@ describe("MCPClientManager", () => {
       await manager.connectAll(config);
       const result = await manager.callTool("fs", "readFile", { path: "/tmp/test" });
       expect(result).toBe("file content here");
-      expect(mockCallTool).toHaveBeenCalledWith({ name: "readFile", arguments: { path: "/tmp/test" } });
+      expect(mockCallTool).toHaveBeenCalledWith({
+        name: "readFile",
+        arguments: { path: "/tmp/test" },
+      });
     });
 
     it("throws for disconnected server", async () => {

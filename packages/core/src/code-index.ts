@@ -47,11 +47,7 @@ function extractSymbols(code: string): string[] {
  * Split a file into chunks at function/class/interface boundaries.
  * Each chunk is 10-maxChunkLines lines.
  */
-export function chunkFile(
-  content: string,
-  filePath: string,
-  maxChunkLines: number,
-): CodeChunk[] {
+export function chunkFile(content: string, filePath: string, maxChunkLines: number): CodeChunk[] {
   if (content.trim().length === 0) return [];
   const lines = content.split("\n");
   if (lines.length === 0) return [];
@@ -191,15 +187,41 @@ interface SerializedIndex {
 
 /** File extensions to index. */
 const INDEXABLE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".rb", ".rs", ".go",
-  ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt",
-  ".vue", ".svelte", ".astro", ".md",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".rb",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".cs",
+  ".swift",
+  ".kt",
+  ".vue",
+  ".svelte",
+  ".astro",
+  ".md",
 ]);
 
 /** Default patterns to exclude from indexing. */
 const DEFAULT_EXCLUDE = [
-  "node_modules", "dist", "build", ".git", "coverage", ".turbo",
-  ".next", ".nuxt", "__pycache__", "target", "vendor",
+  "node_modules",
+  "dist",
+  "build",
+  ".git",
+  "coverage",
+  ".turbo",
+  ".next",
+  ".nuxt",
+  "__pycache__",
+  "target",
+  "vendor",
 ];
 
 /**
@@ -317,11 +339,7 @@ export class CodeIndex {
       idf: Object.fromEntries(this.idf),
     };
 
-    await writeFile(
-      join(dir, "index.json"),
-      JSON.stringify(serialized),
-      "utf-8",
-    );
+    await writeFile(join(dir, "index.json"), JSON.stringify(serialized), "utf-8");
   }
 
   /** Load a previously saved index. Returns true if loaded successfully. */

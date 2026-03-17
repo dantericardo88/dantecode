@@ -22,9 +22,7 @@ export interface ToolSchema {
  * These are Zod-schema versions of the JSON Schema definitions in tools.ts.
  * When mcpTools are provided, they are merged with native tools.
  */
-export function getAISDKTools(
-  mcpTools?: Record<string, ToolSchema>,
-): Record<string, ToolSchema> {
+export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<string, ToolSchema> {
   const nativeTools: Record<string, ToolSchema> = {
     Read: {
       description: "Read a file from disk. Returns content with line numbers.",

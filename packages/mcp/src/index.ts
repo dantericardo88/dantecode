@@ -6,7 +6,12 @@
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-export { loadMCPConfig, defaultMCPConfig, getEnabledServers, validateServerConfig } from "./config.js";
+export {
+  loadMCPConfig,
+  defaultMCPConfig,
+  getEnabledServers,
+  validateServerConfig,
+} from "./config.js";
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
@@ -14,11 +19,7 @@ export { MCPClientManager } from "./client.js";
 
 // ─── Tool Bridge ─────────────────────────────────────────────────────────────
 
-export {
-  mcpToolToZodSchema,
-  mcpToolsToAISDKTools,
-  parseMCPToolName,
-} from "./tool-bridge.js";
+export { mcpToolToZodSchema, mcpToolsToAISDKTools, parseMCPToolName } from "./tool-bridge.js";
 export type { BridgedToolSchema } from "./tool-bridge.js";
 
 // ─── Server ──────────────────────────────────────────────────────────────────

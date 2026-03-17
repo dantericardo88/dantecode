@@ -3,7 +3,12 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { loadMCPConfig, validateServerConfig, getEnabledServers, defaultMCPConfig } from "./config.js";
+import {
+  loadMCPConfig,
+  validateServerConfig,
+  getEnabledServers,
+  defaultMCPConfig,
+} from "./config.js";
 import type { MCPConfig } from "@dantecode/config-types";
 
 // Mock fs/promises
@@ -56,9 +61,9 @@ describe("MCP Config", () => {
     });
 
     it("rejects missing name", () => {
-      expect(
-        validateServerConfig({ transport: "stdio", command: "node", enabled: true }),
-      ).toBe(false);
+      expect(validateServerConfig({ transport: "stdio", command: "node", enabled: true })).toBe(
+        false,
+      );
     });
 
     it("rejects empty name", () => {
@@ -74,21 +79,17 @@ describe("MCP Config", () => {
     });
 
     it("rejects stdio without command", () => {
-      expect(
-        validateServerConfig({ name: "test", transport: "stdio", enabled: true }),
-      ).toBe(false);
+      expect(validateServerConfig({ name: "test", transport: "stdio", enabled: true })).toBe(false);
     });
 
     it("rejects sse without url", () => {
-      expect(
-        validateServerConfig({ name: "test", transport: "sse", enabled: true }),
-      ).toBe(false);
+      expect(validateServerConfig({ name: "test", transport: "sse", enabled: true })).toBe(false);
     });
 
     it("rejects missing enabled field", () => {
-      expect(
-        validateServerConfig({ name: "test", transport: "stdio", command: "node" }),
-      ).toBe(false);
+      expect(validateServerConfig({ name: "test", transport: "stdio", command: "node" })).toBe(
+        false,
+      );
     });
   });
 
@@ -125,10 +126,10 @@ describe("MCP Config", () => {
     });
 
     it("throws on invalid server entry", async () => {
-      mockReadFile.mockResolvedValue(
-        JSON.stringify({ servers: [{ name: "test" }] }),
+      mockReadFile.mockResolvedValue(JSON.stringify({ servers: [{ name: "test" }] }));
+      await expect(loadMCPConfig("/project")).rejects.toThrow(
+        "Invalid MCP server config at index 0",
       );
-      await expect(loadMCPConfig("/project")).rejects.toThrow("Invalid MCP server config at index 0");
     });
   });
 

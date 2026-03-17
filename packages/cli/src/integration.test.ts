@@ -139,11 +139,7 @@ describe("CLI Integration", () => {
       );
       await writeFile(
         join(tempDir, "src", "calc.ts"),
-        [
-          "export function add(a: number, b: number): number {",
-          "  return a + b;",
-          "}",
-        ].join("\n"),
+        ["export function add(a: number, b: number): number {", "  return a + b;", "}"].join("\n"),
         "utf-8",
       );
 
@@ -163,11 +159,7 @@ describe("CLI Integration", () => {
     });
 
     it("returns empty results for unrelated query", async () => {
-      await writeFile(
-        join(tempDir, "src", "app.ts"),
-        "export const version = '1.0.0';",
-        "utf-8",
-      );
+      await writeFile(join(tempDir, "src", "app.ts"), "export const version = '1.0.0';", "utf-8");
 
       const index = new CodeIndex();
       await index.buildIndex(tempDir);

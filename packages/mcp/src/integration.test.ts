@@ -11,11 +11,7 @@ import {
   getEnabledServers,
   defaultMCPConfig,
 } from "./config.js";
-import {
-  mcpToolToZodSchema,
-  mcpToolsToAISDKTools,
-  parseMCPToolName,
-} from "./tool-bridge.js";
+import { mcpToolToZodSchema, mcpToolsToAISDKTools, parseMCPToolName } from "./tool-bridge.js";
 import { EXPOSED_TOOL_NAMES, createMCPServer, setToolHandlers } from "./server.js";
 import type { MCPToolDefinition } from "@dantecode/config-types";
 
@@ -219,9 +215,7 @@ describe("MCP Integration", () => {
       ).toBe(true);
 
       // Invalid: missing command for stdio
-      expect(
-        validateServerConfig({ name: "test", transport: "stdio", enabled: true }),
-      ).toBe(false);
+      expect(validateServerConfig({ name: "test", transport: "stdio", enabled: true })).toBe(false);
 
       // Invalid: unknown transport
       expect(

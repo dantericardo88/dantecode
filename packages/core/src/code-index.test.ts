@@ -126,8 +126,10 @@ describe("Code Index", () => {
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
           if (d.includes("node_modules") || d.includes("dist")) return [];
-          if (d.endsWith("project")) return ["src", "package.json"] as unknown as Awaited<ReturnType<typeof readdir>>;
-          if (d.endsWith("src")) return ["main.ts", "utils.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src", "package.json"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("src"))
+            return ["main.ts", "utils.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
           return [];
         });
 
@@ -142,7 +144,8 @@ describe("Code Index", () => {
         mockReadFile.mockImplementation(async (path) => {
           const p = path as string;
           if (p.includes("main.ts")) return "export function main() {\n  console.log('hello');\n}";
-          if (p.includes("utils.ts")) return "export function add(a: number, b: number) {\n  return a + b;\n}";
+          if (p.includes("utils.ts"))
+            return "export function add(a: number, b: number) {\n  return a + b;\n}";
           return "";
         });
 
@@ -154,8 +157,10 @@ describe("Code Index", () => {
       it("skips excluded directories", async () => {
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
-          if (d.endsWith("project")) return ["src", "node_modules"] as unknown as Awaited<ReturnType<typeof readdir>>;
-          if (d.endsWith("src")) return ["app.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src", "node_modules"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("src"))
+            return ["app.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
           return ["hidden.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
         });
 
@@ -180,8 +185,10 @@ describe("Code Index", () => {
         // Manually build index with known content
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
-          if (d.endsWith("project")) return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
-          if (d.endsWith("src")) return ["auth.ts", "database.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("src"))
+            return ["auth.ts", "database.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
           return [];
         });
 
@@ -212,17 +219,24 @@ describe("Code Index", () => {
       it("returns empty for unrelated query", async () => {
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
-          if (d.endsWith("project")) return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
-          if (d.endsWith("src")) return ["math.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("src"))
+            return ["math.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
           return [];
         });
 
-        mockStat.mockImplementation(async () => ({
-          isFile: () => true,
-          isDirectory: () => false,
-        }) as Awaited<ReturnType<typeof stat>>);
+        mockStat.mockImplementation(
+          async () =>
+            ({
+              isFile: () => true,
+              isDirectory: () => false,
+            }) as Awaited<ReturnType<typeof stat>>,
+        );
 
-        mockReadFile.mockResolvedValue("export function add(a: number, b: number) { return a + b; }");
+        mockReadFile.mockResolvedValue(
+          "export function add(a: number, b: number) { return a + b; }",
+        );
 
         await index.buildIndex("/project");
         const results = index.search("xyzzy nonexistent gibberish");
@@ -237,16 +251,22 @@ describe("Code Index", () => {
       it("respects limit parameter", async () => {
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
-          if (d.endsWith("project")) return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
           if (d.endsWith("src"))
-            return ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+            return ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts"] as unknown as Awaited<
+              ReturnType<typeof readdir>
+            >;
           return [];
         });
 
-        mockStat.mockImplementation(async () => ({
-          isFile: () => true,
-          isDirectory: () => false,
-        }) as Awaited<ReturnType<typeof stat>>);
+        mockStat.mockImplementation(
+          async () =>
+            ({
+              isFile: () => true,
+              isDirectory: () => false,
+            }) as Awaited<ReturnType<typeof stat>>,
+        );
 
         mockReadFile.mockResolvedValue("export function test() { return 'hello'; }");
 
@@ -261,8 +281,10 @@ describe("Code Index", () => {
         // Build a small index
         mockReaddir.mockImplementation(async (dir) => {
           const d = dir as string;
-          if (d.endsWith("project")) return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
-          if (d.endsWith("src")) return ["main.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("project"))
+            return ["src"] as unknown as Awaited<ReturnType<typeof readdir>>;
+          if (d.endsWith("src"))
+            return ["main.ts"] as unknown as Awaited<ReturnType<typeof readdir>>;
           return [];
         });
 
@@ -279,7 +301,7 @@ describe("Code Index", () => {
           if (p.includes("main.ts")) return "export function main() { return 42; }";
           // For loading the saved index
           if (p.includes("index.json")) {
-            return mockWriteFile.mock.calls[0]?.[1] as string ?? "{}";
+            return (mockWriteFile.mock.calls[0]?.[1] as string) ?? "{}";
           }
           return "";
         });

@@ -45,7 +45,11 @@ export async function loadMCPConfig(projectRoot: string): Promise<MCPConfig> {
     throw new Error(`Invalid JSON in ${configPath}`);
   }
 
-  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { servers?: unknown }).servers)) {
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray((parsed as { servers?: unknown }).servers)
+  ) {
     throw new Error(`Invalid MCP config: expected { servers: [...] } in ${configPath}`);
   }
 
