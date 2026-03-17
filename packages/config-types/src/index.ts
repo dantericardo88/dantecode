@@ -489,6 +489,8 @@ export interface RoutingContext {
   filesInScope: number;
   /** User manually forced Tier 2 for the session. */
   forceCapable: boolean;
+  /** Prompt complexity score (0–1) from analyzeComplexity(). Higher = more complex. */
+  promptComplexity?: number;
 }
 
 /** Live cost estimate for the current session. */

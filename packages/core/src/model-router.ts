@@ -412,14 +412,65 @@ export class ModelRouterImpl {
   // --------------------------------------------------------------------------
 
   /**
+   * Analyzes prompt complexity on a 0–1 scale using lexical signals.
+   * Harvested from Ruflo's cost-aware routing pattern — keyword-based
+   * complexity scoring with semantic depth and scope factors.
+   */
+  analyzeComplexity(prompt: string): number {
+    const lower = prompt.toLowerCase();
+    let score = 0;
+
+    // Lexical complexity: presence of high-complexity keywords
+    const complexKeywords = [
+      "refactor", "architect", "redesign", "migrate", "optimize",
+      "debug", "investigate", "security", "vulnerability", "performance",
+      "concurrent", "parallel", "distributed", "transaction", "rollback",
+      "implement", "integration", "pipeline", "orchestrat",
+    ];
+    const simpleKeywords = [
+      "read", "list", "show", "what is", "explain", "print",
+      "rename", "typo", "comment", "log", "hello",
+    ];
+
+    const complexHits = complexKeywords.filter((kw) => lower.includes(kw)).length;
+    const simpleHits = simpleKeywords.filter((kw) => lower.includes(kw)).length;
+    score += Math.min(complexHits * 0.12, 0.5);
+    score -= Math.min(simpleHits * 0.1, 0.3);
+
+    // Semantic depth: multi-step instructions (numbered lists, "then", "after that")
+    const stepIndicators = (lower.match(/\b(then|next|after that|step \d|finally|\d+\.)\b/g) || []).length;
+    score += Math.min(stepIndicators * 0.08, 0.25);
+
+    // Scope factor: long prompts tend to be more complex
+    const wordCount = prompt.split(/\s+/).length;
+    if (wordCount > 200) score += 0.15;
+    else if (wordCount > 100) score += 0.08;
+    else if (wordCount > 50) score += 0.04;
+
+    // Code presence: prompts with code blocks are usually harder
+    const codeBlocks = (prompt.match(/```/g) || []).length / 2;
+    score += Math.min(codeBlocks * 0.06, 0.15);
+
+    return Math.max(0, Math.min(1, score));
+  }
+
+  /**
    * Selects the appropriate model tier based on routing context.
    * Tier escalation is one-way within a session — once "capable" is selected,
    * it remains "capable" for all subsequent requests.
+   *
+   * Enhanced with Ruflo-style complexity scoring: if the prompt complexity
+   * exceeds the threshold (0.4), the tier is escalated to "capable".
    */
   selectTier(context: RoutingContext): "fast" | "capable" {
+    // Complexity-aware routing (Ruflo pattern): analyze prompt complexity
+    const complexityThreshold = 0.4;
+    const complexity = context.promptComplexity ?? 0;
+
     if (
       this._currentTier === "capable" ||
       context.forceCapable ||
+      complexity >= complexityThreshold ||
       context.estimatedInputTokens > 2000 ||
       context.taskType === "autoforge" ||
       context.consecutiveGstackFailures >= 2 ||

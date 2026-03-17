@@ -39,6 +39,8 @@ export interface AgentLoopConfig {
   verbose: boolean;
   enableGit: boolean;
   enableSandbox: boolean;
+  /** Silent mode (Ruflo pattern): suppress per-tool output, show only compact progress. */
+  silent?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -351,6 +353,39 @@ function compactMessages(
 }
 
 // ----------------------------------------------------------------------------
+// Pre-Tool Safety Hooks (Ruflo/ccswarm pattern)
+// ----------------------------------------------------------------------------
+
+/** Dangerous Bash command patterns that should be blocked. */
+const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/\s*$/m, reason: "recursive delete of root filesystem" },
+  { pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r?\s+\/\s*$/m, reason: "forced delete of root filesystem" },
+  { pattern: /\brm\s+-rf\s+\/(?:\s|$)/m, reason: "rm -rf / — catastrophic filesystem delete" },
+  { pattern: /\brm\s+-rf\s+~\s*$/m, reason: "rm -rf ~ — delete entire home directory" },
+  { pattern: /\bgit\s+push\s+--force\s+(origin\s+)?(main|master)\b/, reason: "force push to main/master" },
+  { pattern: /\bgit\s+reset\s+--hard\s+origin\/(main|master)\b/, reason: "hard reset to remote main/master" },
+  { pattern: /:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;?\s*:/, reason: "fork bomb detected" },
+  { pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/, reason: "disk overwrite with dd" },
+  { pattern: /\bmkfs\b/, reason: "filesystem format command" },
+  { pattern: /\bchmod\s+-R\s+777\s+\/\s*$/, reason: "chmod 777 on root filesystem" },
+  { pattern: /\bcurl\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
+  { pattern: /\bwget\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
+];
+
+/**
+ * Pre-tool safety hook: checks Bash commands for dangerous patterns.
+ * Returns null if safe, or a blocking reason string if dangerous.
+ */
+function checkBashSafety(command: string): string | null {
+  for (const { pattern, reason } of DANGEROUS_BASH_PATTERNS) {
+    if (pattern.test(command)) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------------------------
 // Main Agent Loop
 // ----------------------------------------------------------------------------
 
@@ -432,7 +467,9 @@ export async function runAgentLoop(
     // Generate response from model
     let responseText: string;
     try {
-      process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET} ${DIM}(thinking...)${RESET}\n\n`);
+      if (!config.silent) {
+        process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET} ${DIM}(thinking...)${RESET}\n\n`);
+      }
 
       responseText = await router.generate(messages, {
         system: systemPrompt,
@@ -457,8 +494,8 @@ export async function runAgentLoop(
     // Extract tool calls from the response
     const { cleanText, toolCalls } = extractToolCalls(responseText);
 
-    // Display the assistant's text response
-    if (cleanText.length > 0) {
+    // Display the assistant's text response (suppressed in silent mode)
+    if (cleanText.length > 0 && !config.silent) {
       process.stdout.write(`${cleanText}\n`);
     }
 
@@ -501,9 +538,29 @@ export async function runAgentLoop(
         break;
       }
 
-      process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
+      // Pre-tool safety hook (Ruflo/ccswarm pattern): block dangerous Bash commands
+      if (toolCall.name === "Bash") {
+        const bashCmd = toolCall.input["command"] as string | undefined;
+        if (bashCmd) {
+          const blockReason = checkBashSafety(bashCmd);
+          if (blockReason) {
+            process.stdout.write(
+              `\n${RED}${BOLD}BLOCKED:${RESET} ${RED}${blockReason}${RESET}\n${DIM}Command: ${bashCmd.slice(0, 100)}${RESET}\n`,
+            );
+            toolResults.push(
+              `SAFETY HOOK: Bash command blocked — ${blockReason}. Use a safer approach.`,
+            );
+            continue;
+          }
+        }
+      }
 
-      if (config.verbose) {
+      // Silent mode (Ruflo pattern): suppress per-tool output when silent
+      if (!config.silent) {
+        process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
+      }
+
+      if (config.verbose && !config.silent) {
         process.stdout.write(`${DIM}${JSON.stringify(toolCall.input).slice(0, 200)}${RESET}\n`);
       }
 
@@ -577,15 +634,17 @@ export async function runAgentLoop(
         }
       }
 
-      // Show result summary
-      if (result.isError) {
-        process.stdout.write(`${RED}error${RESET}\n`);
-        if (config.verbose) {
-          process.stdout.write(`${DIM}${result.content.slice(0, 300)}${RESET}\n`);
+      // Show result summary (suppressed in silent mode)
+      if (!config.silent) {
+        if (result.isError) {
+          process.stdout.write(`${RED}error${RESET}\n`);
+          if (config.verbose) {
+            process.stdout.write(`${DIM}${result.content.slice(0, 300)}${RESET}\n`);
+          }
+        } else {
+          const preview = result.content.split("\n")[0] || "(success)";
+          process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
         }
-      } else {
-        const preview = result.content.split("\n")[0] || "(success)";
-        process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
       }
 
       toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
