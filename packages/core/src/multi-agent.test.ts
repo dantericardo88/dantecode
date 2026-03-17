@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { MultiAgent } from "./multi-agent.js";
+import { MultiAgent, type MultiAgentProgressCallback } from "./multi-agent.js";
 import { ModelRouterImpl } from "./model-router.js";
 import type { DanteCodeState } from "@dantecode/config-types";
 
@@ -101,5 +101,120 @@ describe("MultiAgent", () => {
     const score = agentAny.computeCompositePdse(outputs);
     // avg=80, reviewer=100 => 80*0.7 + 100*0.3 = 86
     expect(score).toBe(86);
+  });
+
+  // ---------- Integration Tests ----------
+
+  it("full happy-path: coordinate() with 3-lane delegation produces PDSE and outputs", async () => {
+    // Delegation: orchestrator returns 3 lanes
+    mockGenerate.mockResolvedValueOnce(
+      '{"planner":"Break task into steps","coder":"Implement login form","reviewer":"Review code quality"}',
+    );
+    // Planner lane output (rich content → high heuristic PDSE)
+    mockGenerate.mockResolvedValueOnce(
+      "1. Create LoginForm component\n2. Add validation\n3. Run tests\n\n```ts\nexport async function login() { await fetch('/api/auth'); }\nexport interface LoginConfig { type: string; }\n```",
+    );
+    // Coder lane output
+    mockGenerate.mockResolvedValueOnce(
+      "```ts\nexport async function handleLogin(email: string) {\n  await validateInput(email);\n  const result = await fetch('/api/auth');\n  return result;\n}\nexport interface AuthResult { type: string; token: string; }\n```",
+    );
+    // Reviewer lane output
+    mockGenerate.mockResolvedValueOnce(
+      "Code review: All functions complete. Export types present.\n```ts\nexport async function test() { await vi.fn()(); expect(true).toBe(true); }\nexport interface Review { type: string; }\n```",
+    );
+
+    const result = await agent.coordinate("Implement login");
+
+    expect(result.plan).toHaveProperty("planner");
+    expect(result.plan).toHaveProperty("coder");
+    expect(result.plan).toHaveProperty("reviewer");
+    expect(result.outputs).toHaveLength(3);
+    expect(result.outputs.every((o) => o.pdseScore > 0)).toBe(true);
+    expect(result.compositePdse).toBeGreaterThan(0);
+    expect(result.iterations).toBe(1);
+  });
+
+  it("iterates with feedback when composite PDSE is below threshold", async () => {
+    const highThresholdState = {
+      ...mockState,
+      pdse: { ...mockState.pdse, threshold: 95 },
+    } as unknown as DanteCodeState;
+    const strictAgent = new MultiAgent(mockRouter, highThresholdState);
+
+    // All iterations return stub content → low heuristic PDSE (< 95)
+    mockGenerate.mockResolvedValue("stub");
+
+    const result = await strictAgent.coordinate("Build something");
+
+    expect(result.iterations).toBe(3); // Hit iteration limit
+    expect(result.compositePdse).toBeLessThan(95);
+  });
+
+  it("handles agent lane failure gracefully via onProgress", async () => {
+    // Delegation: 2 lanes
+    mockGenerate.mockResolvedValueOnce('{"planner":"plan it","coder":"code it"}');
+    // Planner succeeds
+    mockGenerate.mockResolvedValueOnce(
+      "Plan: step 1, step 2\n```ts\nexport async function plan() { await work(); }\n```",
+    );
+    // Coder throws
+    mockGenerate.mockRejectedValueOnce(new Error("model timeout"));
+    // Fallback for potential re-iterations
+    mockGenerate.mockResolvedValue('{"orchestrator":"try again"}');
+
+    const progressUpdates: Array<{ lane: string; status: string }> = [];
+    const onProgress: MultiAgentProgressCallback = (update) => {
+      progressUpdates.push({ lane: update.lane, status: update.status });
+    };
+
+    const result = await agent.coordinate("Test task", {}, onProgress);
+
+    const failedUpdates = progressUpdates.filter((u) => u.status === "failed");
+    expect(failedUpdates.length).toBeGreaterThanOrEqual(1);
+    expect(failedUpdates.some((u) => u.lane === "coder")).toBe(true);
+
+    // Planner should still have produced output
+    const plannerStarted = progressUpdates.find(
+      (u) => u.lane === "planner" && u.status === "started",
+    );
+    expect(plannerStarted).toBeDefined();
+  });
+
+  it("onProgress reports started → completed for successful lanes", async () => {
+    mockGenerate.mockResolvedValueOnce('{"coder":"implement feature"}');
+    mockGenerate.mockResolvedValueOnce(
+      "```ts\nexport async function feature() { await doWork(); }\nexport interface Config { type: string; }\n```",
+    );
+
+    const progressUpdates: Array<{ lane: string; status: string; pdseScore?: number }> = [];
+    const onProgress: MultiAgentProgressCallback = (update) => {
+      progressUpdates.push({ lane: update.lane, status: update.status, pdseScore: update.pdseScore });
+    };
+
+    await agent.coordinate("Implement feature", {}, onProgress);
+
+    const coderStarted = progressUpdates.find(
+      (u) => u.lane === "coder" && u.status === "started",
+    );
+    const coderCompleted = progressUpdates.find(
+      (u) => u.lane === "coder" && u.status === "completed",
+    );
+    expect(coderStarted).toBeDefined();
+    expect(coderCompleted).toBeDefined();
+    expect(coderCompleted!.pdseScore).toBeGreaterThan(0);
+  });
+
+  it("falls back to defaultLane when delegation returns non-JSON", async () => {
+    // Orchestrator returns gibberish → falls back to defaultLane
+    mockGenerate.mockResolvedValueOnce("I will plan this task carefully...");
+    // DefaultLane (orchestrator) execution
+    mockGenerate.mockResolvedValueOnce(
+      "```ts\nexport async function work() { await process(); }\nexport interface Result { type: string; }\n```",
+    );
+
+    const result = await agent.coordinate("Do something");
+
+    expect(result.outputs.length).toBeGreaterThanOrEqual(1);
+    expect(result.outputs[0]!.lane).toBe("orchestrator");
   });
 });

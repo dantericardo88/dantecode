@@ -8,14 +8,11 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ModelRouterImpl } from "@dantecode/core";
-import {
-  runAntiStubScanner,
-  runLocalPDSEScorer,
-  runConstitutionCheck,
-} from "@dantecode/danteforge";
+import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
 import type { Session, SessionMessage, DanteCodeState } from "@dantecode/config-types";
 import { getStatus, autoCommit } from "@dantecode/git-engine";
 import { executeTool, getToolDefinitions } from "./tools.js";
+import { normalizeAndCheckBash } from "./safety.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -188,121 +185,6 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
   return { cleanText: cleanText.trim(), toolCalls };
 }
 
-// ----------------------------------------------------------------------------
-// DanteForge Pipeline
-// ----------------------------------------------------------------------------
-
-/**
- * Runs the DanteForge quality pipeline on generated code.
- * Steps: anti-stub scan -> constitution check -> PDSE score
- * Returns a summary of results.
- */
-async function runDanteForge(
-  code: string,
-  filePath: string,
-  projectRoot: string,
-  verbose: boolean,
-): Promise<{ passed: boolean; summary: string }> {
-  const summaryLines: string[] = [];
-  let passed = true;
-
-  // Step 1: Anti-stub scan
-  const antiStub = runAntiStubScanner(code, projectRoot, filePath);
-  if (!antiStub.passed) {
-    passed = false;
-    summaryLines.push(
-      `${RED}Anti-stub scan: FAILED${RESET} (${antiStub.hardViolations.length} hard violations)`,
-    );
-    if (verbose) {
-      for (const v of antiStub.hardViolations.slice(0, 5) as Array<{
-        line?: number;
-        message: string;
-      }>) {
-        summaryLines.push(`  ${DIM}Line ${v.line ?? "?"}: ${v.message}${RESET}`);
-      }
-    }
-  } else {
-    summaryLines.push(`${GREEN}Anti-stub scan: PASSED${RESET}`);
-  }
-
-  // Step 2: Constitution check
-  const constitution = runConstitutionCheck(code, filePath);
-  const criticalViolations = constitution.violations.filter((v) => v.severity === "critical");
-  if (criticalViolations.length > 0) {
-    passed = false;
-    summaryLines.push(
-      `${RED}Constitution check: FAILED${RESET} (${criticalViolations.length} critical violations)`,
-    );
-    if (verbose) {
-      for (const v of criticalViolations.slice(0, 5) as Array<{ line?: number; message: string }>) {
-        summaryLines.push(`  ${DIM}Line ${v.line ?? "?"}: ${v.message}${RESET}`);
-      }
-    }
-  } else {
-    const warnings = constitution.violations.filter((v) => v.severity === "warning");
-    if (warnings.length > 0) {
-      summaryLines.push(
-        `${YELLOW}Constitution check: PASSED with ${warnings.length} warning(s)${RESET}`,
-      );
-    } else {
-      summaryLines.push(`${GREEN}Constitution check: PASSED${RESET}`);
-    }
-  }
-
-  // Step 3: PDSE local score (model-based scoring deferred for speed)
-  const pdse = runLocalPDSEScorer(code, projectRoot);
-  if (!pdse.passedGate) {
-    passed = false;
-    summaryLines.push(`${RED}PDSE score: ${pdse.overall}/100 (BELOW threshold)${RESET}`);
-  } else {
-    summaryLines.push(`${GREEN}PDSE score: ${pdse.overall}/100${RESET}`);
-  }
-
-  if (verbose) {
-    summaryLines.push(
-      `  ${DIM}Completeness: ${pdse.completeness} | Correctness: ${pdse.correctness} | Clarity: ${pdse.clarity} | Consistency: ${pdse.consistency}${RESET}`,
-    );
-  }
-
-  return { passed, summary: summaryLines.join("\n") };
-}
-
-// ----------------------------------------------------------------------------
-// Track Written Files for DanteForge
-// ----------------------------------------------------------------------------
-
-/**
- * Checks if a tool call writes code to a file and returns the file path.
- */
-function getWrittenFilePath(toolName: string, toolInput: Record<string, unknown>): string | null {
-  if (toolName === "Write" || toolName === "Edit") {
-    const filePath = toolInput["file_path"] as string | undefined;
-    if (filePath) {
-      // Only run DanteForge on code files
-      const codeExtensions = [
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".mjs",
-        ".cjs",
-        ".py",
-        ".rb",
-        ".rs",
-        ".go",
-        ".java",
-        ".c",
-        ".cpp",
-        ".h",
-      ];
-      const ext = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
-      if (codeExtensions.includes(ext)) {
-        return filePath;
-      }
-    }
-  }
-  return null;
-}
 
 // ----------------------------------------------------------------------------
 // Reflection Loop Helpers
@@ -362,93 +244,6 @@ function compactMessages(
   ];
 }
 
-// ----------------------------------------------------------------------------
-// Pre-Tool Safety Hooks (Ruflo/ccswarm pattern)
-// ----------------------------------------------------------------------------
-
-/** Dangerous Bash command patterns that should be blocked. */
-const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  // Filesystem destruction
-  { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/\s*$/m, reason: "recursive delete of root filesystem" },
-  { pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r?\s+\/\s*$/m, reason: "forced delete of root filesystem" },
-  { pattern: /\brm\s+-rf\s+\/(?:\s|$)/m, reason: "rm -rf / — catastrophic filesystem delete" },
-  { pattern: /\brm\s+-rf\s+~\s*$/m, reason: "rm -rf ~ — delete entire home directory" },
-  // Git destructive operations
-  { pattern: /\bgit\s+push\s+--force\s+(origin\s+)?(main|master)\b/, reason: "force push to main/master" },
-  { pattern: /\bgit\s+reset\s+--hard\s+origin\/(main|master)\b/, reason: "hard reset to remote main/master" },
-  // System attacks
-  { pattern: /:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;?\s*:/, reason: "fork bomb detected" },
-  { pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/, reason: "disk overwrite with dd" },
-  { pattern: /\bmkfs\b/, reason: "filesystem format command" },
-  { pattern: /\bchmod\s+-R\s+777\s+\/\s*$/, reason: "chmod 777 on root filesystem" },
-  // Pipe-to-shell
-  { pattern: /\bcurl\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
-  { pattern: /\bwget\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
-  // find with destructive actions
-  { pattern: /\bfind\s+\/\s+.*-delete\b/, reason: "find with -delete on root filesystem" },
-  { pattern: /\bfind\s+\/\s+.*-exec\s+rm\b/, reason: "find with -exec rm on root filesystem" },
-  { pattern: /\bfind\s+~\s+.*-delete\b/, reason: "find with -delete on home directory" },
-  // Scripting language destructive commands
-  { pattern: /\bpython[23]?\s+(-c\s+)?.*shutil\.rmtree\s*\(/, reason: "Python shutil.rmtree — recursive delete" },
-  { pattern: /\bnode\s+(-e\s+)?.*fs\.(rmSync|rmdirSync)\s*\(/, reason: "Node.js destructive fs operation" },
-  // Env exfiltration
-  { pattern: /\benv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "environment variable exfiltration via network" },
-  { pattern: /\bprintenv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "printenv piped to network tool" },
-  { pattern: /\bcat\s+.*\.env\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: ".env file exfiltration via network" },
-  // Privilege escalation
-  { pattern: /\bchown\s+-R\s+root\b/, reason: "recursive chown to root" },
-  { pattern: /\bchmod\s+[ugo]*\+s\b/, reason: "setuid/setgid bit modification" },
-  // Block device redirect
-  { pattern: />\s*\/dev\/sd[a-z]\b/, reason: "redirect to block device" },
-  { pattern: /\bshred\s+/, reason: "shred command — secure file destruction" },
-];
-
-/**
- * Pre-tool safety hook: checks Bash commands for dangerous patterns.
- * Returns null if safe, or a blocking reason string if dangerous.
- */
-function checkBashSafety(command: string): string | null {
-  for (const { pattern, reason } of DANGEROUS_BASH_PATTERNS) {
-    if (pattern.test(command)) {
-      return reason;
-    }
-  }
-  return null;
-}
-
-/**
- * Semantic safety layer: normalizes a command and checks for compound
- * patterns that individual regex checks might miss.
- *
- * Handles command chaining (;, &&, ||), backslash-escaped commands (\rm),
- * base64-encoded payloads, and eval with variable expansion.
- */
-function normalizeAndCheckBash(command: string): string | null {
-  // Expand backslash-escaped command names (\rm -> rm)
-  const normalized = command.replace(/\\([a-zA-Z])/g, "$1");
-
-  // Split on command chain operators and check each segment
-  const segments = normalized.split(/\s*(?:;|&&|\|\|)\s*/);
-  for (const segment of segments) {
-    const trimmed = segment.trim();
-    if (!trimmed) continue;
-    const blockReason = checkBashSafety(trimmed);
-    if (blockReason) return blockReason;
-  }
-
-  // Check for base64-encoded payloads piped to shell
-  if (/\b(base64\s+-d|echo\s+[A-Za-z0-9+/=]{20,})\s*\|\s*(ba)?sh\b/.test(normalized)) {
-    return "base64-encoded payload piped to shell";
-  }
-
-  // Check for eval with variable expansion
-  if (/\beval\s+.*\$\{?[A-Z_]/.test(normalized)) {
-    return "eval with environment variable expansion";
-  }
-
-  // Check the full normalized command against patterns
-  return checkBashSafety(normalized);
-}
 
 // ----------------------------------------------------------------------------
 // Main Agent Loop
@@ -545,7 +340,7 @@ export async function runAgentLoop(
 
       // Model-assisted complexity scoring: extract on first response
       if (!router.getModelRatedComplexity()) {
-        const modelScore = router.extractModelComplexityRating(responseText);
+        const modelScore = router.extractModelComplexityRating(responseText, prompt);
         if (config.verbose && modelScore !== null) {
           process.stdout.write(
             `${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`,

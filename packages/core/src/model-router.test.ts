@@ -664,12 +664,33 @@ describe("extractModelComplexityRating", () => {
     expect(score).toBe(1.0);
   });
 
-  it("returns heuristic score when no explicit tag found", () => {
+  it("returns heuristic score based on user prompt complexity", () => {
     const score = router.extractModelComplexityRating(
-      "1. Read the file\n2. Edit the function\n3. Run tests\nThis is tricky because of edge cases.",
+      "Here is my response.",
+      "Refactor the entire auth module across all files and handle every edge case with database transactions",
+    );
+    expect(score).toBeGreaterThan(0.5);
+    expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it("falls back to response-based heuristic when no userPrompt", () => {
+    const score = router.extractModelComplexityRating(
+      "I need to refactor the auth module across all services and handle edge cases with database transactions",
     );
     expect(score).toBeGreaterThan(0.3);
     expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it("scores complex prompt higher than simple prompt", () => {
+    const router1 = new ModelRouterImpl(routerConfig, "/test", "s1");
+    const router2 = new ModelRouterImpl(routerConfig, "/test", "s2");
+
+    const simple = router1.extractModelComplexityRating("ok", "rename this variable");
+    const complex = router2.extractModelComplexityRating("ok",
+      "Refactor the entire database migration pipeline across all services, handle edge cases with retry logic and parallel transaction rollback",
+    );
+
+    expect(complex!).toBeGreaterThan(simple!);
   });
 
   it("caches result and returns same value on second call", () => {
@@ -679,9 +700,9 @@ describe("extractModelComplexityRating", () => {
     expect(second).toBe(0.6);
   });
 
-  it("returns baseline heuristic on empty response", () => {
-    const score = router.extractModelComplexityRating("");
-    expect(score).toBeGreaterThanOrEqual(0);
+  it("returns baseline heuristic on empty response and prompt", () => {
+    const score = router.extractModelComplexityRating("", "");
+    expect(score).toBeGreaterThanOrEqual(0.3);
     expect(score).toBeLessThanOrEqual(1);
   });
 

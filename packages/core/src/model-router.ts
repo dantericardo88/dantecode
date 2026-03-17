@@ -462,11 +462,11 @@ export class ModelRouterImpl {
    * Looks for a [COMPLEXITY: X.X] tag, falls back to heuristic inference.
    * Non-blocking: returns cached value after first call.
    */
-  extractModelComplexityRating(responseText: string): number | null {
+  extractModelComplexityRating(responseText: string, userPrompt?: string): number | null {
     if (this._firstTurnCompleted) return this._modelRatedComplexity;
     this._firstTurnCompleted = true;
 
-    // Strategy 1: explicit [COMPLEXITY: X.X] annotation
+    // Strategy 1: explicit [COMPLEXITY: X.X] annotation from model response
     const explicitMatch = responseText.match(
       /\[COMPLEXITY:\s*(0(?:\.\d+)?|1(?:\.0)?)\]/i,
     );
@@ -478,21 +478,31 @@ export class ModelRouterImpl {
       }
     }
 
-    // Strategy 2: heuristic inference from response structure
+    // Strategy 2: heuristic inference from user prompt (task complexity)
+    // Falls back to response text if no user prompt provided
+    const analyzeText = userPrompt ?? responseText;
+    const lower = analyzeText.toLowerCase();
+
     const indicators = {
-      stepCount: (responseText.match(/^\s*\d+\./gm) || []).length,
-      fileRefs: (responseText.match(/\b[\w-]+\.(ts|tsx|js|py|rs|go)\b/g) || []).length,
-      codeBlocks: (responseText.match(/```/g) || []).length / 2,
-      warningWords: (responseText.match(
-        /\b(careful|tricky|complex|subtle|edge case|race condition)\b/gi,
-      ) || []).length,
+      fileRefs: (analyzeText.match(/\b[\w\-./]+\.(ts|tsx|js|jsx|py|rs|go|java|rb|yaml|json)\b/g) || []).length,
+      techKeywords: [
+        "refactor", "migrate", "auth", "database", "api", "deploy", "security",
+        "integrate", "architect", "redesign", "optimize", "concurrent", "parallel",
+        "distributed", "transaction", "pipeline",
+      ].filter((kw) => lower.includes(kw)).length,
+      scopeWords: (lower.match(/\b(all|every|across|entire|each|whole|throughout)\b/g) || []).length,
+      conditionals: (lower.match(/\b(edge case|handle error|fallback|retry|unless|except)\b/g) || []).length,
+      wordCount: analyzeText.split(/\s+/).filter(Boolean).length,
     };
 
     let inferred = 0.3;
-    inferred += Math.min(indicators.stepCount * 0.05, 0.2);
-    inferred += Math.min(indicators.fileRefs * 0.03, 0.15);
-    inferred += Math.min(indicators.codeBlocks * 0.04, 0.15);
-    inferred += Math.min(indicators.warningWords * 0.06, 0.2);
+    inferred += Math.min(indicators.fileRefs * 0.04, 0.2);
+    inferred += Math.min(indicators.techKeywords * 0.08, 0.3);
+    inferred += Math.min(indicators.scopeWords * 0.06, 0.15);
+    inferred += Math.min(indicators.conditionals * 0.04, 0.15);
+    if (indicators.wordCount > 200) inferred += 0.15;
+    else if (indicators.wordCount > 100) inferred += 0.08;
+    else if (indicators.wordCount > 50) inferred += 0.04;
 
     this._modelRatedComplexity = Math.min(1, inferred);
     return this._modelRatedComplexity;

@@ -8,6 +8,12 @@ import { execSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import { appendAuditEvent } from "@dantecode/core";
 import type { TodoItem, TodoStatus } from "@dantecode/config-types";
+import {
+  sandboxCheckCommand,
+  sandboxCheckPath,
+  checkWriteSafety,
+  checkContentForSecrets,
+} from "./safety.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -661,130 +667,6 @@ async function toolTodoWrite(
     content: `Updated ${formattedTodos.length} to-do items:\n${display}`,
     isError: false,
   };
-}
-
-// ----------------------------------------------------------------------------
-// Main Dispatcher
-// ----------------------------------------------------------------------------
-
-// ----------------------------------------------------------------------------
-// Sandbox Guard
-// ----------------------------------------------------------------------------
-
-/** Dangerous command patterns blocked when sandbox mode is active. */
-const SANDBOX_BLOCKED_PATTERNS = [
-  /\brm\s+-rf\s+\//,
-  /\bsudo\b/,
-  /\bchmod\b.*\b777\b/,
-  /\bcurl\b.*\|\s*(?:bash|sh)\b/,
-  /\bwget\b.*\|\s*(?:bash|sh)\b/,
-  /\bdd\s+if=/,
-  /\bmkfs\b/,
-  /\b:>\s*\//,
-  /\bnpm\s+publish\b/,
-  /\bgit\s+push\b/,
-];
-
-/**
- * Returns an error if the command is blocked by sandbox mode, or null if allowed.
- */
-function sandboxCheckCommand(command: string, sandboxEnabled: boolean): ToolResult | null {
-  if (!sandboxEnabled) return null;
-  for (const pattern of SANDBOX_BLOCKED_PATTERNS) {
-    if (pattern.test(command)) {
-      return {
-        content: `Sandbox: command blocked (matches restricted pattern). Disable sandbox to run: ${command}`,
-        isError: true,
-      };
-    }
-  }
-  return null;
-}
-
-/**
- * Returns an error if the file path escapes the project root while sandbox is active.
- */
-function sandboxCheckPath(
-  filePath: string,
-  projectRoot: string,
-  sandboxEnabled: boolean,
-): ToolResult | null {
-  if (!sandboxEnabled) return null;
-  const resolved = resolve(projectRoot, filePath);
-  if (!resolved.startsWith(projectRoot)) {
-    return {
-      content: `Sandbox: write blocked — path escapes project root: ${resolved}`,
-      isError: true,
-    };
-  }
-  return null;
-}
-
-// ----------------------------------------------------------------------------
-// Write/Edit Safety Hooks
-// ----------------------------------------------------------------------------
-
-/** File paths that should never be written to by the agent. */
-const PROTECTED_FILE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  // System directories
-  { pattern: /^\/etc\//, reason: "system configuration directory /etc/" },
-  { pattern: /^\/usr\//, reason: "system directory /usr/" },
-  { pattern: /^\/boot\//, reason: "boot partition" },
-  { pattern: /^\/sys\//, reason: "kernel virtual filesystem /sys/" },
-  { pattern: /^\/proc\//, reason: "process filesystem /proc/" },
-  { pattern: /^C:\\Windows\\/i, reason: "Windows system directory" },
-  { pattern: /^C:\\Program Files/i, reason: "Windows Program Files" },
-  // Secret/credential files
-  { pattern: /\.env$/, reason: ".env file (may contain secrets)" },
-  { pattern: /\.env\.local$/, reason: ".env.local file (may contain secrets)" },
-  { pattern: /\.env\.production$/, reason: ".env.production file (may contain secrets)" },
-  { pattern: /credentials\.json$/i, reason: "credentials file" },
-  { pattern: /\.pem$/, reason: "PEM certificate/key file" },
-  { pattern: /\.key$/, reason: "private key file" },
-  { pattern: /id_rsa/, reason: "SSH private key" },
-  { pattern: /id_ed25519/, reason: "SSH private key" },
-  // SSH/config
-  { pattern: /\.ssh\//, reason: "SSH directory" },
-  { pattern: /\.gnupg\//, reason: "GPG directory" },
-  { pattern: /\.aws\/credentials/, reason: "AWS credentials" },
-  { pattern: /\.kube\/config/, reason: "Kubernetes config" },
-  // Audit tampering protection
-  { pattern: /\.dantecode\/audit\//, reason: "audit log (tamper protection)" },
-];
-
-/**
- * Pre-tool safety hook for Write/Edit operations.
- * Blocks writes to system files, secret files, and audit logs.
- */
-function checkWriteSafety(filePath: string): string | null {
-  for (const { pattern, reason } of PROTECTED_FILE_PATTERNS) {
-    if (pattern.test(filePath)) {
-      return `Write blocked: ${reason}`;
-    }
-  }
-  return null;
-}
-
-/**
- * Checks if file content being written appears to contain hardcoded secrets.
- */
-function checkContentForSecrets(content: string): string | null {
-  const secretPatterns: Array<{ pattern: RegExp; reason: string }> = [
-    { pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/, reason: "Private key detected in content" },
-    { pattern: /AKIA[0-9A-Z]{16}/, reason: "AWS access key ID detected" },
-    { pattern: /ghp_[A-Za-z0-9]{36}/, reason: "GitHub personal access token detected" },
-    { pattern: /gho_[A-Za-z0-9]{36}/, reason: "GitHub OAuth token detected" },
-    { pattern: /xai-[A-Za-z0-9]{20,}/, reason: "xAI/Grok API key detected" },
-    { pattern: /sk-[A-Za-z0-9]{20,}/, reason: "OpenAI-style API key detected" },
-    { pattern: /sk-ant-[A-Za-z0-9-]{20,}/, reason: "Anthropic API key detected" },
-  ];
-
-  for (const { pattern, reason } of secretPatterns) {
-    if (pattern.test(content)) {
-      return reason;
-    }
-  }
-  return null;
 }
 
 // ----------------------------------------------------------------------------
