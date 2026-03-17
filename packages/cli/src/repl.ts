@@ -154,6 +154,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     lastEditFile: null,
     lastEditContent: null,
     recentToolCalls: [],
+    pendingAgentPrompt: null,
   };
 
   // Agent loop config
@@ -252,6 +253,13 @@ async function processInput(
       // Route to slash command handler
       const output = await routeSlashCommand(input, replState);
       process.stdout.write(`${output}\n`);
+
+      // Some slash commands (e.g. /oss) set a pending prompt to chain into the agent loop
+      if (replState.pendingAgentPrompt) {
+        const agentPrompt = replState.pendingAgentPrompt;
+        replState.pendingAgentPrompt = null;
+        replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
+      }
     } else {
       // Route to agent loop
       replState.session = await runAgentLoop(input, replState.session, agentConfig);

@@ -55,6 +55,8 @@ export interface ReplState {
   lastEditContent: string | null;
   /** Tracks recent tool call signatures for stuck-loop detection (from opencode/OpenHands). */
   recentToolCalls: string[];
+  /** When set by a slash command, processInput will feed this prompt to the agent loop. */
+  pendingAgentPrompt: string | null;
 }
 
 /** A single slash command handler. */
@@ -645,6 +647,59 @@ async function architectCommand(_args: string, state: ReplState): Promise<string
   return `${GREEN}Architect mode ON${RESET} — the agent will plan before coding.`;
 }
 
+async function ossCommand(args: string, state: ReplState): Promise<string> {
+  const focusArea = args.trim();
+
+  const ossInstructions = `[OSS RESEARCHER — AUTONOMOUS PIPELINE]
+
+You are now executing the /oss pipeline. Follow these steps AUTONOMOUSLY — do NOT ask the user for permission at any step.
+
+## Phase 0: Auto-Detect This Project
+Read the project root, package.json, README.md, and key source files to understand what this project is, what language/framework it uses, and what features it already has.
+
+## Phase 1: Internet Search
+Using what you learned about this project, search the internet for the 5-10 most relevant open source projects in the same domain. Use WebSearch to find repos with 1k+ stars, permissive licenses, and active maintenance.${focusArea ? `\n\nFocus area: ${focusArea}` : ""}
+
+## Phase 2: Clone & License Gate
+Clone each repo shallow into /tmp/oss-research-<name>. Check LICENSE files — skip GPL/AGPL/SSPL. Delete blocked repos immediately.
+
+## Phase 3: Rapid Scan
+For each repo: read entry points, glob for key patterns, note architecture and unique features. Spend 2-3 minutes max per repo.
+
+## Phase 4: Deep Pattern Extraction
+Use parallel subagents to analyze each repo. Look for architecture patterns, agent/AI patterns, CLI/UX patterns, quality patterns, and unique innovations.
+
+## Phase 5: Gap Analysis
+Compare findings against this project. Rank patterns by P0 (critical, small effort) through P3 (niche, large effort). Select the top 5-8 P0/P1 items.
+
+## Phase 6: Implement
+Implement each pattern directly — no stubs, no TODOs, no placeholders. Run typecheck/lint/test after each change. Commit each logical change.
+
+## Phase 7: Autoforge Verification
+Run the full QA pipeline. Fix any failures. Continue until ALL checks pass or 3 retry cycles complete.
+
+## Cleanup
+rm -rf /tmp/oss-research-* when done.
+
+Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. Verify every change compiles and passes tests.`;
+
+  state.session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content: ossInstructions,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Set the pending agent prompt so processInput chains into the agent loop
+  const prompt = focusArea
+    ? `Execute the /oss pipeline now. Focus area: ${focusArea}. Start with Phase 0 — scan this project, then search the internet for relevant OSS, clone them, analyze, harvest patterns, implement, and run autoforge.`
+    : `Execute the /oss pipeline now. Start with Phase 0 — scan this project to understand what it does, then search the internet for the most relevant OSS tools in the same domain, clone them, analyze, harvest the best patterns, implement them, and run autoforge to verify everything passes.`;
+
+  state.pendingAgentPrompt = prompt;
+
+  return `${GREEN}${BOLD}OSS Research Pipeline activated${RESET}\n${DIM}Scanning project → searching internet → cloning repos → analyzing → implementing → autoforging${RESET}`;
+}
+
 async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
   state.enableSandbox = !state.enableSandbox;
   const statusText = state.enableSandbox ? `${GREEN}ON${RESET}` : `${RED}OFF${RESET}`;
@@ -871,6 +926,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--silent] [--persist]",
     handler: autoforgeCommand,
+  },
+  {
+    name: "oss",
+    description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
+    usage: "/oss [focus-area]",
+    handler: ossCommand,
   },
 ];
 
