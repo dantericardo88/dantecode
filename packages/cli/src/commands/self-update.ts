@@ -41,9 +41,9 @@ export async function runSelfUpdateCommand(
     log("5. VSCode package & reinstall...");
     const vscodeDir = resolve(projectRoot, "packages/vscode");
     execSync("npx @vscode/vsce package", { cwd: vscodeDir, stdio: "inherit" });
-    const vsix = (await import("node:fs/promises"))
-      .readdir(vscodeDir)
-      .then((files) => files.find((f) => f.endsWith(".vsix")));
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(vscodeDir);
+    const vsix = files.find((f) => f.endsWith(".vsix"));
     if (vsix) {
       execSync(`code --install-extension ${vsix} --force`, { cwd: vscodeDir, stdio: "inherit" });
     }

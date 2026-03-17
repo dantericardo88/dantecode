@@ -667,6 +667,63 @@ async function toolTodoWrite(
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
+// ----------------------------------------------------------------------------
+// Sandbox Guard
+// ----------------------------------------------------------------------------
+
+/** Dangerous command patterns blocked when sandbox mode is active. */
+const SANDBOX_BLOCKED_PATTERNS = [
+  /\brm\s+-rf\s+\//,
+  /\bsudo\b/,
+  /\bchmod\b.*\b777\b/,
+  /\bcurl\b.*\|\s*(?:bash|sh)\b/,
+  /\bwget\b.*\|\s*(?:bash|sh)\b/,
+  /\bdd\s+if=/,
+  /\bmkfs\b/,
+  /\b:>\s*\//,
+  /\bnpm\s+publish\b/,
+  /\bgit\s+push\b/,
+];
+
+/**
+ * Returns an error if the command is blocked by sandbox mode, or null if allowed.
+ */
+function sandboxCheckCommand(command: string, sandboxEnabled: boolean): ToolResult | null {
+  if (!sandboxEnabled) return null;
+  for (const pattern of SANDBOX_BLOCKED_PATTERNS) {
+    if (pattern.test(command)) {
+      return {
+        content: `Sandbox: command blocked (matches restricted pattern). Disable sandbox to run: ${command}`,
+        isError: true,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns an error if the file path escapes the project root while sandbox is active.
+ */
+function sandboxCheckPath(
+  filePath: string,
+  projectRoot: string,
+  sandboxEnabled: boolean,
+): ToolResult | null {
+  if (!sandboxEnabled) return null;
+  const resolved = resolve(projectRoot, filePath);
+  if (!resolved.startsWith(projectRoot)) {
+    return {
+      content: `Sandbox: write blocked — path escapes project root: ${resolved}`,
+      isError: true,
+    };
+  }
+  return null;
+}
+
+// ----------------------------------------------------------------------------
+// Main Dispatcher
+// ----------------------------------------------------------------------------
+
 /**
  * Dispatches a tool call to the appropriate handler, executes it, and returns
  * the result string. Also records the action in the audit log when possible.
@@ -675,6 +732,7 @@ async function toolTodoWrite(
  * @param input - The input parameters for the tool.
  * @param projectRoot - Absolute path to the project root directory.
  * @param sessionId - The current session ID for audit logging.
+ * @param sandboxEnabled - When true, dangerous commands and out-of-root writes are blocked.
  * @returns The tool execution result.
  */
 export async function executeTool(
@@ -682,7 +740,26 @@ export async function executeTool(
   input: Record<string, unknown>,
   projectRoot: string,
   sessionId: string = "cli-session",
+  sandboxEnabled: boolean = false,
 ): Promise<ToolResult> {
+  // Sandbox: check file path for Write/Edit
+  if (sandboxEnabled && (name === "Write" || name === "Edit")) {
+    const fp = input["file_path"] as string | undefined;
+    if (fp) {
+      const blocked = sandboxCheckPath(fp, projectRoot, true);
+      if (blocked) return blocked;
+    }
+  }
+
+  // Sandbox: check command for Bash
+  if (sandboxEnabled && name === "Bash") {
+    const cmd = input["command"] as string | undefined;
+    if (cmd) {
+      const blocked = sandboxCheckCommand(cmd, true);
+      if (blocked) return blocked;
+    }
+  }
+
   let result: ToolResult;
 
   switch (name) {

@@ -377,7 +377,7 @@ diff src/b.ts
 describe("generateColoredHunk", () => {
   it("new file: all lines are type 'add' with correct newLineNo", () => {
     const result = generateColoredHunk("", "line1\nline2\nline3", "test.ts");
-    expect(result.lines.every(l => l.type === "add")).toBe(true);
+    expect(result.lines.every((l) => l.type === "add")).toBe(true);
     expect(result.linesAdded).toBe(3);
     expect(result.linesRemoved).toBe(0);
     expect(result.lines[0]?.newLineNo).toBe(1);
@@ -386,7 +386,7 @@ describe("generateColoredHunk", () => {
 
   it("deleted file: all lines are type 'remove' with correct oldLineNo", () => {
     const result = generateColoredHunk("line1\nline2", "", "test.ts");
-    expect(result.lines.every(l => l.type === "remove")).toBe(true);
+    expect(result.lines.every((l) => l.type === "remove")).toBe(true);
     expect(result.linesRemoved).toBe(2);
     expect(result.linesAdded).toBe(0);
     expect(result.lines[0]?.oldLineNo).toBe(1);
@@ -394,14 +394,14 @@ describe("generateColoredHunk", () => {
 
   it("modified file: produces correct mix of add/remove/context lines", () => {
     const result = generateColoredHunk("line1\nline2\nline3", "line1\nchanged\nline3", "test.ts");
-    const types = result.lines.map(l => l.type);
+    const types = result.lines.map((l) => l.type);
     expect(types).toContain("remove");
     expect(types).toContain("add");
   });
 
   it("hunk headers appear before changed sections", () => {
     const result = generateColoredHunk("a\nb\nc", "a\nx\nc", "test.ts");
-    const headerIdx = result.lines.findIndex(l => l.type === "hunk_header");
+    const headerIdx = result.lines.findIndex((l) => l.type === "hunk_header");
     expect(headerIdx).toBeGreaterThanOrEqual(0);
     expect(result.lines[headerIdx]?.content).toContain("@@");
   });
@@ -427,19 +427,19 @@ describe("generateColoredHunk", () => {
 
   it("linesAdded count matches add-type lines in DiffLine[]", () => {
     const result = generateColoredHunk("a", "a\nb\nc", "test.ts");
-    const addCount = result.lines.filter(l => l.type === "add").length;
+    const addCount = result.lines.filter((l) => l.type === "add").length;
     expect(result.linesAdded).toBe(addCount);
   });
 
   it("linesRemoved count matches remove-type lines in DiffLine[]", () => {
     const result = generateColoredHunk("a\nb\nc", "a", "test.ts");
-    const removeCount = result.lines.filter(l => l.type === "remove").length;
+    const removeCount = result.lines.filter((l) => l.type === "remove").length;
     expect(result.linesRemoved).toBe(removeCount);
   });
 
   it("CRLF line endings handled correctly", () => {
     const result = generateColoredHunk("", "line1\r\nline2\r\n", "test.ts");
     expect(result.linesAdded).toBeGreaterThan(0);
-    expect(result.lines.some(l => l.content.includes("\r"))).toBe(false);
+    expect(result.lines.some((l) => l.content.includes("\r"))).toBe(false);
   });
 });

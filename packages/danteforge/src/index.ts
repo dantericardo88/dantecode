@@ -32,7 +32,12 @@ export {
 } from "./lessons.js";
 
 // --- Autoforge IAL ---
-export { runAutoforgeIAL, buildFailureContext, generateProgressBar, formatBladeProgressLine } from "./autoforge.js";
+export {
+  runAutoforgeIAL,
+  buildFailureContext,
+  generateProgressBar,
+  formatBladeProgressLine,
+} from "./autoforge.js";
 export type { AutoforgeResult, AutoforgeContext } from "./autoforge.js";
 
 // --- Blade v1.2 Progress Emitter ---

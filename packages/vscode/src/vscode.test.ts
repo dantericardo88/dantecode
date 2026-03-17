@@ -1141,7 +1141,9 @@ describe("isSelfModificationTarget", () => {
   const projectRoot = "/projects/dantecode";
 
   it("returns true for packages/vscode path", () => {
-    expect(isSelfModificationTarget("packages/vscode/src/sidebar-provider.ts", projectRoot)).toBe(true);
+    expect(isSelfModificationTarget("packages/vscode/src/sidebar-provider.ts", projectRoot)).toBe(
+      true,
+    );
   });
 
   it("returns true for packages/cli path", () => {
@@ -1149,7 +1151,9 @@ describe("isSelfModificationTarget", () => {
   });
 
   it("returns true for packages/danteforge path", () => {
-    expect(isSelfModificationTarget("packages/danteforge/src/autoforge.ts", projectRoot)).toBe(true);
+    expect(isSelfModificationTarget("packages/danteforge/src/autoforge.ts", projectRoot)).toBe(
+      true,
+    );
   });
 
   it("returns true for packages/core path", () => {
@@ -1286,8 +1290,8 @@ describe("executeTool integration", () => {
     // Mock fs: readFile returns null on first call (file doesn't exist),
     // then returns new content for diff generation
     mockReadFile
-      .mockRejectedValueOnce(new Error("ENOENT"))  // old content check (inside toolWrite)
-      .mockResolvedValueOnce("x");                   // new content read for diff hunk
+      .mockRejectedValueOnce(new Error("ENOENT")) // old content check (inside toolWrite)
+      .mockResolvedValueOnce("x"); // new content read for diff hunk
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
 
@@ -1322,12 +1326,7 @@ describe("executeTool integration", () => {
     const context = makeContext();
     mockExecSync.mockReturnValue("file1.ts\nfile2.ts\n");
 
-    const result = await executeTool(
-      "Bash",
-      { command: "ls" },
-      "/proj",
-      context,
-    );
+    const result = await executeTool("Bash", { command: "ls" }, "/proj", context);
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("file1.ts");
@@ -1343,9 +1342,9 @@ describe("executeTool integration", () => {
     // Second readFile: inside toolWrite to check if file existed
     // Third readFile: new content read for diff hunk (after write)
     mockReadFile
-      .mockRejectedValueOnce(new Error("ENOENT"))  // D3: old content capture (file doesn't exist)
-      .mockRejectedValueOnce(new Error("ENOENT"))  // toolWrite: existed check
-      .mockResolvedValueOnce("hello world");         // D3: new content read for diff
+      .mockRejectedValueOnce(new Error("ENOENT")) // D3: old content capture (file doesn't exist)
+      .mockRejectedValueOnce(new Error("ENOENT")) // toolWrite: existed check
+      .mockResolvedValueOnce("hello world"); // D3: new content read for diff
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
 
@@ -1376,9 +1375,9 @@ describe("executeTool integration", () => {
     // 2. toolEdit: read existing content for replacement
     // 3. D3: new content read for diff (after dispatch)
     mockReadFile
-      .mockResolvedValueOnce(oldContent)   // D3: old content capture
-      .mockResolvedValueOnce(oldContent)   // toolEdit: read existing
-      .mockResolvedValueOnce(newContent);   // D3: new content for diff
+      .mockResolvedValueOnce(oldContent) // D3: old content capture
+      .mockResolvedValueOnce(oldContent) // toolEdit: read existing
+      .mockResolvedValueOnce(newContent); // D3: new content for diff
     mockWriteFile.mockResolvedValue(undefined);
 
     const result = await executeTool(
@@ -1397,11 +1396,7 @@ describe("executeTool integration", () => {
   it("works without context (backward compatible)", async () => {
     mockReadFile.mockResolvedValue("line1\nline2\nline3\n");
 
-    const result = await executeTool(
-      "Read",
-      { file_path: "test.txt" },
-      "/proj",
-    );
+    const result = await executeTool("Read", { file_path: "test.txt" }, "/proj");
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("line1");

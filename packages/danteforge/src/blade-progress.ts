@@ -32,10 +32,7 @@ export class BladeProgressEmitter {
   private _estimatedCostUsd = 0;
   private _currentTask = "Initializing...";
 
-  constructor(
-    config: BladeAutoforgeConfig,
-    emit: (state: BladeProgressState) => void,
-  ) {
+  constructor(config: BladeAutoforgeConfig, emit: (state: BladeProgressState) => void) {
     this._config = config;
     this._emit = emit;
   }
@@ -98,9 +95,8 @@ export class BladeProgressEmitter {
 
   private _buildState(): BladeProgressState {
     const totalPhases = this._getTotalPhases();
-    const percentComplete = this._currentPhase === 0
-      ? 0
-      : Math.floor(((this._currentPhase - 1) / totalPhases) * 100);
+    const percentComplete =
+      this._currentPhase === 0 ? 0 : Math.floor(((this._currentPhase - 1) / totalPhases) * 100);
     return {
       phase: this._currentPhase,
       totalPhases,

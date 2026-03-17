@@ -33,11 +33,30 @@ export interface ToolExecutionContext {
   silentMode: boolean;
   currentModelId: string;
   roundId: string;
+  sandboxEnabled?: boolean;
   onDiffHunk?: (hunk: ColoredDiffHunk) => void;
   onSelfModificationAttempt?: (filePath: string) => void;
   awaitSelfModConfirmation?: () => Promise<boolean>;
   runReleaseCheck?: () => Promise<boolean>;
 }
+
+// ----------------------------------------------------------------------------
+// Sandbox Guard
+// ----------------------------------------------------------------------------
+
+/** Dangerous command patterns blocked when sandbox mode is active. */
+const SANDBOX_BLOCKED_PATTERNS = [
+  /\brm\s+-rf\s+\//,
+  /\bsudo\b/,
+  /\bchmod\b.*\b777\b/,
+  /\bcurl\b.*\|\s*(?:bash|sh)\b/,
+  /\bwget\b.*\|\s*(?:bash|sh)\b/,
+  /\bdd\s+if=/,
+  /\bmkfs\b/,
+  /\b:>\s*\//,
+  /\bnpm\s+publish\b/,
+  /\bgit\s+push\b/,
+];
 
 // ----------------------------------------------------------------------------
 // Self-Modification Guard (Blade v1.2 — D5)
@@ -53,10 +72,7 @@ export interface ToolExecutionContext {
  * @param filePath - The file path the agent wants to write (relative or absolute)
  * @param projectRoot - The project root from STATE.yaml
  */
-export function isSelfModificationTarget(
-  filePath: string,
-  projectRoot: string,
-): boolean {
+export function isSelfModificationTarget(filePath: string, projectRoot: string): boolean {
   const resolved = resolve(projectRoot, filePath);
   const selfPaths: string[] = [
     resolve(projectRoot, "packages", "vscode"),
@@ -519,6 +535,28 @@ export async function executeTool(
   const filePath = input["file_path"] as string | undefined;
   const isFileOp = name === "Write" || name === "Edit";
 
+  // Sandbox guard: block out-of-root writes
+  if (context?.sandboxEnabled && isFileOp && filePath) {
+    const resolved = resolvePath(filePath, projectRoot);
+    if (!resolved.startsWith(projectRoot)) {
+      return {
+        content: `Sandbox: write blocked — path escapes project root: ${resolved}`,
+        isError: true,
+      };
+    }
+  }
+
+  // Sandbox guard: block dangerous bash commands
+  if (context?.sandboxEnabled && name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && SANDBOX_BLOCKED_PATTERNS.some((p) => p.test(command))) {
+      return {
+        content: `Sandbox: command blocked (matches restricted pattern)`,
+        isError: true,
+      };
+    }
+  }
+
   // D5: Self-modification guard for Write/Edit
   if (context && isFileOp && filePath && isSelfModificationTarget(filePath, projectRoot)) {
     context.onSelfModificationAttempt?.(filePath);
@@ -536,7 +574,10 @@ export async function executeTool(
   if (context && name === "Bash") {
     const command = input["command"] as string | undefined;
     if (command && isSelfModificationBashCommand(command)) {
-      return { content: "Self-modification blocked: bash command targets protected paths", isError: true };
+      return {
+        content: "Self-modification blocked: bash command targets protected paths",
+        isError: true,
+      };
     }
   }
 

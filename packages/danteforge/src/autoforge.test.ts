@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { buildFailureContext, runAutoforgeIAL, generateProgressBar, formatBladeProgressLine, type AutoforgeContext } from "./autoforge.js";
+import {
+  buildFailureContext,
+  runAutoforgeIAL,
+  generateProgressBar,
+  formatBladeProgressLine,
+  type AutoforgeContext,
+} from "./autoforge.js";
 import { BladeProgressEmitter } from "./blade-progress.js";
 import { formatLessonsForPrompt } from "./lessons.js";
 import type {
@@ -506,9 +512,13 @@ describe("generateProgressBar", () => {
 describe("formatBladeProgressLine", () => {
   it("formats all fields correctly", () => {
     const state: BladeProgressState = {
-      phase: 2, totalPhases: 5, percentComplete: 40,
-      pdseScore: 91, estimatedCostUsd: 0.003,
-      currentTask: "Running GStack", silentMode: true,
+      phase: 2,
+      totalPhases: 5,
+      percentComplete: 40,
+      pdseScore: 91,
+      estimatedCostUsd: 0.003,
+      currentTask: "Running GStack",
+      silentMode: true,
     };
     const line = formatBladeProgressLine(state);
     expect(line).toContain("Phase 2/5");
@@ -520,9 +530,14 @@ describe("formatBladeProgressLine", () => {
 
 describe("BladeProgressEmitter", () => {
   const mockConfig: BladeAutoforgeConfig = {
-    enabled: true, maxIterations: 5, gstackCommands: [],
-    lessonInjectionEnabled: false, abortOnSecurityViolation: false,
-    persistUntilGreen: false, hardCeiling: 10, silentMode: true,
+    enabled: true,
+    maxIterations: 5,
+    gstackCommands: [],
+    lessonInjectionEnabled: false,
+    abortOnSecurityViolation: false,
+    persistUntilGreen: false,
+    hardCeiling: 10,
+    silentMode: true,
   };
 
   it("onIterationStart sets phase and emits correctly", () => {
@@ -543,21 +558,45 @@ describe("BladeProgressEmitter", () => {
   it("onGStackResult shows pass indicator in task", () => {
     const states: BladeProgressState[] = [];
     const emitter = new BladeProgressEmitter(mockConfig, (s) => states.push(s));
-    emitter.onGStackResult({ command: "typecheck", exitCode: 0, stdout: "", stderr: "", durationMs: 100, passed: true });
+    emitter.onGStackResult({
+      command: "typecheck",
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      durationMs: 100,
+      passed: true,
+    });
     expect(states[0]?.currentTask).toContain("pass");
   });
 
   it("onGStackResult shows fail indicator in task", () => {
     const states: BladeProgressState[] = [];
     const emitter = new BladeProgressEmitter(mockConfig, (s) => states.push(s));
-    emitter.onGStackResult({ command: "typecheck", exitCode: 1, stdout: "", stderr: "err", durationMs: 100, passed: false });
+    emitter.onGStackResult({
+      command: "typecheck",
+      exitCode: 1,
+      stdout: "",
+      stderr: "err",
+      durationMs: 100,
+      passed: false,
+    });
     expect(states[0]?.currentTask).toContain("fail");
   });
 
   it("onPDSEScore updates lastPdseScore in emitted state", () => {
     const states: BladeProgressState[] = [];
     const emitter = new BladeProgressEmitter(mockConfig, (s) => states.push(s));
-    emitter.onPDSEScore({ completeness: 90, correctness: 90, clarity: 90, consistency: 90, overall: 92, violations: [], passedGate: true, scoredAt: "", scoredBy: "mock" });
+    emitter.onPDSEScore({
+      completeness: 90,
+      correctness: 90,
+      clarity: 90,
+      consistency: 90,
+      overall: 92,
+      violations: [],
+      passedGate: true,
+      scoredAt: "",
+      scoredBy: "mock",
+    });
     expect(states[0]?.pdseScore).toBe(92);
   });
 
@@ -571,7 +610,15 @@ describe("BladeProgressEmitter", () => {
   it("onComplete always emits percentComplete: 100", () => {
     const states: BladeProgressState[] = [];
     const emitter = new BladeProgressEmitter(mockConfig, (s) => states.push(s));
-    emitter.onComplete({ finalCode: "", iterations: 1, succeeded: true, iterationHistory: [], finalScore: null, totalDurationMs: 100, terminationReason: "passed" });
+    emitter.onComplete({
+      finalCode: "",
+      iterations: 1,
+      succeeded: true,
+      iterationHistory: [],
+      finalScore: null,
+      totalDurationMs: 100,
+      terminationReason: "passed",
+    });
     expect(states[0]?.percentComplete).toBe(100);
   });
 
@@ -614,11 +661,20 @@ describe("runAutoforgeIAL integration", () => {
     const router = createMockRouter([PASSING_SCORE_JSON]);
     const onProgress = vi.fn();
 
-    await runAutoforgeIAL(CLEAN_CODE, baseContext, { ...baseConfig, maxIterations: 1 }, router, "/tmp", onProgress);
+    await runAutoforgeIAL(
+      CLEAN_CODE,
+      baseContext,
+      { ...baseConfig, maxIterations: 1 },
+      router,
+      "/tmp",
+      onProgress,
+    );
 
     // onProgress should have been called at least once with phase=1
     const startCalls = onProgress.mock.calls.filter(
-      (args: unknown[]) => (args[0] as BladeProgressState).phase === 1 && (args[0] as BladeProgressState).currentTask.includes("Running iteration 1"),
+      (args: unknown[]) =>
+        (args[0] as BladeProgressState).phase === 1 &&
+        (args[0] as BladeProgressState).currentTask.includes("Running iteration 1"),
     );
     expect(startCalls.length).toBeGreaterThanOrEqual(1);
   });
@@ -627,11 +683,18 @@ describe("runAutoforgeIAL integration", () => {
     const router = createMockRouter([PASSING_SCORE_JSON]);
     const onProgress = vi.fn();
 
-    await runAutoforgeIAL(CLEAN_CODE, baseContext, { ...baseConfig, maxIterations: 1 }, router, "/tmp", onProgress);
+    await runAutoforgeIAL(
+      CLEAN_CODE,
+      baseContext,
+      { ...baseConfig, maxIterations: 1 },
+      router,
+      "/tmp",
+      onProgress,
+    );
 
     // After scoring, onProgress should be called with the PDSE score and a "PDSE scored" task
-    const scoreCalls = onProgress.mock.calls.filter(
-      (args: unknown[]) => (args[0] as BladeProgressState).currentTask.includes("PDSE scored"),
+    const scoreCalls = onProgress.mock.calls.filter((args: unknown[]) =>
+      (args[0] as BladeProgressState).currentTask.includes("PDSE scored"),
     );
     expect(scoreCalls.length).toBeGreaterThanOrEqual(1);
     // The score emitted should match the overall score from the router response
@@ -730,7 +793,13 @@ export function solve(data: string): string {
     const router = createMockRouter([PASSING_SCORE_JSON]);
 
     // Call without the onProgress parameter — should not throw
-    const result = await runAutoforgeIAL(CLEAN_CODE, baseContext, { ...baseConfig, maxIterations: 1 }, router, "/tmp");
+    const result = await runAutoforgeIAL(
+      CLEAN_CODE,
+      baseContext,
+      { ...baseConfig, maxIterations: 1 },
+      router,
+      "/tmp",
+    );
 
     expect(result.succeeded).toBe(true);
     expect(result.terminationReason).toBe("passed");
@@ -803,9 +872,9 @@ export function compute(x: number): number {
     // 2. Iteration 1 regeneration — returns clean code
     // 3. Iteration 2 PDSE scoring — returns passing score (clean code passes)
     const router = createMockRouter([
-      new Error("model unavailable"),   // iteration 1: scoring fails -> local fallback
-      CLEAN_CODE,                       // iteration 1: regeneration returns clean code
-      PASSING_SCORE_JSON,               // iteration 2: scoring passes on clean code
+      new Error("model unavailable"), // iteration 1: scoring fails -> local fallback
+      CLEAN_CODE, // iteration 1: regeneration returns clean code
+      PASSING_SCORE_JSON, // iteration 2: scoring passes on clean code
     ]);
 
     const bladeConfig: BladeAutoforgeConfig = {

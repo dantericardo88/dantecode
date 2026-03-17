@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import type { ModelConfig, ModelRouterConfig, RoutingContext, BladeAutoforgeConfig } from "@dantecode/config-types";
+import type {
+  ModelConfig,
+  ModelRouterConfig,
+  RoutingContext,
+  BladeAutoforgeConfig,
+} from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
 // Mock external dependencies BEFORE importing the module under test
@@ -519,39 +524,87 @@ describe("selectTier", () => {
   });
 
   it("returns 'fast' for 500-token chat context", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 500, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 500,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     expect(router.selectTier(ctx)).toBe("fast");
   });
 
   it("returns 'capable' for 3000-token context", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 3000, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 3000,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     expect(router.selectTier(ctx)).toBe("capable");
   });
 
   it("returns 'capable' for autoforge task type", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "autoforge", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 100,
+      taskType: "autoforge",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     expect(router.selectTier(ctx)).toBe("capable");
   });
 
   it("returns 'capable' when consecutiveGstackFailures >= 2", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "chat", consecutiveGstackFailures: 2, filesInScope: 1, forceCapable: false };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 100,
+      taskType: "chat",
+      consecutiveGstackFailures: 2,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     expect(router.selectTier(ctx)).toBe("capable");
   });
 
   it("returns 'capable' when filesInScope >= 3", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 100, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 3, forceCapable: false };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 100,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 3,
+      forceCapable: false,
+    };
     expect(router.selectTier(ctx)).toBe("capable");
   });
 
   it("returns 'capable' when forceCapable=true regardless of tokens", () => {
-    const ctx: RoutingContext = { estimatedInputTokens: 10, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: true };
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 10,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: true,
+    };
     expect(router.selectTier(ctx)).toBe("capable");
   });
 
   it("always returns 'capable' once escalated (no de-escalation)", () => {
-    const escalateCtx: RoutingContext = { estimatedInputTokens: 5000, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    const escalateCtx: RoutingContext = {
+      estimatedInputTokens: 5000,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     router.selectTier(escalateCtx);
-    const smallCtx: RoutingContext = { estimatedInputTokens: 10, taskType: "chat", consecutiveGstackFailures: 0, filesInScope: 1, forceCapable: false };
+    const smallCtx: RoutingContext = {
+      estimatedInputTokens: 10,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+    };
     expect(router.selectTier(smallCtx)).toBe("capable");
   });
 });
@@ -607,8 +660,11 @@ describe("recordRequestCost", () => {
 
 describe("shouldContinueLoop", () => {
   const baseConfig: BladeAutoforgeConfig = {
-    enabled: true, maxIterations: 5, gstackCommands: [],
-    lessonInjectionEnabled: false, abortOnSecurityViolation: false,
+    enabled: true,
+    maxIterations: 5,
+    gstackCommands: [],
+    lessonInjectionEnabled: false,
+    abortOnSecurityViolation: false,
     persistUntilGreen: false,
   };
 
@@ -672,7 +728,9 @@ describe("D6 cost tracking integration", () => {
   });
 
   it("stream() tracks cost in onFinish callback", async () => {
-    let capturedOnFinish: (opts: { usage?: { promptTokens: number; completionTokens: number; totalTokens: number } }) => Promise<void>;
+    let capturedOnFinish: (opts: {
+      usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+    }) => Promise<void>;
 
     (streamText as Mock).mockImplementationOnce((opts: { onFinish: typeof capturedOnFinish }) => {
       capturedOnFinish = opts.onFinish;
@@ -683,7 +741,9 @@ describe("D6 cost tracking integration", () => {
     await router.stream(testMessages);
 
     // Simulate the AI SDK calling onFinish after stream completes
-    await capturedOnFinish!({ usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 } });
+    await capturedOnFinish!({
+      usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 },
+    });
 
     const estimate = router.getCostEstimate();
     expect(estimate.sessionTotalUsd).toBeGreaterThan(0);

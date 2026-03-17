@@ -304,9 +304,10 @@ export async function runAutoforgeIAL(
   const bladeConfig = config as Partial<BladeAutoforgeConfig>;
   const hardCeiling = bladeConfig.hardCeiling ?? 200;
   // hardCeiling always caps iterations; persistUntilGreen starts at maxIterations but can grow
-  let maxIter = bladeConfig.hardCeiling !== undefined
-    ? Math.min(config.maxIterations, hardCeiling)
-    : config.maxIterations;
+  let maxIter =
+    bladeConfig.hardCeiling !== undefined
+      ? Math.min(config.maxIterations, hardCeiling)
+      : config.maxIterations;
   if (bladeConfig.persistUntilGreen) {
     // Start at maxIterations but allow growing up to hardCeiling
     maxIter = config.maxIterations;
@@ -448,7 +449,12 @@ export async function runAutoforgeIAL(
 
     // D4: persistUntilGreen — extend loop by one iteration if quality gate not met
     // maxIter can only grow (never shrink) and never exceed hardCeiling
-    if (bladeConfig.persistUntilGreen && !allPassed && iteration >= maxIter && maxIter < hardCeiling) {
+    if (
+      bladeConfig.persistUntilGreen &&
+      !allPassed &&
+      iteration >= maxIter &&
+      maxIter < hardCeiling
+    ) {
       maxIter = Math.min(maxIter + 1, hardCeiling);
     }
 

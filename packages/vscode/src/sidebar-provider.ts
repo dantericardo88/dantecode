@@ -18,7 +18,12 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
-import { ModelRouterImpl, appendAuditEvent, readOrInitializeState, shouldContinueLoop } from "@dantecode/core";
+import {
+  ModelRouterImpl,
+  appendAuditEvent,
+  readOrInitializeState,
+  shouldContinueLoop,
+} from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runAntiStubScanner,
@@ -686,9 +691,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // D6: Select model tier before each request
         const tier = router.selectTier({
-          estimatedInputTokens: router.estimateTokens(
-            agentMessages.map((m) => m.content).join(""),
-          ),
+          estimatedInputTokens: router.estimateTokens(agentMessages.map((m) => m.content).join("")),
           taskType: agentMode === "yolo" ? "autoforge" : "chat",
           consecutiveGstackFailures: 0,
           filesInScope: touchedFiles.length,
@@ -970,7 +973,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             currentModelId: this.currentModel,
             roundId: `round-${roundNumber}`,
             onDiffHunk: (hunk) => {
-              this.postMessage({ type: "diff_hunk", payload: { ...hunk } as unknown as Record<string, unknown> });
+              this.postMessage({
+                type: "diff_hunk",
+                payload: { ...hunk } as unknown as Record<string, unknown>,
+              });
             },
             onSelfModificationAttempt: (filePath) => {
               this.postMessage({
@@ -1127,8 +1133,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           0, // no tool calls left
           maxToolRounds,
           false, // gstack not checked in chat loop
-          0,     // pdse not checked in chat loop
-          { enabled: true, maxIterations: effectiveMaxRounds, gstackCommands: [], abortOnSecurityViolation: false, lessonInjectionEnabled: false },
+          0, // pdse not checked in chat loop
+          {
+            enabled: true,
+            maxIterations: effectiveMaxRounds,
+            gstackCommands: [],
+            abortOnSecurityViolation: false,
+            lessonInjectionEnabled: false,
+          },
         );
         this.postMessage({
           type: "loop_terminated",

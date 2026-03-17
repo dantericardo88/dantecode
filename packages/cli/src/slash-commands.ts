@@ -15,6 +15,8 @@ import {
   summarizeGStackResults,
   queryLessons,
   formatLessonsForPrompt,
+  runAutoforgeIAL,
+  formatBladeProgressLine,
 } from "@dantecode/danteforge";
 import { listSkills, getSkill } from "@dantecode/skill-adapter";
 import {
@@ -565,17 +567,100 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   const persistUntilGreen = flags.includes("--persist");
   const hardCeiling = persistUntilGreen ? 200 : state.state.autoforge.maxIterations;
 
-  const lines: string[] = [
-    `${BOLD}Autoforge Configuration:${RESET}`,
-    `  Silent mode: ${silentMode ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
-    `  Persist until green: ${persistUntilGreen ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
-    `  Hard ceiling: ${hardCeiling} rounds`,
-    `  GStack commands: ${state.state.autoforge.gstackCommands.length}`,
-    "",
-    `${DIM}Autoforge will run on the next agent task with these settings.${RESET}`,
-  ];
+  // If no active files or last edit, show config summary
+  if (!state.lastEditFile && state.session.activeFiles.length === 0) {
+    const lines: string[] = [
+      `${BOLD}Autoforge Configuration:${RESET}`,
+      `  Silent mode: ${silentMode ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
+      `  Persist until green: ${persistUntilGreen ? `${GREEN}ON${RESET}` : `${DIM}OFF${RESET}`}`,
+      `  Hard ceiling: ${hardCeiling} rounds`,
+      `  GStack commands: ${state.state.autoforge.gstackCommands.length}`,
+      "",
+      `${DIM}Add a file with /add <file> then run /autoforge to start the loop.${RESET}`,
+    ];
+    return lines.join("\n");
+  }
 
-  return lines.join("\n");
+  // Get the code to autoforge from the last edited file or the first active file
+  const targetFile = state.lastEditFile ?? state.session.activeFiles[0]!;
+  let code: string;
+  try {
+    code = await readFile(resolve(state.projectRoot, targetFile), "utf-8");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Error reading target file: ${msg}${RESET}`;
+  }
+
+  process.stdout.write(
+    `${DIM}Starting Autoforge IAL on ${targetFile} (max ${hardCeiling} iterations)...${RESET}\n`,
+  );
+
+  // Build a simple ModelRouter adapter for the REPL
+  const router = {
+    chat: async (prompt: string, _opts?: { temperature?: number; maxTokens?: number }) => {
+      // In CLI mode without a live model connection, return the prompt as-is.
+      // The full agent loop provides model-backed autoforge.
+      return prompt;
+    },
+    getConfig: () => ({
+      default: state.state.model.default,
+      fallback: state.state.model.fallback,
+      overrides:
+        ((state.state.model as Record<string, unknown>)["taskOverrides"] as Record<
+          string,
+          import("@dantecode/config-types").ModelConfig
+        >) ?? {},
+    }),
+  };
+
+  try {
+    const autoforgeConfig = {
+      ...state.state.autoforge,
+      maxIterations: hardCeiling,
+      enabled: true,
+    } as import("@dantecode/config-types").BladeAutoforgeConfig;
+    autoforgeConfig.silentMode = silentMode;
+    autoforgeConfig.persistUntilGreen = persistUntilGreen;
+    autoforgeConfig.hardCeiling = hardCeiling;
+
+    const result = await runAutoforgeIAL(
+      code,
+      {
+        taskDescription: `Autoforge quality improvement for ${targetFile}`,
+        filePath: targetFile,
+      },
+      autoforgeConfig,
+      router,
+      state.projectRoot,
+      silentMode
+        ? undefined
+        : (progressState) => {
+            process.stdout.write(`\r${formatBladeProgressLine(progressState)}`);
+          },
+    );
+
+    process.stdout.write("\n");
+
+    const lines: string[] = [
+      "",
+      result.succeeded
+        ? `${GREEN}${BOLD}Autoforge: ALL GATES PASSED${RESET}`
+        : `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`,
+      `  Iterations: ${result.iterations}`,
+      `  Termination: ${result.terminationReason}`,
+    ];
+
+    if (result.finalScore) {
+      lines.push(`  PDSE Score: ${result.finalScore.overall}/100`);
+    }
+
+    lines.push(`  Duration: ${(result.totalDurationMs / 1000).toFixed(1)}s`);
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Autoforge error: ${msg}${RESET}`;
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -675,7 +760,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "autoforge",
-    description: "Configure autoforge settings (--silent --persist)",
+    description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--silent] [--persist]",
     handler: autoforgeCommand,
   },

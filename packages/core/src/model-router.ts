@@ -44,19 +44,30 @@ interface RouterLogEntry {
 // Blade v1.2 — Cost Routing Constants
 // ----------------------------------------------------------------------------
 
-const GROK_FAST_INPUT_PER_MTK = 0.30;
-const GROK_FAST_OUTPUT_PER_MTK = 0.60;
-const GROK_CAPABLE_INPUT_PER_MTK = 3.00;
-const GROK_CAPABLE_OUTPUT_PER_MTK = 6.00;
-const ANTHROPIC_INPUT_PER_MTK = 3.00;
-const ANTHROPIC_OUTPUT_PER_MTK = 15.00;
+const GROK_FAST_INPUT_PER_MTK = 0.3;
+const GROK_FAST_OUTPUT_PER_MTK = 0.6;
+const GROK_CAPABLE_INPUT_PER_MTK = 3.0;
+const GROK_CAPABLE_OUTPUT_PER_MTK = 6.0;
+const ANTHROPIC_INPUT_PER_MTK = 3.0;
+const ANTHROPIC_OUTPUT_PER_MTK = 15.0;
+const OPENAI_INPUT_PER_MTK = 2.5;
+const OPENAI_OUTPUT_PER_MTK = 10.0;
+const GOOGLE_INPUT_PER_MTK = 1.25;
+const GOOGLE_OUTPUT_PER_MTK = 5.0;
+const GROQ_INPUT_PER_MTK = 0.05;
+const GROQ_OUTPUT_PER_MTK = 0.1;
 
 // ----------------------------------------------------------------------------
 // Blade v1.2 — Persistent Loop (D4)
 // ----------------------------------------------------------------------------
 
 /** Exit reason for the agent loop. */
-export type LoopExitReason = "natural_completion" | "hard_ceiling_reached" | "quality_gate_passed" | "user_stopped" | "error";
+export type LoopExitReason =
+  | "natural_completion"
+  | "hard_ceiling_reached"
+  | "quality_gate_passed"
+  | "user_stopped"
+  | "error";
 
 /**
  * Three-condition exit gate for the persistent agent loop.
@@ -251,8 +262,7 @@ export class ModelRouterImpl {
       // D6: Track cost for this request
       const inputTokens = result.usage?.promptTokens ?? 0;
       const outputTokens = result.usage?.completionTokens ?? 0;
-      const providerType = config.provider === "anthropic" ? "anthropic" as const : "grok" as const;
-      this.recordRequestCost(inputTokens, outputTokens, this._currentTier, providerType);
+      this.recordRequestCost(inputTokens, outputTokens, this._currentTier, config.provider);
 
       // Record the generation event in the audit log
       await this.recordAuditEvent(
@@ -313,8 +323,7 @@ export class ModelRouterImpl {
           // D6: Track cost for this streaming request
           const inputTk = usage?.promptTokens ?? 0;
           const outputTk = usage?.completionTokens ?? 0;
-          const pType = config.provider === "anthropic" ? "anthropic" as const : "grok" as const;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, pType);
+          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
           await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
         },
@@ -418,12 +427,7 @@ export class ModelRouterImpl {
     ) {
       if (this._currentTier !== "capable") {
         this._currentTier = "capable";
-        void this.recordAuditEvent(
-          this.routerConfig.default,
-          "tier_escalation",
-          0,
-          0,
-        );
+        void this.recordAuditEvent(this.routerConfig.default, "tier_escalation", 0, 0);
       }
       return "capable";
     }
@@ -444,19 +448,36 @@ export class ModelRouterImpl {
     inputTokens: number,
     outputTokens: number,
     tier: "fast" | "capable",
-    provider: "grok" | "anthropic",
+    provider: string,
   ): CostEstimate {
     let inputRate: number;
     let outputRate: number;
-    if (provider === "anthropic") {
-      inputRate = ANTHROPIC_INPUT_PER_MTK;
-      outputRate = ANTHROPIC_OUTPUT_PER_MTK;
-    } else if (tier === "capable") {
-      inputRate = GROK_CAPABLE_INPUT_PER_MTK;
-      outputRate = GROK_CAPABLE_OUTPUT_PER_MTK;
-    } else {
-      inputRate = GROK_FAST_INPUT_PER_MTK;
-      outputRate = GROK_FAST_OUTPUT_PER_MTK;
+    switch (provider) {
+      case "anthropic":
+        inputRate = ANTHROPIC_INPUT_PER_MTK;
+        outputRate = ANTHROPIC_OUTPUT_PER_MTK;
+        break;
+      case "openai":
+        inputRate = OPENAI_INPUT_PER_MTK;
+        outputRate = OPENAI_OUTPUT_PER_MTK;
+        break;
+      case "google":
+        inputRate = GOOGLE_INPUT_PER_MTK;
+        outputRate = GOOGLE_OUTPUT_PER_MTK;
+        break;
+      case "groq":
+        inputRate = GROQ_INPUT_PER_MTK;
+        outputRate = GROQ_OUTPUT_PER_MTK;
+        break;
+      case "ollama":
+        inputRate = 0;
+        outputRate = 0;
+        break;
+      default:
+        // grok and custom — use tier-based grok rates
+        inputRate = tier === "capable" ? GROK_CAPABLE_INPUT_PER_MTK : GROK_FAST_INPUT_PER_MTK;
+        outputRate = tier === "capable" ? GROK_CAPABLE_OUTPUT_PER_MTK : GROK_FAST_OUTPUT_PER_MTK;
+        break;
     }
     const lastCost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
     this._sessionCostUsd += lastCost;

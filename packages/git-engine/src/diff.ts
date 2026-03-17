@@ -211,7 +211,14 @@ export function generateColoredHunk(
       filePath,
       linesAdded: 0,
       linesRemoved: 0,
-      lines: [{ type: "hunk_header", content: `[Binary file — ${size} bytes]`, oldLineNo: null, newLineNo: null }],
+      lines: [
+        {
+          type: "hunk_header",
+          content: `[Binary file — ${size} bytes]`,
+          oldLineNo: null,
+          newLineNo: null,
+        },
+      ],
       truncated: false,
       fullLineCount: 1,
     };
@@ -250,7 +257,11 @@ export function generateColoredHunk(
 /**
  * Computes a unified diff between two line arrays with context lines.
  */
-function computeUnifiedDiff(oldLines: string[], newLines: string[], contextSize: number): DiffLine[] {
+function computeUnifiedDiff(
+  oldLines: string[],
+  newLines: string[],
+  contextSize: number,
+): DiffLine[] {
   // Simple O(NM) LCS for moderate-size files
   const n = oldLines.length;
   const m = newLines.length;
@@ -273,7 +284,12 @@ function computeUnifiedDiff(oldLines: string[], newLines: string[], contextSize:
   }
 
   // Backtrack to produce edit script
-  interface EditOp { type: "equal" | "remove" | "add"; oldIdx: number; newIdx: number; line: string }
+  interface EditOp {
+    type: "equal" | "remove" | "add";
+    oldIdx: number;
+    newIdx: number;
+    line: string;
+  }
   const edits: EditOp[] = [];
   let i = n;
   let j = m;
@@ -323,8 +339,18 @@ function computeUnifiedDiff(oldLines: string[], newLines: string[], contextSize:
   for (const region of regions) {
     // Compute hunk header line numbers
     const firstEdit = edits[region.start]!;
-    const oldStart = firstEdit.type === "add" ? (firstEdit.oldIdx === -1 ? 1 : firstEdit.oldIdx) : firstEdit.oldIdx;
-    const newStart = firstEdit.type === "remove" ? (firstEdit.newIdx === -1 ? 1 : firstEdit.newIdx) : firstEdit.newIdx;
+    const oldStart =
+      firstEdit.type === "add"
+        ? firstEdit.oldIdx === -1
+          ? 1
+          : firstEdit.oldIdx
+        : firstEdit.oldIdx;
+    const newStart =
+      firstEdit.type === "remove"
+        ? firstEdit.newIdx === -1
+          ? 1
+          : firstEdit.newIdx
+        : firstEdit.newIdx;
     result.push({
       type: "hunk_header",
       content: `@@ -${oldStart} +${newStart} @@`,
@@ -336,13 +362,23 @@ function computeUnifiedDiff(oldLines: string[], newLines: string[], contextSize:
       const edit = edits[idx]!;
       switch (edit.type) {
         case "equal":
-          result.push({ type: "context", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: edit.newIdx });
+          result.push({
+            type: "context",
+            content: edit.line,
+            oldLineNo: edit.oldIdx,
+            newLineNo: edit.newIdx,
+          });
           break;
         case "add":
           result.push({ type: "add", content: edit.line, oldLineNo: null, newLineNo: edit.newIdx });
           break;
         case "remove":
-          result.push({ type: "remove", content: edit.line, oldLineNo: edit.oldIdx, newLineNo: null });
+          result.push({
+            type: "remove",
+            content: edit.line,
+            oldLineNo: edit.oldIdx,
+            newLineNo: null,
+          });
           break;
       }
     }
