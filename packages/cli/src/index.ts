@@ -42,6 +42,8 @@ interface ParsedArgs {
   worktree: boolean;
   /** --verbose flag */
   verbose: boolean;
+  /** --silent flag */
+  silent: boolean;
   /** --config <path> */
   configPath: string | undefined;
   /** --version flag */
@@ -67,6 +69,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     sandbox: false,
     worktree: false,
     verbose: false,
+    silent: false,
     configPath: undefined,
     showVersion: false,
     showHelp: false,
@@ -106,6 +109,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--verbose" || arg === "-v") {
       result.verbose = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--silent" || arg === "-s") {
+      result.silent = true;
       i += 1;
       continue;
     }
@@ -168,6 +177,11 @@ function parseArgs(argv: string[]): ParsedArgs {
           i += 1;
           continue;
         }
+        if (subArg === "--silent" || subArg === "-s") {
+          result.silent = true;
+          i += 1;
+          continue;
+        }
         result.subArgs.push(subArg);
         i += 1;
       }
@@ -227,6 +241,7 @@ async function main(): Promise<void> {
     enableSandbox: parsed.sandbox,
     enableWorktree: parsed.worktree,
     verbose: parsed.verbose,
+    silent: parsed.silent,
     configPath: parsed.configPath,
   };
 

@@ -113,6 +113,9 @@ export class ModelRouterImpl {
   private _sessionTokensUsed = 0;
   private _currentTier: "fast" | "capable" = "fast";
   private _consecutiveGstackFailures = 0;
+  // Model-assisted complexity scoring cache
+  private _modelRatedComplexity: number | null = null;
+  private _firstTurnCompleted = false;
 
   constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
@@ -455,6 +458,52 @@ export class ModelRouterImpl {
   }
 
   /**
+   * Extracts a complexity self-rating from the model's first response.
+   * Looks for a [COMPLEXITY: X.X] tag, falls back to heuristic inference.
+   * Non-blocking: returns cached value after first call.
+   */
+  extractModelComplexityRating(responseText: string): number | null {
+    if (this._firstTurnCompleted) return this._modelRatedComplexity;
+    this._firstTurnCompleted = true;
+
+    // Strategy 1: explicit [COMPLEXITY: X.X] annotation
+    const explicitMatch = responseText.match(
+      /\[COMPLEXITY:\s*(0(?:\.\d+)?|1(?:\.0)?)\]/i,
+    );
+    if (explicitMatch) {
+      const score = parseFloat(explicitMatch[1]!);
+      if (!isNaN(score) && score >= 0 && score <= 1) {
+        this._modelRatedComplexity = score;
+        return score;
+      }
+    }
+
+    // Strategy 2: heuristic inference from response structure
+    const indicators = {
+      stepCount: (responseText.match(/^\s*\d+\./gm) || []).length,
+      fileRefs: (responseText.match(/\b[\w-]+\.(ts|tsx|js|py|rs|go)\b/g) || []).length,
+      codeBlocks: (responseText.match(/```/g) || []).length / 2,
+      warningWords: (responseText.match(
+        /\b(careful|tricky|complex|subtle|edge case|race condition)\b/gi,
+      ) || []).length,
+    };
+
+    let inferred = 0.3;
+    inferred += Math.min(indicators.stepCount * 0.05, 0.2);
+    inferred += Math.min(indicators.fileRefs * 0.03, 0.15);
+    inferred += Math.min(indicators.codeBlocks * 0.04, 0.15);
+    inferred += Math.min(indicators.warningWords * 0.06, 0.2);
+
+    this._modelRatedComplexity = Math.min(1, inferred);
+    return this._modelRatedComplexity;
+  }
+
+  /** Returns the cached model-rated complexity, or null if not yet computed. */
+  getModelRatedComplexity(): number | null {
+    return this._modelRatedComplexity;
+  }
+
+  /**
    * Selects the appropriate model tier based on routing context.
    * Tier escalation is one-way within a session — once "capable" is selected,
    * it remains "capable" for all subsequent requests.
@@ -463,9 +512,11 @@ export class ModelRouterImpl {
    * exceeds the threshold (0.4), the tier is escalated to "capable".
    */
   selectTier(context: RoutingContext): "fast" | "capable" {
-    // Complexity-aware routing (Ruflo pattern): analyze prompt complexity
+    // Complexity-aware routing (Ruflo pattern): use max of lexical and model-rated
     const complexityThreshold = 0.4;
-    const complexity = context.promptComplexity ?? 0;
+    const lexicalComplexity = context.promptComplexity ?? 0;
+    const modelComplexity = context.modelRatedComplexity ?? 0;
+    const complexity = Math.max(lexicalComplexity, modelComplexity);
 
     if (
       this._currentTier === "capable" ||
@@ -549,6 +600,8 @@ export class ModelRouterImpl {
     this._sessionTokensUsed = 0;
     this._currentTier = "fast";
     this._consecutiveGstackFailures = 0;
+    this._modelRatedComplexity = null;
+    this._firstTurnCompleted = false;
   }
 
   /**

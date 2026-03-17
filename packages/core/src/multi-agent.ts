@@ -6,6 +6,14 @@ import { ModelRouterImpl, type GenerateOptions } from "./model-router.js";
 import type { DanteCodeState } from "@dantecode/config-types";
 import { z } from "zod";
 
+/** Callback for reporting multi-agent progress to the UI. */
+export type MultiAgentProgressCallback = (update: {
+  lane: string;
+  status: "started" | "completed" | "failed";
+  message: string;
+  pdseScore?: number;
+}) => void;
+
 const agentLanes = ["orchestrator", "planner", "coder", "tester", "reviewer", "deployer"] as const;
 type AgentLane = (typeof agentLanes)[number];
 
@@ -49,6 +57,7 @@ export class MultiAgent {
   async coordinate(
     task: string,
     options: GenerateOptions = {},
+    onProgress?: MultiAgentProgressCallback,
   ): Promise<{
     plan: DelegationPlan;
     outputs: AgentOutput[];
@@ -65,7 +74,7 @@ export class MultiAgent {
       const plan = await this.delegateTask(task);
 
       // Step 2: Parallel execution
-      const outputs = await this.executeParallel(plan, options);
+      const outputs = await this.executeParallel(plan, options, onProgress);
 
       // Step 3: Score & aggregate
       compositePdse = this.computeCompositePdse(outputs);
@@ -114,6 +123,7 @@ Respond ONLY with valid JSON: { "planner": "subtask desc", "coder": "...", ... }
   private async executeParallel(
     plan: DelegationPlan,
     options: GenerateOptions,
+    onProgress?: MultiAgentProgressCallback,
   ): Promise<AgentOutput[]> {
     const outputs: AgentOutput[] = [];
     const semaphore = new Semaphore(this.config.maxConcurrent);
@@ -124,8 +134,21 @@ Respond ONLY with valid JSON: { "planner": "subtask desc", "coder": "...", ... }
         .map(async ([lane, subtask]) => {
           await semaphore.acquire();
           try {
+            onProgress?.({ lane, status: "started", message: subtask.slice(0, 80) });
             const output = await this.executeAgent(lane as AgentLane, subtask, options);
+            onProgress?.({
+              lane,
+              status: "completed",
+              message: `PDSE: ${output.pdseScore}`,
+              pdseScore: output.pdseScore,
+            });
             outputs.push(output);
+          } catch (err) {
+            onProgress?.({
+              lane,
+              status: "failed",
+              message: err instanceof Error ? err.message : String(err),
+            });
           } finally {
             semaphore.release();
           }

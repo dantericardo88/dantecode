@@ -7,7 +7,8 @@ import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readAuditEvents } from "@dantecode/core";
+import { readAuditEvents, MultiAgent, ModelRouterImpl } from "@dantecode/core";
+import type { MultiAgentProgressCallback } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -51,6 +52,8 @@ export interface ReplState {
   verbose: boolean;
   enableGit: boolean;
   enableSandbox: boolean;
+  /** Whether silent mode is active (toggle with /silent). */
+  silent: boolean;
   lastEditFile: string | null;
   lastEditContent: string | null;
   /** Tracks recent tool call signatures for stuck-loop detection (from opencode/OpenHands). */
@@ -706,6 +709,12 @@ async function sandboxCommand(_args: string, state: ReplState): Promise<string> 
   return `${BOLD}Sandbox mode:${RESET} ${statusText}`;
 }
 
+async function silentCommand(_args: string, state: ReplState): Promise<string> {
+  state.silent = !state.silent;
+  const statusText = state.silent ? `${GREEN}ON${RESET}` : `${RED}OFF${RESET}`;
+  return `${BOLD}Silent mode:${RESET} ${statusText}${state.silent ? ` ${DIM}(compact progress only)${RESET}` : ""}`;
+}
+
 async function autoforgeCommand(args: string, state: ReplState): Promise<string> {
   const flags = args.trim().split(/\s+/);
   const silentMode = flags.includes("--silent");
@@ -805,6 +814,80 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return `${RED}Autoforge error: ${msg}${RESET}`;
+  }
+}
+
+async function partyCommand(args: string, state: ReplState): Promise<string> {
+  const task = args.trim();
+  if (!task) {
+    return `${RED}Usage: /party <task description>${RESET}\n${DIM}Spawns multi-agent coordination with parallel lanes.${RESET}`;
+  }
+
+  const routerConfig = {
+    default: state.state.model.default,
+    fallback: state.state.model.fallback ?? [],
+    overrides:
+      ((state.state.model as Record<string, unknown>)["taskOverrides"] as Record<
+        string,
+        import("@dantecode/config-types").ModelConfig
+      >) ?? {},
+  };
+  const router = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
+  const multiAgent = new MultiAgent(router, state.state);
+
+  const onProgress: MultiAgentProgressCallback = (update) => {
+    const icon =
+      update.status === "started"
+        ? `${YELLOW}>`
+        : update.status === "completed"
+          ? `${GREEN}+`
+          : `${RED}x`;
+    process.stdout.write(
+      `  ${icon}${RESET} ${BOLD}${update.lane.padEnd(12)}${RESET} ${DIM}${update.message.slice(0, 60)}${RESET}\n`,
+    );
+  };
+
+  process.stdout.write(
+    `\n${YELLOW}${BOLD}Multi-Agent Party${RESET} ${DIM}(spawning lanes...)${RESET}\n\n`,
+  );
+
+  try {
+    const result = await multiAgent.coordinate(task, {}, onProgress);
+
+    const lines: string[] = [
+      "",
+      result.compositePdse >= state.state.pdse.threshold
+        ? `${GREEN}${BOLD}Party Complete: PASSED${RESET}`
+        : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
+      `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
+      `  Iterations: ${result.iterations}`,
+      `  Lanes used: ${result.outputs.map((o) => o.lane).join(", ")}`,
+      "",
+    ];
+
+    for (const output of result.outputs) {
+      const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
+      lines.push(
+        `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
+      );
+    }
+
+    // Inject combined outputs into session
+    const combinedContent = result.outputs
+      .map((o) => `## ${o.lane} (PDSE: ${o.pdseScore})\n\n${o.content}`)
+      .join("\n\n---\n\n");
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "assistant",
+      content: combinedContent,
+      timestamp: new Date().toISOString(),
+    });
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Party error: ${message}${RESET}`;
   }
 }
 
@@ -922,6 +1005,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: sandboxCommand,
   },
   {
+    name: "silent",
+    description: "Toggle silent mode (compact progress only)",
+    usage: "/silent",
+    handler: silentCommand,
+  },
+  {
     name: "autoforge",
     description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--silent] [--persist]",
@@ -932,6 +1021,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
     usage: "/oss [focus-area]",
     handler: ossCommand,
+  },
+  {
+    name: "party",
+    description: "Multi-agent coordination — parallel lanes for complex tasks",
+    usage: "/party <task>",
+    handler: partyCommand,
   },
 ];
 

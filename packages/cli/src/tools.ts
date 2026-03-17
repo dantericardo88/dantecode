@@ -721,6 +721,73 @@ function sandboxCheckPath(
 }
 
 // ----------------------------------------------------------------------------
+// Write/Edit Safety Hooks
+// ----------------------------------------------------------------------------
+
+/** File paths that should never be written to by the agent. */
+const PROTECTED_FILE_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  // System directories
+  { pattern: /^\/etc\//, reason: "system configuration directory /etc/" },
+  { pattern: /^\/usr\//, reason: "system directory /usr/" },
+  { pattern: /^\/boot\//, reason: "boot partition" },
+  { pattern: /^\/sys\//, reason: "kernel virtual filesystem /sys/" },
+  { pattern: /^\/proc\//, reason: "process filesystem /proc/" },
+  { pattern: /^C:\\Windows\\/i, reason: "Windows system directory" },
+  { pattern: /^C:\\Program Files/i, reason: "Windows Program Files" },
+  // Secret/credential files
+  { pattern: /\.env$/, reason: ".env file (may contain secrets)" },
+  { pattern: /\.env\.local$/, reason: ".env.local file (may contain secrets)" },
+  { pattern: /\.env\.production$/, reason: ".env.production file (may contain secrets)" },
+  { pattern: /credentials\.json$/i, reason: "credentials file" },
+  { pattern: /\.pem$/, reason: "PEM certificate/key file" },
+  { pattern: /\.key$/, reason: "private key file" },
+  { pattern: /id_rsa/, reason: "SSH private key" },
+  { pattern: /id_ed25519/, reason: "SSH private key" },
+  // SSH/config
+  { pattern: /\.ssh\//, reason: "SSH directory" },
+  { pattern: /\.gnupg\//, reason: "GPG directory" },
+  { pattern: /\.aws\/credentials/, reason: "AWS credentials" },
+  { pattern: /\.kube\/config/, reason: "Kubernetes config" },
+  // Audit tampering protection
+  { pattern: /\.dantecode\/audit\//, reason: "audit log (tamper protection)" },
+];
+
+/**
+ * Pre-tool safety hook for Write/Edit operations.
+ * Blocks writes to system files, secret files, and audit logs.
+ */
+function checkWriteSafety(filePath: string): string | null {
+  for (const { pattern, reason } of PROTECTED_FILE_PATTERNS) {
+    if (pattern.test(filePath)) {
+      return `Write blocked: ${reason}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks if file content being written appears to contain hardcoded secrets.
+ */
+function checkContentForSecrets(content: string): string | null {
+  const secretPatterns: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----/, reason: "Private key detected in content" },
+    { pattern: /AKIA[0-9A-Z]{16}/, reason: "AWS access key ID detected" },
+    { pattern: /ghp_[A-Za-z0-9]{36}/, reason: "GitHub personal access token detected" },
+    { pattern: /gho_[A-Za-z0-9]{36}/, reason: "GitHub OAuth token detected" },
+    { pattern: /xai-[A-Za-z0-9]{20,}/, reason: "xAI/Grok API key detected" },
+    { pattern: /sk-[A-Za-z0-9]{20,}/, reason: "OpenAI-style API key detected" },
+    { pattern: /sk-ant-[A-Za-z0-9-]{20,}/, reason: "Anthropic API key detected" },
+  ];
+
+  for (const { pattern, reason } of secretPatterns) {
+    if (pattern.test(content)) {
+      return reason;
+    }
+  }
+  return null;
+}
+
+// ----------------------------------------------------------------------------
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
@@ -757,6 +824,29 @@ export async function executeTool(
     if (cmd) {
       const blocked = sandboxCheckCommand(cmd, true);
       if (blocked) return blocked;
+    }
+  }
+
+  // Write/Edit safety hooks (always active, not just sandbox mode)
+  if (name === "Write" || name === "Edit") {
+    const fp = input["file_path"] as string | undefined;
+    if (fp) {
+      const writeBlock = checkWriteSafety(fp);
+      if (writeBlock) {
+        return { content: `SAFETY: ${writeBlock}`, isError: true };
+      }
+    }
+    if (name === "Write") {
+      const content = input["content"] as string | undefined;
+      if (content) {
+        const secretWarning = checkContentForSecrets(content);
+        if (secretWarning) {
+          return {
+            content: `SAFETY: ${secretWarning}. Use environment variables instead of hardcoding secrets.`,
+            isError: true,
+          };
+        }
+      }
     }
   }
 

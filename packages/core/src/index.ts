@@ -37,4 +37,4 @@ export {
 
 // ─── Multi-Agent ───────────────────────────────────────────────────────────────
 
-export { MultiAgent, type MultiAgentConfig } from "./multi-agent.js";
+export { MultiAgent, type MultiAgentConfig, type MultiAgentProgressCallback } from "./multi-agent.js";

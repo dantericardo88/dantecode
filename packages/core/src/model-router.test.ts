@@ -607,6 +607,90 @@ describe("selectTier", () => {
     };
     expect(router.selectTier(smallCtx)).toBe("capable");
   });
+
+  it("escalates to capable when modelRatedComplexity >= 0.4", () => {
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 100,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+      promptComplexity: 0.1,
+      modelRatedComplexity: 0.6,
+    };
+    expect(router.selectTier(ctx)).toBe("capable");
+  });
+
+  it("stays fast when both complexities are below threshold", () => {
+    const freshRouter = new ModelRouterImpl(routerConfig, "/test", "session-new");
+    const ctx: RoutingContext = {
+      estimatedInputTokens: 100,
+      taskType: "chat",
+      consecutiveGstackFailures: 0,
+      filesInScope: 1,
+      forceCapable: false,
+      promptComplexity: 0.1,
+      modelRatedComplexity: 0.2,
+    };
+    expect(freshRouter.selectTier(ctx)).toBe("fast");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Model-Assisted Complexity Scoring
+// ---------------------------------------------------------------------------
+
+describe("extractModelComplexityRating", () => {
+  let router: ModelRouterImpl;
+
+  beforeEach(() => {
+    router = new ModelRouterImpl(routerConfig, "/test", "session-1");
+  });
+
+  it("extracts explicit [COMPLEXITY: 0.8] tag", () => {
+    const score = router.extractModelComplexityRating(
+      "Here is my plan for the refactor...\n[COMPLEXITY: 0.8]",
+    );
+    expect(score).toBe(0.8);
+  });
+
+  it("extracts [COMPLEXITY: 0.0] for trivial tasks", () => {
+    const score = router.extractModelComplexityRating("Done!\n[COMPLEXITY: 0.0]");
+    expect(score).toBe(0);
+  });
+
+  it("extracts [COMPLEXITY: 1.0] for maximum complexity", () => {
+    const score = router.extractModelComplexityRating("Very complex.\n[COMPLEXITY: 1.0]");
+    expect(score).toBe(1.0);
+  });
+
+  it("returns heuristic score when no explicit tag found", () => {
+    const score = router.extractModelComplexityRating(
+      "1. Read the file\n2. Edit the function\n3. Run tests\nThis is tricky because of edge cases.",
+    );
+    expect(score).toBeGreaterThan(0.3);
+    expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it("caches result and returns same value on second call", () => {
+    const first = router.extractModelComplexityRating("[COMPLEXITY: 0.6]");
+    const second = router.extractModelComplexityRating("[COMPLEXITY: 0.9]");
+    expect(first).toBe(0.6);
+    expect(second).toBe(0.6);
+  });
+
+  it("returns baseline heuristic on empty response", () => {
+    const score = router.extractModelComplexityRating("");
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it("resets cache when resetSessionCost is called", () => {
+    router.extractModelComplexityRating("[COMPLEXITY: 0.5]");
+    expect(router.getModelRatedComplexity()).toBe(0.5);
+    router.resetSessionCost();
+    expect(router.getModelRatedComplexity()).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

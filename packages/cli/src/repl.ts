@@ -35,6 +35,7 @@ export interface ReplOptions {
   enableSandbox: boolean;
   enableWorktree: boolean;
   verbose: boolean;
+  silent: boolean;
   configPath?: string;
 }
 
@@ -139,9 +140,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
 
-  // Display banner
-  const banner = getBanner(state.model.default, options.projectRoot);
-  process.stdout.write(banner);
+  // Display banner (suppressed in silent mode)
+  if (!options.silent) {
+    const banner = getBanner(state.model.default, options.projectRoot);
+    process.stdout.write(banner);
+  }
 
   // Initialize REPL state
   const replState: ReplState = {
@@ -151,6 +154,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     verbose: options.verbose,
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
+    silent: options.silent,
     lastEditFile: null,
     lastEditContent: null,
     recentToolCalls: [],
@@ -163,6 +167,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     verbose: options.verbose,
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
+    silent: options.silent,
   };
 
   // Create readline interface
@@ -258,10 +263,12 @@ async function processInput(
       if (replState.pendingAgentPrompt) {
         const agentPrompt = replState.pendingAgentPrompt;
         replState.pendingAgentPrompt = null;
+        agentConfig.silent = replState.silent; // Sync toggle state
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
       }
     } else {
       // Route to agent loop
+      agentConfig.silent = replState.silent; // Sync toggle state
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
     }
   } catch (err: unknown) {
@@ -307,6 +314,7 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     verbose: options.verbose,
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
+    silent: options.silent,
   };
 
   // Run the agent loop once

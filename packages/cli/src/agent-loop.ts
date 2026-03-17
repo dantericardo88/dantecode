@@ -97,6 +97,16 @@ function buildSystemPrompt(session: Session, config: AgentLoopConfig): string {
     }
   }
 
+  // First-turn complexity rating instruction (model-assisted scoring)
+  if (session.messages.length <= 1) {
+    sections.push("");
+    sections.push(
+      "On your FIRST response only, include at the very end: [COMPLEXITY: X.X] " +
+      "where X.X is your 0-1 self-assessment of task complexity. " +
+      "0.0 = trivial, 1.0 = extremely complex multi-file refactor.",
+    );
+  }
+
   return sections.join("\n");
 }
 
@@ -358,18 +368,39 @@ function compactMessages(
 
 /** Dangerous Bash command patterns that should be blocked. */
 const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+  // Filesystem destruction
   { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/\s*$/m, reason: "recursive delete of root filesystem" },
   { pattern: /\brm\s+-[a-zA-Z]*f[a-zA-Z]*r?\s+\/\s*$/m, reason: "forced delete of root filesystem" },
   { pattern: /\brm\s+-rf\s+\/(?:\s|$)/m, reason: "rm -rf / — catastrophic filesystem delete" },
   { pattern: /\brm\s+-rf\s+~\s*$/m, reason: "rm -rf ~ — delete entire home directory" },
+  // Git destructive operations
   { pattern: /\bgit\s+push\s+--force\s+(origin\s+)?(main|master)\b/, reason: "force push to main/master" },
   { pattern: /\bgit\s+reset\s+--hard\s+origin\/(main|master)\b/, reason: "hard reset to remote main/master" },
+  // System attacks
   { pattern: /:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;?\s*:/, reason: "fork bomb detected" },
   { pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/, reason: "disk overwrite with dd" },
   { pattern: /\bmkfs\b/, reason: "filesystem format command" },
   { pattern: /\bchmod\s+-R\s+777\s+\/\s*$/, reason: "chmod 777 on root filesystem" },
+  // Pipe-to-shell
   { pattern: /\bcurl\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
   { pattern: /\bwget\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
+  // find with destructive actions
+  { pattern: /\bfind\s+\/\s+.*-delete\b/, reason: "find with -delete on root filesystem" },
+  { pattern: /\bfind\s+\/\s+.*-exec\s+rm\b/, reason: "find with -exec rm on root filesystem" },
+  { pattern: /\bfind\s+~\s+.*-delete\b/, reason: "find with -delete on home directory" },
+  // Scripting language destructive commands
+  { pattern: /\bpython[23]?\s+(-c\s+)?.*shutil\.rmtree\s*\(/, reason: "Python shutil.rmtree — recursive delete" },
+  { pattern: /\bnode\s+(-e\s+)?.*fs\.(rmSync|rmdirSync)\s*\(/, reason: "Node.js destructive fs operation" },
+  // Env exfiltration
+  { pattern: /\benv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "environment variable exfiltration via network" },
+  { pattern: /\bprintenv\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: "printenv piped to network tool" },
+  { pattern: /\bcat\s+.*\.env\b.*\|\s*(curl|wget|nc|netcat)\b/, reason: ".env file exfiltration via network" },
+  // Privilege escalation
+  { pattern: /\bchown\s+-R\s+root\b/, reason: "recursive chown to root" },
+  { pattern: /\bchmod\s+[ugo]*\+s\b/, reason: "setuid/setgid bit modification" },
+  // Block device redirect
+  { pattern: />\s*\/dev\/sd[a-z]\b/, reason: "redirect to block device" },
+  { pattern: /\bshred\s+/, reason: "shred command — secure file destruction" },
 ];
 
 /**
@@ -383,6 +414,40 @@ function checkBashSafety(command: string): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Semantic safety layer: normalizes a command and checks for compound
+ * patterns that individual regex checks might miss.
+ *
+ * Handles command chaining (;, &&, ||), backslash-escaped commands (\rm),
+ * base64-encoded payloads, and eval with variable expansion.
+ */
+function normalizeAndCheckBash(command: string): string | null {
+  // Expand backslash-escaped command names (\rm -> rm)
+  const normalized = command.replace(/\\([a-zA-Z])/g, "$1");
+
+  // Split on command chain operators and check each segment
+  const segments = normalized.split(/\s*(?:;|&&|\|\|)\s*/);
+  for (const segment of segments) {
+    const trimmed = segment.trim();
+    if (!trimmed) continue;
+    const blockReason = checkBashSafety(trimmed);
+    if (blockReason) return blockReason;
+  }
+
+  // Check for base64-encoded payloads piped to shell
+  if (/\b(base64\s+-d|echo\s+[A-Za-z0-9+/=]{20,})\s*\|\s*(ba)?sh\b/.test(normalized)) {
+    return "base64-encoded payload piped to shell";
+  }
+
+  // Check for eval with variable expansion
+  if (/\beval\s+.*\$\{?[A-Z_]/.test(normalized)) {
+    return "eval with environment variable expansion";
+  }
+
+  // Check the full normalized command against patterns
+  return checkBashSafety(normalized);
 }
 
 // ----------------------------------------------------------------------------
@@ -477,6 +542,16 @@ export async function runAgentLoop(
       });
 
       totalTokensUsed += responseText.length; // Approximate token count
+
+      // Model-assisted complexity scoring: extract on first response
+      if (!router.getModelRatedComplexity()) {
+        const modelScore = router.extractModelComplexityRating(responseText);
+        if (config.verbose && modelScore !== null) {
+          process.stdout.write(
+            `${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`,
+          );
+        }
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
@@ -515,8 +590,10 @@ export async function runAgentLoop(
 
     // Execute each tool call
     const toolResults: string[] = [];
+    let toolIndex = 0;
 
     for (const toolCall of toolCalls) {
+      toolIndex++;
       // Stuck loop detection (opencode/OpenHands pattern): if the same tool call
       // signature appears 3 times consecutively, inject a warning to break the loop
       const toolSig = `${toolCall.name}:${JSON.stringify(toolCall.input)}`;
@@ -542,7 +619,7 @@ export async function runAgentLoop(
       if (toolCall.name === "Bash") {
         const bashCmd = toolCall.input["command"] as string | undefined;
         if (bashCmd) {
-          const blockReason = checkBashSafety(bashCmd);
+          const blockReason = normalizeAndCheckBash(bashCmd);
           if (blockReason) {
             process.stdout.write(
               `\n${RED}${BOLD}BLOCKED:${RESET} ${RED}${blockReason}${RESET}\n${DIM}Command: ${bashCmd.slice(0, 100)}${RESET}\n`,
@@ -555,8 +632,13 @@ export async function runAgentLoop(
         }
       }
 
-      // Silent mode (Ruflo pattern): suppress per-tool output when silent
-      if (!config.silent) {
+      // Silent mode (Ruflo pattern): compact progress counter
+      if (config.silent) {
+        process.stdout.write(
+          `\r${DIM}[${toolIndex}/${toolCalls.length} tools] ${toolCall.name}${RESET}` +
+          " ".repeat(20),
+        );
+      } else {
         process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
       }
 
@@ -675,6 +757,11 @@ export async function runAgentLoop(
         },
       };
       session.messages.push(toolResultMessage);
+    }
+
+    // Clear silent mode progress line after tool loop
+    if (config.silent && toolCalls.length > 0) {
+      process.stdout.write(`\r${DIM}[${toolCalls.length}/${toolCalls.length} tools done]${RESET}\n`);
     }
 
     // Reflection loop (aider/Cursor pattern): after code edits, auto-run

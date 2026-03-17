@@ -491,6 +491,8 @@ export interface RoutingContext {
   forceCapable: boolean;
   /** Prompt complexity score (0–1) from analyzeComplexity(). Higher = more complex. */
   promptComplexity?: number;
+  /** Model self-rated complexity (0–1), populated after first turn. Overrides lexical score if higher. */
+  modelRatedComplexity?: number;
 }
 
 /** Live cost estimate for the current session. */
