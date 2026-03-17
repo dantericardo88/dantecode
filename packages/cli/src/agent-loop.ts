@@ -293,6 +293,64 @@ function getWrittenFilePath(toolName: string, toolInput: Record<string, unknown>
 }
 
 // ----------------------------------------------------------------------------
+// Reflection Loop Helpers
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns the project's configured verification commands (lint, test, build).
+ * Used by the reflection loop to auto-verify code changes.
+ */
+function getVerifyCommands(config: AgentLoopConfig): Array<{ name: string; command: string }> {
+  const commands: Array<{ name: string; command: string }> = [];
+  const project = config.state.project;
+  if (project.lintCommand) commands.push({ name: "lint", command: project.lintCommand });
+  if (project.testCommand) commands.push({ name: "test", command: project.testCommand });
+  if (project.buildCommand) commands.push({ name: "build", command: project.buildCommand });
+  return commands;
+}
+
+// ----------------------------------------------------------------------------
+// Context Compaction
+// ----------------------------------------------------------------------------
+
+/**
+ * Compacts messages when approaching the context window limit.
+ * Keeps the first message (system prompt) and the most recent messages,
+ * replacing older messages with a brief summary note.
+ * (Pattern from opencode/OpenHands)
+ */
+function compactMessages(
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  contextWindow: number,
+): Array<{ role: "user" | "assistant" | "system"; content: string }> {
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const estimatedTokens = Math.ceil(totalChars / 4);
+
+  // Only compact when above 75% of context window
+  if (estimatedTokens < contextWindow * 0.75) {
+    return messages;
+  }
+
+  const KEEP_RECENT = 10;
+  if (messages.length <= KEEP_RECENT + 1) {
+    return messages;
+  }
+
+  const first = messages[0]!;
+  const recent = messages.slice(-KEEP_RECENT);
+  const droppedCount = messages.length - KEEP_RECENT - 1;
+
+  return [
+    first,
+    {
+      role: "system" as const,
+      content: `[Context compacted: ${droppedCount} earlier messages removed to fit context window. Recent conversation preserved below.]`,
+    },
+    ...recent,
+  ];
+}
+
+// ----------------------------------------------------------------------------
 // Main Agent Loop
 // ----------------------------------------------------------------------------
 
@@ -354,9 +412,22 @@ export async function runAgentLoop(
   // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
   const recentToolSignatures: string[] = [];
   const STUCK_LOOP_THRESHOLD = 3; // 3 identical consecutive calls = stuck
+  // Reflection loop (aider/Cursor pattern): auto-retry verification after code edits
+  const MAX_VERIFY_RETRIES = 3;
+  let verifyRetries = 0;
 
   while (maxToolRounds > 0) {
     maxToolRounds--;
+
+    // Context compaction (opencode/OpenHands pattern): condense old messages
+    // when approaching the context window limit
+    const compacted = compactMessages(messages, config.state.model.default.contextWindow);
+    if (compacted.length < messages.length) {
+      messages.splice(0, messages.length, ...compacted);
+      if (config.verbose) {
+        process.stdout.write(`${DIM}[context compacted: ${messages.length} messages remaining]${RESET}\n`);
+      }
+    }
 
     // Generate response from model
     let responseText: string;
@@ -545,6 +616,41 @@ export async function runAgentLoop(
         },
       };
       session.messages.push(toolResultMessage);
+    }
+
+    // Reflection loop (aider/Cursor pattern): after code edits, auto-run
+    // the project's configured lint/test/build commands. If any fail,
+    // inject the failure output so the model can fix the issue.
+    const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
+    if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
+      const verifyCommands = getVerifyCommands(config);
+      for (const vc of verifyCommands) {
+        try {
+          const vcResult = await executeTool(
+            "Bash",
+            { command: vc.command },
+            session.projectRoot,
+            session.id,
+          );
+          if (vcResult.isError) {
+            verifyRetries++;
+            toolResults.push(
+              `AUTO-VERIFY (${vc.name}) FAILED:\n${vcResult.content}\n\nFix the errors above. (attempt ${verifyRetries}/${MAX_VERIFY_RETRIES})`,
+            );
+            process.stdout.write(
+              `\n${YELLOW}[verify: ${vc.name} FAILED]${RESET} ${DIM}(retry ${verifyRetries}/${MAX_VERIFY_RETRIES})${RESET}\n`,
+            );
+          } else {
+            process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
+          }
+        } catch {
+          // Verification command failed to execute, skip
+        }
+      }
+    } else if (wroteCode && verifyRetries >= MAX_VERIFY_RETRIES) {
+      toolResults.push(
+        `SYSTEM: Verification has failed ${MAX_VERIFY_RETRIES} times. Stop retrying and ask the user for guidance.`,
+      );
     }
 
     // Add tool results to messages for the next model call

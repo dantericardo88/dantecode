@@ -26,7 +26,7 @@ import {
   revertLastCommit,
   createWorktree,
 } from "@dantecode/git-engine";
-import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
+import type { Session, SessionMessage, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -601,6 +601,50 @@ async function readOnlyCommand(args: string, state: ReplState): Promise<string> 
   }
 }
 
+async function compactCommand(_args: string, state: ReplState): Promise<string> {
+  const before = state.session.messages.length;
+  if (before <= 10) {
+    return `${DIM}Session is small (${before} messages), no compaction needed.${RESET}`;
+  }
+
+  const KEEP_RECENT = 10;
+  const kept = state.session.messages.slice(-KEEP_RECENT);
+  const dropped = before - KEEP_RECENT;
+
+  const summaryMsg: SessionMessage = {
+    id: randomUUID(),
+    role: "system",
+    content: `[Context compacted: ${dropped} earlier messages were removed to free context space.]`,
+    timestamp: new Date().toISOString(),
+  };
+
+  state.session.messages = [summaryMsg, ...kept];
+  return `${GREEN}Compacted${RESET} ${dropped} messages → ${state.session.messages.length} remaining`;
+}
+
+async function architectCommand(_args: string, state: ReplState): Promise<string> {
+  const ARCHITECT_MARKER = "[ARCHITECT MODE]";
+  const hasArchitect = state.session.messages.some(
+    (m) => m.role === "system" && typeof m.content === "string" && m.content.includes(ARCHITECT_MARKER),
+  );
+
+  if (hasArchitect) {
+    state.session.messages = state.session.messages.filter(
+      (m) => !(m.role === "system" && typeof m.content === "string" && m.content.includes(ARCHITECT_MARKER)),
+    );
+    return `${YELLOW}Architect mode OFF${RESET} — direct coding mode resumed.`;
+  }
+
+  state.session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content: `${ARCHITECT_MARKER}\nYou are now in Architect mode. Before writing any code:\n1. Analyze the full scope of the request\n2. Identify all files that need to change\n3. Draft a step-by-step plan with file paths and change descriptions\n4. Present the plan to the user for approval\n5. Only after approval, implement the changes one file at a time\n6. After each file change, run verification (lint/test/build) before moving to the next`,
+    timestamp: new Date().toISOString(),
+  });
+
+  return `${GREEN}Architect mode ON${RESET} — the agent will plan before coding.`;
+}
+
 async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
   state.enableSandbox = !state.enableSandbox;
   const statusText = state.enableSandbox ? `${GREEN}ON${RESET}` : `${RED}OFF${RESET}`;
@@ -797,6 +841,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Add file as read-only reference context",
     usage: "/read-only <file>",
     handler: readOnlyCommand,
+  },
+  {
+    name: "compact",
+    description: "Condense conversation to free context space",
+    usage: "/compact",
+    handler: compactCommand,
+  },
+  {
+    name: "architect",
+    description: "Toggle plan-first architect mode",
+    usage: "/architect",
+    handler: architectCommand,
   },
   {
     name: "worktree",
