@@ -321,6 +321,7 @@ async function agentRun(args: string[], projectRoot: string): Promise<void> {
     projectRoot,
     messages: [],
     activeFiles: [],
+    readOnlyFiles: [],
     model: state.model.default,
     createdAt: now,
     updatedAt: now,

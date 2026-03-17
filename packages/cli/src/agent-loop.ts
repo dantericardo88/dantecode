@@ -14,6 +14,7 @@ import {
   runConstitutionCheck,
 } from "@dantecode/danteforge";
 import type { Session, SessionMessage, DanteCodeState } from "@dantecode/config-types";
+import { getStatus, autoCommit } from "@dantecode/git-engine";
 import { executeTool, getToolDefinitions } from "./tools.js";
 
 // ----------------------------------------------------------------------------
@@ -350,6 +351,9 @@ export async function runAgentLoop(
   let maxToolRounds = 15;
   let totalTokensUsed = 0;
   const touchedFiles: string[] = [];
+  // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
+  const recentToolSignatures: string[] = [];
+  const STUCK_LOOP_THRESHOLD = 3; // 3 identical consecutive calls = stuck
 
   while (maxToolRounds > 0) {
     maxToolRounds--;
@@ -405,10 +409,68 @@ export async function runAgentLoop(
     const toolResults: string[] = [];
 
     for (const toolCall of toolCalls) {
+      // Stuck loop detection (opencode/OpenHands pattern): if the same tool call
+      // signature appears 3 times consecutively, inject a warning to break the loop
+      const toolSig = `${toolCall.name}:${JSON.stringify(toolCall.input)}`;
+      recentToolSignatures.push(toolSig);
+      if (recentToolSignatures.length > STUCK_LOOP_THRESHOLD) {
+        recentToolSignatures.shift();
+      }
+      if (
+        recentToolSignatures.length === STUCK_LOOP_THRESHOLD &&
+        recentToolSignatures.every((sig) => sig === toolSig)
+      ) {
+        process.stdout.write(
+          `\n${YELLOW}${BOLD}Stuck loop detected:${RESET} ${DIM}same tool call repeated ${STUCK_LOOP_THRESHOLD} times. Breaking loop.${RESET}\n`,
+        );
+        toolResults.push(
+          `SYSTEM: Stuck loop detected — you have called ${toolCall.name} with identical arguments ${STUCK_LOOP_THRESHOLD} times. Stop repeating this action and try a different approach, or ask the user for help.`,
+        );
+        recentToolSignatures.length = 0;
+        break;
+      }
+
       process.stdout.write(`\n${DIM}[tool: ${toolCall.name}]${RESET} `);
 
       if (config.verbose) {
         process.stdout.write(`${DIM}${JSON.stringify(toolCall.input).slice(0, 200)}${RESET}\n`);
+      }
+
+      // Dirty-commit-before-edit (aider pattern): if the agent is about to edit
+      // a file that has uncommitted changes, commit those first so /undo works cleanly
+      if (config.enableGit && (toolCall.name === "Write" || toolCall.name === "Edit")) {
+        try {
+          const targetPath = toolCall.input["file_path"] as string | undefined;
+          if (targetPath) {
+            const gitStatus = getStatus(session.projectRoot);
+            const dirtyPaths = [
+              ...gitStatus.unstaged.map((s: { path: string }) => s.path),
+              ...gitStatus.staged.map((s: { path: string }) => s.path),
+            ];
+            const resolvedTarget = resolve(session.projectRoot, targetPath);
+            const isDirty = dirtyPaths.some(
+              (p) => resolve(session.projectRoot, p) === resolvedTarget,
+            );
+            if (isDirty) {
+              autoCommit(
+                {
+                  message: `dantecode: snapshot before agent edit of ${targetPath}`,
+                  footer: "",
+                  files: [targetPath],
+                  allowEmpty: false,
+                },
+                session.projectRoot,
+              );
+              if (config.verbose) {
+                process.stdout.write(
+                  `${DIM}[dirty-commit: saved pre-edit state of ${targetPath}]${RESET}\n`,
+                );
+              }
+            }
+          }
+        } catch {
+          // Non-fatal: if the dirty commit fails, continue with the edit anyway
+        }
       }
 
       const result = await executeTool(
@@ -417,6 +479,23 @@ export async function runAgentLoop(
         session.projectRoot,
         session.id,
       );
+
+      // Tool output truncation (opencode pattern): cap large outputs to avoid
+      // blowing the context window. Truncate to 2000 lines / 50KB.
+      const MAX_OUTPUT_LINES = 2000;
+      const MAX_OUTPUT_BYTES = 50 * 1024;
+      let outputContent = result.content;
+      const outputLines = outputContent.split("\n");
+      if (outputLines.length > MAX_OUTPUT_LINES) {
+        outputContent =
+          outputLines.slice(0, MAX_OUTPUT_LINES).join("\n") +
+          `\n\n... (truncated, ${outputLines.length} total lines)`;
+      }
+      if (outputContent.length > MAX_OUTPUT_BYTES) {
+        outputContent =
+          outputContent.slice(0, MAX_OUTPUT_BYTES) +
+          `\n\n... (truncated, ${result.content.length} total bytes)`;
+      }
 
       // Track files written for DanteForge pipeline
       const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
@@ -438,7 +517,7 @@ export async function runAgentLoop(
         process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
       }
 
-      toolResults.push(`Tool "${toolCall.name}" result:\n${result.content}`);
+      toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
 
       // Record the tool call in the session
       const toolUseMessage: SessionMessage = {

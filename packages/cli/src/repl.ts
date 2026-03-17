@@ -52,6 +52,7 @@ function createSession(projectRoot: string, model: ModelConfig): Session {
     projectRoot,
     messages: [],
     activeFiles: [],
+    readOnlyFiles: [],
     model,
     createdAt: now,
     updatedAt: now,
@@ -152,6 +153,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableSandbox: options.enableSandbox,
     lastEditFile: null,
     lastEditContent: null,
+    recentToolCalls: [],
   };
 
   // Agent loop config

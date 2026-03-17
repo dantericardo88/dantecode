@@ -107,6 +107,7 @@ export interface Session {
   projectRoot: string;
   messages: SessionMessage[];
   activeFiles: string[];
+  readOnlyFiles: string[];
   model: ModelConfig;
   createdAt: string;
   updatedAt: string;

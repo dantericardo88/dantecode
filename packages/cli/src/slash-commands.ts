@@ -53,6 +53,8 @@ export interface ReplState {
   enableSandbox: boolean;
   lastEditFile: string | null;
   lastEditContent: string | null;
+  /** Tracks recent tool call signatures for stuck-loop detection (from opencode/OpenHands). */
+  recentToolCalls: string[];
 }
 
 /** A single slash command handler. */
@@ -555,6 +557,50 @@ async function worktreeCommand(_args: string, state: ReplState): Promise<string>
   }
 }
 
+async function readOnlyCommand(args: string, state: ReplState): Promise<string> {
+  const filePath = args.trim();
+  if (!filePath) {
+    // Show current read-only files
+    if (state.session.readOnlyFiles.length === 0) {
+      return `${DIM}No read-only files. Use /read-only <file> to add reference context.${RESET}`;
+    }
+    const lines = [`${BOLD}Read-only files (reference only, not editable):${RESET}`, ""];
+    for (const file of state.session.readOnlyFiles) {
+      const rel = relative(state.projectRoot, file);
+      lines.push(`  ${DIM}-${RESET} ${rel}`);
+    }
+    return lines.join("\n");
+  }
+
+  const resolved = resolve(state.projectRoot, filePath);
+
+  try {
+    const content = await readFile(resolved, "utf-8");
+    const lineCount = content.split("\n").length;
+
+    if (!state.session.readOnlyFiles.includes(resolved)) {
+      state.session.readOnlyFiles.push(resolved);
+    }
+    // Remove from editable files if present
+    const editIdx = state.session.activeFiles.indexOf(resolved);
+    if (editIdx !== -1) {
+      state.session.activeFiles.splice(editIdx, 1);
+    }
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: `Reference file (READ-ONLY, do not edit): ${resolved}\n\n\`\`\`\n${content}\n\`\`\``,
+      timestamp: new Date().toISOString(),
+    });
+
+    return `${GREEN}Added (read-only)${RESET} ${resolved} ${DIM}(${lineCount} lines)${RESET}`;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Error reading file: ${message}${RESET}`;
+  }
+}
+
 async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
   state.enableSandbox = !state.enableSandbox;
   const statusText = state.enableSandbox ? `${GREEN}ON${RESET}` : `${RED}OFF${RESET}`;
@@ -745,6 +791,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List available agents",
     usage: "/agents",
     handler: agentsCommand,
+  },
+  {
+    name: "read-only",
+    description: "Add file as read-only reference context",
+    usage: "/read-only <file>",
+    handler: readOnlyCommand,
   },
   {
     name: "worktree",
