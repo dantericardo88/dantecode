@@ -136,6 +136,16 @@ function sanitizeSkillName(name: string): string {
  * @param options - Import configuration specifying source, directory, and project root.
  * @returns An ImportResult with lists of imported, skipped, and errored skills.
  */
+export async function loadChecks(projectRoot: string): Promise<ParsedSkill[]> {
+  const checksDir = join(projectRoot, '.dantecode', 'checks');
+  const checks = await glob('**/*.md', { cwd: checksDir });
+  return Promise.all(checks.map(async (c) => {
+    const path = join(checksDir, c);
+    const raw = await readFile(path, 'utf-8');
+    return parseClaudeSkill(raw, path);
+  }));
+}
+
 export async function importSkills(options: ImportOptions): Promise<ImportResult> {
   const {
     source,
