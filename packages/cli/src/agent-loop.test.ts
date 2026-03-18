@@ -1331,7 +1331,11 @@ describe("Universal skill completion (skillActive)", () => {
 
     const session = makeSession();
     // Non-slash prompt but skillActive=true — should still get pipeline protection
-    await runAgentLoop("Implement the design system audit", session, makeConfig({ skillActive: true }));
+    await runAgentLoop(
+      "Implement the design system audit",
+      session,
+      makeConfig({ skillActive: true }),
+    );
 
     // 4 calls: tool → summary (nudged) → tool → done
     expect(mockGenerateText).toHaveBeenCalledTimes(4);
@@ -1436,7 +1440,10 @@ describe("Universal skill completion (skillActive)", () => {
     expect(mockGenerateText).toHaveBeenCalledTimes(3);
     // Session should contain the abort message
     const abortMsg = result.messages.find(
-      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("consecutive empty responses"),
+      (m) =>
+        m.role === "assistant" &&
+        typeof m.content === "string" &&
+        m.content.includes("consecutive empty responses"),
     );
     expect(abortMsg).toBeDefined();
   });
@@ -1466,7 +1473,10 @@ describe("Universal skill completion (skillActive)", () => {
     expect(mockGenerateText).toHaveBeenCalledTimes(3);
     // No abort message
     const abortMsg = result.messages.find(
-      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("consecutive empty responses"),
+      (m) =>
+        m.role === "assistant" &&
+        typeof m.content === "string" &&
+        m.content.includes("consecutive empty responses"),
     );
     expect(abortMsg).toBeUndefined();
   });

@@ -661,7 +661,8 @@ export async function executeTool(
 
   if (context?.sandboxEnabled && name === "GitPush") {
     return {
-      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      content:
+        "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
       isError: true,
     };
   }
@@ -912,7 +913,9 @@ function escapeLiteralControlCharsInJsonStrings(payload: string): string {
   return result;
 }
 
-function parseToolCallPayload(payload: string): { name?: string; input?: Record<string, unknown> } | null {
+function parseToolCallPayload(
+  payload: string,
+): { name?: string; input?: Record<string, unknown> } | null {
   try {
     return JSON.parse(payload) as { name?: string; input?: Record<string, unknown> };
   } catch {

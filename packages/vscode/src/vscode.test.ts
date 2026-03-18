@@ -1303,13 +1303,18 @@ describe("VS Code Extension", () => {
       );
 
       // Access private field via type cast for testing
-      const p = provider as unknown as { activeSkill: string | null; handleNewChat: () => Promise<void> };
+      const p = provider as unknown as {
+        activeSkill: string | null;
+        handleNewChat: () => Promise<void>;
+      };
 
       // Initially null
       expect(p.activeSkill).toBeNull();
 
       // Simulate skill activation via the message handler by calling handleSkillActivate directly
-      const handleSkill = (provider as unknown as { handleSkillActivate: (name: string) => Promise<void> }).handleSkillActivate.bind(provider);
+      const handleSkill = (
+        provider as unknown as { handleSkillActivate: (name: string) => Promise<void> }
+      ).handleSkillActivate.bind(provider);
       await handleSkill("test-skill");
       expect(p.activeSkill).toBe("test-skill");
 

@@ -793,7 +793,8 @@ export async function executeTool(
 
   if (context.sandboxEnabled && name === "GitPush") {
     return {
-      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      content:
+        "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
       isError: true,
     };
   }
@@ -892,7 +893,12 @@ export async function executeTool(
       await appendAuditEvent(projectRoot, {
         sessionId: context.sessionId ?? "cli-session",
         timestamp: new Date().toISOString(),
-        type: auditTypeMap[name]! as "file_write" | "file_edit" | "bash_execute" | "git_commit" | "git_push",
+        type: auditTypeMap[name]! as
+          | "file_write"
+          | "file_edit"
+          | "bash_execute"
+          | "git_commit"
+          | "git_push",
         payload: {
           tool: name,
           input: sanitizeForAudit(input),
