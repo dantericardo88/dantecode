@@ -16,6 +16,9 @@ import {
   MultiAgent,
   ModelRouterImpl,
   SessionStore,
+  AutoforgeCheckpointManager,
+  TaskCircuitBreaker,
+  RecoveryEngine,
 } from "@dantecode/core";
 import type { MultiAgentProgressCallback } from "@dantecode/core";
 import {
@@ -202,29 +205,6 @@ async function ensureBackgroundRunner(state: ReplState) {
   }
 
   return runner;
-}
-
-function runRepoRootGStack(projectRoot: string): { passed: boolean; failedSteps: string[] } {
-  const steps = [
-    { name: "typecheck", command: "npm run typecheck" },
-    { name: "lint", command: "npm run lint" },
-    { name: "test", command: "npm test" },
-  ];
-  const failedSteps: string[] = [];
-
-  for (const step of steps) {
-    try {
-      execSync(step.command, {
-        cwd: projectRoot,
-        stdio: "pipe",
-        encoding: "utf-8",
-      });
-    } catch {
-      failedSteps.push(step.name);
-    }
-  }
-
-  return { passed: failedSteps.length === 0, failedSteps };
 }
 
 // ----------------------------------------------------------------------------
@@ -888,6 +868,7 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   const selfImprove = flags.includes("--self-improve");
   const silentMode = flags.includes("--silent");
   const persistUntilGreen = flags.includes("--persist");
+  const resumeSession = flags.find((f) => f.startsWith("--resume="))?.slice("--resume=".length);
   const hardCeiling = persistUntilGreen ? 200 : state.state.autoforge.maxIterations;
 
   if (selfImprove && !state.lastEditFile && state.session.activeFiles.length === 0) {
@@ -922,6 +903,33 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     return `${RED}Error reading target file: ${msg}${RESET}`;
   }
 
+  // Initialize checkpoint manager, circuit breaker, and recovery engine
+  const sessionId = resumeSession ?? `af-${state.session.id}-${Date.now()}`;
+  const checkpointMgr = new AutoforgeCheckpointManager(state.projectRoot, sessionId);
+  const taskBreaker = new TaskCircuitBreaker({
+    identicalFailureThreshold: 5,
+    maxRecoveryAttempts: 2,
+  });
+  const recovery = new RecoveryEngine({
+    execSyncFn: (cmd, cwd) => execSync(cmd, { cwd, stdio: "pipe", encoding: "utf-8" }) as string,
+  });
+
+  // Attempt to resume from a previous session
+  let startStep = 0;
+  if (resumeSession) {
+    const loaded = await checkpointMgr.loadSession(resumeSession);
+    if (loaded > 0) {
+      const latest = checkpointMgr.getLatestCheckpoint();
+      startStep = latest?.currentStep ?? 0;
+      process.stdout.write(
+        `${GREEN}Resumed from checkpoint ${latest?.id} (step ${startStep})${RESET}\n`,
+      );
+    }
+  }
+
+  // Record before-hash for audit
+  recovery.recordBeforeHash(resolvedTargetFile, code);
+
   process.stdout.write(
     `${DIM}Starting Autoforge IAL on ${displayTargetFile} (max ${hardCeiling} iterations)...${RESET}\n`,
   );
@@ -942,6 +950,18 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     getCostEstimate: () => modelRouter.getCostEstimate(),
   };
 
+  const sessionStart = Date.now();
+
+  // Start periodic checkpointing (every 15 minutes)
+  checkpointMgr.startPeriodicCheckpoints(() => ({
+    triggerCommand: `/autoforge${selfImprove ? " --self-improve" : ""}`,
+    currentStep: startStep,
+    elapsedMs: Date.now() - sessionStart,
+    targetFilePath: resolvedTargetFile,
+    targetFileContent: code,
+    metadata: { silentMode, persistUntilGreen, hardCeiling },
+  }));
+
   try {
     const autoforgeConfig = {
       ...state.state.autoforge,
@@ -952,23 +972,90 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     autoforgeConfig.persistUntilGreen = persistUntilGreen;
     autoforgeConfig.hardCeiling = hardCeiling;
 
-    const result = await runAutoforgeIAL(
-      code,
-      {
-        taskDescription: `Autoforge quality improvement for ${displayTargetFile}`,
-        filePath: resolvedTargetFile,
-      },
-      autoforgeConfig,
-      router,
-      state.projectRoot,
-      silentMode
-        ? undefined
-        : (progressState) => {
-            process.stdout.write(`\r${formatBladeProgressLine(progressState)}`);
-          },
-    );
+    let currentCode = code;
+    let result: Awaited<ReturnType<typeof runAutoforgeIAL>> | null = null;
+    let retryCount = 0;
+    const maxRetries = 3;
 
+    while (retryCount <= maxRetries) {
+      try {
+        result = await runAutoforgeIAL(
+          currentCode,
+          {
+            taskDescription: `Autoforge quality improvement for ${displayTargetFile}`,
+            filePath: resolvedTargetFile,
+          },
+          autoforgeConfig,
+          router,
+          state.projectRoot,
+          silentMode
+            ? undefined
+            : (progressState) => {
+                process.stdout.write(`\r${formatBladeProgressLine(progressState)}`);
+              },
+        );
+
+        // Record success in circuit breaker
+        taskBreaker.recordSuccess();
+        break;
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const failureAction = taskBreaker.recordFailure(errMsg, startStep + retryCount);
+
+        if (failureAction.action === "escalate") {
+          // Save final checkpoint before aborting
+          await checkpointMgr.createCheckpoint({
+            label: "escalation",
+            triggerCommand: `/autoforge${selfImprove ? " --self-improve" : ""}`,
+            currentStep: startStep + retryCount,
+            elapsedMs: Date.now() - sessionStart,
+            targetFilePath: resolvedTargetFile,
+            targetFileContent: currentCode,
+            metadata: { escalated: true, error: errMsg },
+          });
+          checkpointMgr.stopPeriodicCheckpoints();
+          return `${RED}${BOLD}Autoforge ESCALATED${RESET}: ${taskBreaker.getTotalFailures()} failures, recovery exhausted.\n  Last error: ${errMsg}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+        }
+
+        if (failureAction.action === "pause_and_recover") {
+          process.stdout.write(
+            `\n${YELLOW}Circuit breaker triggered — re-reading target file...${RESET}\n`,
+          );
+          const recoveryResult = await recovery.rereadAndRecover(
+            resolvedTargetFile,
+            state.projectRoot,
+          );
+          if (recoveryResult.recovered && recoveryResult.targetContent) {
+            currentCode = recoveryResult.targetContent;
+            process.stdout.write(
+              `${GREEN}Recovery: re-read ${displayTargetFile} (${recoveryResult.contextFiles.length} context files)${RESET}\n`,
+            );
+          }
+        }
+
+        retryCount++;
+        if (retryCount > maxRetries) {
+          await checkpointMgr.createCheckpoint({
+            label: "max-retries-reached",
+            triggerCommand: `/autoforge${selfImprove ? " --self-improve" : ""}`,
+            currentStep: startStep + retryCount,
+            elapsedMs: Date.now() - sessionStart,
+            targetFilePath: resolvedTargetFile,
+            targetFileContent: currentCode,
+            metadata: { error: errMsg },
+          });
+          checkpointMgr.stopPeriodicCheckpoints();
+          return `${RED}Autoforge error after ${retryCount} retries: ${errMsg}${RESET}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+        }
+      }
+    }
+
+    checkpointMgr.stopPeriodicCheckpoints();
     process.stdout.write("\n");
+
+    if (!result) {
+      return `${RED}Autoforge: no result produced${RESET}`;
+    }
 
     const lines: string[] = [
       "",
@@ -995,7 +1082,43 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     lines.push(`  Duration: ${(result.totalDurationMs / 1000).toFixed(1)}s`);
 
     if (result.succeeded) {
+      // Self-edit path: run repo-root verification before writing
+      if (selfImprove) {
+        const verification = recovery.runRepoRootVerification(state.projectRoot);
+        if (!verification.passed) {
+          lines.push(
+            `  ${RED}Repo-root verification FAILED: ${verification.failedSteps.join(", ")}${RESET}`,
+          );
+          lines.push(`  Disk state: unchanged — verification must pass before self-edit commit`);
+
+          await checkpointMgr.createCheckpoint({
+            label: "verification-blocked",
+            triggerCommand: `/autoforge --self-improve`,
+            currentStep: startStep + result.iterations,
+            elapsedMs: Date.now() - sessionStart,
+            targetFilePath: resolvedTargetFile,
+            targetFileContent: result.finalCode,
+            pdseScores: result.finalScore
+              ? [
+                  {
+                    filePath: displayTargetFile,
+                    overall: result.finalScore.overall,
+                    passedGate: result.finalScore.passedGate ?? true,
+                    iteration: result.iterations,
+                  },
+                ]
+              : [],
+            metadata: { verificationFailed: verification.failedSteps },
+          });
+          return lines.join("\n");
+        }
+      }
+
       await writeFile(resolvedTargetFile, result.finalCode, "utf-8");
+
+      // Record after-hash for audit trail
+      recovery.recordAfterHash(resolvedTargetFile, result.finalCode);
+
       state.lastEditFile = resolvedTargetFile;
       state.lastEditContent = code;
       if (!state.session.activeFiles.includes(resolvedTargetFile)) {
@@ -1006,8 +1129,31 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
       lines.push(`  Disk state: unchanged (${displayTargetFile})`);
     }
 
+    // Save final checkpoint
+    await checkpointMgr.createCheckpoint({
+      label: result.succeeded ? "completed" : "finished-not-passed",
+      triggerCommand: `/autoforge${selfImprove ? " --self-improve" : ""}`,
+      currentStep: startStep + result.iterations,
+      elapsedMs: Date.now() - sessionStart,
+      targetFilePath: resolvedTargetFile,
+      targetFileContent: result.succeeded ? result.finalCode : code,
+      pdseScores: result.finalScore
+        ? [
+            {
+              filePath: displayTargetFile,
+              overall: result.finalScore.overall,
+              passedGate: result.finalScore.passedGate ?? true,
+              iteration: result.iterations,
+            },
+          ]
+        : [],
+      metadata: { succeeded: result.succeeded, terminationReason: result.terminationReason },
+    });
+
+    lines.push(`  Session: ${sessionId}`);
     return lines.join("\n");
   } catch (err: unknown) {
+    checkpointMgr.stopPeriodicCheckpoints();
     const msg = err instanceof Error ? err.message : String(err);
     return `${RED}Autoforge error: ${msg}${RESET}`;
   }
@@ -1022,13 +1168,16 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
+  const resumeMatch = args.match(/--resume=([^\s]+)/);
+  const resumeSession = resumeMatch?.[1];
   const task = args
     .replace(/--autoforge/g, "")
     .replace(/--files\s+[^\s]+/g, "")
+    .replace(/--resume=[^\s]+/g, "")
     .trim();
 
   if (!task) {
-    return `${RED}Usage: /party [--autoforge] [--files a,b] <task description>${RESET}\n${DIM}Spawns multi-agent coordination with parallel lanes.${RESET}`;
+    return `${RED}Usage: /party [--autoforge] [--files a,b] [--resume=<session>] <task description>${RESET}\n${DIM}Spawns multi-agent coordination with parallel lanes.${RESET}`;
   }
 
   if (!hasAutoforge) {
@@ -1075,8 +1224,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       ];
 
       for (const output of result.outputs) {
-        const scoreColor =
-          output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
+        const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
         lines.push(
           `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
         );
@@ -1109,11 +1257,55 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   const mergedLanes: string[] = [];
   const blockedLanes: string[] = [];
 
+  // Initialize checkpoint manager, circuit breaker, and recovery engine for party mode
+  const sessionId = resumeSession ?? `party-${state.session.id}-${Date.now()}`;
+  const checkpointMgr = new AutoforgeCheckpointManager(state.projectRoot, sessionId);
+  const taskBreaker = new TaskCircuitBreaker({
+    identicalFailureThreshold: 5,
+    maxRecoveryAttempts: 2,
+  });
+  const recoveryEng = new RecoveryEngine({
+    execSyncFn: (cmd, cwd) => execSync(cmd, { cwd, stdio: "pipe", encoding: "utf-8" }) as string,
+  });
+  const sessionStart = Date.now();
+
+  // Resume from previous session if requested
+  let completedLaneNames: string[] = [];
+  if (resumeSession) {
+    const loaded = await checkpointMgr.loadSession(resumeSession);
+    if (loaded > 0) {
+      const latest = checkpointMgr.getLatestCheckpoint();
+      completedLaneNames = (latest?.metadata?.completedLanes as string[]) ?? [];
+      process.stdout.write(
+        `${GREEN}Resumed from checkpoint ${latest?.id} — skipping lanes: ${completedLaneNames.join(", ") || "none"}${RESET}\n`,
+      );
+    }
+  }
+
+  // Start periodic checkpointing
+  checkpointMgr.startPeriodicCheckpoints(() => ({
+    triggerCommand: "/party --autoforge",
+    currentStep: mergedLanes.length,
+    elapsedMs: Date.now() - sessionStart,
+    worktreeBranches: lanes.map((l) => `danteparty/${state.session.id}/${l}`),
+    metadata: {
+      mergedLanes: [...mergedLanes],
+      blockedLanes: [...blockedLanes],
+      completedLanes: [...mergedLanes, ...blockedLanes.map((b) => b.split(":")[0]!.trim())],
+    },
+  }));
+
   process.stdout.write(
     `\n${YELLOW}${BOLD}Party Autoforge${RESET} ${DIM}(isolated worktrees per lane)${RESET}\n\n`,
   );
 
   for (const lane of lanes) {
+    // Skip lanes already completed in a previous session
+    if (completedLaneNames.includes(lane)) {
+      process.stdout.write(`  ${DIM}skipping ${lane} (completed in previous session)${RESET}\n`);
+      continue;
+    }
+
     const worktreeSessionId = `${state.session.id}-${lane}`;
     const branch = `danteparty/${state.session.id}/${lane}`;
 
@@ -1129,14 +1321,20 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       const lanePrompt = [
         `You are the ${lane} lane in a /party --autoforge workflow.`,
         `Goal: ${task}`,
-        scopedFiles.length > 0 ? `Allowed files: ${scopedFiles.join(", ")}` : "Allowed files: repository-wide",
+        scopedFiles.length > 0
+          ? `Allowed files: ${scopedFiles.join(", ")}`
+          : "Allowed files: repository-wide",
         "Acceptance criteria:",
         "- Stay within your lane scope.",
         "- Run repository-root verification after major edits.",
         "- Do not commit or merge if typecheck, lint, or test fails.",
       ].join("\n");
 
-      const laneSession = cloneSessionForTask(state.session, worktree.directory, `${lane}-${Date.now()}`);
+      const laneSession = cloneSessionForTask(
+        state.session,
+        worktree.directory,
+        `${lane}-${Date.now()}`,
+      );
       const laneResult = await runAgentLoop(lanePrompt, laneSession, {
         state: state.state,
         verbose: state.verbose,
@@ -1181,32 +1379,86 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         }
       }
 
-      const laneGstack = runRepoRootGStack(worktree.directory);
-      const lanePassed =
-        !scopeViolation && pdseFailures.length === 0 && laneGstack.passed;
+      // Use RecoveryEngine for repo-root verification (consistent with autoforge path)
+      const laneVerification = recoveryEng.runRepoRootVerification(worktree.directory);
+      const lanePassed = !scopeViolation && pdseFailures.length === 0 && laneVerification.passed;
 
       if (!lanePassed) {
-        blockedLanes.push(
-          `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneGstack.passed ? ` GStack failed (${laneGstack.failedSteps.join(", ")})` : ""}`.trim(),
-        );
+        const failureMsg =
+          `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneVerification.passed ? ` verification failed (${laneVerification.failedSteps.join(", ")})` : ""}`.trim();
+        blockedLanes.push(failureMsg);
+
+        // Record failure in circuit breaker
+        const failureAction = taskBreaker.recordFailure(failureMsg, mergedLanes.length);
+        if (failureAction.action === "escalate") {
+          process.stdout.write(
+            `  ${RED}Circuit breaker escalated after repeated lane failures${RESET}\n`,
+          );
+          removeWorktree(worktree.directory);
+
+          await checkpointMgr.createCheckpoint({
+            label: "escalation",
+            triggerCommand: "/party --autoforge",
+            currentStep: mergedLanes.length,
+            elapsedMs: Date.now() - sessionStart,
+            worktreeBranches: lanes.map((l) => `danteparty/${state.session.id}/${l}`),
+            metadata: { mergedLanes, blockedLanes, escalated: true },
+          });
+          checkpointMgr.stopPeriodicCheckpoints();
+          break;
+        }
+        if (failureAction.action === "pause_and_recover") {
+          process.stdout.write(
+            `  ${YELLOW}Circuit breaker paused — attempting recovery for ${lane}...${RESET}\n`,
+          );
+        }
+
         removeWorktree(worktree.directory);
         continue;
       }
 
+      // Record success in circuit breaker
+      taskBreaker.recordSuccess();
+
       if (uniqueChangedFiles.length > 0) {
+        // Hash audit before merge
+        for (const filePath of uniqueChangedFiles) {
+          try {
+            const content = await readFile(resolve(worktree.directory, filePath), "utf-8");
+            recoveryEng.recordBeforeHash(filePath, content);
+          } catch {
+            /* skip */
+          }
+        }
+
         mergeWorktree(worktree.directory, baseBranch, state.projectRoot);
         mergedLanes.push(lane);
 
-        const postMergeGstack = runRepoRootGStack(state.projectRoot);
-        if (!postMergeGstack.passed) {
+        // Post-merge verification using RecoveryEngine
+        const postMergeVerification = recoveryEng.runRepoRootVerification(state.projectRoot);
+        if (!postMergeVerification.passed) {
           blockedLanes.push(
-            `post-merge gate failed after ${lane} (${postMergeGstack.failedSteps.join(", ")})`,
+            `post-merge gate failed after ${lane} (${postMergeVerification.failedSteps.join(", ")})`,
           );
           break;
         }
       } else {
         removeWorktree(worktree.directory);
       }
+
+      // Save checkpoint after each lane
+      await checkpointMgr.createCheckpoint({
+        label: `lane-${lane}-complete`,
+        triggerCommand: "/party --autoforge",
+        currentStep: mergedLanes.length,
+        elapsedMs: Date.now() - sessionStart,
+        worktreeBranches: lanes.map((l) => `danteparty/${state.session.id}/${l}`),
+        metadata: {
+          mergedLanes: [...mergedLanes],
+          blockedLanes: [...blockedLanes],
+          completedLanes: [...mergedLanes, ...blockedLanes.map((b) => b.split(":")[0]!.trim())],
+        },
+      });
 
       state.session.messages.push({
         id: randomUUID(),
@@ -1219,19 +1471,35 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     }
   }
 
-  const finalGstack = runRepoRootGStack(state.projectRoot);
+  checkpointMgr.stopPeriodicCheckpoints();
+
+  // Final verification using RecoveryEngine
+  const finalVerification = recoveryEng.runRepoRootVerification(state.projectRoot);
   const statusLine =
-    blockedLanes.length === 0 && finalGstack.passed
+    blockedLanes.length === 0 && finalVerification.passed
       ? `${GREEN}${BOLD}Party Autoforge Complete: PASSED${RESET}`
       : `${YELLOW}${BOLD}Party Autoforge Complete: PARTIAL${RESET}`;
+
+  // Save final checkpoint
+  await checkpointMgr.createCheckpoint({
+    label: "party-complete",
+    triggerCommand: "/party --autoforge",
+    currentStep: mergedLanes.length,
+    elapsedMs: Date.now() - sessionStart,
+    worktreeBranches: [],
+    metadata: { mergedLanes, blockedLanes, finalGstackPassed: finalVerification.passed },
+  });
 
   return [
     "",
     statusLine,
     `  Base branch: ${baseBranch}`,
     `  Merged lanes: ${mergedLanes.length > 0 ? mergedLanes.join(", ") : "none"}`,
-    `  Final GStack: ${finalGstack.passed ? `${GREEN}green${RESET}` : `${RED}red${RESET}`}`,
-    blockedLanes.length > 0 ? `  Blocked lanes: ${blockedLanes.join(" | ")}` : "  Blocked lanes: none",
+    `  Final GStack: ${finalVerification.passed ? `${GREEN}green${RESET}` : `${RED}red${RESET}`}`,
+    blockedLanes.length > 0
+      ? `  Blocked lanes: ${blockedLanes.join(" | ")}`
+      : "  Blocked lanes: none",
+    `  Session: ${sessionId}`,
     "",
   ].join("\n");
 }
@@ -1266,11 +1534,11 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
 
   // Handle `/listen status` subcommand
   if (trimmed === "status") {
-    const port = (state as unknown as Record<string, unknown>)._listenPort as number ?? 8080;
+    const port = ((state as unknown as Record<string, unknown>)._listenPort as number) ?? 8080;
     try {
       const res = await fetch(`http://localhost:${port}/health`);
-      const data = await res.json() as Record<string, unknown>;
-      const counts = data.taskCounts as Record<string, number> ?? {};
+      const data = (await res.json()) as Record<string, unknown>;
+      const counts = (data.taskCounts as Record<string, number>) ?? {};
       return [
         "",
         `${GREEN}${BOLD}Event Gateway Status${RESET}`,
@@ -1309,9 +1577,10 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
   // Build issue-to-PR config from environment if GitHub token is available
   const githubToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   const githubRepo = process.env.GITHUB_REPOSITORY;
-  const issueToPRConfig = githubToken && githubRepo
-    ? { githubToken, repository: githubRepo, baseBranch: "main" }
-    : undefined;
+  const issueToPRConfig =
+    githubToken && githubRepo
+      ? { githubToken, repository: githubRepo, baseBranch: "main" }
+      : undefined;
 
   // Default agent executor: run prompt through the background runner
   const agentExecutor = issueToPRConfig
@@ -1320,7 +1589,11 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
         return new Promise<{ output: string; touchedFiles: string[] }>((resolve, reject) => {
           const check = setInterval(() => {
             const task = runner.getTask(taskId);
-            if (!task) { clearInterval(check); reject(new Error("Task not found")); return; }
+            if (!task) {
+              clearInterval(check);
+              reject(new Error("Task not found"));
+              return;
+            }
             if (task.status === "completed") {
               clearInterval(check);
               resolve({ output: task.output ?? "", touchedFiles: task.touchedFiles });
@@ -1357,7 +1630,8 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
   const ghSecret = process.env.GITHUB_WEBHOOK_SECRET;
   const slackSecret = process.env.SLACK_SIGNING_SECRET;
   const apiToken = process.env.DANTECODE_API_TOKEN;
-  const check = (v: string | undefined) => v ? `${GREEN}configured${RESET}` : `${RED}missing${RESET}`;
+  const check = (v: string | undefined) =>
+    v ? `${GREEN}configured${RESET}` : `${RED}missing${RESET}`;
 
   const lines = [
     "",
@@ -1405,13 +1679,13 @@ async function bgCommand(args: string, state: ReplState): Promise<string> {
           ? `${YELLOW}⟳${RESET}`
           : task.status === "paused"
             ? `${YELLOW}⏸${RESET}`
-          : task.status === "completed"
-            ? `${GREEN}✓${RESET}`
-            : task.status === "failed"
-              ? `${RED}✗${RESET}`
-              : task.status === "cancelled"
-                ? `${DIM}⊘${RESET}`
-                : `${DIM}…${RESET}`;
+            : task.status === "completed"
+              ? `${GREEN}✓${RESET}`
+              : task.status === "failed"
+                ? `${RED}✗${RESET}`
+                : task.status === "cancelled"
+                  ? `${DIM}⊘${RESET}`
+                  : `${DIM}…${RESET}`;
       lines.push(`  ${icon} [${task.id}] ${task.status} — ${task.prompt.slice(0, 60)}`);
       lines.push(`    ${DIM}${task.progress}${RESET}`);
     }
@@ -1635,9 +1909,7 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
   if (trimmed.length > 0) {
     // Try to find session by prefix match
     const entries = await store.list();
-    const match = entries.find(
-      (e) => e.id === trimmed || e.id.startsWith(trimmed),
-    );
+    const match = entries.find((e) => e.id === trimmed || e.id.startsWith(trimmed));
     if (!match) {
       return `${RED}Session not found: ${trimmed}${RESET}\n${DIM}Use /history to see all sessions.${RESET}`;
     }
@@ -1654,9 +1926,7 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
     }
 
     // Collect files touched
-    const files = session.contextFiles.length > 0
-      ? session.contextFiles
-      : [];
+    const files = session.contextFiles.length > 0 ? session.contextFiles : [];
 
     // Message breakdown
     const userCount = session.messages.filter((m) => m.role === "user").length;
@@ -1709,9 +1979,7 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 
   for (const entry of recent) {
     const shortId = entry.id.slice(0, 10) + "..";
-    const title = entry.title.length > 28
-      ? entry.title.slice(0, 27) + "..."
-      : entry.title;
+    const title = entry.title.length > 28 ? entry.title.slice(0, 27) + "..." : entry.title;
     const date = new Date(entry.updatedAt).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",

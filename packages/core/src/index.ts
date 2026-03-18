@@ -114,7 +114,12 @@ export { CodeIndex, chunkFile, tokenize } from "./code-index.js";
 // ─── Vector Store ───────────────────────────────────────────────────────────
 
 export { InMemoryVectorStore, LanceDBVectorStore, createVectorStore } from "./vector-store.js";
-export type { VectorStore, VectorEntry, VectorMetadata, VectorSearchResult } from "./vector-store.js";
+export type {
+  VectorStore,
+  VectorEntry,
+  VectorMetadata,
+  VectorSearchResult,
+} from "./vector-store.js";
 
 // ─── Repo Map ───────────────────────────────────────────────────────────────
 
@@ -169,11 +174,7 @@ export type {
 // ─── Docker Agent ──────────────────────────────────────────────────────────
 
 export { DockerAgent } from "./docker-agent.js";
-export type {
-  DockerAgentOptions,
-  DockerAgentResult,
-  DockerCommandSpec,
-} from "./docker-agent.js";
+export type { DockerAgentOptions, DockerAgentResult, DockerCommandSpec } from "./docker-agent.js";
 
 // ─── Issue-to-PR Pipeline ──────────────────────────────────────────────────
 
@@ -209,11 +210,7 @@ export type { WebhookServerConfig, WebhookServerHandle } from "./webhook-server.
 // ─── Enterprise SSO ──────────────────────────────────────────────────────────
 
 export { EnterpriseSSOManager } from "./enterprise-sso.js";
-export type {
-  SSOConfig,
-  SSOSession,
-  SSOValidationResult,
-} from "./enterprise-sso.js";
+export type { SSOConfig, SSOSession, SSOValidationResult } from "./enterprise-sso.js";
 
 // ─── Team Dashboard ──────────────────────────────────────────────────────────
 
@@ -222,7 +219,14 @@ export type { DashboardMetrics, DashboardFilter, TrendReport } from "./team-dash
 
 // ─── Compliance Export ──────────────────────────────────────────────────────
 
-export { exportAuditLog, maskSensitiveFields, filterEvents, eventsToCSV, eventsToJSON, generateComplianceHeader } from "./compliance-export.js";
+export {
+  exportAuditLog,
+  maskSensitiveFields,
+  filterEvents,
+  eventsToCSV,
+  eventsToJSON,
+  generateComplianceHeader,
+} from "./compliance-export.js";
 export type { ComplianceExportOptions, ComplianceExportResult } from "./compliance-export.js";
 
 // ─── Error Parser ────────────────────────────────────────────────────────────
@@ -252,6 +256,40 @@ export {
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
 } from "./self-improvement-policy.js";
+
+// ─── Autoforge Checkpoint ────────────────────────────────────────────────────
+
+export { AutoforgeCheckpointManager, hashContent } from "./autoforge-checkpoint.js";
+export type {
+  AutoforgeSessionSnapshot,
+  AutoforgeCheckpointFile,
+  AutoforgeCheckpointManagerOptions,
+  CreateAutoforgeCheckpointOptions,
+  PdseCheckpointEntry,
+} from "./autoforge-checkpoint.js";
+
+// ─── Task Circuit Breaker ────────────────────────────────────────────────────
+
+export { TaskCircuitBreaker } from "./task-circuit-breaker.js";
+export type {
+  TaskBreakerState,
+  TaskFailureRecord,
+  EscalationEvent,
+  TaskCircuitBreakerOptions,
+  FailureAction,
+} from "./task-circuit-breaker.js";
+
+// ─── Recovery Engine ─────────────────────────────────────────────────────────
+
+export { RecoveryEngine } from "./recovery-engine.js";
+export type {
+  RecoveryResult,
+  ContextFile,
+  HashAuditRecord,
+  RepoRootVerificationResult,
+  RepoVerificationStep,
+  RecoveryEngineOptions,
+} from "./recovery-engine.js";
 
 // ─── Version Migration ──────────────────────────────────────────────────────
 

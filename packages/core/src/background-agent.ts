@@ -21,6 +21,7 @@ import type {
 import { appendAuditEvent } from "./audit.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
+import { RecoveryEngine } from "./recovery-engine.js";
 
 const execAsync = promisify(exec);
 const SANDBOX_PACKAGE_NAME = "@dantecode/sandbox";
@@ -412,7 +413,9 @@ export class BackgroundAgentRunner {
       if (
         task.status === "queued" ||
         task.status === "running" ||
-        (task.status === "paused" && task.nextRetryAt && new Date(task.nextRetryAt).getTime() <= Date.now())
+        (task.status === "paused" &&
+          task.nextRetryAt &&
+          new Date(task.nextRetryAt).getTime() <= Date.now())
       ) {
         task.status = task.status === "paused" ? "queued" : task.status;
         if (!this.queue.includes(task.id)) {
@@ -452,6 +455,9 @@ export class BackgroundAgentRunner {
   /**
    * Runs after a task completes successfully. Handles auto-commit and
    * PR creation when the corresponding EnqueueOptions flags are set.
+   *
+   * When the task has a self-improvement context, repo-root verification
+   * (typecheck → lint → test) is enforced before any commit proceeds.
    */
   private async postCompletionHook(task: BackgroundAgentTask): Promise<void> {
     const options = this.taskOptions.get(task.id);
@@ -462,6 +468,18 @@ export class BackgroundAgentRunner {
     if (!task.touchedFiles || task.touchedFiles.length === 0) {
       await this.persistTask(task);
       return;
+    }
+
+    // Self-edit gate: run repo-root verification before committing
+    if (task.selfImprovement?.enabled && options.autoCommit) {
+      const recoveryEngine = new RecoveryEngine();
+      const verification = recoveryEngine.runRepoRootVerification(this.projectRoot);
+      if (!verification.passed) {
+        task.progress = `Auto-commit blocked: repo-root verification failed (${verification.failedSteps.join(", ")})`;
+        this.notifyProgress(task);
+        await this.persistTask(task);
+        return;
+      }
     }
 
     if (options.autoCommit) {
@@ -506,7 +524,10 @@ export class BackgroundAgentRunner {
     context: BackgroundTaskContext;
     cleanup: () => Promise<void>;
   }> {
-    const baseContext: Pick<BackgroundTaskContext, "task" | "saveCheckpoint" | "getLatestCheckpoint"> = {
+    const baseContext: Pick<
+      BackgroundTaskContext,
+      "task" | "saveCheckpoint" | "getLatestCheckpoint"
+    > = {
       task,
       saveCheckpoint: (label: string, sessionSnapshot?: Session) =>
         this.saveCheckpoint(task, label, sessionSnapshot),
