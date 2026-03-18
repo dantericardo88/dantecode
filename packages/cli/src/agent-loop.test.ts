@@ -118,12 +118,10 @@ import {
   queryLessons as _ql,
   formatLessonsForPrompt as _flp,
   detectAndRecordPatterns as _darp,
-  recordSuccessPattern as _rsp,
 } from "@dantecode/danteforge";
 const mockQueryLessons = _ql as unknown as ReturnType<typeof vi.fn>;
 const mockFormatLessonsForPrompt = _flp as unknown as ReturnType<typeof vi.fn>;
 const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>;
-const mockRecordSuccessPattern = _rsp as unknown as ReturnType<typeof vi.fn>;
 
 vi.mock("@dantecode/git-engine", () => ({
   getStatus: vi.fn(() => ({ staged: [], unstaged: [], untracked: [] })),
