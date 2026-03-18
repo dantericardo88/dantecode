@@ -145,15 +145,7 @@ const mockQueryLessons = _ql as unknown as ReturnType<typeof vi.fn>;
 const mockFormatLessonsForPrompt = _flp as unknown as ReturnType<typeof vi.fn>;
 const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>;
 
-// Get references to mocked core functions for assertions
-import {
-  computeErrorSignature as _ces,
-  parseVerificationErrors as _pve,
-  formatErrorsForFixPrompt as _fefp,
-} from "@dantecode/core";
-const mockComputeErrorSignature = _ces as unknown as ReturnType<typeof vi.fn>;
-const mockParseVerificationErrors = _pve as unknown as ReturnType<typeof vi.fn>;
-const mockFormatErrorsForFixPrompt = _fefp as unknown as ReturnType<typeof vi.fn>;
+// Core mocked functions are available via vi.mock above; import only if needed.
 
 vi.mock("@dantecode/git-engine", () => ({
   getStatus: vi.fn(() => ({ staged: [], unstaged: [], untracked: [] })),
@@ -634,7 +626,7 @@ describe("Approach memory: recording after verification", () => {
   it("records approach outcome after verification cycle passes", async () => {
     // Configure project with a test command so verification runs
     const config = makeConfig();
-    (config.state.project as Record<string, unknown>).testCommand = "npm test";
+    (config.state.project as unknown as Record<string, unknown>).testCommand = "npm test";
 
     // First call: model writes a file
     mockGenerateText.mockResolvedValueOnce({
@@ -663,7 +655,7 @@ describe("Approach memory: recording after verification", () => {
 
   it("records failed approach and includes it in retry prompt when verification fails", async () => {
     const config = makeConfig();
-    (config.state.project as Record<string, unknown>).testCommand = "npm test";
+    (config.state.project as unknown as Record<string, unknown>).testCommand = "npm test";
 
     // First call: model writes a file
     mockGenerateText.mockResolvedValueOnce({

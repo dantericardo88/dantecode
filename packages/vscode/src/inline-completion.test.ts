@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// ─── VS Code Mock ─────────────────────────────────────────────────────────────
+
 const vscodeMocks = vi.hoisted(() => {
   const configValues: Record<string, unknown> = {};
 
@@ -26,11 +28,14 @@ const vscodeMocks = vi.hoisted(() => {
     ) {}
   }
 
+  const diagnosticEntries = new Map<string, unknown[]>();
+
   return {
     configValues,
     Position,
     Range,
     InlineCompletionItem,
+    diagnosticEntries,
   };
 });
 
@@ -38,6 +43,17 @@ vi.mock("vscode", () => ({
   Position: vscodeMocks.Position,
   Range: vscodeMocks.Range,
   InlineCompletionItem: vscodeMocks.InlineCompletionItem,
+  DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+  Diagnostic: class {
+    source = "";
+    code: unknown = "";
+    constructor(
+      public range: unknown,
+      public message: string,
+      public severity: number,
+    ) {}
+  },
+  Uri: { parse: (s: string) => ({ toString: () => s }) },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: "/workspace" } }],
     getConfiguration: vi.fn(() => ({
@@ -45,12 +61,25 @@ vi.mock("vscode", () => ({
         key in vscodeMocks.configValues ? vscodeMocks.configValues[key] : defaultValue,
       ),
     })),
+    openTextDocument: vi.fn(async () => ({ getText: () => "export function helper() {}" })),
+  },
+  window: {
+    visibleTextEditors: [],
+  },
+  languages: {
+    createDiagnosticCollection: vi.fn(() => ({
+      get: vi.fn((uri: unknown) => vscodeMocks.diagnosticEntries.get(String(uri)) ?? []),
+      set: vi.fn((uri: unknown, diags: unknown[]) => {
+        vscodeMocks.diagnosticEntries.set(String(uri), diags);
+      }),
+      delete: vi.fn((uri: unknown) => vscodeMocks.diagnosticEntries.delete(String(uri))),
+      dispose: vi.fn(),
+    })),
   },
 }));
 
-/**
- * Helper: creates an async iterable that yields the given chunks sequentially.
- */
+// ─── Async Stream Helper ──────────────────────────────────────────────────────
+
 function createTextStream(chunks: string[]): AsyncIterable<string> {
   return {
     [Symbol.asyncIterator]() {
@@ -66,6 +95,8 @@ function createTextStream(chunks: string[]): AsyncIterable<string> {
     },
   };
 }
+
+// ─── Core Mocks ───────────────────────────────────────────────────────────────
 
 const routerMocks = vi.hoisted(() => {
   const mockGenerate = vi.fn().mockResolvedValue("console.log('done');");
@@ -91,54 +122,61 @@ vi.mock("@dantecode/core", () => ({
         modelId: model.slice(slashIndex + 1),
       };
     }
-
     const provider = /^(llama|qwen|mistral)/i.test(model) ? "ollama" : "grok";
-    return {
-      id: `${provider}/${model}`,
-      provider,
-      modelId: model,
-    };
+    return { id: `${provider}/${model}`, provider, modelId: model };
   }),
 }));
 
+let pdseScoreOverride: { overall: number; violations: { message: string }[]; passedGate: boolean } = {
+  overall: 92,
+  violations: [],
+  passedGate: true,
+};
+
 vi.mock("@dantecode/danteforge", () => ({
-  runLocalPDSEScorer: vi.fn(() => ({ overall: 92 })),
+  runLocalPDSEScorer: vi.fn(() => pdseScoreOverride),
 }));
+
+vi.mock("./cross-file-context.js", () => ({
+  gatherCrossFileContext: vi.fn(async () => "// From utils.ts: export function helper()"),
+}));
+
+// ─── SUT Import ───────────────────────────────────────────────────────────────
 
 import {
   DanteCodeCompletionProvider,
   buildFIMPrompt,
   getInlineCompletionDebounceMs,
   resolveInlineCompletionModel,
+  areBracketsBalanced,
+  shouldContinueStreaming,
+  shouldUseMultilineCompletion,
+  disposeInlinePDSEDiagnostics,
 } from "./inline-completion.js";
+
+// ─── Test Helpers ─────────────────────────────────────────────────────────────
 
 function createDocument(prefix: string, suffix: string) {
   return {
     languageId: "typescript",
-    uri: { fsPath: "/workspace/src/example.ts" },
+    uri: { fsPath: "/workspace/src/example.ts", toString: () => "/workspace/src/example.ts" },
     lineCount: Math.max(1, (prefix + suffix).split("\n").length),
     getText: vi.fn((range?: InstanceType<typeof vscodeMocks.Range>) => {
-      if (!range) {
-        return prefix + suffix;
-      }
-      if (range.start.line === 0 && range.start.character === 0) {
-        return prefix;
-      }
+      if (!range) return prefix + suffix;
+      if (range.start.line === 0 && range.start.character === 0) return prefix;
       return suffix;
     }),
   };
 }
 
-/**
- * Creates a mock cancellation token compatible with the provider's usage,
- * including the `onCancellationRequested` disposable pattern.
- */
 function createMockToken(cancelled = false) {
   return {
     isCancellationRequested: cancelled,
     onCancellationRequested: vi.fn(() => ({ dispose: vi.fn() })),
   };
 }
+
+// ─── Tests: Helpers ───────────────────────────────────────────────────────────
 
 describe("inline completion helpers", () => {
   it("prefers the fim model when configured", () => {
@@ -147,55 +185,35 @@ describe("inline completion helpers", () => {
     );
   });
 
-  it("parses bare local model IDs as ollama models", async () => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    routerMocks.mockStream.mockResolvedValue({
-      textStream: createTextStream(["console.log('done');"]),
-    });
-    const provider = new DanteCodeCompletionProvider();
-    const document = createDocument("const answer = ", "");
-    const token = createMockToken();
-
-    vscodeMocks.configValues["defaultModel"] = "llama3";
-    vscodeMocks.configValues["fimModel"] = "llama3";
-
-    const pending = provider.provideInlineCompletionItems(
-      document as never,
-      new vscodeMocks.Position(0, 15) as never,
-      {} as never,
-      token as never,
-    );
-
-    await vi.advanceTimersByTimeAsync(100);
-    await pending;
-
-    expect(routerMocks.mockRouterCtor).toHaveBeenCalledWith(
-      expect.objectContaining({
-        default: expect.objectContaining({
-          provider: "ollama",
-          modelId: "llama3",
-        }),
-      }),
-      "/workspace",
-      "inline-completion",
-    );
+  it("falls back to default model when fim is empty", () => {
+    expect(resolveInlineCompletionModel("grok/grok-3", "")).toBe("grok/grok-3");
+    expect(resolveInlineCompletionModel("grok/grok-3", "  ")).toBe("grok/grok-3");
+    expect(resolveInlineCompletionModel("grok/grok-3", undefined)).toBe("grok/grok-3");
   });
 
   it("uses provider-aware debounce delays", () => {
     expect(getInlineCompletionDebounceMs("ollama")).toBe(100);
     expect(getInlineCompletionDebounceMs("grok")).toBe(150);
-    expect(getInlineCompletionDebounceMs("openai")).toBe(200);
+    expect(getInlineCompletionDebounceMs("openai")).toBe(180);
+    expect(getInlineCompletionDebounceMs("anthropic")).toBe(180);
   });
 
-  it("builds a FIM prompt with multiline token budget when block context is detected", () => {
+  it("uses custom debounce when provided", () => {
+    expect(getInlineCompletionDebounceMs("grok", 250)).toBe(250);
+    expect(getInlineCompletionDebounceMs("ollama", 50)).toBe(50);
+  });
+
+  it("ignores custom debounce of 0", () => {
+    expect(getInlineCompletionDebounceMs("grok", 0)).toBe(150);
+  });
+
+  it("builds a FIM prompt with multiline token budget for block context", () => {
     const prompt = buildFIMPrompt({
       prefix: "function greet(name: string) {\n  ",
       suffix: "\n}\n",
       language: "typescript",
       filePath: "/workspace/src/example.ts",
     });
-
     expect(prompt.userPrompt).toContain("<|fim_prefix|>");
     expect(prompt.userPrompt).toContain("<|fim_suffix|>");
     expect(prompt.userPrompt).toContain("<|fim_middle|>");
@@ -204,48 +222,26 @@ describe("inline completion helpers", () => {
 
   it("forces multiline when multilineOverride is true", () => {
     const prompt = buildFIMPrompt(
-      {
-        prefix: "const x = ",
-        suffix: "",
-        language: "typescript",
-        filePath: "/workspace/src/example.ts",
-      },
+      { prefix: "const x = ", suffix: "", language: "typescript", filePath: "f.ts" },
       true,
     );
-
-    // Multiline mode uses 512 tokens
     expect(prompt.maxTokens).toBe(512);
   });
 
   it("forces single-line when multilineOverride is false", () => {
-    // This prefix normally triggers multiline (ends with `{`)
     const prompt = buildFIMPrompt(
-      {
-        prefix: "function greet(name: string) {",
-        suffix: "\n}\n",
-        language: "typescript",
-        filePath: "/workspace/src/example.ts",
-      },
+      { prefix: "function greet(name: string) {", suffix: "\n}\n", language: "typescript", filePath: "f.ts" },
       false,
     );
-
-    // Single-line mode uses 256 tokens
     expect(prompt.maxTokens).toBe(256);
   });
 
   it("uses an 8000-char prefix window for multiline completions", () => {
     const longPrefix = "a".repeat(9000);
     const prompt = buildFIMPrompt(
-      {
-        prefix: longPrefix + "{",
-        suffix: "\n}\n",
-        language: "typescript",
-        filePath: "/workspace/src/example.ts",
-      },
+      { prefix: longPrefix + "{", suffix: "\n}\n", language: "typescript", filePath: "f.ts" },
       true,
     );
-
-    // The prompt should contain the last 8000 chars of the prefix
     const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
     expect(prefixInPrompt.length).toBe(8000);
   });
@@ -253,34 +249,150 @@ describe("inline completion helpers", () => {
   it("uses a 5000-char prefix window for single-line completions", () => {
     const longPrefix = "a".repeat(6000);
     const prompt = buildFIMPrompt(
-      {
-        prefix: longPrefix,
-        suffix: "",
-        language: "typescript",
-        filePath: "/workspace/src/example.ts",
-      },
+      { prefix: longPrefix, suffix: "", language: "typescript", filePath: "f.ts" },
       false,
     );
-
     const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
     expect(prefixInPrompt.length).toBe(5000);
   });
+
+  it("injects cross-file context into system prompt when provided", () => {
+    const prompt = buildFIMPrompt({
+      prefix: "const x = ",
+      suffix: "",
+      language: "typescript",
+      filePath: "f.ts",
+      crossFileContext: "// From utils.ts: export function helper()",
+    });
+    expect(prompt.systemPrompt).toContain("Cross-file context:");
+    expect(prompt.systemPrompt).toContain("export function helper()");
+  });
+
+  it("omits cross-file context section when context is empty", () => {
+    const prompt = buildFIMPrompt({
+      prefix: "const x = ",
+      suffix: "",
+      language: "typescript",
+      filePath: "f.ts",
+    });
+    expect(prompt.systemPrompt).not.toContain("Cross-file context:");
+  });
 });
 
-describe("DanteCodeCompletionProvider", () => {
+// ─── Tests: Bracket Balancing ─────────────────────────────────────────────────
+
+describe("areBracketsBalanced", () => {
+  it("returns true for balanced braces", () => {
+    expect(areBracketsBalanced("{ foo(); }")).toBe(true);
+  });
+
+  it("returns false for open braces", () => {
+    expect(areBracketsBalanced("{ foo();")).toBe(false);
+  });
+
+  it("returns true for nested balanced brackets", () => {
+    expect(areBracketsBalanced("{ if (x) { bar(); } }")).toBe(true);
+  });
+
+  it("returns true for closing bracket beyond outer scope", () => {
+    expect(areBracketsBalanced("}")).toBe(true);
+  });
+
+  it("returns true for empty string", () => {
+    expect(areBracketsBalanced("")).toBe(true);
+  });
+
+  it("handles mixed bracket types", () => {
+    expect(areBracketsBalanced("([{}])")).toBe(true);
+    expect(areBracketsBalanced("([{")).toBe(false);
+  });
+});
+
+// ─── Tests: Streaming Guard ──────────────────────────────────────────────────
+
+describe("shouldContinueStreaming", () => {
+  it("continues for partial code block with open braces", () => {
+    expect(shouldContinueStreaming("  if (x) {\n    foo();")).toBe(true);
+  });
+
+  it("stops on triple newline (double blank line)", () => {
+    expect(shouldContinueStreaming("foo;\n\n\n")).toBe(false);
+  });
+
+  it("stops when brackets become balanced", () => {
+    expect(shouldContinueStreaming("  return x;\n}")).toBe(false);
+  });
+
+  it("continues for unbalanced brackets", () => {
+    expect(shouldContinueStreaming("  if (x) {\n    foo();")).toBe(true);
+  });
+
+  it("stops on two consecutive empty lines at end", () => {
+    expect(shouldContinueStreaming("foo;\n\n")).toBe(false);
+  });
+
+  it("continues for short text even if balanced", () => {
+    expect(shouldContinueStreaming("x")).toBe(true);
+  });
+});
+
+// ─── Tests: Multiline Detection ──────────────────────────────────────────────
+
+describe("shouldUseMultilineCompletion", () => {
+  it("detects block start with opening brace", () => {
+    expect(shouldUseMultilineCompletion("function foo() {", "\n}\n")).toBe(true);
+  });
+
+  it("detects block start with opening paren", () => {
+    expect(shouldUseMultilineCompletion("const args = (", "\n)")).toBe(true);
+  });
+
+  it("detects arrow function", () => {
+    expect(shouldUseMultilineCompletion("const fn = () => ", "")).toBe(true);
+  });
+
+  it("detects type annotation", () => {
+    expect(shouldUseMultilineCompletion("const user: ", "")).toBe(true);
+  });
+
+  it("returns false for simple expression", () => {
+    expect(shouldUseMultilineCompletion("const x = 42", "")).toBe(false);
+  });
+
+  it("returns false for empty prefix", () => {
+    expect(shouldUseMultilineCompletion("", "")).toBe(false);
+  });
+
+  it("detects when suffix closing brace indicates body needed", () => {
+    // The function body is expected between "{\n  " and "\n}"
+    expect(shouldUseMultilineCompletion("function foo() {\n  ", "\n}")).toBe(true);
+  });
+});
+
+// ─── Tests: Completion Provider v2 ───────────────────────────────────────────
+
+describe("DanteCodeCompletionProvider v2", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    // Reset all config values to prevent leakage between tests
+    for (const key of Object.keys(vscodeMocks.configValues)) {
+      delete vscodeMocks.configValues[key];
+    }
     vscodeMocks.configValues["defaultModel"] = "grok/grok-3";
     vscodeMocks.configValues["fimModel"] = "ollama/qwen2.5-coder";
     vscodeMocks.configValues["pdseThreshold"] = 85;
-    // Default streaming mock
+    vscodeMocks.configValues["inline.pdseWarnings"] = true;
+    vscodeMocks.configValues["inline.debounceMs"] = 0;
+    vscodeMocks.diagnosticEntries.clear();
+    pdseScoreOverride = { overall: 92, violations: [], passedGate: true };
+
     routerMocks.mockStream.mockResolvedValue({
       textStream: createTextStream(["console.log('done');"]),
     });
   });
 
-  it("uses the dedicated fim model and ollama debounce for completion requests", async () => {
+  it("uses the dedicated fim model and ollama debounce", async () => {
     const provider = new DanteCodeCompletionProvider();
     const document = createDocument("const answer = ", "");
     const token = createMockToken();
@@ -292,10 +404,8 @@ describe("DanteCodeCompletionProvider", () => {
       token as never,
     );
 
-    // Ollama debounce is now 100ms
     await vi.advanceTimersByTimeAsync(99);
     expect(routerMocks.mockRouterCtor).not.toHaveBeenCalled();
-
     await vi.advanceTimersByTimeAsync(1);
     const items = await pending;
 
@@ -327,7 +437,6 @@ describe("DanteCodeCompletionProvider", () => {
     await vi.advanceTimersByTimeAsync(100);
     await pending;
 
-    // Stream should be called instead of generate
     expect(routerMocks.mockStream).toHaveBeenCalled();
     expect(routerMocks.mockGenerate).not.toHaveBeenCalled();
   });
@@ -375,18 +484,17 @@ describe("DanteCodeCompletionProvider", () => {
     const items = await pending;
 
     expect(items).toHaveLength(1);
-    // Should only include the first line (before the newline)
     expect((items[0] as { insertText: string }).insertText).toBe("const x = 42;");
   });
 
-  it("keeps full multi-line streaming output when context is multiline", async () => {
-    const multilineOutput = "  return `Hello, ${name}!`;\n";
+  it("streams full multi-line output with balanced-brace guard", async () => {
+    const multilineOutput = "  return `Hello, ${name}!`;\n}";
     routerMocks.mockStream.mockResolvedValue({
       textStream: createTextStream([multilineOutput]),
     });
 
     const provider = new DanteCodeCompletionProvider();
-    const document = createDocument("function greet(name: string) {\n", "\n}\n");
+    const document = createDocument("function greet(name: string) {\n", "\n");
     const token = createMockToken();
 
     const pending = provider.provideInlineCompletionItems(
@@ -399,11 +507,60 @@ describe("DanteCodeCompletionProvider", () => {
     await vi.advanceTimersByTimeAsync(100);
     const items = await pending;
 
-    // Multiline context: should consume the full stream
     expect(items).toHaveLength(1);
   });
 
-  it("requests a 512-token completion budget for multiline block completions", async () => {
+  it("stops multiline streaming when brackets balance", async () => {
+    // Simulate chunk-by-chunk streaming
+    const chunks = ["  if (x) {\n", "    foo();\n", "  }\n", "  // extra"];
+    routerMocks.mockStream.mockResolvedValue({
+      textStream: createTextStream(chunks),
+    });
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("function bar() {\n", "\n}\n");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(1, 0) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+    // Should stop after brackets balance, not include "  // extra"
+    const text = (items[0] as { insertText: string }).insertText;
+    expect(text).not.toContain("// extra");
+  });
+
+  it("stops multiline streaming on double blank lines", async () => {
+    const chunks = ["  const a = 1;\n\n\n  // after blank"];
+    routerMocks.mockStream.mockResolvedValue({
+      textStream: createTextStream(chunks),
+    });
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("function bar() {\n", "\n}\n");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(1, 0) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+  });
+
+  it("requests a 512-token budget for multiline block completions", async () => {
     const provider = new DanteCodeCompletionProvider();
     const document = createDocument("function greet(name: string) {\n  ", "\n}\n");
     const token = createMockToken();
@@ -420,17 +577,14 @@ describe("DanteCodeCompletionProvider", () => {
 
     expect(routerMocks.mockStream).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({
-        maxTokens: 512,
-      }),
+      expect.objectContaining({ maxTokens: 512 }),
     );
   });
 
-  it("respects multilineCompletions='always' config to force multiline", async () => {
-    vscodeMocks.configValues["multilineCompletions"] = "always";
+  it("respects inline.multiline='always' to force multiline", async () => {
+    vscodeMocks.configValues["inline.multiline"] = "always";
 
     const provider = new DanteCodeCompletionProvider();
-    // Simple single-line context that would normally be single-line
     const document = createDocument("const x = ", "");
     const token = createMockToken();
 
@@ -444,20 +598,16 @@ describe("DanteCodeCompletionProvider", () => {
     await vi.advanceTimersByTimeAsync(100);
     await pending;
 
-    // With "always" config, should request 512 tokens (multiline budget)
     expect(routerMocks.mockStream).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({
-        maxTokens: 512,
-      }),
+      expect.objectContaining({ maxTokens: 512 }),
     );
   });
 
-  it("respects multilineCompletions='never' config to force single-line", async () => {
-    vscodeMocks.configValues["multilineCompletions"] = "never";
+  it("respects inline.multiline='never' to force single-line", async () => {
+    vscodeMocks.configValues["inline.multiline"] = "never";
 
     const provider = new DanteCodeCompletionProvider();
-    // Block context that would normally trigger multiline
     const document = createDocument("function greet(name: string) {\n  ", "\n}\n");
     const token = createMockToken();
 
@@ -471,12 +621,33 @@ describe("DanteCodeCompletionProvider", () => {
     await vi.advanceTimersByTimeAsync(100);
     await pending;
 
-    // With "never" config, should request 256 tokens (single-line budget)
     expect(routerMocks.mockStream).toHaveBeenCalledWith(
       expect.any(Array),
-      expect.objectContaining({
-        maxTokens: 256,
-      }),
+      expect.objectContaining({ maxTokens: 256 }),
+    );
+  });
+
+  it("falls back to multilineCompletions setting when inline.multiline is unset", async () => {
+    vscodeMocks.configValues["multilineCompletions"] = "always";
+    // Don't set inline.multiline — should fall back
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockStream).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ maxTokens: 512 }),
     );
   });
 
@@ -489,9 +660,8 @@ describe("DanteCodeCompletionProvider", () => {
     const document = createDocument("const x = ", "");
     const token = createMockToken();
 
-    // Simulate rapid keystrokes (5 calls within 1 second)
     for (let i = 0; i < 4; i++) {
-      vi.advanceTimersByTime(100); // 100ms between keystrokes = 10 chars/sec
+      vi.advanceTimersByTime(100);
       provider.provideInlineCompletionItems(
         document as never,
         new vscodeMocks.Position(0, 10 + i) as never,
@@ -500,7 +670,6 @@ describe("DanteCodeCompletionProvider", () => {
       );
     }
 
-    // The 5th call should use the adaptive 100ms debounce
     const pending = provider.provideInlineCompletionItems(
       document as never,
       new vscodeMocks.Position(0, 14) as never,
@@ -508,8 +677,34 @@ describe("DanteCodeCompletionProvider", () => {
       token as never,
     );
 
-    // With adaptive debounce at 100ms (typing fast), should fire at 100ms
     await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockStream).toHaveBeenCalled();
+  });
+
+  it("uses custom debounce from inline.debounceMs setting", async () => {
+    vscodeMocks.configValues["inline.debounceMs"] = 300;
+    vscodeMocks.configValues["defaultModel"] = "grok/grok-3";
+    vscodeMocks.configValues["fimModel"] = "";
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    // At 299ms, should not have fired
+    await vi.advanceTimersByTimeAsync(299);
+    expect(routerMocks.mockStream).not.toHaveBeenCalled();
+
+    // At 300ms, should fire
+    await vi.advanceTimersByTimeAsync(1);
     await pending;
 
     expect(routerMocks.mockStream).toHaveBeenCalled();
@@ -519,7 +714,6 @@ describe("DanteCodeCompletionProvider", () => {
     const provider = new DanteCodeCompletionProvider();
     const token = createMockToken();
 
-    // Fill cache with unique entries
     for (let i = 0; i < 151; i++) {
       const document = createDocument(`line${i}\nconst x${i} = `, "");
       const pending = provider.provideInlineCompletionItems(
@@ -532,8 +726,6 @@ describe("DanteCodeCompletionProvider", () => {
       await pending;
     }
 
-    // Cache should have evicted the oldest, keeping at most 150
-    // Verify by checking the first entry is gone (no cache hit on retry)
     routerMocks.mockStream.mockClear();
     const doc0 = createDocument("line0\nconst x0 = ", "");
     const pending = provider.provideInlineCompletionItems(
@@ -545,7 +737,6 @@ describe("DanteCodeCompletionProvider", () => {
     await vi.advanceTimersByTimeAsync(200);
     await pending;
 
-    // Should have made a new request (cache miss)
     expect(routerMocks.mockStream).toHaveBeenCalled();
   });
 
@@ -570,5 +761,263 @@ describe("DanteCodeCompletionProvider", () => {
 
     expect(items).toHaveLength(1);
     expect((items[0] as { filterText: string }).filterText).toContain("[?]");
+  });
+
+  it("annotates PDSE gate pass in filterText", async () => {
+    pdseScoreOverride = { overall: 95, violations: [], passedGate: true };
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const answer = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 15) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+    expect((items[0] as { filterText: string }).filterText).toContain("PDSE: 95 PASS");
+  });
+
+  it("appends PDSE warning comment when score below threshold", async () => {
+    pdseScoreOverride = {
+      overall: 72,
+      violations: [{ message: "missing required field" }],
+      passedGate: false,
+    };
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const answer = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 15) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+    const insertText = (items[0] as { insertText: string }).insertText;
+    expect(insertText).toContain("// PDSE 72/100");
+    expect(insertText).toContain("missing required field");
+    expect((items[0] as { filterText: string }).filterText).toContain("PDSE: 72 WARN");
+  });
+
+  it("does not append PDSE comment when inline.pdseWarnings is disabled", async () => {
+    vscodeMocks.configValues["inline.pdseWarnings"] = false;
+    pdseScoreOverride = {
+      overall: 60,
+      violations: [{ message: "low quality" }],
+      passedGate: false,
+    };
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const answer = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 15) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+    const insertText = (items[0] as { insertText: string }).insertText;
+    expect(insertText).not.toContain("PDSE");
+  });
+
+  it("returns empty on cancellation before debounce fires", async () => {
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken(true);
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(200);
+    const items = await pending;
+
+    expect(items).toHaveLength(0);
+  });
+
+  it("returns empty when completion text is empty after cleaning", async () => {
+    routerMocks.mockStream.mockResolvedValue({
+      textStream: createTextStream(["```typescript\n```"]),
+    });
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(0);
+  });
+
+  it("resolves bare model ID through parseModelReference", async () => {
+    vi.clearAllMocks();
+    routerMocks.mockStream.mockResolvedValue({
+      textStream: createTextStream(["console.log('done');"]),
+    });
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const answer = ", "");
+    const token = createMockToken();
+
+    vscodeMocks.configValues["defaultModel"] = "llama3";
+    vscodeMocks.configValues["fimModel"] = "llama3";
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 15) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockRouterCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        default: expect.objectContaining({
+          provider: "ollama",
+          modelId: "llama3",
+        }),
+      }),
+      "/workspace",
+      "inline-completion",
+    );
+  });
+
+  it("uses temperature 0.1 for inline completions", async () => {
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockRouterCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        default: expect.objectContaining({ temperature: 0.1 }),
+      }),
+      expect.any(String),
+      expect.any(String),
+    );
+  });
+
+  it("passes abortSignal to streaming for cancellation support", async () => {
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockStream).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("handles PDSE scorer failure gracefully", async () => {
+    const { runLocalPDSEScorer } = await import("@dantecode/danteforge");
+    (runLocalPDSEScorer as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error("PDSE scorer crash");
+    });
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    // Should still return completion, just without PDSE label
+    expect(items).toHaveLength(1);
+    expect((items[0] as { filterText: string }).filterText).toBe("dantecode");
+  });
+
+  it("disposeInlinePDSEDiagnostics cleans up resources", () => {
+    // Call twice to ensure no error on double-dispose
+    disposeInlinePDSEDiagnostics();
+    disposeInlinePDSEDiagnostics();
+  });
+
+  it("clears cache on clearCache()", async () => {
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    routerMocks.mockStream.mockClear();
+    provider.clearCache();
+
+    // Same request should now miss cache
+    const pending2 = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 10) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await pending2;
+
+    expect(routerMocks.mockStream).toHaveBeenCalled();
   });
 });

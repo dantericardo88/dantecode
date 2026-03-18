@@ -10,7 +10,7 @@ import { DEFAULT_MODEL_ID, MODEL_CATALOG } from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
-import { DanteCodeCompletionProvider } from "./inline-completion.js";
+import { DanteCodeCompletionProvider, disposeInlinePDSEDiagnostics } from "./inline-completion.js";
 import {
   createStatusBar,
   updateStatusBar,
@@ -154,6 +154,7 @@ export function deactivate(): void {
     diagnosticProvider.clearAll();
     diagnosticProvider = undefined;
   }
+  disposeInlinePDSEDiagnostics();
   onboardingProvider = undefined;
 }
 

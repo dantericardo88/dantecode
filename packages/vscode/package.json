@@ -243,6 +243,24 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically reduce completion debounce when typing quickly (>3 chars/sec)"
+        },
+        "dantecode.inline.debounceMs": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 2000,
+          "description": "Custom debounce delay (ms) for inline completions. 0 = use provider-aware defaults (Ollama 100ms, Grok 150ms, others 180ms)."
+        },
+        "dantecode.inline.multiline": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "Control multiline inline completions. 'auto' detects block context (braces, arrows), 'always' forces multiline, 'never' forces single-line."
+        },
+        "dantecode.inline.pdseWarnings": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show PDSE quality warnings as ghost-text comments and Problems panel entries when inline completion scores below threshold."
         }
       }
     },
