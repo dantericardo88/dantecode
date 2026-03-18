@@ -9,6 +9,8 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import type { EventTriggerRegistry } from "./event-triggers.js";
 import type { BackgroundAgentRunner } from "./background-agent.js";
 import { appendAuditEvent } from "./audit.js";
+import { IssueToPRPipeline } from "./issue-to-pr.js";
+import type { IssueToPRConfig, AgentExecutor, GitHubIssueInfo } from "./issue-to-pr.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +29,11 @@ export interface WebhookServerConfig {
   apiToken?: string;
   /** Optional Slack signing secret for verifying Slack webhook signatures. */
   slackSigningSecret?: string;
+  /** Optional config for the Issue-to-PR pipeline. When set, issue webhooks
+   *  trigger the full pipeline (worktree → agent → verify → PR → comment). */
+  issueToPR?: IssueToPRConfig;
+  /** Agent executor for issue-to-PR pipeline. Called with (prompt, workdir). */
+  agentExecutor?: AgentExecutor;
 }
 
 export interface WebhookServerHandle {
@@ -116,7 +123,61 @@ async function handleGitHubWebhook(
     return;
   }
 
-  // Enqueue the task in the background runner
+  // Route issue-to-PR tasks through the full pipeline if configured
+  if (
+    task.metadata.type === "issue-to-pr" &&
+    config.issueToPR &&
+    config.agentExecutor
+  ) {
+    const issueInfo: GitHubIssueInfo = {
+      number: task.metadata.issueNumber as number,
+      title: task.metadata.issueTitle as string,
+      body: task.metadata.issueBody as string,
+      labels: (task.metadata.issueLabels as string[]) ?? [],
+      url: task.metadata.issueUrl as string,
+    };
+
+    // Run the pipeline in the background — don't block the HTTP response
+    const pipeline = new IssueToPRPipeline(config.projectRoot, config.issueToPR);
+    pipeline.setProgressCallback((progress) => {
+      process.stdout.write(
+        `[issue-to-pr] #${issueInfo.number} ${progress.stage}: ${progress.message}\n`,
+      );
+    });
+
+    // Fire and forget — the pipeline handles its own error reporting
+    pipeline.run(issueInfo, config.agentExecutor).then((result) => {
+      if (result.success) {
+        process.stdout.write(
+          `[issue-to-pr] #${issueInfo.number} completed → PR ${result.prUrl}\n`,
+        );
+      } else {
+        process.stdout.write(
+          `[issue-to-pr] #${issueInfo.number} failed: ${result.error}\n`,
+        );
+      }
+    }).catch(() => {/* pipeline handles its own errors */});
+
+    appendAuditEvent(config.projectRoot, {
+      sessionId: task.id,
+      timestamp: new Date().toISOString(),
+      type: "webhook_received",
+      payload: { source: "github", event: eventName, pipeline: "issue-to-pr", issueNumber: issueInfo.number, agentTaskId: task.id },
+      modelId: "",
+      projectRoot: config.projectRoot,
+    }).catch(() => {/* non-fatal */});
+
+    sendJSON(res, 200, {
+      accepted: true,
+      pipeline: "issue-to-pr",
+      issueNumber: issueInfo.number,
+      agentTaskId: task.id,
+      source: task.source,
+    });
+    return;
+  }
+
+  // Default: enqueue the task in the background runner
   const taskId = config.backgroundRunner.enqueue(task.prompt);
 
   // Audit log the webhook event

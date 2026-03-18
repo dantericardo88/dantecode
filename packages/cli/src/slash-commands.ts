@@ -1023,6 +1023,33 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     defaultPriority: "normal",
   });
 
+  // Build issue-to-PR config from environment if GitHub token is available
+  const githubToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const githubRepo = process.env.GITHUB_REPOSITORY;
+  const issueToPRConfig = githubToken && githubRepo
+    ? { githubToken, repository: githubRepo, baseBranch: "main" }
+    : undefined;
+
+  // Default agent executor: run prompt through the background runner
+  const agentExecutor = issueToPRConfig
+    ? async (prompt: string, _workdir: string) => {
+        const taskId = runner.enqueue(prompt, { autoCommit: false, createPR: false });
+        return new Promise<{ output: string; touchedFiles: string[] }>((resolve, reject) => {
+          const check = setInterval(() => {
+            const task = runner.getTask(taskId);
+            if (!task) { clearInterval(check); reject(new Error("Task not found")); return; }
+            if (task.status === "completed") {
+              clearInterval(check);
+              resolve({ output: task.output ?? "", touchedFiles: task.touchedFiles });
+            } else if (task.status === "failed" || task.status === "cancelled") {
+              clearInterval(check);
+              reject(new Error(task.error ?? "Task failed"));
+            }
+          }, 2000);
+        });
+      }
+    : undefined;
+
   const handle = createWebhookServer({
     port,
     eventRegistry: registry,
@@ -1030,6 +1057,8 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     projectRoot: state.projectRoot,
     apiToken: process.env.DANTECODE_API_TOKEN,
     slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    issueToPR: issueToPRConfig,
+    agentExecutor,
   });
 
   try {
@@ -1061,6 +1090,11 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     `  GITHUB_WEBHOOK_SECRET: ${check(ghSecret)}`,
     `  SLACK_SIGNING_SECRET:  ${check(slackSecret)}`,
     `  DANTECODE_API_TOKEN:   ${check(apiToken)}`,
+    "",
+    `${BOLD}Issue-to-PR Pipeline:${RESET}`,
+    `  GITHUB_TOKEN:          ${check(githubToken)}`,
+    `  GITHUB_REPOSITORY:     ${githubRepo ? `${GREEN}${githubRepo}${RESET}` : `${RED}missing${RESET}`}`,
+    `  Status:                ${issueToPRConfig ? `${GREEN}enabled${RESET} — issues → auto-PR` : `${DIM}disabled (set GITHUB_TOKEN + GITHUB_REPOSITORY)${RESET}`}`,
     "",
     `${DIM}To expose publicly: npx ngrok http ${port}${RESET}`,
     `${DIM}Check status: /listen status${RESET}`,

@@ -314,3 +314,125 @@ describe("WebhookServer", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue-to-PR Pipeline Routing Tests
+// ---------------------------------------------------------------------------
+
+describe("WebhookServer — Issue-to-PR Pipeline", () => {
+  let registry: EventTriggerRegistry;
+  let runner: BackgroundAgentRunner;
+  let serverHandle: ReturnType<typeof createWebhookServer>;
+  let port: number;
+  beforeAll(async () => {
+    registry = new EventTriggerRegistry({
+      enabledSources: ["github", "slack", "api", "manual"],
+      githubSecret: TEST_GITHUB_SECRET,
+      defaultPriority: "normal",
+    });
+
+    runner = new BackgroundAgentRunner(2, "/tmp/test-project");
+
+    serverHandle = createWebhookServer({
+      port: 0,
+      eventRegistry: registry,
+      backgroundRunner: runner,
+      projectRoot: "/tmp/test-project",
+      apiToken: TEST_API_TOKEN,
+      slackSigningSecret: TEST_SLACK_SECRET,
+      issueToPR: {
+        githubToken: "ghp_test_token",
+        repository: "acme/app",
+        baseBranch: "main",
+      },
+      agentExecutor: async (_prompt, _workdir) => {
+        return { output: "done", touchedFiles: ["src/fix.ts"] };
+      },
+    });
+
+    await serverHandle.start();
+
+    const addr = serverHandle.server.address();
+    if (typeof addr === "object" && addr !== null) {
+      port = addr.port;
+    } else {
+      throw new Error("Server did not bind to a port");
+    }
+  });
+
+  afterAll(async () => {
+    await serverHandle.stop();
+  });
+
+  it("routes issue webhook through IssueToPRPipeline when configured", async () => {
+    const payload = JSON.stringify({
+      action: "opened",
+      repository: { full_name: "acme/app" },
+      issue: {
+        number: 42,
+        title: "Fix authentication timeout",
+        body: "Users are seeing timeouts on login after 30s",
+        labels: [{ name: "bug" }],
+        html_url: "https://github.com/acme/app/issues/42",
+      },
+    });
+
+    const signature = makeGitHubSignature(payload, TEST_GITHUB_SECRET);
+
+    const { status, body } = await httpRequest(port, "POST", "/webhooks/github", payload, {
+      "x-hub-signature-256": signature,
+      "x-github-event": "issues",
+    });
+
+    expect(status).toBe(200);
+    expect(body.accepted).toBe(true);
+    expect(body.pipeline).toBe("issue-to-pr");
+    expect(body.issueNumber).toBe(42);
+    expect(body.source).toBe("github");
+    // No taskId since it goes through pipeline, not background runner
+    expect(body.taskId).toBeUndefined();
+  });
+
+  it("falls back to background runner for non-issue GitHub events", async () => {
+    const payload = JSON.stringify({
+      action: "completed",
+      repository: { full_name: "acme/app" },
+      workflow_run: {
+        name: "CI",
+        conclusion: "failure",
+        head_commit: { message: "fix: typo" },
+      },
+    });
+
+    const signature = makeGitHubSignature(payload, TEST_GITHUB_SECRET);
+
+    const { status, body } = await httpRequest(port, "POST", "/webhooks/github", payload, {
+      "x-hub-signature-256": signature,
+      "x-github-event": "workflow_run",
+    });
+
+    expect(status).toBe(200);
+    expect(body.accepted).toBe(true);
+    expect(body.taskId).toBeTruthy(); // Goes through background runner
+    expect(body.pipeline).toBeUndefined(); // Not routed to pipeline
+  });
+
+  it("falls back to background runner for push events", async () => {
+    const payload = JSON.stringify({
+      ref: "refs/heads/main",
+      repository: { full_name: "acme/app" },
+      head_commit: { message: "feat: new feature" },
+    });
+
+    const signature = makeGitHubSignature(payload, TEST_GITHUB_SECRET);
+
+    const { status, body } = await httpRequest(port, "POST", "/webhooks/github", payload, {
+      "x-hub-signature-256": signature,
+      "x-github-event": "push",
+    });
+
+    expect(status).toBe(200);
+    expect(body.accepted).toBe(true);
+    expect(body.taskId).toBeTruthy();
+  });
+});
