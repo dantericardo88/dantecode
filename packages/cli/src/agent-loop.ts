@@ -142,6 +142,32 @@ const PIPELINE_CONTINUATION_INSTRUCTION =
   "todo list or the pipeline plan and continue from where you left off.";
 
 // ----------------------------------------------------------------------------
+// Anti-confabulation guards (Grok empty-response / phantom-completion fix)
+// ----------------------------------------------------------------------------
+
+/** Max consecutive empty responses (no text + no tool calls) before aborting. */
+const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
+
+/** Max anti-confabulation nudges (model claims completion but 0 files modified). */
+const MAX_CONFABULATION_NUDGES = 2;
+
+/** Write payload size (chars) above which a truncation warning is emitted. */
+const WRITE_SIZE_WARNING_THRESHOLD = 30_000;
+
+/** Warning injected when model returns empty response. */
+const EMPTY_RESPONSE_WARNING =
+  "You returned an empty response with no tool calls. This may indicate a compatibility " +
+  "issue. Execute the next step using a tool (Read, Edit, Write, Bash, Glob, Grep). " +
+  "If you cannot proceed, explain what is blocking you.";
+
+/** Warning injected when model claims completion but no files were modified. */
+const CONFABULATION_WARNING =
+  "You claimed to complete work, but NO files were actually modified in this session " +
+  "(filesModified === 0). You MUST use Edit or Write tools to make real file changes. " +
+  "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
+  "the next step with real tool calls.";
+
+// ----------------------------------------------------------------------------
 // System Prompt Builder
 // ----------------------------------------------------------------------------
 
@@ -714,6 +740,9 @@ export async function runAgentLoop(
   let executedToolsThisTurn = 0;
   // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
   let pipelineContinuationNudges = 0;
+  // Anti-confabulation guards
+  let consecutiveEmptyRounds = 0;
+  let confabulationNudges = 0;
   const isPipelineWorkflow =
     config.skillActive ||
     EXECUTION_WORKFLOW_PATTERN.test(prompt) ||
@@ -918,6 +947,36 @@ export async function runAgentLoop(
       return session;
     }
 
+    // ---- Anti-confabulation: empty response circuit breaker ----
+    // If the model returned no text and no tool calls, track consecutive empties
+    // and abort after MAX_CONSECUTIVE_EMPTY_ROUNDS (Grok empty-response fix).
+    if (responseText.trim().length === 0 && toolCalls.length === 0) {
+      consecutiveEmptyRounds++;
+      if (!config.silent) {
+        process.stdout.write(
+          `\n${YELLOW}[confab-guard] empty response (${consecutiveEmptyRounds}/${MAX_CONSECUTIVE_EMPTY_ROUNDS})${RESET}\n`,
+        );
+      }
+      if (consecutiveEmptyRounds >= MAX_CONSECUTIVE_EMPTY_ROUNDS) {
+        process.stdout.write(
+          `\n${RED}${BOLD}[confab-guard] ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses — aborting${RESET}\n`,
+        );
+        session.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          content: `The model returned ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses. This typically indicates a model compatibility issue. Try a different model or simplify your request.`,
+          timestamp: new Date().toISOString(),
+        });
+        break;
+      }
+      messages.push({ role: "assistant" as const, content: "(empty response)" });
+      messages.push({ role: "user" as const, content: EMPTY_RESPONSE_WARNING });
+      continue;
+    }
+    if (toolCalls.length > 0) {
+      consecutiveEmptyRounds = 0;
+    }
+
     // Display the assistant's text response (suppressed in silent mode)
     if (cleanText.length > 0 && !config.silent) {
       process.stdout.write(`${cleanText}\n`);
@@ -973,6 +1032,25 @@ export async function runAgentLoop(
         if (!config.silent) {
           process.stdout.write(
             `\n${YELLOW}[pipeline continuation ${pipelineContinuationNudges}/${MAX_PIPELINE_CONTINUATION_NUDGES}]${RESET} ${DIM}(model stopped mid-pipeline — nudging to continue)${RESET}\n`,
+          );
+        }
+        continue;
+      }
+
+      // Anti-confabulation gate: if in a pipeline workflow and the model claims
+      // completion/done but no files were actually modified, reject the claim.
+      if (
+        isPipelineWorkflow &&
+        filesModified === 0 &&
+        confabulationNudges < MAX_CONFABULATION_NUDGES &&
+        PREMATURE_SUMMARY_PATTERN.test(responseText)
+      ) {
+        confabulationNudges++;
+        messages.push({ role: "assistant" as const, content: responseText });
+        messages.push({ role: "user" as const, content: CONFABULATION_WARNING });
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${RED}[confab-guard] model claims completion but 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
           );
         }
         continue;
@@ -1035,6 +1113,18 @@ export async function runAgentLoop(
               `SAFETY HOOK: Bash command blocked — ${blockReason}. Use a safer approach.`,
             );
             continue;
+          }
+        }
+      }
+
+      // Write size guard: warn when Write payload is very large (truncation risk)
+      if (toolCall.name === "Write") {
+        const writeContent = toolCall.input["content"] as string | undefined;
+        if (writeContent && writeContent.length > WRITE_SIZE_WARNING_THRESHOLD) {
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${YELLOW}[confab-guard] Write payload is ${Math.round(writeContent.length / 1000)}K chars — truncation risk. Prefer Edit for surgical changes.${RESET}\n`,
+            );
           }
         }
       }

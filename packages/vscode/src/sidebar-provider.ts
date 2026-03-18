@@ -518,6 +518,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const MAX_EXECUTION_NUDGES = 2;
     let executedToolsThisTurn = 0;
     let pipelineContinuationNudges = 0;
+    // Anti-confabulation guards (Grok empty-response / phantom-completion fix)
+    let consecutiveEmptyRounds = 0;
+    const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
+    let confabulationNudges = 0;
+    const MAX_CONFABULATION_NUDGES = 2;
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -994,6 +999,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Extract tool calls from the response
         const { toolCalls } = extractToolCalls(fullResponse);
 
+        // ---- Anti-confabulation: empty response circuit breaker ----
+        if (fullResponse.trim().length === 0 && toolCalls.length === 0) {
+          consecutiveEmptyRounds++;
+          if (consecutiveEmptyRounds >= MAX_CONSECUTIVE_EMPTY_ROUNDS) {
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n\n> **Anti-confabulation guard:** ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses — aborting. Try a different model.\n`,
+                partial: "",
+              },
+            });
+            this.messages.push({
+              role: "assistant",
+              content: `The model returned ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses. This typically indicates a model compatibility issue. Try a different model or simplify your request.`,
+            });
+            break;
+          }
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk: `\n\n> **Empty response** (${consecutiveEmptyRounds}/${MAX_CONSECUTIVE_EMPTY_ROUNDS}) — nudging model to use tools.\n`,
+              partial: "",
+            },
+          });
+          agentMessages.push({ role: "assistant", content: "(empty response)" });
+          agentMessages.push({
+            role: "user",
+            content:
+              "You returned an empty response with no tool calls. This may indicate a compatibility " +
+              "issue. Execute the next step using a tool (Read, Edit, Write, Bash, Glob, Grep). " +
+              "If you cannot proceed, explain what is blocking you.",
+          });
+          continue;
+        }
+        if (toolCalls.length > 0) {
+          consecutiveEmptyRounds = 0;
+        }
+
         // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
           const isExecutionMode = agentMode === "yolo" || agentMode === "build";
@@ -1059,6 +1102,33 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue;
           }
 
+          // Anti-confabulation gate: model claims completion but no files were modified
+          if (
+            isPipelineWorkflow &&
+            touchedFiles.length === 0 &&
+            confabulationNudges < MAX_CONFABULATION_NUDGES &&
+            PREMATURE_SUMMARY_RE.test(fullResponse)
+          ) {
+            confabulationNudges++;
+            agentMessages.push({ role: "assistant", content: fullResponse });
+            agentMessages.push({
+              role: "user",
+              content:
+                "You claimed to complete work, but NO files were actually modified in this session " +
+                "(filesModified === 0). You MUST use Edit or Write tools to make real file changes. " +
+                "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
+                "the next step with real tool calls.",
+            });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n\n---\n> **Anti-confabulation** (${confabulationNudges}/${MAX_CONFABULATION_NUDGES}) — model claims completion but 0 files modified.\n\n`,
+                partial: "",
+              },
+            });
+            continue;
+          }
+
           this.messages.push({ role: "assistant", content: fullResponse });
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
@@ -1113,6 +1183,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               `Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`,
             );
             continue;
+          }
+
+          // Write size guard: warn when Write payload is very large (truncation risk)
+          if (toolCall.name === "Write") {
+            const writeContent = toolCall.input["content"] as string | undefined;
+            if (writeContent && writeContent.length > 30_000) {
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: {
+                  chunk: `\n> **Warning:** Write payload is ${Math.round(writeContent.length / 1000)}K chars — truncation risk. Prefer Edit for surgical changes.\n`,
+                  partial: "",
+                },
+              });
+            }
           }
 
           // Capture original file content before tool execution (for diff view)

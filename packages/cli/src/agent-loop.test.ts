@@ -1214,18 +1214,27 @@ describe("Pipeline continuation nudge", () => {
       usage: { totalTokens: 30 },
     });
 
-    // Round 5: model emits ANOTHER summary — should NOT be nudged (max=3 reached)
+    // Rounds 5-6: pipeline nudges exhausted → confab gate fires (filesModified=0, max 2)
     mockGenerateText.mockResolvedValueOnce({
       text: "## Summary\nStill done.",
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nReally done.",
+      usage: { totalTokens: 30 },
+    });
+
+    // Round 7: both pipeline nudges and confab nudges exhausted — model is allowed to stop
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nFinal answer.",
       usage: { totalTokens: 30 },
     });
 
     const session = makeSession();
     await runAgentLoop("/autoforge improve code", session, makeConfig());
 
-    // After 3 nudges, model is allowed to stop on the 4th summary
-    // Total calls: 1 (tool) + 3 (summaries, nudged) + 1 (final summary, allowed to break)
-    expect(mockGenerateText).toHaveBeenCalledTimes(5);
+    // 1 (tool) + 3 (pipeline nudges) + 2 (confab nudges) + 1 (allowed to break) = 7
+    expect(mockGenerateText).toHaveBeenCalledTimes(7);
   });
 });
 
@@ -1407,5 +1416,97 @@ describe("Universal skill completion (skillActive)", () => {
       m.content.includes("stopped mid-pipeline"),
     );
     expect(hasNudge).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Anti-confabulation guards
+  // ---------------------------------------------------------------------------
+
+  it("aborts after MAX_CONSECUTIVE_EMPTY_ROUNDS empty responses", async () => {
+    // 3 consecutive empty responses → circuit breaker
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      usage: { totalTokens: 0 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug", session, makeConfig());
+
+    // Should abort after 3 empty rounds
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+    // Session should contain the abort message
+    const abortMsg = result.messages.find(
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("consecutive empty responses"),
+    );
+    expect(abortMsg).toBeDefined();
+  });
+
+  it("resets empty round counter when tool calls succeed", async () => {
+    // Round 1: empty response (count = 1)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      usage: { totalTokens: 0 },
+    });
+    // Round 2: successful tool call (resets counter)
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    // Round 3: final response
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Here is the file content.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug", session, makeConfig());
+
+    // Should complete normally (3 calls: empty → tool → response)
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+    // No abort message
+    const abortMsg = result.messages.find(
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("consecutive empty responses"),
+    );
+    expect(abortMsg).toBeUndefined();
+  });
+
+  it("rejects confabulated completion claims when 0 files modified in pipeline", async () => {
+    // Round 1: model claims completion immediately with zero tool calls.
+    // Text must NOT match responseNeedsToolExecutionNudge (avoids "updated",
+    // "modified", "plan", etc.) so the execution nudge doesn't fire first.
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\n\nAll improvements are complete. Every bug has been resolved.",
+      usage: { totalTokens: 40 },
+    });
+
+    // Round 2: after confabulation nudge, model actually does work
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Let me actually make the change.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/main.ts","old_string":"hello","new_string":"world"}}\n</tool_use>',
+      usage: { totalTokens: 60 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+
+    // Round 3: final response
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Change applied successfully.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("/magic fix the bug", session, makeConfig());
+
+    // 3 calls: confab-rejected summary → real edit → final
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+
+    // Verify confabulation warning was injected in the 2nd call
+    const secondCallArgs = mockGenerateText.mock.calls[1]![0];
+    const userMsgs = secondCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    const hasConfabWarning = userMsgs.some((m: { content: string }) =>
+      m.content.includes("NO files were actually modified"),
+    );
+    expect(hasConfabWarning).toBe(true);
   });
 });
