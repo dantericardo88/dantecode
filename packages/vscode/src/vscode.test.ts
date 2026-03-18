@@ -296,6 +296,69 @@ vi.mock("@dantecode/core", () => ({
   }),
   initializeState: vi.fn().mockResolvedValue(undefined),
   appendAuditEvent: vi.fn().mockResolvedValue(undefined),
+  isProtectedWriteTarget: vi.fn((filePath: string, projectRoot: string) => {
+    const resolved = filePath.startsWith("/") ? filePath : `${projectRoot}/${filePath}`.replace(/\/+/g, "/");
+    return [
+      `${projectRoot}/packages/vscode`,
+      `${projectRoot}/packages/cli`,
+      `${projectRoot}/packages/danteforge`,
+      `${projectRoot}/packages/core`,
+      `${projectRoot}/.dantecode`,
+      `${projectRoot}/CONSTITUTION.md`,
+    ].some((root) => resolved === root || resolved.startsWith(`${root}/`));
+  }),
+  isRepoInternalCdChain: vi.fn((command: string, projectRoot: string) => {
+    const match = command.trim().match(/^cd\s+(.+?)\s*&&/i);
+    if (!match?.[1]) return false;
+    const destination = match[1].replace(/^["']|["']$/g, "");
+    if (destination === "." || destination === "./" || destination === projectRoot) return false;
+    return destination.startsWith("packages/") || destination.startsWith("./packages/");
+  }),
+  isSelfImprovementWriteAllowed: vi.fn(
+    (filePath: string, projectRoot: string, context?: { enabled?: boolean; allowedRoots?: string[] }) => {
+      const resolved = filePath.startsWith("/")
+        ? filePath.replace(/\\/g, "/")
+        : `${projectRoot}/${filePath}`.replace(/\/+/g, "/");
+      return Boolean(
+        context?.enabled &&
+          context.allowedRoots?.some((root) => {
+            const normalizedRoot = root.replace(/\\/g, "/");
+            return resolved === normalizedRoot || resolved.startsWith(`${normalizedRoot}/`);
+          }),
+      );
+    },
+  ),
+  detectSelfImprovementContext: vi.fn((prompt: string, projectRoot: string) => {
+    if (/^\/autoforge\b/i.test(prompt) && /\s--self-improve\b/i.test(prompt)) {
+      return {
+        enabled: true,
+        workflowId: "autoforge-self-improve",
+        triggerCommand: "/autoforge --self-improve",
+        allowedRoots: [
+          `${projectRoot}/packages/vscode`,
+          `${projectRoot}/packages/cli`,
+          `${projectRoot}/packages/core`,
+          `${projectRoot}/packages/danteforge`,
+          `${projectRoot}/.dantecode`,
+        ],
+      };
+    }
+    if (/^\/party\b/i.test(prompt) && /\s--autoforge\b/i.test(prompt)) {
+      return {
+        enabled: true,
+        workflowId: "party-autoforge",
+        triggerCommand: "/party --autoforge",
+        allowedRoots: [
+          `${projectRoot}/packages/vscode`,
+          `${projectRoot}/packages/cli`,
+          `${projectRoot}/packages/core`,
+          `${projectRoot}/packages/danteforge`,
+          `${projectRoot}/.dantecode`,
+        ],
+      };
+    }
+    return null;
+  }),
   ModelRouterImpl: vi.fn(),
   parseModelReference: vi.fn((model: string) => {
     const slashIndex = model.indexOf("/");

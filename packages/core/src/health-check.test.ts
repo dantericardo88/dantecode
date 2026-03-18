@@ -16,8 +16,7 @@ const mockAccess = vi.mocked(access);
 const mockMkdir = vi.mocked(mkdir);
 
 // Suppress stdout during tests
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let stdoutSpy: any;
+let stdoutSpy: { mockRestore: () => void; mock: { calls: unknown[][] } };
 
 beforeEach(() => {
   vi.clearAllMocks();

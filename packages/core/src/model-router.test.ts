@@ -979,6 +979,21 @@ describe("D6 cost tracking integration", () => {
     expect(estimate.sessionTotalUsd).toBeCloseTo(expectedCost, 8);
   });
 
+  it("escalateTier promotes the session to capable and records an audit reason", () => {
+    const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-cost-6b");
+
+    router.escalateTier("persistent verification failures");
+
+    expect(router.getCurrentTier()).toBe("capable");
+    expect(appendAuditEvent).toHaveBeenCalledWith(
+      "/tmp",
+      expect.objectContaining({
+        type: "tier_escalation",
+        payload: expect.objectContaining({ reason: "persistent verification failures" }),
+      }),
+    );
+  });
+
   it("resetSessionCost clears accumulated cost", async () => {
     (generateText as Mock).mockResolvedValueOnce({
       text: "will be cleared",

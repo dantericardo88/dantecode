@@ -8,6 +8,7 @@ import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  createSelfImprovementContext,
   getProviderCatalogEntry,
   getContextUtilization,
   parseModelReference,
@@ -34,6 +35,8 @@ import {
   autoCommit,
   revertLastCommit,
   createWorktree,
+  mergeWorktree,
+  removeWorktree,
 } from "@dantecode/git-engine";
 import type {
   Session,
@@ -43,6 +46,7 @@ import type {
   ModelRouterConfig,
 } from "@dantecode/config-types";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { runAgentLoop } from "./agent-loop.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -98,6 +102,129 @@ interface SlashCommand {
   description: string;
   usage: string;
   handler: (args: string, state: ReplState) => Promise<string>;
+}
+
+function cloneSessionForTask(
+  session: Session,
+  projectRoot: string,
+  taskId: string,
+  snapshot?: Session,
+): Session {
+  if (snapshot) {
+    return JSON.parse(JSON.stringify(snapshot)) as Session;
+  }
+
+  return {
+    ...JSON.parse(JSON.stringify(session)),
+    id: `bg-${taskId}`,
+    projectRoot,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as Session;
+}
+
+function collectTouchedFilesFromSession(session: Session, projectRoot: string): string[] {
+  const touched = new Set<string>();
+
+  for (const message of session.messages) {
+    const filePath = message.toolUse?.input?.["file_path"];
+    if (
+      message.toolUse &&
+      (message.toolUse.name === "Write" || message.toolUse.name === "Edit") &&
+      typeof filePath === "string"
+    ) {
+      touched.add(resolve(projectRoot, filePath));
+    }
+  }
+
+  return Array.from(touched);
+}
+
+function getLastAssistantText(session: Session): string {
+  const lastAssistant = [...session.messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && typeof message.content === "string");
+  return (lastAssistant?.content as string | undefined) ?? "Background task completed.";
+}
+
+async function ensureBackgroundRunner(state: ReplState) {
+  const { BackgroundAgentRunner } = await import("@dantecode/core");
+
+  if (!state._bgRunner) {
+    state._bgRunner = new BackgroundAgentRunner(1, state.projectRoot);
+  }
+
+  const runner = state._bgRunner as InstanceType<typeof BackgroundAgentRunner>;
+  const hasConfiguredWorkFn =
+    typeof (runner as { hasWorkFn?: () => boolean }).hasWorkFn === "function"
+      ? (runner as { hasWorkFn: () => boolean }).hasWorkFn()
+      : false;
+
+  if (!hasConfiguredWorkFn) {
+    runner.setWorkFn(async (prompt, onProgress, context) => {
+      const latestCheckpoint = context.getLatestCheckpoint?.();
+      const taskProjectRoot = context.task.worktreeDir ?? state.projectRoot;
+      const workingSession = cloneSessionForTask(
+        state.session,
+        taskProjectRoot,
+        context.task.id,
+        latestCheckpoint?.sessionSnapshot,
+      );
+
+      onProgress(
+        latestCheckpoint
+          ? `Resuming from checkpoint ${latestCheckpoint.id}`
+          : "Starting autonomous agent loop...",
+      );
+
+      await context.saveCheckpoint?.(
+        latestCheckpoint ? "resume-start" : "task-start",
+        workingSession,
+      );
+
+      const completedSession = await runAgentLoop(prompt, workingSession, {
+        state: state.state,
+        verbose: state.verbose,
+        enableGit: state.enableGit,
+        enableSandbox: state.enableSandbox,
+        silent: true,
+        sandboxBridge: state.sandboxBridge ?? undefined,
+        selfImprovement: context.task.selfImprovement,
+      });
+
+      await context.saveCheckpoint?.("post-run", completedSession);
+
+      return {
+        output: getLastAssistantText(completedSession),
+        touchedFiles: collectTouchedFilesFromSession(completedSession, taskProjectRoot),
+      };
+    });
+  }
+
+  return runner;
+}
+
+function runRepoRootGStack(projectRoot: string): { passed: boolean; failedSteps: string[] } {
+  const steps = [
+    { name: "typecheck", command: "npm run typecheck" },
+    { name: "lint", command: "npm run lint" },
+    { name: "test", command: "npm test" },
+  ];
+  const failedSteps: string[] = [];
+
+  for (const step of steps) {
+    try {
+      execSync(step.command, {
+        cwd: projectRoot,
+        stdio: "pipe",
+        encoding: "utf-8",
+      });
+    } catch {
+      failedSteps.push(step.name);
+    }
+  }
+
+  return { passed: failedSteps.length === 0, failedSteps };
 }
 
 // ----------------------------------------------------------------------------
@@ -758,9 +885,16 @@ async function silentCommand(_args: string, state: ReplState): Promise<string> {
 
 async function autoforgeCommand(args: string, state: ReplState): Promise<string> {
   const flags = args.trim().split(/\s+/);
+  const selfImprove = flags.includes("--self-improve");
   const silentMode = flags.includes("--silent");
   const persistUntilGreen = flags.includes("--persist");
   const hardCeiling = persistUntilGreen ? 200 : state.state.autoforge.maxIterations;
+
+  if (selfImprove && !state.lastEditFile && state.session.activeFiles.length === 0) {
+    state.pendingAgentPrompt =
+      "/autoforge --self-improve improve codebase reliability from the repository root. Run repo-root typecheck, lint, and test after every major edit batch and stop on red.";
+    return `${GREEN}${BOLD}Self-improvement autoforge queued.${RESET}\n${DIM}The next agent loop will run with explicit protected-write access.${RESET}`;
+  }
 
   // If no active files or last edit, show config summary
   if (!state.lastEditFile && state.session.activeFiles.length === 0) {
@@ -880,77 +1014,226 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
 }
 
 async function partyCommand(args: string, state: ReplState): Promise<string> {
-  const task = args.trim();
+  const hasAutoforge = /(?:^|\s)--autoforge(?:\s|$)/.test(args);
+  const filesMatch = args.match(/--files\s+([^\s]+)/);
+  const scopedFiles = filesMatch?.[1]
+    ? filesMatch[1]
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : [];
+  const task = args
+    .replace(/--autoforge/g, "")
+    .replace(/--files\s+[^\s]+/g, "")
+    .trim();
+
   if (!task) {
-    return `${RED}Usage: /party <task description>${RESET}\n${DIM}Spawns multi-agent coordination with parallel lanes.${RESET}`;
+    return `${RED}Usage: /party [--autoforge] [--files a,b] <task description>${RESET}\n${DIM}Spawns multi-agent coordination with parallel lanes.${RESET}`;
   }
 
-  const routerConfig = {
-    default: state.state.model.default,
-    fallback: state.state.model.fallback ?? [],
-    overrides:
-      ((state.state.model as Record<string, unknown>)["taskOverrides"] as Record<
-        string,
-        import("@dantecode/config-types").ModelConfig
-      >) ?? {},
-  };
-  const router = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
-  const multiAgent = new MultiAgent(router, state.state);
+  if (!hasAutoforge) {
+    const routerConfig = {
+      default: state.state.model.default,
+      fallback: state.state.model.fallback ?? [],
+      overrides:
+        ((state.state.model as Record<string, unknown>)["taskOverrides"] as Record<
+          string,
+          import("@dantecode/config-types").ModelConfig
+        >) ?? {},
+    };
+    const router = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
+    const multiAgent = new MultiAgent(router, state.state);
 
-  const onProgress: MultiAgentProgressCallback = (update) => {
-    const icon =
-      update.status === "started"
-        ? `${YELLOW}>`
-        : update.status === "completed"
-          ? `${GREEN}+`
-          : `${RED}x`;
+    const onProgress: MultiAgentProgressCallback = (update) => {
+      const icon =
+        update.status === "started"
+          ? `${YELLOW}>`
+          : update.status === "completed"
+            ? `${GREEN}+`
+            : `${RED}x`;
+      process.stdout.write(
+        `  ${icon}${RESET} ${BOLD}${update.lane.padEnd(12)}${RESET} ${DIM}${update.message.slice(0, 60)}${RESET}\n`,
+      );
+    };
+
     process.stdout.write(
-      `  ${icon}${RESET} ${BOLD}${update.lane.padEnd(12)}${RESET} ${DIM}${update.message.slice(0, 60)}${RESET}\n`,
+      `\n${YELLOW}${BOLD}Multi-Agent Party${RESET} ${DIM}(spawning lanes...)${RESET}\n\n`,
     );
-  };
+
+    try {
+      const result = await multiAgent.coordinate(task, {}, onProgress);
+
+      const lines: string[] = [
+        "",
+        result.compositePdse >= state.state.pdse.threshold
+          ? `${GREEN}${BOLD}Party Complete: PASSED${RESET}`
+          : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
+        `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
+        `  Iterations: ${result.iterations}`,
+        `  Lanes used: ${result.outputs.map((o) => o.lane).join(", ")}`,
+        "",
+      ];
+
+      for (const output of result.outputs) {
+        const scoreColor =
+          output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
+        lines.push(
+          `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
+        );
+      }
+
+      const combinedContent = result.outputs
+        .map((o) => `## ${o.lane} (PDSE: ${o.pdseScore})\n\n${o.content}`)
+        .join("\n\n---\n\n");
+
+      state.session.messages.push({
+        id: randomUUID(),
+        role: "assistant",
+        content: combinedContent,
+        timestamp: new Date().toISOString(),
+      });
+
+      return lines.join("\n");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return `${RED}Party error: ${message}${RESET}`;
+    }
+  }
+
+  const lanes = ["orchestrator", "planner", "coder", "tester", "reviewer", "deployer"] as const;
+  const baseBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+    cwd: state.projectRoot,
+    encoding: "utf-8",
+  }).trim();
+
+  const mergedLanes: string[] = [];
+  const blockedLanes: string[] = [];
 
   process.stdout.write(
-    `\n${YELLOW}${BOLD}Multi-Agent Party${RESET} ${DIM}(spawning lanes...)${RESET}\n\n`,
+    `\n${YELLOW}${BOLD}Party Autoforge${RESET} ${DIM}(isolated worktrees per lane)${RESET}\n\n`,
   );
 
-  try {
-    const result = await multiAgent.coordinate(task, {}, onProgress);
+  for (const lane of lanes) {
+    const worktreeSessionId = `${state.session.id}-${lane}`;
+    const branch = `danteparty/${state.session.id}/${lane}`;
 
-    const lines: string[] = [
-      "",
-      result.compositePdse >= state.state.pdse.threshold
-        ? `${GREEN}${BOLD}Party Complete: PASSED${RESET}`
-        : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
-      `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
-      `  Iterations: ${result.iterations}`,
-      `  Lanes used: ${result.outputs.map((o) => o.lane).join(", ")}`,
-      "",
-    ];
+    try {
+      process.stdout.write(`  ${DIM}creating worktree for ${lane}...${RESET}\n`);
+      const worktree = createWorktree({
+        branch,
+        baseBranch,
+        sessionId: worktreeSessionId,
+        directory: state.projectRoot,
+      });
 
-    for (const output of result.outputs) {
-      const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
-      lines.push(
-        `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
-      );
+      const lanePrompt = [
+        `You are the ${lane} lane in a /party --autoforge workflow.`,
+        `Goal: ${task}`,
+        scopedFiles.length > 0 ? `Allowed files: ${scopedFiles.join(", ")}` : "Allowed files: repository-wide",
+        "Acceptance criteria:",
+        "- Stay within your lane scope.",
+        "- Run repository-root verification after major edits.",
+        "- Do not commit or merge if typecheck, lint, or test fails.",
+      ].join("\n");
+
+      const laneSession = cloneSessionForTask(state.session, worktree.directory, `${lane}-${Date.now()}`);
+      const laneResult = await runAgentLoop(lanePrompt, laneSession, {
+        state: state.state,
+        verbose: state.verbose,
+        enableGit: false,
+        enableSandbox: state.enableSandbox,
+        silent: true,
+        selfImprovement: createSelfImprovementContext(worktree.directory, {
+          workflowId: "party-autoforge",
+          triggerCommand: "/party --autoforge",
+          targetFiles: scopedFiles,
+          auditMetadata: { lane },
+        }),
+      });
+
+      const gitStatus = getStatus(worktree.directory);
+      const changedFiles = [
+        ...gitStatus.staged.map((entry: { path: string }) => entry.path),
+        ...gitStatus.unstaged.map((entry: { path: string }) => entry.path),
+        ...gitStatus.untracked.map((entry: { path: string }) => entry.path),
+      ];
+      const uniqueChangedFiles = [...new Set(changedFiles)];
+
+      const scopeViolation =
+        scopedFiles.length > 0 &&
+        uniqueChangedFiles.some(
+          (filePath) =>
+            !scopedFiles.some(
+              (allowed) => filePath === allowed || filePath.startsWith(`${allowed}/`),
+            ),
+        );
+
+      const pdseFailures: string[] = [];
+      for (const filePath of uniqueChangedFiles) {
+        try {
+          const content = await readFile(resolve(worktree.directory, filePath), "utf-8");
+          const score = runLocalPDSEScorer(content, worktree.directory);
+          if (!score.passedGate || score.overall < state.state.pdse.threshold) {
+            pdseFailures.push(`${filePath} (${score.overall})`);
+          }
+        } catch {
+          pdseFailures.push(`${filePath} (unreadable)`);
+        }
+      }
+
+      const laneGstack = runRepoRootGStack(worktree.directory);
+      const lanePassed =
+        !scopeViolation && pdseFailures.length === 0 && laneGstack.passed;
+
+      if (!lanePassed) {
+        blockedLanes.push(
+          `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneGstack.passed ? ` GStack failed (${laneGstack.failedSteps.join(", ")})` : ""}`.trim(),
+        );
+        removeWorktree(worktree.directory);
+        continue;
+      }
+
+      if (uniqueChangedFiles.length > 0) {
+        mergeWorktree(worktree.directory, baseBranch, state.projectRoot);
+        mergedLanes.push(lane);
+
+        const postMergeGstack = runRepoRootGStack(state.projectRoot);
+        if (!postMergeGstack.passed) {
+          blockedLanes.push(
+            `post-merge gate failed after ${lane} (${postMergeGstack.failedSteps.join(", ")})`,
+          );
+          break;
+        }
+      } else {
+        removeWorktree(worktree.directory);
+      }
+
+      state.session.messages.push({
+        id: randomUUID(),
+        role: "assistant",
+        content: `## ${lane}\n\n${getLastAssistantText(laneResult)}`,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: unknown) {
+      blockedLanes.push(`${lane}: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    // Inject combined outputs into session
-    const combinedContent = result.outputs
-      .map((o) => `## ${o.lane} (PDSE: ${o.pdseScore})\n\n${o.content}`)
-      .join("\n\n---\n\n");
-
-    state.session.messages.push({
-      id: randomUUID(),
-      role: "assistant",
-      content: combinedContent,
-      timestamp: new Date().toISOString(),
-    });
-
-    return lines.join("\n");
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return `${RED}Party error: ${message}${RESET}`;
   }
+
+  const finalGstack = runRepoRootGStack(state.projectRoot);
+  const statusLine =
+    blockedLanes.length === 0 && finalGstack.passed
+      ? `${GREEN}${BOLD}Party Autoforge Complete: PASSED${RESET}`
+      : `${YELLOW}${BOLD}Party Autoforge Complete: PARTIAL${RESET}`;
+
+  return [
+    "",
+    statusLine,
+    `  Base branch: ${baseBranch}`,
+    `  Merged lanes: ${mergedLanes.length > 0 ? mergedLanes.join(", ") : "none"}`,
+    `  Final GStack: ${finalGstack.passed ? `${GREEN}green${RESET}` : `${RED}red${RESET}`}`,
+    blockedLanes.length > 0 ? `  Blocked lanes: ${blockedLanes.join(" | ")}` : "  Blocked lanes: none",
+    "",
+  ].join("\n");
 }
 
 async function mcpCommand(_args: string, state: ReplState): Promise<string> {
@@ -1105,14 +1388,7 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
 }
 
 async function bgCommand(args: string, state: ReplState): Promise<string> {
-  // Lazy import to avoid circular dependency
-  const { BackgroundAgentRunner } = await import("@dantecode/core");
-
-  // Access or create the runner on the state
-  if (!state._bgRunner) {
-    state._bgRunner = new BackgroundAgentRunner(1, state.projectRoot);
-  }
-  const runner = state._bgRunner as InstanceType<typeof BackgroundAgentRunner>;
+  const runner = await ensureBackgroundRunner(state);
 
   const trimmed = args.trim();
 
@@ -1127,6 +1403,8 @@ async function bgCommand(args: string, state: ReplState): Promise<string> {
       const icon =
         task.status === "running"
           ? `${YELLOW}⟳${RESET}`
+          : task.status === "paused"
+            ? `${YELLOW}⏸${RESET}`
           : task.status === "completed"
             ? `${GREEN}✓${RESET}`
             : task.status === "failed"
@@ -1155,21 +1433,31 @@ async function bgCommand(args: string, state: ReplState): Promise<string> {
     return `${DIM}Cleared ${cleared} finished tasks.${RESET}`;
   }
 
+  const resumeMatch = trimmed.match(/^--resume\s+(\S+)$/);
+  if (resumeMatch?.[1]) {
+    const resumed = await runner.resume(resumeMatch[1]);
+    return resumed
+      ? `${GREEN}Resuming background task ${resumeMatch[1]}.${RESET}`
+      : `${RED}Could not resume task ${resumeMatch[1]}.${RESET}`;
+  }
+
   // /bg <prompt> — enqueue a new task
   // Parse flags from the raw args string
   const hasPR = trimmed.includes("--pr");
   const hasCommit = trimmed.includes("--commit") || hasPR; // --pr implies --commit
   const hasDocker = trimmed.includes("--docker");
+  const hasLong = trimmed.includes("--long");
 
   // Strip all known flags to extract the prompt text
   const prompt = trimmed
     .replace(/--pr/g, "")
     .replace(/--commit/g, "")
     .replace(/--docker/g, "")
+    .replace(/--long/g, "")
     .trim();
 
   if (!prompt) {
-    return `${RED}Usage: /bg [--docker] [--commit] [--pr] <task description>${RESET}`;
+    return `${RED}Usage: /bg [--docker] [--commit] [--pr] [--long] <task description> | /bg --resume <taskId>${RESET}`;
   }
 
   const dockerConfig = hasDocker
@@ -1187,10 +1475,12 @@ async function bgCommand(args: string, state: ReplState): Promise<string> {
     createPR: hasPR,
     docker: hasDocker,
     dockerConfig,
+    longRunning: hasLong,
   });
 
   const parts: string[] = [`${GREEN}Background task ${taskId} queued.${RESET}`];
   if (hasDocker) parts.push(`${DIM}(Docker)${RESET}`);
+  if (hasLong) parts.push(`${DIM}(Long-running checkpoints enabled)${RESET}`);
   if (hasPR) {
     parts.push(`\n  ${DIM}Will auto-commit and create PR on completion.${RESET}`);
   } else if (hasCommit) {
@@ -1575,7 +1865,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "autoforge",
     description: "Run autoforge IAL loop on active file",
-    usage: "/autoforge [--silent] [--persist]",
+    usage: "/autoforge [--self-improve] [--silent] [--persist]",
     handler: autoforgeCommand,
   },
   {
@@ -1587,7 +1877,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "party",
     description: "Multi-agent coordination — parallel lanes for complex tasks",
-    usage: "/party <task>",
+    usage: "/party [--autoforge] [--files a,b] <task>",
     handler: partyCommand,
   },
   {
@@ -1599,7 +1889,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "bg",
     description: "Background agent tasks — run, list, cancel (--pr auto-creates PR)",
-    usage: "/bg [--docker] [--commit] [--pr] [task | cancel <id> | clear]",
+    usage: "/bg [--docker] [--commit] [--pr] [--long] [task | --resume <id> | cancel <id> | clear]",
     handler: bgCommand,
   },
   {

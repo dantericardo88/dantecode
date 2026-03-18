@@ -8,9 +8,15 @@
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { accessSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join, dirname, resolve, relative, isAbsolute, extname, sep } from "node:path";
-import type { ColoredDiffHunk } from "@dantecode/config-types";
+import { join, dirname, resolve, relative, isAbsolute, extname } from "node:path";
+import type { ColoredDiffHunk, SelfImprovementContext } from "@dantecode/config-types";
 import { generateColoredHunk } from "@dantecode/git-engine";
+import {
+  appendAuditEvent,
+  isProtectedWriteTarget,
+  isRepoInternalCdChain,
+  isSelfImprovementWriteAllowed,
+} from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -40,7 +46,11 @@ export interface ToolExecutionContext {
   silentMode: boolean;
   currentModelId: string;
   roundId: string;
+  sessionId?: string;
   sandboxEnabled?: boolean;
+  selfImprovement?: SelfImprovementContext;
+  readTracker?: Map<string, string>;
+  editAttempts?: Map<string, number>;
   onDiffHunk?: (payload: DiffReviewPayload) => void;
   onSelfModificationAttempt?: (filePath: string) => void;
   awaitSelfModConfirmation?: () => Promise<boolean>;
@@ -80,16 +90,7 @@ const SANDBOX_BLOCKED_PATTERNS = [
  * @param projectRoot - The project root from STATE.yaml
  */
 export function isSelfModificationTarget(filePath: string, projectRoot: string): boolean {
-  const resolved = resolve(projectRoot, filePath);
-  const selfPaths: string[] = [
-    resolve(projectRoot, "packages", "vscode"),
-    resolve(projectRoot, "packages", "cli"),
-    resolve(projectRoot, "packages", "danteforge"),
-    resolve(projectRoot, "packages", "core"),
-    resolve(projectRoot, ".dantecode"),
-    resolve(projectRoot, "CONSTITUTION.md"),
-  ];
-  return selfPaths.some((sp) => resolved === sp || resolved.startsWith(sp + sep));
+  return isProtectedWriteTarget(filePath, projectRoot);
 }
 
 /** Bash command patterns that could write to self-owned paths. */
@@ -121,7 +122,11 @@ function resolvePath(filePath: string, projectRoot: string): string {
 // Tool Implementations
 // ----------------------------------------------------------------------------
 
-async function toolRead(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolRead(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   if (!filePath) return { content: "Error: file_path parameter is required", isError: true };
 
@@ -139,6 +144,9 @@ async function toolRead(input: Record<string, unknown>, projectRoot: string): Pr
       const lineNum = startLine + i + 1;
       return `${String(lineNum).padStart(6)}  ${line}`;
     });
+    if (context?.readTracker && startLine === 0 && endLine >= lines.length) {
+      context.readTracker.set(buildReadTrackerKey(context, resolved), new Date().toISOString());
+    }
     return { content: numbered.join("\n"), isError: false };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -171,7 +179,11 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
   }
 }
 
-async function toolEdit(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolEdit(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const oldString = input["old_string"] as string | undefined;
   const newString = input["new_string"] as string | undefined;
@@ -184,25 +196,49 @@ async function toolEdit(input: Record<string, unknown>, projectRoot: string): Pr
     return { content: "Error: new_string parameter is required", isError: true };
 
   const resolved = resolvePath(filePath, projectRoot);
+  if (context?.readTracker && !context.readTracker.has(buildReadTrackerKey(context, resolved))) {
+    return {
+      content: `Error: Read the full current file before Edit. Re-run Read on ${resolved} with no offset/limit so the latest contents are in context.`,
+      isError: true,
+    };
+  }
+
   try {
+    const attemptKey = buildEditAttemptKey(context, resolved, oldString, newString);
+    const attemptCount = context?.editAttempts?.get(attemptKey) ?? 0;
+    if (attemptCount >= 2) {
+      return {
+        content: `Error: Third identical Edit attempt blocked for ${resolved} in this round. Re-read the file and switch to a smaller section rewrite or use Write with the full updated file.`,
+        isError: true,
+      };
+    }
+
     const existing = await readFile(resolved, "utf-8");
     if (!existing.includes(oldString)) {
-      return { content: `Error: old_string not found in ${resolved}`, isError: true };
+      return buildEditRecoveryResult(
+        context,
+        attemptKey,
+        `Error: old_string not found in ${resolved}`,
+        existing,
+      );
     }
     if (!replaceAll) {
       const firstIdx = existing.indexOf(oldString);
       const secondIdx = existing.indexOf(oldString, firstIdx + 1);
       if (secondIdx !== -1) {
-        return {
-          content: `Error: old_string appears multiple times. Use replace_all: true or provide more context.`,
-          isError: true,
-        };
+        return buildEditRecoveryResult(
+          context,
+          attemptKey,
+          "Error: old_string appears multiple times. Use replace_all: true or provide more context.",
+          existing,
+        );
       }
     }
     const updated = replaceAll
       ? existing.split(oldString).join(newString)
       : existing.replace(oldString, newString);
     await writeFile(resolved, updated, "utf-8");
+    context?.editAttempts?.delete(attemptKey);
     const count = replaceAll ? existing.split(oldString).length - 1 : 1;
     // Build a compact diff summary
     const oldLines = oldString.split("\n");
@@ -564,17 +600,52 @@ export async function executeTool(
     }
   }
 
+  if (name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && isRepoInternalCdChain(command, projectRoot)) {
+      return {
+        content:
+          "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
+        isError: true,
+      };
+    }
+  }
+
   // D5: Self-modification guard for Write/Edit
   if (context && isFileOp && filePath && isSelfModificationTarget(filePath, projectRoot)) {
-    context.onSelfModificationAttempt?.(filePath);
-    if (context.awaitSelfModConfirmation) {
-      const confirmed = await context.awaitSelfModConfirmation();
-      if (!confirmed) {
+    await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", filePath);
+
+    const autoAllowed = isSelfImprovementWriteAllowed(
+      filePath,
+      projectRoot,
+      context.selfImprovement,
+    );
+
+    if (!autoAllowed) {
+      context.onSelfModificationAttempt?.(filePath);
+      if (context.awaitSelfModConfirmation) {
+        const confirmed = await context.awaitSelfModConfirmation();
+        if (!confirmed) {
+          await appendSelfModificationAudit(
+            projectRoot,
+            context,
+            "self_modification_denied",
+            filePath,
+          );
+          return { content: `Self-modification blocked: ${filePath}`, isError: true };
+        }
+      } else {
+        await appendSelfModificationAudit(
+          projectRoot,
+          context,
+          "self_modification_denied",
+          filePath,
+        );
         return { content: `Self-modification blocked: ${filePath}`, isError: true };
       }
-    } else {
-      return { content: `Self-modification blocked: ${filePath}`, isError: true };
     }
+
+    await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", filePath);
   }
 
   // D5: Self-modification guard for Bash
@@ -602,13 +673,13 @@ export async function executeTool(
   let result: ToolResult;
   switch (name) {
     case "Read":
-      result = await toolRead(input, projectRoot);
+      result = await toolRead(input, projectRoot, context);
       break;
     case "Write":
       result = await toolWrite(input, projectRoot);
       break;
     case "Edit":
-      result = await toolEdit(input, projectRoot);
+      result = await toolEdit(input, projectRoot, context);
       break;
     case "ListDir":
       result = await toolListDir(input, projectRoot);
@@ -664,6 +735,64 @@ export async function executeTool(
   }
 
   return result;
+}
+
+function buildReadTrackerKey(context: ToolExecutionContext, resolvedPath: string): string {
+  return `${context.roundId}:${resolvedPath}`;
+}
+
+function buildEditAttemptKey(
+  context: ToolExecutionContext | undefined,
+  resolvedPath: string,
+  oldString: string,
+  newString: string,
+): string {
+  return `${context?.roundId ?? "round-unknown"}:${resolvedPath}:${oldString}:${newString}`;
+}
+
+function buildEditRecoveryResult(
+  context: ToolExecutionContext | undefined,
+  attemptKey: string,
+  message: string,
+  latestContent: string,
+): ToolResult {
+  const attemptCount = (context?.editAttempts?.get(attemptKey) ?? 0) + 1;
+  context?.editAttempts?.set(attemptKey, attemptCount);
+
+  const guidance =
+    attemptCount >= 2
+      ? "Use Write with the full updated file contents or retry Edit with a smaller, uniquely identifiable section."
+      : "Re-read the current file contents and retry with more specific surrounding context.";
+
+  return {
+    content: `${message}\n\nLatest file contents:\n${latestContent}\n\n${guidance}`,
+    isError: true,
+  };
+}
+
+async function appendSelfModificationAudit(
+  projectRoot: string,
+  context: ToolExecutionContext,
+  type: "self_modification_attempt" | "self_modification_allowed" | "self_modification_denied",
+  filePath: string,
+): Promise<void> {
+  try {
+    await appendAuditEvent(projectRoot, {
+      sessionId: context.sessionId ?? "vscode-session",
+      timestamp: new Date().toISOString(),
+      type,
+      payload: {
+        filePath,
+        workflowId: context.selfImprovement?.workflowId ?? null,
+        triggerCommand: context.selfImprovement?.triggerCommand ?? null,
+        ...(context.selfImprovement?.auditMetadata ?? {}),
+      },
+      modelId: context.currentModelId,
+      projectRoot,
+    });
+  } catch {
+    /* audit failures are non-fatal */
+  }
 }
 
 // ----------------------------------------------------------------------------

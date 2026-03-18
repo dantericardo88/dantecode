@@ -519,6 +519,20 @@ export interface CostEstimate {
 }
 
 // ----------------------------------------------------------------------------
+// Self-Improvement Types
+// ----------------------------------------------------------------------------
+
+/** Explicit workflow context that grants protected self-modification access. */
+export interface SelfImprovementContext {
+  enabled: boolean;
+  workflowId: string;
+  triggerCommand: string;
+  allowedRoots: string[];
+  targetFiles?: string[];
+  auditMetadata?: Record<string, unknown>;
+}
+
+// ----------------------------------------------------------------------------
 // VS Code Extension Types
 // ----------------------------------------------------------------------------
 
@@ -851,7 +865,13 @@ export interface ChatSessionFile {
 // ----------------------------------------------------------------------------
 
 /** Status of a background agent task. */
-export type BackgroundAgentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type BackgroundAgentStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 /** Optional Docker runtime configuration for a background agent task. */
 export interface DockerAgentConfig {
@@ -873,6 +893,19 @@ export interface CloudAgentConfig {
 /** Dispatch mode for background agent tasks. */
 export type DispatchMode = "local" | "docker" | "cloud";
 
+/** Circuit-breaker state recorded on background tasks. */
+export type BackgroundBreakerState = "closed" | "open" | "half-open";
+
+/** Persisted checkpoint metadata for a background task. */
+export interface BackgroundTaskCheckpoint {
+  id: string;
+  label: string;
+  createdAt: string;
+  sessionSnapshot?: Session;
+  touchedFiles: string[];
+  progress: string;
+}
+
 /** A background agent task that runs asynchronously. */
 export interface BackgroundAgentTask {
   id: string;
@@ -887,6 +920,14 @@ export interface BackgroundAgentTask {
   error?: string;
   worktreeDir?: string;
   dockerConfig?: DockerAgentConfig;
+  longRunning?: boolean;
+  attemptCount?: number;
+  checkpointId?: string;
+  nextRetryAt?: string;
+  breakerState?: BackgroundBreakerState;
+  resumeFromTaskId?: string;
+  checkpoints?: BackgroundTaskCheckpoint[];
+  selfImprovement?: SelfImprovementContext;
 }
 
 // ----------------------------------------------------------------------------

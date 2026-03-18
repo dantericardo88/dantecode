@@ -6,6 +6,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BackgroundAgentRunner } from "./background-agent.js";
 import type { EnqueueOptions } from "./background-agent.js";
 import type { BackgroundAgentTask } from "@dantecode/config-types";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+type ExecCallback = (error: Error | null, stdout: string, stderr: string) => void;
 
 // ── child_process mock ────────────────────────────────────────────────────────
 const mockExec = vi.fn();
@@ -35,17 +40,19 @@ vi.mock("@dantecode/sandbox", () => ({
 
 describe("BackgroundAgentRunner", () => {
   let runner: BackgroundAgentRunner;
+  let projectRoot: string;
 
-  beforeEach(() => {
-    runner = new BackgroundAgentRunner(2, "/test/project");
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-runner-"));
+    runner = new BackgroundAgentRunner(2, projectRoot);
     mockExec.mockClear();
     mockSandboxStart.mockClear();
     mockSandboxStop.mockClear();
     mockSandboxRun.mockClear();
 
     // Default: exec succeeds (for auto-commit / PR creation hooks)
-    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb?: Function) => {
-      if (cb) cb(null, { stdout: "", stderr: "" });
+    mockExec.mockImplementation((_cmd: string, _opts: unknown, cb?: ExecCallback) => {
+      if (cb) cb(null, "", "");
       return { stdout: "", stderr: "" };
     });
   });
@@ -137,7 +144,9 @@ describe("BackgroundAgentRunner", () => {
     it("returns false for already completed task", async () => {
       runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
       const id = runner.enqueue("quick");
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.waitFor(() => {
+        expect(runner.getTask(id)?.status).toBe("completed");
+      });
       expect(runner.cancel(id)).toBe(false);
     });
   });
@@ -157,9 +166,12 @@ describe("BackgroundAgentRunner", () => {
   describe("clearFinished", () => {
     it("removes completed tasks", async () => {
       runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
-      runner.enqueue("a");
-      runner.enqueue("b");
-      await new Promise((r) => setTimeout(r, 50));
+      const firstId = runner.enqueue("a");
+      const secondId = runner.enqueue("b");
+      await vi.waitFor(() => {
+        expect(runner.getTask(firstId)?.status).toBe("completed");
+        expect(runner.getTask(secondId)?.status).toBe("completed");
+      });
       const cleared = runner.clearFinished();
       expect(cleared).toBe(2);
       expect(runner.listTasks()).toHaveLength(0);
@@ -189,7 +201,9 @@ describe("BackgroundAgentRunner", () => {
       expect(running.length).toBeLessThanOrEqual(2);
 
       // Wait for all to complete
-      await new Promise((r) => setTimeout(r, 100));
+      await vi.waitFor(() => {
+        expect(completed).toHaveLength(3);
+      });
       expect(completed).toHaveLength(3);
     });
   });
@@ -205,7 +219,10 @@ describe("BackgroundAgentRunner", () => {
       });
 
       runner.enqueue("tracked");
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.waitFor(() => {
+        expect(updates.length).toBeGreaterThanOrEqual(3);
+        expect(updates[updates.length - 1]?.status).toBe("completed");
+      });
 
       // Should have: queued, running, step 1, step 2, completed
       expect(updates.length).toBeGreaterThanOrEqual(3);
@@ -234,6 +251,9 @@ describe("BackgroundAgentRunner", () => {
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
       });
+      await vi.waitFor(() => {
+        expect(mockSandboxStop).toHaveBeenCalledTimes(1);
+      });
 
       const task = runner.getTask(id);
       expect(task!.status).toBe("completed");
@@ -251,7 +271,9 @@ describe("BackgroundAgentRunner", () => {
       });
 
       const id = runner.enqueue("will fail");
-      await new Promise((r) => setTimeout(r, 50));
+      await vi.waitFor(() => {
+        expect(runner.getTask(id)?.status).toBe("failed");
+      });
 
       const task = runner.getTask(id);
       expect(task!.status).toBe("failed");
@@ -265,6 +287,42 @@ describe("BackgroundAgentRunner", () => {
       const task = runner.getTask(id);
       expect(task!.status).toBe("failed");
       expect(task!.error).toContain("No work function");
+    });
+
+    it("opens the circuit after five failures and pauses before retrying", async () => {
+      vi.useFakeTimers();
+      const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-retry-"));
+      const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
+        failureThreshold: 5,
+        resetTimeoutMs: 200,
+      });
+
+      let attempts = 0;
+      retryRunner.setWorkFn(async () => {
+        attempts++;
+        if (attempts < 6) {
+          throw new Error(`boom-${attempts}`);
+        }
+        return { output: "recovered", touchedFiles: [] };
+      });
+
+      const id = retryRunner.enqueue("recover me", { longRunning: true });
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => {
+        expect(retryRunner.getTask(id)?.progress).toContain("Circuit opened after 5 fails");
+      });
+      expect(retryRunner.getTask(id)?.status).toBe("paused");
+      expect(retryRunner.getTask(id)?.progress).toContain("Circuit opened after 5 fails");
+
+      await vi.advanceTimersByTimeAsync(250);
+
+      await vi.waitFor(() => {
+        expect(retryRunner.getTask(id)?.status).toBe("completed");
+      });
+      expect(retryRunner.getTask(id)?.output).toBe("recovered");
+
+      vi.useRealTimers();
     });
   });
 
@@ -320,6 +378,16 @@ describe("BackgroundAgentRunner", () => {
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
       });
+      await vi.waitFor(() => {
+        expect(
+          mockExec.mock.calls.some(
+            (c: unknown[]) =>
+              typeof c[0] === "string" &&
+              c[0].includes("git add") &&
+              c[0].includes("git commit"),
+          ),
+        ).toBe(true);
+      });
 
       // exec should have been called with git add + commit
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
@@ -340,6 +408,7 @@ describe("BackgroundAgentRunner", () => {
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
       });
+      await new Promise((resolve) => setTimeout(resolve, 20));
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const gitCall = calls.find((c) => typeof c === "string" && c.includes("git commit"));
@@ -365,12 +434,12 @@ describe("BackgroundAgentRunner", () => {
 
     it("commit failure does not fail the task", async () => {
       // Make exec fail for git commands
-      mockExec.mockImplementation((cmd: string, _opts: unknown, cb?: Function) => {
+      mockExec.mockImplementation((cmd: string, _opts: unknown, cb?: ExecCallback) => {
         if (typeof cmd === "string" && cmd.includes("git")) {
-          if (cb) cb(new Error("git commit failed"), { stdout: "", stderr: "" });
+          if (cb) cb(new Error("git commit failed"), "", "");
           return;
         }
-        if (cb) cb(null, { stdout: "", stderr: "" });
+        if (cb) cb(null, "", "");
       });
 
       runner.setWorkFn(async () => ({
@@ -404,6 +473,14 @@ describe("BackgroundAgentRunner", () => {
         expect(runner.getTask(id)?.status).toBe("completed");
       });
 
+      await vi.waitFor(() => {
+        expect(
+          mockExec.mock.calls.some(
+            (c: unknown[]) => typeof c[0] === "string" && c[0].includes("gh pr create"),
+          ),
+        ).toBe(true);
+      });
+
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const prCall = calls.find((c) => typeof c === "string" && c.includes("gh pr create"));
       expect(prCall).toBeTruthy();
@@ -411,14 +488,12 @@ describe("BackgroundAgentRunner", () => {
     });
 
     it("PR failure does not fail the task", async () => {
-      let callCount = 0;
-      mockExec.mockImplementation((cmd: string, _opts: unknown, cb?: Function) => {
-        callCount++;
+      mockExec.mockImplementation((cmd: string, _opts: unknown, cb?: ExecCallback) => {
         if (typeof cmd === "string" && cmd.includes("gh pr create")) {
-          if (cb) cb(new Error("gh: not authenticated"), { stdout: "", stderr: "" });
+          if (cb) cb(new Error("gh: not authenticated"), "", "");
           return;
         }
-        if (cb) cb(null, { stdout: "", stderr: "" });
+        if (cb) cb(null, "", "");
       });
 
       runner.setWorkFn(async () => ({
@@ -430,6 +505,9 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
+      });
+      await vi.waitFor(() => {
+        expect(runner.getTask(id)?.progress).toContain("PR creation failed");
       });
 
       const task = runner.getTask(id);

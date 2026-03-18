@@ -1,8 +1,8 @@
 // ============================================================================
 // @dantecode/core — Background Agent Runner
 // Manages asynchronous agent tasks that run in the background while the user
-// continues working. Tasks are queued, executed with concurrency limits, and
-// report progress via callbacks.
+// continues working. Tasks are queued, retried with a circuit breaker for
+// long-running work, and persisted to checkpoints for resume flows.
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
@@ -11,17 +11,28 @@ import { promisify } from "node:util";
 import type {
   BackgroundAgentTask,
   BackgroundAgentStatus,
+  BackgroundTaskCheckpoint,
   DockerAgentConfig,
   SandboxExecResult,
   SandboxSpec,
+  SelfImprovementContext,
+  Session,
 } from "@dantecode/config-types";
 import { appendAuditEvent } from "./audit.js";
+import { BackgroundTaskStore } from "./background-task-store.js";
+import { CircuitBreaker } from "./circuit-breaker.js";
 
 const execAsync = promisify(exec);
 const SANDBOX_PACKAGE_NAME = "@dantecode/sandbox";
+const CHECKPOINT_INTERVAL_MS = 300_000;
 
 /** Callback for progress updates from a background task. */
 export type BackgroundProgressCallback = (task: BackgroundAgentTask) => void;
+
+export interface BackgroundRunnerOptions {
+  failureThreshold?: number;
+  resetTimeoutMs?: number;
+}
 
 /** Options passed when enqueuing a background agent task. */
 export interface EnqueueOptions {
@@ -33,12 +44,20 @@ export interface EnqueueOptions {
   docker?: boolean;
   /** Docker configuration */
   dockerConfig?: DockerAgentConfig;
+  /** Enable checkpointing + retry behavior for long-running tasks */
+  longRunning?: boolean;
+  /** Resume a previously persisted task */
+  resumeFromTaskId?: string;
+  /** Explicit self-improvement context to carry into the task */
+  selfImprovement?: SelfImprovementContext;
 }
 
 export interface BackgroundTaskContext {
   task: BackgroundAgentTask;
   dockerConfig?: DockerAgentConfig;
   runInDocker?: (command: string, timeoutMs?: number) => Promise<SandboxExecResult>;
+  saveCheckpoint?: (label: string, sessionSnapshot?: Session) => Promise<BackgroundTaskCheckpoint>;
+  getLatestCheckpoint?: () => BackgroundTaskCheckpoint | null;
 }
 
 /** Function that runs the actual agent work. Receives a progress reporter. */
@@ -59,17 +78,41 @@ export class BackgroundAgentRunner {
   private running = 0;
   private readonly maxConcurrent: number;
   private readonly projectRoot: string;
+  private readonly breaker: CircuitBreaker;
+  private readonly taskStore: BackgroundTaskStore;
+  private readonly resetTimeoutMs: number;
+  private readonly resumeTimers = new Map<string, NodeJS.Timeout>();
   private onProgress?: BackgroundProgressCallback;
   private workFn?: AgentWorkFn;
+  private readonly restorePromise: Promise<void>;
 
-  constructor(maxConcurrent = 1, projectRoot = process.cwd()) {
+  constructor(
+    maxConcurrent = 1,
+    projectRoot = process.cwd(),
+    options: BackgroundRunnerOptions = {},
+  ) {
     this.maxConcurrent = maxConcurrent;
     this.projectRoot = projectRoot;
+    this.breaker = new CircuitBreaker({
+      failureThreshold: options.failureThreshold ?? 5,
+      resetTimeoutMs: options.resetTimeoutMs ?? 60_000,
+    });
+    this.resetTimeoutMs = this.breaker.getResetTimeoutMs();
+    this.taskStore = new BackgroundTaskStore(projectRoot);
+    this.restorePromise = this.restorePersistedTasks();
   }
 
   /** Set the function that does actual agent work. */
   setWorkFn(fn: AgentWorkFn): void {
     this.workFn = fn;
+    void this.restorePromise.then(() => {
+      this.processQueue();
+    });
+  }
+
+  /** Returns whether a work function has been configured. */
+  hasWorkFn(): boolean {
+    return typeof this.workFn === "function";
   }
 
   /** Set a callback for progress updates. */
@@ -87,16 +130,15 @@ export class BackgroundAgentRunner {
   enqueue(prompt: string, optionsOrDocker?: EnqueueOptions | DockerAgentConfig): string {
     const id = randomUUID().slice(0, 8);
 
-    // Normalize: legacy callers pass a DockerAgentConfig directly.
     let options: EnqueueOptions | undefined;
     let dockerConfig: DockerAgentConfig | undefined;
 
-    if (optionsOrDocker && "autoCommit" in optionsOrDocker) {
-      options = optionsOrDocker as EnqueueOptions;
-      dockerConfig = options.dockerConfig;
-    } else if (optionsOrDocker && "image" in optionsOrDocker) {
+    if (optionsOrDocker && "image" in optionsOrDocker) {
       dockerConfig = optionsOrDocker as DockerAgentConfig;
       options = { dockerConfig };
+    } else if (optionsOrDocker) {
+      options = optionsOrDocker as EnqueueOptions;
+      dockerConfig = options.dockerConfig;
     }
 
     const task: BackgroundAgentTask = {
@@ -106,16 +148,50 @@ export class BackgroundAgentRunner {
       createdAt: new Date().toISOString(),
       progress: "Waiting in queue...",
       touchedFiles: [],
+      attemptCount: 0,
+      breakerState: "closed",
+      checkpoints: [],
+      longRunning: options?.longRunning ?? false,
+      resumeFromTaskId: options?.resumeFromTaskId,
+      selfImprovement: options?.selfImprovement,
       ...(dockerConfig ? { dockerConfig } : {}),
     };
+
     this.tasks.set(id, task);
     if (options) {
       this.taskOptions.set(id, options);
     }
     this.queue.push(id);
     this.notifyProgress(task);
+    void this.persistTask(task);
     this.processQueue();
     return id;
+  }
+
+  /** Manually resumes a persisted paused or failed task from its latest checkpoint. */
+  async resume(taskId: string): Promise<boolean> {
+    await this.restorePromise;
+
+    let task = this.tasks.get(taskId) ?? undefined;
+    if (!task) {
+      task = (await this.taskStore.loadTask(taskId)) ?? undefined;
+    }
+    if (!task) return false;
+    if (task.status === "completed" || task.status === "cancelled") return false;
+
+    this.clearResumeTimer(task.id);
+    task.status = "queued";
+    task.progress = `Resuming from checkpoint ${task.checkpointId ?? "latest"}`;
+    task.nextRetryAt = undefined;
+    task.resumeFromTaskId = task.resumeFromTaskId ?? taskId;
+    this.tasks.set(task.id, task);
+    if (!this.queue.includes(task.id)) {
+      this.queue.push(task.id);
+    }
+    await this.persistTask(task);
+    this.notifyProgress(task);
+    this.processQueue();
+    return true;
   }
 
   /** List all tasks (active and completed). */
@@ -136,11 +212,13 @@ export class BackgroundAgentRunner {
     if (!task) return false;
     if (task.status === "completed" || task.status === "failed") return false;
 
+    this.clearResumeTimer(id);
     task.status = "cancelled";
     task.completedAt = new Date().toISOString();
     task.progress = "Cancelled by user";
     this.queue = this.queue.filter((qId) => qId !== id);
     this.notifyProgress(task);
+    void this.persistTask(task);
     return true;
   }
 
@@ -149,6 +227,7 @@ export class BackgroundAgentRunner {
     const counts: Record<BackgroundAgentStatus, number> = {
       queued: 0,
       running: 0,
+      paused: 0,
       completed: 0,
       failed: 0,
       cancelled: 0,
@@ -166,6 +245,8 @@ export class BackgroundAgentRunner {
       if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
         this.tasks.delete(id);
         this.taskOptions.delete(id);
+        this.clearResumeTimer(id);
+        void this.taskStore.deleteTask(id);
         cleared++;
       }
     }
@@ -177,7 +258,7 @@ export class BackgroundAgentRunner {
     while (this.running < this.maxConcurrent && this.queue.length > 0) {
       const taskId = this.queue.shift()!;
       const task = this.tasks.get(taskId);
-      if (!task || task.status === "cancelled") continue;
+      if (!task || task.status === "cancelled" || task.status === "paused") continue;
       this.runTask(task);
     }
   }
@@ -186,15 +267,21 @@ export class BackgroundAgentRunner {
   private runTask(task: BackgroundAgentTask): void {
     this.running++;
     task.status = "running";
-    task.startedAt = new Date().toISOString();
-    task.progress = "Starting...";
+    task.startedAt = task.startedAt ?? new Date().toISOString();
+    task.progress =
+      task.resumeFromTaskId || task.checkpointId
+        ? `Resuming from checkpoint ${task.checkpointId ?? "latest"}`
+        : "Starting...";
     this.notifyProgress(task);
+    void this.persistTask(task);
 
     const execute = async () => {
       if (!this.workFn) {
         task.status = "failed";
         task.error = "No work function configured";
         task.completedAt = new Date().toISOString();
+        task.progress = "Failed";
+        await this.persistTask(task);
         this.notifyProgress(task);
         this.running--;
         this.processQueue();
@@ -202,34 +289,52 @@ export class BackgroundAgentRunner {
       }
 
       const { context, cleanup } = await this.createTaskContext(task);
+      let checkpointTimer: NodeJS.Timeout | undefined;
 
       try {
-        const result = await this.workFn(
-          task.prompt,
-          (message) => {
-            if (task.status === "cancelled") return;
-            task.progress = message;
-            this.notifyProgress(task);
-          },
-          context,
+        await context.saveCheckpoint?.("task-start");
+        if (task.longRunning) {
+          checkpointTimer = setInterval(() => {
+            void context.saveCheckpoint?.("heartbeat");
+          }, CHECKPOINT_INTERVAL_MS);
+        }
+
+        const result = await this.breaker.execute(task.id, async () =>
+          this.workFn!(
+            task.prompt,
+            (message) => {
+              if (task.status === "cancelled") return;
+              task.progress = message;
+              this.notifyProgress(task);
+              void this.persistTask(task);
+            },
+            context,
+          ),
         );
 
         if (task.status === "cancelled") return;
+
         task.status = "completed";
+        task.breakerState = this.breaker.getState(task.id);
         task.output = result.output;
         task.touchedFiles = result.touchedFiles;
         task.completedAt = new Date().toISOString();
         task.progress = "Done";
+        task.nextRetryAt = undefined;
 
-        // ── Post-completion hook: auto-commit & PR creation ──
+        if (result.touchedFiles.length > 0) {
+          await context.saveCheckpoint?.("write-batch");
+        }
+        await context.saveCheckpoint?.("completed");
         await this.postCompletionHook(task);
       } catch (err: unknown) {
-        if (task.status === "cancelled") return;
-        task.status = "failed";
-        task.error = err instanceof Error ? err.message : String(err);
-        task.completedAt = new Date().toISOString();
-        task.progress = "Failed";
+        if (task.status !== "cancelled") {
+          await this.handleTaskFailure(task, err, context);
+        }
       } finally {
+        if (checkpointTimer) {
+          clearInterval(checkpointTimer);
+        }
         await cleanup();
       }
 
@@ -238,7 +343,110 @@ export class BackgroundAgentRunner {
       this.processQueue();
     };
 
-    execute();
+    void execute();
+  }
+
+  private async handleTaskFailure(
+    task: BackgroundAgentTask,
+    err: unknown,
+    context: BackgroundTaskContext,
+  ): Promise<void> {
+    task.error = err instanceof Error ? err.message : String(err);
+    task.attemptCount = (task.attemptCount ?? 0) + 1;
+    task.breakerState = this.breaker.getState(task.id);
+
+    if (!task.longRunning) {
+      task.status = "failed";
+      task.completedAt = new Date().toISOString();
+      task.progress = "Failed";
+      await context.saveCheckpoint?.("failed");
+      await this.persistTask(task);
+      return;
+    }
+
+    if (task.breakerState === "open") {
+      task.status = "paused";
+      task.progress = `Circuit opened after ${this.breaker.getFailureThreshold()} fails - pausing task for ${Math.ceil(this.resetTimeoutMs / 1000)}s cooldown`;
+      task.nextRetryAt = new Date(Date.now() + this.resetTimeoutMs).toISOString();
+      await context.saveCheckpoint?.("pre-cooldown");
+      await this.persistTask(task);
+      this.scheduleResume(task.id);
+      return;
+    }
+
+    task.status = "queued";
+    task.progress = `Retrying after failure ${task.attemptCount}/${this.breaker.getFailureThreshold()}: ${task.error}`;
+    await context.saveCheckpoint?.("failed");
+    await this.persistTask(task);
+    this.queue.push(task.id);
+  }
+
+  private scheduleResume(taskId: string): void {
+    this.clearResumeTimer(taskId);
+
+    const timer = setTimeout(() => {
+      void this.resume(taskId);
+    }, this.resetTimeoutMs);
+
+    this.resumeTimers.set(taskId, timer);
+  }
+
+  private clearResumeTimer(taskId: string): void {
+    const timer = this.resumeTimers.get(taskId);
+    if (timer) {
+      clearTimeout(timer);
+      this.resumeTimers.delete(taskId);
+    }
+  }
+
+  private async restorePersistedTasks(): Promise<void> {
+    await this.taskStore.cleanupExpired(7);
+    const persistedTasks = await this.taskStore.listTasks();
+
+    for (const task of persistedTasks) {
+      if (this.tasks.has(task.id)) {
+        continue;
+      }
+      this.tasks.set(task.id, task);
+
+      if (
+        task.status === "queued" ||
+        task.status === "running" ||
+        (task.status === "paused" && task.nextRetryAt && new Date(task.nextRetryAt).getTime() <= Date.now())
+      ) {
+        task.status = task.status === "paused" ? "queued" : task.status;
+        if (!this.queue.includes(task.id)) {
+          this.queue.push(task.id);
+        }
+      } else if (task.status === "paused" && task.nextRetryAt) {
+        this.scheduleResume(task.id);
+      }
+    }
+  }
+
+  private async persistTask(task: BackgroundAgentTask): Promise<void> {
+    await this.taskStore.saveTask(task);
+    await this.taskStore.cleanupExpired(7);
+  }
+
+  private async saveCheckpoint(
+    task: BackgroundAgentTask,
+    label: string,
+    sessionSnapshot?: Session,
+  ): Promise<BackgroundTaskCheckpoint> {
+    const checkpoint: BackgroundTaskCheckpoint = {
+      id: randomUUID().slice(0, 8),
+      label,
+      createdAt: new Date().toISOString(),
+      sessionSnapshot,
+      touchedFiles: [...task.touchedFiles],
+      progress: task.progress,
+    };
+
+    task.checkpoints = [...(task.checkpoints ?? []), checkpoint].slice(-20);
+    task.checkpointId = checkpoint.id;
+    await this.persistTask(task);
+    return checkpoint;
   }
 
   /**
@@ -247,10 +455,15 @@ export class BackgroundAgentRunner {
    */
   private async postCompletionHook(task: BackgroundAgentTask): Promise<void> {
     const options = this.taskOptions.get(task.id);
-    if (!options) return;
-    if (!task.touchedFiles || task.touchedFiles.length === 0) return;
+    if (!options) {
+      await this.persistTask(task);
+      return;
+    }
+    if (!task.touchedFiles || task.touchedFiles.length === 0) {
+      await this.persistTask(task);
+      return;
+    }
 
-    // Auto-commit if requested
     if (options.autoCommit) {
       try {
         const files = task.touchedFiles.map((f) => `"${f.replace(/"/g, '\\"')}"`).join(" ");
@@ -265,16 +478,14 @@ export class BackgroundAgentRunner {
       }
     }
 
-    // Create PR if requested (implies auto-commit already happened above)
     if (options.createPR) {
       try {
         const title = task.prompt.slice(0, 72).replace(/"/g, '\\"');
         const fileList = task.touchedFiles.map((f) => `- ${f}`).join("\\n");
         const body = `Automated PR from DanteCode background agent.\\n\\nTask: ${task.prompt.replace(/"/g, '\\"')}\\n\\nFiles changed:\\n${fileList}`;
-        await execAsync(
-          `gh pr create --title "${title}" --body "${body}"`,
-          { cwd: this.projectRoot },
-        );
+        await execAsync(`gh pr create --title "${title}" --body "${body}"`, {
+          cwd: this.projectRoot,
+        });
         task.progress = "PR created";
         this.notifyProgress(task);
       } catch (err) {
@@ -282,6 +493,8 @@ export class BackgroundAgentRunner {
         this.notifyProgress(task);
       }
     }
+
+    await this.persistTask(task);
   }
 
   /** Notify the progress callback. */
@@ -293,16 +506,21 @@ export class BackgroundAgentRunner {
     context: BackgroundTaskContext;
     cleanup: () => Promise<void>;
   }> {
+    const baseContext: Pick<BackgroundTaskContext, "task" | "saveCheckpoint" | "getLatestCheckpoint"> = {
+      task,
+      saveCheckpoint: (label: string, sessionSnapshot?: Session) =>
+        this.saveCheckpoint(task, label, sessionSnapshot),
+      getLatestCheckpoint: () => task.checkpoints?.[task.checkpoints.length - 1] ?? null,
+    };
+
     if (!task.dockerConfig) {
       return {
-        context: { task },
+        context: baseContext,
         cleanup: async () => {},
       };
     }
 
     try {
-      // Keep sandbox loading as a runtime-only dependency so core does not
-      // bundle sandbox's optional native Docker transport dependencies.
       const { SandboxManager, SandboxExecutor } = await import(SANDBOX_PACKAGE_NAME);
       const spec: SandboxSpec = {
         image: task.dockerConfig.image,
@@ -327,7 +545,7 @@ export class BackgroundAgentRunner {
 
       return {
         context: {
-          task,
+          ...baseContext,
           dockerConfig: task.dockerConfig,
           runInDocker: (command: string, timeoutMs?: number) => executor.run(command, timeoutMs),
         },
@@ -338,7 +556,7 @@ export class BackgroundAgentRunner {
     } catch {
       return {
         context: {
-          task,
+          ...baseContext,
           dockerConfig: task.dockerConfig,
           runInDocker: (command: string, timeoutMs?: number) =>
             this.runCommandOnHost(command, timeoutMs),

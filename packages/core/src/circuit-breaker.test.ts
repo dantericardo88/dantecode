@@ -9,7 +9,7 @@ describe("CircuitBreaker", () => {
   let breaker: CircuitBreaker;
 
   beforeEach(() => {
-    breaker = new CircuitBreaker({ failureThreshold: 3, resetTimeoutMs: 60_000 });
+    breaker = new CircuitBreaker({ failureThreshold: 5, resetTimeoutMs: 60_000 });
   });
 
   // --------------------------------------------------------------------------
@@ -31,7 +31,7 @@ describe("CircuitBreaker", () => {
     it("stays closed after fewer failures than threshold", async () => {
       const fail = () => Promise.reject(new Error("provider error"));
 
-      // 2 failures (threshold is 3)
+      // 2 failures (threshold is 5)
       await expect(breaker.execute("grok", fail)).rejects.toThrow("provider error");
       expect(breaker.getState("grok")).toBe("closed");
 
@@ -42,7 +42,7 @@ describe("CircuitBreaker", () => {
     it("opens after reaching failure threshold", async () => {
       const fail = () => Promise.reject(new Error("provider error"));
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow("provider error");
       }
 
@@ -53,7 +53,7 @@ describe("CircuitBreaker", () => {
       const fail = () => Promise.reject(new Error("provider error"));
 
       // Open the circuit
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow("provider error");
       }
 
@@ -65,7 +65,7 @@ describe("CircuitBreaker", () => {
 
     it("CircuitOpenError contains provider name", async () => {
       const fail = () => Promise.reject(new Error("err"));
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("anthropic", fail)).rejects.toThrow();
       }
 
@@ -88,7 +88,7 @@ describe("CircuitBreaker", () => {
       const fail = () => Promise.reject(new Error("err"));
 
       // Open the circuit
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
       expect(breaker.getState("grok")).toBe("open");
@@ -105,7 +105,7 @@ describe("CircuitBreaker", () => {
     it("does not transition before reset timeout", async () => {
       const fail = () => Promise.reject(new Error("err"));
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
 
@@ -127,7 +127,7 @@ describe("CircuitBreaker", () => {
       const fail = () => Promise.reject(new Error("err"));
 
       // Open the circuit
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
 
@@ -154,7 +154,7 @@ describe("CircuitBreaker", () => {
       const fail = () => Promise.reject(new Error("err"));
 
       // Open the circuit
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
 
@@ -202,7 +202,7 @@ describe("CircuitBreaker", () => {
     it("resets an open circuit to closed", async () => {
       const fail = () => Promise.reject(new Error("err"));
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
       expect(breaker.getState("grok")).toBe("open");
@@ -214,7 +214,7 @@ describe("CircuitBreaker", () => {
     it("allows execution after manual reset", async () => {
       const fail = () => Promise.reject(new Error("err"));
 
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
 
@@ -233,7 +233,7 @@ describe("CircuitBreaker", () => {
       const fail = () => Promise.reject(new Error("err"));
 
       // Open circuit for grok
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
 
@@ -283,9 +283,9 @@ describe("CircuitBreaker", () => {
     it("completes closed -> open -> half-open -> closed", async () => {
       const fail = () => Promise.reject(new Error("err"));
 
-      // Step 1: closed -> open (3 failures)
+      // Step 1: closed -> open (5 failures)
       expect(breaker.getState("grok")).toBe("closed");
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 5; i++) {
         await expect(breaker.execute("grok", fail)).rejects.toThrow();
       }
       expect(breaker.getState("grok")).toBe("open");

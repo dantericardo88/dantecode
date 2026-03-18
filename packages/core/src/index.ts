@@ -94,6 +94,7 @@ export type {
   BackgroundTaskContext,
   EnqueueOptions,
 } from "./background-agent.js";
+export { BackgroundTaskStore } from "./background-task-store.js";
 
 // ─── Code Index ──────────────────────────────────────────────────────────────
 
@@ -242,6 +243,15 @@ export type { HealthCheck, HealthCheckResult, HealthCheckConfig } from "./health
 
 export { CircuitBreaker, CircuitOpenError } from "./circuit-breaker.js";
 export type { CircuitBreakerState, CircuitBreakerOptions } from "./circuit-breaker.js";
+
+export {
+  createSelfImprovementContext,
+  detectSelfImprovementContext,
+  getProtectedRoots,
+  isProtectedWriteTarget,
+  isRepoInternalCdChain,
+  isSelfImprovementWriteAllowed,
+} from "./self-improvement-policy.js";
 
 // ─── Version Migration ──────────────────────────────────────────────────────
 

@@ -23,7 +23,7 @@ interface ProviderCircuitState {
 
 /** Configuration options for the circuit breaker. */
 export interface CircuitBreakerOptions {
-  /** Number of consecutive failures before opening the circuit. Default: 3. */
+  /** Number of consecutive failures before opening the circuit. Default: 5. */
   failureThreshold?: number;
   /** Duration in milliseconds to keep the circuit open before half-open. Default: 60000 (60s). */
   resetTimeoutMs?: number;
@@ -48,7 +48,7 @@ export class CircuitBreaker {
   private readonly resetTimeoutMs: number;
 
   constructor(options: CircuitBreakerOptions = {}) {
-    this.failureThreshold = options.failureThreshold ?? 3;
+    this.failureThreshold = options.failureThreshold ?? 5;
     this.resetTimeoutMs = options.resetTimeoutMs ?? 60_000;
   }
 
@@ -76,6 +76,14 @@ export class CircuitBreaker {
    */
   reset(provider: string): void {
     this.states.delete(provider);
+  }
+
+  getFailureThreshold(): number {
+    return this.failureThreshold;
+  }
+
+  getResetTimeoutMs(): number {
+    return this.resetTimeoutMs;
   }
 
   /**

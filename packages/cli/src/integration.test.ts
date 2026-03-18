@@ -3,7 +3,7 @@
 // Tests slash commands that tie together core + cli modules.
 // ============================================================================
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { BackgroundAgentRunner, CodeIndex, SessionStore } from "@dantecode/core";
 import { tmpdir } from "node:os";
@@ -14,10 +14,10 @@ import type { ChatSessionFile, DanteCodeState, Session } from "@dantecode/config
 import type { ReplState } from "./slash-commands.js";
 
 describe("CLI Integration", () => {
-  function makeRuntimeSession(): Session {
+  function makeRuntimeSession(projectRoot = process.cwd()): Session {
     return {
       id: "session-1",
-      projectRoot: process.cwd(),
+      projectRoot,
       messages: [],
       activeFiles: [],
       readOnlyFiles: [],
@@ -41,8 +41,14 @@ describe("CLI Integration", () => {
   // Background Agent via /bg command flow
   // --------------------------------------------------------------------------
   describe("/bg command flow", () => {
+    let bgTempDir: string;
+
+    beforeEach(async () => {
+      bgTempDir = await mkdtemp(join(tmpdir(), "dantecode-integ-bg-"));
+    });
+
     it("enqueues and completes a task end-to-end", async () => {
-      const runner = new BackgroundAgentRunner(2);
+      const runner = new BackgroundAgentRunner(2, bgTempDir);
       runner.setWorkFn(async (prompt) => ({
         output: `Completed: ${prompt}`,
         touchedFiles: ["src/foo.ts"],
@@ -62,7 +68,7 @@ describe("CLI Integration", () => {
     });
 
     it("cancel flow works", () => {
-      const runner = new BackgroundAgentRunner(0); // no slots = stays queued
+      const runner = new BackgroundAgentRunner(0, bgTempDir); // no slots = stays queued
       const id = runner.enqueue("long running task");
 
       expect(runner.getTask(id)!.status).toBe("queued");
@@ -72,7 +78,7 @@ describe("CLI Integration", () => {
     });
 
     it("clear finished removes completed/failed tasks", async () => {
-      const runner = new BackgroundAgentRunner(5);
+      const runner = new BackgroundAgentRunner(5, bgTempDir);
       runner.setWorkFn(async (prompt) => {
         if (prompt === "fail") throw new Error("intentional");
         return { output: "ok", touchedFiles: [] };
@@ -90,7 +96,7 @@ describe("CLI Integration", () => {
 
     it("routes /bg --docker tasks with sandbox defaults", async () => {
       const replState: ReplState = {
-        session: makeRuntimeSession(),
+        session: makeRuntimeSession(bgTempDir),
         state: {
           sandbox: {
             enabled: true,
@@ -102,7 +108,7 @@ describe("CLI Integration", () => {
             autoStart: false,
           },
         } as DanteCodeState,
-        projectRoot: process.cwd(),
+        projectRoot: bgTempDir,
         verbose: false,
         enableGit: false,
         enableSandbox: false,
@@ -129,6 +135,88 @@ describe("CLI Integration", () => {
         cpuLimit: 2,
         readOnlyMount: false,
       });
+    });
+
+    it("resumes a task through /bg --resume", async () => {
+      const resume = vi.fn().mockResolvedValue(true);
+      const replState: ReplState = {
+        session: makeRuntimeSession(bgTempDir),
+        state: {
+          sandbox: {
+            enabled: true,
+            defaultImage: "ghcr.io/dantecode/sandbox:latest",
+            networkMode: "bridge",
+            memoryLimitMb: 2048,
+            cpuLimit: 2,
+            timeoutMs: 300_000,
+            autoStart: false,
+          },
+        } as DanteCodeState,
+        projectRoot: bgTempDir,
+        verbose: false,
+        enableGit: false,
+        enableSandbox: false,
+        silent: true,
+        lastEditFile: null,
+        lastEditContent: null,
+        recentToolCalls: [],
+        pendingAgentPrompt: null,
+        activeAbortController: null,
+        sandboxBridge: null,
+        _bgRunner: {
+          hasWorkFn: () => true,
+          resume,
+          listTasks: () => [],
+          cancel: () => false,
+          clearFinished: () => 0,
+          enqueue: () => "task-1",
+        },
+      };
+
+      const output = await routeSlashCommand("/bg --resume task-123", replState);
+
+      expect(output).toContain("Resuming background task task-123");
+      expect(resume).toHaveBeenCalledWith("task-123");
+    });
+  });
+
+  describe("/autoforge command flow", () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), "dantecode-integ-autoforge-"));
+    });
+
+    it("queues explicit self-improvement from repo root when no file context is active", async () => {
+      const replState: ReplState = {
+        session: makeRuntimeSession(tempDir),
+        state: {
+          autoforge: {
+            enabled: true,
+            maxIterations: 5,
+            gstackCommands: [],
+            lessonInjectionEnabled: true,
+            abortOnSecurityViolation: true,
+          },
+        } as unknown as DanteCodeState,
+        projectRoot: tempDir,
+        verbose: false,
+        enableGit: false,
+        enableSandbox: false,
+        silent: true,
+        lastEditFile: null,
+        lastEditContent: null,
+        recentToolCalls: [],
+        pendingAgentPrompt: null,
+        activeAbortController: null,
+        sandboxBridge: null,
+      };
+
+      const output = await routeSlashCommand("/autoforge --self-improve", replState);
+
+      expect(output).toContain("Self-improvement autoforge queued");
+      expect(replState.pendingAgentPrompt).toContain("/autoforge --self-improve");
+      expect(replState.pendingAgentPrompt).toContain("Run repo-root typecheck, lint, and test");
     });
   });
 

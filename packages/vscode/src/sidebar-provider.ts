@@ -25,6 +25,7 @@ import {
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
+  detectSelfImprovementContext,
   getContextUtilization,
   getProviderCatalogEntry,
   groupCatalogModels,
@@ -408,6 +409,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const projectRoot = this.getProjectRoot();
+    const selfImprovement = detectSelfImprovementContext(text, projectRoot) ?? undefined;
+    const readTracker = new Map<string, string>();
+    const editAttempts = new Map<string, number>();
+
     this.messages.push({ role: "user", content: text });
     this.stopRequested = false;
     this.abortController = new AbortController();
@@ -471,7 +477,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       overrides: {},
     };
 
-    const projectRoot = this.getProjectRoot();
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
     // Resolve agent mode settings
@@ -509,6 +514,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "- Keep paragraphs short (2-3 sentences max).",
       "",
     ];
+
+    if (selfImprovement?.enabled) {
+      systemParts.push("## Explicit Self-Improvement Workflow");
+      systemParts.push(
+        `Protected source edits are explicitly allowed for this request under workflow ${selfImprovement.workflowId}.`,
+      );
+      systemParts.push(
+        "Use protected writes only when they directly advance the self-improvement task, and verify each major edit batch from the repository root.",
+      );
+      systemParts.push("");
+    }
 
     // Mode-specific instructions
     if (agentMode === "plan") {
@@ -1069,6 +1085,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             silentMode: this.agentConfig.agentMode === "yolo",
             currentModelId: this.currentModel,
             roundId: `round-${roundNumber}`,
+            sessionId: this.sessionId,
+            selfImprovement,
+            readTracker,
+            editAttempts,
             onDiffHunk: (diffReview) => {
               this.postMessage({
                 type: "diff_hunk",

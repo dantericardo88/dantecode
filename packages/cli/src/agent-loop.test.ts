@@ -19,6 +19,7 @@ vi.mock("ai", () => ({
 
 // Track analyzeComplexity return value so tests can override it
 let mockAnalyzeComplexityValue = 0.3;
+const mockEscalateTier = vi.fn();
 
 vi.mock("@dantecode/core", () => {
   // Build a lightweight mock ModelRouterImpl that uses our mockGenerateText
@@ -70,7 +71,13 @@ vi.mock("@dantecode/core", () => {
       return mockAnalyzeComplexityValue;
     }
 
-    forceCapable() {}
+    forceCapable() {
+      mockEscalateTier("forceCapable");
+    }
+
+    escalateTier(reason: string) {
+      mockEscalateTier(reason);
+    }
 
     selectTier() {
       return "fast";
@@ -114,6 +121,7 @@ vi.mock("@dantecode/core", () => {
     formatErrorsForFixPrompt: vi.fn(() => ""),
     computeErrorSignature: vi.fn(() => ""),
     getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+    isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
   };
 });
@@ -141,9 +149,15 @@ import {
   formatLessonsForPrompt as _flp,
   detectAndRecordPatterns as _darp,
 } from "@dantecode/danteforge";
+import {
+  parseVerificationErrors as _parseVerificationErrors,
+  computeErrorSignature as _computeErrorSignature,
+} from "@dantecode/core";
 const mockQueryLessons = _ql as unknown as ReturnType<typeof vi.fn>;
 const mockFormatLessonsForPrompt = _flp as unknown as ReturnType<typeof vi.fn>;
 const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>;
+const mockParseVerificationErrors = _parseVerificationErrors as unknown as ReturnType<typeof vi.fn>;
+const mockComputeErrorSignature = _computeErrorSignature as unknown as ReturnType<typeof vi.fn>;
 
 // Core mocked functions are available via vi.mock above; import only if needed.
 
@@ -256,6 +270,7 @@ describe("runAgentLoop smoke tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
   });
 
   it("basic prompt produces response with no tool calls", async () => {
@@ -680,6 +695,117 @@ describe("Approach memory: recording after verification", () => {
     expect(mockExecuteTool).toHaveBeenCalledTimes(2);
     // The session should still complete
     expect(result.messages.length).toBeGreaterThan(0);
+  });
+
+  it("escalates tier after three repeated verification signatures", async () => {
+    const config = makeConfig();
+    (config.state.project as unknown as Record<string, unknown>).lintCommand = "npm run lint";
+    (config.state.project as unknown as Record<string, unknown>).testCommand = "npm test";
+    (config.state.project as unknown as Record<string, unknown>).buildCommand = "npm run build";
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"src/app.ts","content":"broken code"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I need a stronger retry strategy.",
+      usage: { totalTokens: 30 },
+    });
+
+    mockExecuteTool.mockImplementation(async (name: string) => {
+      if (name === "Write") {
+        return { content: "ok", isError: false };
+      }
+      if (name === "Bash") {
+        return { content: "verification failed", isError: true };
+      }
+      return { content: "ok", isError: false };
+    });
+
+    mockParseVerificationErrors.mockReturnValue([{ message: "same failure" }]);
+    mockComputeErrorSignature.mockReturnValue("repeat-sig");
+
+    await runAgentLoop("Update app", makeSession(), config);
+
+    expect(mockEscalateTier).toHaveBeenCalledWith(
+      expect.stringContaining("repeat-sig"),
+    );
+  });
+});
+
+describe("Major edit batch gating", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
+  });
+
+  it("runs repo-root GStack after protected writes", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"packages/cli/src/tools.ts","content":"export const gated = true;"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Protected write verified.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool.mockImplementation(async (name: string) => {
+      if (name === "Write") {
+        return { content: "ok", isError: false };
+      }
+      if (name === "Bash") {
+        return { content: "green", isError: false };
+      }
+      return { content: "ok", isError: false };
+    });
+
+    await runAgentLoop("Harden the CLI tools", makeSession(), makeConfig());
+
+    const bashCommands = mockExecuteTool.mock.calls
+      .filter(([name]) => name === "Bash")
+      .map(([, input]) => (input as Record<string, string>).command);
+
+    expect(bashCommands).toEqual(["npm run typecheck", "npm run lint", "npm test"]);
+  });
+
+  it("blocks GitCommit when repo-root GStack is red", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: [
+        '<tool_use>',
+        '{"name":"Write","input":{"file_path":"packages/cli/src/tools.ts","content":"export const broken = true;"}}',
+        "</tool_use>",
+        '<tool_use>',
+        '{"name":"GitCommit","input":{"message":"commit changes"}}',
+        "</tool_use>",
+      ].join("\n"),
+      usage: { totalTokens: 80 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will fix the failing checks before committing.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool.mockImplementation(async (name: string, input: Record<string, unknown>) => {
+      if (name === "Write") {
+        return { content: "ok", isError: false };
+      }
+      if (name === "Bash") {
+        const command = input.command as string;
+        return {
+          content: command === "npm run typecheck" ? "typecheck failed" : "skipped",
+          isError: command === "npm run typecheck",
+        };
+      }
+      if (name === "GitCommit") {
+        return { content: "should not commit", isError: false };
+      }
+      return { content: "ok", isError: false };
+    });
+
+    await runAgentLoop("Write and commit protected changes", makeSession(), makeConfig());
+
+    expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitCommit")).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   SessionStore,
   estimateMessageTokens,
   getContextUtilization,
+  isProtectedWriteTarget,
   promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
   parseVerificationErrors,
@@ -26,7 +27,13 @@ import {
   detectAndRecordPatterns,
 } from "@dantecode/danteforge";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
-import type { Session, SessionMessage, DanteCodeState, ModelConfig } from "@dantecode/config-types";
+import type {
+  Session,
+  SessionMessage,
+  DanteCodeState,
+  ModelConfig,
+  SelfImprovementContext,
+} from "@dantecode/config-types";
 import {
   getStatus,
   autoCommit,
@@ -61,6 +68,7 @@ export interface AgentLoopConfig {
   verbose: boolean;
   enableGit: boolean;
   enableSandbox: boolean;
+  selfImprovement?: SelfImprovementContext;
   /** Silent mode (Ruflo pattern): suppress per-tool output, show only compact progress. */
   silent?: boolean;
   /** Called for each streaming token chunk, enabling real-time UI updates. */
@@ -318,6 +326,96 @@ function getVerifyCommands(config: AgentLoopConfig): Array<{ name: string; comma
   return commands;
 }
 
+const CODE_FILE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".rb",
+  ".rs",
+  ".go",
+  ".java",
+  ".kt",
+  ".swift",
+  ".cs",
+  ".cpp",
+  ".c",
+  ".h",
+  ".hpp",
+  ".css",
+  ".scss",
+  ".html",
+  ".md",
+  ".json",
+  ".yaml",
+  ".yml",
+]);
+
+interface MajorEditBatchGateResult {
+  passed: boolean;
+  failedSteps: string[];
+}
+
+function isCodeLikeFile(filePath: string): boolean {
+  const normalized = filePath.toLowerCase();
+  return Array.from(CODE_FILE_EXTENSIONS).some((extension) => normalized.endsWith(extension));
+}
+
+function isWorktreeProjectRoot(projectRoot: string): boolean {
+  const normalized = projectRoot.replace(/\\/g, "/");
+  return normalized.includes("/.dantecode/worktrees/");
+}
+
+function isMajorEditBatch(files: string[], projectRoot: string): boolean {
+  const codeFiles = [...new Set(files.filter(isCodeLikeFile))];
+  if (codeFiles.length === 0) {
+    return false;
+  }
+
+  return (
+    codeFiles.some((filePath) => isProtectedWriteTarget(filePath, projectRoot)) ||
+    (isWorktreeProjectRoot(projectRoot) && codeFiles.length > 1)
+  );
+}
+
+async function runMajorEditBatchGate(
+  session: Session,
+  roundCounter: number,
+  config: AgentLoopConfig,
+  readTracker: Map<string, string>,
+  editAttempts: Map<string, number>,
+): Promise<MajorEditBatchGateResult> {
+  const steps = [
+    { name: "typecheck", command: "npm run typecheck" },
+    { name: "lint", command: "npm run lint" },
+    { name: "test", command: "npm test" },
+  ];
+  const failedSteps: string[] = [];
+
+  for (const step of steps) {
+    const gateResult = await executeTool("Bash", { command: step.command }, session.projectRoot, {
+      sessionId: session.id,
+      roundId: `round-${roundCounter}-gstack`,
+      sandboxEnabled: false,
+      selfImprovement: config.selfImprovement,
+      readTracker,
+      editAttempts,
+    });
+
+    if (gateResult.isError) {
+      failedSteps.push(step.name);
+    }
+  }
+
+  return {
+    passed: failedSteps.length === 0,
+    failedSteps,
+  };
+}
+
 // ----------------------------------------------------------------------------
 // Context Compaction
 // ----------------------------------------------------------------------------
@@ -528,6 +626,10 @@ export async function runAgentLoop(
   let toolCallsThisTurn = 0;
   let filesModified = 0;
   let testsRun = 0;
+  let roundCounter = 0;
+  let lastMajorEditGatePassed = true;
+  const readTracker = new Map<string, string>();
+  const editAttempts = new Map<string, number>();
 
   if (config.verbose && thinkingBudget) {
     process.stdout.write(
@@ -551,6 +653,7 @@ export async function runAgentLoop(
 
   while (maxToolRounds > 0) {
     maxToolRounds--;
+    roundCounter++;
 
     // Context compaction (opencode/OpenHands pattern): condense old messages
     // when approaching the context window limit
@@ -745,6 +848,8 @@ export async function runAgentLoop(
 
     // Execute each tool call
     const toolResults: string[] = [];
+    const roundWrittenFiles: string[] = [];
+    let roundMajorEditGateResult: MajorEditBatchGateResult | null = null;
     let toolIndex = 0;
 
     for (const toolCall of toolCalls) {
@@ -841,6 +946,39 @@ export async function runAgentLoop(
         }
       }
 
+      if (toolCall.name === "GitCommit") {
+        if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {
+          roundMajorEditGateResult = await runMajorEditBatchGate(
+            session,
+            roundCounter,
+            config,
+            readTracker,
+            editAttempts,
+          );
+          lastMajorEditGatePassed = roundMajorEditGateResult.passed;
+
+          if (!roundMajorEditGateResult.passed) {
+            const failedSteps = roundMajorEditGateResult.failedSteps.join(", ");
+            toolResults.push(
+              `SYSTEM: Commit blocked. Major edit batch verification failed at the repository root (${failedSteps}). Fix typecheck, lint, and test before committing or merging.`,
+            );
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[gstack: blocked commit â€” ${failedSteps}]${RESET}\n`,
+              );
+            }
+            continue;
+          }
+        }
+
+        if (!lastMajorEditGatePassed) {
+          toolResults.push(
+            "SYSTEM: Commit blocked because the last major edit batch failed repository-root verification. Fix the failing checks before attempting GitCommit again.",
+          );
+          continue;
+        }
+      }
+
       // Route MCP tool calls to the MCP client
       const isMCPTool = toolCall.name.startsWith("mcp_") && config.mcpClient;
 
@@ -875,7 +1013,14 @@ export async function runAgentLoop(
           (toolCall.input["timeout"] as number | undefined) ?? 120000,
         );
       } else {
-        result = await executeTool(toolCall.name, toolCall.input, session.projectRoot, session.id);
+        result = await executeTool(toolCall.name, toolCall.input, session.projectRoot, {
+          sessionId: session.id,
+          roundId: `round-${roundCounter}`,
+          sandboxEnabled: false,
+          selfImprovement: config.selfImprovement,
+          readTracker,
+          editAttempts,
+        });
       }
 
       // Tool output truncation (opencode pattern): cap large outputs to avoid
@@ -901,6 +1046,9 @@ export async function runAgentLoop(
         const resolvedPath = resolve(session.projectRoot, writtenFile);
         if (!touchedFiles.includes(resolvedPath)) {
           touchedFiles.push(resolvedPath);
+        }
+        if (!result.isError && (toolCall.name === "Write" || toolCall.name === "Edit")) {
+          roundWrittenFiles.push(resolvedPath);
         }
         // Progress tracking: count files modified
         filesModified++;
@@ -977,6 +1125,30 @@ export async function runAgentLoop(
       );
     }
 
+    if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {
+      roundMajorEditGateResult = await runMajorEditBatchGate(
+        session,
+        roundCounter,
+        config,
+        readTracker,
+        editAttempts,
+      );
+      lastMajorEditGatePassed = roundMajorEditGateResult.passed;
+
+      const summary = roundMajorEditGateResult.passed
+        ? "SYSTEM: Repository-root verification passed for this major edit batch (typecheck, lint, test). Commits and merges may proceed."
+        : `SYSTEM: Repository-root verification failed for this major edit batch (${roundMajorEditGateResult.failedSteps.join(", ")}). Do not commit or merge until those checks are green.`;
+      toolResults.push(summary);
+
+      if (!config.silent) {
+        process.stdout.write(
+          roundMajorEditGateResult.passed
+            ? `\n${GREEN}[gstack: repo-root gate passed]${RESET}\n`
+            : `\n${RED}[gstack: repo-root gate failed â€” ${roundMajorEditGateResult.failedSteps.join(", ")}]${RESET}\n`,
+        );
+      }
+    }
+
     // Reflection loop (aider/Cursor pattern): after code edits, auto-run
     // the project's configured lint/test/build commands. If any fail,
     // parse the output into structured errors and inject a targeted fix
@@ -1015,8 +1187,13 @@ export async function runAgentLoop(
                 sameErrorCount++;
                 if (sameErrorCount >= 2) {
                   // Same errors persisting across retries — escalate model tier
-                  router.forceCapable();
-                  retryMessage += `\n\nWARNING: These same errors have persisted for ${sameErrorCount + 1} consecutive retries. The model tier has been escalated. Try a fundamentally different approach to fix these issues.`;
+                  const reason = `Persistent verification signature ${errorSig} repeated ${sameErrorCount + 1} times`;
+                  if ("escalateTier" in router && typeof router.escalateTier === "function") {
+                    router.escalateTier(reason);
+                  } else {
+                    router.forceCapable();
+                  }
+                  retryMessage += `\n\nWARNING: These same errors have persisted for ${sameErrorCount + 1} consecutive retries. The model tier has been escalated. Previous attempts failed with signature ${errorSig}. Try a fundamentally different approach to fix these issues.`;
                   if (config.verbose) {
                     process.stdout.write(
                       `\n${YELLOW}[self-heal: tier escalated to capable — same errors ${sameErrorCount + 1}x]${RESET}\n`,

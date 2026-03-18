@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
 import { EventTriggerRegistry } from "./event-triggers.js";
 import type {
   AgentTask,
@@ -509,7 +510,6 @@ describe("EventTriggerRegistry", () => {
 
   describe("verifyGitHubSignature", () => {
     it("verifies valid HMAC-SHA256 signature", () => {
-      const { createHmac } = require("node:crypto");
       const secret = "webhook-secret-123";
       const body = '{"action":"opened","issue":{"number":1}}';
       const expected = "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
@@ -535,7 +535,6 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("accepts Buffer body input", () => {
-      const { createHmac } = require("node:crypto");
       const secret = "buf-secret";
       const body = Buffer.from('{"test":"data"}');
       const expected =
@@ -549,7 +548,6 @@ describe("EventTriggerRegistry", () => {
 
   describe("verifySlackSignature", () => {
     it("verifies valid Slack v0 signature", () => {
-      const { createHmac } = require("node:crypto");
       const signingSecret = "slack-signing-secret";
       const timestamp = String(Math.floor(Date.now() / 1000));
       const body = "token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J";
@@ -561,7 +559,6 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("rejects replayed request (older than 5 minutes)", () => {
-      const { createHmac } = require("node:crypto");
       const signingSecret = "slack-signing-secret";
       const oldTimestamp = String(Math.floor(Date.now() / 1000) - 400);
       const body = "test=data";
@@ -576,7 +573,6 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("rejects tampered body", () => {
-      const { createHmac } = require("node:crypto");
       const signingSecret = "slack-signing-secret";
       const timestamp = String(Math.floor(Date.now() / 1000));
       const body = "original=data";

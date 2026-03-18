@@ -6,8 +6,13 @@
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { execSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
-import { appendAuditEvent } from "@dantecode/core";
-import type { TodoItem, TodoStatus } from "@dantecode/config-types";
+import {
+  appendAuditEvent,
+  isProtectedWriteTarget,
+  isRepoInternalCdChain,
+  isSelfImprovementWriteAllowed,
+} from "@dantecode/core";
+import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
 import {
   sandboxCheckCommand,
   sandboxCheckPath,
@@ -23,6 +28,15 @@ import {
 export interface ToolResult {
   content: string;
   isError: boolean;
+}
+
+export interface CliToolExecutionContext {
+  sessionId?: string;
+  roundId?: string;
+  sandboxEnabled?: boolean;
+  selfImprovement?: SelfImprovementContext;
+  readTracker?: Map<string, string>;
+  editAttempts?: Map<string, number>;
 }
 
 /** Supported tool names. */
@@ -58,7 +72,11 @@ function resolvePath(filePath: string, projectRoot: string): string {
 /**
  * Read tool: reads a file from disk and returns its content with line numbers.
  */
-async function toolRead(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolRead(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   if (!filePath) {
     return { content: "Error: file_path parameter is required", isError: true };
@@ -79,6 +97,10 @@ async function toolRead(input: Record<string, unknown>, projectRoot: string): Pr
       const lineNum = startLine + i + 1;
       return `${String(lineNum).padStart(6)}  ${line}`;
     });
+
+    if (context?.readTracker && startLine === 0 && endLine >= lines.length) {
+      context.readTracker.set(buildReadTrackerKey(context, resolved), new Date().toISOString());
+    }
 
     return { content: numbered.join("\n"), isError: false };
   } catch (err: unknown) {
@@ -120,7 +142,11 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
 /**
  * Edit tool: performs exact string replacement within a file.
  */
-async function toolEdit(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolEdit(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const oldString = input["old_string"] as string | undefined;
   const newString = input["new_string"] as string | undefined;
@@ -137,15 +163,33 @@ async function toolEdit(input: Record<string, unknown>, projectRoot: string): Pr
   }
 
   const resolved = resolvePath(filePath, projectRoot);
+  if (context?.readTracker && !context.readTracker.has(buildReadTrackerKey(context, resolved))) {
+    return {
+      content: `Error: Read the full current file before Edit. Re-run Read on ${resolved} with no offset/limit so the latest contents are in context.`,
+      isError: true,
+    };
+  }
 
   try {
+    const attemptKey = buildEditAttemptKey(context, resolved, oldString, newString);
+    const attemptCount = context?.editAttempts?.get(attemptKey) ?? 0;
+    if (attemptCount >= 2) {
+      return {
+        content: `Error: Third identical Edit attempt blocked for ${resolved} in this round. Re-read the file and switch to a smaller section rewrite or use Write with the full updated file.`,
+        isError: true,
+      };
+    }
+
     const existing = await readFile(resolved, "utf-8");
 
     if (!existing.includes(oldString)) {
-      return {
-        content: `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
-        isError: true,
-      };
+      return buildEditRecoveryResult(
+        context,
+        attemptKey,
+        resolved,
+        `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
+        existing,
+      );
     }
 
     // Check for uniqueness if not replaceAll
@@ -153,10 +197,13 @@ async function toolEdit(input: Record<string, unknown>, projectRoot: string): Pr
       const firstIndex = existing.indexOf(oldString);
       const secondIndex = existing.indexOf(oldString, firstIndex + 1);
       if (secondIndex !== -1) {
-        return {
-          content: `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
-          isError: true,
-        };
+        return buildEditRecoveryResult(
+          context,
+          attemptKey,
+          resolved,
+          `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
+          existing,
+        );
       }
     }
 
@@ -168,6 +215,7 @@ async function toolEdit(input: Record<string, unknown>, projectRoot: string): Pr
     }
 
     await writeFile(resolved, updated, "utf-8");
+    context?.editAttempts?.delete(attemptKey);
 
     const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
 
@@ -688,11 +736,13 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   projectRoot: string,
-  sessionId: string = "cli-session",
+  sessionOrContext: string | CliToolExecutionContext = "cli-session",
   sandboxEnabled: boolean = false,
 ): Promise<ToolResult> {
+  const context = normalizeExecutionContext(sessionOrContext, sandboxEnabled);
+
   // Sandbox: check file path for Write/Edit
-  if (sandboxEnabled && (name === "Write" || name === "Edit")) {
+  if (context.sandboxEnabled && (name === "Write" || name === "Edit")) {
     const fp = input["file_path"] as string | undefined;
     if (fp) {
       const blocked = sandboxCheckPath(fp, projectRoot, true);
@@ -701,7 +751,7 @@ export async function executeTool(
   }
 
   // Sandbox: check command for Bash
-  if (sandboxEnabled && name === "Bash") {
+  if (context.sandboxEnabled && name === "Bash") {
     const cmd = input["command"] as string | undefined;
     if (cmd) {
       const blocked = sandboxCheckCommand(cmd, true);
@@ -709,10 +759,33 @@ export async function executeTool(
     }
   }
 
+  if (name === "Bash") {
+    const command = input["command"] as string | undefined;
+    if (command && isRepoInternalCdChain(command, projectRoot)) {
+      return {
+        content:
+          "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
+        isError: true,
+      };
+    }
+  }
+
   // Write/Edit safety hooks (always active, not just sandbox mode)
   if (name === "Write" || name === "Edit") {
     const fp = input["file_path"] as string | undefined;
     if (fp) {
+      if (isProtectedWriteTarget(fp, projectRoot)) {
+        await appendSelfModificationAudit(projectRoot, context, "self_modification_attempt", fp);
+        if (!isSelfImprovementWriteAllowed(fp, projectRoot, context.selfImprovement)) {
+          await appendSelfModificationAudit(projectRoot, context, "self_modification_denied", fp);
+          return {
+            content: `Self-modification blocked: ${fp}. Protected source edits require an explicit self-improvement workflow such as /autoforge --self-improve or /party --autoforge.`,
+            isError: true,
+          };
+        }
+        await appendSelfModificationAudit(projectRoot, context, "self_modification_allowed", fp);
+      }
+
       const writeBlock = checkWriteSafety(fp);
       if (writeBlock) {
         return { content: `SAFETY: ${writeBlock}`, isError: true };
@@ -736,13 +809,13 @@ export async function executeTool(
 
   switch (name) {
     case "Read":
-      result = await toolRead(input, projectRoot);
+      result = await toolRead(input, projectRoot, context);
       break;
     case "Write":
       result = await toolWrite(input, projectRoot);
       break;
     case "Edit":
-      result = await toolEdit(input, projectRoot);
+      result = await toolEdit(input, projectRoot, context);
       break;
     case "Bash":
       result = await toolBash(input, projectRoot);
@@ -774,7 +847,7 @@ export async function executeTool(
     };
     try {
       await appendAuditEvent(projectRoot, {
-        sessionId,
+        sessionId: context.sessionId ?? "cli-session",
         timestamp: new Date().toISOString(),
         type: auditTypeMap[name]! as "file_write" | "file_edit" | "bash_execute" | "git_commit",
         payload: {
@@ -791,6 +864,89 @@ export async function executeTool(
   }
 
   return result;
+}
+
+function normalizeExecutionContext(
+  sessionOrContext: string | CliToolExecutionContext,
+  sandboxEnabled: boolean,
+): CliToolExecutionContext {
+  if (typeof sessionOrContext === "string") {
+    return {
+      sessionId: sessionOrContext,
+      roundId: "default-round",
+      sandboxEnabled,
+      readTracker: new Map(),
+      editAttempts: new Map(),
+    };
+  }
+
+  return {
+    sessionId: sessionOrContext.sessionId ?? "cli-session",
+    roundId: sessionOrContext.roundId ?? "default-round",
+    sandboxEnabled: sessionOrContext.sandboxEnabled ?? sandboxEnabled,
+    selfImprovement: sessionOrContext.selfImprovement,
+    readTracker: sessionOrContext.readTracker ?? new Map(),
+    editAttempts: sessionOrContext.editAttempts ?? new Map(),
+  };
+}
+
+function buildReadTrackerKey(context: CliToolExecutionContext, resolvedPath: string): string {
+  return `${context.roundId ?? "default-round"}:${resolvedPath}`;
+}
+
+function buildEditAttemptKey(
+  context: CliToolExecutionContext | undefined,
+  resolvedPath: string,
+  oldString: string,
+  newString: string,
+): string {
+  return `${context?.roundId ?? "default-round"}:${resolvedPath}:${oldString}:${newString}`;
+}
+
+function buildEditRecoveryResult(
+  context: CliToolExecutionContext | undefined,
+  attemptKey: string,
+  _resolvedPath: string,
+  message: string,
+  latestContent: string,
+): ToolResult {
+  const attemptCount = (context?.editAttempts?.get(attemptKey) ?? 0) + 1;
+  context?.editAttempts?.set(attemptKey, attemptCount);
+
+  const guidance =
+    attemptCount >= 2
+      ? "Use Write with the full updated file contents or retry Edit with a smaller, uniquely identifiable section."
+      : "Re-read the current file contents and retry with more specific surrounding context.";
+
+  return {
+    content: `${message}\n\nLatest file contents:\n${latestContent}\n\n${guidance}`,
+    isError: true,
+  };
+}
+
+async function appendSelfModificationAudit(
+  projectRoot: string,
+  context: CliToolExecutionContext,
+  type: "self_modification_attempt" | "self_modification_allowed" | "self_modification_denied",
+  filePath: string,
+): Promise<void> {
+  try {
+    await appendAuditEvent(projectRoot, {
+      sessionId: context.sessionId ?? "cli-session",
+      timestamp: new Date().toISOString(),
+      type,
+      payload: {
+        filePath,
+        workflowId: context.selfImprovement?.workflowId ?? null,
+        triggerCommand: context.selfImprovement?.triggerCommand ?? null,
+        ...(context.selfImprovement?.auditMetadata ?? {}),
+      },
+      modelId: "cli",
+      projectRoot,
+    });
+  } catch {
+    // Audit failures should not block tool execution.
+  }
 }
 
 /**

@@ -861,7 +861,26 @@ export class ModelRouterImpl {
    * Forces escalation to the capable tier for this session.
    */
   forceCapable(): void {
+    this.escalateTier("forceCapable");
+  }
+
+  /**
+   * Escalates the active routing tier to the capable model set and records why.
+   * Escalation is one-way within a session.
+   */
+  escalateTier(reason: string): void {
     this._currentTier = "capable";
+    void appendAuditEvent(this.projectRoot, {
+      type: "tier_escalation",
+      sessionId: this.sessionId,
+      timestamp: new Date().toISOString(),
+      modelId: `${this.routerConfig.default.provider}/${this.routerConfig.default.modelId}`,
+      projectRoot: this.projectRoot,
+      payload: {
+        reason,
+        toTier: "capable",
+      },
+    });
   }
 
   /** Returns the current model tier. */
