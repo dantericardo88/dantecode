@@ -1,0 +1,8 @@
+.turbo/
+src/
+node_modules/
+*.ts
+!dist/**
+tsconfig.json
+.gitignore
+**/dist/**\n**/node_modules/**\npackages/**/coverage/**

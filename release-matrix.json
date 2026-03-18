@@ -1,0 +1,82 @@
+{
+  "surfaces": [
+    {
+      "id": "cli",
+      "label": "CLI",
+      "releaseRing": "ga",
+      "role": "primary",
+      "shipTarget": true
+    },
+    {
+      "id": "vscode",
+      "label": "VS Code Extension",
+      "releaseRing": "preview",
+      "role": "primary",
+      "shipTarget": true
+    },
+    {
+      "id": "desktop",
+      "label": "Desktop App",
+      "releaseRing": "experimental",
+      "role": "secondary",
+      "shipTarget": false
+    }
+  ],
+  "providers": [
+    {
+      "id": "grok",
+      "label": "xAI / Grok",
+      "supportTier": "tier1",
+      "uiSupported": true
+    },
+    {
+      "id": "anthropic",
+      "label": "Anthropic",
+      "supportTier": "tier1",
+      "uiSupported": true
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "supportTier": "tier1",
+      "uiSupported": true
+    },
+    {
+      "id": "google",
+      "label": "Google AI",
+      "supportTier": "tier1",
+      "uiSupported": true
+    },
+    {
+      "id": "ollama",
+      "label": "Local (Ollama)",
+      "supportTier": "tier1",
+      "uiSupported": true
+    },
+    {
+      "id": "groq",
+      "label": "Groq",
+      "supportTier": "advanced",
+      "uiSupported": false
+    },
+    {
+      "id": "custom",
+      "label": "Custom OpenAI-Compatible",
+      "supportTier": "advanced",
+      "uiSupported": false
+    }
+  ],
+  "coverageGate": {
+    "scopedPackages": [
+      "core",
+      "danteforge",
+      "git-engine",
+      "skill-adapter"
+    ],
+    "thresholds": {
+      "statements": 30,
+      "functions": 80,
+      "lines": 30
+    }
+  }
+}

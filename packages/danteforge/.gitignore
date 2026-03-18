@@ -1,0 +1,17 @@
+# DanteForge engine — source is proprietary, only compiled binary ships
+# Override root dist/ ignore — we COMMIT the compiled binary
+!dist/
+
+# Proprietary source files (kept locally, not in public repo)
+src/anti-stub-scanner.ts
+src/pdse-scorer.ts
+src/gstack.ts
+src/lessons.ts
+src/autoforge.ts
+src/constitution.ts
+src/blade-progress.ts
+src/memory-detector.ts
+src/sql-js.d.ts
+
+# Test files (proprietary — live in private repo)
+src/*.test.ts

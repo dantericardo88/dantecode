@@ -1,0 +1,243 @@
+{
+  "name": "dantecode",
+  "displayName": "DanteCode",
+  "description": "Preview VS Code client for the DanteCode portable skill runtime and coding agent",
+  "version": "1.0.0",
+  "publisher": "dantecode",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding",
+    "agent",
+    "grok",
+    "model-agnostic",
+    "copilot",
+    "code-review",
+    "quality",
+    "danteforge"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run --config ../../vitest.package.config.ts",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0",
+    "@dantecode/danteforge": "1.0.0",
+    "@dantecode/git-engine": "1.0.0",
+    "@dantecode/skill-adapter": "1.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dantecode",
+          "title": "DanteCode",
+          "icon": "assets/sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "dantecode": [
+        {
+          "type": "webview",
+          "id": "dantecode.chatView",
+          "name": "Chat"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.auditView",
+          "name": "Audit Log"
+        },
+        {
+          "id": "dantecode.repoMap",
+          "name": "Repo Map",
+          "type": "tree"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "dantecode.openChat",
+        "title": "DanteCode: Open Chat",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.addFileToContext",
+        "title": "DanteCode: Add File to Context",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.importClaudeSkills",
+        "title": "DanteCode: Import Claude Skills",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.runPDSE",
+        "title": "DanteCode: Run PDSE Score on File",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.runGStack",
+        "title": "DanteCode: Run GStack QA",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.switchModel",
+        "title": "DanteCode: Switch Model",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.toggleSandbox",
+        "title": "DanteCode: Toggle Sandbox Mode",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.showLessons",
+        "title": "DanteCode: Show Project Lessons",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.initProject",
+        "title": "DanteCode: Initialize Project",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.acceptDiff",
+        "title": "DanteCode: Accept Diff Hunk",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rejectDiff",
+        "title": "DanteCode: Reject Diff Hunk",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.reviewDiff",
+        "title": "DanteCode: Review Pending Diff",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.acceptDiffHunks",
+        "title": "DanteCode: Accept Selected Diff Hunks",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rejectDiffHunks",
+        "title": "DanteCode: Reject Selected Diff Hunks",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.createCheckpoint",
+        "title": "DanteCode: Create Checkpoint",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.listCheckpoints",
+        "title": "DanteCode: List Checkpoints",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rewindCheckpoint",
+        "title": "DanteCode: Rewind Checkpoint",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.setupApiKeys",
+        "title": "DanteCode: Setup API Keys",
+        "category": "DanteCode"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "dantecode.openChat",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d"
+      },
+      {
+        "command": "dantecode.addFileToContext",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorFocus"
+      }
+    ],
+    "configuration": {
+      "title": "DanteCode",
+      "properties": {
+        "dantecode.defaultModel": {
+          "type": "string",
+          "default": "grok/grok-3",
+          "description": "Default model for DanteCode. Format: provider/model-id"
+        },
+        "dantecode.fimModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional dedicated inline-completion model. Format: provider/model-id"
+        },
+        "dantecode.pdseThreshold": {
+          "type": "number",
+          "default": 85,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Minimum PDSE score to pass quality gate"
+        },
+        "dantecode.autoCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically commit accepted edits"
+        },
+        "dantecode.sandboxEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run bash commands in Docker sandbox"
+        },
+        "dantecode.multilineCompletions": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "Control multi-line inline completions. 'auto' detects context, 'always' forces multi-line, 'never' forces single-line."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dantecode.addFileToContext",
+          "group": "dantecode",
+          "when": "editorFocus"
+        },
+        {
+          "command": "dantecode.runPDSE",
+          "group": "dantecode",
+          "when": "editorFocus"
+        }
+      ]
+    }
+  }
+}

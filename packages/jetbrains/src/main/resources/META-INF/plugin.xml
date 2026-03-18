@@ -1,0 +1,40 @@
+<idea-plugin>
+    <id>dev.dantecode.plugin</id>
+    <name>DanteCode</name>
+    <vendor email="support@dantecode.dev" url="https://dantecode.dev">DanteCode</vendor>
+
+    <description><![CDATA[
+    AI-powered coding assistant with runtime-verified code quality.
+    Features DanteForge verification pipeline, multi-model support, and
+    intelligent code completions.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="DanteCode"
+                    secondary="true"
+                    icon="/icons/dantecode.svg"
+                    anchor="right"
+                    factoryClass="dev.dantecode.plugin.ChatToolWindowFactory"/>
+        <completion.contributor
+                language="any"
+                implementationClass="dev.dantecode.plugin.InlineCompletionProvider"/>
+        <notificationGroup id="DanteCode Notifications"
+                          displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <group id="DanteCode.MainMenu" text="DanteCode" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="DanteCode.StartChat"
+                    class="dev.dantecode.plugin.actions.StartChatAction"
+                    text="Open Chat"
+                    description="Open DanteCode chat panel"/>
+            <action id="DanteCode.RunVerification"
+                    class="dev.dantecode.plugin.actions.RunVerificationAction"
+                    text="Run Verification"
+                    description="Run DanteForge verification on current file"/>
+        </group>
+    </actions>
+</idea-plugin>

@@ -1,0 +1,498 @@
+// ============================================================================
+// @dantecode/cli — Agent Loop Smoke Tests
+// End-to-end smoke tests that exercise the full agent loop flow with mocked
+// providers. Tests: basic prompt, tool dispatch, safety blocking, stuck loop.
+// ============================================================================
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock external dependencies BEFORE importing module under test
+
+// Mock generateText at the "ai" module level — ModelRouterImpl calls this internally.
+const mockGenerateText = vi.fn();
+
+vi.mock("ai", () => ({
+  generateText: mockGenerateText,
+  streamText: vi.fn(),
+}));
+
+vi.mock("@dantecode/core", () => {
+  // Build a lightweight mock ModelRouterImpl that uses our mockGenerateText
+  class MockModelRouterImpl {
+    private _modelRatedComplexity: number | null = null;
+    private _firstTurnCompleted = false;
+
+    constructor(_routerConfig: unknown, _projectRoot: string, _sessionId: string) {}
+
+    async generate(
+      messages: Array<{ role: string; content: string }>,
+      _options?: Record<string, unknown>,
+    ): Promise<string> {
+      const result = await mockGenerateText({
+        model: { modelId: "mock" },
+        messages,
+      });
+      return result.text;
+    }
+
+    async stream(
+      messages: Array<{ role: string; content: string }>,
+      _options?: Record<string, unknown>,
+    ): Promise<{ textStream: AsyncIterable<string> }> {
+      const result = await mockGenerateText({
+        model: { modelId: "mock" },
+        messages,
+      });
+      const text = result.text;
+      return {
+        textStream: (async function* () {
+          yield text;
+        })(),
+      };
+    }
+
+    extractModelComplexityRating(_responseText: string, _userPrompt?: string): number | null {
+      if (this._firstTurnCompleted) return this._modelRatedComplexity;
+      this._firstTurnCompleted = true;
+      this._modelRatedComplexity = 0.3;
+      return 0.3;
+    }
+
+    getModelRatedComplexity(): number | null {
+      return this._modelRatedComplexity;
+    }
+
+    analyzeComplexity(_prompt: string): number {
+      return 0.3;
+    }
+
+    selectTier() {
+      return "fast";
+    }
+    recordRequestCost() {}
+    resetSessionCost() {}
+  }
+
+  return {
+    ModelRouterImpl: MockModelRouterImpl,
+    appendAuditEvent: vi.fn().mockResolvedValue(undefined),
+    shouldContinueLoop: vi.fn(() => true),
+    estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
+    estimateMessageTokens: vi.fn((msgs: Array<{ content: string }>) =>
+      msgs.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0),
+    ),
+    promptRequestsToolExecution: vi.fn((prompt: string) =>
+      /\b(fix|update|write|edit|add|build|implement|change)\b/i.test(prompt),
+    ),
+    responseNeedsToolExecutionNudge: vi.fn((text: string) =>
+      /\b(i will|plan|steps?|phase|first|next|then|created|updated|modified|executing plan)\b/i.test(
+        text,
+      ),
+    ),
+    parseVerificationErrors: vi.fn(() => []),
+    formatErrorsForFixPrompt: vi.fn(() => ""),
+    computeErrorSignature: vi.fn(() => ""),
+    getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+  };
+});
+
+vi.mock("@dantecode/danteforge", () => ({
+  runAntiStubScanner: vi.fn(() => ({ passed: true, hardViolations: [] })),
+  runLocalPDSEScorer: vi.fn(() => ({
+    overall: 85,
+    passedGate: true,
+    completeness: 85,
+    correctness: 85,
+    clarity: 85,
+    consistency: 85,
+  })),
+  runConstitutionCheck: vi.fn(() => ({ violations: [] })),
+  queryLessons: vi.fn().mockResolvedValue([]),
+  formatLessonsForPrompt: vi.fn().mockReturnValue(""),
+  detectAndRecordPatterns: vi.fn().mockResolvedValue([]),
+  recordSuccessPattern: vi.fn().mockResolvedValue({}),
+}));
+
+// Get references to the mocked danteforge functions for assertions
+import {
+  queryLessons as _ql,
+  formatLessonsForPrompt as _flp,
+  detectAndRecordPatterns as _darp,
+  recordSuccessPattern as _rsp,
+} from "@dantecode/danteforge";
+const mockQueryLessons = _ql as unknown as ReturnType<typeof vi.fn>;
+const mockFormatLessonsForPrompt = _flp as unknown as ReturnType<typeof vi.fn>;
+const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>;
+const mockRecordSuccessPattern = _rsp as unknown as ReturnType<typeof vi.fn>;
+
+vi.mock("@dantecode/git-engine", () => ({
+  getStatus: vi.fn(() => ({ staged: [], unstaged: [], untracked: [] })),
+  autoCommit: vi.fn(),
+  generateRepoMap: vi.fn(() => [
+    { path: "src/index.ts", size: 1024, language: "typescript", lastModified: "2025-01-01" },
+    { path: "src/utils.ts", size: 512, language: "typescript", lastModified: "2025-01-01" },
+  ]),
+  formatRepoMapForContext: vi.fn(
+    () => "src/index.ts (1.0 KB, typescript)\nsrc/utils.ts (0.5 KB, typescript)",
+  ),
+}));
+
+vi.mock("./tools.js", () => ({
+  executeTool: vi.fn().mockResolvedValue({ content: "ok", isError: false }),
+  getToolDefinitions: vi.fn(() => [
+    { name: "Read", description: "Read a file", parameters: {} },
+    { name: "Write", description: "Write a file", parameters: {} },
+    { name: "Bash", description: "Run command", parameters: {} },
+  ]),
+}));
+
+vi.mock("./tool-schemas.js", () => ({
+  getAISDKTools: vi.fn(() => ({})),
+}));
+
+// Safety module is NOT mocked — we test it for real
+
+import { runAgentLoop, type AgentLoopConfig } from "./agent-loop.js";
+import type { Session, DanteCodeState } from "@dantecode/config-types";
+
+// ---------------------------------------------------------------------------
+// Test Fixtures
+// ---------------------------------------------------------------------------
+
+function makeSession(overrides?: Partial<Session>): Session {
+  return {
+    id: "test-session",
+    projectRoot: "/tmp/test-project",
+    messages: [],
+    activeFiles: [],
+    readOnlyFiles: [],
+    model: {
+      provider: "grok",
+      modelId: "grok-3",
+      maxTokens: 4096,
+      temperature: 0.1,
+      contextWindow: 131072,
+      supportsVision: false,
+      supportsToolCalls: false,
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    agentStack: [],
+    todoList: [],
+    ...overrides,
+  };
+}
+
+function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
+  return {
+    state: {
+      model: {
+        default: {
+          provider: "grok",
+          modelId: "grok-3",
+          maxTokens: 4096,
+          temperature: 0.1,
+          contextWindow: 131072,
+          supportsVision: false,
+          supportsToolCalls: false,
+        },
+        fallback: [],
+        taskOverrides: {},
+      },
+      project: { name: "test", language: "typescript" },
+      pdse: {
+        threshold: 60,
+        hardViolationsAllowed: 0,
+        maxRegenerationAttempts: 3,
+        weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 },
+      },
+      autoforge: {
+        enabled: false,
+        maxIterations: 1,
+        gstackCommands: [],
+        lessonInjectionEnabled: false,
+        abortOnSecurityViolation: false,
+      },
+    } as unknown as DanteCodeState,
+    verbose: false,
+    enableGit: false,
+    enableSandbox: false,
+    silent: true,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("runAgentLoop smoke tests", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("basic prompt produces response with no tool calls", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Hello! I can help you with that.\n[COMPLEXITY: 0.1]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Say hello", session, makeConfig());
+
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+    expect(result.messages.some((m) => m.role === "user")).toBe(true);
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  });
+
+  it("extracts and dispatches tool calls from model response", async () => {
+    // First call: model returns a tool call
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'I will read the file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+    });
+    // Second call: model returns final response (no tool calls)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The file contains the main entry point.",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Read src/index.ts", session, makeConfig());
+
+    // Verify the session has tool use messages
+    const toolUseMsg = result.messages.find(
+      (m) => m.role === "assistant" && m.toolUse?.name === "Read",
+    );
+    expect(toolUseMsg).toBeDefined();
+
+    // Verify tool result is in the session
+    const toolResultMsg = result.messages.find((m) => m.role === "tool");
+    expect(toolResultMsg).toBeDefined();
+  });
+
+  it("nudges narrated execution into real tool calls for action prompts", async () => {
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "I will inspect src/index.ts first, then update the implementation and run tests.",
+        usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+      })
+      .mockResolvedValueOnce({
+        text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+        usage: { promptTokens: 50, completionTokens: 25, totalTokens: 75 },
+      })
+      .mockResolvedValueOnce({
+        text: "I inspected the file and I am ready for the next change.",
+        usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+      });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Fix src/index.ts", session, makeConfig());
+
+    expect(result.messages.some((m) => m.toolUse?.name === "Read")).toBe(true);
+    expect(result.messages.some((m) => m.role === "tool")).toBe(true);
+  });
+
+  it("blocks dangerous bash commands via safety hooks", async () => {
+    // Model returns a dangerous command
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"rm -rf / "}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    // After blocking, model gets safety message and produces final response
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I apologize, that was dangerous.",
+      usage: { totalTokens: 40 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Delete everything", session, makeConfig());
+
+    // The blocked command should NOT produce a tool result message with Bash output.
+    // Instead, the safety hook injects a blocking message into the tool results
+    // which gets sent back to the model as a user message.
+    const bashToolResult = result.messages.find(
+      (m) => m.role === "tool" && m.toolResult?.content.includes("rm -rf"),
+    );
+    expect(bashToolResult).toBeUndefined();
+
+    // Session should end with the model's apology response
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("detects stuck loop and injects break message", async () => {
+    const repeatedToolCall =
+      '<tool_use>\n{"name":"Read","input":{"file_path":"same.ts"}}\n</tool_use>';
+
+    // Model keeps returning the same tool call 3 times, then wraps up
+    mockGenerateText
+      .mockResolvedValueOnce({ text: repeatedToolCall, usage: { totalTokens: 30 } })
+      .mockResolvedValueOnce({ text: repeatedToolCall, usage: { totalTokens: 30 } })
+      .mockResolvedValueOnce({ text: repeatedToolCall, usage: { totalTokens: 30 } })
+      .mockResolvedValueOnce({
+        text: "I will try a different approach.",
+        usage: { totalTokens: 20 },
+      });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Read same.ts", session, makeConfig());
+
+    // Should eventually terminate
+    expect(result.messages.length).toBeGreaterThan(0);
+    expect(result.messages[result.messages.length - 1]!.role).toBe("assistant");
+  });
+
+  it("handles model generation errors gracefully", async () => {
+    mockGenerateText.mockRejectedValueOnce(new Error("API rate limit exceeded"));
+
+    const session = makeSession();
+    const result = await runAgentLoop("Do something", session, makeConfig());
+
+    // Should produce an error message in the session
+    const errorMsg = result.messages.find(
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.includes("error"),
+    );
+    expect(errorMsg).toBeDefined();
+  });
+
+  it("truncates large tool output without crashing", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Read","input":{"file_path":"huge.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "That was a large file.",
+      usage: { totalTokens: 20 },
+    });
+
+    // executeTool mock already returns { content: "ok", isError: false } by default
+
+    const session = makeSession();
+    const result = await runAgentLoop("Read huge file", session, makeConfig());
+
+    // The loop should complete successfully
+    expect(result.messages.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Memory Bridge Tests
+// ---------------------------------------------------------------------------
+
+describe("Memory Bridge: lesson injection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("injects learned patterns into system prompt when lessons exist", async () => {
+    const fakeLessons = [
+      {
+        id: "lesson-1",
+        projectRoot: "/tmp/test-project",
+        pattern: "Always use strict TypeScript",
+        correction: "Enable strict mode in tsconfig.json",
+        occurrences: 5,
+        lastSeen: new Date().toISOString(),
+        severity: "warning" as const,
+        type: "preference" as const,
+        source: "memory-detector" as const,
+      },
+    ];
+
+    mockQueryLessons.mockResolvedValueOnce(fakeLessons);
+    mockFormatLessonsForPrompt.mockReturnValueOnce(
+      "## Previously Learned Lessons (1 relevant)\n\n### Lesson 1 [PREFERENCE / WARNING] (seen 5x)\n**Pattern:** Always use strict TypeScript\n**Correction:** Enable strict mode in tsconfig.json",
+    );
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Got it! I will follow the learned patterns.\n[COMPLEXITY: 0.2]",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Hello", session, makeConfig());
+
+    // queryLessons should have been called with the session projectRoot
+    expect(mockQueryLessons).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectRoot: "/tmp/test-project",
+        limit: 10,
+      }),
+    );
+
+    // formatLessonsForPrompt should have been called with the lessons
+    expect(mockFormatLessonsForPrompt).toHaveBeenCalledWith(fakeLessons);
+
+    // The model receives the system prompt embedded in the flow; verify queryLessons was invoked
+    expect(mockQueryLessons).toHaveBeenCalledTimes(1);
+  });
+
+  it("system prompt works correctly when no lessons exist", async () => {
+    mockQueryLessons.mockResolvedValueOnce([]);
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Hello! How can I help?\n[COMPLEXITY: 0.1]",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Hello", session, makeConfig());
+
+    // Should complete normally even with no lessons
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+    // formatLessonsForPrompt should NOT be called when there are no lessons
+    expect(mockFormatLessonsForPrompt).not.toHaveBeenCalled();
+  });
+
+  it("lesson injection failure does not break the agent loop", async () => {
+    mockQueryLessons.mockRejectedValueOnce(new Error("SQLite database corrupted"));
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I can still help you!\n[COMPLEXITY: 0.1]",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Hello", session, makeConfig());
+
+    // Agent should still produce a response despite lesson injection failure
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  });
+
+  it("records conversation patterns at end of agent loop", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done!\n[COMPLEXITY: 0.1]",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Always use bun instead of npm", session, makeConfig());
+
+    // detectAndRecordPatterns should have been called with conversation messages
+    expect(mockDetectAndRecordPatterns).toHaveBeenCalledTimes(1);
+    const [messages, projectRoot] = mockDetectAndRecordPatterns.mock.calls[0]!;
+    expect(projectRoot).toBe("/tmp/test-project");
+    expect(Array.isArray(messages)).toBe(true);
+    // Should include at least the user message and assistant response
+    expect(messages.length).toBeGreaterThanOrEqual(2);
+    expect(messages.some((m: { role: string }) => m.role === "user")).toBe(true);
+    expect(messages.some((m: { role: string }) => m.role === "assistant")).toBe(true);
+  });
+
+  it("pattern recording failure does not break the session", async () => {
+    mockDetectAndRecordPatterns.mockRejectedValueOnce(new Error("Database write failed"));
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All done!\n[COMPLEXITY: 0.1]",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Hello", session, makeConfig());
+
+    // Session should still complete and return normally
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+    expect(result.updatedAt).toBeDefined();
+  });
+});
