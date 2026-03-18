@@ -37,6 +37,7 @@ import {
   runLocalPDSEScorer,
   runAntiStubScanner,
   runConstitutionCheck,
+  queryLessons,
 } from "@dantecode/danteforge";
 import { generateRepoMap, formatRepoMapForContext, getStatus } from "@dantecode/git-engine";
 import {
@@ -114,7 +115,8 @@ interface WebviewOutboundMessage {
     | "loop_terminated"
     | "diff_hunk"
     | "cost_update"
-    | "context_update";
+    | "context_update"
+    | "memory_info";
   payload: Record<string, unknown>;
 }
 
@@ -147,6 +149,12 @@ interface SidebarHostCallbacks {
   }) => void;
   onDiffReview?: (payload: DiffReviewPayload) => void;
   onModelChange?: (model: string) => void;
+  onStatusBarUpdate?: (info: {
+    model?: string;
+    contextPercent?: number;
+    activeTasks?: number;
+    hasError?: boolean;
+  }) => void;
 }
 
 /** Default config for new users. */
@@ -228,6 +236,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private readonly diffContents = new Map<string, string>();
   private sessionStore: SessionStore | null = null;
   private sessionStoreMigrated = false;
+  private activeTasks = 0;
+  private lastContextPercent = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -251,6 +261,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       provideTextDocumentContent: (uri: vscode.Uri) => {
         return this.diffContents.get(uri.toString()) ?? "";
       },
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Status bar integration
+  // --------------------------------------------------------------------------
+
+  /**
+   * Updates the status bar with current model, context utilization, and active
+   * task count. Should be called after each model response and when background
+   * tasks change.
+   */
+  updateStatusBar(info: {
+    model?: string;
+    contextPercent?: number;
+    activeTasks?: number;
+    hasError?: boolean;
+  }): void {
+    if (info.contextPercent !== undefined) {
+      this.lastContextPercent = info.contextPercent;
+    }
+    if (info.activeTasks !== undefined) {
+      this.activeTasks = info.activeTasks;
+    }
+    this.hostCallbacks.onStatusBarUpdate?.({
+      model: info.model ?? this.currentModel,
+      contextPercent: info.contextPercent ?? this.lastContextPercent,
+      activeTasks: info.activeTasks ?? this.activeTasks,
+      hasError: info.hasError,
     });
   }
 
@@ -355,6 +394,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.sendModelUpdate();
         this.handleLoadAgentConfig();
         void this.scanOllamaModels();
+        void this.sendMemoryInfo();
         break;
     }
   }
@@ -900,6 +940,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           payload: { percent: ctxUtil.percent, tier: ctxUtil.tier },
         });
 
+        // Update the status bar with context utilization after each response
+        this.updateStatusBar({ contextPercent: ctxUtil.percent });
+
         // Extract tool calls from the response
         const { toolCalls } = extractToolCalls(fullResponse);
 
@@ -935,6 +978,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
 
           this.messages.push({ role: "assistant", content: fullResponse });
+          // Clear any error state on successful response
+          this.updateStatusBar({ hasError: false });
           if (roundNumber <= 1) {
             // Single-round response (no tool execution) — send final text
             this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
@@ -1295,6 +1340,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         this.postMessage({ type: "error", payload: { message: diagnostic } });
         this.postMessage({ type: "chat_response_done", payload: { error: true } });
+        // Signal error state to status bar
+        this.updateStatusBar({ hasError: true });
       }
     } finally {
       this.abortController = null;
@@ -1724,6 +1771,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const config = vscode.workspace.getConfiguration("dantecode");
     await config.update("defaultModel", model, vscode.ConfigurationTarget.Global);
     this.sendModelUpdate();
+    // Update status bar with the new model name
+    this.updateStatusBar({ model });
   }
 
   private async handleSkillActivate(skillName: string): Promise<void> {
@@ -1827,6 +1876,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       payload: { model: this.currentModel },
     });
     this.hostCallbacks.onModelChange?.(this.currentModel);
+  }
+
+  /** Send memory info (lesson count + session count) to the webview. */
+  private async sendMemoryInfo(): Promise<void> {
+    try {
+      const projectRoot = this.getProjectRoot();
+      if (!projectRoot) return;
+
+      // Count sessions
+      const store = await this.getSessionStore();
+      const sessions = store ? await store.list() : [];
+      const sessionCount = sessions.length;
+
+      // Count lessons
+      let lessonCount = 0;
+      try {
+        const lessons = await queryLessons({ projectRoot, limit: 100 });
+        lessonCount = lessons.length;
+      } catch {
+        // Non-fatal: lessons may not be available
+      }
+
+      this.postMessage({
+        type: "memory_info",
+        payload: { lessonCount, sessionCount },
+      });
+    } catch {
+      // Non-fatal: memory info is cosmetic
+    }
   }
 
   private getProjectRoot(): string {
@@ -3007,6 +3085,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       background: var(--vscode-panel-border);
       margin: 4px 0;
     }
+
+    /* ---- Memory Info ---- */
+    .memory-info {
+      display: none;
+      padding: 2px 12px;
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      background: var(--vscode-sideBarSectionHeader-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      opacity: 0.8;
+    }
+    .memory-info.visible { display: block; }
   </style>
 </head>
 <body>
@@ -3035,6 +3125,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       ${modelOptionGroups}
     </select>
   </div>
+
+  <div class="memory-info" id="memory-info"></div>
 
   <div class="context-bar" id="context-bar"></div>
 
@@ -4079,6 +4171,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               var tier = message.payload.tier || 'green';
               ctxFill.style.width = pct + '%';
               ctxFill.style.background = tier === 'green' ? '#4caf50' : tier === 'yellow' ? '#ff9800' : '#f44336';
+            }
+            break;
+          }
+
+          case 'memory_info': {
+            var memEl = document.getElementById('memory-info');
+            if (memEl) {
+              var lc = Number(message.payload.lessonCount) || 0;
+              var sc = Number(message.payload.sessionCount) || 0;
+              if (lc > 0 || sc > 0) {
+                memEl.textContent = 'Memory: ' + lc + ' lesson' + (lc !== 1 ? 's' : '') + ' | ' + sc + ' session' + (sc !== 1 ? 's' : '');
+                memEl.classList.add('visible');
+              } else {
+                memEl.classList.remove('visible');
+              }
             }
             break;
           }

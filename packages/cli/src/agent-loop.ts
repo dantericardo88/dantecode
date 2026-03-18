@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ModelRouterImpl,
+  SessionStore,
   estimateMessageTokens,
   getContextUtilization,
   promptRequestsToolExecution,
@@ -16,6 +17,7 @@ import {
   parseVerificationErrors,
   formatErrorsForFixPrompt,
   computeErrorSignature,
+  runStartupHealthCheck,
 } from "@dantecode/core";
 import {
   recordSuccessPattern,
@@ -72,6 +74,35 @@ export interface AgentLoopConfig {
   /** MCP client for dispatching tool calls to external MCP servers. */
   mcpClient?: { callToolByName: (name: string, args: Record<string, unknown>) => Promise<string> };
 }
+
+/** Entry in the approach memory log, tracking tried strategies and outcomes. */
+export interface ApproachLogEntry {
+  description: string;
+  outcome: "success" | "failed" | "partial";
+  toolCalls: number;
+}
+
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
+
+/** How often (in tool calls) to emit a progress line. */
+const PROGRESS_EMIT_INTERVAL = 5;
+
+/** Planning instruction injected for complex tasks. */
+const PLANNING_INSTRUCTION =
+  "Before executing, create a brief plan:\n" +
+  "1. What files need to change?\n" +
+  "2. What's the approach?\n" +
+  "3. What could go wrong?\n" +
+  "Then execute the plan step by step.";
+
+/** Pivot instruction injected after 2 consecutive same-signature failures. */
+const PIVOT_INSTRUCTION =
+  "The same approach has failed twice. STOP and reconsider:\n" +
+  "- What assumption might be wrong?\n" +
+  "- Is there an alternative tool or method?\n" +
+  "- Should we read more context first?";
 
 // ----------------------------------------------------------------------------
 // System Prompt Builder
@@ -146,6 +177,26 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     }
   } catch {
     // Non-fatal: lesson injection failure should not break the agent
+  }
+
+  // Cross-session learning: inject summaries of recent sessions for this project
+  try {
+    const sessionStore = new SessionStore(session.projectRoot);
+    const recentSummaries = await sessionStore.getRecentSummaries(3);
+    // Filter out the current session
+    const pastSummaries = recentSummaries.filter((s) => s.id !== session.id);
+    if (pastSummaries.length > 0) {
+      sections.push("", "## Recent Session Context", "");
+      for (const s of pastSummaries) {
+        const dateStr = new Date(s.date).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+        });
+        sections.push(`- ${dateStr}: ${s.summary}`);
+      }
+    }
+  } catch {
+    // Non-fatal: cross-session context failure should not break the agent
   }
 
   // Project notes: load .dantecode/DANTE.md if it exists (similar to Claude Code's CLAUDE.md)
@@ -382,11 +433,29 @@ function deriveThinkingBudget(model: ModelConfig, complexity: number): number | 
  * @param config - Agent loop configuration.
  * @returns The updated session with new messages.
  */
+// Module-level flag: run startup health check only once per process.
+let _healthCheckCompleted = false;
+
 export async function runAgentLoop(
   prompt: string,
   session: Session,
   config: AgentLoopConfig,
 ): Promise<Session> {
+  // Run startup health check on first invocation only
+  if (!_healthCheckCompleted) {
+    _healthCheckCompleted = true;
+    try {
+      const healthResult = await runStartupHealthCheck({ projectRoot: session.projectRoot });
+      if (!healthResult.healthy) {
+        process.stdout.write(
+          `${YELLOW}[health] Some checks failed — see warnings above. Proceeding anyway.${RESET}\n`,
+        );
+      }
+    } catch {
+      // Health check failure is non-fatal — never block the agent loop
+    }
+  }
+
   // Append user message
   const userMessage: SessionMessage = {
     id: randomUUID(),
@@ -436,10 +505,48 @@ export async function runAgentLoop(
   const MAX_EXECUTION_NUDGES = 2;
   let executedToolsThisTurn = 0;
 
+  // ---- Feature: Planning phase (for complex tasks) ----
+  // Inject planning instruction before first model call when complexity >= 0.7
+  const planningEnabled = lexicalComplexity >= 0.7;
+  let planGenerated = false;
+
+  // ---- Feature: Approach memory ----
+  // Track what approaches were tried and their outcomes within this session
+  const approachLog: ApproachLogEntry[] = [];
+  let currentApproachDescription = "";
+  let currentApproachToolCalls = 0;
+
+  // ---- Feature: Pivot logic ----
+  // Track consecutive failures with similar error signatures for strategy change.
+  // This is different from the existing tier escalation — it's about changing
+  // strategy, not just using a better model.
+  let consecutiveSameSignatureFailures = 0;
+  let lastPivotErrorSignature = "";
+
+  // ---- Feature: Progress tracking ----
+  // Simple counters emitted to the session periodically
+  let toolCallsThisTurn = 0;
+  let filesModified = 0;
+  let testsRun = 0;
+
   if (config.verbose && thinkingBudget) {
     process.stdout.write(
       `${DIM}[thinking: ${config.state.model.default.provider}/${config.state.model.default.modelId}, budget=${thinkingBudget}]${RESET}\n`,
     );
+  }
+
+  // Planning phase: for complex tasks, inject a planning instruction into messages
+  // so the model creates a plan before diving into execution
+  if (planningEnabled) {
+    messages.push({
+      role: "system" as const,
+      content: `## Planning Required (complexity: ${lexicalComplexity.toFixed(2)})\n\n${PLANNING_INSTRUCTION}`,
+    });
+    if (!config.silent) {
+      process.stdout.write(
+        `${DIM}[planning: enabled — complexity ${lexicalComplexity.toFixed(2)} >= 0.7]${RESET}\n`,
+      );
+    }
   }
 
   while (maxToolRounds > 0) {
@@ -566,6 +673,18 @@ export async function runAgentLoop(
           process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
         }
       }
+
+      // Planning phase: track whether the first response contains a plan
+      if (planningEnabled && !planGenerated) {
+        planGenerated = true;
+        // Capture the plan description from the first response for approach memory
+        const planMatch = responseText.match(/(?:plan|approach|strategy)[:\s]*([\s\S]{10,200})/i);
+        if (planMatch) {
+          currentApproachDescription = planMatch[1]!.trim().slice(0, 150);
+        } else {
+          currentApproachDescription = responseText.slice(0, 150).trim();
+        }
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
@@ -630,6 +749,8 @@ export async function runAgentLoop(
 
     for (const toolCall of toolCalls) {
       executedToolsThisTurn++;
+      toolCallsThisTurn++;
+      currentApproachToolCalls++;
       toolIndex++;
       // Stuck loop detection (opencode/OpenHands pattern): if the same tool call
       // signature appears 3 times consecutively, inject a warning to break the loop
@@ -781,6 +902,16 @@ export async function runAgentLoop(
         if (!touchedFiles.includes(resolvedPath)) {
           touchedFiles.push(resolvedPath);
         }
+        // Progress tracking: count files modified
+        filesModified++;
+      }
+
+      // Progress tracking: count test runs (Bash commands that look like tests)
+      if (toolCall.name === "Bash") {
+        const cmd = (toolCall.input["command"] as string) || "";
+        if (/\b(test|jest|vitest|mocha|pytest|cargo\s+test)\b/i.test(cmd)) {
+          testsRun++;
+        }
       }
 
       // Show result summary (suppressed in silent mode)
@@ -824,6 +955,19 @@ export async function runAgentLoop(
         },
       };
       session.messages.push(toolResultMessage);
+
+      // Progress tracking: emit a progress line every PROGRESS_EMIT_INTERVAL tool calls
+      if (toolCallsThisTurn > 0 && toolCallsThisTurn % PROGRESS_EMIT_INTERVAL === 0) {
+        const progressLine = `[progress: ${toolCallsThisTurn} tool calls | ${filesModified} files modified | ${testsRun} tests run]`;
+        process.stdout.write(`\n${DIM}${progressLine}${RESET}\n`);
+        // Also inject a progress marker into the session for visibility
+        session.messages.push({
+          id: randomUUID(),
+          role: "system" as "user",
+          content: progressLine,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
 
     // Clear silent mode progress line after tool loop
@@ -840,6 +984,9 @@ export async function runAgentLoop(
     const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
     if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
       const verifyCommands = getVerifyCommands(config);
+      let verificationPassed = true;
+      let verificationErrorSig = "";
+
       for (const vc of verifyCommands) {
         try {
           const vcResult = await executeTool(
@@ -850,6 +997,7 @@ export async function runAgentLoop(
           );
           if (vcResult.isError) {
             verifyRetries++;
+            verificationPassed = false;
 
             // Self-healing: parse errors into structured format for targeted fixes
             const parsedErrors = parseVerificationErrors(vcResult.content);
@@ -862,6 +1010,7 @@ export async function runAgentLoop(
 
               // Track error signature to detect repeated identical failures
               const errorSig = computeErrorSignature(parsedErrors);
+              verificationErrorSig = errorSig;
               if (errorSig === lastErrorSignature) {
                 sameErrorCount++;
                 if (sameErrorCount >= 2) {
@@ -878,6 +1027,35 @@ export async function runAgentLoop(
                 sameErrorCount = 0;
               }
               lastErrorSignature = errorSig;
+
+              // Pivot logic: track consecutive failures with the same error signature
+              // for strategy change (different from tier escalation — this is about
+              // fundamentally changing the approach, not just using a better model)
+              if (verificationErrorSig === lastPivotErrorSignature) {
+                consecutiveSameSignatureFailures++;
+              } else {
+                consecutiveSameSignatureFailures = 1;
+                lastPivotErrorSignature = verificationErrorSig;
+              }
+
+              if (consecutiveSameSignatureFailures >= 2) {
+                retryMessage += `\n\n${PIVOT_INSTRUCTION}`;
+                if (!config.silent) {
+                  process.stdout.write(
+                    `\n${YELLOW}[pivot: same error signature ${consecutiveSameSignatureFailures}x — requesting strategy change]${RESET}\n`,
+                  );
+                }
+                // Include approach memory in the pivot prompt
+                if (approachLog.length > 0) {
+                  const failedApproaches = approachLog
+                    .filter((a) => a.outcome === "failed")
+                    .map((a) => `  - ${a.description} (${a.toolCalls} tool calls)`)
+                    .join("\n");
+                  if (failedApproaches) {
+                    retryMessage += `\n\nPreviously failed approaches:\n${failedApproaches}`;
+                  }
+                }
+              }
 
               if (config.verbose) {
                 process.stdout.write(
@@ -902,6 +1080,38 @@ export async function runAgentLoop(
         } catch {
           // Verification command failed to execute, skip
         }
+      }
+
+      // Approach memory: record the outcome of this verification cycle
+      if (verifyCommands.length > 0) {
+        const approachDesc = currentApproachDescription || `approach-${approachLog.length + 1}`;
+        if (verificationPassed) {
+          approachLog.push({
+            description: approachDesc,
+            outcome: "success",
+            toolCalls: currentApproachToolCalls,
+          });
+          // Reset pivot tracking on success
+          consecutiveSameSignatureFailures = 0;
+          lastPivotErrorSignature = "";
+        } else {
+          approachLog.push({
+            description: approachDesc,
+            outcome: "failed",
+            toolCalls: currentApproachToolCalls,
+          });
+
+          // Inject approach memory into the retry prompt so the model knows what was tried
+          if (approachLog.length > 1) {
+            const lastFailed = approachLog[approachLog.length - 1]!;
+            toolResults.push(
+              `Previously tried: ${lastFailed.description} — failed. Try a different approach.`,
+            );
+          }
+        }
+        // Reset for the next approach
+        currentApproachDescription = "";
+        currentApproachToolCalls = 0;
       }
     } else if (wroteCode && verifyRetries >= MAX_VERIFY_RETRIES) {
       toolResults.push(

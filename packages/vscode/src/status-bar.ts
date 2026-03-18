@@ -16,6 +16,20 @@ export interface StatusBarState {
   modelTier: "fast" | "capable";
   /** Blade v1.2: accumulated session cost in USD. */
   sessionCostUsd: number;
+  /** Context window utilization percentage (0-100). */
+  contextPercent: number;
+  /** Number of currently running background tasks. */
+  activeTasks: number;
+  /** Whether the status bar is in an error state. */
+  hasError: boolean;
+}
+
+/** Info payload for the updateStatusBarInfo() convenience method. */
+export interface StatusBarInfo {
+  model?: string;
+  contextPercent?: number;
+  activeTasks?: number;
+  hasError?: boolean;
 }
 
 const GATE_ICONS: Record<GateStatus, string> = {
@@ -53,9 +67,12 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     sandboxEnabled,
     modelTier: "fast",
     sessionCostUsd: 0,
+    contextPercent: 0,
+    activeTasks: 0,
+    hasError: false,
   };
 
-  item.command = "dantecode.switchModel";
+  item.command = "dantecode.openChat";
   renderStatusBar(state);
 
   item.show();
@@ -102,42 +119,109 @@ export function updateStatusBarWithCost(
   renderStatusBar(state);
 }
 
+/**
+ * Convenience method to update context percent, active tasks, model, and error
+ * state in a single call. Called after each model response and when background
+ * tasks change.
+ */
+export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo): void {
+  if (info.model !== undefined) {
+    state.currentModel = info.model;
+  }
+  if (info.contextPercent !== undefined) {
+    state.contextPercent = info.contextPercent;
+  }
+  if (info.activeTasks !== undefined) {
+    state.activeTasks = info.activeTasks;
+  }
+  if (info.hasError !== undefined) {
+    state.hasError = info.hasError;
+  }
+  renderStatusBar(state);
+}
+
+/**
+ * Build the status bar display text. Exported for testing.
+ *
+ * Format: "DanteCode | grok-3 | 23% ctx | 2 tasks"
+ *   - model segment is always shown
+ *   - context segment shown when > 0%
+ *   - tasks segment shown when > 0
+ */
+export function formatStatusBarText(state: StatusBarState): string {
+  const shortModel = formatModelName(state.currentModel);
+  const parts: string[] = ["DanteCode", shortModel];
+
+  if (state.contextPercent > 0) {
+    parts.push(`${state.contextPercent}% ctx`);
+  }
+
+  if (state.activeTasks > 0) {
+    parts.push(`${state.activeTasks} task${state.activeTasks !== 1 ? "s" : ""}`);
+  }
+
+  return parts.join(" | ");
+}
+
+/**
+ * Determine the status bar color based on current state.
+ * Exported for testing.
+ *
+ *  - "red"    → error state or PDSE gate failed
+ *  - "yellow" → context usage >75% or gate pending
+ *  - "green"  → healthy (everything normal)
+ */
+export function getStatusBarColor(
+  state: StatusBarState,
+): "green" | "yellow" | "red" {
+  if (state.hasError || state.gateStatus === "failed") {
+    return "red";
+  }
+  if (state.contextPercent > 75 || state.gateStatus === "pending") {
+    return "yellow";
+  }
+  return "green";
+}
+
 function renderStatusBar(state: StatusBarState): void {
-  const { item, currentModel, gateStatus, sandboxEnabled } = state;
+  const { item, gateStatus, sandboxEnabled } = state;
 
   const gateIcon = GATE_ICONS[gateStatus];
   const sandboxLabel = sandboxEnabled ? ` ${SANDBOX_ICON}` : "";
-  const shortModel = formatModelName(currentModel);
 
   const costLabel = state.sessionCostUsd > 0 ? `  ~$${state.sessionCostUsd.toFixed(3)}` : "";
   const tierLabel = state.modelTier === "capable" ? " [capable]" : "";
 
-  item.text = `${gateIcon} DanteCode: ${shortModel}${tierLabel}${sandboxLabel}${costLabel}`;
+  item.text = `${gateIcon} ${formatStatusBarText(state)}${tierLabel}${sandboxLabel}${costLabel}`;
   item.tooltip = [
-    `Model: ${currentModel}`,
+    `Model: ${state.currentModel}`,
     `Tier: ${state.modelTier}`,
+    `Context: ${state.contextPercent}%`,
+    `Active tasks: ${state.activeTasks}`,
     GATE_TOOLTIPS[gateStatus],
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
     "",
-    "Click to switch model",
+    "Click to open DanteCode sidebar",
   ].join("\n");
 
-  // Theme-aware colors
+  // Theme-aware colors based on health state
   item.backgroundColor = undefined;
   item.color = undefined;
 
-  switch (gateStatus) {
-    case "failed":
+  const color = getStatusBarColor(state);
+  switch (color) {
+    case "red":
       item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
       item.color = new vscode.ThemeColor("statusBarItem.errorForeground");
       break;
-    case "pending":
+    case "yellow":
       item.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
       item.color = new vscode.ThemeColor("statusBarItem.warningForeground");
       break;
-    case "passed":
-      item.color = new vscode.ThemeColor("statusBarItem.foreground");
+    case "green":
+      // Use a subtle green foreground when healthy; no background override
+      item.color = new vscode.ThemeColor("charts.green");
       break;
   }
 }

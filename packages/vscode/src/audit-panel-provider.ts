@@ -50,6 +50,7 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   loop_terminated: "Loop Terminated",
   tier_escalation: "Tier Escalation",
   cost_update: "Cost Update",
+  webhook_received: "Webhook Received",
 };
 
 /**

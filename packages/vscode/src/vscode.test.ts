@@ -887,11 +887,11 @@ describe("VS Code Extension", () => {
       expect(state.sandboxEnabled).toBe(false);
     });
 
-    it("createStatusBar sets click command to switchModel", () => {
+    it("createStatusBar sets click command to openChat", () => {
       const context = createMockContext();
       createStatusBar(context);
 
-      expect(mockStatusBarItem.command).toBe("dantecode.switchModel");
+      expect(mockStatusBarItem.command).toBe("dantecode.openChat");
     });
 
     it("createStatusBar shows the status bar item", () => {
@@ -917,6 +917,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "anthropic/claude-sonnet-4", "passed");
@@ -925,7 +928,7 @@ describe("VS Code Extension", () => {
       expect(state.gateStatus).toBe("passed");
       // formatModelName("anthropic/claude-sonnet-4") → "claude-sonnet-4"
       expect(mockStatusBarItem.text).toContain("claude-sonnet-4");
-      expect(mockStatusBarItem.text).toContain("DanteCode:");
+      expect(mockStatusBarItem.text).toContain("DanteCode");
     });
 
     it("updateStatusBar with passed status shows pass icon", () => {
@@ -936,6 +939,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "grok/grok-3", "passed");
@@ -951,6 +957,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -966,6 +975,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "grok/grok-3", "pending");
@@ -981,6 +993,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -991,7 +1006,7 @@ describe("VS Code Extension", () => {
       );
     });
 
-    it("updateStatusBar with none status clears colors", () => {
+    it("updateStatusBar with none status uses green color (healthy)", () => {
       const state: StatusBarState = {
         item: mockStatusBarItem as unknown as vscode.StatusBarItem,
         currentModel: "grok/grok-3",
@@ -999,12 +1014,16 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "grok/grok-3", "none");
 
       expect(mockStatusBarItem.backgroundColor).toBeUndefined();
-      expect(mockStatusBarItem.color).toBeUndefined();
+      // Green state sets a subtle green foreground color
+      expect(mockStatusBarItem.color).toBeDefined();
     });
 
     it("updateSandboxStatus adds vm icon when enabled", () => {
@@ -1015,6 +1034,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateSandboxStatus(state, true);
@@ -1031,6 +1053,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: true,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateSandboxStatus(state, false);
@@ -1047,13 +1072,16 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "openai/gpt-4o", "passed");
 
       expect(mockStatusBarItem.tooltip).toContain("Model: openai/gpt-4o");
       expect(mockStatusBarItem.tooltip).toContain("PDSE gate: PASSED");
-      expect(mockStatusBarItem.tooltip).toContain("Click to switch model");
+      expect(mockStatusBarItem.tooltip).toContain("Click to open DanteCode sidebar");
     });
 
     it("formats model name by extracting part after slash", () => {
@@ -1064,6 +1092,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "google/gemini-2.5-pro", "none");
@@ -1080,6 +1111,9 @@ describe("VS Code Extension", () => {
         sandboxEnabled: false,
         modelTier: "fast",
         sessionCostUsd: 0,
+        contextPercent: 0,
+        activeTasks: 0,
+        hasError: false,
       };
 
       updateStatusBar(state, "llama3", "none");

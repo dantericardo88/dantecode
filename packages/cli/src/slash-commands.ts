@@ -14,6 +14,7 @@ import {
   readAuditEvents,
   MultiAgent,
   ModelRouterImpl,
+  SessionStore,
 } from "@dantecode/core";
 import type { MultiAgentProgressCallback } from "@dantecode/core";
 import {
@@ -47,6 +48,7 @@ import { SandboxBridge } from "./sandbox-bridge.js";
 // ANSI Colors
 // ----------------------------------------------------------------------------
 
+const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -977,9 +979,35 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
   const { BackgroundAgentRunner, EventTriggerRegistry, createWebhookServer } =
     await import("@dantecode/core");
 
-  const port = args.trim() ? parseInt(args.trim(), 10) : 8080;
+  const trimmed = args.trim();
+
+  // Handle `/listen status` subcommand
+  if (trimmed === "status") {
+    const port = (state as unknown as Record<string, unknown>)._listenPort as number ?? 8080;
+    try {
+      const res = await fetch(`http://localhost:${port}/health`);
+      const data = await res.json() as Record<string, unknown>;
+      const counts = data.taskCounts as Record<string, number> ?? {};
+      return [
+        "",
+        `${GREEN}${BOLD}Event Gateway Status${RESET}`,
+        `  Status:    ${data.status === "ok" ? `${GREEN}OK${RESET}` : `${RED}DOWN${RESET}`}`,
+        `  Uptime:    ${data.uptime}s`,
+        `  Active:    ${data.activeTasks ?? 0} tasks`,
+        `  Running:   ${counts.running ?? 0}`,
+        `  Queued:    ${counts.queued ?? 0}`,
+        `  Completed: ${counts.completed ?? 0}`,
+        `  Failed:    ${counts.failed ?? 0}`,
+        "",
+      ].join("\n");
+    } catch {
+      return `${RED}Event Gateway not running. Start with /listen [port]${RESET}`;
+    }
+  }
+
+  const port = trimmed ? parseInt(trimmed, 10) : 8080;
   if (isNaN(port) || port < 1 || port > 65535) {
-    return `${RED}Invalid port number. Usage: /listen [port]${RESET}`;
+    return `${RED}Invalid port number. Usage: /listen [port | status]${RESET}`;
   }
 
   // Reuse or create the background runner
@@ -1011,18 +1039,31 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     return `${RED}Failed to start webhook server: ${msg}${RESET}`;
   }
 
+  // Store port for /listen status
+  (state as unknown as Record<string, unknown>)._listenPort = port;
+
+  const ghSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  const slackSecret = process.env.SLACK_SIGNING_SECRET;
+  const apiToken = process.env.DANTECODE_API_TOKEN;
+  const check = (v: string | undefined) => v ? `${GREEN}configured${RESET}` : `${RED}missing${RESET}`;
+
   const lines = [
     "",
-    `${GREEN}${BOLD}DanteCode webhook server started on port ${port}${RESET}`,
+    `${GREEN}${BOLD}DanteCode Event Gateway — listening on port ${port}${RESET}`,
     "",
     `${BOLD}Endpoints:${RESET}`,
-    `  POST ${DIM}http://localhost:${port}/webhooks/github${RESET}  — GitHub webhook receiver`,
-    `  POST ${DIM}http://localhost:${port}/webhooks/slack${RESET}   — Slack webhook receiver`,
-    `  POST ${DIM}http://localhost:${port}/api/tasks${RESET}        — REST API task submission`,
-    `  GET  ${DIM}http://localhost:${port}/health${RESET}           — Health check`,
+    `  POST /webhooks/github  — GitHub webhook receiver`,
+    `  POST /webhooks/slack   — Slack webhook receiver`,
+    `  POST /api/tasks        — REST API task submission`,
+    `  GET  /health           — Health check`,
     "",
-    `${DIM}To expose publicly (for GitHub webhooks):${RESET}`,
-    `  ${DIM}npx ngrok http ${port}${RESET}`,
+    `${BOLD}Secrets:${RESET}`,
+    `  GITHUB_WEBHOOK_SECRET: ${check(ghSecret)}`,
+    `  SLACK_SIGNING_SECRET:  ${check(slackSecret)}`,
+    `  DANTECODE_API_TOKEN:   ${check(apiToken)}`,
+    "",
+    `${DIM}To expose publicly: npx ngrok http ${port}${RESET}`,
+    `${DIM}Check status: /listen status${RESET}`,
     "",
   ];
 
@@ -1249,6 +1290,124 @@ async function searchCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// History Command
+// ----------------------------------------------------------------------------
+
+async function historyCommand(args: string, state: ReplState): Promise<string> {
+  const store = new SessionStore(state.projectRoot);
+  const trimmed = args.trim();
+
+  // /history clear — delete all sessions
+  if (trimmed === "clear") {
+    const entries = await store.list();
+    if (entries.length === 0) {
+      return `${DIM}No sessions to clear.${RESET}`;
+    }
+    const count = await store.deleteAll();
+    return `${GREEN}Cleared ${count} session(s).${RESET}`;
+  }
+
+  // /history <id> — show details of a specific session
+  if (trimmed.length > 0) {
+    // Try to find session by prefix match
+    const entries = await store.list();
+    const match = entries.find(
+      (e) => e.id === trimmed || e.id.startsWith(trimmed),
+    );
+    if (!match) {
+      return `${RED}Session not found: ${trimmed}${RESET}\n${DIM}Use /history to see all sessions.${RESET}`;
+    }
+
+    const session = await store.load(match.id);
+    if (!session) {
+      return `${RED}Could not load session: ${match.id}${RESET}`;
+    }
+
+    // Generate summary if not cached
+    let summary = session.summary;
+    if (!summary) {
+      summary = await store.summarize(session);
+    }
+
+    // Collect files touched
+    const files = session.contextFiles.length > 0
+      ? session.contextFiles
+      : [];
+
+    // Message breakdown
+    const userCount = session.messages.filter((m) => m.role === "user").length;
+    const assistantCount = session.messages.filter((m) => m.role === "assistant").length;
+    const toolCount = session.messages.filter((m) => m.role === "tool").length;
+
+    const lines = [
+      "",
+      `${BOLD}Session Details${RESET}`,
+      "",
+      `  ${CYAN}ID:${RESET}        ${session.id}`,
+      `  ${CYAN}Title:${RESET}     ${session.title}`,
+      `  ${CYAN}Model:${RESET}     ${session.model}`,
+      `  ${CYAN}Created:${RESET}   ${new Date(session.createdAt).toLocaleString()}`,
+      `  ${CYAN}Updated:${RESET}   ${new Date(session.updatedAt).toLocaleString()}`,
+      `  ${CYAN}Messages:${RESET}  ${session.messages.length} total (${userCount} user, ${assistantCount} assistant, ${toolCount} tool)`,
+      "",
+      `  ${CYAN}Summary:${RESET}   ${summary}`,
+    ];
+
+    if (files.length > 0) {
+      lines.push("");
+      lines.push(`  ${CYAN}Files:${RESET}`);
+      for (const f of files.slice(0, 10)) {
+        lines.push(`    ${DIM}- ${f}${RESET}`);
+      }
+      if (files.length > 10) {
+        lines.push(`    ${DIM}... and ${files.length - 10} more${RESET}`);
+      }
+    }
+
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  // /history — list last 20 sessions
+  const entries = await store.list();
+  if (entries.length === 0) {
+    return `${DIM}No saved sessions. Sessions are stored in .dantecode/sessions/.${RESET}`;
+  }
+
+  const recent = entries.slice(0, 20);
+  const lines = [
+    "",
+    `${BOLD}Session History${RESET} ${DIM}(${entries.length} total, showing last ${recent.length})${RESET}`,
+    "",
+    `  ${DIM}${"ID".padEnd(12)} ${"Title".padEnd(30)} ${"Date".padEnd(20)} Msgs${RESET}`,
+    `  ${DIM}${"─".repeat(12)} ${"─".repeat(30)} ${"─".repeat(20)} ${"─".repeat(4)}${RESET}`,
+  ];
+
+  for (const entry of recent) {
+    const shortId = entry.id.slice(0, 10) + "..";
+    const title = entry.title.length > 28
+      ? entry.title.slice(0, 27) + "..."
+      : entry.title;
+    const date = new Date(entry.updatedAt).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    lines.push(
+      `  ${CYAN}${shortId.padEnd(12)}${RESET} ${title.padEnd(30)} ${DIM}${date.padEnd(20)}${RESET} ${entry.messageCount}`,
+    );
+  }
+
+  lines.push("");
+  lines.push(`${DIM}Use /history <id> for details, /history clear to delete all.${RESET}`);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
@@ -1311,6 +1470,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Show recent audit log entries",
     usage: "/audit",
     handler: auditCommand,
+  },
+  {
+    name: "history",
+    description: "List past sessions, view details, or clear history",
+    usage: "/history [id | clear]",
+    handler: historyCommand,
   },
   {
     name: "clear",
@@ -1406,7 +1571,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "listen",
     description: "Start webhook server for GitHub/Slack events",
-    usage: "/listen [port]",
+    usage: "/listen [port | status]",
     handler: listenCommand,
   },
   {

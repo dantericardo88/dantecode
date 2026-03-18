@@ -50,7 +50,21 @@ export interface SlackTriggerPayload {
   timestamp: string;
 }
 
+export interface EventTriggerOptions {
+  /** Auto-generate branch names from issue titles on dispatch */
+  createBranchOnDispatch?: boolean;
+}
+
 export type TaskHandler = (task: AgentTask) => Promise<void>;
+
+/** Slugify a title for use in branch names: lowercase, hyphens, max 50 chars */
+export function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 50);
+}
 
 /**
  * Registry for event triggers. Routes events from various sources
@@ -151,6 +165,7 @@ export class EventTriggerRegistry {
         }
         // Mark as an issue-to-PR candidate so the background runner can
         // trigger the IssueToPRPipeline when wired up.
+        const branchName = `issue-${issue.number}-${slugifyTitle(String(issue.title ?? ""))}`;
         extraMetadata = {
           type: "issue-to-pr",
           issueNumber: issue.number,
@@ -158,6 +173,7 @@ export class EventTriggerRegistry {
           issueBody: issue.body ?? "",
           issueUrl: issue.html_url ?? "",
           issueLabels: (labels ?? []).map((l) => l.name as string),
+          branchName,
         };
         break;
       }

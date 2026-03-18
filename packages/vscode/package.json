@@ -185,6 +185,22 @@
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
         "when": "editorFocus"
+      },
+      {
+        "command": "dantecode.switchModel",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      },
+      {
+        "command": "dantecode.runPDSE",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
+      },
+      {
+        "command": "dantecode.toggleSandbox",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "focusedView == 'dantecode.chatView'"
       }
     ],
     "configuration": {
@@ -222,6 +238,11 @@
           "enum": ["auto", "always", "never"],
           "default": "auto",
           "description": "Control multi-line inline completions. 'auto' detects context, 'always' forces multi-line, 'never' forces single-line."
+        },
+        "dantecode.debounceAdaptive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reduce completion debounce when typing quickly (>3 chars/sec)"
         }
       }
     },
@@ -238,6 +259,50 @@
           "when": "editorFocus"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "dantecode.welcome",
+        "title": "Get Started with DanteCode",
+        "description": "Set up your AI coding assistant in minutes",
+        "steps": [
+          {
+            "id": "setupApiKey",
+            "title": "Configure API Keys",
+            "description": "Set up your preferred LLM provider (Grok, Claude, GPT, Ollama, etc.)",
+            "media": {
+              "markdown": "## Quick Setup\n\nRun the command **DanteCode: Setup API Keys** to configure your providers.\n\nDanteCode supports 7+ providers — use any model you prefer."
+            },
+            "completionEvents": ["onCommand:dantecode.setupApiKeys"]
+          },
+          {
+            "id": "openChat",
+            "title": "Start a Chat",
+            "description": "Open the DanteCode sidebar and ask your first question",
+            "media": {
+              "markdown": "## Chat with DanteCode\n\nClick the DanteCode icon in the activity bar, or press **Ctrl+Alt+D**.\n\nAsk anything: 'Fix the bug in auth.ts', 'Add unit tests', 'Refactor this function'."
+            },
+            "completionEvents": ["onCommand:dantecode.openChat"]
+          },
+          {
+            "id": "tryPDSE",
+            "title": "Run Quality Check",
+            "description": "Score your code with DanteForge's PDSE verification",
+            "media": {
+              "markdown": "## Quality Gates\n\nDanteCode includes built-in quality verification:\n- **PDSE Score**: Production-Deployment Safety Evaluation\n- **Anti-Stub Detection**: Catches placeholder code\n- **Constitution Check**: Enforces coding standards"
+            },
+            "completionEvents": ["onCommand:dantecode.runPDSE"]
+          },
+          {
+            "id": "learnMore",
+            "title": "Explore Features",
+            "description": "Discover background agents, semantic search, and more",
+            "media": {
+              "markdown": "## Power Features\n\n- **Background Agents**: `/bg` runs tasks in parallel\n- **Semantic Search**: `/search` finds code by meaning\n- **Event Gateway**: `/listen` receives webhooks\n- **Memory**: `/remember` saves project knowledge\n- **Model Switching**: `/model` changes LLM on the fly"
+            }
+          }
+        ]
+      }
+    ]
   }
 }

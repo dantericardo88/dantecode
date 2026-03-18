@@ -172,4 +172,221 @@ describe("SessionStore", () => {
       expect(store.getSessionsDir()).toContain("sessions");
     });
   });
+
+  describe("deleteAll", () => {
+    it("deletes all session JSON files", async () => {
+      mockReaddir.mockResolvedValue(["a.json", "b.json", "c.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockUnlink.mockResolvedValue(undefined);
+
+      const count = await store.deleteAll();
+      expect(count).toBe(3);
+      expect(mockUnlink).toHaveBeenCalledTimes(3);
+    });
+
+    it("returns 0 for empty directory", async () => {
+      mockReaddir.mockResolvedValue([] as unknown as Awaited<ReturnType<typeof readdir>>);
+      const count = await store.deleteAll();
+      expect(count).toBe(0);
+    });
+
+    it("returns 0 when directory does not exist", async () => {
+      mockReaddir.mockRejectedValue(new Error("ENOENT"));
+      const count = await store.deleteAll();
+      expect(count).toBe(0);
+    });
+
+    it("skips non-json files", async () => {
+      mockReaddir.mockResolvedValue(["a.json", "readme.md"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockUnlink.mockResolvedValue(undefined);
+
+      const count = await store.deleteAll();
+      expect(count).toBe(1);
+    });
+  });
+
+  describe("summarize", () => {
+    it("generates a summary from session content", async () => {
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        messages: [
+          { role: "user", content: "Fix the login bug in auth.ts", timestamp: "2026-03-16T10:00:00Z" },
+          { role: "assistant", content: "I fixed the login bug.", timestamp: "2026-03-16T10:01:00Z" },
+        ],
+        contextFiles: ["src/auth.ts"],
+      };
+
+      mockReadFile.mockResolvedValue(JSON.stringify(session));
+
+      const summary = await store.summarize(session);
+      expect(summary).toContain("Fix the login bug");
+      expect(summary).toContain("src/auth.ts");
+      expect(summary).toContain("successfully");
+    });
+
+    it("persists the summary to the session file", async () => {
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        messages: [
+          { role: "user", content: "Hello", timestamp: "2026-03-16T10:00:00Z" },
+          { role: "assistant", content: "Hi there!", timestamp: "2026-03-16T10:00:01Z" },
+        ],
+      };
+
+      await store.summarize(session);
+
+      // Should have called save (which calls writeFile)
+      expect(mockWriteFile).toHaveBeenCalled();
+      const writtenData = JSON.parse(mockWriteFile.mock.calls[0]![1] as string);
+      expect(writtenData.summary).toBeDefined();
+      expect(typeof writtenData.summary).toBe("string");
+    });
+
+    it("detects errors in session", async () => {
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        messages: [
+          { role: "user", content: "Deploy the app", timestamp: "2026-03-16T10:00:00Z" },
+          { role: "assistant", content: "Error: build failed with exit code 1", timestamp: "2026-03-16T10:01:00Z" },
+        ],
+      };
+
+      const summary = await store.summarize(session);
+      expect(summary).toContain("error");
+    });
+
+    it("handles session with no user messages", async () => {
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        messages: [
+          { role: "assistant", content: "Ready to help!", timestamp: "2026-03-16T10:00:00Z" },
+        ],
+      };
+
+      const summary = await store.summarize(session);
+      expect(summary).toContain("Unknown task");
+    });
+
+    it("truncates long user messages", async () => {
+      const longMessage = "A".repeat(200);
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        messages: [
+          { role: "user", content: longMessage, timestamp: "2026-03-16T10:00:00Z" },
+          { role: "assistant", content: "Done!", timestamp: "2026-03-16T10:00:01Z" },
+        ],
+      };
+
+      const summary = await store.summarize(session);
+      expect(summary).toContain("...");
+      // The task portion should be truncated at 120 chars
+      expect(summary.indexOf("...")).toBeLessThan(200);
+    });
+  });
+
+  describe("getRecentSummaries", () => {
+    it("returns summaries for recent sessions", async () => {
+      const session1: ChatSessionFile = {
+        ...sampleSession,
+        id: "s1",
+        updatedAt: "2026-03-17T10:00:00Z",
+        summary: "Existing summary for s1.",
+      };
+      const session2: ChatSessionFile = {
+        ...sampleSession,
+        id: "s2",
+        updatedAt: "2026-03-16T10:00:00Z",
+        summary: "Existing summary for s2.",
+      };
+
+      mockReaddir.mockResolvedValue(["s1.json", "s2.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockReadFile.mockImplementation((path) => {
+        const p = path as string;
+        if (p.includes("s1.json")) return Promise.resolve(JSON.stringify(session1));
+        if (p.includes("s2.json")) return Promise.resolve(JSON.stringify(session2));
+        return Promise.reject(new Error("ENOENT"));
+      });
+
+      const summaries = await store.getRecentSummaries(2);
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.id).toBe("s1");
+      expect(summaries[0]!.summary).toBe("Existing summary for s1.");
+      expect(summaries[1]!.id).toBe("s2");
+    });
+
+    it("generates summary for sessions without cached summary", async () => {
+      const session: ChatSessionFile = {
+        ...sampleSession,
+        id: "no-summary",
+        updatedAt: "2026-03-17T10:00:00Z",
+        // No summary field
+      };
+
+      mockReaddir.mockResolvedValue(["no-summary.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockReadFile.mockResolvedValue(JSON.stringify(session));
+
+      const summaries = await store.getRecentSummaries(1);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.summary).toBeDefined();
+      expect(summaries[0]!.summary.length).toBeGreaterThan(0);
+    });
+
+    it("respects the limit parameter", async () => {
+      const sessions = Array.from({ length: 5 }, (_, i) => ({
+        ...sampleSession,
+        id: `s${i}`,
+        updatedAt: `2026-03-${15 + i}T10:00:00Z`,
+        summary: `Summary ${i}`,
+      }));
+
+      mockReaddir.mockResolvedValue(
+        sessions.map((s) => `${s.id}.json`) as unknown as Awaited<ReturnType<typeof readdir>>,
+      );
+      mockReadFile.mockImplementation((path) => {
+        const p = path as string;
+        const match = sessions.find((s) => p.includes(`${s.id}.json`));
+        if (match) return Promise.resolve(JSON.stringify(match));
+        return Promise.reject(new Error("ENOENT"));
+      });
+
+      const summaries = await store.getRecentSummaries(2);
+      expect(summaries).toHaveLength(2);
+    });
+  });
+
+  describe("list includes summary", () => {
+    it("includes summary field when present in session", async () => {
+      const sessionWithSummary: ChatSessionFile = {
+        ...sampleSession,
+        summary: "This is a cached summary.",
+      };
+
+      mockReaddir.mockResolvedValue(["session-123.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockReadFile.mockResolvedValue(JSON.stringify(sessionWithSummary));
+
+      const list = await store.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]!.summary).toBe("This is a cached summary.");
+    });
+
+    it("summary is undefined when not present", async () => {
+      mockReaddir.mockResolvedValue(["session-123.json"] as unknown as Awaited<
+        ReturnType<typeof readdir>
+      >);
+      mockReadFile.mockResolvedValue(JSON.stringify(sampleSession));
+
+      const list = await store.list();
+      expect(list).toHaveLength(1);
+      expect(list[0]!.summary).toBeUndefined();
+    });
+  });
 });

@@ -83,6 +83,7 @@ export {
 // ─── Session Store ───────────────────────────────────────────────────────────
 
 export { SessionStore } from "./session-store.js";
+export type { SessionSummaryEntry, SessionListEntry } from "./session-store.js";
 
 // ─── Background Agent ────────────────────────────────────────────────────────
 
@@ -195,7 +196,9 @@ export type {
   CronSchedule,
   SlackTriggerPayload,
   TaskHandler,
+  EventTriggerOptions,
 } from "./event-triggers.js";
+export { slugifyTitle } from "./event-triggers.js";
 
 // ─── Webhook Server ─────────────────────────────────────────────────────────
 
@@ -229,3 +232,23 @@ export {
   computeErrorSignature,
 } from "./error-parser.js";
 export type { ParsedError } from "./error-parser.js";
+
+// ─── Health Check ───────────────────────────────────────────────────────────
+
+export { runStartupHealthCheck } from "./health-check.js";
+export type { HealthCheck, HealthCheckResult, HealthCheckConfig } from "./health-check.js";
+
+// ─── Circuit Breaker ────────────────────────────────────────────────────────
+
+export { CircuitBreaker, CircuitOpenError } from "./circuit-breaker.js";
+export type { CircuitBreakerState, CircuitBreakerOptions } from "./circuit-breaker.js";
+
+// ─── Version Migration ──────────────────────────────────────────────────────
+
+export {
+  runMigrations,
+  detectConfigVersion,
+  v0_to_v1,
+  LATEST_CONFIG_VERSION,
+} from "./version-migration.js";
+export type { MigrationResult, MigrationRunResult } from "./version-migration.js";

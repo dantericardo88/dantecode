@@ -18,7 +18,7 @@ const SINGLE_LINE_MAX_TOKENS = 256;
  * Maximum number of cached completions to retain. Older entries are evicted
  * using a simple FIFO strategy.
  */
-const MAX_CACHE_SIZE = 100;
+const MAX_CACHE_SIZE = 150;
 
 /**
  * Cached completion entry keyed by a hash of the request context.
@@ -32,7 +32,7 @@ interface CacheEntry {
 /**
  * Maximum age of a cache entry in milliseconds before it is considered stale.
  */
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 90_000;
 
 interface FIMPromptInput {
   prefix: string;
@@ -65,7 +65,7 @@ export function getInlineCompletionDebounceMs(provider: string): number {
 export function buildFIMPrompt(input: FIMPromptInput, multilineOverride?: boolean): FIMPromptResult {
   const isMultilineContext = shouldUseMultilineCompletion(input.prefix, input.suffix);
   const multiline = multilineOverride !== undefined ? multilineOverride : isMultilineContext;
-  const prefixWindow = multiline ? input.prefix.slice(-6000) : input.prefix.slice(-2000);
+  const prefixWindow = multiline ? input.prefix.slice(-8000) : input.prefix.slice(-5000);
   const suffixWindow = multiline
     ? input.suffix.split("\n").slice(0, 10).join("\n").slice(0, 2000)
     : input.suffix.slice(0, 1000);
@@ -111,6 +111,7 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
   private readonly cache: CacheEntry[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private lastRequestId = 0;
+  private lastKeystrokeTimes: number[] = [];
 
   /**
    * Provides inline completion items for the given document position.
@@ -150,12 +151,30 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       config.get<string>("fimModel"),
     );
     const [provider] = parseModelString(selectedModel);
-    const debounceMs = getInlineCompletionDebounceMs(provider);
+    const baseDebounceMs = getInlineCompletionDebounceMs(provider);
 
-    // Build a cache key from the prefix tail (last 200 chars), language, model, and position
-    const prefixTail = prefix.slice(-200);
+    // Adaptive debounce: reduce delay when typing quickly
+    const now = Date.now();
+    this.lastKeystrokeTimes.push(now);
+    if (this.lastKeystrokeTimes.length > 5) {
+      this.lastKeystrokeTimes = this.lastKeystrokeTimes.slice(-5);
+    }
+    const adaptiveEnabled = config.get<boolean>("debounceAdaptive", true);
+    let debounceMs = baseDebounceMs;
+    if (adaptiveEnabled && this.lastKeystrokeTimes.length >= 3) {
+      const oldest = this.lastKeystrokeTimes[0]!;
+      const elapsed = (now - oldest) / 1000;
+      const charsPerSec = this.lastKeystrokeTimes.length / elapsed;
+      if (charsPerSec > 3) {
+        debounceMs = Math.min(baseDebounceMs, 100);
+      }
+    }
+
+    // Build a cache key from last 3 lines before cursor + suffix head for better hit rate
+    const prefixLines = prefix.split("\n");
+    const last3Lines = prefixLines.slice(-3).join("\n");
     const suffixHead = suffix.slice(0, 100);
-    const cacheKey = `${selectedModel}:${language}:${position.line}:${position.character}:${prefixTail}:${suffixHead}`;
+    const cacheKey = `${selectedModel}:${language}:${position.line}:${last3Lines}:${suffixHead}`;
 
     // Check the cache for a recent matching entry
     const cached = this.lookupCache(cacheKey);
@@ -336,8 +355,9 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     // Create the inline completion item
     const item = new vscode.InlineCompletionItem(cleaned, new vscode.Range(position, position));
 
-    // Attach PDSE gate info as a filter text that VS Code uses for sorting
-    item.filterText = `dantecode${gateLabel}`;
+    // Attach PDSE gate info and confidence marker as filter text
+    const confidenceMarker = cleaned.length < 10 ? " [?]" : "";
+    item.filterText = `dantecode${gateLabel}${confidenceMarker}`;
 
     return [item];
   }

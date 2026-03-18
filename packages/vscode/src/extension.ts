@@ -14,6 +14,7 @@ import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import {
   createStatusBar,
   updateStatusBar,
+  updateStatusBarInfo,
   updateSandboxStatus,
   updateStatusBarWithCost,
   type StatusBarState,
@@ -82,6 +83,11 @@ export function activate(context: vscode.ExtensionContext): void {
       onModelChange: (model) => {
         if (statusBarState) {
           updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+        }
+      },
+      onStatusBarUpdate: (info) => {
+        if (statusBarState) {
+          updateStatusBarInfo(statusBarState, info);
         }
       },
     },

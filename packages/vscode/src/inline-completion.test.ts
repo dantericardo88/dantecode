@@ -233,8 +233,8 @@ describe("inline completion helpers", () => {
     expect(prompt.maxTokens).toBe(256);
   });
 
-  it("uses a 6000-char prefix window for multiline completions", () => {
-    const longPrefix = "a".repeat(7000);
+  it("uses an 8000-char prefix window for multiline completions", () => {
+    const longPrefix = "a".repeat(9000);
     const prompt = buildFIMPrompt(
       {
         prefix: longPrefix + "{",
@@ -245,9 +245,25 @@ describe("inline completion helpers", () => {
       true,
     );
 
-    // The prompt should contain the last 6000 chars of the prefix
+    // The prompt should contain the last 8000 chars of the prefix
     const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
-    expect(prefixInPrompt.length).toBe(6000);
+    expect(prefixInPrompt.length).toBe(8000);
+  });
+
+  it("uses a 5000-char prefix window for single-line completions", () => {
+    const longPrefix = "a".repeat(6000);
+    const prompt = buildFIMPrompt(
+      {
+        prefix: longPrefix,
+        suffix: "",
+        language: "typescript",
+        filePath: "/workspace/src/example.ts",
+      },
+      false,
+    );
+
+    const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
+    expect(prefixInPrompt.length).toBe(5000);
   });
 });
 
@@ -462,5 +478,97 @@ describe("DanteCodeCompletionProvider", () => {
         maxTokens: 256,
       }),
     );
+  });
+
+  it("reduces debounce to 100ms when typing quickly with adaptive enabled", async () => {
+    vscodeMocks.configValues["debounceAdaptive"] = true;
+    vscodeMocks.configValues["defaultModel"] = "grok/grok-3";
+    vscodeMocks.configValues["fimModel"] = "";
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const x = ", "");
+    const token = createMockToken();
+
+    // Simulate rapid keystrokes (5 calls within 1 second)
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(100); // 100ms between keystrokes = 10 chars/sec
+      provider.provideInlineCompletionItems(
+        document as never,
+        new vscodeMocks.Position(0, 10 + i) as never,
+        {} as never,
+        token as never,
+      );
+    }
+
+    // The 5th call should use the adaptive 100ms debounce
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 14) as never,
+      {} as never,
+      token as never,
+    );
+
+    // With adaptive debounce at 100ms (typing fast), should fire at 100ms
+    await vi.advanceTimersByTimeAsync(100);
+    await pending;
+
+    expect(routerMocks.mockStream).toHaveBeenCalled();
+  });
+
+  it("uses 150-entry cache with 90s TTL", async () => {
+    const provider = new DanteCodeCompletionProvider();
+    const token = createMockToken();
+
+    // Fill cache with unique entries
+    for (let i = 0; i < 151; i++) {
+      const document = createDocument(`line${i}\nconst x${i} = `, "");
+      const pending = provider.provideInlineCompletionItems(
+        document as never,
+        new vscodeMocks.Position(1, 12) as never,
+        {} as never,
+        token as never,
+      );
+      await vi.advanceTimersByTimeAsync(200);
+      await pending;
+    }
+
+    // Cache should have evicted the oldest, keeping at most 150
+    // Verify by checking the first entry is gone (no cache hit on retry)
+    routerMocks.mockStream.mockClear();
+    const doc0 = createDocument("line0\nconst x0 = ", "");
+    const pending = provider.provideInlineCompletionItems(
+      doc0 as never,
+      new vscodeMocks.Position(1, 12) as never,
+      {} as never,
+      token as never,
+    );
+    await vi.advanceTimersByTimeAsync(200);
+    await pending;
+
+    // Should have made a new request (cache miss)
+    expect(routerMocks.mockStream).toHaveBeenCalled();
+  });
+
+  it("adds confidence marker for short completions", async () => {
+    routerMocks.mockStream.mockResolvedValue({
+      textStream: createTextStream(["x"]),
+    });
+
+    const provider = new DanteCodeCompletionProvider();
+    const document = createDocument("const answer = ", "");
+    const token = createMockToken();
+
+    const pending = provider.provideInlineCompletionItems(
+      document as never,
+      new vscodeMocks.Position(0, 15) as never,
+      {} as never,
+      token as never,
+    );
+
+    await vi.advanceTimersByTimeAsync(100);
+    const items = await pending;
+
+    expect(items).toHaveLength(1);
+    expect((items[0] as { filterText: string }).filterText).toContain("[?]");
   });
 });

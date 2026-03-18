@@ -435,7 +435,8 @@ export type AuditEventType =
   | "self_modification_denied"
   | "loop_terminated"
   | "tier_escalation"
-  | "cost_update";
+  | "cost_update"
+  | "webhook_received";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {
@@ -841,6 +842,8 @@ export interface ChatSessionFile {
   contextFiles: string[];
   totalTokens?: number;
   totalCostUsd?: number;
+  /** Auto-generated 2-3 sentence summary of the session for quick listing. */
+  summary?: string;
 }
 
 // ----------------------------------------------------------------------------

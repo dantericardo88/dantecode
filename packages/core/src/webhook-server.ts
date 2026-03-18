@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { EventTriggerRegistry } from "./event-triggers.js";
 import type { BackgroundAgentRunner } from "./background-agent.js";
+import { appendAuditEvent } from "./audit.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,6 +119,16 @@ async function handleGitHubWebhook(
   // Enqueue the task in the background runner
   const taskId = config.backgroundRunner.enqueue(task.prompt);
 
+  // Audit log the webhook event
+  appendAuditEvent(config.projectRoot, {
+    sessionId: task.id,
+    timestamp: new Date().toISOString(),
+    type: "webhook_received",
+    payload: { source: "github", event: eventName, taskId, agentTaskId: task.id },
+    modelId: "",
+    projectRoot: config.projectRoot,
+  }).catch(() => {/* non-fatal */});
+
   sendJSON(res, 200, {
     accepted: true,
     taskId,
@@ -207,6 +218,15 @@ async function handleSlackWebhook(
 
   const taskId = config.backgroundRunner.enqueue(task.prompt);
 
+  appendAuditEvent(config.projectRoot, {
+    sessionId: task.id,
+    timestamp: new Date().toISOString(),
+    type: "webhook_received",
+    payload: { source: "slack", event: "message", taskId, agentTaskId: task.id },
+    modelId: "",
+    projectRoot: config.projectRoot,
+  }).catch(() => {/* non-fatal */});
+
   sendJSON(res, 200, {
     accepted: true,
     taskId,
@@ -254,6 +274,15 @@ async function handleAPITasks(
   // Create an API task through the registry and enqueue it
   const agentTask = config.eventRegistry.fromAPI(prompt, (body.metadata as Record<string, unknown>) ?? undefined);
   const taskId = config.backgroundRunner.enqueue(agentTask.prompt);
+
+  appendAuditEvent(config.projectRoot, {
+    sessionId: agentTask.id,
+    timestamp: new Date().toISOString(),
+    type: "webhook_received",
+    payload: { source: "api", event: "task_submit", taskId, agentTaskId: agentTask.id },
+    modelId: "",
+    projectRoot: config.projectRoot,
+  }).catch(() => {/* non-fatal */});
 
   sendJSON(res, 200, {
     accepted: true,
