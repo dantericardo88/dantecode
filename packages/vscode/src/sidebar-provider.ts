@@ -25,6 +25,7 @@ import {
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
+  createSelfImprovementContext,
   detectSelfImprovementContext,
   getContextUtilization,
   getProviderCatalogEntry,
@@ -414,7 +415,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     const projectRoot = this.getProjectRoot();
-    const selfImprovement = detectSelfImprovementContext(text, projectRoot) ?? undefined;
+    const selfImprovement =
+      detectSelfImprovementContext(text, projectRoot) ??
+      (this.activeSkill
+        ? createSelfImprovementContext(projectRoot, {
+            workflowId: "skill-pipeline",
+            triggerCommand: `skill:${this.activeSkill}`,
+          })
+        : undefined);
     const readTracker = new Map<string, string>();
     const editAttempts = new Map<string, number>();
 

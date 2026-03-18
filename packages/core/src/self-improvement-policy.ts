@@ -67,6 +67,20 @@ export function detectSelfImprovementContext(
     });
   }
 
+  // DanteForge pipeline commands — explicitly authorized to modify DanteCode's
+  // own source as part of the forge workflow. This catches /magic, /inferno,
+  // /forge, /party (without --autoforge), /autoforge (without --self-improve), etc.
+  if (
+    /^\/(?:magic|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest|party|autoforge)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return createSelfImprovementContext(projectRoot, {
+      workflowId: "danteforge-pipeline",
+      triggerCommand: trimmed.split(/\s/)[0]!,
+    });
+  }
+
   if (CHAT_SELF_IMPROVEMENT_PATTERNS.some((pattern) => pattern.test(trimmed))) {
     return createSelfImprovementContext(projectRoot, {
       workflowId: "chat-self-improvement",

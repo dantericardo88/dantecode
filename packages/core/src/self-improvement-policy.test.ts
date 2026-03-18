@@ -54,6 +54,43 @@ describe("self-improvement-policy", () => {
     it("ignores normal user prompts", () => {
       expect(detectSelfImprovementContext("help me fix auth", projectRoot)).toBeNull();
     });
+
+    it("detects /magic as danteforge-pipeline", () => {
+      const context = detectSelfImprovementContext("/magic improve reliability", projectRoot);
+      expect(context?.enabled).toBe(true);
+      expect(context?.workflowId).toBe("danteforge-pipeline");
+      expect(context?.triggerCommand).toBe("/magic");
+    });
+
+    it("detects /inferno as danteforge-pipeline", () => {
+      const context = detectSelfImprovementContext("/inferno 4-hour resume proof", projectRoot);
+      expect(context?.enabled).toBe(true);
+      expect(context?.workflowId).toBe("danteforge-pipeline");
+      expect(context?.triggerCommand).toBe("/inferno");
+    });
+
+    it("detects /forge as danteforge-pipeline", () => {
+      const context = detectSelfImprovementContext("/forge build auth module", projectRoot);
+      expect(context?.enabled).toBe(true);
+      expect(context?.workflowId).toBe("danteforge-pipeline");
+      expect(context?.triggerCommand).toBe("/forge");
+    });
+
+    it("preserves specific /autoforge --self-improve workflowId over generic match", () => {
+      const context = detectSelfImprovementContext("/autoforge --self-improve", projectRoot);
+      expect(context?.workflowId).toBe("autoforge-self-improve");
+    });
+
+    it("preserves specific /party --autoforge workflowId over generic match", () => {
+      const context = detectSelfImprovementContext("/party --autoforge reliability", projectRoot);
+      expect(context?.workflowId).toBe("party-autoforge");
+    });
+
+    it("detects /party without --autoforge as danteforge-pipeline", () => {
+      const context = detectSelfImprovementContext("/party run tests", projectRoot);
+      expect(context?.enabled).toBe(true);
+      expect(context?.workflowId).toBe("danteforge-pipeline");
+    });
   });
 
   describe("isSelfImprovementWriteAllowed", () => {
