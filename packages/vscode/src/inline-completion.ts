@@ -254,8 +254,11 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       const oldest = this.lastKeystrokeTimes[0]!;
       const elapsed = (now - oldest) / 1000;
       const charsPerSec = this.lastKeystrokeTimes.length / elapsed;
-      if (charsPerSec > 3) {
-        debounceMs = Math.min(baseDebounceMs, 100);
+      // Graduated adaptive curve: faster typing → lower debounce (floor 80ms)
+      if (charsPerSec > 5) {
+        debounceMs = Math.max(80, baseDebounceMs - 100);
+      } else if (charsPerSec > 3) {
+        debounceMs = Math.max(80, baseDebounceMs - 80);
       }
     }
 
@@ -485,8 +488,19 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     );
 
     let text = "";
+    const streamStart = Date.now();
+    let firstChunkLogged = false;
+
     for await (const chunk of result.textStream) {
       text += chunk;
+
+      if (!firstChunkLogged) {
+        firstChunkLogged = true;
+        const latencyMs = Date.now() - streamStart;
+        if (latencyMs > 200) {
+          console.log(`[DanteCode] First chunk latency: ${latencyMs}ms (target <150ms)`);
+        }
+      }
 
       // Single-line: stop at first newline
       if (!isMultiline && text.includes("\n")) {
