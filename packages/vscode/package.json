@@ -84,6 +84,11 @@
     },
     "commands": [
       {
+        "command": "dantecode.selfUpdate",
+        "title": "DanteCode: Self Update",
+        "category": "DanteCode"
+      },
+      {
         "command": "dantecode.openChat",
         "title": "DanteCode: Open Chat",
         "category": "DanteCode"

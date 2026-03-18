@@ -7,6 +7,8 @@ import {
 describe("execution heuristics", () => {
   it("recognizes prompts that require tool execution", () => {
     expect(promptRequestsToolExecution("Fix the failing build and update src/app.ts")).toBe(true);
+    expect(promptRequestsToolExecution("please continue")).toBe(true);
+    expect(promptRequestsToolExecution("/verify please continue")).toBe(true);
     expect(promptRequestsToolExecution("Explain how the router works")).toBe(false);
   });
 

@@ -6,16 +6,17 @@
 // ============================================================================
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
-import { accessSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute, extname } from "node:path";
 import type { ColoredDiffHunk, SelfImprovementContext } from "@dantecode/config-types";
 import { generateColoredHunk } from "@dantecode/git-engine";
 import {
   appendAuditEvent,
+  detectInstallContext,
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
+  resolvePreferredShell,
 } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
@@ -293,31 +294,11 @@ async function toolListDir(
   }
 }
 
-function resolveShell(): string | true {
-  if (process.platform !== "win32") return "/bin/bash";
-  // On Windows, try Git Bash first, then fall back to cmd.exe
-  const gitBashPaths = [
-    "C:\\Program Files\\Git\\bin\\bash.exe",
-    "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-  ];
-  for (const p of gitBashPaths) {
-    try {
-      accessSync(p);
-      return p;
-    } catch {
-      /* next */
-    }
-  }
-  // cmd.exe is always available on Windows
-  return true; // `true` = use OS default shell (cmd.exe on Windows)
-}
-
 async function toolBash(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const command = input["command"] as string | undefined;
   if (!command) return { content: "Error: command parameter is required", isError: true };
 
   const timeoutMs = typeof input["timeout"] === "number" ? input["timeout"] : 30000;
-  const shell = resolveShell();
 
   try {
     const result = execSync(command, {
@@ -326,7 +307,7 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
       timeout: timeoutMs,
       maxBuffer: 5 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: typeof shell === "string" ? shell : undefined,
+      shell: resolvePreferredShell(),
     });
     return { content: result || "(no output)", isError: false };
   } catch (err: unknown) {
@@ -548,24 +529,72 @@ async function toolSelfUpdate(
   projectRoot: string,
 ): Promise<ToolResult> {
   try {
-    // PDSE gate first
-    const gate = await toolBash({ command: "npm run release:check" }, projectRoot);
-    if (gate.isError) {
-      return { content: `SelfUpdate blocked: gates failed\n${gate.content}`, isError: true };
+    const dryRun = input["dryRun"] === true;
+    const runtimePath = __filename;
+    const extensionRoot = resolve(__dirname, "..");
+    const installContext = detectInstallContext({
+      runtimePath,
+      cwd: projectRoot,
+      workspaceRoot: projectRoot,
+      extensionPath: extensionRoot,
+    });
+
+    if (installContext.repoRoot && installContext.workspaceIsRepoRoot) {
+      const result = await toolBash(
+        {
+          command: `node packages/cli/dist/index.js self-update${dryRun ? " --dry-run" : ""} --verbose`,
+          timeout: 900000,
+        },
+        installContext.repoRoot,
+      );
+      return {
+        content: `SelfUpdate ${dryRun ? "dry-run" : "complete"}:\n${result.content}`,
+        isError: result.isError,
+      };
     }
 
-    const dryRun = input["dryRun"] === true;
-    const cmd = dryRun
-      ? 'echo "[dry-run] Would: git pull && npm ci && npm run build && vsce package && code --install-extension *.vsix"'
-      : 'git pull origin main && npm ci && npm run build && cd packages/vscode && npx @vscode/vsce package && code --install-extension *.vsix --force && echo "Reload VS Code window!"';
+    const guidance = [
+      "VS Code extension updates are handled by the extension host.",
+      "Use the Extensions view to check for DanteCode updates.",
+      "To update the CLI globally, run: npm install -g @dantecode/cli@latest",
+    ];
 
-    const result = await toolBash({ command: cmd, timeout: 600000 }, projectRoot);
+    if (installContext.repoRoot && !installContext.workspaceIsRepoRoot) {
+      guidance.unshift(
+        `Open the DanteCode repo root at ${installContext.repoRoot} to use the repo self-update workflow.`,
+      );
+    }
+
     return {
-      content: `SelfUpdate ${dryRun ? "dry-run" : "complete"}:\n${result.content}`,
-      isError: result.isError,
+      content: `${dryRun ? "SelfUpdate dry-run" : "SelfUpdate guidance"}:\n${guidance.join("\n")}`,
+      isError: false,
     };
   } catch (err: unknown) {
     return { content: `SelfUpdate error: ${String(err)}`, isError: true };
+  }
+}
+
+async function toolGitPush(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const remote = typeof input["remote"] === "string" ? input["remote"] : undefined;
+  const branch = typeof input["branch"] === "string" ? input["branch"] : undefined;
+  const setUpstream = input["set_upstream"] === true || input["setUpstream"] === true;
+
+  try {
+    const { pushBranch } = await import("@dantecode/git-engine");
+    const result = pushBranch({ remote, branch, setUpstream }, projectRoot);
+    return {
+      content:
+        `Push verified: ${result.remote}/${result.branch}\n` +
+        `Local HEAD: ${result.localCommit}\n` +
+        `Remote ref: ${result.remoteCommit}` +
+        (result.output ? `\nOutput: ${result.output}` : ""),
+      isError: false,
+    };
+  } catch (err: unknown) {
+    return { content: `Error pushing: ${String(err)}`, isError: true };
   }
 }
 
@@ -598,6 +627,13 @@ export async function executeTool(
         isError: true,
       };
     }
+  }
+
+  if (context?.sandboxEnabled && name === "GitPush") {
+    return {
+      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      isError: true,
+    };
   }
 
   if (name === "Bash") {
@@ -695,6 +731,9 @@ export async function executeTool(
       break;
     case "SelfUpdate":
       result = await toolSelfUpdate(input, projectRoot);
+      break;
+    case "GitPush":
+      result = await toolGitPush(input, projectRoot);
       break;
     default:
       result = { content: `Unknown tool: ${name}`, isError: true };
@@ -833,7 +872,7 @@ export function extractToolCalls(text: string): {
 
   // Pattern 2: ```json blocks with tool structure
   const jsonPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|ListDir|Bash|Glob|Grep)"[\s\S]*?\})\s*\n```/g;
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|ListDir|Bash|Glob|Grep|GitPush|SelfUpdate)"[\s\S]*?\})\s*\n```/g;
   while ((match = jsonPattern.exec(text)) !== null) {
     try {
       const parsed = JSON.parse(match[1]!) as { name?: string; input?: Record<string, unknown> };
@@ -884,6 +923,9 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 ### Grep — Search file contents with regex
   Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }
 
+### GitPush — Push a branch to a remote and verify the remote ref
+  Input: { "remote": "origin", "branch": "main", "set_upstream": true/false }
+
 ### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)
   Input: { "dryRun": true/false }
 
@@ -896,6 +938,7 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 - Use Glob or ListDir to explore the project structure.
 - Use Grep to search for specific code patterns.
 - Use Bash to run tests, type-checks, or build commands to verify changes.
+- Use GitPush when the user explicitly asks you to publish verified commits to a remote.
 - You can chain multiple tool calls in one response.
 - After tool results come back, analyze them and continue your task.
 - NEVER respond with only a plan or description when the user asks you to build something. Take action immediately.

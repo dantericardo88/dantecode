@@ -4,8 +4,8 @@
 
 // ─── Auto-Commit System ─────────────────────────────────────────────────────
 
-export { autoCommit, getLastCommitHash, revertLastCommit, getStatus } from "./commit.js";
-export type { CommitResult, StatusEntry, GitStatusResult } from "./commit.js";
+export { autoCommit, getLastCommitHash, revertLastCommit, pushBranch, getStatus } from "./commit.js";
+export type { CommitResult, PushResult, StatusEntry, GitStatusResult } from "./commit.js";
 
 // ─── Worktree Management ────────────────────────────────────────────────────
 

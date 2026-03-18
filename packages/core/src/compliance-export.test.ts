@@ -17,9 +17,7 @@ import type { AuditEvent } from "@dantecode/config-types";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeEvent(
-  overrides?: Partial<AuditEvent>,
-): AuditEvent {
+function makeEvent(overrides?: Partial<AuditEvent>): AuditEvent {
   return {
     id: `evt-${Math.random().toString(36).slice(2, 8)}`,
     sessionId: "session-1",
@@ -56,10 +54,7 @@ describe("exportAuditLog", () => {
   });
 
   it("produces JSON output", () => {
-    const events = [
-      makeEvent({ id: "e1" }),
-      makeEvent({ id: "e2" }),
-    ];
+    const events = [makeEvent({ id: "e1" }), makeEvent({ id: "e2" })];
     const result = exportAuditLog(events, { format: "json" });
 
     expect(result.format).toBe("json");
@@ -88,9 +83,7 @@ describe("exportAuditLog", () => {
   });
 
   it("applies masking during export", () => {
-    const events = [
-      makeEvent({ payload: { path: "/src/a.ts", apiKey: "sk-xyz" } }),
-    ];
+    const events = [makeEvent({ payload: { path: "/src/a.ts", apiKey: "sk-xyz" } })];
     const result = exportAuditLog(events, {
       format: "json",
       includePayload: true,

@@ -277,6 +277,7 @@ export type {
   EscalationEvent,
   TaskCircuitBreakerOptions,
   FailureAction,
+  BackoffRecommendation,
 } from "./task-circuit-breaker.js";
 
 // ─── Recovery Engine ─────────────────────────────────────────────────────────
@@ -290,6 +291,32 @@ export type {
   RepoVerificationStep,
   RecoveryEngineOptions,
 } from "./recovery-engine.js";
+
+// ─── Event-Sourced Checkpointer ─────────────────────────────────────────────
+
+export { EventSourcedCheckpointer, hashCheckpointContent } from "./checkpointer.js";
+export type {
+  Checkpoint,
+  CheckpointMetadata,
+  PendingWrite,
+  CheckpointTuple,
+  CheckpointEvent,
+  CheckpointListOptions,
+  EventSourcedCheckpointerOptions,
+} from "./checkpointer.js";
+
+// ─── Loop Detector ──────────────────────────────────────────────────────────
+
+export { LoopDetector, fingerprintAction } from "./loop-detector.js";
+export type { ActionRecord, LoopDetectionResult, LoopDetectorOptions } from "./loop-detector.js";
+export { detectInstallContext, resolvePreferredShell } from "./runtime-update.js";
+export type {
+  InstallContextKind,
+  DetectedInstallContext,
+  DetectInstallContextOptions,
+  SelfUpdatePlan,
+  ResolvePreferredShellOptions,
+} from "./runtime-update.js";
 
 // ─── Version Migration ──────────────────────────────────────────────────────
 

@@ -29,8 +29,7 @@ function buildAssertion(opts: {
   attributes?: Record<string, string>;
 }): string {
   const nameId = opts.nameId ?? "alice@example.com";
-  const notOnOrAfter =
-    opts.notOnOrAfter ?? new Date(Date.now() + 3_600_000).toISOString();
+  const notOnOrAfter = opts.notOnOrAfter ?? new Date(Date.now() + 3_600_000).toISOString();
   const attrs = opts.attributes ?? {};
 
   let attrXml = "";
@@ -142,24 +141,18 @@ describe("EnterpriseSSOManager", () => {
     });
 
     it("rejects emails outside allowed domains", () => {
-      const restricted = new EnterpriseSSOManager(
-        baseConfig({ allowedDomains: ["corp.io"] }),
-      );
+      const restricted = new EnterpriseSSOManager(baseConfig({ allowedDomains: ["corp.io"] }));
       expect(restricted.isEmailAllowed("user@corp.io")).toBe(true);
       expect(restricted.isEmailAllowed("user@other.com")).toBe(false);
     });
 
     it("is case-insensitive for domain matching", () => {
-      const restricted = new EnterpriseSSOManager(
-        baseConfig({ allowedDomains: ["Corp.IO"] }),
-      );
+      const restricted = new EnterpriseSSOManager(baseConfig({ allowedDomains: ["Corp.IO"] }));
       expect(restricted.isEmailAllowed("user@corp.io")).toBe(true);
     });
 
     it("rejects emails without a domain", () => {
-      const restricted = new EnterpriseSSOManager(
-        baseConfig({ allowedDomains: ["corp.io"] }),
-      );
+      const restricted = new EnterpriseSSOManager(baseConfig({ allowedDomains: ["corp.io"] }));
       expect(restricted.isEmailAllowed("nodomain")).toBe(false);
     });
   });
@@ -312,9 +305,7 @@ describe("EnterpriseSSOManager", () => {
     });
 
     it("rejects email outside allowed domains", async () => {
-      const restricted = new EnterpriseSSOManager(
-        baseConfig({ allowedDomains: ["corp.io"] }),
-      );
+      const restricted = new EnterpriseSSOManager(baseConfig({ allowedDomains: ["corp.io"] }));
       const assertion = buildAssertion({ nameId: "alice@other.com" });
       const result = await restricted.validateAssertion(assertion);
       expect(result.valid).toBe(false);

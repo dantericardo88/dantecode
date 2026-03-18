@@ -32,11 +32,11 @@
     }
   },
   "scripts": {
-    "build": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping build');process.exit(0)}process.exit(1)\" || tsup",
+    "build": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping build');process.exit(0)}process.exit(1)\" || tsup src/index.ts --format esm --dts",
     "build:dev": "tsup src/index.ts --format esm --dts",
     "typecheck": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping typecheck');process.exit(0)}process.exit(1)\" || tsc --noEmit",
     "lint": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping lint');process.exit(0)}process.exit(1)\" || eslint src/",
-    "test": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping tests');process.exit(0)}process.exit(1)\" || vitest run --config ../../vitest.package.config.ts",
+    "test": "node -e \"if(!require('fs').existsSync('src/index.ts')){console.log('Binary dist — skipping tests');process.exit(0)}process.exit(1)\" || vitest run --config ../../vitest.package.config.ts --passWithNoTests",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {

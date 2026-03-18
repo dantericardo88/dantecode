@@ -23,9 +23,7 @@ export function parseVerificationErrors(output: string): ParsedError[] {
 
   for (const line of lines) {
     // TypeScript: src/foo.ts(12,5): error TS2345: Argument of type...
-    const tsMatch = line.match(
-      /(\S+\.tsx?)\((\d+),(\d+)\):\s*error\s*(TS\d+):\s*(.+)/,
-    );
+    const tsMatch = line.match(/(\S+\.tsx?)\((\d+),(\d+)\):\s*error\s*(TS\d+):\s*(.+)/);
     if (tsMatch) {
       errors.push({
         file: tsMatch[1]!,
@@ -39,9 +37,7 @@ export function parseVerificationErrors(output: string): ParsedError[] {
     }
 
     // TypeScript (colon format): src/foo.ts:12:5 - error TS2345: Argument of type...
-    const tsColonMatch = line.match(
-      /(\S+\.tsx?):(\d+):(\d+)\s*-\s*error\s*(TS\d+):\s*(.+)/,
-    );
+    const tsColonMatch = line.match(/(\S+\.tsx?):(\d+):(\d+)\s*-\s*error\s*(TS\d+):\s*(.+)/);
     if (tsColonMatch) {
       errors.push({
         file: tsColonMatch[1]!,
@@ -55,9 +51,7 @@ export function parseVerificationErrors(output: string): ParsedError[] {
     }
 
     // ESLint: src/foo.ts:12:5  error  No unused vars  no-unused-vars
-    const eslintMatch = line.match(
-      /(\S+):(\d+):(\d+)\s+(error|warning)\s+(.+?)\s{2,}(\S+)$/,
-    );
+    const eslintMatch = line.match(/(\S+):(\d+):(\d+)\s+(error|warning)\s+(.+?)\s{2,}(\S+)$/);
     if (eslintMatch) {
       errors.push({
         file: eslintMatch[1]!,
@@ -86,9 +80,7 @@ export function parseVerificationErrors(output: string): ParsedError[] {
     }
 
     // Jest-style assertion: at Object.<anonymous> (src/foo.test.ts:42:10)
-    const jestStackMatch = line.match(
-      /at\s+\S+\s+\((\S+\.(?:test|spec)\.tsx?):(\d+):(\d+)\)/,
-    );
+    const jestStackMatch = line.match(/at\s+\S+\s+\((\S+\.(?:test|spec)\.tsx?):(\d+):(\d+)\)/);
     if (jestStackMatch) {
       errors.push({
         file: jestStackMatch[1]!,
@@ -139,9 +131,7 @@ export function formatErrorsForFixPrompt(errors: ParsedError[]): string {
  */
 export function computeErrorSignature(errors: ParsedError[]): string {
   return errors
-    .map(
-      (e) => `${e.file}:${e.line}:${e.code ?? e.message.slice(0, 50)}`,
-    )
+    .map((e) => `${e.file}:${e.line}:${e.code ?? e.message.slice(0, 50)}`)
     .sort()
     .join("|");
 }

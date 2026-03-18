@@ -104,10 +104,7 @@ export class EventTriggerRegistry {
 
     if (expected.length !== signatureHeader.length) return false;
 
-    return timingSafeEqual(
-      Buffer.from(expected, "utf-8"),
-      Buffer.from(signatureHeader, "utf-8"),
-    );
+    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(signatureHeader, "utf-8"));
   }
 
   /**
@@ -129,17 +126,11 @@ export class EventTriggerRegistry {
 
     if (expected.length !== signatureHeader.length) return false;
 
-    return timingSafeEqual(
-      Buffer.from(expected, "utf-8"),
-      Buffer.from(signatureHeader, "utf-8"),
-    );
+    return timingSafeEqual(Buffer.from(expected, "utf-8"), Buffer.from(signatureHeader, "utf-8"));
   }
 
   /** Create a task from a GitHub webhook event */
-  fromGitHub(
-    eventName: string,
-    payload: Record<string, unknown>,
-  ): AgentTask | null {
+  fromGitHub(eventName: string, payload: Record<string, unknown>): AgentTask | null {
     if (!this.config.enabledSources.includes("github")) {
       return null;
     }
@@ -343,11 +334,11 @@ export class EventTriggerRegistry {
     if (parts.length !== 5) return false;
 
     const values = [
-      date.getMinutes(),   // minute (0-59)
-      date.getHours(),     // hour (0-23)
-      date.getDate(),      // day of month (1-31)
+      date.getMinutes(), // minute (0-59)
+      date.getHours(), // hour (0-23)
+      date.getDate(), // day of month (1-31)
       date.getMonth() + 1, // month (1-12)
-      date.getDay(),       // day of week (0-6, Sunday=0)
+      date.getDay(), // day of week (0-6, Sunday=0)
     ];
 
     for (let i = 0; i < 5; i++) {

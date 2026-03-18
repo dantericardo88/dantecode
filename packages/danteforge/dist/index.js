@@ -1,1 +1,847 @@
-import{existsSync as e,readFileSync as t,mkdirSync as s,writeFileSync as n}from"fs";import{resolve as r,join as a,dirname as i}from"path";import{spawn as o}from"child_process";import c from"sql.js";import{randomUUID as d}from"crypto";import{readFile as u,mkdir as l,writeFile as p,unlink as h}from"fs/promises";var m=Object.defineProperty,f=[{regex:/\bTODO\b/i,message:"TODO marker found — implementation is incomplete",violationType:"stub_detected"},{regex:/\bFIXME\b/i,message:"FIXME marker found — known issue left unresolved",violationType:"stub_detected"},{regex:/\bHACK\b/i,message:"HACK marker found — workaround left in code",violationType:"stub_detected"},{regex:/raise\s+NotImplementedError/,message:"Python NotImplementedError raised — function is a stub",violationType:"stub_detected"},{regex:/throw\s+new\s+Error\s*\(\s*['"`]not\s+implemented['"`]\s*\)/i,message:"Throwing 'not implemented' error — function is a stub",violationType:"stub_detected"},{regex:/throw\s+new\s+Error\s*\(\s*['"`]todo['"`]\s*\)/i,message:"Throwing 'todo' error — function is a stub",violationType:"stub_detected"},{regex:/throw\s+new\s+Error\s*\(\s*['"`]stub['"`]\s*\)/i,message:"Throwing 'stub' error — function is a stub",violationType:"stub_detected"},{regex:/^\s*\.\.\.\s*$/,message:"Ellipsis stub detected — body is empty placeholder",violationType:"stub_detected"},{regex:/^\s*pass\s*$/,message:"Python pass stub detected — body is empty placeholder",violationType:"stub_detected"},{regex:/\bas\s+any\b/,message:"'as any' type assertion defeats TypeScript safety",violationType:"type_any"},{regex:/:\s*any\b/,message:"Explicit 'any' type annotation defeats TypeScript safety",violationType:"type_any"},{regex:/@ts-ignore/,message:"@ts-ignore directive suppresses type checking",violationType:"type_any"},{regex:/@ts-nocheck/,message:"@ts-nocheck directive disables type checking for entire file",violationType:"type_any"},{regex:/\bplaceholder\b/i,message:"Placeholder text found — likely incomplete implementation",violationType:"stub_detected"},{regex:/\bnotImplemented\b/,message:"notImplemented reference found — function is a stub",violationType:"stub_detected"},{regex:/\/\/\s*\.{3,}/,message:"Ellipsis comment found — indicates omitted code",violationType:"stub_detected"},{regex:/{\s*}\s*$/,message:"Empty function or block body — likely incomplete",violationType:"incomplete_function"},{regex:/=>\s*{\s*}\s*$/,message:"Empty arrow function body — likely incomplete",violationType:"incomplete_function"},{regex:/return\s*;\s*\/\/.*stub/i,message:"Bare return with stub comment — function is a stub",violationType:"stub_detected"}],g=[{regex:/\bXXX\b/,message:"XXX marker found — needs attention",violationType:"stub_detected"},{regex:/\bconsole\.log\b/,message:"console.log left in code — likely debug leftover",violationType:"console_log_leftover"},{regex:/\bconsole\.debug\b/,message:"console.debug left in code — likely debug leftover",violationType:"console_log_leftover"},{regex:/\bconsole\.warn\b/,message:"console.warn left in code — consider proper logging",violationType:"console_log_leftover"},{regex:/\.skip\s*\(/,message:".skip() found — test is being skipped",violationType:"test_skip"},{regex:/\bxit\s*\(/,message:"xit() found — Jasmine test is being skipped",violationType:"test_skip"},{regex:/\bxdescribe\s*\(/,message:"xdescribe() found — test suite is being skipped",violationType:"test_skip"},{regex:/\btest\.todo\s*\(/,message:"test.todo() found — test is a placeholder",violationType:"test_skip"},{regex:/\bit\.todo\s*\(/,message:"it.todo() found — test is a placeholder",violationType:"test_skip"},{regex:/\bNOTE\b:\s/,message:"NOTE marker found — consider converting to documentation",violationType:"stub_detected"}];function y(s,n,r){const i=[],o=[],c=s.split("\n"),d=r??"<inline>",u=function(s){const n=a(s,".dantecode","STATE.yaml");if(!e(n))return[];try{const e=t(n,"utf-8"),s=[];let r=!1,a={};const i=e.split("\n");for(const e of i){const t=e.trim();if("stub_patterns:"!==t){if(r){if(t.length>0&&!t.startsWith("-")&&!t.startsWith("pattern:")&&!t.startsWith("message:")&&!t.startsWith("severity:")&&!e.startsWith("    ")&&!e.startsWith("\t\t")){r=!1,a.regex&&a.message&&s.push({regex:new RegExp(a.regex),message:a.message,violationType:"stub_detected"});continue}if(t.startsWith("- pattern:")||t.startsWith("pattern:")){a.regex&&a.message&&s.push({regex:new RegExp(a.regex),message:a.message,violationType:"stub_detected"}),a={};const e=t.match(/pattern:\s*["'](.+?)["']/);e?.[1]&&(a.regex=e[1])}else if(t.startsWith("message:")){const e=t.match(/message:\s*["'](.+?)["']/);e?.[1]&&(a.message=e[1])}else if(t.startsWith("severity:")){const e=t.match(/severity:\s*["']?(\w+)["']?/);e?.[1]&&(a.severity=e[1])}}}else r=!0}return r&&a.regex&&a.message&&s.push({regex:new RegExp(a.regex),message:a.message,violationType:"stub_detected"}),s}catch{return[]}}(n),l=[...f,...u];for(let e=0;e<c.length;e++){const t=c[e];if(void 0===t)continue;const s=e+1,n=t.trim();if(0!==n.length){for(const e of l)if(e.regex.test(t)){if("incomplete_function"===e.violationType){if(/\b(interface|type|import|export\s+type)\b/.test(t))continue;if(/\(\s*{\s*}\s*\)/.test(t))continue;if(/=\s*{\s*}/.test(t)&&!/=>\s*{\s*}/.test(t))continue}if("type_any"===e.violationType&&/as\s+any/.test(t)){const e=t.replace(/(['"`])(?:(?!\1).)*\1/g,"");if(!/\bas\s+any\b/.test(e)&&!/:\s*any\b/.test(e))continue}i.push({type:e.violationType,severity:"hard",file:d,line:s,message:e.message,pattern:e.regex.source})}for(const e of g)if(e.regex.test(t)){if("console_log_leftover"===e.violationType){const e=n.replace(/(['"`])(?:(?!\1).)*\1/g,"");if(!/console\.(log|debug|warn)\b/.test(e))continue}o.push({type:e.violationType,severity:"soft",file:d,line:s,message:e.message,pattern:e.regex.source})}}}return{hardViolations:i,softViolations:o,passed:0===i.length,scannedLines:c.length,filePath:r}}function _(s,n){const a=r(n,s);if(!e(a))return{hardViolations:[{type:"stub_detected",severity:"hard",file:a,message:`File not found: ${a}`}],softViolations:[],passed:!1,scannedLines:0,filePath:a};return y(t(a,"utf-8"),n,a)}var v,b,x,k={};((e,t)=>{for(var s in t)m(e,s,{get:t[s],enumerable:!0})})(k,{BRAND:()=>st,DIRTY:()=>L,EMPTY_PATH:()=>P,INVALID:()=>M,NEVER:()=>Gt,OK:()=>F,ParseStatus:()=>D,Schema:()=>K,ZodAny:()=>$e,ZodArray:()=>Ae,ZodBigInt:()=>xe,ZodBoolean:()=>ke,ZodBranded:()=>nt,ZodCatch:()=>et,ZodDate:()=>we,ZodDefault:()=>Qe,ZodDiscriminatedUnion:()=>Re,ZodEffects:()=>Ge,ZodEnum:()=>Xe,ZodError:()=>$,ZodFirstPartyTypeKind:()=>ct,ZodFunction:()=>ze,ZodIntersection:()=>Me,ZodIssueCode:()=>E,ZodLazy:()=>Ve,ZodLiteral:()=>He,ZodMap:()=>Ue,ZodNaN:()=>tt,ZodNativeEnum:()=>qe,ZodNever:()=>Oe,ZodNull:()=>Se,ZodNullable:()=>Ye,ZodNumber:()=>be,ZodObject:()=>Pe,ZodOptional:()=>Je,ZodParsedType:()=>w,ZodPipeline:()=>rt,ZodPromise:()=>Ke,ZodReadonly:()=>at,ZodRecord:()=>Fe,ZodSchema:()=>K,ZodSet:()=>We,ZodString:()=>_e,ZodSymbol:()=>Te,ZodTransformer:()=>Ge,ZodTuple:()=>Le,ZodType:()=>K,ZodUndefined:()=>Ee,ZodUnion:()=>Ie,ZodUnknown:()=>Ne,ZodVoid:()=>Ce,addIssueToContext:()=>I,any:()=>xt,array:()=>Et,bigint:()=>ft,boolean:()=>gt,coerce:()=>Kt,custom:()=>ot,date:()=>yt,datetimeRegex:()=>me,defaultErrorMap:()=>N,discriminatedUnion:()=>Ot,effect:()=>Ut,enum:()=>Mt,function:()=>jt,getErrorMap:()=>A,getParsedType:()=>T,instanceof:()=>lt,intersection:()=>Ct,isAborted:()=>U,isAsync:()=>V,isDirty:()=>W,isValid:()=>z,late:()=>ut,lazy:()=>Rt,literal:()=>Dt,makeIssue:()=>Z,map:()=>Pt,nan:()=>mt,nativeEnum:()=>Lt,never:()=>wt,null:()=>bt,nullable:()=>zt,number:()=>ht,object:()=>St,objectUtil:()=>x,oboolean:()=>qt,onumber:()=>Xt,optional:()=>Wt,ostring:()=>Bt,pipeline:()=>Ht,preprocess:()=>Vt,promise:()=>Ft,quotelessJson:()=>S,record:()=>Zt,set:()=>It,setErrorMap:()=>C,strictObject:()=>$t,string:()=>pt,symbol:()=>_t,transformer:()=>Ut,tuple:()=>At,undefined:()=>vt,union:()=>Nt,unknown:()=>kt,util:()=>v,void:()=>Tt}),(b=v||(v={})).assertEqual=e=>{},b.assertIs=function(e){},b.assertNever=function(e){throw new Error},b.arrayToEnum=e=>{const t={};for(const s of e)t[s]=s;return t},b.getValidEnumValues=e=>{const t=b.objectKeys(e).filter(t=>"number"!=typeof e[e[t]]),s={};for(const n of t)s[n]=e[n];return b.objectValues(s)},b.objectValues=e=>b.objectKeys(e).map(function(t){return e[t]}),b.objectKeys="function"==typeof Object.keys?e=>Object.keys(e):e=>{const t=[];for(const s in e)Object.prototype.hasOwnProperty.call(e,s)&&t.push(s);return t},b.find=(e,t)=>{for(const s of e)if(t(s))return s},b.isInteger="function"==typeof Number.isInteger?e=>Number.isInteger(e):e=>"number"==typeof e&&Number.isFinite(e)&&Math.floor(e)===e,b.joinValues=function(e,t=" | "){return e.map(e=>"string"==typeof e?`'${e}'`:e).join(t)},b.jsonStringifyReplacer=(e,t)=>"bigint"==typeof t?t.toString():t,(x||(x={})).mergeShapes=(e,t)=>({...e,...t});var w=v.arrayToEnum(["string","nan","number","integer","float","boolean","date","bigint","symbol","function","undefined","null","array","object","unknown","promise","void","never","map","set"]),T=e=>{switch(typeof e){case"undefined":return w.undefined;case"string":return w.string;case"number":return Number.isNaN(e)?w.nan:w.number;case"boolean":return w.boolean;case"function":return w.function;case"bigint":return w.bigint;case"symbol":return w.symbol;case"object":return Array.isArray(e)?w.array:null===e?w.null:e.then&&"function"==typeof e.then&&e.catch&&"function"==typeof e.catch?w.promise:"undefined"!=typeof Map&&e instanceof Map?w.map:"undefined"!=typeof Set&&e instanceof Set?w.set:"undefined"!=typeof Date&&e instanceof Date?w.date:w.object;default:return w.unknown}},E=v.arrayToEnum(["invalid_type","invalid_literal","custom","invalid_union","invalid_union_discriminator","invalid_enum_value","unrecognized_keys","invalid_arguments","invalid_return_type","invalid_date","invalid_string","too_small","too_big","invalid_intersection_types","not_multiple_of","not_finite"]),S=e=>JSON.stringify(e,null,2).replace(/"([^"]+)":/g,"$1:"),$=class e extends Error{get errors(){return this.issues}constructor(e){super(),this.issues=[],this.addIssue=e=>{this.issues=[...this.issues,e]},this.addIssues=(e=[])=>{this.issues=[...this.issues,...e]};const t=new.target.prototype;Object.setPrototypeOf?Object.setPrototypeOf(this,t):this.__proto__=t,this.name="ZodError",this.issues=e}format(e){const t=e||function(e){return e.message},s={_errors:[]},n=e=>{for(const r of e.issues)if("invalid_union"===r.code)r.unionErrors.map(n);else if("invalid_return_type"===r.code)n(r.returnTypeError);else if("invalid_arguments"===r.code)n(r.argumentsError);else if(0===r.path.length)s._errors.push(t(r));else{let e=s,n=0;for(;n<r.path.length;){const s=r.path[n];n===r.path.length-1?(e[s]=e[s]||{_errors:[]},e[s]._errors.push(t(r))):e[s]=e[s]||{_errors:[]},e=e[s],n++}}};return n(this),s}static assert(t){if(!(t instanceof e))throw new Error(`Not a ZodError: ${t}`)}toString(){return this.message}get message(){return JSON.stringify(this.issues,v.jsonStringifyReplacer,2)}get isEmpty(){return 0===this.issues.length}flatten(e=e=>e.message){const t={},s=[];for(const n of this.issues)if(n.path.length>0){const s=n.path[0];t[s]=t[s]||[],t[s].push(e(n))}else s.push(e(n));return{formErrors:s,fieldErrors:t}}get formErrors(){return this.flatten()}};$.create=e=>new $(e);var N=(e,t)=>{let s;switch(e.code){case E.invalid_type:s=e.received===w.undefined?"Required":`Expected ${e.expected}, received ${e.received}`;break;case E.invalid_literal:s=`Invalid literal value, expected ${JSON.stringify(e.expected,v.jsonStringifyReplacer)}`;break;case E.unrecognized_keys:s=`Unrecognized key(s) in object: ${v.joinValues(e.keys,", ")}`;break;case E.invalid_union:s="Invalid input";break;case E.invalid_union_discriminator:s=`Invalid discriminator value. Expected ${v.joinValues(e.options)}`;break;case E.invalid_enum_value:s=`Invalid enum value. Expected ${v.joinValues(e.options)}, received '${e.received}'`;break;case E.invalid_arguments:s="Invalid function arguments";break;case E.invalid_return_type:s="Invalid function return type";break;case E.invalid_date:s="Invalid date";break;case E.invalid_string:"object"==typeof e.validation?"includes"in e.validation?(s=`Invalid input: must include "${e.validation.includes}"`,"number"==typeof e.validation.position&&(s=`${s} at one or more positions greater than or equal to ${e.validation.position}`)):"startsWith"in e.validation?s=`Invalid input: must start with "${e.validation.startsWith}"`:"endsWith"in e.validation?s=`Invalid input: must end with "${e.validation.endsWith}"`:v.assertNever(e.validation):s="regex"!==e.validation?`Invalid ${e.validation}`:"Invalid";break;case E.too_small:s="array"===e.type?`Array must contain ${e.exact?"exactly":e.inclusive?"at least":"more than"} ${e.minimum} element(s)`:"string"===e.type?`String must contain ${e.exact?"exactly":e.inclusive?"at least":"over"} ${e.minimum} character(s)`:"number"===e.type||"bigint"===e.type?`Number must be ${e.exact?"exactly equal to ":e.inclusive?"greater than or equal to ":"greater than "}${e.minimum}`:"date"===e.type?`Date must be ${e.exact?"exactly equal to ":e.inclusive?"greater than or equal to ":"greater than "}${new Date(Number(e.minimum))}`:"Invalid input";break;case E.too_big:s="array"===e.type?`Array must contain ${e.exact?"exactly":e.inclusive?"at most":"less than"} ${e.maximum} element(s)`:"string"===e.type?`String must contain ${e.exact?"exactly":e.inclusive?"at most":"under"} ${e.maximum} character(s)`:"number"===e.type?`Number must be ${e.exact?"exactly":e.inclusive?"less than or equal to":"less than"} ${e.maximum}`:"bigint"===e.type?`BigInt must be ${e.exact?"exactly":e.inclusive?"less than or equal to":"less than"} ${e.maximum}`:"date"===e.type?`Date must be ${e.exact?"exactly":e.inclusive?"smaller than or equal to":"smaller than"} ${new Date(Number(e.maximum))}`:"Invalid input";break;case E.custom:s="Invalid input";break;case E.invalid_intersection_types:s="Intersection results could not be merged";break;case E.not_multiple_of:s=`Number must be a multiple of ${e.multipleOf}`;break;case E.not_finite:s="Number must be finite";break;default:s=t.defaultError,v.assertNever(e)}return{message:s}},O=N;function C(e){O=e}function A(){return O}var Z=e=>{const{data:t,path:s,errorMaps:n,issueData:r}=e,a=[...s,...r.path||[]],i={...r,path:a};if(void 0!==r.message)return{...r,path:a,message:r.message};let o="";const c=n.filter(e=>!!e).slice().reverse();for(const e of c)o=e(i,{data:t,defaultError:o}).message;return{...r,path:a,message:o}},P=[];function I(e,t){const s=A(),n=Z({issueData:t,data:e.data,path:e.path,errorMaps:[e.common.contextualErrorMap,e.schemaErrorMap,s,s===N?void 0:N].filter(e=>!!e)});e.common.issues.push(n)}var j,R,D=class e{constructor(){this.value="valid"}dirty(){"valid"===this.value&&(this.value="dirty")}abort(){"aborted"!==this.value&&(this.value="aborted")}static mergeArray(e,t){const s=[];for(const n of t){if("aborted"===n.status)return M;"dirty"===n.status&&e.dirty(),s.push(n.value)}return{status:e.value,value:s}}static async mergeObjectAsync(t,s){const n=[];for(const e of s){const t=await e.key,s=await e.value;n.push({key:t,value:s})}return e.mergeObjectSync(t,n)}static mergeObjectSync(e,t){const s={};for(const n of t){const{key:t,value:r}=n;if("aborted"===t.status)return M;if("aborted"===r.status)return M;"dirty"===t.status&&e.dirty(),"dirty"===r.status&&e.dirty(),"__proto__"===t.value||void 0===r.value&&!n.alwaysSet||(s[t.value]=r.value)}return{status:e.value,value:s}}},M=Object.freeze({status:"aborted"}),L=e=>({status:"dirty",value:e}),F=e=>({status:"valid",value:e}),U=e=>"aborted"===e.status,W=e=>"dirty"===e.status,z=e=>"valid"===e.status,V=e=>"undefined"!=typeof Promise&&e instanceof Promise;(R=j||(j={})).errToObj=e=>"string"==typeof e?{message:e}:e||{},R.toString=e=>"string"==typeof e?e:e?.message;var H=class{constructor(e,t,s,n){this._cachedPath=[],this.parent=e,this.data=t,this._path=s,this._key=n}get path(){return this._cachedPath.length||(Array.isArray(this._key)?this._cachedPath.push(...this._path,...this._key):this._cachedPath.push(...this._path,this._key)),this._cachedPath}},B=(e,t)=>{if(z(t))return{success:!0,data:t.value};if(!e.common.issues.length)throw new Error("Validation failed but no issues detected.");return{success:!1,get error(){if(this._error)return this._error;const t=new $(e.common.issues);return this._error=t,this._error}}};function X(e){if(!e)return{};const{errorMap:t,invalid_type_error:s,required_error:n,description:r}=e;if(t&&(s||n))throw new Error('Can\'t use "invalid_type_error" or "required_error" in conjunction with custom error map.');if(t)return{errorMap:t,description:r};return{errorMap:(t,r)=>{const{message:a}=e;return"invalid_enum_value"===t.code?{message:a??r.defaultError}:void 0===r.data?{message:a??n??r.defaultError}:"invalid_type"!==t.code?{message:r.defaultError}:{message:a??s??r.defaultError}},description:r}}var q,K=class{get description(){return this._def.description}_getType(e){return T(e.data)}_getOrReturnCtx(e,t){return t||{common:e.parent.common,data:e.data,parsedType:T(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}_processInputParams(e){return{status:new D,ctx:{common:e.parent.common,data:e.data,parsedType:T(e.data),schemaErrorMap:this._def.errorMap,path:e.path,parent:e.parent}}}_parseSync(e){const t=this._parse(e);if(V(t))throw new Error("Synchronous parse encountered promise.");return t}_parseAsync(e){const t=this._parse(e);return Promise.resolve(t)}parse(e,t){const s=this.safeParse(e,t);if(s.success)return s.data;throw s.error}safeParse(e,t){const s={common:{issues:[],async:t?.async??!1,contextualErrorMap:t?.errorMap},path:t?.path||[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:T(e)},n=this._parseSync({data:e,path:s.path,parent:s});return B(s,n)}"~validate"(e){const t={common:{issues:[],async:!!this["~standard"].async},path:[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:T(e)};if(!this["~standard"].async)try{const s=this._parseSync({data:e,path:[],parent:t});return z(s)?{value:s.value}:{issues:t.common.issues}}catch(e){e?.message?.toLowerCase()?.includes("encountered")&&(this["~standard"].async=!0),t.common={issues:[],async:!0}}return this._parseAsync({data:e,path:[],parent:t}).then(e=>z(e)?{value:e.value}:{issues:t.common.issues})}async parseAsync(e,t){const s=await this.safeParseAsync(e,t);if(s.success)return s.data;throw s.error}async safeParseAsync(e,t){const s={common:{issues:[],contextualErrorMap:t?.errorMap,async:!0},path:t?.path||[],schemaErrorMap:this._def.errorMap,parent:null,data:e,parsedType:T(e)},n=this._parse({data:e,path:s.path,parent:s}),r=await(V(n)?n:Promise.resolve(n));return B(s,r)}refine(e,t){const s=e=>"string"==typeof t||void 0===t?{message:t}:"function"==typeof t?t(e):t;return this._refinement((t,n)=>{const r=e(t),a=()=>n.addIssue({code:E.custom,...s(t)});return"undefined"!=typeof Promise&&r instanceof Promise?r.then(e=>!!e||(a(),!1)):!!r||(a(),!1)})}refinement(e,t){return this._refinement((s,n)=>!!e(s)||(n.addIssue("function"==typeof t?t(s,n):t),!1))}_refinement(e){return new Ge({schema:this,typeName:ct.ZodEffects,effect:{type:"refinement",refinement:e}})}superRefine(e){return this._refinement(e)}constructor(e){this.spa=this.safeParseAsync,this._def=e,this.parse=this.parse.bind(this),this.safeParse=this.safeParse.bind(this),this.parseAsync=this.parseAsync.bind(this),this.safeParseAsync=this.safeParseAsync.bind(this),this.spa=this.spa.bind(this),this.refine=this.refine.bind(this),this.refinement=this.refinement.bind(this),this.superRefine=this.superRefine.bind(this),this.optional=this.optional.bind(this),this.nullable=this.nullable.bind(this),this.nullish=this.nullish.bind(this),this.array=this.array.bind(this),this.promise=this.promise.bind(this),this.or=this.or.bind(this),this.and=this.and.bind(this),this.transform=this.transform.bind(this),this.brand=this.brand.bind(this),this.default=this.default.bind(this),this.catch=this.catch.bind(this),this.describe=this.describe.bind(this),this.pipe=this.pipe.bind(this),this.readonly=this.readonly.bind(this),this.isNullable=this.isNullable.bind(this),this.isOptional=this.isOptional.bind(this),this["~standard"]={version:1,vendor:"zod",validate:e=>this["~validate"](e)}}optional(){return Je.create(this,this._def)}nullable(){return Ye.create(this,this._def)}nullish(){return this.nullable().optional()}array(){return Ae.create(this)}promise(){return Ke.create(this,this._def)}or(e){return Ie.create([this,e],this._def)}and(e){return Me.create(this,e,this._def)}transform(e){return new Ge({...X(this._def),schema:this,typeName:ct.ZodEffects,effect:{type:"transform",transform:e}})}default(e){const t="function"==typeof e?e:()=>e;return new Qe({...X(this._def),innerType:this,defaultValue:t,typeName:ct.ZodDefault})}brand(){return new nt({typeName:ct.ZodBranded,type:this,...X(this._def)})}catch(e){const t="function"==typeof e?e:()=>e;return new et({...X(this._def),innerType:this,catchValue:t,typeName:ct.ZodCatch})}describe(e){return new(0,this.constructor)({...this._def,description:e})}pipe(e){return rt.create(this,e)}readonly(){return at.create(this)}isOptional(){return this.safeParse(void 0).success}isNullable(){return this.safeParse(null).success}},G=/^c[^\s-]{8,}$/i,J=/^[0-9a-z]+$/,Y=/^[0-9A-HJKMNP-TV-Z]{26}$/i,Q=/^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/i,ee=/^[a-z0-9_-]{21}$/i,te=/^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/,se=/^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/,ne=/^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i,re=/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/,ae=/^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/(3[0-2]|[12]?[0-9])$/,ie=/^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/,oe=/^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/,ce=/^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/,de=/^([0-9a-zA-Z-_]{4})*(([0-9a-zA-Z-_]{2}(==)?)|([0-9a-zA-Z-_]{3}(=)?))?$/,ue="((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))",le=new RegExp(`^${ue}$`);function pe(e){let t="[0-5]\\d";e.precision?t=`${t}\\.\\d{${e.precision}}`:null==e.precision&&(t=`${t}(\\.\\d+)?`);return`([01]\\d|2[0-3]):[0-5]\\d(:${t})${e.precision?"+":"?"}`}function he(e){return new RegExp(`^${pe(e)}$`)}function me(e){let t=`${ue}T${pe(e)}`;const s=[];return s.push(e.local?"Z?":"Z"),e.offset&&s.push("([+-]\\d{2}:?\\d{2})"),t=`${t}(${s.join("|")})`,new RegExp(`^${t}$`)}function fe(e,t){return!("v4"!==t&&t||!re.test(e))||!("v6"!==t&&t||!ie.test(e))}function ge(e,t){if(!te.test(e))return!1;try{const[s]=e.split(".");if(!s)return!1;const n=s.replace(/-/g,"+").replace(/_/g,"/").padEnd(s.length+(4-s.length%4)%4,"="),r=JSON.parse(atob(n));return"object"==typeof r&&null!==r&&((!("typ"in r)||"JWT"===r?.typ)&&(!!r.alg&&(!t||r.alg===t)))}catch{return!1}}function ye(e,t){return!("v4"!==t&&t||!ae.test(e))||!("v6"!==t&&t||!oe.test(e))}var _e=class e extends K{_parse(e){this._def.coerce&&(e.data=String(e.data));if(this._getType(e)!==w.string){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.string,received:t.parsedType}),M}const t=new D;let s;for(const n of this._def.checks)if("min"===n.kind)e.data.length<n.value&&(s=this._getOrReturnCtx(e,s),I(s,{code:E.too_small,minimum:n.value,type:"string",inclusive:!0,exact:!1,message:n.message}),t.dirty());else if("max"===n.kind)e.data.length>n.value&&(s=this._getOrReturnCtx(e,s),I(s,{code:E.too_big,maximum:n.value,type:"string",inclusive:!0,exact:!1,message:n.message}),t.dirty());else if("length"===n.kind){const r=e.data.length>n.value,a=e.data.length<n.value;(r||a)&&(s=this._getOrReturnCtx(e,s),r?I(s,{code:E.too_big,maximum:n.value,type:"string",inclusive:!0,exact:!0,message:n.message}):a&&I(s,{code:E.too_small,minimum:n.value,type:"string",inclusive:!0,exact:!0,message:n.message}),t.dirty())}else if("email"===n.kind)ne.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"email",code:E.invalid_string,message:n.message}),t.dirty());else if("emoji"===n.kind)q||(q=new RegExp("^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$","u")),q.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"emoji",code:E.invalid_string,message:n.message}),t.dirty());else if("uuid"===n.kind)Q.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"uuid",code:E.invalid_string,message:n.message}),t.dirty());else if("nanoid"===n.kind)ee.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"nanoid",code:E.invalid_string,message:n.message}),t.dirty());else if("cuid"===n.kind)G.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"cuid",code:E.invalid_string,message:n.message}),t.dirty());else if("cuid2"===n.kind)J.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"cuid2",code:E.invalid_string,message:n.message}),t.dirty());else if("ulid"===n.kind)Y.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"ulid",code:E.invalid_string,message:n.message}),t.dirty());else if("url"===n.kind)try{new URL(e.data)}catch{s=this._getOrReturnCtx(e,s),I(s,{validation:"url",code:E.invalid_string,message:n.message}),t.dirty()}else if("regex"===n.kind){n.regex.lastIndex=0;n.regex.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"regex",code:E.invalid_string,message:n.message}),t.dirty())}else if("trim"===n.kind)e.data=e.data.trim();else if("includes"===n.kind)e.data.includes(n.value,n.position)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:{includes:n.value,position:n.position},message:n.message}),t.dirty());else if("toLowerCase"===n.kind)e.data=e.data.toLowerCase();else if("toUpperCase"===n.kind)e.data=e.data.toUpperCase();else if("startsWith"===n.kind)e.data.startsWith(n.value)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:{startsWith:n.value},message:n.message}),t.dirty());else if("endsWith"===n.kind)e.data.endsWith(n.value)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:{endsWith:n.value},message:n.message}),t.dirty());else if("datetime"===n.kind){me(n).test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:"datetime",message:n.message}),t.dirty())}else if("date"===n.kind){le.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:"date",message:n.message}),t.dirty())}else if("time"===n.kind){he(n).test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{code:E.invalid_string,validation:"time",message:n.message}),t.dirty())}else"duration"===n.kind?se.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"duration",code:E.invalid_string,message:n.message}),t.dirty()):"ip"===n.kind?fe(e.data,n.version)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"ip",code:E.invalid_string,message:n.message}),t.dirty()):"jwt"===n.kind?ge(e.data,n.alg)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"jwt",code:E.invalid_string,message:n.message}),t.dirty()):"cidr"===n.kind?ye(e.data,n.version)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"cidr",code:E.invalid_string,message:n.message}),t.dirty()):"base64"===n.kind?ce.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"base64",code:E.invalid_string,message:n.message}),t.dirty()):"base64url"===n.kind?de.test(e.data)||(s=this._getOrReturnCtx(e,s),I(s,{validation:"base64url",code:E.invalid_string,message:n.message}),t.dirty()):v.assertNever(n);return{status:t.value,value:e.data}}_regex(e,t,s){return this.refinement(t=>e.test(t),{validation:t,code:E.invalid_string,...j.errToObj(s)})}_addCheck(t){return new e({...this._def,checks:[...this._def.checks,t]})}email(e){return this._addCheck({kind:"email",...j.errToObj(e)})}url(e){return this._addCheck({kind:"url",...j.errToObj(e)})}emoji(e){return this._addCheck({kind:"emoji",...j.errToObj(e)})}uuid(e){return this._addCheck({kind:"uuid",...j.errToObj(e)})}nanoid(e){return this._addCheck({kind:"nanoid",...j.errToObj(e)})}cuid(e){return this._addCheck({kind:"cuid",...j.errToObj(e)})}cuid2(e){return this._addCheck({kind:"cuid2",...j.errToObj(e)})}ulid(e){return this._addCheck({kind:"ulid",...j.errToObj(e)})}base64(e){return this._addCheck({kind:"base64",...j.errToObj(e)})}base64url(e){return this._addCheck({kind:"base64url",...j.errToObj(e)})}jwt(e){return this._addCheck({kind:"jwt",...j.errToObj(e)})}ip(e){return this._addCheck({kind:"ip",...j.errToObj(e)})}cidr(e){return this._addCheck({kind:"cidr",...j.errToObj(e)})}datetime(e){return"string"==typeof e?this._addCheck({kind:"datetime",precision:null,offset:!1,local:!1,message:e}):this._addCheck({kind:"datetime",precision:void 0===e?.precision?null:e?.precision,offset:e?.offset??!1,local:e?.local??!1,...j.errToObj(e?.message)})}date(e){return this._addCheck({kind:"date",message:e})}time(e){return"string"==typeof e?this._addCheck({kind:"time",precision:null,message:e}):this._addCheck({kind:"time",precision:void 0===e?.precision?null:e?.precision,...j.errToObj(e?.message)})}duration(e){return this._addCheck({kind:"duration",...j.errToObj(e)})}regex(e,t){return this._addCheck({kind:"regex",regex:e,...j.errToObj(t)})}includes(e,t){return this._addCheck({kind:"includes",value:e,position:t?.position,...j.errToObj(t?.message)})}startsWith(e,t){return this._addCheck({kind:"startsWith",value:e,...j.errToObj(t)})}endsWith(e,t){return this._addCheck({kind:"endsWith",value:e,...j.errToObj(t)})}min(e,t){return this._addCheck({kind:"min",value:e,...j.errToObj(t)})}max(e,t){return this._addCheck({kind:"max",value:e,...j.errToObj(t)})}length(e,t){return this._addCheck({kind:"length",value:e,...j.errToObj(t)})}nonempty(e){return this.min(1,j.errToObj(e))}trim(){return new e({...this._def,checks:[...this._def.checks,{kind:"trim"}]})}toLowerCase(){return new e({...this._def,checks:[...this._def.checks,{kind:"toLowerCase"}]})}toUpperCase(){return new e({...this._def,checks:[...this._def.checks,{kind:"toUpperCase"}]})}get isDatetime(){return!!this._def.checks.find(e=>"datetime"===e.kind)}get isDate(){return!!this._def.checks.find(e=>"date"===e.kind)}get isTime(){return!!this._def.checks.find(e=>"time"===e.kind)}get isDuration(){return!!this._def.checks.find(e=>"duration"===e.kind)}get isEmail(){return!!this._def.checks.find(e=>"email"===e.kind)}get isURL(){return!!this._def.checks.find(e=>"url"===e.kind)}get isEmoji(){return!!this._def.checks.find(e=>"emoji"===e.kind)}get isUUID(){return!!this._def.checks.find(e=>"uuid"===e.kind)}get isNANOID(){return!!this._def.checks.find(e=>"nanoid"===e.kind)}get isCUID(){return!!this._def.checks.find(e=>"cuid"===e.kind)}get isCUID2(){return!!this._def.checks.find(e=>"cuid2"===e.kind)}get isULID(){return!!this._def.checks.find(e=>"ulid"===e.kind)}get isIP(){return!!this._def.checks.find(e=>"ip"===e.kind)}get isCIDR(){return!!this._def.checks.find(e=>"cidr"===e.kind)}get isBase64(){return!!this._def.checks.find(e=>"base64"===e.kind)}get isBase64url(){return!!this._def.checks.find(e=>"base64url"===e.kind)}get minLength(){let e=null;for(const t of this._def.checks)"min"===t.kind&&(null===e||t.value>e)&&(e=t.value);return e}get maxLength(){let e=null;for(const t of this._def.checks)"max"===t.kind&&(null===e||t.value<e)&&(e=t.value);return e}};function ve(e,t){const s=(e.toString().split(".")[1]||"").length,n=(t.toString().split(".")[1]||"").length,r=s>n?s:n;return Number.parseInt(e.toFixed(r).replace(".",""))%Number.parseInt(t.toFixed(r).replace(".",""))/10**r}_e.create=e=>new _e({checks:[],typeName:ct.ZodString,coerce:e?.coerce??!1,...X(e)});var be=class e extends K{constructor(){super(...arguments),this.min=this.gte,this.max=this.lte,this.step=this.multipleOf}_parse(e){this._def.coerce&&(e.data=Number(e.data));if(this._getType(e)!==w.number){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.number,received:t.parsedType}),M}let t;const s=new D;for(const n of this._def.checks)if("int"===n.kind)v.isInteger(e.data)||(t=this._getOrReturnCtx(e,t),I(t,{code:E.invalid_type,expected:"integer",received:"float",message:n.message}),s.dirty());else if("min"===n.kind){(n.inclusive?e.data<n.value:e.data<=n.value)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.too_small,minimum:n.value,type:"number",inclusive:n.inclusive,exact:!1,message:n.message}),s.dirty())}else if("max"===n.kind){(n.inclusive?e.data>n.value:e.data>=n.value)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.too_big,maximum:n.value,type:"number",inclusive:n.inclusive,exact:!1,message:n.message}),s.dirty())}else"multipleOf"===n.kind?0!==ve(e.data,n.value)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.not_multiple_of,multipleOf:n.value,message:n.message}),s.dirty()):"finite"===n.kind?Number.isFinite(e.data)||(t=this._getOrReturnCtx(e,t),I(t,{code:E.not_finite,message:n.message}),s.dirty()):v.assertNever(n);return{status:s.value,value:e.data}}gte(e,t){return this.setLimit("min",e,!0,j.toString(t))}gt(e,t){return this.setLimit("min",e,!1,j.toString(t))}lte(e,t){return this.setLimit("max",e,!0,j.toString(t))}lt(e,t){return this.setLimit("max",e,!1,j.toString(t))}setLimit(t,s,n,r){return new e({...this._def,checks:[...this._def.checks,{kind:t,value:s,inclusive:n,message:j.toString(r)}]})}_addCheck(t){return new e({...this._def,checks:[...this._def.checks,t]})}int(e){return this._addCheck({kind:"int",message:j.toString(e)})}positive(e){return this._addCheck({kind:"min",value:0,inclusive:!1,message:j.toString(e)})}negative(e){return this._addCheck({kind:"max",value:0,inclusive:!1,message:j.toString(e)})}nonpositive(e){return this._addCheck({kind:"max",value:0,inclusive:!0,message:j.toString(e)})}nonnegative(e){return this._addCheck({kind:"min",value:0,inclusive:!0,message:j.toString(e)})}multipleOf(e,t){return this._addCheck({kind:"multipleOf",value:e,message:j.toString(t)})}finite(e){return this._addCheck({kind:"finite",message:j.toString(e)})}safe(e){return this._addCheck({kind:"min",inclusive:!0,value:Number.MIN_SAFE_INTEGER,message:j.toString(e)})._addCheck({kind:"max",inclusive:!0,value:Number.MAX_SAFE_INTEGER,message:j.toString(e)})}get minValue(){let e=null;for(const t of this._def.checks)"min"===t.kind&&(null===e||t.value>e)&&(e=t.value);return e}get maxValue(){let e=null;for(const t of this._def.checks)"max"===t.kind&&(null===e||t.value<e)&&(e=t.value);return e}get isInt(){return!!this._def.checks.find(e=>"int"===e.kind||"multipleOf"===e.kind&&v.isInteger(e.value))}get isFinite(){let e=null,t=null;for(const s of this._def.checks){if("finite"===s.kind||"int"===s.kind||"multipleOf"===s.kind)return!0;"min"===s.kind?(null===t||s.value>t)&&(t=s.value):"max"===s.kind&&(null===e||s.value<e)&&(e=s.value)}return Number.isFinite(t)&&Number.isFinite(e)}};be.create=e=>new be({checks:[],typeName:ct.ZodNumber,coerce:e?.coerce||!1,...X(e)});var xe=class e extends K{constructor(){super(...arguments),this.min=this.gte,this.max=this.lte}_parse(e){if(this._def.coerce)try{e.data=BigInt(e.data)}catch{return this._getInvalidInput(e)}if(this._getType(e)!==w.bigint)return this._getInvalidInput(e);let t;const s=new D;for(const n of this._def.checks)if("min"===n.kind){(n.inclusive?e.data<n.value:e.data<=n.value)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.too_small,type:"bigint",minimum:n.value,inclusive:n.inclusive,message:n.message}),s.dirty())}else if("max"===n.kind){(n.inclusive?e.data>n.value:e.data>=n.value)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.too_big,type:"bigint",maximum:n.value,inclusive:n.inclusive,message:n.message}),s.dirty())}else"multipleOf"===n.kind?e.data%n.value!==BigInt(0)&&(t=this._getOrReturnCtx(e,t),I(t,{code:E.not_multiple_of,multipleOf:n.value,message:n.message}),s.dirty()):v.assertNever(n);return{status:s.value,value:e.data}}_getInvalidInput(e){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.bigint,received:t.parsedType}),M}gte(e,t){return this.setLimit("min",e,!0,j.toString(t))}gt(e,t){return this.setLimit("min",e,!1,j.toString(t))}lte(e,t){return this.setLimit("max",e,!0,j.toString(t))}lt(e,t){return this.setLimit("max",e,!1,j.toString(t))}setLimit(t,s,n,r){return new e({...this._def,checks:[...this._def.checks,{kind:t,value:s,inclusive:n,message:j.toString(r)}]})}_addCheck(t){return new e({...this._def,checks:[...this._def.checks,t]})}positive(e){return this._addCheck({kind:"min",value:BigInt(0),inclusive:!1,message:j.toString(e)})}negative(e){return this._addCheck({kind:"max",value:BigInt(0),inclusive:!1,message:j.toString(e)})}nonpositive(e){return this._addCheck({kind:"max",value:BigInt(0),inclusive:!0,message:j.toString(e)})}nonnegative(e){return this._addCheck({kind:"min",value:BigInt(0),inclusive:!0,message:j.toString(e)})}multipleOf(e,t){return this._addCheck({kind:"multipleOf",value:e,message:j.toString(t)})}get minValue(){let e=null;for(const t of this._def.checks)"min"===t.kind&&(null===e||t.value>e)&&(e=t.value);return e}get maxValue(){let e=null;for(const t of this._def.checks)"max"===t.kind&&(null===e||t.value<e)&&(e=t.value);return e}};xe.create=e=>new xe({checks:[],typeName:ct.ZodBigInt,coerce:e?.coerce??!1,...X(e)});var ke=class extends K{_parse(e){this._def.coerce&&(e.data=Boolean(e.data));if(this._getType(e)!==w.boolean){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.boolean,received:t.parsedType}),M}return F(e.data)}};ke.create=e=>new ke({typeName:ct.ZodBoolean,coerce:e?.coerce||!1,...X(e)});var we=class e extends K{_parse(e){this._def.coerce&&(e.data=new Date(e.data));if(this._getType(e)!==w.date){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.date,received:t.parsedType}),M}if(Number.isNaN(e.data.getTime())){return I(this._getOrReturnCtx(e),{code:E.invalid_date}),M}const t=new D;let s;for(const n of this._def.checks)"min"===n.kind?e.data.getTime()<n.value&&(s=this._getOrReturnCtx(e,s),I(s,{code:E.too_small,message:n.message,inclusive:!0,exact:!1,minimum:n.value,type:"date"}),t.dirty()):"max"===n.kind?e.data.getTime()>n.value&&(s=this._getOrReturnCtx(e,s),I(s,{code:E.too_big,message:n.message,inclusive:!0,exact:!1,maximum:n.value,type:"date"}),t.dirty()):v.assertNever(n);return{status:t.value,value:new Date(e.data.getTime())}}_addCheck(t){return new e({...this._def,checks:[...this._def.checks,t]})}min(e,t){return this._addCheck({kind:"min",value:e.getTime(),message:j.toString(t)})}max(e,t){return this._addCheck({kind:"max",value:e.getTime(),message:j.toString(t)})}get minDate(){let e=null;for(const t of this._def.checks)"min"===t.kind&&(null===e||t.value>e)&&(e=t.value);return null!=e?new Date(e):null}get maxDate(){let e=null;for(const t of this._def.checks)"max"===t.kind&&(null===e||t.value<e)&&(e=t.value);return null!=e?new Date(e):null}};we.create=e=>new we({checks:[],coerce:e?.coerce||!1,typeName:ct.ZodDate,...X(e)});var Te=class extends K{_parse(e){if(this._getType(e)!==w.symbol){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.symbol,received:t.parsedType}),M}return F(e.data)}};Te.create=e=>new Te({typeName:ct.ZodSymbol,...X(e)});var Ee=class extends K{_parse(e){if(this._getType(e)!==w.undefined){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.undefined,received:t.parsedType}),M}return F(e.data)}};Ee.create=e=>new Ee({typeName:ct.ZodUndefined,...X(e)});var Se=class extends K{_parse(e){if(this._getType(e)!==w.null){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.null,received:t.parsedType}),M}return F(e.data)}};Se.create=e=>new Se({typeName:ct.ZodNull,...X(e)});var $e=class extends K{constructor(){super(...arguments),this._any=!0}_parse(e){return F(e.data)}};$e.create=e=>new $e({typeName:ct.ZodAny,...X(e)});var Ne=class extends K{constructor(){super(...arguments),this._unknown=!0}_parse(e){return F(e.data)}};Ne.create=e=>new Ne({typeName:ct.ZodUnknown,...X(e)});var Oe=class extends K{_parse(e){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.never,received:t.parsedType}),M}};Oe.create=e=>new Oe({typeName:ct.ZodNever,...X(e)});var Ce=class extends K{_parse(e){if(this._getType(e)!==w.undefined){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.void,received:t.parsedType}),M}return F(e.data)}};Ce.create=e=>new Ce({typeName:ct.ZodVoid,...X(e)});var Ae=class e extends K{_parse(e){const{ctx:t,status:s}=this._processInputParams(e),n=this._def;if(t.parsedType!==w.array)return I(t,{code:E.invalid_type,expected:w.array,received:t.parsedType}),M;if(null!==n.exactLength){const e=t.data.length>n.exactLength.value,r=t.data.length<n.exactLength.value;(e||r)&&(I(t,{code:e?E.too_big:E.too_small,minimum:r?n.exactLength.value:void 0,maximum:e?n.exactLength.value:void 0,type:"array",inclusive:!0,exact:!0,message:n.exactLength.message}),s.dirty())}if(null!==n.minLength&&t.data.length<n.minLength.value&&(I(t,{code:E.too_small,minimum:n.minLength.value,type:"array",inclusive:!0,exact:!1,message:n.minLength.message}),s.dirty()),null!==n.maxLength&&t.data.length>n.maxLength.value&&(I(t,{code:E.too_big,maximum:n.maxLength.value,type:"array",inclusive:!0,exact:!1,message:n.maxLength.message}),s.dirty()),t.common.async)return Promise.all([...t.data].map((e,s)=>n.type._parseAsync(new H(t,e,t.path,s)))).then(e=>D.mergeArray(s,e));const r=[...t.data].map((e,s)=>n.type._parseSync(new H(t,e,t.path,s)));return D.mergeArray(s,r)}get element(){return this._def.type}min(t,s){return new e({...this._def,minLength:{value:t,message:j.toString(s)}})}max(t,s){return new e({...this._def,maxLength:{value:t,message:j.toString(s)}})}length(t,s){return new e({...this._def,exactLength:{value:t,message:j.toString(s)}})}nonempty(e){return this.min(1,e)}};function Ze(e){if(e instanceof Pe){const t={};for(const s in e.shape){const n=e.shape[s];t[s]=Je.create(Ze(n))}return new Pe({...e._def,shape:()=>t})}return e instanceof Ae?new Ae({...e._def,type:Ze(e.element)}):e instanceof Je?Je.create(Ze(e.unwrap())):e instanceof Ye?Ye.create(Ze(e.unwrap())):e instanceof Le?Le.create(e.items.map(e=>Ze(e))):e}Ae.create=(e,t)=>new Ae({type:e,minLength:null,maxLength:null,exactLength:null,typeName:ct.ZodArray,...X(t)});var Pe=class e extends K{constructor(){super(...arguments),this._cached=null,this.nonstrict=this.passthrough,this.augment=this.extend}_getCached(){if(null!==this._cached)return this._cached;const e=this._def.shape(),t=v.objectKeys(e);return this._cached={shape:e,keys:t},this._cached}_parse(e){if(this._getType(e)!==w.object){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.object,received:t.parsedType}),M}const{status:t,ctx:s}=this._processInputParams(e),{shape:n,keys:r}=this._getCached(),a=[];if(!(this._def.catchall instanceof Oe&&"strip"===this._def.unknownKeys))for(const e in s.data)r.includes(e)||a.push(e);const i=[];for(const e of r){const t=n[e],r=s.data[e];i.push({key:{status:"valid",value:e},value:t._parse(new H(s,r,s.path,e)),alwaysSet:e in s.data})}if(this._def.catchall instanceof Oe){const e=this._def.unknownKeys;if("passthrough"===e)for(const e of a)i.push({key:{status:"valid",value:e},value:{status:"valid",value:s.data[e]}});else if("strict"===e)a.length>0&&(I(s,{code:E.unrecognized_keys,keys:a}),t.dirty());else if("strip"!==e)throw new Error("Internal ZodObject error: invalid unknownKeys value.")}else{const e=this._def.catchall;for(const t of a){const n=s.data[t];i.push({key:{status:"valid",value:t},value:e._parse(new H(s,n,s.path,t)),alwaysSet:t in s.data})}}return s.common.async?Promise.resolve().then(async()=>{const e=[];for(const t of i){const s=await t.key,n=await t.value;e.push({key:s,value:n,alwaysSet:t.alwaysSet})}return e}).then(e=>D.mergeObjectSync(t,e)):D.mergeObjectSync(t,i)}get shape(){return this._def.shape()}strict(t){return j.errToObj,new e({...this._def,unknownKeys:"strict",...void 0!==t?{errorMap:(e,s)=>{const n=this._def.errorMap?.(e,s).message??s.defaultError;return"unrecognized_keys"===e.code?{message:j.errToObj(t).message??n}:{message:n}}}:{}})}strip(){return new e({...this._def,unknownKeys:"strip"})}passthrough(){return new e({...this._def,unknownKeys:"passthrough"})}extend(t){return new e({...this._def,shape:()=>({...this._def.shape(),...t})})}merge(t){return new e({unknownKeys:t._def.unknownKeys,catchall:t._def.catchall,shape:()=>({...this._def.shape(),...t._def.shape()}),typeName:ct.ZodObject})}setKey(e,t){return this.augment({[e]:t})}catchall(t){return new e({...this._def,catchall:t})}pick(t){const s={};for(const e of v.objectKeys(t))t[e]&&this.shape[e]&&(s[e]=this.shape[e]);return new e({...this._def,shape:()=>s})}omit(t){const s={};for(const e of v.objectKeys(this.shape))t[e]||(s[e]=this.shape[e]);return new e({...this._def,shape:()=>s})}deepPartial(){return Ze(this)}partial(t){const s={};for(const e of v.objectKeys(this.shape)){const n=this.shape[e];t&&!t[e]?s[e]=n:s[e]=n.optional()}return new e({...this._def,shape:()=>s})}required(t){const s={};for(const e of v.objectKeys(this.shape))if(t&&!t[e])s[e]=this.shape[e];else{let t=this.shape[e];for(;t instanceof Je;)t=t._def.innerType;s[e]=t}return new e({...this._def,shape:()=>s})}keyof(){return Be(v.objectKeys(this.shape))}};Pe.create=(e,t)=>new Pe({shape:()=>e,unknownKeys:"strip",catchall:Oe.create(),typeName:ct.ZodObject,...X(t)}),Pe.strictCreate=(e,t)=>new Pe({shape:()=>e,unknownKeys:"strict",catchall:Oe.create(),typeName:ct.ZodObject,...X(t)}),Pe.lazycreate=(e,t)=>new Pe({shape:e,unknownKeys:"strip",catchall:Oe.create(),typeName:ct.ZodObject,...X(t)});var Ie=class extends K{_parse(e){const{ctx:t}=this._processInputParams(e),s=this._def.options;if(t.common.async)return Promise.all(s.map(async e=>{const s={...t,common:{...t.common,issues:[]},parent:null};return{result:await e._parseAsync({data:t.data,path:t.path,parent:s}),ctx:s}})).then(function(e){for(const t of e)if("valid"===t.result.status)return t.result;for(const s of e)if("dirty"===s.result.status)return t.common.issues.push(...s.ctx.common.issues),s.result;const s=e.map(e=>new $(e.ctx.common.issues));return I(t,{code:E.invalid_union,unionErrors:s}),M});{let e;const n=[];for(const r of s){const s={...t,common:{...t.common,issues:[]},parent:null},a=r._parseSync({data:t.data,path:t.path,parent:s});if("valid"===a.status)return a;"dirty"!==a.status||e||(e={result:a,ctx:s}),s.common.issues.length&&n.push(s.common.issues)}if(e)return t.common.issues.push(...e.ctx.common.issues),e.result;const r=n.map(e=>new $(e));return I(t,{code:E.invalid_union,unionErrors:r}),M}}get options(){return this._def.options}};Ie.create=(e,t)=>new Ie({options:e,typeName:ct.ZodUnion,...X(t)});var je=e=>e instanceof Ve?je(e.schema):e instanceof Ge?je(e.innerType()):e instanceof He?[e.value]:e instanceof Xe?e.options:e instanceof qe?v.objectValues(e.enum):e instanceof Qe?je(e._def.innerType):e instanceof Ee?[void 0]:e instanceof Se?[null]:e instanceof Je?[void 0,...je(e.unwrap())]:e instanceof Ye?[null,...je(e.unwrap())]:e instanceof nt||e instanceof at?je(e.unwrap()):e instanceof et?je(e._def.innerType):[],Re=class e extends K{_parse(e){const{ctx:t}=this._processInputParams(e);if(t.parsedType!==w.object)return I(t,{code:E.invalid_type,expected:w.object,received:t.parsedType}),M;const s=this.discriminator,n=t.data[s],r=this.optionsMap.get(n);return r?t.common.async?r._parseAsync({data:t.data,path:t.path,parent:t}):r._parseSync({data:t.data,path:t.path,parent:t}):(I(t,{code:E.invalid_union_discriminator,options:Array.from(this.optionsMap.keys()),path:[s]}),M)}get discriminator(){return this._def.discriminator}get options(){return this._def.options}get optionsMap(){return this._def.optionsMap}static create(t,s,n){const r=new Map;for(const e of s){const s=je(e.shape[t]);if(!s.length)throw new Error(`A discriminator value for key \`${t}\` could not be extracted from all schema options`);for(const n of s){if(r.has(n))throw new Error(`Discriminator property ${String(t)} has duplicate value ${String(n)}`);r.set(n,e)}}return new e({typeName:ct.ZodDiscriminatedUnion,discriminator:t,options:s,optionsMap:r,...X(n)})}};function De(e,t){const s=T(e),n=T(t);if(e===t)return{valid:!0,data:e};if(s===w.object&&n===w.object){const s=v.objectKeys(t),n=v.objectKeys(e).filter(e=>-1!==s.indexOf(e)),r={...e,...t};for(const s of n){const n=De(e[s],t[s]);if(!n.valid)return{valid:!1};r[s]=n.data}return{valid:!0,data:r}}if(s===w.array&&n===w.array){if(e.length!==t.length)return{valid:!1};const s=[];for(let n=0;n<e.length;n++){const r=De(e[n],t[n]);if(!r.valid)return{valid:!1};s.push(r.data)}return{valid:!0,data:s}}return s===w.date&&n===w.date&&+e===+t?{valid:!0,data:e}:{valid:!1}}var Me=class extends K{_parse(e){const{status:t,ctx:s}=this._processInputParams(e),n=(e,n)=>{if(U(e)||U(n))return M;const r=De(e.value,n.value);return r.valid?((W(e)||W(n))&&t.dirty(),{status:t.value,value:r.data}):(I(s,{code:E.invalid_intersection_types}),M)};return s.common.async?Promise.all([this._def.left._parseAsync({data:s.data,path:s.path,parent:s}),this._def.right._parseAsync({data:s.data,path:s.path,parent:s})]).then(([e,t])=>n(e,t)):n(this._def.left._parseSync({data:s.data,path:s.path,parent:s}),this._def.right._parseSync({data:s.data,path:s.path,parent:s}))}};Me.create=(e,t,s)=>new Me({left:e,right:t,typeName:ct.ZodIntersection,...X(s)});var Le=class e extends K{_parse(e){const{status:t,ctx:s}=this._processInputParams(e);if(s.parsedType!==w.array)return I(s,{code:E.invalid_type,expected:w.array,received:s.parsedType}),M;if(s.data.length<this._def.items.length)return I(s,{code:E.too_small,minimum:this._def.items.length,inclusive:!0,exact:!1,type:"array"}),M;!this._def.rest&&s.data.length>this._def.items.length&&(I(s,{code:E.too_big,maximum:this._def.items.length,inclusive:!0,exact:!1,type:"array"}),t.dirty());const n=[...s.data].map((e,t)=>{const n=this._def.items[t]||this._def.rest;return n?n._parse(new H(s,e,s.path,t)):null}).filter(e=>!!e);return s.common.async?Promise.all(n).then(e=>D.mergeArray(t,e)):D.mergeArray(t,n)}get items(){return this._def.items}rest(t){return new e({...this._def,rest:t})}};Le.create=(e,t)=>{if(!Array.isArray(e))throw new Error("You must pass an array of schemas to z.tuple([ ... ])");return new Le({items:e,typeName:ct.ZodTuple,rest:null,...X(t)})};var Fe=class e extends K{get keySchema(){return this._def.keyType}get valueSchema(){return this._def.valueType}_parse(e){const{status:t,ctx:s}=this._processInputParams(e);if(s.parsedType!==w.object)return I(s,{code:E.invalid_type,expected:w.object,received:s.parsedType}),M;const n=[],r=this._def.keyType,a=this._def.valueType;for(const e in s.data)n.push({key:r._parse(new H(s,e,s.path,e)),value:a._parse(new H(s,s.data[e],s.path,e)),alwaysSet:e in s.data});return s.common.async?D.mergeObjectAsync(t,n):D.mergeObjectSync(t,n)}get element(){return this._def.valueType}static create(t,s,n){return new e(s instanceof K?{keyType:t,valueType:s,typeName:ct.ZodRecord,...X(n)}:{keyType:_e.create(),valueType:t,typeName:ct.ZodRecord,...X(s)})}},Ue=class extends K{get keySchema(){return this._def.keyType}get valueSchema(){return this._def.valueType}_parse(e){const{status:t,ctx:s}=this._processInputParams(e);if(s.parsedType!==w.map)return I(s,{code:E.invalid_type,expected:w.map,received:s.parsedType}),M;const n=this._def.keyType,r=this._def.valueType,a=[...s.data.entries()].map(([e,t],a)=>({key:n._parse(new H(s,e,s.path,[a,"key"])),value:r._parse(new H(s,t,s.path,[a,"value"]))}));if(s.common.async){const e=new Map;return Promise.resolve().then(async()=>{for(const s of a){const n=await s.key,r=await s.value;if("aborted"===n.status||"aborted"===r.status)return M;"dirty"!==n.status&&"dirty"!==r.status||t.dirty(),e.set(n.value,r.value)}return{status:t.value,value:e}})}{const e=new Map;for(const s of a){const n=s.key,r=s.value;if("aborted"===n.status||"aborted"===r.status)return M;"dirty"!==n.status&&"dirty"!==r.status||t.dirty(),e.set(n.value,r.value)}return{status:t.value,value:e}}}};Ue.create=(e,t,s)=>new Ue({valueType:t,keyType:e,typeName:ct.ZodMap,...X(s)});var We=class e extends K{_parse(e){const{status:t,ctx:s}=this._processInputParams(e);if(s.parsedType!==w.set)return I(s,{code:E.invalid_type,expected:w.set,received:s.parsedType}),M;const n=this._def;null!==n.minSize&&s.data.size<n.minSize.value&&(I(s,{code:E.too_small,minimum:n.minSize.value,type:"set",inclusive:!0,exact:!1,message:n.minSize.message}),t.dirty()),null!==n.maxSize&&s.data.size>n.maxSize.value&&(I(s,{code:E.too_big,maximum:n.maxSize.value,type:"set",inclusive:!0,exact:!1,message:n.maxSize.message}),t.dirty());const r=this._def.valueType;function a(e){const s=new Set;for(const n of e){if("aborted"===n.status)return M;"dirty"===n.status&&t.dirty(),s.add(n.value)}return{status:t.value,value:s}}const i=[...s.data.values()].map((e,t)=>r._parse(new H(s,e,s.path,t)));return s.common.async?Promise.all(i).then(e=>a(e)):a(i)}min(t,s){return new e({...this._def,minSize:{value:t,message:j.toString(s)}})}max(t,s){return new e({...this._def,maxSize:{value:t,message:j.toString(s)}})}size(e,t){return this.min(e,t).max(e,t)}nonempty(e){return this.min(1,e)}};We.create=(e,t)=>new We({valueType:e,minSize:null,maxSize:null,typeName:ct.ZodSet,...X(t)});var ze=class e extends K{constructor(){super(...arguments),this.validate=this.implement}_parse(e){const{ctx:t}=this._processInputParams(e);if(t.parsedType!==w.function)return I(t,{code:E.invalid_type,expected:w.function,received:t.parsedType}),M;function s(e,s){return Z({data:e,path:t.path,errorMaps:[t.common.contextualErrorMap,t.schemaErrorMap,A(),N].filter(e=>!!e),issueData:{code:E.invalid_arguments,argumentsError:s}})}function n(e,s){return Z({data:e,path:t.path,errorMaps:[t.common.contextualErrorMap,t.schemaErrorMap,A(),N].filter(e=>!!e),issueData:{code:E.invalid_return_type,returnTypeError:s}})}const r={errorMap:t.common.contextualErrorMap},a=t.data;if(this._def.returns instanceof Ke){const e=this;return F(async function(...t){const i=new $([]),o=await e._def.args.parseAsync(t,r).catch(e=>{throw i.addIssue(s(t,e)),i}),c=await Reflect.apply(a,this,o);return await e._def.returns._def.type.parseAsync(c,r).catch(e=>{throw i.addIssue(n(c,e)),i})})}{const e=this;return F(function(...t){const i=e._def.args.safeParse(t,r);if(!i.success)throw new $([s(t,i.error)]);const o=Reflect.apply(a,this,i.data),c=e._def.returns.safeParse(o,r);if(!c.success)throw new $([n(o,c.error)]);return c.data})}}parameters(){return this._def.args}returnType(){return this._def.returns}args(...t){return new e({...this._def,args:Le.create(t).rest(Ne.create())})}returns(t){return new e({...this._def,returns:t})}implement(e){return this.parse(e)}strictImplement(e){return this.parse(e)}static create(t,s,n){return new e({args:t||Le.create([]).rest(Ne.create()),returns:s||Ne.create(),typeName:ct.ZodFunction,...X(n)})}},Ve=class extends K{get schema(){return this._def.getter()}_parse(e){const{ctx:t}=this._processInputParams(e);return this._def.getter()._parse({data:t.data,path:t.path,parent:t})}};Ve.create=(e,t)=>new Ve({getter:e,typeName:ct.ZodLazy,...X(t)});var He=class extends K{_parse(e){if(e.data!==this._def.value){const t=this._getOrReturnCtx(e);return I(t,{received:t.data,code:E.invalid_literal,expected:this._def.value}),M}return{status:"valid",value:e.data}}get value(){return this._def.value}};function Be(e,t){return new Xe({values:e,typeName:ct.ZodEnum,...X(t)})}He.create=(e,t)=>new He({value:e,typeName:ct.ZodLiteral,...X(t)});var Xe=class e extends K{_parse(e){if("string"!=typeof e.data){const t=this._getOrReturnCtx(e),s=this._def.values;return I(t,{expected:v.joinValues(s),received:t.parsedType,code:E.invalid_type}),M}if(this._cache||(this._cache=new Set(this._def.values)),!this._cache.has(e.data)){const t=this._getOrReturnCtx(e),s=this._def.values;return I(t,{received:t.data,code:E.invalid_enum_value,options:s}),M}return F(e.data)}get options(){return this._def.values}get enum(){const e={};for(const t of this._def.values)e[t]=t;return e}get Values(){const e={};for(const t of this._def.values)e[t]=t;return e}get Enum(){const e={};for(const t of this._def.values)e[t]=t;return e}extract(t,s=this._def){return e.create(t,{...this._def,...s})}exclude(t,s=this._def){return e.create(this.options.filter(e=>!t.includes(e)),{...this._def,...s})}};Xe.create=Be;var qe=class extends K{_parse(e){const t=v.getValidEnumValues(this._def.values),s=this._getOrReturnCtx(e);if(s.parsedType!==w.string&&s.parsedType!==w.number){const e=v.objectValues(t);return I(s,{expected:v.joinValues(e),received:s.parsedType,code:E.invalid_type}),M}if(this._cache||(this._cache=new Set(v.getValidEnumValues(this._def.values))),!this._cache.has(e.data)){const e=v.objectValues(t);return I(s,{received:s.data,code:E.invalid_enum_value,options:e}),M}return F(e.data)}get enum(){return this._def.values}};qe.create=(e,t)=>new qe({values:e,typeName:ct.ZodNativeEnum,...X(t)});var Ke=class extends K{unwrap(){return this._def.type}_parse(e){const{ctx:t}=this._processInputParams(e);if(t.parsedType!==w.promise&&!1===t.common.async)return I(t,{code:E.invalid_type,expected:w.promise,received:t.parsedType}),M;const s=t.parsedType===w.promise?t.data:Promise.resolve(t.data);return F(s.then(e=>this._def.type.parseAsync(e,{path:t.path,errorMap:t.common.contextualErrorMap})))}};Ke.create=(e,t)=>new Ke({type:e,typeName:ct.ZodPromise,...X(t)});var Ge=class extends K{innerType(){return this._def.schema}sourceType(){return this._def.schema._def.typeName===ct.ZodEffects?this._def.schema.sourceType():this._def.schema}_parse(e){const{status:t,ctx:s}=this._processInputParams(e),n=this._def.effect||null,r={addIssue:e=>{I(s,e),e.fatal?t.abort():t.dirty()},get path(){return s.path}};if(r.addIssue=r.addIssue.bind(r),"preprocess"===n.type){const e=n.transform(s.data,r);if(s.common.async)return Promise.resolve(e).then(async e=>{if("aborted"===t.value)return M;const n=await this._def.schema._parseAsync({data:e,path:s.path,parent:s});return"aborted"===n.status?M:"dirty"===n.status||"dirty"===t.value?L(n.value):n});{if("aborted"===t.value)return M;const n=this._def.schema._parseSync({data:e,path:s.path,parent:s});return"aborted"===n.status?M:"dirty"===n.status||"dirty"===t.value?L(n.value):n}}if("refinement"===n.type){const e=e=>{const t=n.refinement(e,r);if(s.common.async)return Promise.resolve(t);if(t instanceof Promise)throw new Error("Async refinement encountered during synchronous parse operation. Use .parseAsync instead.");return e};if(!1===s.common.async){const n=this._def.schema._parseSync({data:s.data,path:s.path,parent:s});return"aborted"===n.status?M:("dirty"===n.status&&t.dirty(),e(n.value),{status:t.value,value:n.value})}return this._def.schema._parseAsync({data:s.data,path:s.path,parent:s}).then(s=>"aborted"===s.status?M:("dirty"===s.status&&t.dirty(),e(s.value).then(()=>({status:t.value,value:s.value}))))}if("transform"===n.type){if(!1===s.common.async){const e=this._def.schema._parseSync({data:s.data,path:s.path,parent:s});if(!z(e))return M;const a=n.transform(e.value,r);if(a instanceof Promise)throw new Error("Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.");return{status:t.value,value:a}}return this._def.schema._parseAsync({data:s.data,path:s.path,parent:s}).then(e=>z(e)?Promise.resolve(n.transform(e.value,r)).then(e=>({status:t.value,value:e})):M)}v.assertNever(n)}};Ge.create=(e,t,s)=>new Ge({schema:e,typeName:ct.ZodEffects,effect:t,...X(s)}),Ge.createWithPreprocess=(e,t,s)=>new Ge({schema:t,effect:{type:"preprocess",transform:e},typeName:ct.ZodEffects,...X(s)});var Je=class extends K{_parse(e){return this._getType(e)===w.undefined?F(void 0):this._def.innerType._parse(e)}unwrap(){return this._def.innerType}};Je.create=(e,t)=>new Je({innerType:e,typeName:ct.ZodOptional,...X(t)});var Ye=class extends K{_parse(e){return this._getType(e)===w.null?F(null):this._def.innerType._parse(e)}unwrap(){return this._def.innerType}};Ye.create=(e,t)=>new Ye({innerType:e,typeName:ct.ZodNullable,...X(t)});var Qe=class extends K{_parse(e){const{ctx:t}=this._processInputParams(e);let s=t.data;return t.parsedType===w.undefined&&(s=this._def.defaultValue()),this._def.innerType._parse({data:s,path:t.path,parent:t})}removeDefault(){return this._def.innerType}};Qe.create=(e,t)=>new Qe({innerType:e,typeName:ct.ZodDefault,defaultValue:"function"==typeof t.default?t.default:()=>t.default,...X(t)});var et=class extends K{_parse(e){const{ctx:t}=this._processInputParams(e),s={...t,common:{...t.common,issues:[]}},n=this._def.innerType._parse({data:s.data,path:s.path,parent:{...s}});return V(n)?n.then(e=>({status:"valid",value:"valid"===e.status?e.value:this._def.catchValue({get error(){return new $(s.common.issues)},input:s.data})})):{status:"valid",value:"valid"===n.status?n.value:this._def.catchValue({get error(){return new $(s.common.issues)},input:s.data})}}removeCatch(){return this._def.innerType}};et.create=(e,t)=>new et({innerType:e,typeName:ct.ZodCatch,catchValue:"function"==typeof t.catch?t.catch:()=>t.catch,...X(t)});var tt=class extends K{_parse(e){if(this._getType(e)!==w.nan){const t=this._getOrReturnCtx(e);return I(t,{code:E.invalid_type,expected:w.nan,received:t.parsedType}),M}return{status:"valid",value:e.data}}};tt.create=e=>new tt({typeName:ct.ZodNaN,...X(e)});var st=Symbol("zod_brand"),nt=class extends K{_parse(e){const{ctx:t}=this._processInputParams(e),s=t.data;return this._def.type._parse({data:s,path:t.path,parent:t})}unwrap(){return this._def.type}},rt=class e extends K{_parse(e){const{status:t,ctx:s}=this._processInputParams(e);if(s.common.async){return(async()=>{const e=await this._def.in._parseAsync({data:s.data,path:s.path,parent:s});return"aborted"===e.status?M:"dirty"===e.status?(t.dirty(),L(e.value)):this._def.out._parseAsync({data:e.value,path:s.path,parent:s})})()}{const e=this._def.in._parseSync({data:s.data,path:s.path,parent:s});return"aborted"===e.status?M:"dirty"===e.status?(t.dirty(),{status:"dirty",value:e.value}):this._def.out._parseSync({data:e.value,path:s.path,parent:s})}}static create(t,s){return new e({in:t,out:s,typeName:ct.ZodPipeline})}},at=class extends K{_parse(e){const t=this._def.innerType._parse(e),s=e=>(z(e)&&(e.value=Object.freeze(e.value)),e);return V(t)?t.then(e=>s(e)):s(t)}unwrap(){return this._def.innerType}};function it(e,t){const s="function"==typeof e?e(t):"string"==typeof e?{message:e}:e;return"string"==typeof s?{message:s}:s}function ot(e,t={},s){return e?$e.create().superRefine((n,r)=>{const a=e(n);if(a instanceof Promise)return a.then(e=>{if(!e){const e=it(t,n),a=e.fatal??s??!0;r.addIssue({code:"custom",...e,fatal:a})}});if(!a){const e=it(t,n),a=e.fatal??s??!0;r.addIssue({code:"custom",...e,fatal:a})}}):$e.create()}at.create=(e,t)=>new at({innerType:e,typeName:ct.ZodReadonly,...X(t)});var ct,dt,ut={object:Pe.lazycreate};(dt=ct||(ct={})).ZodString="ZodString",dt.ZodNumber="ZodNumber",dt.ZodNaN="ZodNaN",dt.ZodBigInt="ZodBigInt",dt.ZodBoolean="ZodBoolean",dt.ZodDate="ZodDate",dt.ZodSymbol="ZodSymbol",dt.ZodUndefined="ZodUndefined",dt.ZodNull="ZodNull",dt.ZodAny="ZodAny",dt.ZodUnknown="ZodUnknown",dt.ZodNever="ZodNever",dt.ZodVoid="ZodVoid",dt.ZodArray="ZodArray",dt.ZodObject="ZodObject",dt.ZodUnion="ZodUnion",dt.ZodDiscriminatedUnion="ZodDiscriminatedUnion",dt.ZodIntersection="ZodIntersection",dt.ZodTuple="ZodTuple",dt.ZodRecord="ZodRecord",dt.ZodMap="ZodMap",dt.ZodSet="ZodSet",dt.ZodFunction="ZodFunction",dt.ZodLazy="ZodLazy",dt.ZodLiteral="ZodLiteral",dt.ZodEnum="ZodEnum",dt.ZodEffects="ZodEffects",dt.ZodNativeEnum="ZodNativeEnum",dt.ZodOptional="ZodOptional",dt.ZodNullable="ZodNullable",dt.ZodDefault="ZodDefault",dt.ZodCatch="ZodCatch",dt.ZodPromise="ZodPromise",dt.ZodBranded="ZodBranded",dt.ZodPipeline="ZodPipeline",dt.ZodReadonly="ZodReadonly";var lt=(e,t={message:`Input not instance of ${e.name}`})=>ot(t=>t instanceof e,t),pt=_e.create,ht=be.create,mt=tt.create,ft=xe.create,gt=ke.create,yt=we.create,_t=Te.create,vt=Ee.create,bt=Se.create,xt=$e.create,kt=Ne.create,wt=Oe.create,Tt=Ce.create,Et=Ae.create,St=Pe.create,$t=Pe.strictCreate,Nt=Ie.create,Ot=Re.create,Ct=Me.create,At=Le.create,Zt=Fe.create,Pt=Ue.create,It=We.create,jt=ze.create,Rt=Ve.create,Dt=He.create,Mt=Xe.create,Lt=qe.create,Ft=Ke.create,Ut=Ge.create,Wt=Je.create,zt=Ye.create,Vt=Ge.createWithPreprocess,Ht=rt.create,Bt=()=>pt().optional(),Xt=()=>ht().optional(),qt=()=>gt().optional(),Kt={string:e=>_e.create({...e,coerce:!0}),number:e=>be.create({...e,coerce:!0}),boolean:e=>ke.create({...e,coerce:!0}),bigint:e=>xe.create({...e,coerce:!0}),date:e=>we.create({...e,coerce:!0})},Gt=M,Jt=k.object({completeness:k.number().min(0).max(100),correctness:k.number().min(0).max(100),clarity:k.number().min(0).max(100),consistency:k.number().min(0).max(100),violations:k.array(k.object({type:k.string(),message:k.string(),line:k.number().optional()}))}),Yt={threshold:70,hardViolationsAllowed:0,maxRegenerationAttempts:3,weights:{completeness:.35,correctness:.3,clarity:.2,consistency:.15}};function Qt(e){return Math.max(0,Math.min(100,Math.round(e)))}function es(e,t,s,n,r=Yt.weights){const a=e*r.completeness+t*r.correctness+s*r.clarity+n*r.consistency;return Math.round(100*a)/100}async function ts(e,t,s,n){const r={...Yt,...n},a={...Yt.weights,...n?.weights},i=y(e,s),o=[...i.hardViolations,...i.softViolations];let c=null;try{const s='You are a strict code quality evaluator. Analyze the following code and return a JSON object with exactly these fields:\n\n{\n  "completeness": <0-100 score: are all functions implemented, no stubs, no missing logic?>,\n  "correctness": <0-100 score: is the logic correct, error handling present, edge cases covered?>,\n  "clarity": <0-100 score: is naming clear, code readable, well-structured?>,\n  "consistency": <0-100 score: consistent style, patterns, naming conventions?>,\n  "violations": [\n    { "type": "<violation_type>", "message": "<description>", "line": <line_number_or_null> }\n  ]\n}\n\nScoring guidelines:\n- completeness: Deduct heavily for TODO/FIXME/stub patterns, empty functions, missing error handling paths\n- correctness: Deduct for logic errors, missing null checks, uncaught exceptions, race conditions\n- clarity: Deduct for poor naming, deep nesting, god functions (>50 lines), magic numbers\n- consistency: Deduct for mixed naming conventions, inconsistent error handling patterns, mixed import styles\n- violations: List every concrete issue found\n\nReturn ONLY valid JSON, no markdown fences, no explanation.\n\nCode to evaluate:\n'+e;c=function(e){let t=e.trim();const s=t.match(/```(?:json)?\s*([\s\S]*?)```/);s?.[1]&&(t=s[1].trim());const n=t.match(/\{[\s\S]*\}/);n?.[0]&&(t=n[0]);try{const e=JSON.parse(t),s=Jt.safeParse(e);if(s.success)return s.data;if("object"==typeof e&&null!==e){const t=e;return{completeness:Qt(Number(t.completeness)||0),correctness:Qt(Number(t.correctness)||0),clarity:Qt(Number(t.clarity)||0),consistency:Qt(Number(t.consistency)||0),violations:Array.isArray(t.violations)?t.violations.map(e=>({type:String(e.type??"unknown"),message:String(e.message??"Unknown violation"),line:"number"==typeof e.line?e.line:void 0})):[]}}}catch{}return null}(await t.chat(s,{temperature:.1,maxTokens:2048}))}catch{return ns(e,s)}if(null===c){return ns(e,s)}let d=c.clarity;i.hardViolations.length>0&&(d=0);const u=[...o,...c.violations.map(e=>({type:ss(e.type),severity:"soft",file:"<evaluated>",line:e.line,message:e.message}))],l=es(c.completeness,c.correctness,d,c.consistency,a),p=u.filter(e=>"hard"===e.severity).length,h=l>=r.threshold&&p<=r.hardViolationsAllowed;return{completeness:c.completeness,correctness:c.correctness,clarity:d,consistency:c.consistency,overall:l,violations:u,passedGate:h,scoredAt:(new Date).toISOString(),scoredBy:"pdse-model"}}function ss(e){return{stub:"stub_detected",stub_detected:"stub_detected",incomplete:"incomplete_function",incomplete_function:"incomplete_function",error_handling:"missing_error_handling",missing_error_handling:"missing_error_handling",any:"type_any",type_any:"type_any",secret:"hardcoded_secret",hardcoded_secret:"hardcoded_secret",console:"console_log_leftover",console_log:"console_log_leftover",console_log_leftover:"console_log_leftover",test_skip:"test_skip",skip:"test_skip",unused_import:"import_unused",import_unused:"import_unused",dead_code:"dead_code",background:"background_process",background_process:"background_process"}[e.toLowerCase().replace(/[^a-z_]/g,"")]??"stub_detected"}function ns(e,t){const s=e.split("\n"),n=[],r=y(e,t);n.push(...r.hardViolations,...r.softViolations);let a=100;const i=(e.match(/(?:function\s+\w+|(?:const|let|var)\s+\w+\s*=\s*(?:async\s+)?(?:\([^)]*\)|[^=])\s*=>|(?:async\s+)?\w+\s*\([^)]*\)\s*{)/g)??[]).length,o=e.match(/(?:=>|{)\s*(?:\/\/[^\n]*\n\s*)?}\s*$/gm)??[];if(o.length>0&&i>0){const e=o.length/i;a-=Math.round(60*e)}(e.match(/\bexport\b/g)??[]).length>5&&s.length<30&&(a-=20,n.push({type:"incomplete_function",severity:"soft",file:"<evaluated>",message:"Many exports in very short file suggests incomplete implementations"}));let c=100;const d=/\btry\s*{/.test(e),u=/\.catch\s*\(/.test(e),l=/catch\s*\(\s*\w+\s*\)/.test(e),p=/\basync\b/.test(e),h=/\bPromise\b/.test(e)||/\bawait\b/.test(e);!p&&!h||d||u||(c-=25,n.push({type:"missing_error_handling",severity:"soft",file:"<evaluated>",message:"Async code detected without try/catch or .catch() error handling"}));const m=(e.match(/\bthrow\b/g)??[]).length,f=(e.match(/\bcatch\b/g)??[]).length;m>0&&0===f&&!l&&(c-=15);const g=(e.match(/\.\w+/g)??[]).length,_=(e.match(/(?:\?\.|!= ?null|!== ?null|!= ?undefined|!== ?undefined|\?\?)/g)??[]).length;g>20&&0===_&&(c-=10,n.push({type:"missing_error_handling",severity:"soft",file:"<evaluated>",message:"Many property accesses with no null/undefined guards"}));let v=100;if(r.hardViolations.length>0)v=0;else{let e=0,t=-1;for(let r=0;r<s.length;r++){const a=s[r];if(void 0===a)continue;const i=(a.match(/{/g)??[]).length;if(0===e&&i>0&&(t=r),e+=i-(a.match(/}/g)??[]).length,0===e&&t>=0){const e=r-t+1;e>50&&(v-=10,n.push({type:"incomplete_function",severity:"soft",file:"<evaluated>",line:t+1,message:`Function body is ${e} lines long (>50 lines recommended max)`})),t=-1}}const r=/(?<!const\s+\w+\s*=\s*.*?)(?<![.\w])\b(\d+)\b(?![\w.])/g;let a=0;for(const e of s){if(void 0===e)continue;const t=e.trim();if(/^\s*(const|let|var|import|\/\/|\/\*|\*)/.test(t))continue;const s=t.matchAll(r);for(const e of s){const t=Number(e[1]);0!==t&&1!==t&&-1!==t&&2!==t&&100!==t&&a++}}a>5&&(v-=10,n.push({type:"stub_detected",severity:"soft",file:"<evaluated>",message:`${a} magic numbers found — consider using named constants`}));const i=/\b(?:const|let|var)\s+([a-z])\b/g;let o=0;for(const e of s){if(void 0===e)continue;const t=e.matchAll(i);for(const e of t){const t=e[1];t&&!["i","j","k","e","_","x","y","z"].includes(t)&&o++}}o>3&&(v-=10)}let b=100;const x=(e.match(/'/g)??[]).length,k=(e.match(/"/g)??[]).length;if(x>5&&k>5){Math.min(x,k)/Math.max(x,k)>.3&&(b-=5)}const w=/\bexport\s+default\b/.test(e),T=/\bexport\s+(?:const|function|class|interface|type|enum)\b/.test(e);w&&T&&(b-=5);const E=s.filter(e=>void 0!==e&&e.trim().endsWith(";")&&!e.trim().startsWith("//")&&!e.trim().startsWith("*")).length,S=s.filter(e=>{if(void 0===e)return!1;const t=e.trim();return!(!(t.length>0)||t.endsWith(";")||t.endsWith("{")||t.endsWith("}")||t.endsWith(",")||t.endsWith("(")||t.endsWith(")")||t.startsWith("//")||t.startsWith("*")||t.startsWith("import")||t.startsWith("export")||/^\s*$/.test(t))}).length;if(E>5&&S>5){Math.min(E,S)/Math.max(E,S)>.3&&(b-=10)}const $=s.filter(e=>void 0!==e&&/^\t/.test(e)).length,N=s.filter(e=>void 0!==e&&/^ {2,}/.test(e)).length;$>3&&N>3&&(b-=15,n.push({type:"stub_detected",severity:"soft",file:"<evaluated>",message:"Mixed indentation (tabs and spaces) detected"})),a=Qt(a),c=Qt(c),v=Qt(v),b=Qt(b);const O=es(a,c,v,b),C=n.filter(e=>"hard"===e.severity).length;return{completeness:a,correctness:c,clarity:v,consistency:b,overall:O,violations:n,passedGate:O>=Yt.threshold&&0===C,scoredAt:(new Date).toISOString(),scoredBy:"pdse-local"}}var rs=new Set(["assoc","break","call","cd","chdir","cls","color","copy","date","del","dir","echo","endlocal","erase","for","ftype","goto","if","md","mkdir","mklink","move","path","pause","popd","prompt","pushd","rd","rem","ren","rename","rmdir","set","setlocal","shift","start","time","title","type","ver","verify","vol"]);function as(t,s){return new Promise(n=>{const a=Date.now(),i=r(s);if(!e(i))return void n({command:t.command,exitCode:1,stdout:"",stderr:`Working directory does not exist: ${i}`,durationMs:0,passed:!1});const c=function(e){const t=[];let s="",n=!1,r=!1,a=!1;for(let i=0;i<e.length;i++){const o=e[i];a?(s+=o,a=!1):"\\"!==o?"'"!==o||r?'"'!==o||n?" "!==o||n||r?s+=o:s.length>0&&(t.push(s),s=""):r=!r:n=!n:a=!0}s.length>0&&t.push(s);return t}(t.command),d=c[0],u=c.slice(1);if(!d)return void n({command:t.command,exitCode:1,stdout:"",stderr:`Empty command: ${t.command}`,durationMs:0,passed:!1});const l=function(e,t){if(/[|><;&]/.test(e)||/\$\(/.test(e))return!0;if("win32"!==process.platform)return!1;return rs.has(t.toLowerCase())}(t.command,d);let p;p=l?o(t.command,[],{cwd:i,shell:!0,stdio:["ignore","pipe","pipe"],env:{...process.env}}):o(d,u,{cwd:i,shell:!1,stdio:["ignore","pipe","pipe"],env:{...process.env}});const h=[],m=[];let f,g=!1;t.timeoutMs>0&&(f=setTimeout(()=>{g=!0,p.kill("SIGTERM"),setTimeout(()=>{p.killed||p.kill("SIGKILL")},2e3)},t.timeoutMs)),p.stdout.on("data",e=>{h.push(e)}),p.stderr.on("data",e=>{m.push(e)}),p.on("close",e=>{void 0!==f&&clearTimeout(f);const s=Date.now()-a,r=Buffer.concat(h).toString("utf-8"),i=Buffer.concat(m).toString("utf-8"),o=g?124:e??1,c=!!t.failureIsSoft||0===o;n(g?{command:t.command,exitCode:124,stdout:r,stderr:i+`\n[GStack] Process killed after ${t.timeoutMs}ms timeout`,durationMs:s,passed:t.failureIsSoft}:{command:t.command,exitCode:o,stdout:r,stderr:i,durationMs:s,passed:c})}),p.on("error",e=>{void 0!==f&&clearTimeout(f);const s=Date.now()-a;n({command:t.command,exitCode:127,stdout:"",stderr:`Failed to spawn process: ${e.message}`,durationMs:s,passed:t.failureIsSoft})})})}async function is(e,t,s){const n=[];for(const e of t){const t=await as(e,s);n.push(t)}return n}function os(e){return e.every(e=>e.passed)}function cs(e){const t=[];for(const s of e){const e=s.passed?"PASS":"FAIL";if(t.push(`[${e}] ${s.command} (exit=${s.exitCode}, ${s.durationMs}ms)`),!s.passed&&s.stderr.length>0){const e=s.stderr.split("\n").slice(0,5);for(const s of e)t.push(`  stderr: ${s}`)}}return t.join("\n")}function ds(e){return a(r(e),".dantecode","lessons.db")}var us=null;async function ls(n){const i=await async function(){return null===us&&(us=c()),us}(),o=ds(n),d=a(r(n),".dantecode");e(d)||s(d,{recursive:!0});const u=e(o)?new i.Database(t(o)):new i.Database;return u.run("\n    CREATE TABLE IF NOT EXISTS lessons (\n      id TEXT PRIMARY KEY,\n      project_root TEXT NOT NULL,\n      pattern TEXT NOT NULL,\n      correction TEXT NOT NULL,\n      file_pattern TEXT,\n      language TEXT,\n      framework TEXT,\n      occurrences INTEGER NOT NULL DEFAULT 1,\n      last_seen TEXT NOT NULL,\n      severity TEXT NOT NULL DEFAULT 'warning',\n      type TEXT NOT NULL DEFAULT 'failure',\n      source TEXT NOT NULL DEFAULT 'autoforge'\n    )\n  "),function(e){const t=e.exec("PRAGMA table_info(lessons)");(t.length>0?new Set(t[0].values.map(e=>String(e[1]??""))):new Set).has("type")||(e.run("ALTER TABLE lessons ADD COLUMN type TEXT NOT NULL DEFAULT 'failure'"),e.run("UPDATE lessons SET type = 'failure' WHERE type IS NULL OR type = ''"))}(u),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_project_root ON lessons(project_root)"),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_severity ON lessons(severity)"),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_pattern ON lessons(pattern)"),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_language ON lessons(language)"),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_file_pattern ON lessons(file_pattern)"),u.run("CREATE INDEX IF NOT EXISTS idx_lessons_type ON lessons(type)"),u}function ps(e,t){const s=ds(t),r=e.export();n(s,Buffer.from(r))}var hs={critical:4,error:3,warning:2,info:1};function ms(e){if(0===e.length||!e[0])return[];const t=e[0].columns;return e[0].values.map(e=>{const s={};return t.forEach((t,n)=>{s[t]=e[n]??null}),s})}function fs(e){return{id:e.id,projectRoot:e.project_root,pattern:e.pattern,correction:e.correction,filePattern:e.file_pattern??void 0,language:e.language??void 0,framework:e.framework??void 0,occurrences:e.occurrences,lastSeen:e.last_seen,severity:e.severity,type:e.type??"failure",source:e.source}}async function gs(e,t){const s=await ls(t),n=r(t);try{const t=e.id??d(),r=(new Date).toISOString(),a=e.type??"failure",i=ms(s.exec("SELECT id, occurrences, type FROM lessons\n         WHERE pattern = $pattern AND project_root = $root AND type = $type\n         LIMIT 1",{$pattern:e.pattern,$root:n,$type:a}));if(i.length>0){const t=i[0];return s.run("UPDATE lessons\n         SET correction = $correction,\n             file_pattern = $filePattern,\n             language = $language,\n             framework = $framework,\n             occurrences = occurrences + 1,\n             last_seen = $lastSeen,\n             severity = $severity,\n             type = $type,\n             source = $source\n         WHERE id = $id",{$correction:e.correction,$filePattern:e.filePattern??null,$language:e.language??null,$framework:e.framework??null,$lastSeen:r,$severity:e.severity,$type:a,$source:e.source,$id:t.id}),ps(s,n),{...e,id:t.id,projectRoot:n,occurrences:t.occurrences+1,lastSeen:r,type:a}}return s.run("INSERT INTO lessons (\n        id, project_root, pattern, correction, file_pattern, language, framework,\n        occurrences, last_seen, severity, type, source\n      ) VALUES (\n        $id, $root, $pattern, $correction, $filePattern, $language, $framework,\n        $occurrences, $lastSeen, $severity, $type, $source\n      )",{$id:t,$root:n,$pattern:e.pattern,$correction:e.correction,$filePattern:e.filePattern??null,$language:e.language??null,$framework:e.framework??null,$occurrences:e.occurrences??1,$lastSeen:e.lastSeen??r,$severity:e.severity,$type:a,$source:e.source}),ps(s,n),{...e,id:t,projectRoot:n,occurrences:e.occurrences??1,lastSeen:e.lastSeen??r,type:a}}finally{s.close()}}async function ys(e,t){const s=r(t);return gs({...e,projectRoot:e.projectRoot??s,type:"success",severity:e.severity??"info",source:e.source??"autoforge"},s)}async function _s(e,t){const s=r(t);return gs({...e,projectRoot:e.projectRoot??s,type:"preference",severity:e.severity??"info",source:e.source??"user"},s)}async function vs(e){const t=await ls(e.projectRoot),s=r(e.projectRoot);try{const r=["project_root = $root"],a={$root:s};e.filePattern&&(r.push("(file_pattern IS NULL OR file_pattern LIKE $filePattern)"),a.$filePattern=`%${e.filePattern}%`),e.language&&(r.push("(language IS NULL OR language = $language)"),a.$language=e.language),e.minSeverity&&(a.$minSeverityRank=(n=e.minSeverity,hs[n]??0),r.push("\n        CASE severity\n          WHEN 'critical' THEN 4\n          WHEN 'error' THEN 3\n          WHEN 'warning' THEN 2\n          WHEN 'info' THEN 1\n          ELSE 0\n        END >= $minSeverityRank\n      ")),e.type&&(r.push("type = $type"),a.$type=e.type),a.$limit=e.limit;const i=`\n      SELECT * FROM lessons\n      WHERE ${r.join(" AND ")}\n      ORDER BY\n        CASE type\n          WHEN 'preference' THEN 3\n          WHEN 'success' THEN 2\n          WHEN 'failure' THEN 1\n          ELSE 0\n        END DESC,\n        CASE severity\n          WHEN 'critical' THEN 4\n          WHEN 'error' THEN 3\n          WHEN 'warning' THEN 2\n          WHEN 'info' THEN 1\n          ELSE 0\n        END DESC,\n        occurrences DESC\n      LIMIT $limit\n    `;return ms(t.exec(i,a)).map(fs)}finally{t.close()}var n}async function bs(e){const t=await ls(e),s=r(e);try{const e=t.exec("SELECT COUNT(*) as count FROM lessons WHERE project_root = $root",{$root:s});if(0===e.length||!e[0]||0===e[0].values.length)return 0;const n=e[0].values[0];return n&&Number(n[0])||0}finally{t.close()}}async function xs(e,t){const s=await ls(t),n=r(t);try{const t=s.exec("SELECT COUNT(*) as count FROM lessons WHERE id = $id AND project_root = $root",{$id:e,$root:n});return 0!==(t.length>0&&t[0]&&t[0].values.length>0&&t[0].values[0]?Number(t[0].values[0][0]):0)&&(s.run("DELETE FROM lessons WHERE id = $id AND project_root = $root",{$id:e,$root:n}),ps(s,n),!0)}finally{s.close()}}async function ks(e){const t=await ls(e),s=r(e);try{const e=t.exec("SELECT COUNT(*) as count FROM lessons WHERE project_root = $root",{$root:s}),n=e.length>0&&e[0]&&e[0].values.length>0&&e[0].values[0]?Number(e[0].values[0][0]):0;return t.run("DELETE FROM lessons WHERE project_root = $root",{$root:s}),ps(t,s),n}finally{t.close()}}function ws(e){if(0===e.length)return"";return`## Previously Learned Lessons (${e.length} relevant)\n\n`+e.map((e,t)=>{const s=[`### Lesson ${t+1} [${e.type.toUpperCase()} / ${e.severity.toUpperCase()}] (seen ${e.occurrences}x)`,`**Pattern:** ${e.pattern}`,`**Correction:** ${e.correction}`];return e.filePattern&&s.push(`**Applies to files:** ${e.filePattern}`),e.language&&s.push(`**Language:** ${e.language}`),e.framework&&s.push(`**Framework:** ${e.framework}`),s.join("\n")}).join("\n\n")}var Ts=[{regex:/(?:api[_-]?key|apikey)\s*[:=]\s*['"`][A-Za-z0-9_\-]{16,}['"`]/i,type:"credential_exposure",severity:"critical",message:"Hardcoded API key detected in string literal"},{regex:/(?:password|passwd|pwd)\s*[:=]\s*['"`][^'"`]{4,}['"`]/i,type:"credential_exposure",severity:"critical",message:"Hardcoded password detected in string literal"},{regex:/(?:secret|secret[_-]?key)\s*[:=]\s*['"`][A-Za-z0-9_\-]{8,}['"`]/i,type:"credential_exposure",severity:"critical",message:"Hardcoded secret/secret key detected in string literal"},{regex:/(?:access[_-]?token|auth[_-]?token|bearer[_-]?token)\s*[:=]\s*['"`][A-Za-z0-9_\-/.]{16,}['"`]/i,type:"credential_exposure",severity:"critical",message:"Hardcoded access/auth token detected in string literal"},{regex:/(?:private[_-]?key)\s*[:=]\s*['"`]-----BEGIN/i,type:"credential_exposure",severity:"critical",message:"Hardcoded private key detected"},{regex:/(?:aws[_-]?access[_-]?key[_-]?id)\s*[:=]\s*['"`]AKIA[A-Z0-9]{16}['"`]/i,type:"credential_exposure",severity:"critical",message:"AWS access key ID detected in string literal"},{regex:/(?:aws[_-]?secret[_-]?access[_-]?key)\s*[:=]\s*['"`][A-Za-z0-9/+=]{40}['"`]/i,type:"credential_exposure",severity:"critical",message:"AWS secret access key detected in string literal"},{regex:/(?:database[_-]?url|db[_-]?url|connection[_-]?string)\s*[:=]\s*['"`](?:postgres|mysql|mongodb|redis):\/\/[^'"`]+['"`]/i,type:"credential_exposure",severity:"critical",message:"Database connection string with potential credentials detected"},{regex:/(?:gh[ps]_[A-Za-z0-9_]{36,})/,type:"credential_exposure",severity:"critical",message:"GitHub token pattern (ghp_/ghs_) detected in code"},{regex:/(?:sk-[A-Za-z0-9]{32,})/,type:"credential_exposure",severity:"critical",message:"OpenAI API key pattern (sk-) detected in code"},{regex:/(?:xox[bpsa]-[A-Za-z0-9\-]{10,})/,type:"credential_exposure",severity:"critical",message:"Slack token pattern (xoxb-/xoxp-) detected in code"},{regex:/GOCSPX-[A-Za-z0-9_\-]{28,}/,type:"credential_exposure",severity:"critical",message:"Google OAuth client secret detected"}],Es=[{regex:/\bnohup\b/,type:"background_process",severity:"warning",message:"nohup usage detected — may spawn persistent background process"},{regex:/\bdisown\b/,type:"background_process",severity:"warning",message:"disown usage detected — detaches process from terminal"},{regex:/\bdaemon\b(?:\s*\(|\s*:)/,type:"background_process",severity:"warning",message:"Daemon process pattern detected"},{regex:/&\s*$/,type:"background_process",severity:"warning",message:"Background execution operator (&) at end of command"},{regex:/\bchild_process\.fork\b/,type:"background_process",severity:"warning",message:"child_process.fork() — spawns a detached child process"},{regex:/\bdetached\s*:\s*true\b/,type:"background_process",severity:"warning",message:"Process spawned with detached: true — runs independently of parent"},{regex:/\bcluster\.fork\b/,type:"background_process",severity:"warning",message:"cluster.fork() — spawns a worker process"},{regex:/\bpm2\s+start\b/,type:"background_process",severity:"warning",message:"PM2 process manager start command detected"},{regex:/\bforever\s+start\b/,type:"background_process",severity:"warning",message:"forever process manager start command detected"}],Ss=[{regex:/rm\s+-rf\s+\/(?!\w)/,type:"dangerous_operation",severity:"critical",message:"Destructive command: rm -rf / — would delete entire filesystem"},{regex:/rm\s+-rf\s+~\//,type:"dangerous_operation",severity:"critical",message:"Destructive command: rm -rf ~/ — would delete home directory"},{regex:/rm\s+-rf\s+\$\{?HOME\}?/,type:"dangerous_operation",severity:"critical",message:"Destructive command: rm -rf $HOME — would delete home directory"},{regex:/\bDROP\s+TABLE\b/i,type:"dangerous_operation",severity:"critical",message:"DROP TABLE statement detected — destructive database operation"},{regex:/\bDROP\s+DATABASE\b/i,type:"dangerous_operation",severity:"critical",message:"DROP DATABASE statement detected — destructive database operation"},{regex:/\bTRUNCATE\s+TABLE\b/i,type:"dangerous_operation",severity:"critical",message:"TRUNCATE TABLE statement detected — deletes all data"},{regex:/\bDELETE\s+FROM\s+\w+\s*(?:;|$)/i,type:"dangerous_operation",severity:"warning",message:"DELETE FROM without WHERE clause — would delete all rows"},{regex:/\beval\s*\(\s*(?:req\.|request\.|params\.|body\.|query\.|input|user)/,type:"code_injection",severity:"critical",message:"eval() with user input — critical code injection vulnerability"},{regex:/new\s+Function\s*\(\s*(?:req\.|request\.|params\.|body\.|query\.|input|user)/,type:"code_injection",severity:"critical",message:"new Function() with user input — critical code injection vulnerability"},{regex:/\bexec\s*\(\s*(?:req\.|request\.|params\.|body\.|query\.|input|user|`)/,type:"code_injection",severity:"critical",message:"exec() with user input — command injection vulnerability"},{regex:/child_process.*exec\s*\(\s*`/,type:"code_injection",severity:"critical",message:"child_process exec with template literal — potential command injection"},{regex:/\bexecSync\s*\(\s*`/,type:"code_injection",severity:"warning",message:"execSync with template literal — potential command injection"},{regex:/\b__proto__\s*\[/,type:"code_injection",severity:"critical",message:"Prototype pollution via __proto__ access"},{regex:/\bconstructor\s*\[\s*['"`]prototype['"`]\s*\]/,type:"code_injection",severity:"critical",message:"Prototype pollution via constructor.prototype access"},{regex:/innerHTML\s*=\s*(?:req\.|request\.|params\.|body\.|query\.|input|user)/,type:"code_injection",severity:"critical",message:"innerHTML assignment with user input — XSS vulnerability"},{regex:/document\.write\s*\(\s*(?:req\.|request\.|params\.|body\.|query\.|input|user)/,type:"code_injection",severity:"critical",message:"document.write() with user input — XSS vulnerability"},{regex:/\bchmod\s+777\b/,type:"dangerous_operation",severity:"warning",message:"chmod 777 — sets world-readable/writable/executable permissions"},{regex:/\bchmod\s+666\b/,type:"dangerous_operation",severity:"warning",message:"chmod 666 — sets world-readable/writable permissions"},{regex:/\bcurl\b.*\|\s*(?:sh|bash|zsh)\b/,type:"dangerous_operation",severity:"critical",message:"curl piped to shell — remote code execution risk"},{regex:/\bwget\b.*\|\s*(?:sh|bash|zsh)\b/,type:"dangerous_operation",severity:"critical",message:"wget piped to shell — remote code execution risk"},{regex:/\b::\(\)\s*{\s*:\s*\|\s*:\s*&\s*}\s*;\s*:/,type:"dangerous_operation",severity:"critical",message:"Fork bomb pattern detected"},{regex:/>\s*\/dev\/sd[a-z]/,type:"dangerous_operation",severity:"critical",message:"Direct write to block device — could destroy disk data"},{regex:/\bmkfs\b/,type:"dangerous_operation",severity:"critical",message:"mkfs (make filesystem) command — formats a disk partition"},{regex:/\bdd\s+if=.*of=\/dev\//,type:"dangerous_operation",severity:"critical",message:"dd writing to device — could destroy disk data"}],$s=[...Ts,...Es,...Ss];function Ns(e,t){const s=[],n=e.split("\n");for(let e=0;e<n.length;e++){const t=n[e];if(void 0===t)continue;const r=e+1;if(0!==t.trim().length&&(!/^\s*\*\s/.test(t)||/:/.test(t)))for(const e of $s)if(e.regex.test(t)){if("credential_exposure"===e.type){if(/:\s*string\s*[;,}]/.test(t)&&!/'|"|`/.test(t))continue;if(/^\s*\/\//.test(t)&&!/:=/.test(t.replace(/\/\/.*/,"")))continue;if(/process\.env\.\w+/.test(t)&&!/['"`][A-Za-z0-9_\-]{16,}['"`]/.test(t))continue}if("background_process"===e.type&&/&\s*$/.test(t)&&!/(?:exec|spawn|system|sh |bash |cmd )/.test(t)&&!/['"`].*&\s*['"`]/.test(t)&&(/&&/.test(t)||/&\s*\w/.test(t)))continue;s.push({type:e.type,severity:e.severity,line:r,message:e.message,pattern:e.regex.source})}}return{passed:0===s.length,violations:s,scannedLines:n.length,filePath:t}}function Os(e){const t=Math.max(0,Math.min(100,e)),s=Math.floor(t/10),n=10-s;return"█".repeat(s)+"░".repeat(n)}function Cs(e){const t=Os(e.percentComplete),s=e.estimatedCostUsd.toFixed(3);return`Autoforge Phase ${e.phase}/${e.totalPhases}  [${t}]  ${e.percentComplete}%  •  PDSE ${e.pdseScore}  •  Est. $${s}`}function As(e){const t=e;return t.getCostEstimate?.().sessionTotalUsd??0}async function Zs(e,t,s){if(!t)return s();await l(i(t.targetPath),{recursive:!0}),await p(t.targetPath,e,"utf-8");try{return await s()}finally{t.existedOnDisk&&null!==t.originalContent?await p(t.targetPath,t.originalContent,"utf-8"):await h(t.targetPath).catch(()=>{})}}function Ps(e,t,s,n,r){const a=[];if(a.push("# Code Regeneration Request\n\nThe previous code generation did not pass quality gates. Please regenerate the code addressing ALL of the issues listed below.\n"),a.push(`## Original Task\n\n${r.taskDescription}\n`),r.filePath&&a.push(`**Target file:** ${r.filePath}`),r.language&&a.push(`**Language:** ${r.language}`),r.framework&&a.push(`**Framework:** ${r.framework}`),t&&(a.push(`\n## PDSE Quality Score (Failed)\n\n- **Overall:** ${t.overall}/100 (gate threshold requires >= 70)\n- **Completeness:** ${t.completeness}/100 (weight: 35%)\n- **Correctness:** ${t.correctness}/100 (weight: 30%)\n- **Clarity:** ${t.clarity}/100 (weight: 20%)\n- **Consistency:** ${t.consistency}/100 (weight: 15%)\n`),t.violations.length>0)){a.push("### Violations Found\n");const e=t.violations.filter(e=>"hard"===e.severity),s=t.violations.filter(e=>"soft"===e.severity);if(e.length>0){a.push("**HARD violations (MUST fix):**");for(const t of e){const e=t.line?` (line ${t.line})`:"";a.push(`- [${t.type}]${e}: ${t.message}`)}a.push("")}if(s.length>0){a.push("**Soft violations (should fix):**");for(const e of s){const t=e.line?` (line ${e.line})`:"";a.push(`- [${e.type}]${t}: ${e.message}`)}a.push("")}}const i=s.filter(e=>!e.passed);if(i.length>0){a.push("## GStack Command Failures\n");for(const e of i){if(a.push(`### Command: \`${e.command}\``),a.push(`- **Exit code:** ${e.exitCode}`),a.push(`- **Duration:** ${e.durationMs}ms`),e.stderr.trim().length>0){const t=e.stderr.length>2e3?e.stderr.slice(0,2e3)+"\n... (truncated)":e.stderr;a.push(`- **Error output:**\n\`\`\`\n${t}\n\`\`\``)}if(e.stdout.trim().length>0){const t=e.stdout.length>1e3?e.stdout.slice(0,1e3)+"\n... (truncated)":e.stdout;a.push(`- **Standard output:**\n\`\`\`\n${t}\n\`\`\``)}a.push("")}}const o=ws(n);return o.length>0&&a.push(o),a.push("\n## Current Code (needs fixes)\n\n```\n"+e+"\n```\n"),a.push("\n## Instructions\n\n1. Fix ALL hard violations listed above — these are blocking.\n2. Address soft violations where possible.\n3. Ensure the code passes all GStack commands (build, test, lint).\n4. Apply corrections from the lessons section.\n5. Return ONLY the complete, corrected source code.\n6. Do NOT include markdown fences, explanations, or comments about changes.\n7. The code must be complete — no stubs, no TODOs, no placeholders.\n"),a.join("\n")}function Is(e){const t=e.match(/```(?:\w+)?\s*\n([\s\S]*?)```/);if(t?.[1])return t[1].trim();const s=e.trim();if(/^(?:import|export|const|let|var|function|class|interface|type|enum|\/\/|\/\*|#!)/m.test(s)){const e=s.split("\n"),t=[];let n=!1;for(const s of e)n||/^(?:Note:|Changes:|This |I |Here |The above|Explanation:)/i.test(s.trim())?n=!0:t.push(s);return t.join("\n").trim()}return s}async function js(e,t,s,n,a,i){const o=[];let c=e,d=null;const l=Date.now(),p=await async function(e,t){if(!e.filePath)return null;const s=r(t,e.filePath);try{return{existedOnDisk:!0,originalContent:await u(s,"utf-8"),targetPath:s}}catch{return{existedOnDisk:!1,originalContent:null,targetPath:s}}}(t,a),h=s,m=h.hardCeiling??200;let f=void 0!==h.hardCeiling?Math.min(s.maxIterations,m):s.maxIterations;h.persistUntilGreen&&(f=s.maxIterations);let g=0;for(let e=1;e<=f;e++){const r=Date.now();i?.({phase:e,totalPhases:f,percentComplete:Math.floor((e-1)/f*100),pdseScore:g,estimatedCostUsd:As(n),currentTask:`Running iteration ${e}...`,silentMode:h.silentMode??!1});const u=y(c,a),_=[...u.hardViolations,...u.softViolations];if(s.abortOnSecurityViolation){const t=Ns(c);if(!t.passed){const s=t.violations.map(e=>({type:"credential_exposure"===e.type?"hardcoded_secret":"background_process",severity:"hard",file:"<evaluated>",line:e.line,message:e.message,pattern:e.pattern}));if(_.push(...s),t.violations.some(e=>"critical"===e.severity)){const t=Date.now()-r;return o.push({iterationNumber:e,inputViolations:_,gstackResults:[],lessonsInjected:[],outputScore:{completeness:0,correctness:0,clarity:0,consistency:0,overall:0,violations:_,passedGate:!1,scoredAt:(new Date).toISOString(),scoredBy:"constitution"},succeeded:!1,durationMs:t}),{finalCode:c,iterations:e,succeeded:!1,iterationHistory:o,finalScore:null,totalDurationMs:Date.now()-l,terminationReason:"constitution_violation"}}}}let v,b=[];s.gstackCommands.length>0&&(b=await Zs(c,p,async()=>is(0,s.gstackCommands,a)));try{v=await ts(c,n,a)}catch{v=ns(c,a)}d=v,g=v.overall,i?.({phase:e,totalPhases:f,percentComplete:Math.floor(e/f*100),pdseScore:v.overall,estimatedCostUsd:As(n),currentTask:`PDSE scored: ${v.overall}/100`,silentMode:h.silentMode??!1});const x=os(b),k=v.passedGate&&x,w=Date.now()-r;if(o.push({iterationNumber:e,inputViolations:_,gstackResults:b,lessonsInjected:[],outputScore:v,succeeded:k,durationMs:w}),k)return await ys({pattern:`Autoforge success: ${t.taskDescription}`,correction:`Preserve the passing structure for ${t.filePath??"generated code"}. The final iteration passed PDSE and all configured GStack commands.`,filePattern:t.filePath,language:t.language,framework:t.framework,occurrences:1,lastSeen:(new Date).toISOString(),severity:v.overall>=95?"info":"warning",source:"autoforge"},a),{finalCode:c,iterations:e,succeeded:!0,iterationHistory:o,finalScore:v,totalDurationMs:Date.now()-l,terminationReason:"passed"};if(h.persistUntilGreen&&!k&&e>=f&&f<m&&(f=Math.min(f+1,m)),e<f){let e=[];s.lessonInjectionEnabled&&(e=await vs({projectRoot:a,language:t.language,filePattern:t.filePath,limit:10}));const r=o[o.length-1];r&&(r.lessonsInjected=e.map(e=>e.id));const i=Ps(c,v,b,e,t);try{const e=Is(await n.chat(i,{temperature:.3,maxTokens:16384}));e.length>0&&e!==c&&(c=e)}catch{}}if(e===f&&!k){const s=v.violations.filter(e=>"hard"===e.severity),n=b.filter(e=>!e.passed);if(s.length>0){const e=s[0];gs({projectRoot:a,pattern:`Anti-stub violation: ${e.type} — ${e.message}`,correction:`Ensure generated code does not contain ${e.type} patterns. The code must be complete with no stubs, TODOs, or placeholder implementations.`,filePattern:t.filePath,language:t.language,framework:t.framework,occurrences:1,lastSeen:(new Date).toISOString(),severity:"error",source:"autoforge"},a)}if(n.length>0){const e=n[0],s=e.stderr.slice(0,200);gs({projectRoot:a,pattern:`GStack failure: ${e.command} exited with code ${e.exitCode}`,correction:`Ensure generated code passes the command: ${e.command}. Previous error: ${s}`,filePattern:t.filePath,language:t.language,framework:t.framework,occurrences:1,lastSeen:(new Date).toISOString(),severity:"warning",source:"autoforge"},a)}return{finalCode:c,iterations:e,succeeded:!1,iterationHistory:o,finalScore:v,totalDurationMs:Date.now()-l,terminationReason:"max_iterations"}}}return{finalCode:c,iterations:f,succeeded:!1,iterationHistory:o,finalScore:d,totalDurationMs:Date.now()-l,terminationReason:"max_iterations"}}var Rs=class{_config;_emit;_currentPhase=0;_lastPdseScore=0;_estimatedCostUsd=0;_currentTask="Initializing...";constructor(e,t){this._config=e,this._emit=t}onIterationStart(e){this._currentPhase=e,this._currentTask=`Running iteration ${e}...`,this._emitState()}onToolRound(e,t){this._currentTask=`Tool: ${t} (round ${e})`,this._emitState()}onGStackResult(e){const t=e.passed?"pass":"fail";this._currentTask=`GStack ${e.command}: ${t}`,this._emitState()}onPDSEScore(e){this._lastPdseScore=e.overall,this._currentTask=`PDSE scored: ${e.overall}/100`,this._emitState()}onCostUpdate(e){this._estimatedCostUsd=e,this._emitState()}onComplete(e){this._currentTask=e.succeeded?"Complete":"Did not pass all gates",this._emit({phase:this._currentPhase,totalPhases:this._getTotalPhases(),percentComplete:100,pdseScore:e.finalScore?.overall??this._lastPdseScore,estimatedCostUsd:this._estimatedCostUsd,currentTask:this._currentTask,silentMode:this._config.silentMode??!1})}getProgressLine(){return Cs(this._buildState())}_getTotalPhases(){return this._config.hardCeiling??this._config.maxIterations}_buildState(){const e=this._getTotalPhases(),t=0===this._currentPhase?0:Math.floor((this._currentPhase-1)/e*100);return{phase:this._currentPhase,totalPhases:e,percentComplete:t,pdseScore:this._lastPdseScore,estimatedCostUsd:this._estimatedCostUsd,currentTask:this._currentTask,silentMode:this._config.silentMode??!1}}_emitState(){this._emit(this._buildState())}},Ds=[/(?:no[,.]?\s+)?(?:I\s+(?:said|told you|asked|meant|wanted)|actually|please use|don't use|always use|never use|prefer|instead of)\s+(.+)/i,/(?:that's wrong|that's incorrect|not like that)[.,]?\s*(.+)/i,/(?:change|rename|switch|use)\s+(?:it\s+)?(?:to|from)\s+(.+)/i],Ms=[/(?:use|prefer|always use)\s+(camelCase|snake_case|PascalCase|kebab-case)/i,/(?:naming convention|name (?:it|them|files|variables))\s+(?:in\s+|with\s+|using\s+)?(camelCase|snake_case|PascalCase|kebab-case)/i],Ls=[/(?:we use|I use|using|prefer|always use)\s+(React|Vue|Angular|Svelte|Next\.?js|Express|Fastify|Prisma|Drizzle|TailwindCSS|Tailwind)/i],Fs=[/(?:use|prefer|always use|run with)\s+(bun|npm|yarn|pnpm|deno)\b/i,/(?:use|prefer|always use)\s+(vitest|jest|mocha|playwright|cypress)\b/i,/(?:use|prefer|always use)\s+(prettier|eslint|biome)\b/i];function Us(e){const t=[],s=new Set;for(let n=0;n<e.length;n++){const r=e[n];if("user"!==r.role)continue;const a=r.content;for(const e of Ws(a)){const n=e.pattern;s.has(n)||(s.add(n),t.push(e))}for(const e of zs(a)){const n=e.pattern;s.has(n)||(s.add(n),t.push(e))}for(const e of Vs(a)){const n=e.pattern;s.has(n)||(s.add(n),t.push(e))}for(const e of Hs(a)){const n=e.pattern;s.has(n)||(s.add(n),t.push(e))}}return t}function Ws(e){const t=[];for(const s of Ds){const n=s.exec(e);if(n?.[1]){const e=n[1].trim().replace(/[.!]+$/,"");e.length>=5&&e.length<=200&&t.push({pattern:`User correction: ${e.slice(0,80)}`,correction:e,source:"memory-detector",type:"preference"})}}return t}function zs(e){const t=[];for(const s of Ms){const n=s.exec(e);if(n?.[1]){const e=n[1].trim();t.push({pattern:`Naming convention preference: ${e}`,correction:`Use ${e} naming convention in this project.`,source:"memory-detector",type:"preference"})}}return t}function Vs(e){const t=[];for(const s of Ls){const n=s.exec(e);if(n?.[1]){const e=n[1].trim();t.push({pattern:`Framework preference: ${e}`,correction:`This project uses ${e}.`,framework:e,source:"memory-detector",type:"preference"})}}return t}function Hs(e){const t=[];for(const s of Fs){const n=s.exec(e);if(n?.[1]){const e=n[1].trim();t.push({pattern:`Tool preference: ${e}`,correction:`Use ${e} in this project.`,source:"memory-detector",type:"preference"})}}return t}async function Bs(e,t){const s=Us(e);if(0===s.length)return[];const n=await vs({projectRoot:t,type:"preference",limit:1e3}),r=new Set(n.map(e=>e.pattern)),a=[];for(const e of s){if(r.has(e.pattern))continue;const s=await gs({projectRoot:t,pattern:e.pattern,correction:e.correction,language:e.language,framework:e.framework,occurrences:1,lastSeen:(new Date).toISOString(),severity:"info",type:e.type,source:e.source},t);a.push(s)}return a}export{Es as BACKGROUND_PROCESS_PATTERNS,Rs as BladeProgressEmitter,$s as CONSTITUTION_PATTERNS,Ts as CREDENTIAL_PATTERNS,Ss as DANGEROUS_OPERATION_PATTERNS,f as HARD_VIOLATION_PATTERNS,g as SOFT_VIOLATION_PATTERNS,os as allGStackPassed,Ps as buildFailureContext,ks as clearLessons,xs as deleteLesson,Bs as detectAndRecordPatterns,Us as detectPatterns,Cs as formatBladeProgressLine,ws as formatLessonsForPrompt,Os as generateProgressBar,bs as getLessonCount,ls as initLessonsDB,vs as queryLessons,gs as recordLesson,_s as recordPreference,ys as recordSuccessPattern,y as runAntiStubScanner,js as runAutoforgeIAL,Ns as runConstitutionCheck,is as runGStack,as as runGStackSingle,ns as runLocalPDSEScorer,ts as runPDSEScorer,_ as scanFile,cs as summarizeGStackResults};
+// src/index.ts
+import { readFileSync } from "fs";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { dirname, join, resolve } from "path";
+import { spawn } from "child_process";
+import { randomUUID } from "crypto";
+function createStubPattern(regex, message, violationType) {
+  return { regex, message, violationType };
+}
+var HARD_VIOLATION_PATTERNS = [
+  createStubPattern(
+    /\bTODO\b/i,
+    "TODO marker found - implementation is incomplete",
+    "stub_detected"
+  ),
+  createStubPattern(/\bFIXME\b/i, "FIXME marker found - code still needs repair", "stub_detected"),
+  createStubPattern(/\bHACK\b/i, "HACK marker found - workaround left in code", "stub_detected"),
+  createStubPattern(
+    /raise\s+NotImplementedError/,
+    "NotImplementedError indicates an incomplete implementation",
+    "stub_detected"
+  ),
+  createStubPattern(
+    /throw\s+new\s+Error\s*\(\s*['"`]not\s+implemented['"`]\s*\)/i,
+    'Throwing "not implemented" is a stub',
+    "stub_detected"
+  ),
+  createStubPattern(
+    /throw\s+new\s+Error\s*\(\s*['"`]todo['"`]\s*\)/i,
+    'Throwing "todo" is a stub',
+    "stub_detected"
+  ),
+  createStubPattern(
+    /throw\s+new\s+Error\s*\(\s*['"`]stub['"`]\s*\)/i,
+    'Throwing "stub" is a stub',
+    "stub_detected"
+  ),
+  createStubPattern(/^\s*\.\.\.\s*$/, "Ellipsis stub detected", "stub_detected"),
+  createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected"),
+  createStubPattern(/\bplaceholder\b/i, "Placeholder text found", "stub_detected"),
+  createStubPattern(/\bnotImplemented\b/, "notImplemented symbol found", "stub_detected"),
+  createStubPattern(/\/\/\s*\.{3,}/, "Comment ellipsis indicates stubbed code", "stub_detected"),
+  createStubPattern(/return\s*;\s*\/\/.*stub/i, "Stubbed early return found", "stub_detected"),
+  createStubPattern(/\bXXX\b/, "XXX marker found", "stub_detected")
+];
+var SOFT_VIOLATION_PATTERNS = [
+  createStubPattern(/\bas\s+any\b/, "Unsafe cast to any defeats type safety", "type_any"),
+  createStubPattern(/:\s*any\b/, "Explicit any type annotation defeats type safety", "type_any"),
+  createStubPattern(/@ts-ignore/, "@ts-ignore suppresses type checking", "type_any"),
+  createStubPattern(/@ts-nocheck/, "@ts-nocheck disables type checking", "type_any"),
+  createStubPattern(/\bconsole\.log\b/, "console.log left in code", "console_log_leftover"),
+  createStubPattern(/\bconsole\.debug\b/, "console.debug left in code", "console_log_leftover"),
+  createStubPattern(/\bconsole\.warn\b/, "console.warn left in code", "console_log_leftover"),
+  createStubPattern(/\.skip\s*\(/, "Skipped test found", "test_skip"),
+  createStubPattern(/\bxit\s*\(/, "xit() found - test is skipped", "test_skip"),
+  createStubPattern(/\bxdescribe\s*\(/, "xdescribe() found - suite is skipped", "test_skip"),
+  createStubPattern(/\btest\.todo\s*\(/, "test.todo() found", "test_skip"),
+  createStubPattern(/\bit\.todo\s*\(/, "it.todo() found", "test_skip")
+];
+function cloneRegex(regex) {
+  return new RegExp(regex.source, regex.flags);
+}
+function buildViolation(line, lineNumber, filePath, pattern, severity) {
+  const regex = cloneRegex(pattern.regex);
+  if (!regex.test(line)) {
+    return null;
+  }
+  return {
+    type: pattern.violationType,
+    severity,
+    file: filePath ?? "<evaluated>",
+    line: lineNumber,
+    message: pattern.message,
+    pattern: pattern.regex.source
+  };
+}
+function runAntiStubScanner(content, _projectRoot, filePath) {
+  const lines = content.split(/\r?\n/);
+  const hardViolations = [];
+  const softViolations = [];
+  lines.forEach((line, index) => {
+    for (const pattern of HARD_VIOLATION_PATTERNS) {
+      const violation = buildViolation(line, index + 1, filePath, pattern, "hard");
+      if (violation !== null) {
+        hardViolations.push(violation);
+      }
+    }
+    for (const pattern of SOFT_VIOLATION_PATTERNS) {
+      const violation = buildViolation(line, index + 1, filePath, pattern, "soft");
+      if (violation !== null) {
+        softViolations.push(violation);
+      }
+    }
+  });
+  return {
+    hardViolations,
+    softViolations,
+    passed: hardViolations.length === 0,
+    scannedLines: lines.length,
+    filePath
+  };
+}
+function scanFile(filePath, projectRoot) {
+  const absolutePath = resolve(projectRoot, filePath);
+  const content = readFileSync(absolutePath, "utf-8");
+  return runAntiStubScanner(content, projectRoot, filePath);
+}
+function createConstitutionPattern(regex, type, severity, message) {
+  return { regex, type, severity, message };
+}
+var CREDENTIAL_PATTERNS = [
+  createConstitutionPattern(
+    /\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*['"`][^'"`\s]{8,}['"`]/i,
+    "credential_exposure",
+    "critical",
+    "Possible hardcoded credential detected"
+  ),
+  createConstitutionPattern(
+    /\bsk-[A-Za-z0-9]{16,}\b/,
+    "credential_exposure",
+    "critical",
+    "OpenAI-style API key detected"
+  ),
+  createConstitutionPattern(
+    /\bghp_[A-Za-z0-9]{20,}\b/,
+    "credential_exposure",
+    "critical",
+    "GitHub token detected"
+  ),
+  createConstitutionPattern(
+    /\bBearer\s+[A-Za-z0-9._-]{16,}\b/i,
+    "credential_exposure",
+    "critical",
+    "Bearer token detected"
+  )
+];
+var BACKGROUND_PROCESS_PATTERNS = [
+  createConstitutionPattern(
+    /\b(nohup|disown|daemonize|daemon|pm2\s+start)\b/i,
+    "background_process",
+    "warning",
+    "Background process launch detected"
+  ),
+  createConstitutionPattern(
+    /\bStart-Process\b.*\b(WindowStyle\s+Hidden|PassThru|NoNewWindow)\b/i,
+    "background_process",
+    "warning",
+    "Hidden PowerShell process launch detected"
+  )
+];
+var DANGEROUS_OPERATION_PATTERNS = [
+  createConstitutionPattern(
+    /\brm\s+-rf\s+\/\b/i,
+    "dangerous_operation",
+    "critical",
+    "Destructive rm -rf / pattern detected"
+  ),
+  createConstitutionPattern(
+    /\bDROP\s+TABLE\b/i,
+    "dangerous_operation",
+    "critical",
+    "DROP TABLE detected"
+  ),
+  createConstitutionPattern(
+    /\bTRUNCATE\s+TABLE\b/i,
+    "dangerous_operation",
+    "critical",
+    "TRUNCATE TABLE detected"
+  ),
+  createConstitutionPattern(/\beval\s*\(/, "code_injection", "critical", "eval() detected"),
+  createConstitutionPattern(
+    /\bnew\s+Function\s*\(/,
+    "code_injection",
+    "critical",
+    "Function constructor detected"
+  )
+];
+var ALL_PATTERNS = [
+  ...CREDENTIAL_PATTERNS,
+  ...BACKGROUND_PROCESS_PATTERNS,
+  ...DANGEROUS_OPERATION_PATTERNS
+];
+function runConstitutionCheck(code, filePath) {
+  const lines = code.split(/\r?\n/);
+  const violations = [];
+  lines.forEach((line, index) => {
+    for (const pattern of ALL_PATTERNS) {
+      const regex = cloneRegex(pattern.regex);
+      if (!regex.test(line)) {
+        continue;
+      }
+      violations.push({
+        type: pattern.type,
+        severity: pattern.severity,
+        line: index + 1,
+        message: pattern.message,
+        pattern: pattern.regex.source
+      });
+    }
+  });
+  return {
+    passed: !violations.some((violation) => violation.severity === "critical"),
+    violations,
+    scannedLines: lines.length,
+    filePath
+  };
+}
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+function constitutionViolationsToPdse(violations, file) {
+  return violations.map((violation) => ({
+    type: violation.type === "credential_exposure" ? "hardcoded_secret" : violation.type === "background_process" ? "background_process" : "dead_code",
+    severity: violation.severity === "critical" ? "hard" : "soft",
+    file,
+    line: violation.line,
+    message: violation.message,
+    pattern: violation.pattern
+  }));
+}
+function countLongLines(code, threshold) {
+  return code.split(/\r?\n/).filter((line) => line.length > threshold).length;
+}
+function countMatches(regex, code) {
+  const matches = code.match(cloneRegex(regex));
+  return matches?.length ?? 0;
+}
+async function runPDSEScorer(code, _router, projectRoot, gateConfig) {
+  const local = runLocalPDSEScorer(code, projectRoot);
+  const threshold = gateConfig?.threshold ?? 85;
+  return {
+    ...local,
+    passedGate: local.overall >= threshold && local.violations.filter((violation) => violation.severity === "hard").length === 0
+  };
+}
+function runLocalPDSEScorer(code, projectRoot) {
+  const antiStub = runAntiStubScanner(code, projectRoot);
+  const constitution = runConstitutionCheck(code);
+  const constitutionAsPdse = constitutionViolationsToPdse(constitution.violations, "<evaluated>");
+  const violations = [
+    ...antiStub.hardViolations,
+    ...antiStub.softViolations,
+    ...constitutionAsPdse
+  ];
+  const hardCount = violations.filter((violation) => violation.severity === "hard").length;
+  const softCount = violations.filter((violation) => violation.severity === "soft").length;
+  const longLines = countLongLines(code, 140);
+  const emptyFunctions = countMatches(/function\s+\w+\s*\([^)]*\)\s*{\s*}/g, code);
+  const arrowEmpties = countMatches(/=>\s*{\s*}/g, code);
+  const tryCount = countMatches(/\btry\s*{/g, code);
+  const catchCount = countMatches(/\bcatch\s*\(/g, code);
+  const errorHandlingPenalty = code.includes("async") && tryCount === 0 && catchCount === 0 ? 8 : 0;
+  const completeness = clampScore(
+    100 - hardCount * 18 - emptyFunctions * 12 - arrowEmpties * 10 - softCount * 2
+  );
+  const correctness = clampScore(
+    100 - hardCount * 20 - constitution.violations.length * 8 - errorHandlingPenalty
+  );
+  const clarity = clampScore(100 - softCount * 4 - longLines * 2);
+  const consistency = clampScore(
+    100 - softCount * 3 - Math.max(0, countMatches(/\t/g, code) > 0 && code.includes("  ") ? 8 : 0)
+  );
+  const overall = clampScore((completeness + correctness + clarity + consistency) / 4);
+  return {
+    completeness,
+    correctness,
+    clarity,
+    consistency,
+    overall,
+    violations,
+    passedGate: overall >= 85 && hardCount === 0,
+    scoredAt: (/* @__PURE__ */ new Date()).toISOString(),
+    scoredBy: "local-heuristic"
+  };
+}
+function runGStackSingle(command, projectRoot) {
+  return new Promise((resolveResult) => {
+    const startedAt = Date.now();
+    const child = spawn(command.command, {
+      cwd: projectRoot,
+      shell: true,
+      env: process.env
+    });
+    let stdout = "";
+    let stderr = "";
+    let finished = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, command.timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      resolveResult({
+        command: command.name,
+        exitCode: 1,
+        stdout,
+        stderr: `${stderr}${stderr ? "\n" : ""}${error.message}`.trim(),
+        durationMs: Date.now() - startedAt,
+        passed: Boolean(command.failureIsSoft)
+      });
+    });
+    child.on("close", (code) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(timer);
+      const exitCode = timedOut ? 124 : code ?? 1;
+      resolveResult({
+        command: command.name,
+        exitCode,
+        stdout,
+        stderr: timedOut ? `${stderr}
+Timed out after ${command.timeoutMs}ms`.trim() : stderr,
+        durationMs: Date.now() - startedAt,
+        passed: exitCode === 0 || Boolean(command.failureIsSoft)
+      });
+    });
+  });
+}
+async function runGStack(_code, commands, projectRoot) {
+  const results = [];
+  for (const command of commands) {
+    results.push(await runGStackSingle(command, projectRoot));
+  }
+  return results;
+}
+function allGStackPassed(results) {
+  return results.every((result) => result.passed);
+}
+function summarizeGStackResults(results) {
+  if (results.length === 0) {
+    return "No verification commands ran.";
+  }
+  return results.map(
+    (result) => `${result.passed ? "PASS" : "FAIL"} ${result.command} (${result.durationMs}ms)`
+  ).join("\n");
+}
+var LESSONS_RELATIVE_PATH = join(".dantecode", "lessons.json");
+function getLessonsFile(projectRoot) {
+  return join(projectRoot, LESSONS_RELATIVE_PATH);
+}
+function severityRank(severity) {
+  switch (severity) {
+    case "info":
+      return 0;
+    case "warning":
+      return 1;
+    case "error":
+      return 2;
+    case "critical":
+      return 3;
+  }
+}
+async function readLessons(projectRoot) {
+  const lessonsFile = getLessonsFile(projectRoot);
+  try {
+    const raw = await readFile(lessonsFile, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+async function writeLessons(projectRoot, lessons) {
+  const lessonsFile = getLessonsFile(projectRoot);
+  await mkdir(dirname(lessonsFile), { recursive: true });
+  await writeFile(lessonsFile, `${JSON.stringify(lessons, null, 2)}
+`, "utf-8");
+}
+function normalizeLesson(lesson, projectRoot, type, source, severity) {
+  return {
+    id: lesson.id ?? randomUUID(),
+    projectRoot,
+    pattern: lesson.pattern,
+    correction: lesson.correction,
+    filePattern: lesson.filePattern,
+    language: lesson.language,
+    framework: lesson.framework,
+    occurrences: lesson.occurrences > 0 ? lesson.occurrences : 1,
+    lastSeen: lesson.lastSeen || (/* @__PURE__ */ new Date()).toISOString(),
+    severity: lesson.severity ?? severity,
+    type: lesson.type ?? type,
+    source: lesson.source ?? source
+  };
+}
+async function initLessonsDB(_projectRoot) {
+  return {};
+}
+async function recordLesson(lesson, projectRoot) {
+  const lessons = await readLessons(projectRoot);
+  const normalized = normalizeLesson(
+    lesson,
+    projectRoot,
+    lesson.type ?? "failure",
+    lesson.source ?? "autoforge",
+    lesson.severity ?? "warning"
+  );
+  const existing = lessons.find(
+    (entry) => entry.pattern === normalized.pattern && entry.type === normalized.type && entry.projectRoot === normalized.projectRoot
+  );
+  if (existing) {
+    existing.correction = normalized.correction;
+    existing.filePattern = normalized.filePattern ?? existing.filePattern;
+    existing.language = normalized.language ?? existing.language;
+    existing.framework = normalized.framework ?? existing.framework;
+    existing.lastSeen = normalized.lastSeen;
+    existing.occurrences += normalized.occurrences;
+    existing.severity = normalized.severity;
+    existing.source = normalized.source;
+    await writeLessons(projectRoot, lessons);
+    return existing;
+  }
+  lessons.push(normalized);
+  await writeLessons(projectRoot, lessons);
+  return normalized;
+}
+async function recordSuccessPattern(lesson, projectRoot) {
+  return recordLesson(
+    {
+      ...lesson,
+      projectRoot,
+      severity: lesson.severity ?? "info",
+      source: lesson.source ?? "autoforge",
+      type: "success"
+    },
+    projectRoot
+  );
+}
+async function recordPreference(lesson, projectRoot) {
+  return recordLesson(
+    {
+      ...lesson,
+      projectRoot,
+      severity: lesson.severity ?? "info",
+      source: lesson.source ?? "memory-detector",
+      type: "preference"
+    },
+    projectRoot
+  );
+}
+async function queryLessons(query) {
+  const lessons = await readLessons(query.projectRoot);
+  return lessons.filter((lesson) => query.type ? lesson.type === query.type : true).filter(
+    (lesson) => query.language ? lesson.language === void 0 || lesson.language === query.language : true
+  ).filter((lesson) => {
+    if (!query.filePattern) {
+      return true;
+    }
+    if (!lesson.filePattern) {
+      return true;
+    }
+    return lesson.filePattern.includes(query.filePattern) || query.filePattern.includes(lesson.filePattern);
+  }).filter(
+    (lesson) => query.minSeverity ? severityRank(lesson.severity) >= severityRank(query.minSeverity) : true
+  ).sort((left, right) => {
+    if (right.occurrences !== left.occurrences) {
+      return right.occurrences - left.occurrences;
+    }
+    return right.lastSeen.localeCompare(left.lastSeen);
+  }).slice(0, query.limit);
+}
+async function getLessonCount(projectRoot) {
+  const lessons = await readLessons(projectRoot);
+  return lessons.length;
+}
+async function deleteLesson(lessonId, projectRoot) {
+  const lessons = await readLessons(projectRoot);
+  const filtered = lessons.filter((lesson) => lesson.id !== lessonId);
+  if (filtered.length === lessons.length) {
+    return false;
+  }
+  await writeLessons(projectRoot, filtered);
+  return true;
+}
+async function clearLessons(projectRoot) {
+  const lessons = await readLessons(projectRoot);
+  await writeLessons(projectRoot, []);
+  return lessons.length;
+}
+function formatLessonsForPrompt(lessons) {
+  if (lessons.length === 0) {
+    return "No prior lessons recorded.";
+  }
+  return lessons.map(
+    (lesson) => `- [${lesson.type}/${lesson.severity}] ${lesson.pattern}
+  Correction: ${lesson.correction}`
+  ).join("\n");
+}
+function generateProgressBar(percentComplete) {
+  const clamped = Math.max(0, Math.min(100, percentComplete));
+  const filled = Math.round(clamped / 10);
+  return "#".repeat(filled) + "-".repeat(10 - filled);
+}
+function formatBladeProgressLine(state) {
+  return `Autoforge Phase ${state.phase}/${state.totalPhases} [${generateProgressBar(
+    state.percentComplete
+  )}] ${state.percentComplete}% | PDSE ${state.pdseScore} | Est. $${state.estimatedCostUsd.toFixed(
+    3
+  )}`;
+}
+function buildFailureContext(currentCode, score, gstackResults, lessons, context) {
+  const gstackFailures = gstackResults.filter((result) => !result.passed);
+  const sections = [
+    "# Autoforge Regeneration Request",
+    `Task: ${context.taskDescription}`,
+    context.filePath ? `Target file: ${context.filePath}` : void 0,
+    context.language ? `Language: ${context.language}` : void 0,
+    context.framework ? `Framework: ${context.framework}` : void 0,
+    "",
+    "Current code:",
+    "```",
+    currentCode,
+    "```",
+    "",
+    score ? `PDSE: ${score.overall} (completeness ${score.completeness}, correctness ${score.correctness}, clarity ${score.clarity}, consistency ${score.consistency})` : "PDSE: unavailable",
+    score && score.violations.length > 0 ? `Violations:
+${score.violations.map((violation) => `- ${violation.message}`).join("\n")}` : "Violations: none captured",
+    "",
+    gstackFailures.length > 0 ? `Verification failures:
+${gstackFailures.map(
+      (result) => `- ${result.command}: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`
+    ).join("\n")}` : "Verification failures: none",
+    "",
+    lessons.length > 0 ? "Relevant lessons:\n" + formatLessonsForPrompt(lessons) : "Relevant lessons: none",
+    "",
+    "Return improved production-ready code only. Do not add explanations."
+  ].filter((section) => Boolean(section));
+  return sections.join("\n");
+}
+function extractCodeFromResponse(response) {
+  const fenced = response.match(/```(?:\w+)?\s*\n([\s\S]*?)```/);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+  return response.trim();
+}
+async function runAutoforgeIAL(code, context, config, router, projectRoot, onProgress) {
+  const bladeConfig = config;
+  const startedAt = Date.now();
+  const maxIterations = bladeConfig.persistUntilGreen ? bladeConfig.hardCeiling ?? 200 : config.maxIterations;
+  let currentCode = code;
+  let finalScore = null;
+  const iterationHistory = [];
+  for (let iteration = 1; iteration <= maxIterations; iteration++) {
+    onProgress?.({
+      phase: iteration,
+      totalPhases: maxIterations,
+      percentComplete: Math.floor((iteration - 1) / maxIterations * 100),
+      pdseScore: finalScore?.overall ?? 0,
+      estimatedCostUsd: 0,
+      currentTask: `Running iteration ${iteration}/${maxIterations}`,
+      silentMode: bladeConfig.silentMode ?? false
+    });
+    const iterationStartedAt = Date.now();
+    const antiStub = runAntiStubScanner(currentCode, projectRoot, context.filePath);
+    const constitution = runConstitutionCheck(currentCode, context.filePath);
+    const inputViolations = [
+      ...antiStub.hardViolations,
+      ...antiStub.softViolations,
+      ...constitutionViolationsToPdse(constitution.violations, context.filePath ?? "<evaluated>")
+    ];
+    if (config.abortOnSecurityViolation && constitution.violations.some((violation) => violation.severity === "critical")) {
+      const score2 = runLocalPDSEScorer(currentCode, projectRoot);
+      finalScore = score2;
+      iterationHistory.push({
+        iterationNumber: iteration,
+        inputViolations,
+        gstackResults: [],
+        lessonsInjected: [],
+        outputScore: score2,
+        succeeded: false,
+        durationMs: Date.now() - iterationStartedAt
+      });
+      return {
+        finalCode: currentCode,
+        iterations: iteration,
+        succeeded: false,
+        iterationHistory,
+        finalScore,
+        totalDurationMs: Date.now() - startedAt,
+        terminationReason: "constitution_violation"
+      };
+    }
+    const gstackResults = await runGStack(currentCode, config.gstackCommands, projectRoot);
+    const score = runLocalPDSEScorer(currentCode, projectRoot);
+    finalScore = score;
+    const succeeded = score.passedGate && allGStackPassed(gstackResults);
+    iterationHistory.push({
+      iterationNumber: iteration,
+      inputViolations,
+      gstackResults,
+      lessonsInjected: [],
+      outputScore: score,
+      succeeded,
+      durationMs: Date.now() - iterationStartedAt
+    });
+    onProgress?.({
+      phase: iteration,
+      totalPhases: maxIterations,
+      percentComplete: Math.floor(iteration / maxIterations * 100),
+      pdseScore: score.overall,
+      estimatedCostUsd: 0,
+      currentTask: succeeded ? `Iteration ${iteration} passed` : `Iteration ${iteration} needs fixes`,
+      silentMode: bladeConfig.silentMode ?? false
+    });
+    if (succeeded) {
+      await recordSuccessPattern(
+        {
+          pattern: `Autoforge success: ${context.taskDescription}`,
+          correction: `Preserve the implementation shape that passed ${context.filePath ?? "the target file"}.`,
+          filePattern: context.filePath,
+          language: context.language,
+          framework: context.framework,
+          occurrences: 1,
+          lastSeen: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        projectRoot
+      );
+      return {
+        finalCode: currentCode,
+        iterations: iteration,
+        succeeded: true,
+        iterationHistory,
+        finalScore,
+        totalDurationMs: Date.now() - startedAt,
+        terminationReason: "passed"
+      };
+    }
+    if (iteration === maxIterations) {
+      break;
+    }
+    const lessons = bladeConfig.lessonInjectionEnabled ? await queryLessons({
+      projectRoot,
+      filePattern: context.filePath,
+      language: context.language,
+      limit: 10
+    }) : [];
+    const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
+    try {
+      const regenerated = extractCodeFromResponse(
+        await router.chat(prompt, {
+          temperature: 0.3,
+          maxTokens: 4096
+        })
+      );
+      if (regenerated.length > 0) {
+        currentCode = regenerated;
+      }
+    } catch {
+    }
+  }
+  return {
+    finalCode: currentCode,
+    iterations: iterationHistory.length,
+    succeeded: false,
+    iterationHistory,
+    finalScore,
+    totalDurationMs: Date.now() - startedAt,
+    terminationReason: "max_iterations"
+  };
+}
+var BladeProgressEmitter = class {
+  constructor(_config, _emit) {
+    this._config = _config;
+    this._emit = _emit;
+  }
+  _currentPhase = 0;
+  _lastPdseScore = 0;
+  _estimatedCostUsd = 0;
+  _currentTask = "Initializing...";
+  onIterationStart(iteration) {
+    this._currentPhase = iteration;
+    this._currentTask = `Running iteration ${iteration}/${this._getTotalPhases()}`;
+    this._emitState();
+  }
+  onToolRound(round, toolName) {
+    this._currentTask = `Running ${toolName} (round ${round})`;
+    this._emitState();
+  }
+  onGStackResult(result) {
+    this._currentTask = `${result.command}: ${result.passed ? "pass" : "fail"}`;
+    this._emitState();
+  }
+  onPDSEScore(score) {
+    this._lastPdseScore = score.overall;
+    this._currentTask = `PDSE ${score.overall} recorded`;
+    this._emitState();
+  }
+  onCostUpdate(costUsd) {
+    this._estimatedCostUsd = costUsd;
+    this._emitState();
+  }
+  onComplete(result) {
+    this._currentTask = result.succeeded ? "Completed successfully" : "Completed with failures";
+    this._emit({
+      phase: this._currentPhase,
+      totalPhases: this._getTotalPhases(),
+      percentComplete: 100,
+      pdseScore: result.finalScore?.overall ?? this._lastPdseScore,
+      estimatedCostUsd: this._estimatedCostUsd,
+      currentTask: this._currentTask,
+      silentMode: this._config.silentMode ?? false
+    });
+  }
+  getProgressLine() {
+    return formatBladeProgressLine(this._buildState());
+  }
+  _getTotalPhases() {
+    return this._config.hardCeiling ?? this._config.maxIterations;
+  }
+  _buildState() {
+    return {
+      phase: this._currentPhase,
+      totalPhases: this._getTotalPhases(),
+      percentComplete: this._currentPhase === 0 ? 0 : Math.floor((this._currentPhase - 1) / this._getTotalPhases() * 100),
+      pdseScore: this._lastPdseScore,
+      estimatedCostUsd: this._estimatedCostUsd,
+      currentTask: this._currentTask,
+      silentMode: this._config.silentMode ?? false
+    };
+  }
+  _emitState() {
+    this._emit(this._buildState());
+  }
+};
+function detectPatterns(messages) {
+  const detected = /* @__PURE__ */ new Map();
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+    const content = message.content.trim();
+    const preferMatch = content.match(/\bprefer\s+([^.!?\n]+)/i);
+    if (preferMatch?.[1]) {
+      const value = preferMatch[1].trim();
+      detected.set(`prefer:${value.toLowerCase()}`, {
+        pattern: `User prefers ${value}`,
+        correction: `Respect the user's preference for ${value} in future responses.`,
+        source: "memory-detector",
+        type: "preference"
+      });
+    }
+    const namingMatch = content.match(/\b(?:call|name)\s+it\s+["'`]?([^"'`\n]+)["'`]?/i);
+    if (namingMatch?.[1]) {
+      const value = namingMatch[1].trim();
+      detected.set(`name:${value.toLowerCase()}`, {
+        pattern: `User prefers naming it ${value}`,
+        correction: `Use the requested name "${value}" consistently.`,
+        source: "memory-detector",
+        type: "preference"
+      });
+    }
+    const insteadMatch = content.match(/\buse\s+([^.!?\n]+?)\s+instead\b/i);
+    if (insteadMatch?.[1]) {
+      const value = insteadMatch[1].trim();
+      detected.set(`use:${value.toLowerCase()}`, {
+        pattern: `User prefers using ${value} instead`,
+        correction: `Favor ${value} for similar follow-up changes.`,
+        source: "memory-detector",
+        type: "preference"
+      });
+    }
+  }
+  return [...detected.values()];
+}
+async function detectAndRecordPatterns(messages, projectRoot) {
+  const patterns = detectPatterns(messages);
+  if (patterns.length === 0) {
+    return [];
+  }
+  const existing = await queryLessons({
+    projectRoot,
+    limit: 1e3,
+    type: "preference"
+  });
+  const recorded = [];
+  for (const pattern of patterns) {
+    const duplicate = existing.find(
+      (lesson) => lesson.pattern === pattern.pattern && lesson.type === pattern.type
+    );
+    if (duplicate) {
+      continue;
+    }
+    recorded.push(
+      await recordLesson(
+        {
+          pattern: pattern.pattern,
+          correction: pattern.correction,
+          projectRoot,
+          occurrences: 1,
+          lastSeen: (/* @__PURE__ */ new Date()).toISOString(),
+          severity: "info",
+          source: pattern.source,
+          type: pattern.type
+        },
+        projectRoot
+      )
+    );
+  }
+  return recorded;
+}
+export {
+  ALL_PATTERNS,
+  BACKGROUND_PROCESS_PATTERNS,
+  BladeProgressEmitter,
+  ALL_PATTERNS as CONSTITUTION_PATTERNS,
+  CREDENTIAL_PATTERNS,
+  DANGEROUS_OPERATION_PATTERNS,
+  HARD_VIOLATION_PATTERNS,
+  SOFT_VIOLATION_PATTERNS,
+  allGStackPassed,
+  buildFailureContext,
+  clearLessons,
+  deleteLesson,
+  detectAndRecordPatterns,
+  detectPatterns,
+  formatBladeProgressLine,
+  formatLessonsForPrompt,
+  generateProgressBar,
+  getLessonCount,
+  initLessonsDB,
+  queryLessons,
+  recordLesson,
+  recordPreference,
+  recordSuccessPattern,
+  runAntiStubScanner,
+  runAutoforgeIAL,
+  runConstitutionCheck,
+  runGStack,
+  runGStackSingle,
+  runLocalPDSEScorer,
+  runPDSEScorer,
+  scanFile,
+  summarizeGStackResults
+};

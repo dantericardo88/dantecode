@@ -137,9 +137,7 @@ function pathMatchesImport(candidatePath: string, importSpec: string): boolean {
  * @returns A string of context lines separated by `\n`, or an empty string
  *          if no useful context could be gathered.
  */
-export async function gatherCrossFileContext(
-  options: CrossFileContextOptions,
-): Promise<string> {
+export async function gatherCrossFileContext(options: CrossFileContextOptions): Promise<string> {
   const {
     currentFilePath,
     openFilePaths,

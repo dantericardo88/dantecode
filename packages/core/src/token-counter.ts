@@ -63,8 +63,7 @@ export function getContextUtilization(
   contextWindow: number,
 ): ContextUtilization {
   const tokens = estimateMessageTokens(messages);
-  const percent =
-    contextWindow > 0 ? Math.min(100, Math.round((tokens / contextWindow) * 100)) : 0;
+  const percent = contextWindow > 0 ? Math.min(100, Math.round((tokens / contextWindow) * 100)) : 0;
   const tier = percent < 50 ? "green" : percent < 75 ? "yellow" : "red";
   return { tokens, maxTokens: contextWindow, percent, tier };
 }

@@ -213,8 +213,16 @@ describe("SessionStore", () => {
       const session: ChatSessionFile = {
         ...sampleSession,
         messages: [
-          { role: "user", content: "Fix the login bug in auth.ts", timestamp: "2026-03-16T10:00:00Z" },
-          { role: "assistant", content: "I fixed the login bug.", timestamp: "2026-03-16T10:01:00Z" },
+          {
+            role: "user",
+            content: "Fix the login bug in auth.ts",
+            timestamp: "2026-03-16T10:00:00Z",
+          },
+          {
+            role: "assistant",
+            content: "I fixed the login bug.",
+            timestamp: "2026-03-16T10:01:00Z",
+          },
         ],
         contextFiles: ["src/auth.ts"],
       };
@@ -250,7 +258,11 @@ describe("SessionStore", () => {
         ...sampleSession,
         messages: [
           { role: "user", content: "Deploy the app", timestamp: "2026-03-16T10:00:00Z" },
-          { role: "assistant", content: "Error: build failed with exit code 1", timestamp: "2026-03-16T10:01:00Z" },
+          {
+            role: "assistant",
+            content: "Error: build failed with exit code 1",
+            timestamp: "2026-03-16T10:01:00Z",
+          },
         ],
       };
 

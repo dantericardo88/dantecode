@@ -16,6 +16,16 @@ export interface CommitResult {
   filesCommitted: string[];
 }
 
+/** Result returned after a successful git push that was verified remotely. */
+export interface PushResult {
+  remote: string;
+  branch: string;
+  localCommit: string;
+  remoteCommit: string;
+  output: string;
+  setUpstream: boolean;
+}
+
 /** A single entry from `git status --porcelain`. */
 export interface StatusEntry {
   /** Two-character status code (e.g. "M ", " M", "??", "A ", "D "). */
@@ -67,6 +77,34 @@ function git(args: string, cwd: string): string {
     const msg = stderr || err.message || "Unknown git error";
     throw new Error(`git ${args.split(" ")[0]}: ${msg}`);
   }
+}
+
+function getCurrentBranch(projectRoot: string): string {
+  const branch = git("rev-parse --abbrev-ref HEAD", projectRoot);
+  if (!branch || branch === "HEAD") {
+    throw new Error("git push: cannot infer branch from detached HEAD; pass an explicit branch");
+  }
+  return branch;
+}
+
+function formatPushError(message: string, remote: string, branch: string): string {
+  if (
+    /Authentication failed|Permission denied|could not read Username|Repository not found|403|denied to/i.test(
+      message,
+    )
+  ) {
+    return (
+      `git push: authentication failed for ${remote}/${branch}. ` +
+      `Configure GitHub credentials (PAT or SSH) for this repository and retry. ` +
+      `Original error: ${message}`
+    );
+  }
+
+  if (/No configured push destination|No such remote/i.test(message)) {
+    return `git push: remote "${remote}" is not configured. Original error: ${message}`;
+  }
+
+  return `git push: ${message}`;
 }
 
 /**
@@ -177,6 +215,60 @@ export function getLastCommitHash(projectRoot: string): string {
  */
 export function revertLastCommit(projectRoot: string): string {
   return git("revert HEAD --no-edit", projectRoot);
+}
+
+/**
+ * Push the current branch (or an explicit branch) to a remote and verify that
+ * the remote ref points at the same commit as local HEAD afterward.
+ */
+export function pushBranch(
+  options: { remote?: string; branch?: string; setUpstream?: boolean } = {},
+  projectRoot: string,
+): PushResult {
+  const remote = options.remote?.trim() || "origin";
+  const branch = options.branch?.trim() || getCurrentBranch(projectRoot);
+  const setUpstream = options.setUpstream === true;
+  const localCommit = getLastCommitHash(projectRoot);
+  const upstreamFlag = setUpstream ? "-u " : "";
+
+  let output = "";
+  try {
+    output = git(`push ${upstreamFlag}${remote} ${branch}`, projectRoot);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(formatPushError(message, remote, branch));
+  }
+
+  const remoteRef = git(`ls-remote ${remote} refs/heads/${branch}`, projectRoot)
+    .split("\n")
+    .find(Boolean);
+
+  if (!remoteRef) {
+    throw new Error(
+      `git push: remote ${remote}/${branch} was not found after push. The push could not be verified.`,
+    );
+  }
+
+  const remoteCommit = remoteRef.split(/\s+/)[0]?.trim() ?? "";
+  if (!remoteCommit) {
+    throw new Error(
+      `git push: remote ${remote}/${branch} returned an invalid ref after push verification.`,
+    );
+  }
+  if (remoteCommit !== localCommit) {
+    throw new Error(
+      `git push: verification failed for ${remote}/${branch}. Remote is ${remoteCommit}, local HEAD is ${localCommit}.`,
+    );
+  }
+
+  return {
+    remote,
+    branch,
+    localCommit,
+    remoteCommit,
+    output,
+    setUpstream,
+  };
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   getLastCommitHash,
   revertLastCommit,
   getStatus,
+  pushBranch,
   type CommitResult,
 } from "./commit.js";
 import { execSync } from "node:child_process";
@@ -231,6 +232,42 @@ describe("commit system", () => {
       revertLastCommit(repoDir);
       const afterHash = getLastCommitHash(repoDir);
       expect(afterHash).not.toBe(beforeHash);
+    });
+  });
+
+  describe("pushBranch", () => {
+    it("pushes HEAD to the remote and verifies the remote ref", async () => {
+      const remoteDir = await mkdtemp(join(tmpdir(), "dantecode-remote-"));
+      execSync("git init --bare", { cwd: remoteDir, stdio: "pipe" });
+      execSync(`git remote add origin "${remoteDir}"`, { cwd: repoDir, stdio: "pipe" });
+
+      await writeFile(join(repoDir, "push.txt"), "push me");
+      autoCommit(
+        {
+          message: "feat: add push target",
+          footer: "Footer",
+          files: ["push.txt"],
+          allowEmpty: false,
+        },
+        repoDir,
+      );
+
+      const result = pushBranch({ setUpstream: true }, repoDir);
+      expect(result.branch).toBeTruthy();
+      expect(result.localCommit).toBe(result.remoteCommit);
+
+      const remoteRef = execSync(`git ls-remote origin refs/heads/${result.branch}`, {
+        cwd: repoDir,
+        encoding: "utf-8",
+        stdio: "pipe",
+      }).trim();
+      expect(remoteRef.startsWith(result.localCommit)).toBe(true);
+
+      await rm(remoteDir, { recursive: true, force: true });
+    });
+
+    it("throws a helpful error when the remote is missing", () => {
+      expect(() => pushBranch({}, repoDir)).toThrow(/git push:/);
     });
   });
 });

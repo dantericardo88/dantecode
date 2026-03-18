@@ -66,9 +66,7 @@ export function exportAuditLog(
 
   // 2. Mask sensitive fields
   if (options.maskFields && options.maskFields.length > 0) {
-    filtered = filtered.map((e) =>
-      maskSensitiveFields(e, options.maskFields!, options.maskString),
-    );
+    filtered = filtered.map((e) => maskSensitiveFields(e, options.maskFields!, options.maskString));
   }
 
   // 3. Convert to the requested format
@@ -123,18 +121,13 @@ export function maskSensitiveFields(
  */
 export function filterEvents(
   events: AuditEvent[],
-  options: Pick<
-    ComplianceExportOptions,
-    "startDate" | "endDate" | "eventTypes"
-  >,
+  options: Pick<ComplianceExportOptions, "startDate" | "endDate" | "eventTypes">,
 ): AuditEvent[] {
   let filtered = [...events];
 
   if (options.startDate) {
     const start = new Date(options.startDate).getTime();
-    filtered = filtered.filter(
-      (e) => new Date(e.timestamp).getTime() >= start,
-    );
+    filtered = filtered.filter((e) => new Date(e.timestamp).getTime() >= start);
   }
 
   if (options.endDate) {
@@ -156,12 +149,7 @@ export function filterEvents(
  * double-quotes with internal double-quotes escaped by doubling.
  */
 function csvEscape(value: string): string {
-  if (
-    value.includes(",") ||
-    value.includes('"') ||
-    value.includes("\n") ||
-    value.includes("\r")
-  ) {
+  if (value.includes(",") || value.includes('"') || value.includes("\n") || value.includes("\r")) {
     return '"' + value.replace(/"/g, '""') + '"';
   }
   return value;
@@ -172,10 +160,7 @@ function csvEscape(value: string): string {
  * RFC 4180 compliant: fields containing commas, quotes, or newlines are
  * properly quoted and escaped.
  */
-export function eventsToCSV(
-  events: AuditEvent[],
-  includePayload?: boolean,
-): string {
+export function eventsToCSV(events: AuditEvent[], includePayload?: boolean): string {
   const headers = [...TOP_LEVEL_FIELDS];
   if (includePayload) {
     headers.push("payload" as keyof AuditEvent);
@@ -201,10 +186,7 @@ export function eventsToCSV(
 /**
  * Convert events to formatted JSON.
  */
-export function eventsToJSON(
-  events: AuditEvent[],
-  includePayload?: boolean,
-): string {
+export function eventsToJSON(events: AuditEvent[], includePayload?: boolean): string {
   if (!includePayload) {
     // Strip payloads
     const stripped = events.map((e) => {
@@ -219,16 +201,16 @@ export function eventsToJSON(
 /**
  * Generate a compliance summary header for the export.
  */
-export function generateComplianceHeader(
-  result: ComplianceExportResult,
-): string {
+export function generateComplianceHeader(result: ComplianceExportResult): string {
   const lines: string[] = [];
   lines.push("========================================");
   lines.push("SOC2 Compliance Audit Log Export");
   lines.push("========================================");
   lines.push(`Format:       ${result.format.toUpperCase()}`);
   lines.push(`Event Count:  ${result.eventCount}`);
-  lines.push(`Date Range:   ${result.dateRange.start || "N/A"} to ${result.dateRange.end || "N/A"}`);
+  lines.push(
+    `Date Range:   ${result.dateRange.start || "N/A"} to ${result.dateRange.end || "N/A"}`,
+  );
   lines.push(`Generated At: ${result.generatedAt}`);
   lines.push("========================================");
   return lines.join("\n");

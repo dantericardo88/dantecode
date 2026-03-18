@@ -22,6 +22,7 @@ import { appendAuditEvent } from "./audit.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { RecoveryEngine } from "./recovery-engine.js";
+import { LoopDetector } from "./loop-detector.js";
 
 const execAsync = promisify(exec);
 const SANDBOX_PACKAGE_NAME = "@dantecode/sandbox";
@@ -83,6 +84,7 @@ export class BackgroundAgentRunner {
   private readonly taskStore: BackgroundTaskStore;
   private readonly resetTimeoutMs: number;
   private readonly resumeTimers = new Map<string, NodeJS.Timeout>();
+  private readonly loopDetectors = new Map<string, LoopDetector>();
   private onProgress?: BackgroundProgressCallback;
   private workFn?: AgentWorkFn;
   private readonly restorePromise: Promise<void>;
@@ -181,6 +183,7 @@ export class BackgroundAgentRunner {
     if (task.status === "completed" || task.status === "cancelled") return false;
 
     this.clearResumeTimer(task.id);
+    this.loopDetectors.delete(task.id);
     task.status = "queued";
     task.progress = `Resuming from checkpoint ${task.checkpointId ?? "latest"}`;
     task.nextRetryAt = undefined;
@@ -214,6 +217,7 @@ export class BackgroundAgentRunner {
     if (task.status === "completed" || task.status === "failed") return false;
 
     this.clearResumeTimer(id);
+    this.loopDetectors.delete(id);
     task.status = "cancelled";
     task.completedAt = new Date().toISOString();
     task.progress = "Cancelled by user";
@@ -247,6 +251,7 @@ export class BackgroundAgentRunner {
         this.tasks.delete(id);
         this.taskOptions.delete(id);
         this.clearResumeTimer(id);
+        this.loopDetectors.delete(id);
         void this.taskStore.deleteTask(id);
         cleared++;
       }
@@ -322,6 +327,7 @@ export class BackgroundAgentRunner {
         task.completedAt = new Date().toISOString();
         task.progress = "Done";
         task.nextRetryAt = undefined;
+        this.loopDetectors.delete(task.id);
 
         if (result.touchedFiles.length > 0) {
           await context.saveCheckpoint?.("write-batch");
@@ -355,6 +361,28 @@ export class BackgroundAgentRunner {
     task.error = err instanceof Error ? err.message : String(err);
     task.attemptCount = (task.attemptCount ?? 0) + 1;
     task.breakerState = this.breaker.getState(task.id);
+
+    // Loop detection: track failure patterns per task
+    if (!this.loopDetectors.has(task.id)) {
+      this.loopDetectors.set(
+        task.id,
+        new LoopDetector({ maxIterations: 15, identicalThreshold: 3 }),
+      );
+    }
+    const detector = this.loopDetectors.get(task.id)!;
+    const loopCheck = detector.recordAction("task_failure", task.error);
+    if (loopCheck.stuck) {
+      task.status = task.longRunning ? "paused" : "failed";
+      task.completedAt = task.longRunning ? undefined : new Date().toISOString();
+      task.progress = `Loop detected: ${loopCheck.reason} — ${loopCheck.details}`;
+      task.nextRetryAt = undefined;
+      await context.saveCheckpoint?.("loop-detected");
+      await this.persistTask(task);
+      if (!task.longRunning) {
+        this.loopDetectors.delete(task.id);
+      }
+      return;
+    }
 
     if (!task.longRunning) {
       task.status = "failed";

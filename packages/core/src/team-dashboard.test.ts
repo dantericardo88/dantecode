@@ -3,20 +3,14 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import {
-  computeDashboardMetrics,
-  formatDashboardReport,
-  computeTrend,
-} from "./team-dashboard.js";
+import { computeDashboardMetrics, formatDashboardReport, computeTrend } from "./team-dashboard.js";
 import type { AuditEvent } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeEvent(
-  overrides: Partial<AuditEvent> & { type: AuditEvent["type"] },
-): AuditEvent {
+function makeEvent(overrides: Partial<AuditEvent> & { type: AuditEvent["type"] }): AuditEvent {
   return {
     id: `evt-${Math.random().toString(36).slice(2, 8)}`,
     sessionId: "session-1",
@@ -133,13 +127,13 @@ describe("computeDashboardMetrics", () => {
       makeEvent({
         type: "cost_update",
         modelId: "claude-opus-4",
-        payload: { costUsd: 0.10 },
+        payload: { costUsd: 0.1 },
       }),
     ];
     const m = computeDashboardMetrics(events);
     expect(m.totalCostUsd).toBeCloseTo(0.18, 5);
     expect(m.costByModel["grok-4"]).toBeCloseTo(0.08, 5);
-    expect(m.costByModel["claude-opus-4"]).toBeCloseTo(0.10, 5);
+    expect(m.costByModel["claude-opus-4"]).toBeCloseTo(0.1, 5);
   });
 
   it("counts files edited and lessons recorded", () => {

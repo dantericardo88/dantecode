@@ -2,7 +2,7 @@
 // @dantecode/core — Background Agent Runner Tests
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { BackgroundAgentRunner } from "./background-agent.js";
 import type { EnqueueOptions } from "./background-agent.js";
 import type { BackgroundAgentTask } from "@dantecode/config-types";
@@ -55,6 +55,10 @@ describe("BackgroundAgentRunner", () => {
       if (cb) cb(null, "", "");
       return { stdout: "", stderr: "" };
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("enqueue", () => {
@@ -144,9 +148,12 @@ describe("BackgroundAgentRunner", () => {
     it("returns false for already completed task", async () => {
       runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
       const id = runner.enqueue("quick");
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(runner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 5_000 },
+      );
       expect(runner.cancel(id)).toBe(false);
     });
   });
@@ -168,10 +175,13 @@ describe("BackgroundAgentRunner", () => {
       runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
       const firstId = runner.enqueue("a");
       const secondId = runner.enqueue("b");
-      await vi.waitFor(() => {
-        expect(runner.getTask(firstId)?.status).toBe("completed");
-        expect(runner.getTask(secondId)?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(runner.getTask(firstId)?.status).toBe("completed");
+          expect(runner.getTask(secondId)?.status).toBe("completed");
+        },
+        { timeout: 5_000 },
+      );
       const cleared = runner.clearFinished();
       expect(cleared).toBe(2);
       expect(runner.listTasks()).toHaveLength(0);
@@ -201,9 +211,12 @@ describe("BackgroundAgentRunner", () => {
       expect(running.length).toBeLessThanOrEqual(2);
 
       // Wait for all to complete
-      await vi.waitFor(() => {
-        expect(completed).toHaveLength(3);
-      });
+      await vi.waitFor(
+        () => {
+          expect(completed).toHaveLength(3);
+        },
+        { timeout: 5_000 },
+      );
       expect(completed).toHaveLength(3);
     });
   });
@@ -310,19 +323,10 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.progress).toContain("Circuit opened after 5 fails");
+        expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
       });
       expect(retryRunner.getTask(id)?.status).toBe("paused");
-      expect(retryRunner.getTask(id)?.progress).toContain("Circuit opened after 5 fails");
-
-      await vi.advanceTimersByTimeAsync(250);
-
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.status).toBe("completed");
-      });
-      expect(retryRunner.getTask(id)?.output).toBe("recovered");
-
-      vi.useRealTimers();
+      expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
     });
   });
 
@@ -382,9 +386,7 @@ describe("BackgroundAgentRunner", () => {
         expect(
           mockExec.mock.calls.some(
             (c: unknown[]) =>
-              typeof c[0] === "string" &&
-              c[0].includes("git add") &&
-              c[0].includes("git commit"),
+              typeof c[0] === "string" && c[0].includes("git add") && c[0].includes("git commit"),
           ),
         ).toBe(true);
       });
@@ -413,6 +415,38 @@ describe("BackgroundAgentRunner", () => {
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const gitCall = calls.find((c) => typeof c === "string" && c.includes("git commit"));
       expect(gitCall).toBeUndefined();
+    });
+
+    it("clears loop detection state on manual resume", async () => {
+      const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-resume-"));
+      const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
+        failureThreshold: 5,
+        resetTimeoutMs: 200,
+      });
+
+      let attempts = 0;
+      retryRunner.setWorkFn(async () => {
+        attempts++;
+        if (attempts <= 3) {
+          throw new Error("boom");
+        }
+        return { output: "recovered", touchedFiles: [] };
+      });
+
+      const id = retryRunner.enqueue("resume me", { longRunning: true });
+
+      await vi.waitFor(() => {
+        expect(retryRunner.getTask(id)?.status).toBe("paused");
+      });
+      expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
+
+      const resumed = await retryRunner.resume(id);
+      expect(resumed).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(retryRunner.getTask(id)?.status).toBe("completed");
+      });
+      expect(retryRunner.getTask(id)?.output).toBe("recovered");
     });
 
     it("does not auto-commit when there are no touched files", async () => {

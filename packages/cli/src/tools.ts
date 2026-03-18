@@ -11,6 +11,7 @@ import {
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
+  resolvePreferredShell,
 } from "@dantecode/core";
 import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
 import {
@@ -48,6 +49,7 @@ export type ToolName =
   | "Glob"
   | "Grep"
   | "GitCommit"
+  | "GitPush"
   | "TodoWrite";
 
 // ----------------------------------------------------------------------------
@@ -247,7 +249,7 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
       timeout: timeoutMs,
       maxBuffer: 10 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? "bash" : "/bin/bash",
+      shell: resolvePreferredShell(),
     });
     return { content: result || "(no output)", isError: false };
   } catch (err: unknown) {
@@ -683,6 +685,36 @@ async function toolGitCommit(
 }
 
 /**
+ * GitPush tool: pushes a branch and verifies the remote ref matches local HEAD.
+ */
+async function toolGitPush(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const remote = typeof input["remote"] === "string" ? input["remote"] : undefined;
+  const branch = typeof input["branch"] === "string" ? input["branch"] : undefined;
+  const setUpstream = input["set_upstream"] === true || input["setUpstream"] === true;
+
+  try {
+    const { pushBranch } = await import("@dantecode/git-engine");
+
+    const result = pushBranch({ remote, branch, setUpstream }, projectRoot);
+
+    return {
+      content:
+        `Push verified: ${result.remote}/${result.branch}\n` +
+        `Local HEAD: ${result.localCommit}\n` +
+        `Remote ref: ${result.remoteCommit}` +
+        (result.output ? `\nOutput: ${result.output}` : ""),
+      isError: false,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `Error pushing: ${message}`, isError: true };
+  }
+}
+
+/**
  * TodoWrite tool: manages the session's to-do list.
  * Accepts a full replacement of the todo list.
  */
@@ -759,6 +791,13 @@ export async function executeTool(
     }
   }
 
+  if (context.sandboxEnabled && name === "GitPush") {
+    return {
+      content: "Sandbox: git push is blocked while sandbox mode is enabled. Disable sandbox to push to a remote.",
+      isError: true,
+    };
+  }
+
   if (name === "Bash") {
     const command = input["command"] as string | undefined;
     if (command && isRepoInternalCdChain(command, projectRoot)) {
@@ -829,6 +868,9 @@ export async function executeTool(
     case "GitCommit":
       result = await toolGitCommit(input, projectRoot);
       break;
+    case "GitPush":
+      result = await toolGitPush(input, projectRoot);
+      break;
     case "TodoWrite":
       result = await toolTodoWrite(input, projectRoot);
       break;
@@ -837,19 +879,20 @@ export async function executeTool(
   }
 
   // Record audit event for file-modifying tools
-  const auditableTools = new Set(["Write", "Edit", "Bash", "GitCommit"]);
+  const auditableTools = new Set(["Write", "Edit", "Bash", "GitCommit", "GitPush"]);
   if (auditableTools.has(name)) {
     const auditTypeMap: Record<string, string> = {
       Write: "file_write",
       Edit: "file_edit",
       Bash: "bash_execute",
       GitCommit: "git_commit",
+      GitPush: "git_push",
     };
     try {
       await appendAuditEvent(projectRoot, {
         sessionId: context.sessionId ?? "cli-session",
         timestamp: new Date().toISOString(),
-        type: auditTypeMap[name]! as "file_write" | "file_edit" | "bash_execute" | "git_commit",
+        type: auditTypeMap[name]! as "file_write" | "file_edit" | "bash_execute" | "git_commit" | "git_push",
         payload: {
           tool: name,
           input: sanitizeForAudit(input),
@@ -1074,6 +1117,22 @@ export function getToolDefinitions(): Array<{
           },
         },
         required: ["message"],
+      },
+    },
+    {
+      name: "GitPush",
+      description: "Push a branch to a remote and verify the remote ref matches local HEAD.",
+      parameters: {
+        type: "object",
+        properties: {
+          remote: { type: "string", description: "Remote name (default: origin)" },
+          branch: { type: "string", description: "Branch name (default: current branch)" },
+          set_upstream: {
+            type: "boolean",
+            description: "Set upstream tracking for the branch with git push -u",
+          },
+        },
+        required: [],
       },
     },
     {

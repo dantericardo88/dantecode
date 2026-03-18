@@ -45,7 +45,10 @@ function httpRequest(
           try {
             resolve({ status: res.statusCode ?? 0, body: JSON.parse(raw) });
           } catch {
-            resolve({ status: res.statusCode ?? 0, body: { _raw: raw } as Record<string, unknown> });
+            resolve({
+              status: res.statusCode ?? 0,
+              body: { _raw: raw } as Record<string, unknown>,
+            });
           }
         });
         res.on("error", reject);

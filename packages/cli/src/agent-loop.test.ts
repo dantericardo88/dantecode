@@ -94,8 +94,12 @@ vi.mock("@dantecode/core", () => {
     async getRecentSummaries(limit = 3) {
       return mockGetRecentSummaries(limit);
     }
-    async list() { return []; }
-    async load() { return null; }
+    async list() {
+      return [];
+    }
+    async load() {
+      return null;
+    }
     async save() {}
   }
 
@@ -120,7 +124,12 @@ vi.mock("@dantecode/core", () => {
     parseVerificationErrors: vi.fn(() => []),
     formatErrorsForFixPrompt: vi.fn(() => ""),
     computeErrorSignature: vi.fn(() => ""),
-    getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+    getContextUtilization: vi.fn(() => ({
+      tokens: 100,
+      maxTokens: 128000,
+      percent: 0,
+      tier: "green",
+    })),
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
   };
@@ -330,6 +339,60 @@ describe("runAgentLoop smoke tests", () => {
 
     const session = makeSession();
     const result = await runAgentLoop("Fix src/index.ts", session, makeConfig());
+
+    expect(result.messages.some((m) => m.toolUse?.name === "Read")).toBe(true);
+    expect(result.messages.some((m) => m.role === "tool")).toBe(true);
+  });
+
+  it("nudges continuation prompts into real tool calls after earlier execution work", async () => {
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: "Continuing the pipeline. I will update the wiring and run verification next.",
+        usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+      })
+      .mockResolvedValueOnce({
+        text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+        usage: { promptTokens: 50, completionTokens: 25, totalTokens: 75 },
+      })
+      .mockResolvedValueOnce({
+        text: "I inspected the file and I am ready for the next change.",
+        usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+      });
+
+    const session = makeSession({
+      messages: [
+        {
+          id: "prior-user",
+          role: "user",
+          content: "/autoforge --self-improve",
+          timestamp: new Date().toISOString(),
+        },
+        {
+          id: "prior-tool",
+          role: "assistant",
+          content: "Using tool: Read",
+          timestamp: new Date().toISOString(),
+          toolUse: {
+            id: "tool-1",
+            name: "Read",
+            input: { file_path: "src/index.ts" },
+          },
+        },
+        {
+          id: "prior-result",
+          role: "tool",
+          content: "ok",
+          timestamp: new Date().toISOString(),
+          toolResult: {
+            toolUseId: "tool-1",
+            content: "ok",
+            isError: false,
+          },
+        },
+      ],
+    });
+
+    const result = await runAgentLoop("please continue", session, makeConfig());
 
     expect(result.messages.some((m) => m.toolUse?.name === "Read")).toBe(true);
     expect(result.messages.some((m) => m.role === "tool")).toBe(true);
@@ -727,9 +790,7 @@ describe("Approach memory: recording after verification", () => {
 
     await runAgentLoop("Update app", makeSession(), config);
 
-    expect(mockEscalateTier).toHaveBeenCalledWith(
-      expect.stringContaining("repeat-sig"),
-    );
+    expect(mockEscalateTier).toHaveBeenCalledWith(expect.stringContaining("repeat-sig"));
   });
 });
 
@@ -772,10 +833,10 @@ describe("Major edit batch gating", () => {
   it("blocks GitCommit when repo-root GStack is red", async () => {
     mockGenerateText.mockResolvedValueOnce({
       text: [
-        '<tool_use>',
+        "<tool_use>",
         '{"name":"Write","input":{"file_path":"packages/cli/src/tools.ts","content":"export const broken = true;"}}',
         "</tool_use>",
-        '<tool_use>',
+        "<tool_use>",
         '{"name":"GitCommit","input":{"message":"commit changes"}}',
         "</tool_use>",
       ].join("\n"),
@@ -806,6 +867,45 @@ describe("Major edit batch gating", () => {
     await runAgentLoop("Write and commit protected changes", makeSession(), makeConfig());
 
     expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitCommit")).toBe(false);
+  });
+
+  it("blocks GitPush when repo-root GStack is red", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: [
+        "<tool_use>",
+        '{"name":"Write","input":{"file_path":"packages/cli/src/tools.ts","content":"export const broken = true;"}}',
+        "</tool_use>",
+        "<tool_use>",
+        '{"name":"GitPush","input":{"remote":"origin","branch":"main"}}',
+        "</tool_use>",
+      ].join("\n"),
+      usage: { totalTokens: 80 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will fix the failing checks before pushing.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool.mockImplementation(async (name: string, input: Record<string, unknown>) => {
+      if (name === "Write") {
+        return { content: "ok", isError: false };
+      }
+      if (name === "Bash") {
+        const command = input.command as string;
+        return {
+          content: command === "npm run typecheck" ? "typecheck failed" : "skipped",
+          isError: command === "npm run typecheck",
+        };
+      }
+      if (name === "GitPush") {
+        return { content: "should not push", isError: false };
+      }
+      return { content: "ok", isError: false };
+    });
+
+    await runAgentLoop("Write and push protected changes", makeSession(), makeConfig());
+
+    expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitPush")).toBe(false);
   });
 });
 
@@ -930,9 +1030,7 @@ describe("Progress tracking: emission after tool calls", () => {
 
     // Progress message should exist and show 5 tool calls
     const progressMsg = result.messages.find(
-      (m) =>
-        typeof m.content === "string" &&
-        m.content.includes("[progress:"),
+      (m) => typeof m.content === "string" && m.content.includes("[progress:"),
     );
     expect(progressMsg).toBeDefined();
     expect(progressMsg!.content).toContain("5 tool calls");
@@ -968,9 +1066,7 @@ describe("Progress tracking: emission after tool calls", () => {
 
     // No progress message should exist in the session
     const progressMsg = result.messages.find(
-      (m) =>
-        typeof m.content === "string" &&
-        m.content.includes("[progress:"),
+      (m) => typeof m.content === "string" && m.content.includes("[progress:"),
     );
     expect(progressMsg).toBeUndefined();
   });

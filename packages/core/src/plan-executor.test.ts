@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  PlanExecutor,
-  areDependenciesMet,
-  getNextExecutableSteps,
-} from "./plan-executor.js";
+import { PlanExecutor, areDependenciesMet, getNextExecutableSteps } from "./plan-executor.js";
 import type { ExecutionPlan, PlanStep } from "./architect-planner.js";
 
 function makePlan(steps: Partial<PlanStep>[]): ExecutionPlan {
@@ -91,9 +87,7 @@ describe("PlanExecutor", () => {
   });
 
   it("runs verify command after successful step", async () => {
-    const plan = makePlan([
-      { description: "Build step", verifyCommand: "npm test" },
-    ]);
+    const plan = makePlan([{ description: "Build step", verifyCommand: "npm test" }]);
 
     const executeStep = vi.fn().mockResolvedValue({
       stepId: "step-1",
@@ -114,9 +108,7 @@ describe("PlanExecutor", () => {
   });
 
   it("marks step as failed when verification fails", async () => {
-    const plan = makePlan([
-      { description: "Build step", verifyCommand: "npm test" },
-    ]);
+    const plan = makePlan([{ description: "Build step", verifyCommand: "npm test" }]);
 
     const executeStep = vi.fn().mockResolvedValue({
       stepId: "step-1",
@@ -137,9 +129,7 @@ describe("PlanExecutor", () => {
   });
 
   it("invokes replan on failure and adds new steps", async () => {
-    const plan = makePlan([
-      { description: "Will fail" },
-    ]);
+    const plan = makePlan([{ description: "Will fail" }]);
 
     const executeStep = vi
       .fn()
@@ -165,9 +155,7 @@ describe("PlanExecutor", () => {
   });
 
   it("limits replan attempts", async () => {
-    const plan = makePlan([
-      { description: "Keeps failing" },
-    ]);
+    const plan = makePlan([{ description: "Keeps failing" }]);
 
     const executeStep = vi.fn().mockResolvedValue({
       stepId: "step-1",
@@ -176,9 +164,11 @@ describe("PlanExecutor", () => {
       durationMs: 5,
     });
 
-    const replan = vi.fn().mockResolvedValue([
-      { id: "retry", description: "Retry", files: [], status: "pending" as const },
-    ]);
+    const replan = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "retry", description: "Retry", files: [], status: "pending" as const },
+      ]);
 
     const executor = new PlanExecutor({ executeStep, replan, maxReplans: 2 });
     const result = await executor.execute(plan);

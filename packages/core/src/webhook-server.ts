@@ -124,11 +124,7 @@ async function handleGitHubWebhook(
   }
 
   // Route issue-to-PR tasks through the full pipeline if configured
-  if (
-    task.metadata.type === "issue-to-pr" &&
-    config.issueToPR &&
-    config.agentExecutor
-  ) {
+  if (task.metadata.type === "issue-to-pr" && config.issueToPR && config.agentExecutor) {
     const issueInfo: GitHubIssueInfo = {
       number: task.metadata.issueNumber as number,
       title: task.metadata.issueTitle as string,
@@ -146,26 +142,37 @@ async function handleGitHubWebhook(
     });
 
     // Fire and forget — the pipeline handles its own error reporting
-    pipeline.run(issueInfo, config.agentExecutor).then((result) => {
-      if (result.success) {
-        process.stdout.write(
-          `[issue-to-pr] #${issueInfo.number} completed → PR ${result.prUrl}\n`,
-        );
-      } else {
-        process.stdout.write(
-          `[issue-to-pr] #${issueInfo.number} failed: ${result.error}\n`,
-        );
-      }
-    }).catch(() => {/* pipeline handles its own errors */});
+    pipeline
+      .run(issueInfo, config.agentExecutor)
+      .then((result) => {
+        if (result.success) {
+          process.stdout.write(
+            `[issue-to-pr] #${issueInfo.number} completed → PR ${result.prUrl}\n`,
+          );
+        } else {
+          process.stdout.write(`[issue-to-pr] #${issueInfo.number} failed: ${result.error}\n`);
+        }
+      })
+      .catch(() => {
+        /* pipeline handles its own errors */
+      });
 
     appendAuditEvent(config.projectRoot, {
       sessionId: task.id,
       timestamp: new Date().toISOString(),
       type: "webhook_received",
-      payload: { source: "github", event: eventName, pipeline: "issue-to-pr", issueNumber: issueInfo.number, agentTaskId: task.id },
+      payload: {
+        source: "github",
+        event: eventName,
+        pipeline: "issue-to-pr",
+        issueNumber: issueInfo.number,
+        agentTaskId: task.id,
+      },
       modelId: "",
       projectRoot: config.projectRoot,
-    }).catch(() => {/* non-fatal */});
+    }).catch(() => {
+      /* non-fatal */
+    });
 
     sendJSON(res, 200, {
       accepted: true,
@@ -188,7 +195,9 @@ async function handleGitHubWebhook(
     payload: { source: "github", event: eventName, taskId, agentTaskId: task.id },
     modelId: "",
     projectRoot: config.projectRoot,
-  }).catch(() => {/* non-fatal */});
+  }).catch(() => {
+    /* non-fatal */
+  });
 
   sendJSON(res, 200, {
     accepted: true,
@@ -286,7 +295,9 @@ async function handleSlackWebhook(
     payload: { source: "slack", event: "message", taskId, agentTaskId: task.id },
     modelId: "",
     projectRoot: config.projectRoot,
-  }).catch(() => {/* non-fatal */});
+  }).catch(() => {
+    /* non-fatal */
+  });
 
   sendJSON(res, 200, {
     accepted: true,
@@ -333,7 +344,10 @@ async function handleAPITasks(
   }
 
   // Create an API task through the registry and enqueue it
-  const agentTask = config.eventRegistry.fromAPI(prompt, (body.metadata as Record<string, unknown>) ?? undefined);
+  const agentTask = config.eventRegistry.fromAPI(
+    prompt,
+    (body.metadata as Record<string, unknown>) ?? undefined,
+  );
   const taskId = config.backgroundRunner.enqueue(agentTask.prompt);
 
   appendAuditEvent(config.projectRoot, {
@@ -343,7 +357,9 @@ async function handleAPITasks(
     payload: { source: "api", event: "task_submit", taskId, agentTaskId: agentTask.id },
     modelId: "",
     projectRoot: config.projectRoot,
-  }).catch(() => {/* non-fatal */});
+  }).catch(() => {
+    /* non-fatal */
+  });
 
   sendJSON(res, 200, {
     accepted: true,
@@ -358,11 +374,7 @@ async function handleAPITasks(
  *
  * Returns server health including uptime and active task counts.
  */
-function handleHealth(
-  res: ServerResponse,
-  config: WebhookServerConfig,
-  startTime: number,
-): void {
+function handleHealth(res: ServerResponse, config: WebhookServerConfig, startTime: number): void {
   const counts = config.backgroundRunner.getStatusCounts();
 
   sendJSON(res, 200, {

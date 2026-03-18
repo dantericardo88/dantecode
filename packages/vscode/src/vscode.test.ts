@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Comprehensive vscode module mock
@@ -297,7 +298,9 @@ vi.mock("@dantecode/core", () => ({
   initializeState: vi.fn().mockResolvedValue(undefined),
   appendAuditEvent: vi.fn().mockResolvedValue(undefined),
   isProtectedWriteTarget: vi.fn((filePath: string, projectRoot: string) => {
-    const resolved = filePath.startsWith("/") ? filePath : `${projectRoot}/${filePath}`.replace(/\/+/g, "/");
+    const resolved = filePath.startsWith("/")
+      ? filePath
+      : `${projectRoot}/${filePath}`.replace(/\/+/g, "/");
     return [
       `${projectRoot}/packages/vscode`,
       `${projectRoot}/packages/cli`,
@@ -315,16 +318,20 @@ vi.mock("@dantecode/core", () => ({
     return destination.startsWith("packages/") || destination.startsWith("./packages/");
   }),
   isSelfImprovementWriteAllowed: vi.fn(
-    (filePath: string, projectRoot: string, context?: { enabled?: boolean; allowedRoots?: string[] }) => {
+    (
+      filePath: string,
+      projectRoot: string,
+      context?: { enabled?: boolean; allowedRoots?: string[] },
+    ) => {
       const resolved = filePath.startsWith("/")
         ? filePath.replace(/\\/g, "/")
         : `${projectRoot}/${filePath}`.replace(/\/+/g, "/");
       return Boolean(
         context?.enabled &&
-          context.allowedRoots?.some((root) => {
-            const normalizedRoot = root.replace(/\\/g, "/");
-            return resolved === normalizedRoot || resolved.startsWith(`${normalizedRoot}/`);
-          }),
+        context.allowedRoots?.some((root) => {
+          const normalizedRoot = root.replace(/\\/g, "/");
+          return resolved === normalizedRoot || resolved.startsWith(`${normalizedRoot}/`);
+        }),
       );
     },
   ),
@@ -359,6 +366,26 @@ vi.mock("@dantecode/core", () => ({
     }
     return null;
   }),
+  detectInstallContext: vi.fn(
+    ({
+      runtimePath,
+      workspaceRoot,
+      extensionPath,
+    }: {
+      runtimePath: string;
+      workspaceRoot?: string;
+      extensionPath?: string;
+    }) => ({
+      kind: "vscode_extension_host",
+      runtimePath,
+      packageRoot: extensionPath ?? "/test",
+      packageName: "dantecode",
+      repoRoot: "/test/project",
+      workspaceRoot,
+      extensionPath,
+      workspaceIsRepoRoot: workspaceRoot === "/test/project",
+    }),
+  ),
   ModelRouterImpl: vi.fn(),
   parseModelReference: vi.fn((model: string) => {
     const slashIndex = model.indexOf("/");
@@ -379,6 +406,7 @@ vi.mock("@dantecode/core", () => ({
   responseNeedsToolExecutionNudge: vi.fn((text: string) =>
     /\b(plan|will|executing plan|running:|created|updated|modified)\b/i.test(text),
   ),
+  resolvePreferredShell: vi.fn(() => "/bin/bash"),
 }));
 
 vi.mock("@dantecode/danteforge", () => ({
@@ -400,8 +428,11 @@ vi.mock("@dantecode/danteforge", () => ({
   formatLessonsForPrompt: vi.fn().mockReturnValue(""),
 }));
 
+const mockPushBranch = vi.fn();
+
 vi.mock("@dantecode/git-engine", () => ({
   generateRepoMap: vi.fn().mockReturnValue([]),
+  pushBranch: (...args: unknown[]) => mockPushBranch(...args),
   generateColoredHunk: vi.fn().mockReturnValue({
     filePath: "test.ts",
     linesAdded: 1,
@@ -528,7 +559,10 @@ import { AuditPanelProvider } from "./audit-panel-provider.js";
 import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import { activate, deactivate, setPendingDiff } from "./extension.js";
 import { generateColoredHunk } from "@dantecode/git-engine";
+import { detectInstallContext as _detectInstallContext } from "@dantecode/core";
 import * as vscode from "vscode";
+
+const mockDetectInstallContext = _detectInstallContext as unknown as ReturnType<typeof vi.fn>;
 
 // ---------------------------------------------------------------------------
 // PDSEDiagnosticProvider Tests
@@ -1377,6 +1411,15 @@ describe("VS Code Extension", () => {
       expect(commandIds).toContain("dantecode.openChat");
     });
 
+    it("registers dantecode.selfUpdate command", () => {
+      const context = createMockContext();
+      activate(context);
+
+      const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
+      const commandIds = callArgs.map((c: unknown[]) => c[0]);
+      expect(commandIds).toContain("dantecode.selfUpdate");
+    });
+
     it("registers dantecode.switchModel command", () => {
       const context = createMockContext();
       activate(context);
@@ -1415,6 +1458,85 @@ describe("VS Code Extension", () => {
       expect(commandIds).toContain("dantecode.reviewDiff");
       expect(commandIds).toContain("dantecode.acceptDiffHunks");
       expect(commandIds).toContain("dantecode.rejectDiffHunks");
+    });
+
+    it("runs repo self-update from the repo root terminal when the extension is in repo-dev mode", async () => {
+      const context = createMockContext();
+      activate(context);
+      mockDetectInstallContext.mockReturnValueOnce({
+        kind: "vscode_extension_host",
+        runtimePath: "/test/extension",
+        packageRoot: "/test",
+        packageName: "dantecode",
+        repoRoot: "/test/project",
+        workspaceRoot: "/test/project",
+        extensionPath: "/test",
+        workspaceIsRepoRoot: true,
+      });
+
+      const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
+      const handler = callArgs.find((c: unknown[]) => c[0] === "dantecode.selfUpdate")?.[1] as
+        | (() => Promise<void>)
+        | undefined;
+
+      await handler?.();
+
+      expect(vscode.window.createTerminal).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/test/project" }),
+      );
+      const terminal = (vscode.window.createTerminal as ReturnType<typeof vi.fn>).mock.results[0]
+        ?.value as { sendText: (value: string) => void; show: () => void };
+      expect(terminal.sendText).toHaveBeenCalledWith(
+        "node packages/cli/dist/index.js self-update --verbose",
+      );
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        "DanteCode: Repo self-update started in terminal",
+      );
+    });
+
+    it("shows extension-host guidance instead of shelling into the workspace for published installs", async () => {
+      const context = createMockContext();
+      activate(context);
+      mockDetectInstallContext.mockReturnValueOnce({
+        kind: "vscode_extension_host",
+        runtimePath: "/extensions/dantecode",
+        packageRoot: "/extensions/dantecode",
+        packageName: "dantecode",
+        workspaceRoot: "/test/project",
+        extensionPath: "/extensions/dantecode",
+        workspaceIsRepoRoot: false,
+      });
+
+      const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
+      const handler = callArgs.find((c: unknown[]) => c[0] === "dantecode.selfUpdate")?.[1] as
+        | (() => Promise<void>)
+        | undefined;
+
+      await handler?.();
+
+      expect(vscode.window.createTerminal).not.toHaveBeenCalled();
+      expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+        "workbench.extensions.action.checkForUpdates",
+      );
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        "DanteCode: Extension updates come from the VS Code Extensions view. Update the CLI separately with `npm install -g @dantecode/cli@latest`.",
+      );
+    });
+
+    it("contributes the self-update command in the extension manifest", async () => {
+      const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const repoManifestPath = join(process.cwd(), "packages", "vscode", "package.json");
+      const manifestPath = await actualFs
+        .access(repoManifestPath)
+        .then(() => repoManifestPath)
+        .catch(() => join(process.cwd(), "package.json"));
+      const manifest = JSON.parse(await actualFs.readFile(manifestPath, "utf-8")) as {
+        contributes?: { commands?: Array<{ command: string }> };
+      };
+
+      expect(
+        manifest.contributes?.commands?.some((entry) => entry.command === "dantecode.selfUpdate"),
+      ).toBe(true);
     });
 
     it("manual create checkpoint command delegates to the checkpoint manager", async () => {
@@ -1630,6 +1752,7 @@ describe("executeTool integration", () => {
     mockReaddir.mockReset();
     mockStat.mockReset();
     mockExecSync.mockReset();
+    mockPushBranch.mockReset();
   });
 
   it("blocks Write to self-owned path without confirmation", async () => {
@@ -1700,6 +1823,97 @@ describe("executeTool integration", () => {
     expect(result.isError).toBe(false);
     expect(result.content).toContain("file1.ts");
     expect(mockExecSync).toHaveBeenCalled();
+  });
+
+  it("routes SelfUpdate through the CLI self-update command in repo-dev mode", async () => {
+    const context = makeContext();
+    mockDetectInstallContext.mockReturnValueOnce({
+      kind: "vscode_extension_host",
+      runtimePath: "/test/extension",
+      packageRoot: "/test",
+      packageName: "dantecode",
+      repoRoot: "/proj",
+      workspaceRoot: "/proj",
+      extensionPath: "/test",
+      workspaceIsRepoRoot: true,
+    });
+    mockExecSync.mockReturnValue("self-update ok");
+
+    const result = await executeTool("SelfUpdate", { dryRun: false }, "/proj", context);
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("SelfUpdate complete");
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "node packages/cli/dist/index.js self-update --verbose",
+      expect.objectContaining({ cwd: "/proj" }),
+    );
+    expect(
+      mockExecSync.mock.calls.some(
+        (call: unknown[]) =>
+          typeof call[0] === "string" && (call[0] as string).includes("cd packages/vscode"),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns extension-host guidance for SelfUpdate outside repo-dev mode", async () => {
+    const context = makeContext();
+    mockDetectInstallContext.mockReturnValueOnce({
+      kind: "vscode_extension_host",
+      runtimePath: "/extensions/dantecode",
+      packageRoot: "/extensions/dantecode",
+      packageName: "dantecode",
+      workspaceRoot: "/proj",
+      extensionPath: "/extensions/dantecode",
+      workspaceIsRepoRoot: false,
+    });
+
+    const result = await executeTool("SelfUpdate", { dryRun: false }, "/proj", context);
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Extensions view");
+    expect(result.content).toContain("npm install -g @dantecode/cli@latest");
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it("routes GitPush through git-engine and returns verification details", async () => {
+    const context = makeContext();
+    mockPushBranch.mockReturnValue({
+      remote: "origin",
+      branch: "main",
+      localCommit: "abc123",
+      remoteCommit: "abc123",
+      output: "Everything up-to-date",
+      setUpstream: true,
+    });
+
+    const result = await executeTool(
+      "GitPush",
+      { remote: "origin", branch: "main", set_upstream: true },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Push verified");
+    expect(mockPushBranch).toHaveBeenCalledWith(
+      { remote: "origin", branch: "main", setUpstream: true },
+      "/proj",
+    );
+  });
+
+  it("blocks GitPush while sandbox mode is enabled", async () => {
+    const context = makeContext({ sandboxEnabled: true });
+
+    const result = await executeTool(
+      "GitPush",
+      { remote: "origin", branch: "main" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Sandbox");
+    expect(mockPushBranch).not.toHaveBeenCalled();
   });
 
   it("calls onDiffHunk after successful Write", async () => {

@@ -59,17 +59,28 @@ const DEFAULT_EXCLUDE = [
 ];
 
 const INDEXABLE_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".py", ".rb", ".rs", ".go",
-  ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".py",
+  ".rb",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".cpp",
+  ".h",
+  ".hpp",
+  ".cs",
+  ".swift",
+  ".kt",
 ]);
 
 /**
  * Extract symbol definitions from source code using regex.
  */
-export function extractSymbolDefinitions(
-  content: string,
-  filePath: string,
-): SymbolDefinition[] {
+export function extractSymbolDefinitions(content: string, filePath: string): SymbolDefinition[] {
   const symbols: SymbolDefinition[] = [];
   const lines = content.split("\n");
 
@@ -157,9 +168,7 @@ export function computeFileScores(
     const target = filePaths.find((fp) => {
       const normalized = fp.replace(/\.(ts|tsx|js|jsx)$/, "");
       return (
-        normalized === importBase ||
-        normalized === edge.to ||
-        normalized.endsWith(`/${importBase}`)
+        normalized === importBase || normalized === edge.to || normalized.endsWith(`/${importBase}`)
       );
     });
 
@@ -197,10 +206,7 @@ export function computeFileScores(
 /**
  * Format ranked files as a compact context string for LLM injection.
  */
-export function formatRepoMap(
-  rankedFiles: RankedFile[],
-  maxTokenBudget = 2000,
-): string {
+export function formatRepoMap(rankedFiles: RankedFile[], maxTokenBudget = 2000): string {
   const lines: string[] = ["# Repository Map (ranked by importance)", ""];
   let tokens = 20; // header overhead
 
@@ -273,10 +279,7 @@ export async function buildRepoMap(
   return ranked;
 }
 
-async function collectSourceFiles(
-  dir: string,
-  excludePatterns: string[],
-): Promise<string[]> {
+async function collectSourceFiles(dir: string, excludePatterns: string[]): Promise<string[]> {
   const files: string[] = [];
 
   try {

@@ -35,7 +35,12 @@ const mockExecFile = childProcess.execFile as unknown as ReturnType<typeof vi.fn
 
 function mockDockerSuccess(stdout = "", stderr = ""): void {
   mockExecFile.mockImplementation(
-    (_cmd: string, _args: string[], _opts: unknown, cb: (err: unknown, result: unknown) => void) => {
+    (
+      _cmd: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (err: unknown, result: unknown) => void,
+    ) => {
       cb(null, { stdout, stderr });
       return {};
     },
@@ -63,10 +68,23 @@ function mockDockerFailure(message: string, code = 1): void {
   );
 }
 
-function mockDockerSequence(results: Array<{ stdout?: string; stderr?: string; error?: string; killed?: boolean; signal?: string }>): void {
+function mockDockerSequence(
+  results: Array<{
+    stdout?: string;
+    stderr?: string;
+    error?: string;
+    killed?: boolean;
+    signal?: string;
+  }>,
+): void {
   let callIndex = 0;
   mockExecFile.mockImplementation(
-    (_cmd: string, _args: string[], _opts: unknown, cb: (err: unknown, result?: unknown) => void) => {
+    (
+      _cmd: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (err: unknown, result?: unknown) => void,
+    ) => {
       const entry = results[callIndex] ?? results[results.length - 1]!;
       callIndex++;
       if (entry.error) {
@@ -214,10 +232,7 @@ describe("DockerAgent.start", () => {
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "docker",
-      expect.arrayContaining([
-        "--volume",
-        "/projects/test:/workspace",
-      ]),
+      expect.arrayContaining(["--volume", "/projects/test:/workspace"]),
       expect.any(Object),
       expect.any(Function),
     );
@@ -244,7 +259,7 @@ describe("DockerAgent.start", () => {
 describe("DockerAgent.exec", () => {
   it("sends correct docker exec command", async () => {
     mockDockerSequence([
-      { stdout: "container123" },             // docker run
+      { stdout: "container123" }, // docker run
       { stdout: "command output", stderr: "" }, // docker exec
     ]);
 
@@ -268,10 +283,7 @@ describe("DockerAgent.exec", () => {
   });
 
   it("passes workdir and env overrides", async () => {
-    mockDockerSequence([
-      { stdout: "cid" },
-      { stdout: "ok" },
-    ]);
+    mockDockerSequence([{ stdout: "cid" }, { stdout: "ok" }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();
@@ -293,16 +305,11 @@ describe("DockerAgent.exec", () => {
   it("throws if container not started", async () => {
     const agent = new DockerAgent("/projects/test");
 
-    await expect(agent.exec({ command: "ls" })).rejects.toThrow(
-      "Container not started",
-    );
+    await expect(agent.exec({ command: "ls" })).rejects.toThrow("Container not started");
   });
 
   it("handles command failure with exit code", async () => {
-    mockDockerSequence([
-      { stdout: "cid" },
-      { error: "exit code 2", killed: false },
-    ]);
+    mockDockerSequence([{ stdout: "cid" }, { error: "exit code 2", killed: false }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();
@@ -338,10 +345,10 @@ describe("DockerAgent.exec", () => {
 describe("DockerAgent.runTask", () => {
   it("runs full lifecycle: start, exec, collect patch, stop", async () => {
     mockDockerSequence([
-      { stdout: "container-for-task" },           // docker run (start)
-      { stdout: "task output" },                   // docker exec (command)
+      { stdout: "container-for-task" }, // docker run (start)
+      { stdout: "task output" }, // docker exec (command)
       { stdout: "diff --git a/f.ts b/f.ts\n+new line" }, // docker exec (git diff / collectPatch)
-      { stdout: "" },                               // docker rm (stop)
+      { stdout: "" }, // docker rm (stop)
     ]);
 
     const agent = new DockerAgent("/projects/test");
@@ -358,10 +365,10 @@ describe("DockerAgent.runTask", () => {
 
   it("stops container even when exec fails", async () => {
     mockDockerSequence([
-      { stdout: "cid" },             // docker run
-      { error: "command failed" },    // docker exec (command fails)
-      { stdout: "" },                 // docker exec (collectPatch — may also fail gracefully)
-      { stdout: "" },                 // docker rm (stop)
+      { stdout: "cid" }, // docker run
+      { error: "command failed" }, // docker exec (command fails)
+      { stdout: "" }, // docker exec (collectPatch — may also fail gracefully)
+      { stdout: "" }, // docker rm (stop)
     ]);
 
     const agent = new DockerAgent("/projects/test");
@@ -374,9 +381,9 @@ describe("DockerAgent.runTask", () => {
 
   it("skips start/stop when container is already running", async () => {
     mockDockerSequence([
-      { stdout: "pre-started-id" },  // docker run (manual start)
-      { stdout: "reuse output" },     // docker exec (command)
-      { stdout: "" },                 // docker exec (git diff)
+      { stdout: "pre-started-id" }, // docker run (manual start)
+      { stdout: "reuse output" }, // docker exec (command)
+      { stdout: "" }, // docker exec (git diff)
     ]);
 
     const agent = new DockerAgent("/projects/test");
@@ -395,11 +402,9 @@ describe("DockerAgent.runTask", () => {
 
 describe("DockerAgent.collectPatch", () => {
   it("returns git diff output", async () => {
-    const diffOutput = "diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1,2 @@\n+console.log('hello')";
-    mockDockerSequence([
-      { stdout: "cid" },
-      { stdout: diffOutput },
-    ]);
+    const diffOutput =
+      "diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1,2 @@\n+console.log('hello')";
+    mockDockerSequence([{ stdout: "cid" }, { stdout: diffOutput }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();
@@ -409,10 +414,7 @@ describe("DockerAgent.collectPatch", () => {
   });
 
   it("returns empty string when no changes", async () => {
-    mockDockerSequence([
-      { stdout: "cid" },
-      { stdout: "" },
-    ]);
+    mockDockerSequence([{ stdout: "cid" }, { stdout: "" }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();
@@ -433,7 +435,7 @@ describe("DockerAgent.stop", () => {
   it("removes container with force flag", async () => {
     mockDockerSequence([
       { stdout: "to-remove" }, // docker run
-      { stdout: "" },          // docker rm
+      { stdout: "" }, // docker rm
     ]);
 
     const agent = new DockerAgent("/projects/test");
@@ -456,10 +458,7 @@ describe("DockerAgent.stop", () => {
   });
 
   it("handles cleanup errors gracefully", async () => {
-    mockDockerSequence([
-      { stdout: "cid" },
-      { error: "container already removed" },
-    ]);
+    mockDockerSequence([{ stdout: "cid" }, { error: "container already removed" }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();
@@ -483,10 +482,7 @@ describe("DockerAgent — error handling", () => {
   });
 
   it("returns stderr in result when exec fails", async () => {
-    mockDockerSequence([
-      { stdout: "cid" },
-      { error: "npm ERR! Missing script: test" },
-    ]);
+    mockDockerSequence([{ stdout: "cid" }, { error: "npm ERR! Missing script: test" }]);
 
     const agent = new DockerAgent("/projects/test");
     await agent.start();

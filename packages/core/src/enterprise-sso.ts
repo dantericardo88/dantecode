@@ -164,10 +164,7 @@ export class EnterpriseSSOManager {
    * Extracts the SignatureValue and SignedInfo from the XML, then verifies
    * with the certificate's public key using RSA-SHA256.
    */
-  private verifyXMLSignature(
-    xml: string,
-    certPem: string,
-  ): { valid: boolean; error?: string } {
+  private verifyXMLSignature(xml: string, certPem: string): { valid: boolean; error?: string } {
     try {
       // Extract SignatureValue
       const sigValueMatch = xml.match(
@@ -179,17 +176,13 @@ export class EnterpriseSSOManager {
       const signatureB64 = sigValueMatch[1].replace(/\s+/g, "");
 
       // Extract the SignedInfo element (the signed content)
-      const signedInfoMatch = xml.match(
-        /(<(?:ds:)?SignedInfo[\s\S]*?<\/(?:ds:)?SignedInfo>)/,
-      );
+      const signedInfoMatch = xml.match(/(<(?:ds:)?SignedInfo[\s\S]*?<\/(?:ds:)?SignedInfo>)/);
       if (!signedInfoMatch?.[1]) {
         return { valid: false, error: "No SignedInfo found" };
       }
 
       // Canonicalize SignedInfo (minimal C14N: trim whitespace between tags)
-      const signedInfo = signedInfoMatch[1]
-        .replace(/>\s+</g, "><")
-        .trim();
+      const signedInfo = signedInfoMatch[1].replace(/>\s+</g, "><").trim();
 
       // Normalize certificate PEM
       const normalizedCert = certPem.includes("BEGIN CERTIFICATE")
@@ -218,20 +211,14 @@ export class EnterpriseSSOManager {
    */
   createSession(attributes: Record<string, string>): SSOSession {
     const now = new Date();
-    const timeoutSec =
-      this.config.sessionTimeoutSec ?? DEFAULT_SESSION_TIMEOUT_SEC;
+    const timeoutSec = this.config.sessionTimeoutSec ?? DEFAULT_SESSION_TIMEOUT_SEC;
     const expiresAt = new Date(now.getTime() + timeoutSec * 1000);
 
     const userId = attributes["nameId"] ?? attributes["email"] ?? randomUUID();
     const email = attributes["email"] ?? "";
     const displayName =
-      attributes["displayName"] ??
-      attributes["name"] ??
-      attributes["cn"] ??
-      email;
-    const groups = attributes["groups"]
-      ? attributes["groups"].split(",").map((g) => g.trim())
-      : [];
+      attributes["displayName"] ?? attributes["name"] ?? attributes["cn"] ?? email;
+    const groups = attributes["groups"] ? attributes["groups"].split(",").map((g) => g.trim()) : [];
 
     const session: SSOSession = {
       userId,
@@ -346,10 +333,7 @@ export class EnterpriseSSOManager {
    * Save SSO config to `configPath`.
    * Creates parent directories if they do not exist.
    */
-  static async saveConfig(
-    configPath: string,
-    config: SSOConfig,
-  ): Promise<void> {
+  static async saveConfig(configPath: string, config: SSOConfig): Promise<void> {
     await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
   }
@@ -400,8 +384,7 @@ function parseAssertionXML(xml: string): ParsedAssertion {
   // Extract SAML Attributes using a two-pass approach:
   // 1. Find all <Attribute Name="..."> blocks
   // 2. For each, extract <AttributeValue>...</AttributeValue>
-  const attrBlockPattern =
-    /<([a-zA-Z0-9]*:?)Attribute\s+([^>]*?)>([\s\S]*?)<\/\1Attribute>/g;
+  const attrBlockPattern = /<([a-zA-Z0-9]*:?)Attribute\s+([^>]*?)>([\s\S]*?)<\/\1Attribute>/g;
   let attrBlock: RegExpExecArray | null;
   while ((attrBlock = attrBlockPattern.exec(xml)) !== null) {
     const attrTag = attrBlock[2] ?? "";

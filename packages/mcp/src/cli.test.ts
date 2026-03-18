@@ -18,7 +18,7 @@ describe("MCP CLI entry point", () => {
     const content = readFileSync(cliPath, "utf-8");
     expect(content).toContain("#!/usr/bin/env node");
     expect(content).toContain("startMCPServerStdio");
-    expect(content).toContain('import');
+    expect(content).toContain("import");
   });
 
   it("package.json has a bin field pointing to dist/cli.js", () => {

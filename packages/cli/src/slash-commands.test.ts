@@ -141,11 +141,7 @@ describe("/party --autoforge", () => {
         return "main\n";
       }
 
-      if (
-        command === "npm run typecheck" ||
-        command === "npm run lint" ||
-        command === "npm test"
-      ) {
+      if (command === "npm run typecheck" || command === "npm run lint" || command === "npm test") {
         return "";
       }
 

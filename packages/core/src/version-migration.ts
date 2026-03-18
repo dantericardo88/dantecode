@@ -52,12 +52,12 @@ type MigrationFn = (data: Record<string, unknown>) => Record<string, unknown>;
  */
 const MODEL_NAME_NORMALIZATION: Record<string, string> = {
   "grok-3-latest": "grok-3",
-  "grok3": "grok-3",
+  grok3: "grok-3",
   "claude-3.5-sonnet": "claude-sonnet-4-20250514",
   "claude-3-5-sonnet-20241022": "claude-sonnet-4-20250514",
   "claude-3-opus": "claude-opus-4-20250514",
   "gpt-4-turbo": "gpt-4-turbo-2024-04-09",
-  "gpt4": "gpt-4-turbo-2024-04-09",
+  gpt4: "gpt-4-turbo-2024-04-09",
   "gpt-4o": "gpt-4o-2024-08-06",
 };
 
@@ -86,7 +86,11 @@ export function v0_to_v1(data: Record<string, unknown>): Record<string, unknown>
 
     // Normalize default model
     const defaultModel = modelCopy["default"] as Record<string, unknown> | undefined;
-    if (defaultModel && typeof defaultModel === "object" && typeof defaultModel["modelId"] === "string") {
+    if (
+      defaultModel &&
+      typeof defaultModel === "object" &&
+      typeof defaultModel["modelId"] === "string"
+    ) {
       const normalized = MODEL_NAME_NORMALIZATION[defaultModel["modelId"]];
       if (normalized) {
         modelCopy["default"] = { ...defaultModel, modelId: normalized };
@@ -196,12 +200,14 @@ export async function runMigrations(projectRoot: string): Promise<MigrationRunRe
   } catch {
     // Corrupt YAML — cannot migrate
     return {
-      results: [{
-        fromVersion: 0,
-        toVersion: LATEST_CONFIG_VERSION,
-        applied: false,
-        message: "STATE.yaml contains invalid YAML — cannot migrate",
-      }],
+      results: [
+        {
+          fromVersion: 0,
+          toVersion: LATEST_CONFIG_VERSION,
+          applied: false,
+          message: "STATE.yaml contains invalid YAML — cannot migrate",
+        },
+      ],
       finalVersion: 0,
       migrated: false,
     };
@@ -209,12 +215,14 @@ export async function runMigrations(projectRoot: string): Promise<MigrationRunRe
 
   if (!data || typeof data !== "object") {
     return {
-      results: [{
-        fromVersion: 0,
-        toVersion: LATEST_CONFIG_VERSION,
-        applied: false,
-        message: "STATE.yaml root is not an object — cannot migrate",
-      }],
+      results: [
+        {
+          fromVersion: 0,
+          toVersion: LATEST_CONFIG_VERSION,
+          applied: false,
+          message: "STATE.yaml root is not an object — cannot migrate",
+        },
+      ],
       finalVersion: 0,
       migrated: false,
     };

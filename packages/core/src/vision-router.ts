@@ -29,14 +29,34 @@ export interface VisionCapability {
 
 // Known vision-capable models with their constraints.
 const VISION_CAPABLE_MODELS: VisionCapability[] = [
-  { provider: "grok", modelId: "grok-4.20-beta-0309-non-reasoning", supportsVision: true, maxImageSize: 20_000_000 },
+  {
+    provider: "grok",
+    modelId: "grok-4.20-beta-0309-non-reasoning",
+    supportsVision: true,
+    maxImageSize: 20_000_000,
+  },
   { provider: "grok", modelId: "grok-4-0709", supportsVision: true, maxImageSize: 20_000_000 },
-  { provider: "anthropic", modelId: "claude-opus-4-6", supportsVision: true, maxImageSize: 20_000_000 },
-  { provider: "anthropic", modelId: "claude-sonnet-4-6", supportsVision: true, maxImageSize: 20_000_000 },
+  {
+    provider: "anthropic",
+    modelId: "claude-opus-4-6",
+    supportsVision: true,
+    maxImageSize: 20_000_000,
+  },
+  {
+    provider: "anthropic",
+    modelId: "claude-sonnet-4-6",
+    supportsVision: true,
+    maxImageSize: 20_000_000,
+  },
   { provider: "openai", modelId: "gpt-5", supportsVision: true, maxImageSize: 20_000_000 },
   { provider: "openai", modelId: "gpt-4.1", supportsVision: true, maxImageSize: 20_000_000 },
   { provider: "google", modelId: "gemini-2.5-pro", supportsVision: true, maxImageSize: 20_000_000 },
-  { provider: "google", modelId: "gemini-2.5-flash", supportsVision: true, maxImageSize: 20_000_000 },
+  {
+    provider: "google",
+    modelId: "gemini-2.5-flash",
+    supportsVision: true,
+    maxImageSize: 20_000_000,
+  },
 ];
 
 /**

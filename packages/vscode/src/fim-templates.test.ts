@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import {
-  getFIMTemplate,
-  buildFIMPromptForModel,
-  type FIMInput,
-} from "./fim-templates.js";
+import { getFIMTemplate, buildFIMPromptForModel, type FIMInput } from "./fim-templates.js";
 
 // ---------------------------------------------------------------------------
 // Template registry tests
@@ -79,16 +75,12 @@ describe("buildFIMPromptForModel", () => {
 
   it("assembles a StarCoder prompt with correct token wrapping", () => {
     const result = buildFIMPromptForModel("ollama", "starcoder2-3b", baseInput);
-    expect(result.prompt).toBe(
-      "<fim_prefix>function greet() {\n  <fim_suffix>\n}\n<fim_middle>",
-    );
+    expect(result.prompt).toBe("<fim_prefix>function greet() {\n  <fim_suffix>\n}\n<fim_middle>");
   });
 
   it("assembles a DeepSeek prompt with correct token wrapping", () => {
     const result = buildFIMPromptForModel("ollama", "deepseek-coder-6.7b", baseInput);
-    expect(result.prompt).toBe(
-      "<|fim_begin|>function greet() {\n  <|fim_hole|>\n}\n<|fim_end|>",
-    );
+    expect(result.prompt).toBe("<|fim_begin|>function greet() {\n  <|fim_hole|>\n}\n<|fim_end|>");
   });
 
   it("prepends cross-file context before the prefix code", () => {

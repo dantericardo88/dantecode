@@ -11,6 +11,9 @@ const {
   mockExec,
   mockExecFile,
   mockAppendAuditEvent,
+  mockResolvePreferredShell,
+  mockAutoCommit,
+  mockPushBranch,
 } = vi.hoisted(() => ({
   mockReadFile: vi.fn(),
   mockWriteFile: vi.fn(),
@@ -21,6 +24,9 @@ const {
   mockExec: vi.fn(),
   mockExecFile: vi.fn(),
   mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
+  mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
+  mockAutoCommit: vi.fn(),
+  mockPushBranch: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -42,18 +48,22 @@ vi.mock("node:child_process", async () => {
 });
 
 vi.mock("@dantecode/core", async () => {
-  const actual = await vi.importActual<object>("../../core/src/self-improvement-policy.ts");
+  const policy = await vi.importActual<object>("../../core/src/self-improvement-policy.ts");
   return {
-    ...actual,
-    appendAuditEvent: (...args: unknown[]) => mockAppendAuditEvent(...args),
+    ...policy,
+    appendAuditEvent: mockAppendAuditEvent,
+    resolvePreferredShell: mockResolvePreferredShell,
   };
 });
 
-import { executeTool, type CliToolExecutionContext } from "./tools.js";
+vi.mock("@dantecode/git-engine", () => ({
+  autoCommit: (...args: unknown[]) => mockAutoCommit(...args),
+  pushBranch: (...args: unknown[]) => mockPushBranch(...args),
+}));
 
-function makeContext(
-  overrides: Partial<CliToolExecutionContext> = {},
-): CliToolExecutionContext {
+import { executeTool, getToolDefinitions, type CliToolExecutionContext } from "./tools.js";
+
+function makeContext(overrides: Partial<CliToolExecutionContext> = {}): CliToolExecutionContext {
   return {
     sessionId: "session-1",
     roundId: "round-1",
@@ -82,6 +92,10 @@ describe("cli tools hardening", () => {
     mockReaddir.mockReset();
     mockStat.mockReset();
     mockExecSync.mockReset();
+    mockResolvePreferredShell.mockReset();
+    mockResolvePreferredShell.mockReturnValue("/bin/bash");
+    mockAutoCommit.mockReset();
+    mockPushBranch.mockReset();
   });
 
   it("blocks protected writes outside explicit self-improvement mode", async () => {
@@ -213,5 +227,62 @@ describe("cli tools hardening", () => {
 
     expect(third.isError).toBe(true);
     expect(third.content).toContain("Third identical Edit attempt blocked");
+  });
+
+  it("uses the shared preferred shell for Bash commands", async () => {
+    mockExecSync.mockReturnValue("tests passed");
+    mockResolvePreferredShell.mockReturnValue("C:\\Program Files\\Git\\bin\\bash.exe");
+
+    const result = await executeTool("Bash", { command: "npm test" }, "/proj", makeContext());
+
+    expect(result.isError).toBe(false);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "npm test",
+      expect.objectContaining({
+        shell: "C:\\Program Files\\Git\\bin\\bash.exe",
+      }),
+    );
+  });
+
+  it("routes GitPush through git-engine with verification details", async () => {
+    mockPushBranch.mockReturnValue({
+      remote: "origin",
+      branch: "main",
+      localCommit: "abc123",
+      remoteCommit: "abc123",
+      output: "Everything up-to-date",
+      setUpstream: true,
+    });
+
+    const result = await executeTool(
+      "GitPush",
+      { remote: "origin", branch: "main", set_upstream: true },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Push verified");
+    expect(mockPushBranch).toHaveBeenCalledWith(
+      { remote: "origin", branch: "main", setUpstream: true },
+      "/proj",
+    );
+  });
+
+  it("blocks GitPush while sandbox mode is enabled", async () => {
+    const result = await executeTool(
+      "GitPush",
+      { remote: "origin", branch: "main" },
+      "/proj",
+      makeContext({ sandboxEnabled: true }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Sandbox");
+    expect(mockPushBranch).not.toHaveBeenCalled();
+  });
+
+  it("advertises GitPush in the available tool definitions", () => {
+    expect(getToolDefinitions().some((tool) => tool.name === "GitPush")).toBe(true);
   });
 });

@@ -101,9 +101,7 @@ export type LocalAgentExecutor = (
   projectRoot: string,
 ) => Promise<{ output: string; touchedFiles: string[] }>;
 
-async function dispatchLocal(
-  options: DispatchOptions,
-): Promise<DispatchResult> {
+async function dispatchLocal(options: DispatchOptions): Promise<DispatchResult> {
   const startedAt = Date.now();
   options.onProgress?.("Running agent task locally...");
 
@@ -154,8 +152,7 @@ async function dispatchLocal(
     };
 
     const timedOut =
-      execError.signal === "SIGTERM" ||
-      (err instanceof Error && err.message.includes("timed out"));
+      execError.signal === "SIGTERM" || (err instanceof Error && err.message.includes("timed out"));
 
     return {
       mode: "local",
@@ -179,9 +176,7 @@ async function isDockerAvailable(): Promise<boolean> {
   }
 }
 
-async function dispatchDocker(
-  options: DispatchOptions,
-): Promise<DispatchResult> {
+async function dispatchDocker(options: DispatchOptions): Promise<DispatchResult> {
   const startedAt = Date.now();
   options.onProgress?.("Checking Docker availability...");
 
@@ -350,9 +345,7 @@ export async function* parseSSEStream(
 
 // ─── Cloud Dispatch ──────────────────────────────────────────────────────────
 
-async function dispatchCloud(
-  options: DispatchOptions,
-): Promise<DispatchResult> {
+async function dispatchCloud(options: DispatchOptions): Promise<DispatchResult> {
   const startedAt = Date.now();
 
   if (!options.cloudConfig) {
@@ -490,9 +483,7 @@ async function dispatchCloud(
  * Dispatch an agent task using the 3-tier strategy.
  * Tries the preferred mode first, falls back through the tiers on failure.
  */
-export async function dispatchAgentTask(
-  options: DispatchOptions,
-): Promise<DispatchResult> {
+export async function dispatchAgentTask(options: DispatchOptions): Promise<DispatchResult> {
   const preferred = selectDispatchMode(options);
   const chain = buildFallbackChain(preferred);
 
@@ -520,16 +511,20 @@ export async function dispatchAgentTask(
     }
 
     lastResult = result;
-    options.onProgress?.(`${mode} dispatch failed: ${result.error ?? "unknown error"}. Trying next tier...`);
+    options.onProgress?.(
+      `${mode} dispatch failed: ${result.error ?? "unknown error"}. Trying next tier...`,
+    );
   }
 
   // All tiers exhausted — return the last failure result
-  return lastResult ?? {
-    mode: preferred,
-    success: false,
-    output: "",
-    touchedFiles: [],
-    durationMs: 0,
-    error: "All dispatch tiers exhausted",
-  };
+  return (
+    lastResult ?? {
+      mode: preferred,
+      success: false,
+      output: "",
+      touchedFiles: [],
+      durationMs: 0,
+      error: "All dispatch tiers exhausted",
+    }
+  );
 }

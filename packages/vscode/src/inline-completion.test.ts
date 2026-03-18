@@ -127,11 +127,12 @@ vi.mock("@dantecode/core", () => ({
   }),
 }));
 
-let pdseScoreOverride: { overall: number; violations: { message: string }[]; passedGate: boolean } = {
-  overall: 92,
-  violations: [],
-  passedGate: true,
-};
+let pdseScoreOverride: { overall: number; violations: { message: string }[]; passedGate: boolean } =
+  {
+    overall: 92,
+    violations: [],
+    passedGate: true,
+  };
 
 vi.mock("@dantecode/danteforge", () => ({
   runLocalPDSEScorer: vi.fn(() => pdseScoreOverride),
@@ -230,7 +231,12 @@ describe("inline completion helpers", () => {
 
   it("forces single-line when multilineOverride is false", () => {
     const prompt = buildFIMPrompt(
-      { prefix: "function greet(name: string) {", suffix: "\n}\n", language: "typescript", filePath: "f.ts" },
+      {
+        prefix: "function greet(name: string) {",
+        suffix: "\n}\n",
+        language: "typescript",
+        filePath: "f.ts",
+      },
       false,
     );
     expect(prompt.maxTokens).toBe(256);
@@ -242,7 +248,8 @@ describe("inline completion helpers", () => {
       { prefix: longPrefix + "{", suffix: "\n}\n", language: "typescript", filePath: "f.ts" },
       true,
     );
-    const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
+    const prefixInPrompt =
+      prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
     expect(prefixInPrompt.length).toBe(8000);
   });
 
@@ -252,7 +259,8 @@ describe("inline completion helpers", () => {
       { prefix: longPrefix, suffix: "", language: "typescript", filePath: "f.ts" },
       false,
     );
-    const prefixInPrompt = prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
+    const prefixInPrompt =
+      prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
     expect(prefixInPrompt.length).toBe(5000);
   });
 

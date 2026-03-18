@@ -171,9 +171,7 @@ export function formatStatusBarText(state: StatusBarState): string {
  *  - "yellow" → context usage >75% or gate pending
  *  - "green"  → healthy (everything normal)
  */
-export function getStatusBarColor(
-  state: StatusBarState,
-): "green" | "yellow" | "red" {
+export function getStatusBarColor(state: StatusBarState): "green" | "yellow" | "red" {
   if (state.hasError || state.gateStatus === "failed") {
     return "red";
   }

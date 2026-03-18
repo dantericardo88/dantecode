@@ -257,7 +257,14 @@ export type LessonSeverity = "info" | "warning" | "error" | "critical";
 export type LessonType = "failure" | "success" | "preference";
 
 /** Source that produced a lesson entry. */
-export type LessonSource = "pdse" | "autoforge" | "user" | "constitution" | "review" | "agent_loop" | "memory-detector";
+export type LessonSource =
+  | "pdse"
+  | "autoforge"
+  | "user"
+  | "constitution"
+  | "review"
+  | "agent_loop"
+  | "memory-detector";
 
 /** A single learned lesson that can be injected into future prompts. */
 export interface Lesson {
@@ -412,6 +419,7 @@ export type AuditEventType =
   | "file_edit"
   | "bash_execute"
   | "git_commit"
+  | "git_push"
   | "git_worktree_create"
   | "git_worktree_merge"
   | "pdse_gate_pass"

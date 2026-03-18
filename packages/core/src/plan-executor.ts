@@ -63,9 +63,7 @@ export class PlanExecutor {
       // Check dependencies
       if (step.dependencies?.length) {
         const unmet = step.dependencies.filter((depId) => {
-          const depResult = results.find(
-            (r) => r.stepId === depId || r.stepId === `step-${depId}`,
-          );
+          const depResult = results.find((r) => r.stepId === depId || r.stepId === `step-${depId}`);
           return !depResult?.success;
         });
 
@@ -133,10 +131,7 @@ export class PlanExecutor {
 /**
  * Check if a step's dependencies are all completed successfully.
  */
-export function areDependenciesMet(
-  step: PlanStep,
-  completedSteps: Set<string>,
-): boolean {
+export function areDependenciesMet(step: PlanStep, completedSteps: Set<string>): boolean {
   if (!step.dependencies?.length) return true;
   return step.dependencies.every(
     (dep) => completedSteps.has(dep) || completedSteps.has(`step-${dep}`),

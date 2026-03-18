@@ -19,11 +19,7 @@ vi.mock("@dantecode/core", () => ({
   DEFAULT_MODEL_ID: "grok/grok-3",
 }));
 
-import {
-  formatStatusBarText,
-  getStatusBarColor,
-  type StatusBarState,
-} from "./status-bar.js";
+import { formatStatusBarText, getStatusBarColor, type StatusBarState } from "./status-bar.js";
 
 /**
  * Creates a minimal StatusBarState for testing the pure utility functions.
@@ -75,7 +71,11 @@ describe("formatStatusBarText", () => {
 
   it("shows all segments when context and tasks are both active", () => {
     const text = formatStatusBarText(
-      makeState({ currentModel: "anthropic/claude-sonnet-4-20250514", contextPercent: 55, activeTasks: 3 }),
+      makeState({
+        currentModel: "anthropic/claude-sonnet-4-20250514",
+        contextPercent: 55,
+        activeTasks: 3,
+      }),
     );
     expect(text).toBe("DanteCode | claude-sonnet-4-20250514 | 55% ctx | 3 tasks");
   });
@@ -124,14 +124,10 @@ describe("getStatusBarColor", () => {
   });
 
   it("returns red when error takes priority over yellow context", () => {
-    expect(
-      getStatusBarColor(makeState({ hasError: true, contextPercent: 80 })),
-    ).toBe("red");
+    expect(getStatusBarColor(makeState({ hasError: true, contextPercent: 80 }))).toBe("red");
   });
 
   it("returns red when gate failed takes priority over high context", () => {
-    expect(
-      getStatusBarColor(makeState({ gateStatus: "failed", contextPercent: 90 })),
-    ).toBe("red");
+    expect(getStatusBarColor(makeState({ gateStatus: "failed", contextPercent: 90 }))).toBe("red");
   });
 });

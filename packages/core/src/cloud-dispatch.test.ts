@@ -3,11 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  selectDispatchMode,
-  dispatchAgentTask,
-  parseSSEStream,
-} from "./cloud-dispatch.js";
+import { selectDispatchMode, dispatchAgentTask, parseSSEStream } from "./cloud-dispatch.js";
 import type { DispatchOptions } from "./cloud-dispatch.js";
 import * as childProcess from "node:child_process";
 
@@ -110,9 +106,7 @@ describe("selectDispatchMode", () => {
   });
 
   it("returns 'cloud' as preferredMode when explicitly set", () => {
-    const mode = selectDispatchMode(
-      makeBaseOptions({ preferredMode: "cloud" }),
-    );
+    const mode = selectDispatchMode(makeBaseOptions({ preferredMode: "cloud" }));
     expect(mode).toBe("cloud");
   });
 });
@@ -122,9 +116,7 @@ describe("selectDispatchMode", () => {
 describe("dispatchAgentTask — local mode", () => {
   it("succeeds with local execution", async () => {
     mockExecSuccess("task output");
-    const result = await dispatchAgentTask(
-      makeBaseOptions({ preferredMode: "local" }),
-    );
+    const result = await dispatchAgentTask(makeBaseOptions({ preferredMode: "local" }));
 
     expect(result.mode).toBe("local");
     expect(result.success).toBe(true);
@@ -134,9 +126,7 @@ describe("dispatchAgentTask — local mode", () => {
 
   it("returns failure when local exec fails", async () => {
     mockExecFailure("command not found");
-    const result = await dispatchAgentTask(
-      makeBaseOptions({ preferredMode: "local" }),
-    );
+    const result = await dispatchAgentTask(makeBaseOptions({ preferredMode: "local" }));
 
     expect(result.mode).toBe("local");
     expect(result.success).toBe(false);
@@ -197,9 +187,9 @@ describe("dispatchAgentTask — localExecutor", () => {
   });
 
   it("handles localExecutor timeout", async () => {
-    const executor = vi.fn().mockImplementation(
-      () => new Promise((resolve) => setTimeout(resolve, 10_000)),
-    );
+    const executor = vi
+      .fn()
+      .mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 10_000)));
 
     const result = await dispatchAgentTask(
       makeBaseOptions({
@@ -220,9 +210,7 @@ describe("dispatchAgentTask — localExecutor", () => {
 describe("dispatchAgentTask — docker fallback", () => {
   it("falls back to local when docker config is missing", async () => {
     mockExecSuccess("local fallback");
-    const result = await dispatchAgentTask(
-      makeBaseOptions({ preferredMode: "docker" }),
-    );
+    const result = await dispatchAgentTask(makeBaseOptions({ preferredMode: "docker" }));
 
     // Docker fails (no config), falls back to local
     expect(result.success).toBe(true);
@@ -411,7 +399,7 @@ describe("parseSSEStream", () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('data: hello world\n\ndata: second event\n\n'));
+        controller.enqueue(encoder.encode("data: hello world\n\ndata: second event\n\n"));
         controller.close();
       },
     });
@@ -430,7 +418,7 @@ describe("parseSSEStream", () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('event: progress\ndata: step 1\n\n'));
+        controller.enqueue(encoder.encode("event: progress\ndata: step 1\n\n"));
         controller.close();
       },
     });

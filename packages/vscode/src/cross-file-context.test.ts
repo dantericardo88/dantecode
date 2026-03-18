@@ -45,7 +45,7 @@ describe("extractExportedSignatures", () => {
   it("extracts function signatures", () => {
     const source = [
       "export function greet(name: string): string {",
-      '  return `Hello ${name}`;',
+      "  return `Hello ${name}`;",
       "}",
     ].join("\n");
 
@@ -55,7 +55,8 @@ describe("extractExportedSignatures", () => {
   });
 
   it("extracts async function signatures", () => {
-    const source = "export async function fetchData(url: string): Promise<Response> {\n  return fetch(url);\n}";
+    const source =
+      "export async function fetchData(url: string): Promise<Response> {\n  return fetch(url);\n}";
     const sigs = extractExportedSignatures(source);
     expect(sigs).toHaveLength(1);
     expect(sigs[0]).toContain("export async function fetchData");
@@ -80,7 +81,7 @@ describe("extractExportedSignatures", () => {
   });
 
   it("extracts const exports", () => {
-    const source = 'export const MAX_SIZE = 100;\nexport let counter = 0;\n';
+    const source = "export const MAX_SIZE = 100;\nexport let counter = 0;\n";
     const sigs = extractExportedSignatures(source);
     expect(sigs.length).toBeGreaterThanOrEqual(2);
   });
@@ -104,7 +105,7 @@ describe("gatherCrossFileContext", () => {
     ].join("\n"),
     "/src/utils.ts": [
       "export function greet(name: string): string {",
-      '  return `Hello ${name}`;',
+      "  return `Hello ${name}`;",
       "}",
       "export function trim(s: string): string {",
       "  return s.trim();",
@@ -117,11 +118,7 @@ describe("gatherCrossFileContext", () => {
       "}",
       "export const DEFAULT_CONFIG: Config = { key: '', value: 0 };",
     ].join("\n"),
-    "/src/unrelated.ts": [
-      "export class Logger {",
-      "  log(msg: string) {}",
-      "}",
-    ].join("\n"),
+    "/src/unrelated.ts": ["export class Logger {", "  log(msg: string) {}", "}"].join("\n"),
   };
 
   const readFile = vi.fn(async (path: string): Promise<string> => {
@@ -146,12 +143,7 @@ describe("gatherCrossFileContext", () => {
   it("prioritises imported files over unrelated open files", async () => {
     const result = await gatherCrossFileContext({
       currentFilePath: "/src/main.ts",
-      openFilePaths: [
-        "/src/main.ts",
-        "/src/unrelated.ts",
-        "/src/utils.ts",
-        "/src/config.ts",
-      ],
+      openFilePaths: ["/src/main.ts", "/src/unrelated.ts", "/src/utils.ts", "/src/config.ts"],
       readFile,
     });
 

@@ -111,10 +111,7 @@ function isValidUrl(url: string): boolean {
 
 // ─── Accessibility Tree Formatter ────────────────────────────────────────────
 
-function flattenAccessibilityTree(
-  node: PlaywrightAccessibilityNode,
-  depth = 0,
-): string {
+function flattenAccessibilityTree(node: PlaywrightAccessibilityNode, depth = 0): string {
   const indent = "  ".repeat(depth);
   const parts: string[] = [];
 
@@ -343,7 +340,10 @@ export class BrowserAgent {
    */
   async scroll(direction: "up" | "down"): Promise<BrowserActionResult> {
     if (direction !== "up" && direction !== "down") {
-      return { success: false, error: `Invalid scroll direction: ${String(direction)}. Must be "up" or "down"` };
+      return {
+        success: false,
+        error: `Invalid scroll direction: ${String(direction)}. Must be "up" or "down"`,
+      };
     }
 
     const page = await this.ensurePage();

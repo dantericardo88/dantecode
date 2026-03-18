@@ -3,7 +3,9 @@
 // ============================================================================
 
 const EXECUTION_PROMPT_PATTERN =
-  /\b(add|apply|build|change|create|edit|fix|implement|modify|refactor|rename|rewrite|update|write)\b/i;
+  /\b(add|apply|build|change|continue|create|edit|fix|implement|modify|refactor|rename|resume|rewrite|run|update|verify|wire|write)\b/i;
+
+const SLASH_WORKFLOW_PATTERN = /^\/(?:autoforge|party|magic|forge|verify|ship)\b/i;
 
 const PLAN_PATTERN =
   /\b(i(?:'| a)?ll|let me|going to|about to|plan|steps?|phase|first|next|then)\b/i;
@@ -22,7 +24,8 @@ const ARTIFACT_PATTERN =
  * not just explanation or conversation.
  */
 export function promptRequestsToolExecution(prompt: string): boolean {
-  return EXECUTION_PROMPT_PATTERN.test(prompt);
+  const trimmed = prompt.trim();
+  return EXECUTION_PROMPT_PATTERN.test(trimmed) || SLASH_WORKFLOW_PATTERN.test(trimmed);
 }
 
 /**

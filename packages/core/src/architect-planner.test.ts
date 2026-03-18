@@ -1,9 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  ArchitectPlanner,
-  analyzeComplexity,
-  parsePlanFromText,
-} from "./architect-planner.js";
+import { ArchitectPlanner, analyzeComplexity, parsePlanFromText } from "./architect-planner.js";
 
 describe("architect-planner", () => {
   describe("analyzeComplexity", () => {
@@ -71,11 +67,9 @@ describe("architect-planner", () => {
     });
 
     it("parses steps with verify commands", () => {
-      const text = [
-        "1. Fix the failing test",
-        "   Verify: npm test",
-        "2. Update the docs",
-      ].join("\n");
+      const text = ["1. Fix the failing test", "   Verify: npm test", "2. Update the docs"].join(
+        "\n",
+      );
 
       const plan = parsePlanFromText("fix tests", text);
       expect(plan.steps[0]!.verifyCommand).toBe("npm test");
@@ -94,20 +88,14 @@ describe("architect-planner", () => {
     });
 
     it("handles 'Step N:' format", () => {
-      const text = [
-        "Step 1: Analyze the codebase",
-        "Step 2: Implement changes",
-      ].join("\n");
+      const text = ["Step 1: Analyze the codebase", "Step 2: Implement changes"].join("\n");
 
       const plan = parsePlanFromText("analyze", text);
       expect(plan.steps).toHaveLength(2);
     });
 
     it("handles parenthetical format '1)'", () => {
-      const text = [
-        "1) First task",
-        "2) Second task",
-      ].join("\n");
+      const text = ["1) First task", "2) Second task"].join("\n");
 
       const plan = parsePlanFromText("tasks", text);
       expect(plan.steps).toHaveLength(2);
@@ -149,9 +137,11 @@ describe("architect-planner", () => {
 
   describe("ArchitectPlanner", () => {
     it("generates a plan using the provided model function", async () => {
-      const generatePlan = vi.fn().mockResolvedValue(
-        "1. Create the auth module\n   Files: src/auth.ts\n2. Add tests\n   Verify: npm test",
-      );
+      const generatePlan = vi
+        .fn()
+        .mockResolvedValue(
+          "1. Create the auth module\n   Files: src/auth.ts\n2. Add tests\n   Verify: npm test",
+        );
 
       const planner = new ArchitectPlanner({ generatePlan });
       const plan = await planner.createPlan("build auth system", "repo context here");

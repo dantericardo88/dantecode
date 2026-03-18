@@ -66,19 +66,14 @@ export interface TrendReport {
 /**
  * Apply dashboard filters to the event list.
  */
-function applyFilter(
-  events: AuditEvent[],
-  filter?: DashboardFilter,
-): AuditEvent[] {
+function applyFilter(events: AuditEvent[], filter?: DashboardFilter): AuditEvent[] {
   if (!filter) return events;
 
   let filtered = events;
 
   if (filter.startDate) {
     const start = new Date(filter.startDate).getTime();
-    filtered = filtered.filter(
-      (e) => new Date(e.timestamp).getTime() >= start,
-    );
+    filtered = filtered.filter((e) => new Date(e.timestamp).getTime() >= start);
   }
   if (filter.endDate) {
     const end = new Date(filter.endDate).getTime();
@@ -160,8 +155,7 @@ export function computeDashboardMetrics(
       const cost = Number(event.payload["costUsd"] ?? 0);
       totalCostUsd += cost;
       if (event.modelId) {
-        costByModel[event.modelId] =
-          (costByModel[event.modelId] ?? 0) + cost;
+        costByModel[event.modelId] = (costByModel[event.modelId] ?? 0) + cost;
       }
     }
 
@@ -217,9 +211,7 @@ export function computeDashboardMetrics(
 
   // Total sessions (based on session_start events, or fall back to unique session IDs)
   const totalSessions =
-    (eventCounts["session_start"] ?? 0) > 0
-      ? (eventCounts["session_start"] ?? 0)
-      : sessionIds.size;
+    (eventCounts["session_start"] ?? 0) > 0 ? (eventCounts["session_start"] ?? 0) : sessionIds.size;
 
   // Average session duration
   let totalDurationMin = 0;
@@ -231,8 +223,7 @@ export function computeDashboardMetrics(
       durationCount++;
     }
   }
-  const averageSessionDurationMin =
-    durationCount > 0 ? totalDurationMin / durationCount : 0;
+  const averageSessionDurationMin = durationCount > 0 ? totalDurationMin / durationCount : 0;
 
   return {
     totalSessions,
@@ -254,10 +245,7 @@ export function computeDashboardMetrics(
 /**
  * Generate a markdown summary report from dashboard metrics.
  */
-export function formatDashboardReport(
-  metrics: DashboardMetrics,
-  title?: string,
-): string {
+export function formatDashboardReport(metrics: DashboardMetrics, title?: string): string {
   const heading = title ?? "Team Dashboard Report";
   const lines: string[] = [];
 
@@ -275,9 +263,7 @@ export function formatDashboardReport(
   lines.push(`| Pass Rate | ${(metrics.passRate * 100).toFixed(1)}% |`);
   lines.push(`| Average PDSE Score | ${metrics.averagePDSEScore.toFixed(2)} |`);
   lines.push(`| Total Cost (USD) | $${metrics.totalCostUsd.toFixed(2)} |`);
-  lines.push(
-    `| Avg Session Duration | ${metrics.averageSessionDurationMin.toFixed(1)} min |`,
-  );
+  lines.push(`| Avg Session Duration | ${metrics.averageSessionDurationMin.toFixed(1)} min |`);
   lines.push(`| Files Edited | ${metrics.filesEdited} |`);
   lines.push(`| Lessons Recorded | ${metrics.lessonsRecorded} |`);
   lines.push("");
@@ -327,16 +313,12 @@ export function formatDashboardReport(
 /**
  * Compute trend data comparing two time periods.
  */
-export function computeTrend(
-  current: DashboardMetrics,
-  previous: DashboardMetrics,
-): TrendReport {
+export function computeTrend(current: DashboardMetrics, previous: DashboardMetrics): TrendReport {
   const sessionsDelta = current.totalSessions - previous.totalSessions;
   const passRateDelta = current.passRate - previous.passRate;
   const costDelta = current.totalCostUsd - previous.totalCostUsd;
   const pdseDelta = current.averagePDSEScore - previous.averagePDSEScore;
-  const activeDevelopersDelta =
-    current.activeDevelopers - previous.activeDevelopers;
+  const activeDevelopersDelta = current.activeDevelopers - previous.activeDevelopers;
 
   // Build a human-readable summary
   const parts: string[] = [];
@@ -352,9 +334,7 @@ export function computeTrend(
   if (passRateDelta > 0) {
     parts.push(`pass rate improved by ${(passRateDelta * 100).toFixed(1)}pp`);
   } else if (passRateDelta < 0) {
-    parts.push(
-      `pass rate regressed by ${(Math.abs(passRateDelta) * 100).toFixed(1)}pp`,
-    );
+    parts.push(`pass rate regressed by ${(Math.abs(passRateDelta) * 100).toFixed(1)}pp`);
   }
 
   if (costDelta > 0) {

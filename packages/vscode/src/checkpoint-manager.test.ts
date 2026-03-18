@@ -196,9 +196,7 @@ describe("CheckpointManager", () => {
 
   describe("generateDiffPreview", () => {
     it("generates git diff for stash-based checkpoints", async () => {
-      execCommand
-        .mockResolvedValueOnce("true")
-        .mockResolvedValueOnce("Saved working directory");
+      execCommand.mockResolvedValueOnce("true").mockResolvedValueOnce("Saved working directory");
 
       const checkpoint = await manager.createCheckpoint({ label: "diff-test" });
 
@@ -234,9 +232,7 @@ describe("CheckpointManager", () => {
     });
 
     it("handles missing stash entry gracefully", async () => {
-      execCommand
-        .mockResolvedValueOnce("true")
-        .mockResolvedValueOnce("Saved working directory");
+      execCommand.mockResolvedValueOnce("true").mockResolvedValueOnce("Saved working directory");
 
       const checkpoint = await manager.createCheckpoint({ label: "gone-stash" });
 
@@ -247,9 +243,7 @@ describe("CheckpointManager", () => {
     });
 
     it("handles git errors gracefully", async () => {
-      execCommand
-        .mockResolvedValueOnce("true")
-        .mockResolvedValueOnce("Saved working directory");
+      execCommand.mockResolvedValueOnce("true").mockResolvedValueOnce("Saved working directory");
 
       const checkpoint = await manager.createCheckpoint({ label: "err-stash" });
 

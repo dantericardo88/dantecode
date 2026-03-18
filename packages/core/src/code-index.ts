@@ -471,10 +471,9 @@ export class CodeIndex {
     let changedFiles: string[];
     try {
       const { stdout } = await execAsync("git diff --name-only HEAD", { cwd: projectRoot });
-      const { stdout: untrackedOut } = await execAsync(
-        "git ls-files --others --exclude-standard",
-        { cwd: projectRoot },
-      );
+      const { stdout: untrackedOut } = await execAsync("git ls-files --others --exclude-standard", {
+        cwd: projectRoot,
+      });
       const allChanged = [...stdout.trim().split("\n"), ...untrackedOut.trim().split("\n")]
         .map((f) => f.trim())
         .filter((f) => f.length > 0 && INDEXABLE_EXTENSIONS.has(extname(f)));

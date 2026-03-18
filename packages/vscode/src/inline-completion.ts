@@ -67,7 +67,10 @@ export function getInlineCompletionDebounceMs(provider: string, customMs?: numbe
   }
 }
 
-export function buildFIMPrompt(input: FIMPromptInput, multilineOverride?: boolean): FIMPromptResult {
+export function buildFIMPrompt(
+  input: FIMPromptInput,
+  multilineOverride?: boolean,
+): FIMPromptResult {
   const isMultilineContext = shouldUseMultilineCompletion(input.prefix, input.suffix);
   const multiline = multilineOverride !== undefined ? multilineOverride : isMultilineContext;
   const prefixWindow = multiline ? input.prefix.slice(-8000) : input.prefix.slice(-5000);
@@ -168,7 +171,10 @@ function addInlinePDSEDiagnostic(
   reason: string,
 ): void {
   const collection = getInlinePDSEDiagnostics();
-  const range = new vscode.Range(position, new vscode.Position(position.line, position.character + 1));
+  const range = new vscode.Range(
+    position,
+    new vscode.Position(position.line, position.character + 1),
+  );
   const diag = new vscode.Diagnostic(
     range,
     `PDSE ${score}/100 – ${reason}`,
@@ -335,12 +341,11 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     const pdseWarnings = config.get<boolean>("inline.pdseWarnings", true);
 
     // Resolve multi-line completion mode
-    const multilineConfig = config.get<string>("inline.multiline") ??
-      config.get<string>("multilineCompletions", "auto");
+    const multilineConfig =
+      config.get<string>("inline.multiline") ?? config.get<string>("multilineCompletions", "auto");
     const isMultilineContext = shouldUseMultilineCompletion(prefix, suffix);
     const isMultiline =
-      multilineConfig === "always" ||
-      (multilineConfig === "auto" && isMultilineContext);
+      multilineConfig === "always" || (multilineConfig === "auto" && isMultilineContext);
 
     const [provider, modelId] = parseModelString(modelString);
 
@@ -410,13 +415,10 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
         cancelDisposable.dispose();
         return [];
       }
-      completionText = await router.generate(
-        [{ role: "user", content: fimPrompt.userPrompt }],
-        {
-          system: fimPrompt.systemPrompt,
-          maxTokens: fimPrompt.maxTokens,
-        },
-      );
+      completionText = await router.generate([{ role: "user", content: fimPrompt.userPrompt }], {
+        system: fimPrompt.systemPrompt,
+        maxTokens: fimPrompt.maxTokens,
+      });
     } finally {
       cancelDisposable.dispose();
     }
@@ -441,9 +443,8 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       gateLabel = ` [PDSE: ${score.overall} ${passLabel}]`;
 
       if (score.overall < pdseThreshold) {
-        pdseReason = score.violations.length > 0
-          ? score.violations[0]!.message
-          : "below quality threshold";
+        pdseReason =
+          score.violations.length > 0 ? score.violations[0]!.message : "below quality threshold";
       }
     } catch {
       gateLabel = "";
@@ -478,14 +479,11 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     isMultiline: boolean,
     abortSignal: AbortSignal,
   ): Promise<string> {
-    const result = await router.stream(
-      [{ role: "user", content: fimPrompt.userPrompt }],
-      {
-        system: fimPrompt.systemPrompt,
-        maxTokens: fimPrompt.maxTokens,
-        abortSignal,
-      },
-    );
+    const result = await router.stream([{ role: "user", content: fimPrompt.userPrompt }], {
+      system: fimPrompt.systemPrompt,
+      maxTokens: fimPrompt.maxTokens,
+      abortSignal,
+    });
 
     let text = "";
     const streamStart = Date.now();

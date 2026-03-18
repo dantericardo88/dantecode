@@ -91,6 +91,18 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       }),
     },
 
+    GitPush: {
+      description: "Push a branch to a remote and verify that the remote ref updated.",
+      parameters: z.object({
+        remote: z.string().optional().describe("The remote name (default: origin)"),
+        branch: z.string().optional().describe("The branch to push (default: current branch)"),
+        set_upstream: z
+          .boolean()
+          .optional()
+          .describe("Whether to pass -u and set upstream tracking for the branch"),
+      }),
+    },
+
     TodoWrite: {
       description: "Update the session's to-do list with a complete replacement.",
       parameters: z.object({

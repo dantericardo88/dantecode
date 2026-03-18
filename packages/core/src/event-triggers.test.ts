@@ -23,9 +23,7 @@ function makeConfig(overrides: Partial<TriggerConfig> = {}): TriggerConfig {
   };
 }
 
-function makeGitHubIssuePayload(
-  overrides: Record<string, unknown> = {},
-): Record<string, unknown> {
+function makeGitHubIssuePayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     action: "opened",
     repository: { full_name: "acme/dantecode" },
@@ -39,9 +37,7 @@ function makeGitHubIssuePayload(
   };
 }
 
-function makeSlackPayload(
-  overrides: Partial<SlackTriggerPayload> = {},
-): SlackTriggerPayload {
+function makeSlackPayload(overrides: Partial<SlackTriggerPayload> = {}): SlackTriggerPayload {
   return {
     text: "Deploy the new feature",
     channel: "#engineering",
@@ -115,9 +111,7 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("returns null when github source is disabled", () => {
-      const registry = new EventTriggerRegistry(
-        makeConfig({ enabledSources: ["manual"] }),
-      );
+      const registry = new EventTriggerRegistry(makeConfig({ enabledSources: ["manual"] }));
       const task = registry.fromGitHub("issues", makeGitHubIssuePayload());
 
       expect(task).toBeNull();
@@ -211,9 +205,7 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("returns null when slack source is disabled", () => {
-      const registry = new EventTriggerRegistry(
-        makeConfig({ enabledSources: ["manual"] }),
-      );
+      const registry = new EventTriggerRegistry(makeConfig({ enabledSources: ["manual"] }));
       const task = registry.fromSlack(makeSlackPayload());
 
       expect(task).toBeNull();
@@ -465,9 +457,7 @@ describe("EventTriggerRegistry", () => {
 
   describe("priority", () => {
     it("uses default priority from config", () => {
-      const registry = new EventTriggerRegistry(
-        makeConfig({ defaultPriority: "high" }),
-      );
+      const registry = new EventTriggerRegistry(makeConfig({ defaultPriority: "high" }));
       const task = registry.fromManual("High priority task");
 
       expect(task.priority).toBe("high");
@@ -519,27 +509,20 @@ describe("EventTriggerRegistry", () => {
     });
 
     it("rejects invalid signature", () => {
-      const registry = new EventTriggerRegistry(
-        makeConfig({ githubSecret: "webhook-secret-123" }),
-      );
-      expect(
-        registry.verifyGitHubSignature('{"action":"opened"}', "sha256=deadbeef"),
-      ).toBe(false);
+      const registry = new EventTriggerRegistry(makeConfig({ githubSecret: "webhook-secret-123" }));
+      expect(registry.verifyGitHubSignature('{"action":"opened"}', "sha256=deadbeef")).toBe(false);
     });
 
     it("rejects when no secret is configured", () => {
       const registry = new EventTriggerRegistry(makeConfig());
-      expect(
-        registry.verifyGitHubSignature("{}", "sha256=anything"),
-      ).toBe(false);
+      expect(registry.verifyGitHubSignature("{}", "sha256=anything")).toBe(false);
     });
 
     it("accepts Buffer body input", () => {
       const secret = "buf-secret";
       const body = Buffer.from('{"test":"data"}');
       const expected =
-        "sha256=" +
-        createHmac("sha256", secret).update(body.toString("utf-8")).digest("hex");
+        "sha256=" + createHmac("sha256", secret).update(body.toString("utf-8")).digest("hex");
 
       const registry = new EventTriggerRegistry(makeConfig({ githubSecret: secret }));
       expect(registry.verifyGitHubSignature(body, expected)).toBe(true);
@@ -563,13 +546,12 @@ describe("EventTriggerRegistry", () => {
       const oldTimestamp = String(Math.floor(Date.now() / 1000) - 400);
       const body = "test=data";
       const baseString = `v0:${oldTimestamp}:${body}`;
-      const expected =
-        "v0=" + createHmac("sha256", signingSecret).update(baseString).digest("hex");
+      const expected = "v0=" + createHmac("sha256", signingSecret).update(baseString).digest("hex");
 
       const registry = new EventTriggerRegistry(makeConfig());
-      expect(
-        registry.verifySlackSignature(body, oldTimestamp, expected, signingSecret),
-      ).toBe(false);
+      expect(registry.verifySlackSignature(body, oldTimestamp, expected, signingSecret)).toBe(
+        false,
+      );
     });
 
     it("rejects tampered body", () => {
@@ -580,9 +562,9 @@ describe("EventTriggerRegistry", () => {
       const sig = "v0=" + createHmac("sha256", signingSecret).update(baseString).digest("hex");
 
       const registry = new EventTriggerRegistry(makeConfig());
-      expect(
-        registry.verifySlackSignature("tampered=data", timestamp, sig, signingSecret),
-      ).toBe(false);
+      expect(registry.verifySlackSignature("tampered=data", timestamp, sig, signingSecret)).toBe(
+        false,
+      );
     });
   });
 });

@@ -89,7 +89,8 @@ export function isSelfImprovementWriteAllowed(
   const resolvedPath = resolveProjectPath(filePath, projectRoot);
   return context.allowedRoots.some(
     (allowedRoot) =>
-      resolvedPath === allowedRoot || resolvedPath.startsWith(`${resolve(projectRoot, allowedRoot)}${sep}`),
+      resolvedPath === allowedRoot ||
+      resolvedPath.startsWith(`${resolve(projectRoot, allowedRoot)}${sep}`),
   );
 }
 

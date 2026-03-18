@@ -6,7 +6,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { DEFAULT_MODEL_ID, MODEL_CATALOG } from "@dantecode/core";
+import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
@@ -162,7 +162,7 @@ export function deactivate(): void {
 
 function registerCommands(context: vscode.ExtensionContext): void {
   const commands: Array<[string, (...args: unknown[]) => unknown]> = [
-    ["dantecode.selfUpdate", commandSelfUpdate],
+    ["dantecode.selfUpdate", () => commandSelfUpdate(context)],
     ["dantecode.openChat", commandOpenChat],
     ["dantecode.addFileToContext", commandAddFileToContext],
     ["dantecode.importClaudeSkills", commandImportClaudeSkills],
@@ -650,19 +650,29 @@ async function commandSetupApiKeys(): Promise<void> {
   void vscode.commands.executeCommand("workbench.action.openSettings", "dantecode");
 }
 
-async function commandSelfUpdate(): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-  if (!projectRoot) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void> {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const installContext = detectInstallContext({
+    runtimePath: context.extensionPath,
+    workspaceRoot,
+    extensionPath: context.extensionPath,
+  });
+
+  if (installContext.repoRoot && installContext.workspaceIsRepoRoot) {
+    const terminal = vscode.window.createTerminal({
+      name: "DanteCode Self-Update",
+      cwd: installContext.repoRoot,
+    });
+    terminal.sendText("node packages/cli/dist/index.js self-update --verbose");
+    terminal.show();
+    void vscode.window.showInformationMessage("DanteCode: Repo self-update started in terminal");
     return;
   }
-  const terminal = vscode.window.createTerminal({
-    name: "DanteCode Self-Update",
-    cwd: projectRoot,
-  });
-  terminal.sendText("npx dantecode self-update --verbose");
-  terminal.show();
-  void vscode.window.showInformationMessage("DanteCode: Self-update started in terminal");
+
+  void vscode.commands.executeCommand("workbench.extensions.action.checkForUpdates");
+  void vscode.window.showInformationMessage(
+    "DanteCode: Extension updates come from the VS Code Extensions view. Update the CLI separately with `npm install -g @dantecode/cli@latest`.",
+  );
 }
 
 /**

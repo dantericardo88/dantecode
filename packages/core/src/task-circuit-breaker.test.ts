@@ -316,4 +316,127 @@ describe("TaskCircuitBreaker", () => {
       expect(afterRecovery.identicalCount).toBe(1);
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Exponential backoff (Aider-style)
+  // --------------------------------------------------------------------------
+
+  describe("exponential backoff", () => {
+    it("starts with initial delay of 125ms by default", () => {
+      breaker.recordFailure("api error", 1);
+      const backoff = breaker.getBackoffDelay("api error");
+      expect(backoff.delayMs).toBe(125);
+      expect(backoff.timedOut).toBe(false);
+    });
+
+    it("doubles delay on each call", () => {
+      breaker.recordFailure("api error", 1);
+
+      const b1 = breaker.getBackoffDelay("api error");
+      expect(b1.delayMs).toBe(125);
+
+      const b2 = breaker.getBackoffDelay("api error");
+      expect(b2.delayMs).toBe(250);
+
+      const b3 = breaker.getBackoffDelay("api error");
+      expect(b3.delayMs).toBe(500);
+
+      const b4 = breaker.getBackoffDelay("api error");
+      expect(b4.delayMs).toBe(1000);
+    });
+
+    it("tracks cumulative delay", () => {
+      breaker.recordFailure("api error", 1);
+
+      breaker.getBackoffDelay("api error"); // 125, cumulative: 125
+      const b2 = breaker.getBackoffDelay("api error"); // 250, cumulative: 375
+      expect(b2.cumulativeDelayMs).toBe(375);
+    });
+
+    it("times out when cumulative delay exceeds retryTimeoutMs", () => {
+      const fastBreaker = new TaskCircuitBreaker({
+        initialBackoffMs: 100,
+        retryTimeoutMs: 500,
+      });
+
+      fastBreaker.recordFailure("timeout error", 1);
+
+      fastBreaker.getBackoffDelay("timeout error"); // 100, cumulative: 100
+      fastBreaker.getBackoffDelay("timeout error"); // 200, cumulative: 300
+      const b3 = fastBreaker.getBackoffDelay("timeout error"); // 400 > remaining 200 → timedOut
+
+      expect(b3.timedOut).toBe(true);
+      expect(b3.delayMs).toBe(0);
+    });
+
+    it("caps delay at maxBackoffMs", () => {
+      const cappedBreaker = new TaskCircuitBreaker({
+        initialBackoffMs: 10000,
+        maxBackoffMs: 15000,
+        retryTimeoutMs: 1_000_000, // large timeout so we don't time out
+      });
+
+      cappedBreaker.recordFailure("error", 1);
+
+      cappedBreaker.getBackoffDelay("error"); // 10000
+      const b2 = cappedBreaker.getBackoffDelay("error"); // min(20000, 15000) = 15000
+      expect(b2.delayMs).toBe(15000);
+    });
+
+    it("resets backoff on success", () => {
+      breaker.recordFailure("api error", 1);
+      breaker.getBackoffDelay("api error"); // 125
+      breaker.getBackoffDelay("api error"); // 250
+
+      breaker.recordSuccess();
+
+      breaker.recordFailure("api error", 2);
+      const fresh = breaker.getBackoffDelay("api error");
+      expect(fresh.delayMs).toBe(125); // Reset to initial
+    });
+
+    it("resets backoff on reset()", () => {
+      breaker.recordFailure("error", 1);
+      breaker.getBackoffDelay("error");
+      breaker.getBackoffDelay("error");
+
+      breaker.reset();
+
+      breaker.recordFailure("error", 1);
+      const fresh = breaker.getBackoffDelay("error");
+      expect(fresh.delayMs).toBe(125);
+    });
+
+    it("tracks separate backoff per error hash", () => {
+      breaker.recordFailure("error A", 1);
+      breaker.recordFailure("error B", 2);
+
+      const bA1 = breaker.getBackoffDelay("error A");
+      breaker.getBackoffDelay("error A"); // advance A
+
+      const bB1 = breaker.getBackoffDelay("error B");
+
+      expect(bA1.delayMs).toBe(125);
+      expect(bB1.delayMs).toBe(125); // B starts fresh
+    });
+
+    it("exposes backoff configuration via getters", () => {
+      expect(breaker.getInitialBackoffMs()).toBe(125);
+      expect(breaker.getRetryTimeoutMs()).toBe(60_000);
+    });
+
+    it("uses custom backoff configuration", () => {
+      const custom = new TaskCircuitBreaker({
+        initialBackoffMs: 500,
+        retryTimeoutMs: 30_000,
+      });
+
+      expect(custom.getInitialBackoffMs()).toBe(500);
+      expect(custom.getRetryTimeoutMs()).toBe(30_000);
+
+      custom.recordFailure("err", 1);
+      const b = custom.getBackoffDelay("err");
+      expect(b.delayMs).toBe(500);
+    });
+  });
 });

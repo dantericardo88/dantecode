@@ -56,16 +56,27 @@ vi.mock("@dantecode/core", async () => {
     }
 
     async save() {}
-    async delete() { return true; }
-    async exists() { return true; }
-    getSessionsDir() { return "/test/.dantecode/sessions"; }
+    async delete() {
+      return true;
+    }
+    async exists() {
+      return true;
+    }
+    getSessionsDir() {
+      return "/test/.dantecode/sessions";
+    }
   }
 
   return {
     ...actual,
     SessionStore: MockSessionStore,
     getProviderCatalogEntry: vi.fn(() => ({ label: "Mock" })),
-    getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+    getContextUtilization: vi.fn(() => ({
+      tokens: 100,
+      maxTokens: 128000,
+      percent: 0,
+      tier: "green",
+    })),
     parseModelReference: vi.fn((ref: string) => ({ provider: "grok", modelId: ref, id: ref })),
     readAuditEvents: vi.fn().mockResolvedValue([]),
     MultiAgent: vi.fn(),
@@ -145,8 +156,19 @@ function makeReplState(overrides?: Record<string, unknown>) {
         taskOverrides: {},
       },
       project: { name: "test", language: "typescript" },
-      pdse: { threshold: 60, hardViolationsAllowed: 0, maxRegenerationAttempts: 3, weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 } },
-      autoforge: { enabled: false, maxIterations: 1, gstackCommands: [], lessonInjectionEnabled: false, abortOnSecurityViolation: false },
+      pdse: {
+        threshold: 60,
+        hardViolationsAllowed: 0,
+        maxRegenerationAttempts: 3,
+        weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 },
+      },
+      autoforge: {
+        enabled: false,
+        maxIterations: 1,
+        gstackCommands: [],
+        lessonInjectionEnabled: false,
+        abortOnSecurityViolation: false,
+      },
     } as unknown as DanteCodeState,
     projectRoot: "/test/project",
     verbose: false,

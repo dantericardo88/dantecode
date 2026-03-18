@@ -4,11 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { IssueToPRPipeline } from "./issue-to-pr.js";
-import type {
-  GitHubIssueInfo,
-  PipelineProgress,
-  AgentExecutor,
-} from "./issue-to-pr.js";
+import type { GitHubIssueInfo, PipelineProgress, AgentExecutor } from "./issue-to-pr.js";
 
 // ---------------------------------------------------------------------------
 // Mock child_process.exec so no real git commands are run
@@ -41,9 +37,7 @@ function makeIssue(overrides: Partial<GitHubIssueInfo> = {}): GitHubIssueInfo {
   };
 }
 
-function makePipeline(
-  overrides: Record<string, unknown> = {},
-): IssueToPRPipeline {
+function makePipeline(overrides: Record<string, unknown> = {}): IssueToPRPipeline {
   return new IssueToPRPipeline(PROJECT_ROOT, {
     githubToken: "ghp_test_token_123",
     repository: "acme/dantecode",
@@ -58,7 +52,11 @@ function makePipeline(
 
 function mockExecSuccess(stdout = "", stderr = ""): void {
   mockExec.mockImplementation(
-    (_cmd: string, _opts: unknown, cb?: (err: null, result: { stdout: string; stderr: string }) => void) => {
+    (
+      _cmd: string,
+      _opts: unknown,
+      cb?: (err: null, result: { stdout: string; stderr: string }) => void,
+    ) => {
       if (cb) {
         cb(null, { stdout, stderr });
       }
@@ -160,16 +158,12 @@ describe("IssueToPRPipeline", () => {
 
     it("removes special characters", () => {
       const pipeline = makePipeline();
-      expect(pipeline.sanitizeBranchName("feat: add auth (v2)!")).toBe(
-        "feat-add-auth-v2",
-      );
+      expect(pipeline.sanitizeBranchName("feat: add auth (v2)!")).toBe("feat-add-auth-v2");
     });
 
     it("collapses multiple dashes", () => {
       const pipeline = makePipeline();
-      expect(pipeline.sanitizeBranchName("fix---broken---tests")).toBe(
-        "fix-broken-tests",
-      );
+      expect(pipeline.sanitizeBranchName("fix---broken---tests")).toBe("fix-broken-tests");
     });
 
     it("truncates to 60 characters", () => {
@@ -192,7 +186,11 @@ describe("IssueToPRPipeline", () => {
       const commands: string[] = [];
 
       mockExec.mockImplementation(
-        (cmd: string, _opts: unknown, cb?: (err: null, result: { stdout: string; stderr: string }) => void) => {
+        (
+          cmd: string,
+          _opts: unknown,
+          cb?: (err: null, result: { stdout: string; stderr: string }) => void,
+        ) => {
           commands.push(cmd);
           if (cb) cb(null, { stdout: "", stderr: "" });
           return { stdout: "", stderr: "" };
@@ -229,7 +227,11 @@ describe("IssueToPRPipeline", () => {
       let callCount = 0;
 
       mockExec.mockImplementation(
-        (_cmd: string, _opts: unknown, cb?: (err: Error | null, result?: { stdout: string; stderr: string }) => void) => {
+        (
+          _cmd: string,
+          _opts: unknown,
+          cb?: (err: Error | null, result?: { stdout: string; stderr: string }) => void,
+        ) => {
           callCount++;
           if (callCount === 2 && cb) {
             const err = new Error("test failure") as Error & { stdout: string; stderr: string };
@@ -301,9 +303,9 @@ describe("IssueToPRPipeline", () => {
         text: async () => '{"message":"Validation Failed"}',
       });
 
-      await expect(
-        pipeline.createPullRequest("issue-42/fix-bug", issue),
-      ).rejects.toThrow("GitHub API POST");
+      await expect(pipeline.createPullRequest("issue-42/fix-bug", issue)).rejects.toThrow(
+        "GitHub API POST",
+      );
     });
   });
 
@@ -314,11 +316,7 @@ describe("IssueToPRPipeline", () => {
       const pipeline = makePipeline();
       mockFetchJSON(201, { id: 1 });
 
-      await pipeline.commentOnIssue(
-        42,
-        "https://github.com/acme/dantecode/pull/99",
-        true,
-      );
+      await pipeline.commentOnIssue(42, "https://github.com/acme/dantecode/pull/99", true);
 
       expect(mockFetch).toHaveBeenCalledWith(
         "https://api.github.com/repos/acme/dantecode/issues/42/comments",
@@ -364,17 +362,18 @@ describe("IssueToPRPipeline", () => {
       const commands: string[] = [];
 
       mockExec.mockImplementation(
-        (cmd: string, _opts: unknown, cb?: (err: null, result: { stdout: string; stderr: string }) => void) => {
+        (
+          cmd: string,
+          _opts: unknown,
+          cb?: (err: null, result: { stdout: string; stderr: string }) => void,
+        ) => {
           commands.push(cmd);
           if (cb) cb(null, { stdout: "", stderr: "" });
           return {};
         },
       );
 
-      await pipeline.cleanupWorktree(
-        "/workspace/.worktrees/issue-42/fix-bug",
-        "issue-42/fix-bug",
-      );
+      await pipeline.cleanupWorktree("/workspace/.worktrees/issue-42/fix-bug", "issue-42/fix-bug");
 
       expect(commands).toHaveLength(2);
       expect(commands[0]).toContain("git worktree remove");

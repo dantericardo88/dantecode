@@ -63,9 +63,9 @@ describe("self-improvement-policy", () => {
         triggerCommand: "/autoforge --self-improve",
       });
 
-      expect(
-        isSelfImprovementWriteAllowed("packages/cli/src/tools.ts", projectRoot, context),
-      ).toBe(true);
+      expect(isSelfImprovementWriteAllowed("packages/cli/src/tools.ts", projectRoot, context)).toBe(
+        true,
+      );
     });
 
     it("rejects protected writes without explicit context", () => {

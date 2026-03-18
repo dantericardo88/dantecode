@@ -19,6 +19,8 @@ import {
   AutoforgeCheckpointManager,
   TaskCircuitBreaker,
   RecoveryEngine,
+  EventSourcedCheckpointer,
+  LoopDetector,
 } from "@dantecode/core";
 import type { MultiAgentProgressCallback } from "@dantecode/core";
 import {
@@ -903,29 +905,54 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     return `${RED}Error reading target file: ${msg}${RESET}`;
   }
 
-  // Initialize checkpoint manager, circuit breaker, and recovery engine
+  // Initialize checkpoint manager, circuit breaker, recovery engine,
+  // event-sourced checkpointer (LangGraph+OpenHands), and loop detector (CrewAI-inspired)
   const sessionId = resumeSession ?? `af-${state.session.id}-${Date.now()}`;
   const checkpointMgr = new AutoforgeCheckpointManager(state.projectRoot, sessionId);
   const taskBreaker = new TaskCircuitBreaker({
     identicalFailureThreshold: 5,
     maxRecoveryAttempts: 2,
+    initialBackoffMs: 125,
+    maxBackoffMs: 60_000,
+    retryTimeoutMs: 60_000,
   });
   const recovery = new RecoveryEngine({
     execSyncFn: (cmd, cwd) => execSync(cmd, { cwd, stdio: "pipe", encoding: "utf-8" }) as string,
+  });
+  const eventCheckpointer = new EventSourcedCheckpointer(state.projectRoot, sessionId);
+  const loopDetector = new LoopDetector({
+    maxIterations: hardCeiling,
+    identicalThreshold: 3,
+    patternWindowSize: 10,
   });
 
   // Attempt to resume from a previous session
   let startStep = 0;
   if (resumeSession) {
     const loaded = await checkpointMgr.loadSession(resumeSession);
+    const eventCount = await eventCheckpointer.resume();
     if (loaded > 0) {
       const latest = checkpointMgr.getLatestCheckpoint();
       startStep = latest?.currentStep ?? 0;
       process.stdout.write(
-        `${GREEN}Resumed from checkpoint ${latest?.id} (step ${startStep})${RESET}\n`,
+        `${GREEN}Resumed from checkpoint ${latest?.id} (step ${startStep}, ${eventCount} events replayed)${RESET}\n`,
       );
     }
   }
+
+  // Create initial event-sourced checkpoint with session state
+  await eventCheckpointer.put(
+    {
+      targetFile: resolvedTargetFile,
+      startStep,
+      mode: selfImprove ? "self-improve" : "standard",
+    },
+    {
+      source: "input",
+      step: startStep,
+      triggerCommand: `/autoforge${selfImprove ? " --self-improve" : ""}`,
+    },
+  );
 
   // Record before-hash for audit
   recovery.recordBeforeHash(resolvedTargetFile, code);
@@ -978,6 +1005,22 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     const maxRetries = 3;
 
     while (retryCount <= maxRetries) {
+      // Loop detection: check for stuck patterns before each attempt
+      const loopCheck = loopDetector.recordAction(
+        "autoforge_attempt",
+        `retry=${retryCount} step=${startStep + retryCount} file=${displayTargetFile}`,
+      );
+      if (loopCheck.stuck) {
+        checkpointMgr.stopPeriodicCheckpoints();
+        await eventCheckpointer.putWrite({
+          taskId: `loop-break-${retryCount}`,
+          channel: "loopDetection",
+          value: { stuck: true, reason: loopCheck.reason, details: loopCheck.details },
+          timestamp: new Date().toISOString(),
+        });
+        return `${RED}${BOLD}Autoforge LOOP DETECTED${RESET}: ${loopCheck.reason} — ${loopCheck.details}\n  Iterations: ${loopCheck.iterationCount}, consecutive repeats: ${loopCheck.consecutiveRepeats}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+      }
+
       try {
         result = await runAutoforgeIAL(
           currentCode,
@@ -995,12 +1038,30 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
               },
         );
 
-        // Record success in circuit breaker
+        // Record success in circuit breaker and event checkpointer
         taskBreaker.recordSuccess();
+        await eventCheckpointer.putWrite({
+          taskId: `success-${retryCount}`,
+          channel: "ialResult",
+          value: {
+            succeeded: result.succeeded,
+            iterations: result.iterations,
+            score: result.finalScore?.overall,
+          },
+          timestamp: new Date().toISOString(),
+        });
         break;
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         const failureAction = taskBreaker.recordFailure(errMsg, startStep + retryCount);
+
+        // Record failure event
+        await eventCheckpointer.putWrite({
+          taskId: `failure-${retryCount}`,
+          channel: "error",
+          value: { error: errMsg, action: failureAction.action, step: startStep + retryCount },
+          timestamp: new Date().toISOString(),
+        });
 
         if (failureAction.action === "escalate") {
           // Save final checkpoint before aborting
@@ -1018,6 +1079,19 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         }
 
         if (failureAction.action === "pause_and_recover") {
+          // Apply exponential backoff before recovery (Aider-style)
+          const backoff = taskBreaker.getBackoffDelay(errMsg);
+          if (backoff.timedOut) {
+            checkpointMgr.stopPeriodicCheckpoints();
+            return `${RED}${BOLD}Autoforge TIMED OUT${RESET}: retry backoff exceeded ${taskBreaker.getRetryTimeoutMs()}ms cumulative delay.\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+          }
+          if (backoff.delayMs > 0) {
+            process.stdout.write(
+              `\n${DIM}Backoff: waiting ${backoff.delayMs}ms before recovery (attempt ${backoff.attempt})...${RESET}\n`,
+            );
+            await new Promise((r) => setTimeout(r, backoff.delayMs));
+          }
+
           process.stdout.write(
             `\n${YELLOW}Circuit breaker triggered — re-reading target file...${RESET}\n`,
           );
@@ -1257,15 +1331,25 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   const mergedLanes: string[] = [];
   const blockedLanes: string[] = [];
 
-  // Initialize checkpoint manager, circuit breaker, and recovery engine for party mode
+  // Initialize checkpoint manager, circuit breaker, recovery engine,
+  // event-sourced checkpointer, and loop detector for party mode
   const sessionId = resumeSession ?? `party-${state.session.id}-${Date.now()}`;
   const checkpointMgr = new AutoforgeCheckpointManager(state.projectRoot, sessionId);
   const taskBreaker = new TaskCircuitBreaker({
     identicalFailureThreshold: 5,
     maxRecoveryAttempts: 2,
+    initialBackoffMs: 125,
+    maxBackoffMs: 60_000,
+    retryTimeoutMs: 60_000,
   });
   const recoveryEng = new RecoveryEngine({
     execSyncFn: (cmd, cwd) => execSync(cmd, { cwd, stdio: "pipe", encoding: "utf-8" }) as string,
+  });
+  const partyCheckpointer = new EventSourcedCheckpointer(state.projectRoot, sessionId);
+  const partyLoopDetector = new LoopDetector({
+    maxIterations: lanes.length * 3,
+    identicalThreshold: 3,
+    patternWindowSize: lanes.length * 2,
   });
   const sessionStart = Date.now();
 
@@ -1273,14 +1357,21 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   let completedLaneNames: string[] = [];
   if (resumeSession) {
     const loaded = await checkpointMgr.loadSession(resumeSession);
+    const eventCount = await partyCheckpointer.resume();
     if (loaded > 0) {
       const latest = checkpointMgr.getLatestCheckpoint();
       completedLaneNames = (latest?.metadata?.completedLanes as string[]) ?? [];
       process.stdout.write(
-        `${GREEN}Resumed from checkpoint ${latest?.id} — skipping lanes: ${completedLaneNames.join(", ") || "none"}${RESET}\n`,
+        `${GREEN}Resumed from checkpoint ${latest?.id} — skipping lanes: ${completedLaneNames.join(", ") || "none"} (${eventCount} events replayed)${RESET}\n`,
       );
     }
   }
+
+  // Create initial event-sourced checkpoint for party session
+  await partyCheckpointer.put(
+    { task, lanes: [...lanes], completedLanes: completedLaneNames },
+    { source: "input", step: 0, triggerCommand: "/party --autoforge" },
+  );
 
   // Start periodic checkpointing
   checkpointMgr.startPeriodicCheckpoints(() => ({
@@ -1388,8 +1479,28 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneVerification.passed ? ` verification failed (${laneVerification.failedSteps.join(", ")})` : ""}`.trim();
         blockedLanes.push(failureMsg);
 
+        // Loop detection: track lane failures for stuck patterns
+        const loopCheck = partyLoopDetector.recordAction("lane_failure", failureMsg);
+        if (loopCheck.stuck) {
+          process.stdout.write(
+            `  ${RED}Loop detected in party lanes: ${loopCheck.reason} — ${loopCheck.details}${RESET}\n`,
+          );
+          removeWorktree(worktree.directory);
+          checkpointMgr.stopPeriodicCheckpoints();
+          break;
+        }
+
         // Record failure in circuit breaker
         const failureAction = taskBreaker.recordFailure(failureMsg, mergedLanes.length);
+
+        // Record failure event in event-sourced checkpoint
+        await partyCheckpointer.putWrite({
+          taskId: `lane-fail-${lane}`,
+          channel: `lane.${lane}.error`,
+          value: { failureMsg, action: failureAction.action },
+          timestamp: new Date().toISOString(),
+        });
+
         if (failureAction.action === "escalate") {
           process.stdout.write(
             `  ${RED}Circuit breaker escalated after repeated lane failures${RESET}\n`,
@@ -1408,6 +1519,14 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           break;
         }
         if (failureAction.action === "pause_and_recover") {
+          // Apply exponential backoff before recovery (Aider-style)
+          const backoff = taskBreaker.getBackoffDelay(failureMsg);
+          if (!backoff.timedOut && backoff.delayMs > 0) {
+            process.stdout.write(
+              `  ${DIM}Backoff: waiting ${backoff.delayMs}ms before next lane...${RESET}\n`,
+            );
+            await new Promise((r) => setTimeout(r, backoff.delayMs));
+          }
           process.stdout.write(
             `  ${YELLOW}Circuit breaker paused — attempting recovery for ${lane}...${RESET}\n`,
           );
@@ -1417,8 +1536,15 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         continue;
       }
 
-      // Record success in circuit breaker
+      // Record success in circuit breaker + loop detector + event-sourced checkpoint
       taskBreaker.recordSuccess();
+      partyLoopDetector.recordAction("lane_success", lane);
+      await partyCheckpointer.putWrite({
+        taskId: `lane-ok-${lane}`,
+        channel: `lane.${lane}.result`,
+        value: { passed: true, changedFiles: uniqueChangedFiles.length },
+        timestamp: new Date().toISOString(),
+      });
 
       if (uniqueChangedFiles.length > 0) {
         // Hash audit before merge

@@ -236,8 +236,20 @@ describe("repo-map-ast", () => {
           filePath: "utils.ts",
           score: 0.3,
           symbols: [
-            { name: "helper", kind: "function", signature: "function helper()", filePath: "utils.ts", line: 1 },
-            { name: "Config", kind: "interface", signature: "interface Config", filePath: "utils.ts", line: 5 },
+            {
+              name: "helper",
+              kind: "function",
+              signature: "function helper()",
+              filePath: "utils.ts",
+              line: 1,
+            },
+            {
+              name: "Config",
+              kind: "interface",
+              signature: "interface Config",
+              filePath: "utils.ts",
+              line: 5,
+            },
           ],
         },
       ];

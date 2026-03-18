@@ -123,10 +123,7 @@ export class DockerAgent {
 
     // Mount project directory
     const mountFlag = this.options.readOnlyMount ? ":ro" : "";
-    args.push(
-      "--volume",
-      `${this.projectRoot}:${this.options.workdir}${mountFlag}`,
-    );
+    args.push("--volume", `${this.projectRoot}:${this.options.workdir}${mountFlag}`);
 
     // Environment variables
     for (const [key, value] of Object.entries(this.options.env)) {

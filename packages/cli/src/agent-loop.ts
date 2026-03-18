@@ -112,6 +112,9 @@ const PIVOT_INSTRUCTION =
   "- Is there an alternative tool or method?\n" +
   "- Should we read more context first?";
 
+const EXECUTION_CONTINUATION_PATTERN = /^(?:please\s+)?(?:continue|resume|run|verify)\b/i;
+const EXECUTION_WORKFLOW_PATTERN = /^\/(?:autoforge|party|magic|forge|verify|ship)\b/i;
+
 // ----------------------------------------------------------------------------
 // System Prompt Builder
 // ----------------------------------------------------------------------------
@@ -285,7 +288,7 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
 
   // Pattern 2: JSON blocks with tool call structure
   const jsonBlockPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|TodoWrite)"[\s\S]*?\})\s*\n```/g;
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite)"[\s\S]*?\})\s*\n```/g;
 
   while ((match = jsonBlockPattern.exec(text)) !== null) {
     try {
@@ -508,6 +511,24 @@ function deriveThinkingBudget(model: ModelConfig, complexity: number): number | 
   const baseBudget =
     model.reasoningEffort === "high" ? 8192 : model.reasoningEffort === "low" ? 2048 : 4096;
   return Math.round(baseBudget * Math.max(1, complexity));
+}
+
+function isExecutionContinuationPrompt(prompt: string, session: Session): boolean {
+  if (!EXECUTION_CONTINUATION_PATTERN.test(prompt.trim())) {
+    return false;
+  }
+
+  const priorMessages = session.messages.slice(0, -1);
+  return priorMessages.some((message) => {
+    if (message.toolUse || message.toolResult) {
+      return true;
+    }
+    return (
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      EXECUTION_WORKFLOW_PATTERN.test(message.content.trim())
+    );
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -811,7 +832,7 @@ export async function runAgentLoop(
     if (toolCalls.length === 0) {
       if (
         executedToolsThisTurn === 0 &&
-        promptRequestsToolExecution(prompt) &&
+        (promptRequestsToolExecution(prompt) || isExecutionContinuationPrompt(prompt, session)) &&
         responseNeedsToolExecutionNudge(responseText) &&
         executionNudges < MAX_EXECUTION_NUDGES &&
         maxToolRounds > 0
@@ -824,7 +845,7 @@ export async function runAgentLoop(
         messages.push({
           role: "user",
           content:
-            "You described the intended work but did not use any tools. Stop narrating and actually execute the next step with Read, Write, Edit, Bash, Glob, Grep, or TodoWrite. Only claim file changes after a successful tool result.",
+            "You described the intended work but did not use any tools. Stop narrating and actually execute the next step with Read, Write, Edit, Bash, Glob, Grep, GitCommit, GitPush, or TodoWrite. Only claim file changes after a successful tool result.",
         });
         if (!config.silent) {
           process.stdout.write(
@@ -946,7 +967,7 @@ export async function runAgentLoop(
         }
       }
 
-      if (toolCall.name === "GitCommit") {
+      if (toolCall.name === "GitCommit" || toolCall.name === "GitPush") {
         if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {
           roundMajorEditGateResult = await runMajorEditBatchGate(
             session,
@@ -960,12 +981,10 @@ export async function runAgentLoop(
           if (!roundMajorEditGateResult.passed) {
             const failedSteps = roundMajorEditGateResult.failedSteps.join(", ");
             toolResults.push(
-              `SYSTEM: Commit blocked. Major edit batch verification failed at the repository root (${failedSteps}). Fix typecheck, lint, and test before committing or merging.`,
+              `SYSTEM: ${toolCall.name} blocked. Major edit batch verification failed at the repository root (${failedSteps}). Fix typecheck, lint, and test before committing or pushing.`,
             );
             if (!config.silent) {
-              process.stdout.write(
-                `\n${RED}[gstack: blocked commit â€” ${failedSteps}]${RESET}\n`,
-              );
+              process.stdout.write(`\n${RED}[gstack: blocked commit â€” ${failedSteps}]${RESET}\n`);
             }
             continue;
           }
@@ -973,7 +992,7 @@ export async function runAgentLoop(
 
         if (!lastMajorEditGatePassed) {
           toolResults.push(
-            "SYSTEM: Commit blocked because the last major edit batch failed repository-root verification. Fix the failing checks before attempting GitCommit again.",
+            `SYSTEM: ${toolCall.name} blocked because the last major edit batch failed repository-root verification. Fix the failing checks before attempting ${toolCall.name} again.`,
           );
           continue;
         }
@@ -1357,7 +1376,8 @@ export async function runAgentLoop(
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({
         role: m.role as "user" | "assistant" | "system",
-        content: typeof m.content === "string" ? m.content : m.content.map((b) => b.text || "").join("\n"),
+        content:
+          typeof m.content === "string" ? m.content : m.content.map((b) => b.text || "").join("\n"),
       }));
     await detectAndRecordPatterns(conversationMessages, session.projectRoot);
   } catch {

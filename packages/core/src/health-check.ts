@@ -216,9 +216,7 @@ function logHealthCheckTable(result: HealthCheckResult): void {
  * @param config - Health check configuration (project root path).
  * @returns The aggregate HealthCheckResult.
  */
-export async function runStartupHealthCheck(
-  config: HealthCheckConfig,
-): Promise<HealthCheckResult> {
+export async function runStartupHealthCheck(config: HealthCheckConfig): Promise<HealthCheckResult> {
   const checks: HealthCheck[] = [];
 
   // 1. Node.js version
