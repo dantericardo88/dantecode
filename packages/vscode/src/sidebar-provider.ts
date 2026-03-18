@@ -239,6 +239,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private sessionStoreMigrated = false;
   private activeTasks = 0;
   private lastContextPercent = 0;
+  /** Dynamic round budget requested by pipeline orchestrators. */
+  private pendingRequiredRounds = 0;
+  /** Currently active skill name. Enables universal pipeline continuation for all skills. */
+  private activeSkill: string | null = null;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -417,6 +421,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.messages.push({ role: "user", content: text });
     this.stopRequested = false;
     this.abortController = new AbortController();
+
+    // Detect pipeline workflows and set dynamic round budget.
+    // Any active skill gets 80 rounds; heavy DanteForge pipelines get 150.
+    if (/\/(?:magic|inferno|blaze)\b/i.test(text)) {
+      this.pendingRequiredRounds = 150;
+    } else if (this.activeSkill || /\/(?:autoforge|party|ember)\b/i.test(text)) {
+      this.pendingRequiredRounds = 80;
+    }
     const { signal } = this.abortController;
 
     // Build model configuration — retrieve API key from SecretStorage
@@ -481,11 +493,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Resolve agent mode settings
     const { agentMode, permissions, runUntilComplete } = this.agentConfig;
+    // Dynamic round budget: pipeline workflows (/magic, /autoforge, /party) can
+    // request more rounds via requiredRounds. YOLO mode gets 50, runUntilComplete
+    // gets 30, pipeline gets its requested budget, otherwise use the user's setting.
+    const pipelineRounds = this.pendingRequiredRounds ?? 0;
     const effectiveMaxRounds =
-      agentMode === "yolo" ? 50 : runUntilComplete ? 30 : this.agentConfig.maxToolRounds;
+      pipelineRounds > 0
+        ? Math.max(pipelineRounds, 50)
+        : agentMode === "yolo"
+          ? 50
+          : runUntilComplete
+            ? 30
+            : this.agentConfig.maxToolRounds;
+    this.pendingRequiredRounds = 0; // Reset after use
     let executionNudges = 0;
     const MAX_EXECUTION_NUDGES = 2;
     let executedToolsThisTurn = 0;
+    let pipelineContinuationNudges = 0;
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -579,7 +603,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const modelLabel = this.currentModel.replace(/^[^/]+\//, ""); // strip provider prefix
     systemParts.push("## Git Commits");
     systemParts.push(
-      `When making git commits via the Bash tool, always include this Co-Authored-By trailer:`,
+      `Prefer the GitCommit tool for commits. If you must use Bash for git commit, always include this Co-Authored-By trailer:`,
     );
     systemParts.push(`Co-Authored-By: DanteCode (${modelLabel}) <noreply@dantecode.dev>`);
     systemParts.push("");
@@ -993,6 +1017,40 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue; // Go back to the top of the agent loop
           }
 
+          // Pipeline continuation nudge: if a skill is active or the user triggered a
+          // pipeline workflow, and the model stopped with a summary-like response,
+          // nudge it to continue instead of stopping.
+          const isPipelineWorkflow =
+            this.activeSkill !== null ||
+            /\/(?:magic|autoforge|party|inferno|blaze|ember|forge|verify|ship)\b/i.test(text);
+          const PREMATURE_SUMMARY_RE =
+            /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+          if (
+            isPipelineWorkflow &&
+            executedToolsThisTurn > 0 &&
+            maxToolRounds > 1 &&
+            pipelineContinuationNudges < 3 &&
+            PREMATURE_SUMMARY_RE.test(fullResponse)
+          ) {
+            pipelineContinuationNudges++;
+            agentMessages.push({ role: "assistant", content: fullResponse });
+            agentMessages.push({
+              role: "user",
+              content:
+                "You stopped mid-pipeline with a summary/status response, but the task is NOT " +
+                "complete. The pipeline still has remaining steps. Do NOT summarize — continue " +
+                "executing the next step immediately with tool calls.",
+            });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n\n---\n> **Pipeline continuation** (${pipelineContinuationNudges}/3) — model stopped mid-pipeline, nudging to continue.\n\n`,
+                partial: "",
+              },
+            });
+            continue;
+          }
+
           this.messages.push({ role: "assistant", content: fullResponse });
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
@@ -1273,14 +1331,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           type: "loop_terminated",
           payload: { reason: loopCheck.reason, roundsCompleted: roundNumber },
         });
-        this.postMessage({
-          type: "chat_response_chunk",
-          payload: {
-            chunk: "\n\n---\n> **Max tool rounds reached.** Review the results above.\n",
-            partial: "",
-          },
-        });
-        this.postMessage({ type: "chat_response_done", payload: {} });
+
+        // Auto-continuation: for pipeline workflows (or any active skill),
+        // auto-queue a continuation message instead of just stopping.
+        const isPipelineExhausted =
+          this.activeSkill !== null ||
+          /\/(?:magic|autoforge|party|inferno|blaze|ember|forge)\b/i.test(text);
+        if (isPipelineExhausted && this.agentConfig.runUntilComplete) {
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk:
+                "\n\n---\n> **Round budget exhausted** — pipeline still in progress. " +
+                "Auto-continuing in a fresh session...\n\n",
+              partial: "",
+            },
+          });
+          this.postMessage({ type: "chat_response_done", payload: {} });
+          // Queue auto-continuation: send a "please continue" message after a brief delay
+          setTimeout(() => {
+            void this.handleChatRequest(
+              "The previous session exhausted its round budget mid-pipeline. " +
+                "Continue the pipeline from where it left off. Check the todo list " +
+                "and completed work so far, then execute the remaining steps.",
+            );
+          }, 500);
+        } else {
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk: isPipelineExhausted
+                ? "\n\n---\n> **Max tool rounds reached** mid-pipeline. " +
+                  'Send "please continue" to resume, or use `/magic --resume` to pick up later.\n'
+                : "\n\n---\n> **Max tool rounds reached.** Review the results above.\n",
+              partial: "",
+            },
+          });
+          this.postMessage({ type: "chat_response_done", payload: {} });
+        }
       }
 
       // Auto-save current chat to history
@@ -1411,6 +1499,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.currentChatId = this.generateChatId();
     this.contextFiles = [];
     this.pendingImages = [];
+    this.activeSkill = null;
     this.sendContextFilesUpdate();
   }
 
@@ -1813,6 +1902,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       });
 
       void vscode.window.showInformationMessage(`DanteCode: Activated skill "${skillName}"`);
+      // Track active skill so pipeline continuation protections apply universally
+      this.activeSkill = skillName;
     } catch {
       void vscode.window.showErrorMessage(`DanteCode: Failed to activate skill "${skillName}"`);
     }

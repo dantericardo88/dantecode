@@ -181,6 +181,7 @@ function makeReplState(overrides?: Record<string, unknown>) {
     pendingAgentPrompt: null,
     activeAbortController: null,
     sandboxBridge: null,
+    activeSkill: null,
     ...overrides,
   };
 }

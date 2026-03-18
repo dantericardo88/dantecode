@@ -574,6 +574,36 @@ async function toolSelfUpdate(
   }
 }
 
+async function toolGitCommit(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const message = input["message"] as string | undefined;
+  if (!message) return { content: "Error: message parameter is required", isError: true };
+
+  const files = Array.isArray(input["files"]) ? (input["files"] as string[]) : [];
+
+  try {
+    const { autoCommit } = await import("@dantecode/git-engine");
+    const result = autoCommit(
+      {
+        message,
+        footer:
+          "Generated with DanteCode (https://dantecode.dev)\n\nCo-Authored-By: DanteCode <noreply@dantecode.dev>",
+        files,
+        allowEmpty: false,
+      },
+      projectRoot,
+    );
+    return {
+      content: `Commit created: ${result.commitHash}\nMessage: ${result.message}\nFiles: ${result.filesCommitted.join(", ")}`,
+      isError: false,
+    };
+  } catch (err: unknown) {
+    return { content: `Error committing: ${String(err)}`, isError: true };
+  }
+}
+
 async function toolGitPush(
   input: Record<string, unknown>,
   projectRoot: string,
@@ -732,6 +762,9 @@ export async function executeTool(
     case "SelfUpdate":
       result = await toolSelfUpdate(input, projectRoot);
       break;
+    case "GitCommit":
+      result = await toolGitCommit(input, projectRoot);
+      break;
     case "GitPush":
       result = await toolGitPush(input, projectRoot);
       break;
@@ -834,6 +867,66 @@ async function appendSelfModificationAudit(
   }
 }
 
+function escapeLiteralControlCharsInJsonStrings(payload: string): string {
+  let result = "";
+  let inString = false;
+  let escaping = false;
+
+  for (const char of payload) {
+    if (escaping) {
+      result += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      result += char;
+      escaping = true;
+      continue;
+    }
+
+    if (char === '"') {
+      result += char;
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      if (char === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (char === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (char === "\t") {
+        result += "\\t";
+        continue;
+      }
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
+function parseToolCallPayload(payload: string): { name?: string; input?: Record<string, unknown> } | null {
+  try {
+    return JSON.parse(payload) as { name?: string; input?: Record<string, unknown> };
+  } catch {
+    try {
+      return JSON.parse(escapeLiteralControlCharsInJsonStrings(payload)) as {
+        name?: string;
+        input?: Record<string, unknown>;
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Tool Call Extraction
 // ----------------------------------------------------------------------------
@@ -855,37 +948,29 @@ export function extractToolCalls(text: string): {
   let match: RegExpExecArray | null;
 
   while ((match = xmlPattern.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]!) as { name?: string; input?: Record<string, unknown> };
-      if (parsed.name && parsed.input) {
-        toolCalls.push({
-          id: `tc-${Date.now()}-${idCounter++}`,
-          name: parsed.name,
-          input: parsed.input,
-        });
-      }
-    } catch {
-      /* skip malformed */
+    const parsed = parseToolCallPayload(match[1]!);
+    if (parsed?.name && parsed.input) {
+      toolCalls.push({
+        id: `tc-${Date.now()}-${idCounter++}`,
+        name: parsed.name,
+        input: parsed.input,
+      });
     }
     cleanText = cleanText.replace(match[0], "");
   }
 
   // Pattern 2: ```json blocks with tool structure
   const jsonPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|ListDir|Bash|Glob|Grep|GitPush|SelfUpdate)"[\s\S]*?\})\s*\n```/g;
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|ListDir|Bash|Glob|Grep|GitCommit|GitPush|SelfUpdate)"[\s\S]*?\})\s*\n```/g;
   while ((match = jsonPattern.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]!) as { name?: string; input?: Record<string, unknown> };
-      if (parsed.name && parsed.input) {
-        toolCalls.push({
-          id: `tc-${Date.now()}-${idCounter++}`,
-          name: parsed.name,
-          input: parsed.input,
-        });
-        cleanText = cleanText.replace(match[0], "");
-      }
-    } catch {
-      /* skip malformed */
+    const parsed = parseToolCallPayload(match[1]!);
+    if (parsed?.name && parsed.input) {
+      toolCalls.push({
+        id: `tc-${Date.now()}-${idCounter++}`,
+        name: parsed.name,
+        input: parsed.input,
+      });
+      cleanText = cleanText.replace(match[0], "");
     }
   }
 
@@ -923,6 +1008,9 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 ### Grep — Search file contents with regex
   Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }
 
+### GitCommit — Stage files and create a git commit
+  Input: { "message": "commit summary", "files": ["optional/file.ts"] }
+
 ### GitPush — Push a branch to a remote and verify the remote ref
   Input: { "remote": "origin", "branch": "main", "set_upstream": true/false }
 
@@ -938,6 +1026,7 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 - Use Glob or ListDir to explore the project structure.
 - Use Grep to search for specific code patterns.
 - Use Bash to run tests, type-checks, or build commands to verify changes.
+- Prefer GitCommit over raw Bash git commit commands.
 - Use GitPush when the user explicitly asks you to publish verified commits to a remote.
 - You can chain multiple tool calls in one response.
 - After tool results come back, analyze them and continue your task.

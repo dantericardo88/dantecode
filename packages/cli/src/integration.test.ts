@@ -119,6 +119,7 @@ describe("CLI Integration", () => {
         pendingAgentPrompt: null,
         activeAbortController: null,
         sandboxBridge: null,
+        activeSkill: null,
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -163,6 +164,7 @@ describe("CLI Integration", () => {
         pendingAgentPrompt: null,
         activeAbortController: null,
         sandboxBridge: null,
+        activeSkill: null,
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -210,6 +212,7 @@ describe("CLI Integration", () => {
         pendingAgentPrompt: null,
         activeAbortController: null,
         sandboxBridge: null,
+        activeSkill: null,
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

@@ -99,6 +99,8 @@ export interface ReplState {
   _bgRunner?: unknown;
   /** Code index (lazily initialized by /index and /search). */
   _codeIndex?: unknown;
+  /** Currently active skill name, or null. Used to enable universal pipeline continuation. */
+  activeSkill: string | null;
 }
 
 /** A single slash command handler. */
@@ -626,6 +628,9 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
     content: `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}\n\n${skill.instructions}`,
     timestamp: new Date().toISOString(),
   });
+
+  // Track active skill so pipeline continuation protections apply universally
+  state.activeSkill = skill.frontmatter.name;
 
   return `${GREEN}Activated skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n${DIM}${skill.frontmatter.description}${RESET}`;
 }

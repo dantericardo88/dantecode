@@ -81,6 +81,18 @@ export interface AgentLoopConfig {
   mcpTools?: Record<string, { description: string; parameters: import("zod").ZodTypeAny }>;
   /** MCP client for dispatching tool calls to external MCP servers. */
   mcpClient?: { callToolByName: (name: string, args: Record<string, unknown>) => Promise<string> };
+  /**
+   * Minimum number of tool rounds required to complete the task.
+   * Set by pipeline orchestrators (e.g., /magic, /autoforge) to override the
+   * default maxToolRounds=15 when more rounds are needed.
+   */
+  requiredRounds?: number;
+  /**
+   * Whether a skill is currently active. When true, pipeline continuation
+   * protections (nudge, elevated round budget) activate regardless of the
+   * prompt text — ensuring ALL skills run to completion.
+   */
+  skillActive?: boolean;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -114,6 +126,20 @@ const PIVOT_INSTRUCTION =
 
 const EXECUTION_CONTINUATION_PATTERN = /^(?:please\s+)?(?:continue|resume|run|verify)\b/i;
 const EXECUTION_WORKFLOW_PATTERN = /^\/(?:autoforge|party|magic|forge|verify|ship)\b/i;
+
+/** Detects premature wrap-up responses that should trigger pipeline continuation. */
+const PREMATURE_SUMMARY_PATTERN =
+  /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+
+/** Max pipeline continuation nudges before allowing the model to stop. */
+const MAX_PIPELINE_CONTINUATION_NUDGES = 3;
+
+/** Pipeline continuation instruction injected when the model stops mid-pipeline. */
+const PIPELINE_CONTINUATION_INSTRUCTION =
+  "You stopped mid-pipeline with a summary/status response, but the task is NOT complete. " +
+  "The pipeline still has remaining steps. Do NOT summarize — continue executing the next " +
+  "step immediately with tool calls. If you are unsure what step is next, re-read your " +
+  "todo list or the pipeline plan and continue from where you left off.";
 
 // ----------------------------------------------------------------------------
 // System Prompt Builder
@@ -250,6 +276,68 @@ interface ExtractedToolCall {
   input: Record<string, unknown>;
 }
 
+function escapeLiteralControlCharsInJsonStrings(payload: string): string {
+  let result = "";
+  let inString = false;
+  let escaping = false;
+
+  for (const char of payload) {
+    if (escaping) {
+      result += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      result += char;
+      escaping = true;
+      continue;
+    }
+
+    if (char === '"') {
+      result += char;
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      if (char === "\n") {
+        result += "\\n";
+        continue;
+      }
+      if (char === "\r") {
+        result += "\\r";
+        continue;
+      }
+      if (char === "\t") {
+        result += "\\t";
+        continue;
+      }
+    }
+
+    result += char;
+  }
+
+  return result;
+}
+
+function parseToolCallPayload(
+  payload: string,
+): { name?: string; input?: Record<string, unknown> } | null {
+  try {
+    return JSON.parse(payload) as { name?: string; input?: Record<string, unknown> };
+  } catch {
+    try {
+      return JSON.parse(escapeLiteralControlCharsInJsonStrings(payload)) as {
+        name?: string;
+        input?: Record<string, unknown>;
+      };
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * Extracts tool calls from the model response text.
  * Looks for patterns like:
@@ -268,20 +356,13 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
   let match: RegExpExecArray | null;
 
   while ((match = xmlPattern.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]!) as {
-        name?: string;
-        input?: Record<string, unknown>;
-      };
-      if (parsed.name && parsed.input) {
-        toolCalls.push({
-          id: randomUUID(),
-          name: parsed.name,
-          input: parsed.input,
-        });
-      }
-    } catch {
-      // Not valid JSON, skip
+    const parsed = parseToolCallPayload(match[1]!);
+    if (parsed?.name && parsed.input) {
+      toolCalls.push({
+        id: randomUUID(),
+        name: parsed.name,
+        input: parsed.input,
+      });
     }
     cleanText = cleanText.replace(match[0], "");
   }
@@ -291,21 +372,14 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
     /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite)"[\s\S]*?\})\s*\n```/g;
 
   while ((match = jsonBlockPattern.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]!) as {
-        name?: string;
-        input?: Record<string, unknown>;
-      };
-      if (parsed.name && parsed.input) {
-        toolCalls.push({
-          id: randomUUID(),
-          name: parsed.name,
-          input: parsed.input,
-        });
-        cleanText = cleanText.replace(match[0], "");
-      }
-    } catch {
-      // Not valid JSON, skip
+    const parsed = parseToolCallPayload(match[1]!);
+    if (parsed?.name && parsed.input) {
+      toolCalls.push({
+        id: randomUUID(),
+        name: parsed.name,
+        input: parsed.input,
+      });
+      cleanText = cleanText.replace(match[0], "");
     }
   }
 
@@ -523,6 +597,15 @@ function isExecutionContinuationPrompt(prompt: string, session: Session): boolea
     if (message.toolUse || message.toolResult) {
       return true;
     }
+    // Detect skill activation system messages — any activated skill means
+    // "continue" should be treated as an execution continuation.
+    if (
+      message.role === "system" &&
+      typeof message.content === "string" &&
+      message.content.startsWith('Activated skill "')
+    ) {
+      return true;
+    }
     return (
       message.role === "user" &&
       typeof message.content === "string" &&
@@ -608,7 +691,13 @@ export async function runAgentLoop(
   }));
 
   // Tool call loop: keep sending to the model until no more tool calls
-  let maxToolRounds = 15;
+  // Dynamic round budget: pipeline orchestrators can request more rounds via requiredRounds.
+  // When a skill is active (skillActive), default to 50 rounds to ensure completion.
+  let maxToolRounds = config.requiredRounds
+    ? Math.max(config.requiredRounds, 15)
+    : config.skillActive
+      ? 50
+      : 15;
   let totalTokensUsed = 0;
   const touchedFiles: string[] = [];
   // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
@@ -623,6 +712,12 @@ export async function runAgentLoop(
   let executionNudges = 0;
   const MAX_EXECUTION_NUDGES = 2;
   let executedToolsThisTurn = 0;
+  // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
+  let pipelineContinuationNudges = 0;
+  const isPipelineWorkflow =
+    config.skillActive ||
+    EXECUTION_WORKFLOW_PATTERN.test(prompt) ||
+    isExecutionContinuationPrompt(prompt, session);
 
   // ---- Feature: Planning phase (for complex tasks) ----
   // Inject planning instruction before first model call when complexity >= 0.7
@@ -850,6 +945,34 @@ export async function runAgentLoop(
         if (!config.silent) {
           process.stdout.write(
             `\n${YELLOW}[nudge: execute with tools]${RESET} ${DIM}(no tool calls were emitted)${RESET}\n`,
+          );
+        }
+        continue;
+      }
+
+      // Pipeline continuation nudge: if we're in a pipeline workflow (e.g., /magic,
+      // /autoforge) and the model emitted a summary-like response with no tool calls
+      // but has clearly done work (executedToolsThisTurn > 0), it may be wrapping up
+      // prematurely. Force it to continue unless we've already nudged too many times.
+      if (
+        isPipelineWorkflow &&
+        executedToolsThisTurn > 0 &&
+        maxToolRounds > 0 &&
+        pipelineContinuationNudges < MAX_PIPELINE_CONTINUATION_NUDGES &&
+        PREMATURE_SUMMARY_PATTERN.test(responseText)
+      ) {
+        pipelineContinuationNudges++;
+        messages.push({
+          role: "assistant",
+          content: responseText,
+        });
+        messages.push({
+          role: "user",
+          content: PIPELINE_CONTINUATION_INSTRUCTION,
+        });
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${YELLOW}[pipeline continuation ${pipelineContinuationNudges}/${MAX_PIPELINE_CONTINUATION_NUDGES}]${RESET} ${DIM}(model stopped mid-pipeline — nudging to continue)${RESET}\n`,
           );
         }
         continue;

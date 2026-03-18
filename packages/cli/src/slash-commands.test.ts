@@ -126,6 +126,7 @@ function makeState(projectRoot: string): ReplState {
     pendingAgentPrompt: null,
     activeAbortController: null,
     sandboxBridge: null,
+    activeSkill: null,
   };
 }
 

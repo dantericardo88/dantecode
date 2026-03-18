@@ -309,6 +309,23 @@ export type {
 
 export { LoopDetector, fingerprintAction } from "./loop-detector.js";
 export type { ActionRecord, LoopDetectionResult, LoopDetectorOptions } from "./loop-detector.js";
+
+// ─── Magic Pipeline State ────────────────────────────────────────────────────
+
+export {
+  saveMagicPipelineState,
+  loadMagicPipelineState,
+  clearMagicPipelineState,
+  createMagicPipelineState,
+  advancePipelineStep,
+  recordStepRetry,
+  remainingSteps,
+  estimateRequiredRounds,
+  formatPipelineProgress,
+  getMagicStatePath,
+} from "./magic-pipeline-state.js";
+export type { MagicPipelineState, MagicStepResult } from "./magic-pipeline-state.js";
+
 export { detectInstallContext, resolvePreferredShell } from "./runtime-update.js";
 export type {
   InstallContextKind,

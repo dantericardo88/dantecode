@@ -429,9 +429,11 @@ vi.mock("@dantecode/danteforge", () => ({
 }));
 
 const mockPushBranch = vi.fn();
+const mockAutoCommit = vi.fn();
 
 vi.mock("@dantecode/git-engine", () => ({
   generateRepoMap: vi.fn().mockReturnValue([]),
+  autoCommit: (...args: unknown[]) => mockAutoCommit(...args),
   pushBranch: (...args: unknown[]) => mockPushBranch(...args),
   generateColoredHunk: vi.fn().mockReturnValue({
     filePath: "test.ts",
@@ -552,6 +554,7 @@ import {
   isSelfModificationTarget,
   isSelfModificationBashCommand,
   executeTool,
+  extractToolCalls,
   type ToolExecutionContext,
 } from "./agent-tools.js";
 import { ChatSidebarProvider } from "./sidebar-provider.js";
@@ -1290,6 +1293,30 @@ describe("VS Code Extension", () => {
       };
       expect(() => provider.sendPDSEScore(score)).not.toThrow();
     });
+
+    it("tracks activeSkill through skill activation and new chat reset", async () => {
+      const uri = vscode.Uri.file("/test");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+
+      // Access private field via type cast for testing
+      const p = provider as unknown as { activeSkill: string | null; handleNewChat: () => Promise<void> };
+
+      // Initially null
+      expect(p.activeSkill).toBeNull();
+
+      // Simulate skill activation via the message handler by calling handleSkillActivate directly
+      const handleSkill = (provider as unknown as { handleSkillActivate: (name: string) => Promise<void> }).handleSkillActivate.bind(provider);
+      await handleSkill("test-skill");
+      expect(p.activeSkill).toBe("test-skill");
+
+      // New chat resets activeSkill
+      await p.handleNewChat();
+      expect(p.activeSkill).toBeNull();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1753,6 +1780,7 @@ describe("executeTool integration", () => {
     mockStat.mockReset();
     mockExecSync.mockReset();
     mockPushBranch.mockReset();
+    mockAutoCommit.mockReset();
   });
 
   it("blocks Write to self-owned path without confirmation", async () => {
@@ -1901,6 +1929,32 @@ describe("executeTool integration", () => {
     );
   });
 
+  it("routes GitCommit through git-engine and returns commit details", async () => {
+    const context = makeContext();
+    mockAutoCommit.mockReturnValue({
+      commitHash: "abc123",
+      message: "feat: add recovery",
+      filesCommitted: ["src/app.ts"],
+    });
+
+    const result = await executeTool(
+      "GitCommit",
+      { message: "feat: add recovery", files: ["src/app.ts"] },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Commit created: abc123");
+    expect(mockAutoCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "feat: add recovery",
+        files: ["src/app.ts"],
+      }),
+      "/proj",
+    );
+  });
+
   it("blocks GitPush while sandbox mode is enabled", async () => {
     const context = makeContext({ sandboxEnabled: true });
 
@@ -1989,5 +2043,24 @@ describe("executeTool integration", () => {
     expect(result.isError).toBe(false);
     expect(result.content).toContain("line1");
     expect(result.content).toContain("line2");
+  });
+});
+
+describe("extractToolCalls", () => {
+  it("recovers multiline Bash tool calls with raw newlines inside JSON strings", () => {
+    const response = [
+      "Running commit",
+      "<tool_use>",
+      '{"name":"Bash","input":{"command":"git commit -m \\"feat: snapshot',
+      "",
+      'Co-Authored-By: DanteCode <noreply@dantecode.dev>\\"","timeout":30000}}',
+      "</tool_use>",
+    ].join("\n");
+
+    const result = extractToolCalls(response);
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]?.name).toBe("Bash");
+    expect(result.toolCalls[0]?.input.command).toContain("Co-Authored-By: DanteCode");
   });
 });

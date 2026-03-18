@@ -87,6 +87,7 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.state = replState.state;
   agentConfig.enableSandbox = replState.enableSandbox;
   agentConfig.silent = replState.silent;
+  agentConfig.skillActive = replState.activeSkill !== null;
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
@@ -150,6 +151,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     pendingAgentPrompt: null,
     activeAbortController: null,
     sandboxBridge: null,
+    activeSkill: null,
   };
 
   // Agent loop config

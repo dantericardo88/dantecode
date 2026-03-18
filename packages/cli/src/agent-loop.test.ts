@@ -322,6 +322,36 @@ describe("runAgentLoop smoke tests", () => {
     expect(toolResultMsg).toBeDefined();
   });
 
+  it("recovers multiline Bash tool calls whose JSON string contains raw newlines", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: [
+        "I will create the commit.",
+        "<tool_use>",
+        '{"name":"Bash","input":{"command":"git commit -m \\"chore: snapshot',
+        "",
+        'Co-Authored-By: DanteCode <noreply@dantecode.dev>\\"","timeout":30000}}',
+        "</tool_use>",
+      ].join("\n"),
+      usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The commit command finished.",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Create the commit", session, makeConfig());
+
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Bash",
+      expect.objectContaining({
+        command: expect.stringContaining("Co-Authored-By: DanteCode <noreply@dantecode.dev>"),
+      }),
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
   it("nudges narrated execution into real tool calls for action prompts", async () => {
     mockGenerateText
       .mockResolvedValueOnce({
@@ -1069,5 +1099,313 @@ describe("Progress tracking: emission after tool calls", () => {
       (m) => typeof m.content === "string" && m.content.includes("[progress:"),
     );
     expect(progressMsg).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pipeline continuation nudge tests
+// ---------------------------------------------------------------------------
+
+describe("Pipeline continuation nudge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
+  });
+
+  it("nudges the model to continue when it stops mid-pipeline with a summary", async () => {
+    // Round 1: model emits a tool call (establishing executedToolsThisTurn > 0)
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file contents here", isError: false });
+
+    // Round 2: model emits a premature summary without tool calls
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\n\nAll changes are complete. The pipeline finished successfully.",
+      usage: { totalTokens: 50 },
+    });
+
+    // Round 3: after nudge, model continues with tool calls
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Continuing.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/other.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "other file", isError: false });
+
+    // Round 4: model genuinely finishes
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All steps are now truly complete.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    // Use /magic prompt to trigger pipeline detection
+    await runAgentLoop("/magic improve reliability", session, makeConfig());
+
+    // The model should have been called 4 times (tool → summary → nudge+tool → done)
+    expect(mockGenerateText).toHaveBeenCalledTimes(4);
+
+    // Verify the nudge was injected by checking what the 3rd model call received.
+    // The 3rd call's messages should contain the pipeline continuation instruction
+    // as one of the user messages (the nudge + assistant summary pair is injected
+    // before the model is called again).
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    const hasNudge = userMsgs.some((m: { content: string }) =>
+      m.content.includes("stopped mid-pipeline"),
+    );
+    expect(hasNudge).toBe(true);
+  });
+
+  it("does NOT nudge for non-pipeline prompts", async () => {
+    // Round 1: tool call
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"a.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+
+    // Round 2: summary (should NOT trigger nudge for non-pipeline prompt)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\n\nDone with the task.",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    // Regular prompt, not a pipeline workflow
+    const result = await runAgentLoop("Read the file a.ts", session, makeConfig());
+
+    // Only 2 model calls — no nudge continuation
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+
+    // No nudge message injected
+    const nudgeMsg = result.messages.find(
+      (m) =>
+        m.role === "user" &&
+        typeof m.content === "string" &&
+        m.content.includes("stopped mid-pipeline"),
+    );
+    expect(nudgeMsg).toBeUndefined();
+  });
+
+  it("stops nudging after MAX_PIPELINE_CONTINUATION_NUDGES (3)", async () => {
+    // Round 1: tool call
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"a.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+
+    // Rounds 2-4: model keeps emitting summaries (3 nudges)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nDone.",
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Results\nAll complete.",
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Done\nFinished everything.",
+      usage: { totalTokens: 30 },
+    });
+
+    // Round 5: model emits ANOTHER summary — should NOT be nudged (max=3 reached)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nStill done.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("/autoforge improve code", session, makeConfig());
+
+    // After 3 nudges, model is allowed to stop on the 4th summary
+    // Total calls: 1 (tool) + 3 (summaries, nudged) + 1 (final summary, allowed to break)
+    expect(mockGenerateText).toHaveBeenCalledTimes(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dynamic round budget tests
+// ---------------------------------------------------------------------------
+
+describe("Dynamic round budget (requiredRounds)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+  });
+
+  it("uses requiredRounds when provided", async () => {
+    // This test verifies the loop can run more than 15 rounds when requiredRounds is set.
+    // Use unique file paths per round to avoid the stuck loop detector (3 identical calls = stuck).
+
+    // Emit tool calls for 17 rounds (exceeds default 15)
+    for (let i = 0; i < 17; i++) {
+      const toolCallText = `<tool_use>\n{"name":"Read","input":{"file_path":"file-${i}.ts"}}\n</tool_use>`;
+      mockGenerateText.mockResolvedValueOnce({
+        text: `Round ${i + 1}.\n${toolCallText}`,
+        usage: { totalTokens: 50 },
+      });
+      mockExecuteTool.mockResolvedValueOnce({ content: `round ${i + 1}`, isError: false });
+    }
+
+    // Final response
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All 17 rounds done.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Do work", session, makeConfig({ requiredRounds: 20 }));
+
+    // All 17 tool rounds should have executed (impossible with default maxToolRounds=15)
+    expect(mockExecuteTool).toHaveBeenCalledTimes(17);
+    expect(mockGenerateText).toHaveBeenCalledTimes(18); // 17 tool rounds + 1 final
+  });
+
+  it("enforces minimum of 15 rounds even when requiredRounds is lower", async () => {
+    // Even if requiredRounds is 5, the loop should still allow 15 rounds
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Small task", session, makeConfig({ requiredRounds: 5 }));
+
+    // Should not error — the Math.max(5, 15) ensures at least 15 rounds available
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Universal skill completion tests (skillActive flag)
+// ---------------------------------------------------------------------------
+
+describe("Universal skill completion (skillActive)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
+  });
+
+  it("triggers continuation nudge when skillActive is true even for non-slash prompts", async () => {
+    // Round 1: model emits a tool call
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Working.\n<tool_use>\n{"name":"Read","input":{"file_path":"app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    // Round 2: premature summary
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\n\nAll done.",
+      usage: { totalTokens: 50 },
+    });
+
+    // Round 3: after nudge, model continues
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Continuing.\n<tool_use>\n{"name":"Read","input":{"file_path":"utils.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "utils content", isError: false });
+
+    // Round 4: genuinely finishes
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Task complete.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    // Non-slash prompt but skillActive=true — should still get pipeline protection
+    await runAgentLoop("Implement the design system audit", session, makeConfig({ skillActive: true }));
+
+    // 4 calls: tool → summary (nudged) → tool → done
+    expect(mockGenerateText).toHaveBeenCalledTimes(4);
+
+    // Verify nudge was injected in the 3rd call
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    const hasNudge = userMsgs.some((m: { content: string }) =>
+      m.content.includes("stopped mid-pipeline"),
+    );
+    expect(hasNudge).toBe(true);
+  });
+
+  it("elevates round budget to 50 when skillActive is true", async () => {
+    // Simulate 17 rounds of tool calls — would fail with default 15 but should succeed with 50
+    const rounds = 17;
+    for (let i = 0; i < rounds; i++) {
+      mockGenerateText.mockResolvedValueOnce({
+        text: `Step ${i}.\n<tool_use>\n{"name":"Read","input":{"file_path":"skill-file-${i}.ts"}}\n</tool_use>`,
+        usage: { totalTokens: 100 },
+      });
+      mockExecuteTool.mockResolvedValueOnce({ content: `content ${i}`, isError: false });
+    }
+
+    // Final: model finishes
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All skill steps done.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Run the full skill", session, makeConfig({ skillActive: true }));
+
+    // All 17 tool rounds + 1 final = 18 calls (impossible with default 15)
+    expect(mockGenerateText).toHaveBeenCalledTimes(rounds + 1);
+  });
+
+  it("treats 'continue' as execution continuation when skill activation system message exists", async () => {
+    // Round 1: model continues from skill context
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Working.\n<tool_use>\n{"name":"Read","input":{"file_path":"skill-work.ts"}}\n</tool_use>',
+      usage: { totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    // Round 2: premature summary — should get nudged because isExecutionContinuationPrompt
+    // detects the skill activation system message
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\n\nFinished.",
+      usage: { totalTokens: 50 },
+    });
+
+    // Round 3: continues after nudge (text must NOT match PREMATURE_SUMMARY_PATTERN)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Understood, continuing with the next step now.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    // Add a skill activation system message to the session
+    session.messages.push({
+      id: "skill-sys",
+      role: "system",
+      content: 'Activated skill "design-audit": Run a comprehensive design system audit.',
+      timestamp: new Date().toISOString(),
+    });
+
+    // "continue" prompt with a prior skill activation system message
+    await runAgentLoop("continue", session, makeConfig());
+
+    // 3 calls: tool → summary (nudged) → text (no summary match, stops)
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
+
+    // Verify the nudge was injected in the 3rd call
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    const hasNudge = userMsgs.some((m: { content: string }) =>
+      m.content.includes("stopped mid-pipeline"),
+    );
+    expect(hasNudge).toBe(true);
   });
 });
