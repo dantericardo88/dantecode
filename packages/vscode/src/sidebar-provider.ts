@@ -1037,6 +1037,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           consecutiveEmptyRounds = 0;
         }
 
+        // Pipeline detection: used by both no-tool-calls handling and tool execution guards
+        const isPipelineWorkflow =
+          this.activeSkill !== null ||
+          /\/(?:magic|autoforge|party|inferno|blaze|ember|forge|verify|ship)\b/i.test(text);
+        const PREMATURE_SUMMARY_RE =
+          /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+
         // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
           const isExecutionMode = agentMode === "yolo" || agentMode === "build";
@@ -1071,11 +1078,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           // Pipeline continuation nudge: if a skill is active or the user triggered a
           // pipeline workflow, and the model stopped with a summary-like response,
           // nudge it to continue instead of stopping.
-          const isPipelineWorkflow =
-            this.activeSkill !== null ||
-            /\/(?:magic|autoforge|party|inferno|blaze|ember|forge|verify|ship)\b/i.test(text);
-          const PREMATURE_SUMMARY_RE =
-            /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
           if (
             isPipelineWorkflow &&
             executedToolsThisTurn > 0 &&
@@ -1185,18 +1187,63 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue;
           }
 
-          // Write size guard: warn when Write payload is very large (truncation risk)
+          // Write size guard: block large Write payloads on existing files (force Edit).
           if (toolCall.name === "Write") {
             const writeContent = toolCall.input["content"] as string | undefined;
             if (writeContent && writeContent.length > 30_000) {
+              const writeFilePath = toolCall.input["file_path"] as string | undefined;
+              const absWritePath = writeFilePath
+                ? writeFilePath.startsWith("/") || writeFilePath.includes(":")
+                  ? writeFilePath
+                  : pathResolve(projectRoot, writeFilePath)
+                : null;
+              const fileAlreadyRead = absWritePath && readTracker.has(absWritePath);
+              if (fileAlreadyRead) {
+                // Block: model is rewriting an existing file with a massive payload
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: {
+                    chunk: `\n> **BLOCKED:** Write (${Math.round(writeContent.length / 1000)}K chars) to existing file. Use Edit for surgical changes.\n`,
+                    partial: "",
+                  },
+                });
+                toolResultParts.push(
+                  `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
+                  `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+                  `Break your changes into multiple small Edit calls targeting specific sections.`,
+                );
+                continue;
+              }
+              // New file: warn but allow
               this.postMessage({
                 type: "chat_response_chunk",
                 payload: {
-                  chunk: `\n> **Warning:** Write payload is ${Math.round(writeContent.length / 1000)}K chars — truncation risk. Prefer Edit for surgical changes.\n`,
+                  chunk: `\n> **Warning:** Write payload is ${Math.round(writeContent.length / 1000)}K chars — large file.\n`,
                   partial: "",
                 },
               });
             }
+          }
+
+          // Premature commit blocker: block GitCommit/GitPush when no files were modified.
+          if (
+            (toolCall.name === "GitCommit" || toolCall.name === "GitPush") &&
+            touchedFiles.length === 0 &&
+            isPipelineWorkflow
+          ) {
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **BLOCKED:** ${toolCall.name} — 0 files modified this session. Write/Edit files first.\n`,
+                partial: "",
+              },
+            });
+            toolResultParts.push(
+              `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
+              `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+              `then commit. Do NOT claim you already made changes — only tool results count.`,
+            );
+            continue;
           }
 
           // Capture original file content before tool execution (for diff view)

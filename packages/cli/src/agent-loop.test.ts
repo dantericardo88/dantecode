@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolve } from "node:path";
 
 // Mock external dependencies BEFORE importing module under test
 
@@ -1518,5 +1519,90 @@ describe("Universal skill completion (skillActive)", () => {
       m.content.includes("NO files were actually modified"),
     );
     expect(hasConfabWarning).toBe(true);
+  });
+
+  it("blocks GitCommit when 0 files modified in pipeline workflow", async () => {
+    // Round 1: model reads a file then tries to commit (confabulation: no writes)
+    mockGenerateText.mockResolvedValueOnce({
+      text:
+        'I\'ll read the file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>' +
+        '\n<tool_use>\n{"name":"GitCommit","input":{"message":"feat: add feature","files":["src/app.ts"]}}\n</tool_use>',
+      usage: { totalTokens: 80 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    // GitCommit should be blocked — executeTool not called for it
+
+    // Round 2: model actually edits after getting blocked message
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Editing.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/app.ts","old_string":"old","new_string":"new"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+
+    // Round 3: done
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Applied the change.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("/magic implement feature", session, makeConfig());
+
+    // Verify GitCommit was blocked — the block message should appear in round 2 messages
+    const secondCallArgs = mockGenerateText.mock.calls[1]![0];
+    const toolResults = secondCallArgs.messages.find(
+      (m: { role: string; content: string }) =>
+        m.role === "user" && m.content.includes("GitCommit BLOCKED"),
+    );
+    expect(toolResults).toBeDefined();
+  });
+
+  it("blocks large Write to existing file and tells model to use Edit", async () => {
+    // Round 1: model reads a file (populates readTracker via mock)
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/big-file.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    // Mock Read to populate readTracker (simulating real executeTool behavior)
+    mockExecuteTool.mockImplementationOnce(
+      async (_name: string, input: Record<string, unknown>, projectRoot: string, context?: { readTracker?: Map<string, string> }) => {
+        if (context?.readTracker && input.file_path) {
+          context.readTracker.set(resolve(projectRoot, input.file_path as string), "mock-hash");
+        }
+        return { content: "existing content", isError: false };
+      },
+    );
+
+    // Round 2: model tries to Write the entire file (35K chars) — should be blocked
+    const largeContent = "x".repeat(35_000);
+    mockGenerateText.mockResolvedValueOnce({
+      text: `Rewriting.\n<tool_use>\n{"name":"Write","input":{"file_path":"src/big-file.ts","content":"${largeContent}"}}\n</tool_use>`,
+      usage: { totalTokens: 100 },
+    });
+    // executeTool should NOT be called for the blocked Write
+
+    // Round 3: model uses Edit instead after getting blocked message
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Using Edit.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/big-file.ts","old_string":"existing","new_string":"better"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+
+    // Round 4: done
+    mockGenerateText.mockResolvedValueOnce({
+      text: "File edited.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("/magic refactor the file", session, makeConfig());
+
+    // Verify the Write was blocked — block message in round 3 messages
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const blockMsg = thirdCallArgs.messages.find(
+      (m: { role: string; content: string }) =>
+        m.role === "user" && m.content.includes("Write BLOCKED"),
+    );
+    expect(blockMsg).toBeDefined();
   });
 });

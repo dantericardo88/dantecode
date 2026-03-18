@@ -1117,13 +1117,31 @@ export async function runAgentLoop(
         }
       }
 
-      // Write size guard: warn when Write payload is very large (truncation risk)
+      // Write size guard: block large Write payloads on existing files (force Edit).
+      // Grok models try to rewrite entire files (50K+ chars) instead of using Edit.
       if (toolCall.name === "Write") {
         const writeContent = toolCall.input["content"] as string | undefined;
         if (writeContent && writeContent.length > WRITE_SIZE_WARNING_THRESHOLD) {
+          const writeFilePath = toolCall.input["file_path"] as string | undefined;
+          const fileExists = writeFilePath && readTracker.has(resolve(session.projectRoot, writeFilePath));
+          if (fileExists) {
+            // Block: model is rewriting an existing file with a massive payload
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[confab-guard] BLOCKED Write (${Math.round(writeContent.length / 1000)}K chars) to existing file. Use Edit for surgical changes.${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
+              `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+              `Break your changes into multiple small Edit calls targeting specific sections.`,
+            );
+            continue;
+          }
+          // New file: warn but allow
           if (!config.silent) {
             process.stdout.write(
-              `\n${YELLOW}[confab-guard] Write payload is ${Math.round(writeContent.length / 1000)}K chars — truncation risk. Prefer Edit for surgical changes.${RESET}\n`,
+              `\n${YELLOW}[confab-guard] Write payload is ${Math.round(writeContent.length / 1000)}K chars — large file.${RESET}\n`,
             );
           }
         }
@@ -1178,6 +1196,27 @@ export async function runAgentLoop(
         } catch {
           // Non-fatal: if the dirty commit fails, continue with the edit anyway
         }
+      }
+
+      // Premature commit blocker: block GitCommit/GitPush when no files have been
+      // modified this session. Grok models confabulate file edits in their narrative
+      // text, then try to commit non-existent changes.
+      if (
+        (toolCall.name === "GitCommit" || toolCall.name === "GitPush") &&
+        filesModified === 0 &&
+        isPipelineWorkflow
+      ) {
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${RED}[confab-guard] BLOCKED ${toolCall.name} — 0 files modified this session. Write/Edit files first.${RESET}\n`,
+          );
+        }
+        toolResults.push(
+          `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
+          `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+          `then commit. Do NOT claim you already made changes — only tool results count.`,
+        );
+        continue;
       }
 
       if (toolCall.name === "GitCommit" || toolCall.name === "GitPush") {
