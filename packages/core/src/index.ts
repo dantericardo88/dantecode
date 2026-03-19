@@ -584,3 +584,43 @@ export type {
   PolicySet,
   PolicyEnforcerOptions,
 } from "./policy-enforcer.js";
+
+// ─── Hierarchical Planner ──────────────────────────────────────────────────
+
+export { HierarchicalPlanner } from "./hierarchical-planner.js";
+export type {
+  WaveNode,
+  WaveTree,
+  ReDecomposeOptions,
+  HierarchicalPlannerOptions,
+} from "./hierarchical-planner.js";
+
+// ─── Autonomy Engine ────────────────────────────────────────────────────────
+
+export { AutonomyEngine } from "./autonomy-engine.js";
+export type {
+  AgentGoal,
+  ReasoningMetaResult,
+  GoalAdaptation,
+  AutonomyEngineOptions,
+} from "./autonomy-engine.js";
+
+// ─── Event Engine ───────────────────────────────────────────────────────────
+
+export { EventEngine } from "./event-engine.js";
+export type {
+  DanteEventType,
+  DanteEvent,
+  WorkflowDefinition,
+  EventQueueEntry,
+  EventEngineOptions,
+} from "./event-engine.js";
+
+// ─── Git Hook Handler ───────────────────────────────────────────────────────
+
+export { GitHookHandler } from "./git-hook-handler.js";
+export type {
+  GitHookType,
+  GitHookPayload,
+  GitHookHandlerOptions,
+} from "./git-hook-handler.js";
