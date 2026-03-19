@@ -182,6 +182,7 @@ function makeReplState(overrides?: Record<string, unknown>) {
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
+    waveState: null,
     ...overrides,
   };
 }

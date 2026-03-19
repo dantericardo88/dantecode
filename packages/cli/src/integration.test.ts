@@ -120,6 +120,7 @@ describe("CLI Integration", () => {
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
+        waveState: null,
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -165,6 +166,7 @@ describe("CLI Integration", () => {
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
+        waveState: null,
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -213,6 +215,7 @@ describe("CLI Integration", () => {
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
+        waveState: null,
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

@@ -127,6 +127,7 @@ function makeState(projectRoot: string): ReplState {
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
+    waveState: null,
   };
 }
 

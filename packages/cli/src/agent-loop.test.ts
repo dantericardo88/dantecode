@@ -689,9 +689,10 @@ describe("Planning phase: injection for complex tasks", () => {
         m.role === "system" && m.content.includes("Planning Required"),
     );
     expect(planningMessage).toBeDefined();
-    expect(planningMessage.content).toContain("What files need to change?");
-    expect(planningMessage.content).toContain("What's the approach?");
-    expect(planningMessage.content).toContain("What could go wrong?");
+    expect(planningMessage.content).toContain("What files need to change");
+    expect(planningMessage.content).toContain("What's the approach");
+    expect(planningMessage.content).toContain("What could go wrong");
+    expect(planningMessage.content).toContain("verification strategy");
 
     // Session should still complete normally
     expect(result.messages.length).toBeGreaterThanOrEqual(2);
@@ -1527,7 +1528,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
-    const result = await runAgentLoop("/magic fix the bug", session, makeConfig());
+    await runAgentLoop("/magic fix the bug", session, makeConfig());
 
     // 3 calls: confab-rejected summary → real edit → final
     expect(mockGenerateText).toHaveBeenCalledTimes(3);
@@ -1802,5 +1803,36 @@ describe("Universal skill completion (skillActive)", () => {
     // Single wave = basic protocol, not Claude Workflow Mode
     expect(systemPrompt).not.toContain("Claude Workflow Mode");
     expect(systemPrompt).toContain("Tool Recipes for Skill Execution");
+  });
+
+  it("injects reflection checkpoint after 15 tool calls", async () => {
+    // Build 15 Read tool calls as XML tool_use blocks in the model's text
+    const toolCallsXml = Array.from({ length: 15 }, (_, i) =>
+      `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
+    ).join("\n");
+
+    // First call: 15 tool calls embedded in text
+    mockGenerateText.mockResolvedValueOnce({
+      text: `Analyzing codebase.\n${toolCallsXml}`,
+      usage: { totalTokens: 100 },
+    });
+    // Second call: final response after reflection checkpoint
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Analysis complete.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("analyze the codebase", session, makeConfig());
+
+    // Check that the second call includes the reflection prompt
+    expect(mockGenerateText.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const lastCallArgs = mockGenerateText.mock.calls[mockGenerateText.mock.calls.length - 1]![0];
+    const allMsgs = lastCallArgs.messages as Array<{ role: string; content: string }>;
+    const hasReflection = allMsgs.some(
+      (m) =>
+        typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
+    );
+    expect(hasReflection).toBe(true);
   });
 });

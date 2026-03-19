@@ -116,6 +116,69 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
           .describe("The updated to-do list"),
       }),
     },
+
+    WebSearch: {
+      description:
+        "Search the web using DuckDuckGo and return structured results with titles, URLs, and snippets. Results are cached for 15 minutes.",
+      parameters: z.object({
+        query: z.string().describe("The search query"),
+        max_results: z
+          .number()
+          .optional()
+          .describe("Maximum number of results to return (default: 10, max: 20)"),
+      }),
+    },
+
+    WebFetch: {
+      description:
+        "Fetch content from a URL. HTML is converted to readable text. JSON and plain text are returned as-is. Results are cached for 15 minutes.",
+      parameters: z.object({
+        url: z.string().describe("The URL to fetch (must be HTTP or HTTPS)"),
+        max_chars: z
+          .number()
+          .optional()
+          .describe("Maximum characters to return (default: 20000)"),
+        selector: z
+          .string()
+          .optional()
+          .describe("CSS selector (#id, .class, or tag) to extract specific content"),
+        raw: z
+          .boolean()
+          .optional()
+          .describe("Return raw content without HTML-to-text conversion (default: false)"),
+      }),
+    },
+    GitHubSearch: {
+      description:
+        "Search GitHub for repositories, code, issues, or pull requests using the gh CLI.",
+      parameters: z.object({
+        query: z.string().describe("The search query"),
+        type: z
+          .enum(["repos", "code", "issues", "prs"])
+          .optional()
+          .describe("What to search: repos, code, issues, or prs (default: repos)"),
+        limit: z
+          .number()
+          .optional()
+          .describe("Maximum number of results (default: 10, max: 50)"),
+      }),
+    },
+
+    SubAgent: {
+      description:
+        "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result.",
+      parameters: z.object({
+        prompt: z.string().describe("The task description for the sub-agent to execute"),
+        max_rounds: z
+          .number()
+          .optional()
+          .describe("Maximum tool-calling rounds for the sub-agent (default: 30, max: 100)"),
+        background: z
+          .boolean()
+          .optional()
+          .describe("Run in background and return task ID instead of waiting (default: false)"),
+      }),
+    },
   };
 
   // Merge MCP tools when available

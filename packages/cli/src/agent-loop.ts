@@ -21,7 +21,6 @@ import {
   runStartupHealthCheck,
   getCurrentWave,
   advanceWave,
-  recordWaveFailure,
   buildWavePrompt,
   isWaveComplete,
   CLAUDE_WORKFLOW_MODE,
@@ -47,7 +46,7 @@ import {
   generateRepoMap,
   formatRepoMapForContext,
 } from "@dantecode/git-engine";
-import { executeTool, getToolDefinitions } from "./tools.js";
+import { executeTool, getToolDefinitions, type SubAgentExecutor, type SubAgentOptions, type SubAgentResult } from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
 import { StreamRenderer } from "./stream-renderer.js";
 import { getAISDKTools } from "./tool-schemas.js";
@@ -125,10 +124,11 @@ const PROGRESS_EMIT_INTERVAL = 5;
 /** Planning instruction injected for complex tasks. */
 const PLANNING_INSTRUCTION =
   "Before executing, create a brief plan:\n" +
-  "1. What files need to change?\n" +
-  "2. What's the approach?\n" +
-  "3. What could go wrong?\n" +
-  "Then execute the plan step by step.";
+  "1. What files need to change and why?\n" +
+  "2. What's the approach? (Read → Edit → Verify cycle)\n" +
+  "3. What could go wrong? (edge cases, breaking changes, missing imports)\n" +
+  "4. What's the verification strategy? (tests, typecheck, manual check)\n" +
+  "Then execute the plan step by step. After each major change, verify before moving on.";
 
 /** Pivot instruction injected after 2 consecutive same-signature failures. */
 const PIVOT_INSTRUCTION =
@@ -163,6 +163,22 @@ const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
 
 /** Max anti-confabulation nudges (model claims completion but 0 files modified). */
 const MAX_CONFABULATION_NUDGES = 2;
+
+// ----------------------------------------------------------------------------
+// Structured reasoning checkpoints
+// ----------------------------------------------------------------------------
+
+/** How many tool calls between automatic reflection checkpoints. */
+const REFLECTION_CHECKPOINT_INTERVAL = 15;
+
+/** Reflection prompt injected at checkpoints to force chain-of-thought reasoning. */
+const REFLECTION_PROMPT =
+  "REFLECTION CHECKPOINT: Pause and evaluate your progress.\n" +
+  "1. What have you accomplished so far?\n" +
+  "2. Are you on track to solve the original problem?\n" +
+  "3. Have you missed anything (untested edge cases, unread files, incomplete changes)?\n" +
+  "4. What is the most important next step?\n" +
+  "Continue with the most impactful action.";
 
 /** Write payload size (chars) above which a truncation warning is emitted. */
 const WRITE_SIZE_WARNING_THRESHOLD = 30_000;
@@ -467,7 +483,7 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
 
   // Pattern 2: JSON blocks with tool call structure
   const jsonBlockPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite)"[\s\S]*?\})\s*\n```/g;
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite|WebSearch|WebFetch|SubAgent|GitHubSearch)"[\s\S]*?\})\s*\n```/g;
 
   while ((match = jsonBlockPattern.exec(text)) !== null) {
     const parsed = parseToolCallPayload(match[1]!);
@@ -733,6 +749,96 @@ function isExecutionContinuationPrompt(prompt: string, session: Session): boolea
  * @param config - Agent loop configuration.
  * @returns The updated session with new messages.
  */
+/**
+ * Creates a sub-agent executor function that can be passed to the tool
+ * execution context. The executor clones the parent session and runs
+ * a fresh agent loop with constrained rounds.
+ */
+function createSubAgentExecutor(
+  parentSession: Session,
+  parentConfig: AgentLoopConfig,
+): SubAgentExecutor {
+  return async (prompt: string, options?: SubAgentOptions): Promise<SubAgentResult> => {
+    const maxRounds = options?.maxRounds ?? 30;
+    const startTime = Date.now();
+
+    // Create a child session — inherits project root + model but gets fresh messages
+    const childSession: Session = {
+      id: `sub-${parentSession.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`,
+      projectRoot: parentSession.projectRoot,
+      messages: [],
+      activeFiles: [],
+      readOnlyFiles: [],
+      model: parentSession.model,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      agentStack: [
+        ...(parentSession.agentStack ?? []),
+        {
+          agentId: `subagent-${randomUUID().slice(0, 8)}`,
+          agentType: "sub-agent",
+          startedAt: new Date().toISOString(),
+          touchedFiles: [],
+          status: "running" as const,
+          subAgentIds: [],
+        },
+      ],
+      todoList: [],
+    };
+
+    // Child config: limited rounds, no sub-agent nesting beyond 2 levels
+    const nestingDepth = (parentSession.agentStack?.length ?? 0);
+    const childConfig: AgentLoopConfig = {
+      ...parentConfig,
+      requiredRounds: maxRounds,
+      silent: true, // Sub-agents run silently
+      onToken: undefined, // No streaming for sub-agents
+      abortSignal: parentConfig.abortSignal,
+      // Prevent excessive nesting — disable sub-agent spawning beyond depth 2
+      ...(nestingDepth >= 2 ? {} : {}),
+    };
+
+    try {
+      const completedSession = await runAgentLoop(prompt, childSession, childConfig);
+
+      // Extract last assistant message as output
+      const assistantMsgs = completedSession.messages.filter(
+        (m: SessionMessage) => m.role === "assistant",
+      );
+      const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+      const output = lastMsg?.content ?? "(no output)";
+
+      // Collect touched files from tool results
+      const touchedFiles: string[] = [];
+      for (const msg of completedSession.messages) {
+        if (msg.role === "assistant" && typeof msg.content === "string") {
+          // Extract file paths from "Successfully wrote/edited ..." patterns
+          const writeMatches = msg.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
+          for (const match of writeMatches) {
+            if (match[1]) touchedFiles.push(match[1]);
+          }
+        }
+      }
+
+      return {
+        output: typeof output === "string" ? output : JSON.stringify(output),
+        touchedFiles,
+        durationMs: Date.now() - startTime,
+        success: true,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        output: "",
+        touchedFiles: [],
+        durationMs: Date.now() - startTime,
+        success: false,
+        error: message,
+      };
+    }
+  };
+}
+
 // Module-level flag: run startup health check only once per process.
 let _healthCheckCompleted = false;
 
@@ -1403,6 +1509,7 @@ export async function runAgentLoop(
           selfImprovement: config.selfImprovement,
           readTracker,
           editAttempts,
+          subAgentExecutor: createSubAgentExecutor(session, config),
         });
       }
 
@@ -1498,6 +1605,20 @@ export async function runAgentLoop(
           content: progressLine,
           timestamp: new Date().toISOString(),
         });
+      }
+    }
+
+    // Reflection checkpoint: inject chain-of-thought reasoning prompt at intervals
+    if (
+      executedToolsThisTurn > 0 &&
+      executedToolsThisTurn % REFLECTION_CHECKPOINT_INTERVAL === 0 &&
+      maxToolRounds > 0
+    ) {
+      toolResults.push(`SYSTEM: ${REFLECTION_PROMPT}`);
+      if (!config.silent) {
+        process.stdout.write(
+          `\n${DIM}[reflection checkpoint at ${executedToolsThisTurn} tool calls]${RESET}\n`,
+        );
       }
     }
 

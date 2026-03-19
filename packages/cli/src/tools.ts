@@ -31,6 +31,29 @@ export interface ToolResult {
   isError: boolean;
 }
 
+/** Result from a sub-agent execution. */
+export interface SubAgentResult {
+  output: string;
+  touchedFiles: string[];
+  durationMs: number;
+  success: boolean;
+  error?: string;
+}
+
+/** Options for sub-agent spawning. */
+export interface SubAgentOptions {
+  /** Maximum rounds the sub-agent can execute (default: 30). */
+  maxRounds?: number;
+  /** Whether to run in background and return a task ID instead of waiting. */
+  background?: boolean;
+}
+
+/** Executor function type for sub-agent dispatch. Set by the agent loop. */
+export type SubAgentExecutor = (
+  prompt: string,
+  options?: SubAgentOptions,
+) => Promise<SubAgentResult>;
+
 export interface CliToolExecutionContext {
   sessionId?: string;
   roundId?: string;
@@ -38,6 +61,8 @@ export interface CliToolExecutionContext {
   selfImprovement?: SelfImprovementContext;
   readTracker?: Map<string, string>;
   editAttempts?: Map<string, number>;
+  /** Injected by the agent loop to enable sub-agent spawning. */
+  subAgentExecutor?: SubAgentExecutor;
 }
 
 /** Supported tool names. */
@@ -50,7 +75,11 @@ export type ToolName =
   | "Grep"
   | "GitCommit"
   | "GitPush"
-  | "TodoWrite";
+  | "TodoWrite"
+  | "WebSearch"
+  | "WebFetch"
+  | "SubAgent"
+  | "GitHubSearch";
 
 // ----------------------------------------------------------------------------
 // Path Resolution
@@ -750,6 +779,554 @@ async function toolTodoWrite(
 }
 
 // ----------------------------------------------------------------------------
+// WebSearch + WebFetch
+// ----------------------------------------------------------------------------
+
+/** Simple in-memory + disk cache for web search/fetch results. */
+const webCache = new Map<string, { content: string; timestamp: number }>();
+const WEB_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function getCachedWebResult(key: string): string | null {
+  const entry = webCache.get(key);
+  if (entry && Date.now() - entry.timestamp < WEB_CACHE_TTL_MS) {
+    return entry.content;
+  }
+  webCache.delete(key);
+  return null;
+}
+
+function setCachedWebResult(key: string, content: string): void {
+  webCache.set(key, { content, timestamp: Date.now() });
+}
+
+/**
+ * Strips HTML tags and extracts readable text content.
+ * Handles common HTML entities and collapses whitespace.
+ */
+function htmlToText(html: string): string {
+  return html
+    // Remove script and style blocks
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    // Remove HTML comments
+    .replace(/<!--[\s\S]*?-->/g, "")
+    // Replace block-level elements with newlines
+    .replace(/<\/?(?:div|p|br|hr|h[1-6]|li|tr|td|th|blockquote|pre|section|article|header|footer|nav|aside|main)\b[^>]*>/gi, "\n")
+    // Remove remaining tags
+    .replace(/<[^>]+>/g, "")
+    // Decode common HTML entities
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    // Collapse whitespace
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Extracts search result items from DuckDuckGo HTML response.
+ */
+function parseDuckDuckGoResults(html: string): Array<{
+  title: string;
+  url: string;
+  snippet: string;
+}> {
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+
+  // DuckDuckGo HTML results are in <div class="result..."> blocks
+  // Each result has a link in <a class="result__a" href="...">title</a>
+  // and snippet in <a class="result__snippet" ...>
+  const resultBlocks = html.match(/<div[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) || [];
+
+  for (const block of resultBlocks) {
+    // Extract URL and title from the result link
+    const linkMatch = block.match(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
+    if (!linkMatch) continue;
+
+    const url = linkMatch[1]!;
+    const title = htmlToText(linkMatch[2]!);
+
+    // Extract snippet
+    const snippetMatch = block.match(/<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
+    const snippet = snippetMatch ? htmlToText(snippetMatch[1]!) : "";
+
+    if (title && url && !url.startsWith("//duckduckgo.com")) {
+      results.push({ title, url, snippet });
+    }
+  }
+
+  // Fallback: try extracting links with surrounding text if structured parsing fails
+  if (results.length === 0) {
+    const linkMatches = [...html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
+    for (const match of linkMatches) {
+      const url = match[1]!;
+      const title = htmlToText(match[2]!);
+      // Skip DuckDuckGo internal links
+      if (url.includes("duckduckgo.com") || !title || title.length < 3) continue;
+      results.push({ title, url, snippet: "" });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * WebSearch tool: searches the web using DuckDuckGo HTML and returns structured results.
+ */
+async function toolWebSearch(
+  input: Record<string, unknown>,
+  _projectRoot: string,
+): Promise<ToolResult> {
+  const query = input["query"] as string | undefined;
+  if (!query) {
+    return { content: "Error: query parameter is required", isError: true };
+  }
+
+  const maxResults = typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 10;
+
+  const cacheKey = `search:${query}:${maxResults}`;
+  const cached = getCachedWebResult(cacheKey);
+  if (cached) {
+    return { content: cached, isError: false };
+  }
+
+  try {
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const response = await fetch(searchUrl, {
+      headers: {
+        "User-Agent": "DanteCode/1.0 (CLI agent tool)",
+        "Accept": "text/html",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      return {
+        content: `WebSearch failed: HTTP ${response.status} ${response.statusText}`,
+        isError: true,
+      };
+    }
+
+    const html = await response.text();
+    const results = parseDuckDuckGoResults(html).slice(0, maxResults);
+
+    if (results.length === 0) {
+      const output = `No search results found for: "${query}"`;
+      setCachedWebResult(cacheKey, output);
+      return { content: output, isError: false };
+    }
+
+    const formatted = results
+      .map((r, i) => {
+        const parts = [`${i + 1}. **${r.title}**`, `   URL: ${r.url}`];
+        if (r.snippet) parts.push(`   ${r.snippet}`);
+        return parts.join("\n");
+      })
+      .join("\n\n");
+
+    const output = `Search results for "${query}" (${results.length} results):\n\n${formatted}`;
+    setCachedWebResult(cacheKey, output);
+    return { content: output, isError: false };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `WebSearch error: ${message}`, isError: true };
+  }
+}
+
+/**
+ * WebFetch tool: fetches a URL, converts HTML to readable text, and optionally
+ * extracts content based on a prompt/selector.
+ */
+async function toolWebFetch(
+  input: Record<string, unknown>,
+  _projectRoot: string,
+): Promise<ToolResult> {
+  const url = input["url"] as string | undefined;
+  if (!url) {
+    return { content: "Error: url parameter is required", isError: true };
+  }
+
+  // Validate URL
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { content: `Error: invalid URL: ${url}`, isError: true };
+  }
+
+  // Block non-HTTP(S) protocols
+  if (!parsedUrl.protocol.startsWith("http")) {
+    return { content: `Error: only HTTP/HTTPS URLs are supported, got ${parsedUrl.protocol}`, isError: true };
+  }
+
+  const maxChars = typeof input["max_chars"] === "number" ? input["max_chars"] : 20000;
+  const selector = input["selector"] as string | undefined;
+  const raw = input["raw"] === true;
+
+  const cacheKey = `fetch:${url}:${maxChars}:${selector ?? ""}:${raw}`;
+  const cached = getCachedWebResult(cacheKey);
+  if (cached) {
+    return { content: cached, isError: false };
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "DanteCode/1.0 (CLI agent tool)",
+        "Accept": "text/html, application/json, text/plain, */*",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      return {
+        content: `WebFetch failed: HTTP ${response.status} ${response.statusText} for ${url}`,
+        isError: true,
+      };
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    const body = await response.text();
+
+    let content: string;
+
+    if (raw || contentType.includes("application/json") || contentType.includes("text/plain")) {
+      // Return raw content (JSON, plain text)
+      content = body;
+    } else {
+      // Apply CSS selector extraction if requested (simple id/class match)
+      if (selector) {
+        const selectorContent = extractBySelector(body, selector);
+        content = selectorContent ? selectorContent : htmlToText(body);
+      } else {
+        // Smart content extraction: try main content area first
+        content = extractMainContent(body);
+      }
+    }
+
+    // Truncate to max_chars
+    if (content.length > maxChars) {
+      content = content.slice(0, maxChars) + `\n\n... (truncated at ${maxChars} chars, total: ${content.length})`;
+    }
+
+    // Extract page metadata for context
+    const metadata = extractPageMetadata(body, contentType);
+    const metaHeader = metadata ? `${metadata}\n\n` : "";
+
+    const output = `Fetched ${url} (${contentType || "unknown type"}, ${body.length} bytes):\n\n${metaHeader}${content}`;
+    setCachedWebResult(cacheKey, output);
+    return { content: output, isError: false };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `WebFetch error: ${message}`, isError: true };
+  }
+}
+
+/**
+ * Extracts content from HTML by a simple CSS selector (id or class).
+ */
+function extractBySelector(html: string, selector: string): string | null {
+  // Support #id and .class selectors
+  let regex: RegExp;
+  if (selector.startsWith("#")) {
+    const id = selector.slice(1);
+    regex = new RegExp(`<[^>]+id="${id}"[^>]*>([\\s\\S]*?)<\\/`, "i");
+  } else if (selector.startsWith(".")) {
+    const cls = selector.slice(1);
+    regex = new RegExp(`<[^>]+class="[^"]*${cls}[^"]*"[^>]*>([\\s\\S]*?)<\\/`, "i");
+  } else {
+    // Tag selector
+    regex = new RegExp(`<${selector}[^>]*>([\\s\\S]*?)<\\/${selector}>`, "i");
+  }
+
+  const match = html.match(regex);
+  if (match) {
+    return htmlToText(match[0]!);
+  }
+  return null;
+}
+
+/**
+ * Smart content extraction: tries to find the main content area of a page.
+ * Falls back to full htmlToText if no main content area is detected.
+ */
+function extractMainContent(html: string): string {
+  // Try semantic content tags in priority order
+  const contentSelectors = [
+    /<article[^>]*>([\s\S]*?)<\/article>/i,
+    /<main[^>]*>([\s\S]*?)<\/main>/i,
+    /<div[^>]+(?:class|id)="[^"]*(?:content|readme|article|post|entry|body)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
+  ];
+
+  for (const re of contentSelectors) {
+    const match = html.match(re);
+    if (match?.[1] && match[1].length > 200) {
+      return htmlToText(match[1]);
+    }
+  }
+
+  // Fallback to full page
+  return htmlToText(html);
+}
+
+/**
+ * Extracts page metadata (title, description, canonical URL) from HTML.
+ */
+function extractPageMetadata(html: string, contentType: string): string | null {
+  if (!contentType.includes("html")) return null;
+
+  const parts: string[] = [];
+
+  // Extract title
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleMatch?.[1]) {
+    const title = htmlToText(titleMatch[1]).trim();
+    if (title) parts.push(`Title: ${title}`);
+  }
+
+  // Extract meta description
+  const descMatch = html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i)
+    ?? html.match(/<meta[^>]+content="([^"]+)"[^>]+name="description"/i);
+  if (descMatch?.[1]) {
+    parts.push(`Description: ${descMatch[1]}`);
+  }
+
+  return parts.length > 0 ? parts.join("\n") : null;
+}
+
+// ----------------------------------------------------------------------------
+// Sub-Agent Spawning
+// ----------------------------------------------------------------------------
+
+/**
+ * SubAgent tool: spawns a sub-agent to handle a specific task and returns
+ * the result. Requires a subAgentExecutor to be set in the execution context
+ * (wired up by the agent loop).
+ */
+async function toolSubAgent(
+  input: Record<string, unknown>,
+  _projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
+  const prompt = input["prompt"] as string | undefined;
+  if (!prompt) {
+    return { content: "Error: prompt parameter is required", isError: true };
+  }
+
+  if (!context?.subAgentExecutor) {
+    return {
+      content: "Error: Sub-agent execution is not available in the current context. The agent loop must provide a subAgentExecutor.",
+      isError: true,
+    };
+  }
+
+  const maxRounds = typeof input["max_rounds"] === "number" ? Math.min(input["max_rounds"], 100) : 30;
+  const background = input["background"] === true;
+
+  try {
+    const result = await context.subAgentExecutor(prompt, { maxRounds, background });
+
+    if (!result.success) {
+      return {
+        content: `Sub-agent failed (${result.durationMs}ms): ${result.error ?? "unknown error"}\n\nPartial output:\n${result.output}`,
+        isError: true,
+      };
+    }
+
+    const parts: string[] = [
+      `Sub-agent completed successfully (${result.durationMs}ms).`,
+    ];
+
+    if (result.touchedFiles.length > 0) {
+      parts.push(`\nFiles modified (${result.touchedFiles.length}):`);
+      for (const f of result.touchedFiles.slice(0, 20)) {
+        parts.push(`  - ${f}`);
+      }
+      if (result.touchedFiles.length > 20) {
+        parts.push(`  ... and ${result.touchedFiles.length - 20} more`);
+      }
+    }
+
+    parts.push(`\nOutput:\n${result.output}`);
+
+    return { content: parts.join("\n"), isError: false };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `SubAgent error: ${message}`, isError: true };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// GitHub Search
+// ----------------------------------------------------------------------------
+
+/**
+ * GitHubSearch tool: searches GitHub repos, code, issues, or PRs using the `gh` CLI.
+ * Wraps common `gh search` and `gh api` patterns into a structured tool.
+ */
+async function toolGitHubSearch(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const query = input["query"] as string | undefined;
+  if (!query) {
+    return { content: "Error: query parameter is required", isError: true };
+  }
+
+  const searchType = (input["type"] as string) || "repos";
+  const limit = typeof input["limit"] === "number" ? Math.min(input["limit"], 50) : 10;
+
+  // Validate search type
+  const validTypes = ["repos", "code", "issues", "prs"];
+  if (!validTypes.includes(searchType)) {
+    return {
+      content: `Error: type must be one of: ${validTypes.join(", ")}`,
+      isError: true,
+    };
+  }
+
+  // Build gh command based on search type
+  let command: string;
+  switch (searchType) {
+    case "repos":
+      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount,language,updatedAt`;
+      break;
+    case "code":
+      command = `gh search code ${JSON.stringify(query)} --limit ${limit} --json repository,path,textMatches`;
+      break;
+    case "issues":
+      command = `gh search issues ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+      break;
+    case "prs":
+      command = `gh search prs ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+      break;
+    default:
+      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount`;
+  }
+
+  try {
+    const result = execSync(command, {
+      cwd: projectRoot,
+      encoding: "utf-8",
+      timeout: 30000,
+      maxBuffer: 5 * 1024 * 1024,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: resolvePreferredShell(),
+    });
+
+    // Parse JSON output from gh
+    let parsed: unknown[];
+    try {
+      parsed = JSON.parse(result);
+    } catch {
+      return { content: result || "(no output)", isError: false };
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return { content: `No ${searchType} found for: "${query}"`, isError: false };
+    }
+
+    // Format results based on type
+    const formatted = formatGitHubResults(searchType, parsed);
+    return {
+      content: `GitHub ${searchType} search for "${query}" (${parsed.length} results):\n\n${formatted}`,
+      isError: false,
+    };
+  } catch (err: unknown) {
+    const error = err as { stderr?: string; message?: string };
+    const stderr = typeof error.stderr === "string" ? error.stderr : "";
+    if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
+      return {
+        content: "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
+        isError: true,
+      };
+    }
+    if (stderr.includes("not logged in") || stderr.includes("auth login")) {
+      return {
+        content: "Error: GitHub CLI is not authenticated. Run `gh auth login` first.",
+        isError: true,
+      };
+    }
+    const message = stderr || (err instanceof Error ? err.message : String(err));
+    return { content: `GitHubSearch error: ${message}`, isError: true };
+  }
+}
+
+/**
+ * Formats GitHub search results into readable text.
+ */
+function formatGitHubResults(type: string, results: unknown[]): string {
+  switch (type) {
+    case "repos":
+      return (results as Array<{
+        name?: string;
+        url?: string;
+        description?: string;
+        stargazersCount?: number;
+        language?: string;
+        updatedAt?: string;
+      }>)
+        .map((r, i) => {
+          const parts = [`${i + 1}. **${r.name ?? "unknown"}**`];
+          if (r.description) parts.push(`   ${r.description}`);
+          parts.push(`   URL: ${r.url ?? "N/A"}`);
+          const meta: string[] = [];
+          if (r.stargazersCount !== undefined) meta.push(`${r.stargazersCount} stars`);
+          if (r.language) meta.push(r.language);
+          if (r.updatedAt) meta.push(`updated ${r.updatedAt.slice(0, 10)}`);
+          if (meta.length > 0) parts.push(`   ${meta.join(" | ")}`);
+          return parts.join("\n");
+        })
+        .join("\n\n");
+
+    case "code":
+      return (results as Array<{
+        repository?: { nameWithOwner?: string };
+        path?: string;
+        textMatches?: Array<{ fragment?: string }>;
+      }>)
+        .map((r, i) => {
+          const repo = r.repository?.nameWithOwner ?? "unknown";
+          const path = r.path ?? "unknown";
+          const parts = [`${i + 1}. ${repo}/${path}`];
+          if (r.textMatches?.[0]?.fragment) {
+            parts.push(`   ${r.textMatches[0].fragment.slice(0, 200)}`);
+          }
+          return parts.join("\n");
+        })
+        .join("\n\n");
+
+    case "issues":
+    case "prs":
+      return (results as Array<{
+        title?: string;
+        url?: string;
+        state?: string;
+        repository?: { nameWithOwner?: string };
+        createdAt?: string;
+        labels?: Array<{ name?: string }>;
+      }>)
+        .map((r, i) => {
+          const parts = [`${i + 1}. **${r.title ?? "untitled"}** [${r.state ?? "unknown"}]`];
+          parts.push(`   ${r.repository?.nameWithOwner ?? "unknown"}`);
+          parts.push(`   URL: ${r.url ?? "N/A"}`);
+          const labels = r.labels?.map((l) => l.name).filter(Boolean).join(", ");
+          if (labels) parts.push(`   Labels: ${labels}`);
+          return parts.join("\n");
+        })
+        .join("\n\n");
+
+    default:
+      return JSON.stringify(results, null, 2);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
@@ -875,6 +1452,18 @@ export async function executeTool(
     case "TodoWrite":
       result = await toolTodoWrite(input, projectRoot);
       break;
+    case "WebSearch":
+      result = await toolWebSearch(input, projectRoot);
+      break;
+    case "WebFetch":
+      result = await toolWebFetch(input, projectRoot);
+      break;
+    case "SubAgent":
+      result = await toolSubAgent(input, projectRoot, context);
+      break;
+    case "GitHubSearch":
+      result = await toolGitHubSearch(input, projectRoot);
+      break;
     default:
       result = { content: `Unknown tool: ${name}`, isError: true };
   }
@@ -936,6 +1525,7 @@ function normalizeExecutionContext(
     selfImprovement: sessionOrContext.selfImprovement,
     readTracker: sessionOrContext.readTracker ?? new Map(),
     editAttempts: sessionOrContext.editAttempts ?? new Map(),
+    subAgentExecutor: sessionOrContext.subAgentExecutor,
   };
 }
 
@@ -1160,6 +1750,89 @@ export function getToolDefinitions(): Array<{
           },
         },
         required: ["todos"],
+      },
+    },
+    {
+      name: "WebSearch",
+      description:
+        "Search the web using DuckDuckGo and return structured results with titles, URLs, and snippets. Results are cached for 15 minutes.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query" },
+          max_results: {
+            type: "number",
+            description: "Maximum number of results to return (default: 10, max: 20)",
+          },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "WebFetch",
+      description:
+        "Fetch content from a URL. HTML is converted to readable text. JSON and plain text are returned as-is. Results are cached for 15 minutes.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The URL to fetch (must be HTTP or HTTPS)" },
+          max_chars: {
+            type: "number",
+            description: "Maximum characters to return (default: 20000)",
+          },
+          selector: {
+            type: "string",
+            description: "CSS selector (#id, .class, or tag) to extract specific content",
+          },
+          raw: {
+            type: "boolean",
+            description: "Return raw content without HTML-to-text conversion (default: false)",
+          },
+        },
+        required: ["url"],
+      },
+    },
+    {
+      name: "GitHubSearch",
+      description:
+        "Search GitHub for repositories, code, issues, or pull requests using the gh CLI. Requires gh to be installed and authenticated.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query" },
+          type: {
+            type: "string",
+            description: "What to search: repos, code, issues, or prs (default: repos)",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of results (default: 10, max: 50)",
+          },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "SubAgent",
+      description:
+        "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result. Use for parallelizable tasks, research queries, or code changes that can be isolated.",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description: "The task description for the sub-agent to execute",
+          },
+          max_rounds: {
+            type: "number",
+            description: "Maximum tool-calling rounds for the sub-agent (default: 30, max: 100)",
+          },
+          background: {
+            type: "boolean",
+            description: "Run in background and return task ID instead of waiting for completion (default: false)",
+          },
+        },
+        required: ["prompt"],
       },
     },
   ];

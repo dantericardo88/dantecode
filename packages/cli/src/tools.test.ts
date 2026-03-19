@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SelfImprovementContext } from "@dantecode/config-types";
 
 const {
@@ -284,5 +284,571 @@ describe("cli tools hardening", () => {
 
   it("advertises GitPush in the available tool definitions", () => {
     expect(getToolDefinitions().some((tool) => tool.name === "GitPush")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WebSearch + WebFetch Tools
+// ---------------------------------------------------------------------------
+
+describe("WebSearch tool", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns error when query is missing", async () => {
+    const result = await executeTool("WebSearch", {}, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("query parameter is required");
+  });
+
+  it("returns structured search results from DuckDuckGo HTML", async () => {
+    const mockHtml = `
+      <div class="result results_links results_links_deep web-result">
+        <div class="links_main links_deep result__body">
+          <a class="result__a" href="https://example.com/page1">Example Page One</a>
+          <a class="result__snippet">A snippet describing the first result.</a>
+        </div>
+      </div>
+      <div class="result results_links results_links_deep web-result">
+        <div class="links_main links_deep result__body">
+          <a class="result__a" href="https://example.com/page2">Example Page Two</a>
+          <a class="result__snippet">Second result snippet here.</a>
+        </div>
+      </div>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+    });
+
+    const result = await executeTool("WebSearch", { query: "test query" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Search results for");
+    expect(result.content).toContain("Example Page One");
+    expect(result.content).toContain("https://example.com/page1");
+  });
+
+  it("falls back to link extraction when structured parsing fails", async () => {
+    const mockHtml = `
+      <html><body>
+        <a href="https://github.com/test/repo">Test Repository</a>
+        <a href="https://docs.example.com/guide">Documentation Guide</a>
+      </body></html>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+    });
+
+    const result = await executeTool("WebSearch", { query: "fallback test" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("https://github.com/test/repo");
+  });
+
+  it("returns no results message when page has no links", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("<html><body>No results here</body></html>"),
+    });
+
+    const result = await executeTool("WebSearch", { query: "empty query" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("No search results found");
+  });
+
+  it("handles HTTP errors gracefully", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+    });
+
+    const result = await executeTool("WebSearch", { query: "rate limited" }, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("HTTP 429");
+  });
+
+  it("handles network errors gracefully", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
+
+    const result = await executeTool("WebSearch", { query: "timeout test" }, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Network timeout");
+  });
+
+  it("uses cache for repeated queries", async () => {
+    const mockHtml = `
+      <html><body>
+        <a href="https://cached.example.com/page">Cached Result</a>
+      </body></html>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+    });
+
+    const result1 = await executeTool("WebSearch", { query: "cache test query xyz" }, "/proj", makeContext());
+    const result2 = await executeTool("WebSearch", { query: "cache test query xyz" }, "/proj", makeContext());
+
+    expect(result1.content).toBe(result2.content);
+    // fetch should only be called once (second uses cache)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("WebFetch tool", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("returns error when url is missing", async () => {
+    const result = await executeTool("WebFetch", {}, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("url parameter is required");
+  });
+
+  it("rejects invalid URLs", async () => {
+    const result = await executeTool("WebFetch", { url: "not-a-url" }, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("invalid URL");
+  });
+
+  it("rejects non-HTTP protocols", async () => {
+    const result = await executeTool("WebFetch", { url: "ftp://example.com/file" }, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("only HTTP/HTTPS");
+  });
+
+  it("converts HTML to readable text", async () => {
+    const mockHtml = `
+      <html><head><title>Test</title></head>
+      <body>
+        <h1>Hello World</h1>
+        <p>This is a <strong>test</strong> paragraph.</p>
+        <script>console.log('removed');</script>
+      </body></html>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+      headers: new Map([["content-type", "text/html"]]),
+    });
+
+    const result = await executeTool("WebFetch", { url: "https://example.com" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Hello World");
+    expect(result.content).toContain("test paragraph");
+    expect(result.content).not.toContain("console.log");
+  });
+
+  it("returns JSON as-is without conversion", async () => {
+    const mockJson = '{"name": "test", "value": 42}';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockJson),
+      headers: new Map([["content-type", "application/json"]]),
+    });
+
+    const result = await executeTool("WebFetch", { url: "https://api.example.com/data" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain('"name": "test"');
+    expect(result.content).toContain('"value": 42');
+  });
+
+  it("truncates content exceeding max_chars", async () => {
+    const longContent = "x".repeat(5000);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(longContent),
+      headers: new Map([["content-type", "text/plain"]]),
+    });
+
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://example.com/long", max_chars: 100 },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("truncated at 100 chars");
+  });
+
+  it("handles HTTP errors gracefully", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+    });
+
+    const result = await executeTool("WebFetch", { url: "https://example.com/missing" }, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("HTTP 404");
+  });
+
+  it("returns raw content when raw flag is true", async () => {
+    const rawHtml = "<h1>Raw HTML</h1><p>Not converted</p>";
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(rawHtml),
+      headers: new Map([["content-type", "text/html"]]),
+    });
+
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://example.com/raw", raw: true },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("<h1>Raw HTML</h1>");
+    expect(result.content).toContain("<p>Not converted</p>");
+  });
+
+  it("extracts page metadata (title and description)", async () => {
+    const mockHtml = `
+      <html>
+      <head>
+        <title>Project Documentation</title>
+        <meta name="description" content="Learn how to use the project API.">
+      </head>
+      <body><main><p>Main content here.</p></main></body>
+      </html>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+      headers: new Map([["content-type", "text/html"]]),
+    });
+
+    const result = await executeTool("WebFetch", { url: "https://docs.example.com" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Title: Project Documentation");
+    expect(result.content).toContain("Description: Learn how to use the project API.");
+  });
+
+  it("extracts main content from article tag", async () => {
+    const mockHtml = `
+      <html><body>
+        <nav>Navigation links here</nav>
+        <article>
+          <h1>Important Article</h1>
+          <p>This is the main content that should be extracted. It needs to be long enough to pass the 200 char threshold so let me add more words here to ensure the extraction works properly and returns this block.</p>
+        </article>
+        <footer>Footer content here</footer>
+      </body></html>
+    `;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockHtml),
+      headers: new Map([["content-type", "text/html"]]),
+    });
+
+    const result = await executeTool("WebFetch", { url: "https://blog.example.com/post" }, "/proj", makeContext());
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Important Article");
+    expect(result.content).toContain("main content that should be extracted");
+  });
+
+  it("advertises WebSearch and WebFetch in tool definitions", () => {
+    const tools = getToolDefinitions();
+    expect(tools.some((t) => t.name === "WebSearch")).toBe(true);
+    expect(tools.some((t) => t.name === "WebFetch")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SubAgent Tool
+// ---------------------------------------------------------------------------
+
+describe("SubAgent tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns error when prompt is missing", async () => {
+    const result = await executeTool("SubAgent", {}, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("prompt parameter is required");
+  });
+
+  it("returns error when no subAgentExecutor is set", async () => {
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "search for files" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Sub-agent execution is not available");
+  });
+
+  it("returns successful result from sub-agent executor", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output: "Found 3 relevant files and updated them.",
+      touchedFiles: ["src/a.ts", "src/b.ts", "src/c.ts"],
+      durationMs: 1500,
+      success: true,
+    });
+
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "find and update files" },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("completed successfully");
+    expect(result.content).toContain("1500ms");
+    expect(result.content).toContain("src/a.ts");
+    expect(result.content).toContain("src/b.ts");
+    expect(result.content).toContain("Files modified (3)");
+    expect(mockExecutor).toHaveBeenCalledWith("find and update files", {
+      maxRounds: 30,
+      background: false,
+    });
+  });
+
+  it("passes max_rounds option to executor", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output: "done",
+      touchedFiles: [],
+      durationMs: 100,
+      success: true,
+    });
+
+    await executeTool(
+      "SubAgent",
+      { prompt: "quick task", max_rounds: 10 },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(mockExecutor).toHaveBeenCalledWith("quick task", {
+      maxRounds: 10,
+      background: false,
+    });
+  });
+
+  it("caps max_rounds at 100", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output: "done",
+      touchedFiles: [],
+      durationMs: 100,
+      success: true,
+    });
+
+    await executeTool(
+      "SubAgent",
+      { prompt: "long task", max_rounds: 500 },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(mockExecutor).toHaveBeenCalledWith("long task", {
+      maxRounds: 100,
+      background: false,
+    });
+  });
+
+  it("returns error result when sub-agent fails", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output: "partial work done",
+      touchedFiles: [],
+      durationMs: 5000,
+      success: false,
+      error: "Context window exceeded",
+    });
+
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "complex task" },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Sub-agent failed");
+    expect(result.content).toContain("Context window exceeded");
+    expect(result.content).toContain("partial work done");
+  });
+
+  it("handles executor exceptions gracefully", async () => {
+    const mockExecutor = vi.fn().mockRejectedValue(new Error("Network timeout"));
+
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "failing task" },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("Network timeout");
+  });
+
+  it("advertises SubAgent in tool definitions", () => {
+    const tools = getToolDefinitions();
+    expect(tools.some((t) => t.name === "SubAgent")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHubSearch Tool
+// ---------------------------------------------------------------------------
+
+describe("GitHubSearch tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecSync.mockReset();
+    mockResolvePreferredShell.mockReturnValue("/bin/bash");
+  });
+
+  it("returns error when query is missing", async () => {
+    const result = await executeTool("GitHubSearch", {}, "/proj", makeContext());
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("query parameter is required");
+  });
+
+  it("rejects invalid search type", async () => {
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "test", type: "invalid" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("type must be one of");
+  });
+
+  it("searches repos and formats results", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify([
+      {
+        name: "awesome-project",
+        url: "https://github.com/user/awesome-project",
+        description: "An awesome project",
+        stargazersCount: 1234,
+        language: "TypeScript",
+        updatedAt: "2026-03-15T00:00:00Z",
+      },
+      {
+        name: "cool-lib",
+        url: "https://github.com/user/cool-lib",
+        description: "A cool library",
+        stargazersCount: 567,
+        language: "JavaScript",
+        updatedAt: "2026-03-10T00:00:00Z",
+      },
+    ]));
+
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "awesome typescript" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("awesome-project");
+    expect(result.content).toContain("1234 stars");
+    expect(result.content).toContain("TypeScript");
+    expect(result.content).toContain("cool-lib");
+  });
+
+  it("searches issues with correct command", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify([
+      {
+        title: "Bug: crash on startup",
+        url: "https://github.com/user/repo/issues/42",
+        state: "OPEN",
+        repository: { nameWithOwner: "user/repo" },
+        createdAt: "2026-03-12T00:00:00Z",
+        labels: [{ name: "bug" }],
+      },
+    ]));
+
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "crash startup", type: "issues", limit: 5 },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Bug: crash on startup");
+    expect(result.content).toContain("OPEN");
+    expect(result.content).toContain("user/repo");
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining("gh search issues"),
+      expect.objectContaining({ cwd: "/proj" }),
+    );
+  });
+
+  it("returns no results message when search returns empty", async () => {
+    mockExecSync.mockReturnValue("[]");
+
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "nonexistent thing" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("No repos found");
+  });
+
+  it("handles gh not installed error", async () => {
+    mockExecSync.mockImplementation(() => {
+      const err = new Error("Command failed") as Error & { stderr: string };
+      err.stderr = "gh: command not found";
+      throw err;
+    });
+
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "test" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("not installed");
+  });
+
+  it("handles gh not authenticated error", async () => {
+    mockExecSync.mockImplementation(() => {
+      const err = new Error("Command failed") as Error & { stderr: string };
+      err.stderr = "To get started with GitHub CLI, please run: gh auth login";
+      throw err;
+    });
+
+    const result = await executeTool(
+      "GitHubSearch",
+      { query: "test" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("not authenticated");
+  });
+
+  it("advertises GitHubSearch in tool definitions", () => {
+    const tools = getToolDefinitions();
+    expect(tools.some((t) => t.name === "GitHubSearch")).toBe(true);
   });
 });
