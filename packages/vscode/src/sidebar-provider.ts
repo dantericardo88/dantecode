@@ -3655,7 +3655,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   </div>
 
   <!-- Drop Zone Overlay -->
-  <div class="drop-zone-overlay" id="drop-zone">Drop files here</div>
+  <div class="drop-zone-overlay" id="drop-zone">Drop images here &bull; Right-click files in Explorer &rarr; Add to DanteCode Context</div>
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>

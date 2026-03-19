@@ -270,6 +270,12 @@
       }
     },
     "menus": {
+      "explorer/context": [
+        {
+          "command": "dantecode.addFileToContext",
+          "group": "dantecode@1"
+        }
+      ],
       "editor/context": [
         {
           "command": "dantecode.addFileToContext",

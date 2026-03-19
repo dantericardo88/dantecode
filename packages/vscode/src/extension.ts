@@ -673,7 +673,16 @@ async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void
     ].join(" && ");
     terminal.sendText(autoCommitAndUpdate);
     terminal.show();
-    void vscode.window.showInformationMessage("DanteCode: Committing, pushing, and self-updating…");
+    void vscode.window
+      .showInformationMessage(
+        "DanteCode: Committing, pushing, and self-updating… Reload window when the terminal finishes.",
+        "Reload Now",
+      )
+      .then((action) => {
+        if (action === "Reload Now") {
+          void vscode.commands.executeCommand("workbench.action.reloadWindow");
+        }
+      });
     return;
   }
 
