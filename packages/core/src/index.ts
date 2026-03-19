@@ -624,3 +624,48 @@ export type {
   GitHookPayload,
   GitHookHandlerOptions,
 } from "./git-hook-handler.js";
+
+// ─── Capability Fingerprint ─────────────────────────────────────────────────
+
+export { CapabilityFingerprint } from "./capability-fingerprint.js";
+export type {
+  ModelCapabilities,
+  ModelSelectionCriteria,
+  CapabilityFingerprintOptions,
+} from "./capability-fingerprint.js";
+
+// ─── Unified LLM Client ─────────────────────────────────────────────────────
+
+export { UnifiedLLMClient } from "./unified-llm-client.js";
+export type {
+  LLMMessage,
+  LLMCallOptions,
+  LLMCallResult,
+  FallbackChain,
+  ClientTelemetry,
+  LLMExecutorFn,
+  UnifiedLLMClientOptions,
+} from "./unified-llm-client.js";
+
+// ─── GitHub CLI Engine ──────────────────────────────────────────────────────
+
+export { GitHubCLIEngine } from "./github-cli-engine.js";
+export type {
+  GHAction,
+  GHRequest,
+  GHResult,
+  PRCreateArgs,
+  IssueCreateArgs,
+  GitHubCLIEngineOptions,
+} from "./github-cli-engine.js";
+
+// ─── Web Fetch Engine ───────────────────────────────────────────────────────
+
+export { WebFetchEngine } from "./web-fetch-engine.js";
+export type {
+  FetchMode,
+  FetchOptions,
+  FetchResult,
+  FetchFn,
+  WebFetchEngineOptions,
+} from "./web-fetch-engine.js";
