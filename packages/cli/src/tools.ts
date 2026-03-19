@@ -28,8 +28,11 @@ import {
 import {
   MultiEngineSearch,
   createSearchEngine,
-  type SearchResult,
 } from "./web-search-engine.js";
+import {
+  synthesizeResults,
+  formatSynthesizedResult,
+} from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -820,9 +823,9 @@ function setCachedFetchResult(key: string, content: string): void {
 }
 
 /**
- * WebSearch tool: multi-engine search with result ranking and optional chaining.
- * Engines: DuckDuckGo (always), Brave (if BRAVE_API_KEY set).
- * Results are deduplicated via reciprocal rank fusion.
+ * WebSearch tool: multi-provider search with RRF ranking, semantic reranking,
+ * citation synthesis, and cost-aware provider selection.
+ * Providers: Tavily (primary), Exa, Serper, Google CSE, Brave, DuckDuckGo.
  */
 async function toolWebSearch(
   input: Record<string, unknown>,
@@ -833,48 +836,65 @@ async function toolWebSearch(
     return { content: "Error: query parameter is required", isError: true };
   }
 
-  const maxResults = typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 10;
-  const engine = input["engine"] as string | undefined;
+  const maxResults = typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 15;
+  const provider = (input["provider"] as string | undefined) ?? undefined;
+  const searchDepth = (input["search_depth"] as "basic" | "advanced" | undefined) ?? "basic";
   const followUp = input["follow_up"] === true;
+  const includeCitations = input["include_citations"] !== false; // default true
+  const includeRawContent = input["include_raw_content"] === true;
+  const topic = (input["topic"] as "general" | "news" | undefined) ?? undefined;
 
   try {
     const searcher = getSearchEngine();
-    let results: SearchResult[];
 
-    if (followUp) {
-      // Chain search: run initial query, then refine based on results
-      results = await searcher.chainSearch(
-        query,
-        (currentResults) => {
-          // Simple refinement: if results are too generic, add specificity
-          if (currentResults.length < 3) return `${query} tutorial guide`;
-          return null; // Satisfied with results
-        },
-        2, // max 2 follow-up chains
-        maxResults,
-      );
-    } else {
-      results = await searcher.search(query, maxResults, engine);
-    }
+    // Use the orchestrated search for full metadata
+    const orchestrated = await searcher.orchestratedSearch(query, {
+      maxResults,
+      preferredProvider: provider,
+      searchDepth,
+      followUp,
+      includeRawContent,
+      topic,
+    });
 
-    if (results.length === 0) {
+    if (orchestrated.results.length === 0) {
       return { content: `No search results found for: "${query}"`, isError: false };
     }
 
+    const results = orchestrated.results;
+
+    // Build formatted results
     const formatted = results
       .map((r, i) => {
         const parts = [`${i + 1}. **${r.title}**`, `   URL: ${r.url}`];
         if (r.snippet) parts.push(`   ${r.snippet}`);
         if (r.source && r.source.includes("+")) parts.push(`   Sources: ${r.source}`);
+        if (r.relevanceScore !== undefined) parts.push(`   Relevance: ${(r.relevanceScore * 100).toFixed(0)}%`);
         return parts.join("\n");
       })
       .join("\n\n");
 
-    const engineLabel = engine && engine !== "auto" ? ` (${engine})` : results.some(r => r.source?.includes("+")) ? " (multi-engine)" : "";
-    return {
-      content: `Search results for "${query}"${engineLabel} (${results.length} results):\n\n${formatted}`,
-      isError: false,
-    };
+    // Build provider info
+    const providerInfo = orchestrated.providersUsed.length > 1
+      ? ` (providers: ${orchestrated.providersUsed.join(", ")})`
+      : orchestrated.providersUsed.length === 1
+        ? ` (${orchestrated.providersUsed[0]})`
+        : "";
+
+    const costInfo = orchestrated.totalCost > 0 ? ` | cost: $${orchestrated.totalCost.toFixed(4)}` : "";
+
+    let output = `Search results for "${query}"${providerInfo} (${results.length} results${costInfo}):\n\n${formatted}`;
+
+    // Add citation synthesis if enabled
+    if (includeCitations) {
+      const synthesis = synthesizeResults(results, query, { useRawContent: includeRawContent });
+      if (synthesis.confidence > 0) {
+        const citationBlock = formatSynthesizedResult(synthesis);
+        output += `\n\n---\n**Synthesis** (confidence: ${(synthesis.confidence * 100).toFixed(0)}%):\n${citationBlock}`;
+      }
+    }
+
+    return { content: output, isError: false };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `WebSearch error: ${message}`, isError: true };
@@ -1899,23 +1919,41 @@ export function getToolDefinitions(): Array<{
     {
       name: "WebSearch",
       description:
-        "Search the web using multiple engines (DuckDuckGo + Brave) with result ranking. Supports engine selection and follow-up search chaining. Results are cached for 15 minutes.",
+        "Search the web using multiple providers (Tavily, Exa, Serper, Google, Brave, DuckDuckGo) with reciprocal rank fusion, semantic reranking, and citation synthesis. Results cached semantically for 7 days.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string", description: "The search query" },
           max_results: {
             type: "number",
-            description: "Maximum number of results to return (default: 10, max: 20)",
+            description: "Maximum number of results to return (default: 15, max: 20)",
           },
-          engine: {
+          provider: {
             type: "string",
-            enum: ["auto", "duckduckgo", "brave"],
-            description: "Search engine to use (default: auto — uses all available)",
+            enum: ["auto", "tavily", "exa", "serper", "google", "brave", "duckduckgo"],
+            description: "Preferred search provider (default: auto — uses best available with cost-aware fallback)",
+          },
+          search_depth: {
+            type: "string",
+            enum: ["basic", "advanced"],
+            description: "Search depth: basic (fast) or advanced (thorough). Default: basic",
           },
           follow_up: {
             type: "boolean",
             description: "Chain follow-up searches to refine results (default: false)",
+          },
+          include_citations: {
+            type: "boolean",
+            description: "Include synthesized summary with inline [N] citations (default: true)",
+          },
+          include_raw_content: {
+            type: "boolean",
+            description: "Include raw page content from supported providers (default: false)",
+          },
+          topic: {
+            type: "string",
+            enum: ["general", "news"],
+            description: "Topic filter (default: general)",
           },
         },
         required: ["query"],

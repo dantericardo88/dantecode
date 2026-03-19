@@ -19,7 +19,7 @@ concrete module in the codebase. Scores use a 0–10 scale:
 | Skill Execution Protocol | 8.5 | `cli/agent-loop.ts` (buildSystemPrompt) | Tool recipes (gh, curl, git clone) + 8-rule execution protocol injected when skillActive. |
 | Anti-Confabulation | 9.0 | `cli/agent-loop.ts` | 5 guards: empty circuit breaker, confab gate, write size guard, phantom commit blocker, write-to-existing blocker. |
 | Pipeline Continuation | 8.5 | `cli/agent-loop.ts` | Premature summary detection + 3 nudges + confab gate fallback. |
-| WebSearch | 8.5 | `cli/tools.ts` (toolWebSearch) | Native tool via DuckDuckGo HTML. Structured results with title/URL/snippet. 15-min cache. 7 tests. |
+| WebSearch | 9.2 | `core/web-search-orchestrator.ts` + `core/search-providers.ts` | Multi-provider orchestrator (Tavily/Exa/Serper/Google CSE/Brave/DuckDuckGo), cost-aware fallback, RRF ranking, citation synthesis, semantic reranking (5-factor), 7-day semantic cache (Jaccard 0.8), agentic iteration (auto follow-up on low confidence). 85 tests. |
 | WebFetch | 9.0 | `cli/tools.ts` (toolWebFetch) | Native tool with HTML→text, smart content extraction (article/main), page metadata (title/desc), CSS selectors, JSON passthrough, raw mode. 15-min cache. 10 tests. |
 | Agent Spawning | 8.5 | `cli/tools.ts` (SubAgent) + `cli/agent-loop.ts` | SubAgent tool with executor injection, child session creation, nesting depth tracking, max_rounds cap. BackgroundAgentRunner for async. 8 tests. |
 | GitHub CLI | 8.5 | `cli/tools.ts` (GitHubSearch) | Native tool wrapping `gh search` for repos/code/issues/PRs. Structured JSON output, auth detection, formatted results. 8 tests. |
@@ -39,3 +39,4 @@ concrete module in the codebase. Scores use a 0–10 scale:
 - **2026-03-18**: GitHub CLI 7.0→8.5 via GitHubSearch native tool (repos/code/issues/PRs).
 - **2026-03-18**: WebFetch 8.5→9.0 via smart content extraction + page metadata.
 - **2026-03-18**: Reasoning Chains 7.5→8.5 via enhanced planning + reflection checkpoints.
+- **2026-03-18**: WebSearch 8.5→9.2 via multi-provider orchestrator (Tavily/Exa/Serper/Google CSE/Brave/DDG), citation synthesis, semantic reranking, 7-day semantic cache, agentic iteration. 85 new tests.

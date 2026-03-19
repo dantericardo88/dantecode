@@ -49,8 +49,16 @@ vi.mock("node:child_process", async () => {
 
 vi.mock("@dantecode/core", async () => {
   const policy = await vi.importActual<object>("../../core/src/self-improvement-policy.ts");
+  const search = await vi.importActual<object>("../../core/src/search-synthesizer.ts");
+  const providers = await vi.importActual<object>("../../core/src/search-providers.ts");
+  const orchestrator = await vi.importActual<object>("../../core/src/web-search-orchestrator.ts");
+  const reranker = await vi.importActual<object>("../../core/src/search-reranker.ts");
   return {
     ...policy,
+    ...search,
+    ...providers,
+    ...orchestrator,
+    ...reranker,
     appendAuditEvent: mockAppendAuditEvent,
     resolvePreferredShell: mockResolvePreferredShell,
   };

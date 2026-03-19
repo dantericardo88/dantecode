@@ -387,3 +387,70 @@ export type { CacheableSection } from "./prompt-cache.js";
 
 export { GitSnapshotRecovery } from "./git-snapshot-recovery.js";
 export type { GitSnapshot, GitSnapshotOptions } from "./git-snapshot-recovery.js";
+
+// ─── Search Providers ──────────────────────────────────────────────────────
+
+export {
+  TavilyProvider,
+  ExaProvider,
+  SerperProvider,
+  GoogleCSEProvider,
+  BraveProvider,
+  DuckDuckGoProvider,
+  createSearchProviders,
+  loadSearchConfig,
+  DEFAULT_PROVIDER_ORDER,
+} from "./search-providers.js";
+export type {
+  SearchResult,
+  SearchProvider,
+  SearchProviderOptions,
+  SearchProviderConfig,
+} from "./search-providers.js";
+
+// ─── Search HTML Utils ─────────────────────────────────────────────────────
+
+export { htmlToReadableText as searchHtmlToText } from "./search-html-utils.js";
+
+// ─── Web Search Orchestrator ───────────────────────────────────────────────
+
+export {
+  WebSearchOrchestrator,
+  createWebSearchOrchestrator,
+  clearOrchestratorCache,
+} from "./web-search-orchestrator.js";
+export type {
+  WebSearchOptions,
+  OrchestratedSearchResult,
+} from "./web-search-orchestrator.js";
+
+// ─── Search Synthesizer ────────────────────────────────────────────────────
+
+export {
+  synthesizeResults,
+  buildSynthesisPrompt,
+  formatCitationBlock,
+  formatSynthesizedResult,
+} from "./search-synthesizer.js";
+export type {
+  Citation,
+  SynthesizedResult,
+  SynthesizerOptions,
+} from "./search-synthesizer.js";
+
+// ─── Search Reranker ───────────────────────────────────────────────────────
+
+export { rerankResults } from "./search-reranker.js";
+export type {
+  RerankContext,
+  RankedSearchResult,
+  RerankOptions,
+} from "./search-reranker.js";
+
+// ─── Search Cache ──────────────────────────────────────────────────────────
+
+export { SemanticSearchCache } from "./search-cache.js";
+export type {
+  SearchCacheEntry,
+  SearchCacheOptions,
+} from "./search-cache.js";

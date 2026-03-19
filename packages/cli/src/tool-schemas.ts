@@ -119,21 +119,37 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
 
     WebSearch: {
       description:
-        "Search the web using multiple engines (DuckDuckGo + Brave) with result ranking via reciprocal rank fusion. Results are cached for 15 minutes.",
+        "Search the web using multiple providers (Tavily, Exa, Serper, Google, Brave, DuckDuckGo) with reciprocal rank fusion, semantic reranking, and citation synthesis. Results are cached semantically for 7 days.",
       parameters: z.object({
         query: z.string().describe("The search query"),
         max_results: z
           .number()
           .optional()
-          .describe("Maximum number of results to return (default: 10, max: 20)"),
-        engine: z
-          .enum(["auto", "duckduckgo", "brave"])
+          .describe("Maximum number of results to return (default: 15, max: 20)"),
+        provider: z
+          .enum(["auto", "tavily", "exa", "serper", "google", "brave", "duckduckgo"])
           .optional()
-          .describe("Search engine to use (default: auto — uses all available)"),
+          .describe("Preferred search provider (default: auto — uses best available with cost-aware fallback)"),
+        search_depth: z
+          .enum(["basic", "advanced"])
+          .optional()
+          .describe("Search depth: basic (fast, <2s) or advanced (thorough). Default: basic"),
         follow_up: z
           .boolean()
           .optional()
           .describe("Chain follow-up searches to refine results (default: false)"),
+        include_citations: z
+          .boolean()
+          .optional()
+          .describe("Include synthesized summary with inline [N] citations (default: true)"),
+        include_raw_content: z
+          .boolean()
+          .optional()
+          .describe("Include raw page content from supported providers like Tavily/Exa (default: false)"),
+        topic: z
+          .enum(["general", "news"])
+          .optional()
+          .describe("Topic filter (default: general)"),
       }),
     },
 
