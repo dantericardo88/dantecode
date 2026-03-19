@@ -531,7 +531,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     let consecutiveEmptyRounds = 0;
     const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
     let confabulationNudges = 0;
-    const MAX_CONFABULATION_NUDGES = 2;
+    // 4 chances: Grok needs more nudges than Claude to actually start writing files
+    const MAX_CONFABULATION_NUDGES = 4;
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -1128,7 +1129,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           this.activeSkill !== null ||
           /\/(?:magic|autoforge|party|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest)\b/i.test(text);
         const PREMATURE_SUMMARY_RE =
-          /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+          /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete|git\s+status|verification\s+results?|changes?\s+made|next\s+steps?|recommendations?)/i;
+        // Grok-specific confabulation: fake verification tables, fake git status, fake PDSE scores.
+        // These patterns appear when Grok narrates what it "did" without using Edit/Write tools.
+        const GROK_CONFAB_RE =
+          /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
 
         // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
@@ -1190,27 +1195,45 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue;
           }
 
-          // Anti-confabulation gate: model claims completion but no files were modified
+          // Anti-confabulation gate v2: fires in two scenarios:
+          // 1. Classic: model claims completion (PREMATURE_SUMMARY_RE or GROK_CONFAB_RE match)
+          //    but touchedFiles === 0 (nothing was actually written).
+          // 2. Reads-only: model did tool calls (executedToolsThisTurn > 0) but ALL were reads,
+          //    touchedFiles === 0, and either fake-verification text was detected OR we've been
+          //    reading for 3+ rounds. Grok's pattern: read N files → write "turbo typecheck: PASS"
+          //    → stop. The PREMATURE_SUMMARY_RE doesn't match Grok's specific format, so we need
+          //    both the GROK_CONFAB_RE detector and the round-count fallback.
+          const isGrokConfab = GROK_CONFAB_RE.test(fullResponse);
+          const isClassicConfab = PREMATURE_SUMMARY_RE.test(fullResponse) || isGrokConfab;
+          const isReadsOnlyConfab =
+            executedToolsThisTurn > 0 && (isGrokConfab || roundNumber >= 3);
           if (
             isPipelineWorkflow &&
             touchedFiles.length === 0 &&
             confabulationNudges < MAX_CONFABULATION_NUDGES &&
-            PREMATURE_SUMMARY_RE.test(fullResponse)
+            (isClassicConfab || isReadsOnlyConfab)
           ) {
             confabulationNudges++;
             agentMessages.push({ role: "assistant", content: fullResponse });
             agentMessages.push({
               role: "user",
               content:
-                "You claimed to complete work, but NO files were actually modified in this session " +
-                "(filesModified === 0). You MUST use Edit or Write tools to make real file changes. " +
-                "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
-                "the next step with real tool calls.",
+                "CONFABULATION DETECTED: You have read files and/or claimed to have implemented " +
+                "changes, but ZERO files were actually written in this session. " +
+                "Running `git status` would show 0 changed files. " +
+                "\n\nDo NOT write planning text, summaries, or fake verification results. " +
+                "\nYour VERY NEXT response MUST contain a Write or Edit tool call to create/modify a real file. " +
+                "\n\nSteps to unblock:" +
+                "\n1. Pick the FIRST file from your implementation plan (e.g. a new .ts file you planned to create)" +
+                "\n2. Use the Write tool to create it with complete, production-ready code" +
+                "\n3. Only AFTER real file changes: run Bash for typecheck/lint/test" +
+                "\n\nDo NOT claim 'typecheck PASS', 'committed', 'pushed', or 'PDSE score' unless " +
+                "you actually ran those commands with the Bash tool and got real output.",
             });
             this.postMessage({
               type: "chat_response_chunk",
               payload: {
-                chunk: `\n\n---\n> **Anti-confabulation** (${confabulationNudges}/${MAX_CONFABULATION_NUDGES}) — model claims completion but 0 files modified.\n\n`,
+                chunk: `\n\n---\n> **Anti-confabulation v2** (${confabulationNudges}/${MAX_CONFABULATION_NUDGES}) — ${isReadsOnlyConfab && !isClassicConfab ? "reads-only pattern" : "fake completion detected"}, 0 files written.\n\n`,
                 partial: "",
               },
             });

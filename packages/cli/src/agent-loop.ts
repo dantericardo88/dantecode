@@ -192,7 +192,15 @@ const RM_SOURCE_RE =
 
 /** Detects premature wrap-up responses that should trigger pipeline continuation. */
 const PREMATURE_SUMMARY_PATTERN =
-  /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+  /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete|git\s+status|verification\s+results?|changes?\s+made|next\s+steps?|recommendations?)/i;
+
+/**
+ * Grok-specific confabulation detector: fake verification tables, fake git status, fake PDSE
+ * scores. These patterns appear when Grok narrates what it "did" without using Edit/Write tools.
+ * The PREMATURE_SUMMARY_PATTERN alone doesn't catch them because Grok uses different phrasing.
+ */
+const GROK_CONFAB_PATTERN =
+  /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
 
 /** Max pipeline continuation nudges before allowing the model to stop. */
 const MAX_PIPELINE_CONTINUATION_NUDGES = 3;
@@ -212,7 +220,8 @@ const PIPELINE_CONTINUATION_INSTRUCTION =
 const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
 
 /** Max anti-confabulation nudges (model claims completion but 0 files modified). */
-const MAX_CONFABULATION_NUDGES = 2;
+// 4 chances: Grok needs more nudges than Claude to actually start writing files
+const MAX_CONFABULATION_NUDGES = 4;
 
 // ----------------------------------------------------------------------------
 // Structured reasoning checkpoints
@@ -239,12 +248,22 @@ const EMPTY_RESPONSE_WARNING =
   "issue. Execute the next step using a tool (Read, Edit, Write, Bash, Glob, Grep). " +
   "If you cannot proceed, explain what is blocking you.";
 
-/** Warning injected when model claims completion but no files were modified. */
+/**
+ * Warning injected when model claims completion but no files were modified.
+ * Strong language required: Grok ignores polite nudges and keeps confabulating.
+ */
 const CONFABULATION_WARNING =
-  "You claimed to complete work, but NO files were actually modified in this session " +
-  "(filesModified === 0). You MUST use Edit or Write tools to make real file changes. " +
-  "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
-  "the next step with real tool calls.";
+  "CONFABULATION DETECTED: You have read files and/or claimed to have implemented changes, " +
+  "but ZERO files were actually written in this session (filesModified === 0). " +
+  "Running `git status` would show 0 changed files. " +
+  "\n\nDo NOT write planning text, summaries, or fake verification results. " +
+  "\nYour VERY NEXT response MUST contain a Write or Edit tool call to create/modify a real file. " +
+  "\n\nSteps to unblock:" +
+  "\n1. Pick the FIRST file from your implementation plan (e.g. a new .ts file you planned to create)" +
+  "\n2. Use the Write tool to create it with complete, production-ready code" +
+  "\n3. Only AFTER real file changes: run Bash for typecheck/lint/test" +
+  "\n\nDo NOT claim 'typecheck PASS', 'committed', 'pushed', or 'PDSE score' unless " +
+  "you actually ran those commands with the Bash tool and got real output.";
 
 // ----------------------------------------------------------------------------
 // System Prompt Builder
@@ -1740,20 +1759,28 @@ export async function runAgentLoop(
         continue;
       }
 
-      // Anti-confabulation gate: if in a pipeline workflow and the model claims
-      // completion/done but no files were actually modified, reject the claim.
+      // Anti-confabulation gate v2: fires in two scenarios:
+      // 1. Classic: model claims completion (regex match) but filesModified === 0
+      // 2. Reads-only: model did only reads (executedToolsThisTurn > 0), filesModified === 0,
+      //    AND either Grok-specific fake-verification text detected OR we're in round 3+.
+      //    Grok's pattern: read files → narrate "turbo typecheck: PASS" → stop without writing.
+      const isGrokConfab = GROK_CONFAB_PATTERN.test(responseText);
+      const isClassicConfab = PREMATURE_SUMMARY_PATTERN.test(responseText) || isGrokConfab;
+      const isReadsOnlyConfab =
+        executedToolsThisTurn > 0 && (isGrokConfab || roundCounter >= 3);
       if (
         isPipelineWorkflow &&
         filesModified === 0 &&
         confabulationNudges < MAX_CONFABULATION_NUDGES &&
-        PREMATURE_SUMMARY_PATTERN.test(responseText)
+        (isClassicConfab || isReadsOnlyConfab)
       ) {
         confabulationNudges++;
         messages.push({ role: "assistant" as const, content: responseText });
         messages.push({ role: "user" as const, content: CONFABULATION_WARNING });
         if (!config.silent) {
+          const reason = isReadsOnlyConfab && !isClassicConfab ? "reads-only pattern" : "fake completion";
           process.stdout.write(
-            `\n${RED}[confab-guard] model claims completion but 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
+            `\n${RED}[confab-guard v2] ${reason} — 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
           );
         }
         continue;
