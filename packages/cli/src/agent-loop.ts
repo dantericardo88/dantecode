@@ -27,6 +27,7 @@ import {
   CLAUDE_WORKFLOW_MODE,
   ApproachMemory,
   formatApproachesForPrompt,
+  globalToolScheduler,
 } from "@dantecode/core";
 import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
 import { buildWorkflowInvocationPrompt } from "@dantecode/core";
@@ -2199,6 +2200,36 @@ export async function runAgentLoop(
       }
 
       toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
+
+      // DTR Phase 1: Post-execution verification for Bash and Write tools.
+      // After git clone, mkdir, curl/wget, or Write — verify the artifact actually exists.
+      // If verification fails, inject a warning message before the model's next turn so
+      // it knows the artifact is missing and can retry rather than proceeding blindly.
+      if (!result.isError) {
+        try {
+          let dtrVerifyMsg: string | null = null;
+          if (toolCall.name === "Bash") {
+            const bashCmd = (toolCall.input["command"] as string) || "";
+            dtrVerifyMsg = await globalToolScheduler.verifyBashArtifacts(
+              bashCmd,
+              session.projectRoot,
+            );
+          } else if (toolCall.name === "Write" && writtenFile) {
+            dtrVerifyMsg = await globalToolScheduler.verifyWriteArtifact(
+              writtenFile,
+              session.projectRoot,
+            );
+          }
+          if (dtrVerifyMsg) {
+            if (!config.silent) {
+              process.stdout.write(`\n${RED}${dtrVerifyMsg.split("\n")[0]}${RESET}\n`);
+            }
+            toolResults.push(dtrVerifyMsg);
+          }
+        } catch {
+          // Non-fatal: DTR verification errors must not interrupt execution
+        }
+      }
 
       // Record the tool call in the session
       const toolUseMessage: SessionMessage = {

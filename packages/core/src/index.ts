@@ -745,3 +745,54 @@ export type {
   CommandMatch,
   CommandPaletteOptions,
 } from "./command-palette.js";
+
+// ─── DTR Phase 1: Deterministic Tool Runtime ────────────────────────────────
+
+export {
+  TERMINAL_STATES,
+  VALID_TRANSITIONS,
+} from "./tool-runtime/tool-call-types.js";
+export type {
+  ToolCallStatus,
+  ToolCallRecord,
+  ToolExecutionResult,
+  ToolExecutionEvidence,
+  ArtifactKind,
+  ArtifactRecord,
+  VerificationCheckKind,
+  VerificationCheck,
+  VerificationResult,
+  VerificationCheckOutcome,
+  ToolSchedulerConfig,
+} from "./tool-runtime/tool-call-types.js";
+
+export { ArtifactStore, globalArtifactStore } from "./tool-runtime/artifact-store.js";
+
+export {
+  detectGitCloneTarget,
+  detectMkdirTarget,
+  detectDownloadTarget,
+  runVerificationChecks,
+  buildGitCloneChecks,
+  buildFileWriteChecks,
+  buildDownloadChecks,
+  buildMkdirChecks,
+  inferVerificationChecks,
+  formatVerificationMessage,
+} from "./tool-runtime/verification-checks.js";
+
+export {
+  ToolScheduler,
+  globalToolScheduler,
+} from "./tool-runtime/tool-scheduler.js";
+export type { SchedulerEvents } from "./tool-runtime/tool-scheduler.js";
+
+export {
+  ApprovalGateway,
+  globalApprovalGateway,
+} from "./tool-runtime/approval-gateway.js";
+export type {
+  ApprovalDecision,
+  ApprovalRule,
+  ApprovalGatewayConfig,
+} from "./tool-runtime/approval-gateway.js";

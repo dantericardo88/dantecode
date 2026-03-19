@@ -34,6 +34,7 @@ import {
   readOrInitializeState,
   responseNeedsToolExecutionNudge,
   shouldContinueLoop,
+  globalToolScheduler,
 } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -1649,6 +1650,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
 
           toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
+
+          // DTR Phase 1: Post-execution verification for Bash and Write tools.
+          // After git clone, mkdir, curl/wget — verify the artifact exists before continuing.
+          if (!result.isError) {
+            try {
+              let dtrVerifyMsg: string | null = null;
+              if (toolCall.name === "Bash") {
+                const bashCmd = (toolCall.input["command"] as string) || "";
+                dtrVerifyMsg = await globalToolScheduler.verifyBashArtifacts(
+                  bashCmd,
+                  projectRoot ?? process.cwd(),
+                );
+              } else if (toolCall.name === "Write" && writtenFile) {
+                dtrVerifyMsg = await globalToolScheduler.verifyWriteArtifact(
+                  writtenFile,
+                  projectRoot ?? process.cwd(),
+                );
+              }
+              if (dtrVerifyMsg) {
+                toolResultParts.push(dtrVerifyMsg);
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk: `\n> ⚠️ ${dtrVerifyMsg.split("\n")[0]}\n`, partial: "" },
+                });
+              }
+            } catch {
+              // Non-fatal: DTR verification errors must not interrupt execution
+            }
+          }
         }
 
         // Append the assistant response + tool results to the conversation for next round
