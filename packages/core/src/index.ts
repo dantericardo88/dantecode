@@ -669,3 +669,55 @@ export type {
   FetchFn,
   WebFetchEngineOptions,
 } from "./web-fetch-engine.js";
+
+// ─── Wave 6: FIM Engine ─────────────────────────────────────────────────────
+
+export { FIMEngine } from "./fim-engine.js";
+export type {
+  FIMModel,
+  FIMContext,
+  FIMPrompt,
+  FIMCompletion,
+  FIMEngineOptions,
+} from "./fim-engine.js";
+
+// ─── Wave 6: Production Engine ──────────────────────────────────────────────
+
+export { ProductionEngine } from "./production-engine.js";
+export type {
+  ProductionMetric,
+  MetricAggregates,
+  ProductionEngineOptions,
+} from "./production-engine.js";
+
+// ─── Wave 6: Metrics Collector ──────────────────────────────────────────────
+
+export { MetricsCollector } from "./metrics-collector.js";
+export type {
+  MetricType,
+  MetricDefinition,
+  MetricSample,
+  HistogramBuckets,
+} from "./metrics-collector.js";
+
+// ─── Wave 6: UX Engine ──────────────────────────────────────────────────────
+
+export { UXEngine } from "./ux-engine.js";
+export type {
+  ThemeName,
+  Theme,
+  ThemeIcons,
+  ThemeColors,
+  ProgressOptions,
+  StatusLineOptions,
+  UXEngineOptions,
+} from "./ux-engine.js";
+
+// ─── Wave 6: Command Palette ────────────────────────────────────────────────
+
+export { CommandPalette } from "./command-palette.js";
+export type {
+  PaletteCommand,
+  CommandMatch,
+  CommandPaletteOptions,
+} from "./command-palette.js";
