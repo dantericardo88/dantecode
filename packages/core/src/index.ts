@@ -491,3 +491,48 @@ export type {
   SearchCacheEntry,
   SearchCacheOptions,
 } from "./search-cache.js";
+
+// ─── Persistent Memory ──────────────────────────────────────────────────────
+
+export { PersistentMemory } from "./persistent-memory.js";
+export type {
+  MemoryEntry,
+  MemorySearchOptions,
+  MemoryDistillResult,
+  PersistentMemoryOptions,
+} from "./persistent-memory.js";
+
+// ─── Memory Distiller ──────────────────────────────────────────────────────
+
+export { distillEntries, extractPlaybook, scoreRelevance, findDuplicates } from "./memory-distiller.js";
+export type {
+  DistillableEntry,
+  DistilledEntry,
+  DistillationResult,
+  DistillerOptions,
+} from "./memory-distiller.js";
+
+// ─── Security Engine ───────────────────────────────────────────────────────
+
+export { SecurityEngine } from "./security-engine.js";
+export type {
+  SecurityLayer,
+  RiskLevel,
+  ActionDecision,
+  SecurityAction,
+  SecurityCheckResult,
+  AnomalyDetectionResult,
+  QuarantineEntry,
+  SecurityRule,
+  SecurityEngineOptions,
+} from "./security-engine.js";
+
+// ─── Secrets Scanner ───────────────────────────────────────────────────────
+
+export { SecretsScanner } from "./secrets-scanner.js";
+export type {
+  SecretMatch,
+  ScanResult,
+  SecretsPattern,
+  SecretsScannerOptions,
+} from "./secrets-scanner.js";
