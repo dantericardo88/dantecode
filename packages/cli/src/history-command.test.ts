@@ -179,6 +179,8 @@ function makeReplState(overrides?: Record<string, unknown>) {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    pendingResumeRunId: null,
+    pendingExpectedWorkflow: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,

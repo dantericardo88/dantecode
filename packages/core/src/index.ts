@@ -84,6 +84,7 @@ export {
 
 export { SessionStore } from "./session-store.js";
 export type { SessionSummaryEntry, SessionListEntry } from "./session-store.js";
+export { DurableRunStore } from "./durable-run-store.js";
 
 // ─── Background Agent ────────────────────────────────────────────────────────
 

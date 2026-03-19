@@ -10,6 +10,7 @@ import { resolve } from "node:path";
 import {
   ModelRouterImpl,
   SessionStore,
+  DurableRunStore,
   estimateMessageTokens,
   getContextUtilization,
   isProtectedWriteTarget,
@@ -36,6 +37,7 @@ import {
 } from "@dantecode/danteforge";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
 import type {
+  ExecutionEvidence,
   Session,
   SessionMessage,
   DanteCodeState,
@@ -107,6 +109,21 @@ export interface AgentLoopConfig {
    * verification gates between waves (Claude Workflow Mode).
    */
   waveState?: WaveOrchestratorState;
+  /** Durable run identifier for this execution. */
+  runId?: string;
+  /** Explicit durable run ID to resume from. */
+  resumeFrom?: string;
+  /** Checkpoint behavior overrides for durable runs. */
+  checkpointPolicy?: {
+    afterToolBatch?: boolean;
+    afterVerification?: boolean;
+  };
+  /** Timeout retry policy for durable runs. */
+  timeoutPolicy?: {
+    transientRetries?: number;
+  };
+  /** Expected workflow name queued by the slash command router. */
+  expectedWorkflow?: string;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -786,6 +803,133 @@ function deriveThinkingBudget(model: ModelConfig, complexity: number): number | 
   return Math.round(baseBudget * Math.max(1, complexity));
 }
 
+function isTimeoutError(message: string): boolean {
+  return /\b(?:timed?\s*out|timeout)\b/i.test(message);
+}
+
+function inferWorkflowName(prompt: string, config: AgentLoopConfig): string {
+  if (config.expectedWorkflow) {
+    return config.expectedWorkflow;
+  }
+
+  const slashMatch = prompt.trim().match(/^\/([a-z0-9-]+)/i);
+  if (slashMatch?.[1]) {
+    return slashMatch[1].toLowerCase();
+  }
+
+  return config.skillActive ? "skill" : "agent-loop";
+}
+
+function buildResumePrompt(
+  runId: string,
+  hint: {
+    summary?: string;
+    lastConfirmedStep?: string;
+    lastSuccessfulTool?: string;
+    nextAction?: string;
+  } | null,
+  originalPrompt: string,
+): string {
+  const lines = [`Resuming durable run ${runId}.`];
+
+  if (hint?.summary) {
+    lines.push(`Previous status: ${hint.summary}`);
+  }
+  if (hint?.lastConfirmedStep) {
+    lines.push(`Last confirmed step: ${hint.lastConfirmedStep}`);
+  }
+  if (hint?.lastSuccessfulTool) {
+    lines.push(`Last successful tool: ${hint.lastSuccessfulTool}`);
+  }
+  if (hint?.nextAction) {
+    lines.push(`Next action: ${hint.nextAction}`);
+  }
+  lines.push(
+    originalPrompt.trim().length > 0 && !/^continue$/i.test(originalPrompt.trim())
+      ? `User follow-up: ${originalPrompt.trim()}`
+      : "Continue from the last confirmed step.",
+  );
+
+  return lines.join("\n");
+}
+
+function buildExecutionEvidence(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  result: { isError: boolean },
+  writtenFile?: string,
+): ExecutionEvidence {
+  const timestamp = new Date().toISOString();
+  const command = typeof toolInput["command"] === "string" ? toolInput["command"] : undefined;
+  const filePath = typeof toolInput["file_path"] === "string" ? toolInput["file_path"] : writtenFile;
+  const sourceUrl = typeof toolInput["url"] === "string" ? toolInput["url"] : undefined;
+
+  if (writtenFile && !result.isError) {
+    return {
+      id: randomUUID(),
+      kind: "file_write",
+      success: true,
+      label: `Updated ${writtenFile}`,
+      filePath: writtenFile,
+      timestamp,
+    };
+  }
+
+  if (toolName === "Bash" && command && /\b(?:test|lint|build|typecheck|vitest|jest)\b/i.test(command)) {
+    return {
+      id: randomUUID(),
+      kind: result.isError ? "tool_result" : "verification_pass",
+      success: !result.isError,
+      label: result.isError ? `Verification failed: ${command}` : `Verified with: ${command}`,
+      command,
+      timestamp,
+    };
+  }
+
+  if (toolName === "WebFetch" || toolName === "WebSearch" || toolName === "GitHubSearch") {
+    return {
+      id: randomUUID(),
+      kind: "source_fetch",
+      success: !result.isError,
+      label: `${toolName} executed`,
+      sourceUrl,
+      timestamp,
+    };
+  }
+
+  if (toolName === "SubAgent") {
+    return {
+      id: randomUUID(),
+      kind: "agent_spawn",
+      success: !result.isError,
+      label: "Spawned sub-agent",
+      agentId: typeof toolInput["agentId"] === "string" ? toolInput["agentId"] : undefined,
+      timestamp,
+    };
+  }
+
+  if (toolName === "GitCommit" || toolName === "GitPush") {
+    return {
+      id: randomUUID(),
+      kind: "commit",
+      success: !result.isError,
+      label: `${toolName} executed`,
+      timestamp,
+    };
+  }
+
+  return {
+    id: randomUUID(),
+    kind: "tool_result",
+    success: !result.isError,
+    label: `${toolName} executed`,
+    filePath,
+    command,
+    sourceUrl,
+    timestamp,
+  };
+}
+
 function isExecutionContinuationPrompt(prompt: string, session: Session): boolean {
   if (!EXECUTION_CONTINUATION_PATTERN.test(prompt.trim())) {
     return false;
@@ -1031,11 +1175,45 @@ export async function runAgentLoop(
     }
   }
 
+  const durableRunStore = new DurableRunStore(session.projectRoot);
+  let durablePrompt = prompt;
+  let durableRunId = config.resumeFrom ?? config.runId;
+  let workflowName = inferWorkflowName(prompt, config);
+  const shouldCheckForResume =
+    Boolean(config.resumeFrom) || EXECUTION_CONTINUATION_PATTERN.test(prompt.trim());
+
+  if (shouldCheckForResume) {
+    const resumeTarget = config.resumeFrom
+      ? await durableRunStore.loadRun(config.resumeFrom)
+      : await durableRunStore.getLatestWaitingUserRun();
+
+    if (resumeTarget) {
+      durableRunId = resumeTarget.id;
+      workflowName = resumeTarget.workflow || workflowName;
+      const snapshot = await durableRunStore.loadSessionSnapshot(resumeTarget.id);
+      const resumeHint = await durableRunStore.getResumeHint(resumeTarget.id);
+      if (snapshot) {
+        session = snapshot;
+      }
+      durablePrompt = buildResumePrompt(resumeTarget.id, resumeHint, prompt);
+    }
+  }
+
+  let durableRun = durableRunId ? await durableRunStore.loadRun(durableRunId) : null;
+  if (!durableRun) {
+    durableRun = await durableRunStore.initializeRun({
+      runId: durableRunId,
+      session,
+      prompt: durablePrompt,
+      workflow: workflowName,
+    });
+  }
+
   // Append user message
   const userMessage: SessionMessage = {
     id: randomUUID(),
     role: "user",
-    content: prompt,
+    content: durablePrompt,
     timestamp: new Date().toISOString(),
   };
   session.messages.push(userMessage);
@@ -1047,7 +1225,7 @@ export async function runAgentLoop(
     overrides: config.state.model.taskOverrides,
   };
   const router = new ModelRouterImpl(routerConfig, session.projectRoot, session.id);
-  const lexicalComplexity = router.analyzeComplexity(prompt);
+  const lexicalComplexity = router.analyzeComplexity(durablePrompt);
   const thinkingBudget = deriveThinkingBudget(config.state.model.default, lexicalComplexity);
   let localSandboxBridge: SandboxBridge | null = null;
 
@@ -1095,8 +1273,8 @@ export async function runAgentLoop(
   let confabulationNudges = 0;
   const isPipelineWorkflow =
     config.skillActive ||
-    EXECUTION_WORKFLOW_PATTERN.test(prompt) ||
-    isExecutionContinuationPrompt(prompt, session);
+    EXECUTION_WORKFLOW_PATTERN.test(durablePrompt) ||
+    isExecutionContinuationPrompt(durablePrompt, session);
 
   // ---- Feature: Planning phase (for complex tasks) ----
   // Inject planning instruction before first model call when complexity >= 0.7
@@ -1113,7 +1291,7 @@ export async function runAgentLoop(
   const persistentMemory = new ApproachMemory(session.projectRoot);
   let historicalFailures: string | undefined;
   try {
-    const failed = await persistentMemory.getFailedApproaches(prompt, 5);
+    const failed = await persistentMemory.getFailedApproaches(durablePrompt, 5);
     if (failed.length > 0) {
       historicalFailures = formatApproachesForPrompt(failed);
     }
@@ -1137,6 +1315,12 @@ export async function runAgentLoop(
   let lastMajorEditGatePassed = true;
   const readTracker = new Map<string, string>();
   const editAttempts = new Map<string, number>();
+  const evidenceLedger: ExecutionEvidence[] = [];
+  let lastConfirmedStep = "Started execution.";
+  let lastSuccessfulTool: string | undefined;
+  let lastSuccessfulToolResult: string | undefined;
+  let transientTimeoutRetries = 0;
+  const maxTransientRetries = config.timeoutPolicy?.transientRetries ?? 1;
 
   if (config.verbose && thinkingBudget) {
     process.stdout.write(
@@ -1276,7 +1460,11 @@ export async function runAgentLoop(
           }
           responseText = renderer.getFullText();
           renderer.finish();
-        } catch {
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (isTimeoutError(message)) {
+            throw err;
+          }
           // Fallback to blocking generate if streaming is not supported
           renderer.reset();
           if (!config.silent) {
@@ -1297,7 +1485,7 @@ export async function runAgentLoop(
 
       // Model-assisted complexity scoring: extract on first response
       if (!router.getModelRatedComplexity()) {
-        const modelScore = router.extractModelComplexityRating(responseText, prompt);
+        const modelScore = router.extractModelComplexityRating(responseText, durablePrompt);
         if (config.verbose && modelScore !== null) {
           process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
         }
@@ -1314,9 +1502,51 @@ export async function runAgentLoop(
           currentApproachDescription = responseText.slice(0, 150).trim();
         }
       }
+
+      transientTimeoutRetries = 0;
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+
+      if (isTimeoutError(errorMessage)) {
+        if (transientTimeoutRetries < maxTransientRetries) {
+          transientTimeoutRetries++;
+          messages.push({
+            role: "user" as const,
+            content:
+              "SYSTEM: The last model call timed out. Retry from the last confirmed step and continue executing without summarizing.",
+          });
+          continue;
+        }
+
+        const pauseNotice =
+          `Execution paused for durable run ${durableRun.id} after repeated model timeout. ` +
+          `Type continue or /resume ${durableRun.id} to keep going.`;
+
+        await durableRunStore.pauseRun(durableRun.id, {
+          reason: "model_timeout",
+          session,
+          touchedFiles,
+          lastConfirmedStep,
+          lastSuccessfulTool,
+          nextAction: "Retry from the last confirmed step.",
+          message: pauseNotice,
+          evidence: evidenceLedger,
+        });
+
+        session.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          content: pauseNotice,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (localSandboxBridge) {
+          await localSandboxBridge.shutdown();
+        }
+
+        return session;
+      }
 
       const errorMsg: SessionMessage = {
         id: randomUUID(),
@@ -1325,6 +1555,18 @@ export async function runAgentLoop(
         timestamp: new Date().toISOString(),
       };
       session.messages.push(errorMsg);
+      await durableRunStore.failRun(durableRun.id, {
+        session,
+        touchedFiles,
+        lastConfirmedStep,
+        lastSuccessfulTool,
+        nextAction: "Resolve the model error before retrying.",
+        message: errorMessage,
+        evidence: evidenceLedger,
+      });
+      if (localSandboxBridge) {
+        await localSandboxBridge.shutdown();
+      }
       return session;
     }
 
@@ -1367,7 +1609,8 @@ export async function runAgentLoop(
     if (toolCalls.length === 0) {
       if (
         executedToolsThisTurn === 0 &&
-        (promptRequestsToolExecution(prompt) || isExecutionContinuationPrompt(prompt, session)) &&
+        (promptRequestsToolExecution(durablePrompt) ||
+          isExecutionContinuationPrompt(durablePrompt, session)) &&
         responseNeedsToolExecutionNudge(responseText) &&
         executionNudges < MAX_EXECUTION_NUDGES &&
         maxToolRounds > 0
@@ -1755,6 +1998,21 @@ export async function runAgentLoop(
         }
       }
 
+      const evidence = buildExecutionEvidence(
+        toolCall.name,
+        toolCall.input,
+        result,
+        writtenFile ?? undefined,
+      );
+      evidenceLedger.push(evidence);
+      if (!result.isError) {
+        lastSuccessfulTool = toolCall.name;
+        lastSuccessfulToolResult = outputContent.split("\n")[0] || undefined;
+        lastConfirmedStep = writtenFile
+          ? `Updated ${writtenFile}`
+          : `Executed ${toolCall.name}${lastSuccessfulToolResult ? `: ${lastSuccessfulToolResult}` : ""}`;
+      }
+
       // Show result summary (suppressed in silent mode)
       if (!config.silent) {
         if (result.isError) {
@@ -1874,6 +2132,7 @@ export async function runAgentLoop(
             session.projectRoot,
             session.id,
           );
+          evidenceLedger.push(buildExecutionEvidence("Bash", { command: vc.command }, vcResult));
           if (vcResult.isError) {
             verifyRetries++;
             verificationPassed = false;
@@ -1959,11 +2218,26 @@ export async function runAgentLoop(
             // Verification passed — reset error signature tracking
             lastErrorSignature = "";
             sameErrorCount = 0;
+            lastConfirmedStep = `Verified ${vc.name}`;
             process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
           }
         } catch {
           // Verification command failed to execute, skip
         }
+      }
+
+      if (config.checkpointPolicy?.afterVerification ?? true) {
+        await durableRunStore.checkpoint(durableRun.id, {
+          session,
+          touchedFiles,
+          lastConfirmedStep,
+          lastSuccessfulTool,
+          nextAction: verificationPassed
+            ? "Proceed to the next implementation step."
+            : "Fix the reported verification issues before continuing.",
+          evidence: evidenceLedger,
+        });
+        evidenceLedger.length = 0;
       }
 
       // Approach memory: record the outcome of this verification cycle
@@ -2064,6 +2338,18 @@ export async function runAgentLoop(
       content: `Tool execution results:\n\n${toolResults.join("\n\n---\n\n")}`,
     };
     messages.push(toolResultsMessage);
+
+    if ((config.checkpointPolicy?.afterToolBatch ?? true) && toolCalls.length > 0) {
+      await durableRunStore.checkpoint(durableRun.id, {
+        session,
+        touchedFiles,
+        lastConfirmedStep,
+        lastSuccessfulTool,
+        nextAction: "Continue executing the next planned step.",
+        evidence: evidenceLedger,
+      });
+      evidenceLedger.length = 0;
+    }
   }
 
   // Diff-based anti-confabulation: compare claimed vs actual file changes (advisory)
@@ -2140,6 +2426,15 @@ export async function runAgentLoop(
 
   // Update session timestamp
   session.updatedAt = new Date().toISOString();
+
+  await durableRunStore.completeRun(durableRun.id, {
+    session,
+    touchedFiles,
+    lastConfirmedStep,
+    lastSuccessfulTool,
+    nextAction: "Run completed.",
+    evidence: evidenceLedger,
+  });
 
   if (localSandboxBridge) {
     await localSandboxBridge.shutdown();

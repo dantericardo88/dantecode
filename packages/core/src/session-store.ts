@@ -6,7 +6,7 @@
 
 import { readFile, writeFile, readdir, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import type { ChatSessionFile } from "@dantecode/config-types";
+import type { ChatSessionFile, Session } from "@dantecode/config-types";
 
 /** A lightweight session summary entry returned by getRecentSummaries(). */
 export interface SessionSummaryEntry {
@@ -31,14 +31,21 @@ export interface SessionListEntry {
  */
 export class SessionStore {
   private readonly sessionsDir: string;
+  private readonly runtimeSessionsDir: string;
 
   constructor(projectRoot: string) {
     this.sessionsDir = join(projectRoot, ".dantecode", "sessions");
+    this.runtimeSessionsDir = join(this.sessionsDir, "runtime");
   }
 
   /** Ensure the sessions directory exists. */
   private async ensureDir(): Promise<void> {
     await mkdir(this.sessionsDir, { recursive: true });
+  }
+
+  /** Ensure the runtime session directory exists. */
+  private async ensureRuntimeDir(): Promise<void> {
+    await mkdir(this.runtimeSessionsDir, { recursive: true });
   }
 
   /** Save a chat session to disk. */
@@ -54,6 +61,24 @@ export class SessionStore {
     try {
       const raw = await readFile(filePath, "utf-8");
       return JSON.parse(raw) as ChatSessionFile;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Save a full runtime session snapshot for durable resume. */
+  async saveRuntimeSession(id: string, session: Session): Promise<void> {
+    await this.ensureRuntimeDir();
+    const filePath = join(this.runtimeSessionsDir, `${id}.json`);
+    await writeFile(filePath, JSON.stringify(session, null, 2), "utf-8");
+  }
+
+  /** Load a full runtime session snapshot by durable run ID. */
+  async loadRuntimeSession(id: string): Promise<Session | null> {
+    const filePath = join(this.runtimeSessionsDir, `${id}.json`);
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      return JSON.parse(raw) as Session;
     } catch {
       return null;
     }

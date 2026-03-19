@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DanteCodeState, Session } from "@dantecode/config-types";
+import { DurableRunStore } from "@dantecode/core";
 import type { ReplState } from "./slash-commands.js";
 
 const {
@@ -124,6 +125,8 @@ function makeState(projectRoot: string): ReplState {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    pendingResumeRunId: null,
+    pendingExpectedWorkflow: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
@@ -271,5 +274,51 @@ describe("/party --autoforge", () => {
     expect(output).toContain("Party Autoforge Complete: PARTIAL");
     expect(output).toContain("scope violation");
     expect(mockMergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("surfaces markdown-backed workflow commands in help and activates them truthfully", async () => {
+    await mkdir(join(projectRoot, "commands"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "commands", "inferno.md"),
+      "---\nname: inferno\ndescription: Maximum workflow\n---\n\n# Inferno\nDo the biggest workflow.\n",
+      "utf-8",
+    );
+
+    const state = makeState(projectRoot);
+
+    const help = await routeSlashCommand("/help", state);
+    expect(help).toContain("/inferno");
+    expect(help.toLowerCase()).toContain("markdown");
+
+    const output = await routeSlashCommand("/inferno close the resume gap", state);
+    expect(output.toLowerCase()).toContain("markdown-backed");
+    expect(state.pendingAgentPrompt).toContain("/inferno");
+    expect(state.pendingExpectedWorkflow).toBe("inferno");
+  });
+
+  it("queues the latest paused durable run through /resume", async () => {
+    const state = makeState(projectRoot);
+    const store = new DurableRunStore(projectRoot);
+    const run = await store.initializeRun({
+      runId: "run-resume",
+      session: state.session,
+      prompt: "Fix the timeout flow",
+      workflow: "agent-loop",
+    });
+
+    await store.pauseRun(run.id, {
+      reason: "model_timeout",
+      session: state.session,
+      touchedFiles: ["src/app.ts"],
+      lastConfirmedStep: "Edited src/app.ts",
+      nextAction: "Run typecheck",
+      message: "Paused after timeout.",
+    });
+
+    const output = await routeSlashCommand("/resume", state);
+
+    expect(output).toContain("run-resume");
+    expect(state.pendingAgentPrompt).toBe("continue");
+    expect(state.pendingResumeRunId).toBe("run-resume");
   });
 });

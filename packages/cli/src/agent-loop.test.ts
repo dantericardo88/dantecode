@@ -12,6 +12,23 @@ import { resolve } from "node:path";
 
 // Mock generateText at the "ai" module level — ModelRouterImpl calls this internally.
 const mockGenerateText = vi.fn();
+const {
+  mockGetLatestWaitingRun,
+  mockLoadSessionSnapshot,
+  mockPauseRun,
+  mockCheckpointRun,
+  mockInitializeRun,
+  mockAppendEvidence,
+  mockLoadResumeHint,
+} = vi.hoisted(() => ({
+  mockGetLatestWaitingRun: vi.fn().mockResolvedValue(null),
+  mockLoadSessionSnapshot: vi.fn().mockResolvedValue(null),
+  mockPauseRun: vi.fn(),
+  mockCheckpointRun: vi.fn(),
+  mockInitializeRun: vi.fn(),
+  mockAppendEvidence: vi.fn(),
+  mockLoadResumeHint: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("ai", () => ({
   generateText: mockGenerateText,
@@ -104,11 +121,74 @@ vi.mock("@dantecode/core", () => {
       return null;
     }
     async save() {}
+    async saveRuntimeSession() {}
+    async loadRuntimeSession() {
+      return null;
+    }
+  }
+
+  class MockDurableRunStore {
+    constructor(_projectRoot: string) {}
+    async initializeRun(options: Record<string, unknown>) {
+      mockInitializeRun(options);
+      return {
+        id: (options.runId as string | undefined) ?? "durable-run-1",
+        projectRoot: "/tmp/test-project",
+        sessionId: "test-session",
+        prompt: String(options.prompt ?? ""),
+        workflow: (options.workflow as string | undefined) ?? "agent-loop",
+        status: "running",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        touchedFiles: [],
+        evidenceCount: 0,
+      };
+    }
+    async checkpoint(runId: string, payload: Record<string, unknown>) {
+      mockCheckpointRun(runId, payload);
+    }
+    async pauseRun(runId: string, payload: Record<string, unknown>) {
+      mockPauseRun(runId, payload);
+      return {
+        id: runId,
+        status: "waiting_user",
+        workflow: "agent-loop",
+        resumeHint: {
+          runId,
+          summary: "Paused after timeout",
+          lastConfirmedStep: "Read src/app.ts",
+          lastSuccessfulTool: "Read",
+          nextAction: "Retry from the last confirmed step.",
+          continueCommand: "continue",
+        },
+      };
+    }
+    async appendEvidence(runId: string, evidence: unknown) {
+      mockAppendEvidence(runId, evidence);
+    }
+    async completeRun() {}
+    async failRun() {}
+    async loadRun() {
+      return null;
+    }
+    async loadEvidence() {
+      return [];
+    }
+    async getLatestWaitingUserRun() {
+      return mockGetLatestWaitingRun();
+    }
+    async loadSessionSnapshot(runId: string) {
+      return mockLoadSessionSnapshot(runId);
+    }
+    async getResumeHint(runId: string) {
+      return mockLoadResumeHint(runId);
+    }
   }
 
   return {
     ModelRouterImpl: MockModelRouterImpl,
     SessionStore: MockSessionStore,
+    DurableRunStore: MockDurableRunStore,
     _mockGetRecentSummaries: mockGetRecentSummaries,
     appendAuditEvent: vi.fn().mockResolvedValue(undefined),
     shouldContinueLoop: vi.fn(() => true),
@@ -315,6 +395,9 @@ describe("runAgentLoop smoke tests", () => {
     vi.clearAllMocks();
     mockAnalyzeComplexityValue = 0.3;
     mockEscalateTier.mockReset();
+    mockGetLatestWaitingRun.mockResolvedValue(null);
+    mockLoadSessionSnapshot.mockResolvedValue(null);
+    mockLoadResumeHint.mockResolvedValue(null);
   });
 
   it("basic prompt produces response with no tool calls", async () => {
@@ -329,6 +412,59 @@ describe("runAgentLoop smoke tests", () => {
     expect(result.messages.length).toBeGreaterThanOrEqual(2);
     expect(result.messages.some((m) => m.role === "user")).toBe(true);
     expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  });
+
+  it("pauses after a repeated model timeout and resumes the latest paused run on continue", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "app", isError: false });
+    mockGenerateText.mockRejectedValueOnce(new Error("Model timed out"));
+    mockGenerateText.mockRejectedValueOnce(new Error("Model timed out"));
+
+    const pausedSession = makeSession();
+    const firstRun = await runAgentLoop("/magic fix resume", pausedSession, makeConfig());
+
+    expect(mockPauseRun).toHaveBeenCalledWith(
+      "durable-run-1",
+      expect.objectContaining({ reason: "model_timeout" }),
+    );
+    expect(
+      firstRun.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("Execution paused"),
+      ),
+    ).toBe(true);
+
+    mockGetLatestWaitingRun.mockResolvedValue({
+      id: "durable-run-1",
+      status: "waiting_user",
+      workflow: "magic",
+    });
+    mockLoadResumeHint.mockResolvedValue({
+      runId: "durable-run-1",
+      summary: "Paused after timeout",
+      lastConfirmedStep: "Read src/app.ts",
+      lastSuccessfulTool: "Read",
+      nextAction: "Retry from the last confirmed step.",
+      continueCommand: "continue",
+    });
+    mockLoadSessionSnapshot.mockResolvedValue(firstRun);
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Resumed successfully.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("continue", makeSession(), makeConfig());
+
+    expect(mockLoadSessionSnapshot).toHaveBeenCalledWith("durable-run-1");
+    const resumeCall = mockGenerateText.mock.calls[mockGenerateText.mock.calls.length - 1]![0];
+    const messageText = resumeCall.messages.map((m: { content: string }) => m.content).join("\n");
+    expect(messageText).toContain("Resuming durable run durable-run-1");
+    expect(messageText).toContain("Retry from the last confirmed step.");
   });
 
   it("extracts and dispatches tool calls from model response", async () => {

@@ -122,6 +122,74 @@ export interface Session {
   todoList: TodoItem[];
 }
 
+/** Durable execution status for long-running agent workflows. */
+export type DurableRunStatus =
+  | "running"
+  | "waiting_user"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/** Why a durable run paused instead of completing. */
+export type PauseReason =
+  | "model_timeout"
+  | "tool_timeout"
+  | "verification_failed"
+  | "recoverable_error"
+  | "user_input_required"
+  | "process_restart";
+
+/** Confirmed execution fact captured in the durable evidence ledger. */
+export interface ExecutionEvidence {
+  id: string;
+  kind:
+    | "file_write"
+    | "verification_pass"
+    | "source_fetch"
+    | "agent_spawn"
+    | "commit"
+    | "blocked_action"
+    | "tool_result";
+  success: boolean;
+  label: string;
+  timestamp: string;
+  filePath?: string;
+  command?: string;
+  sourceUrl?: string;
+  agentId?: string;
+  details?: Record<string, unknown>;
+}
+
+/** User-facing resume guidance persisted with a durable run. */
+export interface ResumeHint {
+  runId: string;
+  summary: string;
+  lastConfirmedStep?: string;
+  lastSuccessfulTool?: string;
+  nextAction: string;
+  continueCommand: string;
+}
+
+/** Persisted durable execution state for resumable workflows. */
+export interface DurableRun {
+  id: string;
+  projectRoot: string;
+  sessionId: string;
+  prompt: string;
+  workflow: string;
+  status: DurableRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  pauseReason?: PauseReason;
+  touchedFiles: string[];
+  evidenceCount: number;
+  lastConfirmedStep?: string;
+  lastSuccessfulTool?: string;
+  nextAction?: string;
+  resumeHint?: ResumeHint;
+  legacySource?: "autoforge_checkpoint" | "background_task";
+}
+
 // ----------------------------------------------------------------------------
 // PDSE Scoring Types
 // ----------------------------------------------------------------------------

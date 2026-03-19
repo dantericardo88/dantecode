@@ -16,6 +16,7 @@ import {
   MultiAgent,
   ModelRouterImpl,
   SessionStore,
+  DurableRunStore,
   AutoforgeCheckpointManager,
   TaskCircuitBreaker,
   RecoveryEngine,
@@ -54,6 +55,10 @@ import type {
 } from "@dantecode/config-types";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { runAgentLoop } from "./agent-loop.js";
+import {
+  loadSlashCommandRegistry,
+  type NativeSlashCommandDefinition,
+} from "./command-registry.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -87,6 +92,10 @@ export interface ReplState {
   recentToolCalls: string[];
   /** When set by a slash command, processInput will feed this prompt to the agent loop. */
   pendingAgentPrompt: string | null;
+  /** Pending durable run ID to resume on the next agent loop turn. */
+  pendingResumeRunId: string | null;
+  /** Expected workflow name for the next agent loop turn. */
+  pendingExpectedWorkflow: string | null;
   /** Active abort controller for cancelling streaming generation via Ctrl+C. */
   activeAbortController: AbortController | null;
   /** Live sandbox bridge when sandbox mode is enabled. */
@@ -219,11 +228,15 @@ async function ensureBackgroundRunner(state: ReplState) {
 // Command Implementations
 // ----------------------------------------------------------------------------
 
-async function helpCommand(_args: string, _state: ReplState): Promise<string> {
+async function helpCommand(_args: string, state: ReplState): Promise<string> {
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
   const lines = ["", `${BOLD}Available Slash Commands${RESET}`, ""];
 
-  for (const cmd of SLASH_COMMANDS) {
-    lines.push(`  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`);
+  for (const cmd of registry) {
+    const sourceLabel = cmd.source === "native" ? "native" : "markdown";
+    lines.push(
+      `  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description} [${sourceLabel}]${RESET}`,
+    );
   }
 
   lines.push("");
@@ -231,6 +244,45 @@ async function helpCommand(_args: string, _state: ReplState): Promise<string> {
     `${DIM}Type a command with / prefix, or type naturally to chat with the agent.${RESET}`,
   );
   lines.push("");
+
+  return lines.join("\n");
+}
+
+async function resumeCommand(args: string, state: ReplState): Promise<string> {
+  const requestedRunId = args.trim() || undefined;
+  const store = new DurableRunStore(state.projectRoot);
+  const run = requestedRunId
+    ? await store.loadRun(requestedRunId)
+    : await store.getLatestWaitingUserRun();
+
+  if (!run) {
+    return `${YELLOW}No paused durable run found.${RESET}`;
+  }
+
+  state.pendingAgentPrompt = "continue";
+  state.pendingResumeRunId = run.id;
+  state.pendingExpectedWorkflow = run.workflow;
+
+  const hint = await store.getResumeHint(run.id);
+  const nextAction = hint?.nextAction ?? run.nextAction ?? "Resume from the last checkpoint.";
+  return `${GREEN}Queued durable run ${run.id} for resume.${RESET}\n${DIM}${nextAction}${RESET}`;
+}
+
+async function runsCommand(_args: string, state: ReplState): Promise<string> {
+  const store = new DurableRunStore(state.projectRoot);
+  const runs = await store.listRuns();
+
+  if (runs.length === 0) {
+    return `${DIM}No durable runs found for this project.${RESET}`;
+  }
+
+  const lines = [`${BOLD}Durable Runs${RESET}`, ""];
+  for (const run of runs) {
+    const source = run.legacySource ? ` (${run.legacySource})` : "";
+    lines.push(
+      `  ${CYAN}${run.id}${RESET} ${run.status.padEnd(12)} ${DIM}${run.workflow}${source}${RESET}`,
+    );
+  }
 
   return lines.join("\n");
 }
@@ -902,6 +954,7 @@ Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. V
     : `Execute the /oss pipeline now. Start with Phase 0 — scan this project to understand what it does, then search the internet for the most relevant OSS tools in the same domain, clone them, analyze, harvest the best patterns, implement them, and run autoforge to verify everything passes.`;
 
   state.pendingAgentPrompt = prompt;
+  state.pendingExpectedWorkflow = "oss";
 
   return `${GREEN}${BOLD}OSS Research Pipeline activated${RESET}\n${DIM}Scanning project → searching internet → cloning repos → analyzing → implementing → autoforging${RESET}`;
 }
@@ -945,6 +998,7 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   if (selfImprove && !state.lastEditFile && state.session.activeFiles.length === 0) {
     state.pendingAgentPrompt =
       "/autoforge --self-improve improve codebase reliability from the repository root. Run repo-root typecheck, lint, and test after every major edit batch and stop on red.";
+    state.pendingExpectedWorkflow = "autoforge";
     return `${GREEN}${BOLD}Self-improvement autoforge queued.${RESET}\n${DIM}The next agent loop will run with explicit protected-write access.${RESET}`;
   }
 
@@ -2332,6 +2386,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: autoforgeCommand,
   },
   {
+    name: "resume",
+    description: "Queue a paused durable run for continuation",
+    usage: "/resume [runId]",
+    handler: resumeCommand,
+  },
+  {
+    name: "runs",
+    description: "List durable runs and legacy resumable sessions",
+    usage: "/runs",
+    handler: runsCommand,
+  },
+  {
     name: "oss",
     description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
     usage: "/oss [focus-area]",
@@ -2375,6 +2441,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
+function getNativeCommandDefinitions(): NativeSlashCommandDefinition[] {
+  return SLASH_COMMANDS.map((command) => ({
+    name: command.name,
+    description: command.description,
+    usage: command.usage,
+  }));
+}
+
 // ----------------------------------------------------------------------------
 // Public API
 // ----------------------------------------------------------------------------
@@ -2400,12 +2474,24 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
       : withoutSlash.slice(0, spaceIndex).toLowerCase();
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
-  const command = SLASH_COMMANDS.find((c) => c.name === commandName);
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
+  const command = registry.find((c) => c.name === commandName);
   if (!command) {
     return `${RED}Unknown command: /${commandName}${RESET}\n${DIM}Type /help to see available commands.${RESET}`;
   }
 
-  return command.handler(args, state);
+  if (command.source === "markdown") {
+    state.pendingAgentPrompt = trimmed;
+    state.pendingExpectedWorkflow = command.name;
+    return `${GREEN}Activated markdown-backed workflow /${command.name}.${RESET}\n${DIM}Queued for agent execution using the synced command file.${RESET}`;
+  }
+
+  const nativeCommand = SLASH_COMMANDS.find((c) => c.name === commandName);
+  if (!nativeCommand) {
+    return `${RED}Native command handler missing for /${commandName}.${RESET}`;
+  }
+
+  return nativeCommand.handler(args, state);
 }
 
 /**

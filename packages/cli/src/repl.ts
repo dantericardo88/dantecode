@@ -89,6 +89,8 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.silent = replState.silent;
   agentConfig.skillActive = replState.activeSkill !== null;
   agentConfig.waveState = replState.waveState ?? undefined;
+  agentConfig.resumeFrom = replState.pendingResumeRunId ?? undefined;
+  agentConfig.expectedWorkflow = replState.pendingExpectedWorkflow ?? undefined;
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
@@ -150,6 +152,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    pendingResumeRunId: null,
+    pendingExpectedWorkflow: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
@@ -280,6 +284,8 @@ async function processInput(
         replState.activeAbortController = new AbortController();
         agentConfig.abortSignal = replState.activeAbortController.signal;
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
+        replState.pendingResumeRunId = null;
+        replState.pendingExpectedWorkflow = null;
         replState.activeAbortController = null;
       }
     } else {
@@ -288,6 +294,8 @@ async function processInput(
       replState.activeAbortController = new AbortController();
       agentConfig.abortSignal = replState.activeAbortController.signal;
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
+      replState.pendingResumeRunId = null;
+      replState.pendingExpectedWorkflow = null;
       replState.activeAbortController = null;
     }
   } catch (err: unknown) {
