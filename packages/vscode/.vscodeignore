@@ -1,8 +1,10 @@
-.turbo/
-src/
-node_modules/
-*.ts
-!dist/**
-tsconfig.json
-.gitignore
-**/dist/**\n**/node_modules/**\npackages/**/coverage/**
+# Whitelist approach: exclude everything, then re-include what's needed.
+# (tsup bundles all workspace deps into dist/extension.js — no node_modules needed)
+**
+
+!dist/
+!dist/extension.js
+!assets/
+!assets/**
+!package.json
+!LICENSE.txt
