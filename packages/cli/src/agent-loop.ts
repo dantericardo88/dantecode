@@ -28,6 +28,8 @@ import {
   ApproachMemory,
   formatApproachesForPrompt,
   globalToolScheduler,
+  adaptToolResult,
+  formatEvidenceSummary,
 } from "@dantecode/core";
 import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
 import { buildWorkflowInvocationPrompt } from "@dantecode/core";
@@ -2106,6 +2108,7 @@ export async function runAgentLoop(
         activeSandboxBridge &&
         typeof toolCall.input["command"] === "string";
 
+      const _toolStartMs = Date.now();
       let result: { content: string; isError: boolean };
       if (isMCPTool) {
         try {
@@ -2186,6 +2189,10 @@ export async function runAgentLoop(
           : `Executed ${toolCall.name}${lastSuccessfulToolResult ? `: ${lastSuccessfulToolResult}` : ""}`;
       }
 
+      // DTR Phase 2: Wrap raw result with structured evidence for verbose logging.
+      const dtrResult = adaptToolResult(toolCall.name, toolCall.input, result, _toolStartMs);
+      const evidenceSuffix = config.verbose ? formatEvidenceSummary(dtrResult) : "";
+
       // Show result summary (suppressed in silent mode)
       if (!config.silent) {
         if (result.isError) {
@@ -2195,7 +2202,10 @@ export async function runAgentLoop(
           }
         } else {
           const preview = result.content.split("\n")[0] || "(success)";
-          process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
+          process.stdout.write(
+            `${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}` +
+            (evidenceSuffix ? ` ${DIM}${evidenceSuffix}${RESET}` : "") + "\n",
+          );
         }
       }
 

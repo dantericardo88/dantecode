@@ -746,6 +746,33 @@ export type {
   CommandPaletteOptions,
 } from "./command-palette.js";
 
+// ─── DTR Phase 2: Tool Adapters ─────────────────────────────────────────────
+
+export {
+  wrapToolResult,
+  adaptReadResult,
+  adaptWriteResult,
+  adaptBashResult,
+  adaptWebResult,
+  adaptSubAgentResult,
+  adaptToolResult,
+  formatEvidenceSummary,
+} from "./tool-runtime/tool-adapters.js";
+export type { RawToolResult } from "./tool-runtime/tool-adapters.js";
+
+// ─── DTR Phase 5: Model Capability Registry ──────────────────────────────────
+
+export {
+  BUILTIN_CAPABILITY_PROFILES,
+  ModelCapabilityRegistry,
+  globalModelRegistry,
+} from "./model-runtime/model-capabilities.js";
+export type {
+  ModelCapabilityProfile,
+  ProviderKind,
+  RetryProfile,
+} from "./model-runtime/model-capabilities.js";
+
 // ─── DTR Phase 1: Deterministic Tool Runtime ────────────────────────────────
 
 export {
