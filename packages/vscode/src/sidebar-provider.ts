@@ -612,6 +612,83 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       systemParts.push("");
     }
 
+    // Skill execution: inject tool recipes and execution protocol when a skill is active.
+    // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations that
+    // Claude Code handles natively (WebSearch, WebFetch, Agent) using Bash equivalents.
+    if (this.activeSkill) {
+      systemParts.push("## Tool Recipes for Skill Execution");
+      systemParts.push("");
+      systemParts.push(
+        "When executing skills, you may need capabilities beyond the basic tool set.",
+      );
+      systemParts.push(
+        "Use Bash to access these — do NOT skip steps because a dedicated tool is missing.",
+      );
+      systemParts.push("");
+      systemParts.push("### Searching GitHub");
+      systemParts.push("```bash");
+      systemParts.push(
+        'gh search repos "react state management" --limit 10 --json name,url,description,stargazersCount',
+      );
+      systemParts.push("```");
+      systemParts.push(
+        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+      );
+      systemParts.push("");
+      systemParts.push("### Fetching Web Content");
+      systemParts.push("```bash");
+      systemParts.push("curl -sL 'https://example.com/page' | head -200");
+      systemParts.push("```");
+      systemParts.push("");
+      systemParts.push("### Cloning and Analyzing Repositories");
+      systemParts.push("```bash");
+      systemParts.push(
+        "git clone --depth 1 'https://github.com/org/repo.git' /tmp/oss-scan/reponame",
+      );
+      systemParts.push("```");
+      systemParts.push("Then use Glob, Grep, and Read to analyze the cloned repository.");
+      systemParts.push("");
+      systemParts.push("### GitHub API Queries");
+      systemParts.push("```bash");
+      systemParts.push("gh api repos/owner/repo --jq '.stargazers_count, .license.spdx_id'");
+      systemParts.push(
+        "gh api 'search/repositories?q=topic:state-management+language:typescript&sort=stars' --jq '.items[:5] | .[].full_name'",
+      );
+      systemParts.push("```");
+      systemParts.push("");
+      systemParts.push("## Skill Execution Protocol");
+      systemParts.push("");
+      systemParts.push(
+        "You are executing a multi-step skill workflow. Follow this protocol STRICTLY:",
+      );
+      systemParts.push("");
+      systemParts.push(
+        "1. **DECOMPOSE FIRST**: Use TodoWrite to create a numbered checklist of all steps before doing any work.",
+      );
+      systemParts.push(
+        "2. **READ BEFORE EDIT**: Always Read a file before modifying it. Never edit blind.",
+      );
+      systemParts.push(
+        "3. **ONE STEP AT A TIME**: Complete one step fully, verify it, then advance to the next.",
+      );
+      systemParts.push(
+        "4. **EVERY RESPONSE = TOOL CALLS**: Never respond with only text/narration. Every response MUST include at least one tool call.",
+      );
+      systemParts.push(
+        "5. **VERIFY EACH STEP**: After completing a step, verify with a concrete check (Read the file, run a test, check git status).",
+      );
+      systemParts.push(
+        "6. **UPDATE PROGRESS**: Mark each TodoWrite item as completed before starting the next.",
+      );
+      systemParts.push(
+        "7. **USE BASH FOR EXTERNAL OPS**: GitHub search, web fetch, repo cloning — use Bash with the recipes above.",
+      );
+      systemParts.push(
+        "8. **NEVER CONFABULATE**: Only claim a file was modified AFTER a successful Edit/Write tool result. Only claim tests pass AFTER a successful Bash test result.",
+      );
+      systemParts.push("");
+    }
+
     // Git commit attribution — use the active model name dynamically
     const modelLabel = this.currentModel.replace(/^[^/]+\//, ""); // strip provider prefix
     systemParts.push("## Git Commits");

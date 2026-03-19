@@ -621,11 +621,35 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
     return `${RED}Skill not found: ${skillName}${RESET}`;
   }
 
-  // Inject the skill instructions into the session as a system message
+  // Inject the skill instructions into the session as a system message.
+  // Include a structured execution preamble that forces step-by-step execution
+  // and teaches tool usage patterns — critical for non-Claude models (Grok, GPT)
+  // that otherwise confabulate or skip steps.
+  const skillPreamble = [
+    `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}`,
+    "",
+    "## MANDATORY: Step-by-Step Execution",
+    "",
+    "Before reading the skill instructions below, understand these ABSOLUTE rules:",
+    "",
+    "1. Your FIRST action must be: use TodoWrite to decompose this skill into numbered steps.",
+    "2. Then execute each step ONE AT A TIME with real tool calls.",
+    "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
+    "4. After each step, verify your work (Read the file, run a check, etc.).",
+    "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+    "6. For web content: `curl -sL 'url' | head -200`",
+    "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
+    "8. Mark each TodoWrite step completed as you finish it.",
+    "",
+    "---",
+    "",
+    skill.instructions,
+  ].join("\n");
+
   state.session.messages.push({
     id: randomUUID(),
     role: "system",
-    content: `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}\n\n${skill.instructions}`,
+    content: skillPreamble,
     timestamp: new Date().toISOString(),
   });
 

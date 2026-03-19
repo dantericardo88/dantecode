@@ -37,6 +37,7 @@ vi.mock("@dantecode/core", () => {
       const result = await mockGenerateText({
         model: { modelId: "mock" },
         messages,
+        system: _options?.system,
       });
       return result.text;
     }
@@ -48,6 +49,7 @@ vi.mock("@dantecode/core", () => {
       const result = await mockGenerateText({
         model: { modelId: "mock" },
         messages,
+        system: _options?.system,
       });
       const text = result.text;
       return {
@@ -1604,5 +1606,72 @@ describe("Universal skill completion (skillActive)", () => {
         m.role === "user" && m.content.includes("Write BLOCKED"),
     );
     expect(blockMsg).toBeDefined();
+  });
+
+  // ---- Skill execution protocol: tool recipes injected when skillActive ----
+
+  it("injects tool recipes and execution protocol into system prompt when skillActive is true", async () => {
+    // Single response, no tool calls — just check the system prompt
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Ready to execute the skill.",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("do the thing", session, makeConfig({ skillActive: true }));
+
+    // The system prompt is passed as the `system` option to generate/stream
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    expect(systemPrompt).toBeDefined();
+    // Check specific tool recipes are present
+    expect(systemPrompt).toContain("Tool Recipes for Skill Execution");
+    expect(systemPrompt).toContain("gh search repos");
+    expect(systemPrompt).toContain("curl -sL");
+    expect(systemPrompt).toContain("git clone --depth 1");
+    expect(systemPrompt).toContain("gh api");
+    // Check execution protocol is present
+    expect(systemPrompt).toContain("Skill Execution Protocol");
+    expect(systemPrompt).toContain("DECOMPOSE FIRST");
+    expect(systemPrompt).toContain("EVERY RESPONSE = TOOL CALLS");
+    expect(systemPrompt).toContain("NEVER CONFABULATE");
+  });
+
+  it("does NOT inject tool recipes when skillActive is false", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Just a normal response.",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("hello", session, makeConfig());
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    expect(systemPrompt).not.toContain("Tool Recipes for Skill Execution");
+  });
+
+  it("elevates round budget to 50 when skillActive is true", async () => {
+    // Respond with tool calls for many rounds to test the budget
+    // Set up enough rounds that it would exceed the default 15
+    for (let i = 0; i < 20; i++) {
+      mockGenerateText.mockResolvedValueOnce({
+        text: `Step ${i + 1}.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
+        usage: { totalTokens: 50 },
+      });
+      mockExecuteTool.mockResolvedValueOnce({ content: `content of file${i}`, isError: false });
+    }
+    // Final response with no tool calls to end the loop
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All done.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("run the skill", session, makeConfig({ skillActive: true }));
+
+    // Should have made more than 15 generate calls (the default budget)
+    // because skillActive elevates the budget to 50
+    expect(mockGenerateText.mock.calls.length).toBeGreaterThan(15);
   });
 });
