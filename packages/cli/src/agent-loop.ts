@@ -28,6 +28,8 @@ import {
   ApproachMemory,
   formatApproachesForPrompt,
   globalToolScheduler,
+  globalArtifactStore,
+  globalExecutionPolicy,
   adaptToolResult,
   formatEvidenceSummary,
 } from "@dantecode/core";
@@ -308,6 +310,17 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     "- After `Write <file>`: the SUCCESS result confirms the file exists. If you see ERROR, do NOT proceed as if it succeeded.",
     "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
     "",
+    "## Artifact Acquisition Tools",
+    "",
+    "Prefer these over `Bash curl`/`Bash wget` when downloading files — they auto-verify the download, compute SHA-256, and register a tracked ArtifactRecord:",
+    "",
+    "- **AcquireUrl** — download any URL to a local file with size check + hash:",
+    '  `{"name":"AcquireUrl","input":{"url":"https://example.com/file.tar.gz","dest":"external/file.tar.gz"}}`',
+    "- **AcquireArchive** — download AND extract .tar.gz / .zip / .tar.bz2 archives, verifies file count:",
+    '  `{"name":"AcquireArchive","input":{"url":"https://example.com/repo.tar.gz","extract_to":"external/repo","strip_components":1}}`',
+    "",
+    "Both tools return an ArtifactID you can reference in subsequent steps. If either returns isError=true, do NOT proceed as if the file exists.",
+    "",
     "JSON TOOL CALL FORMAT — malformed JSON causes SILENT DROPS (file never written, command never ran):",
     "- Double quotes inside string values MUST be escaped: \\\"",
     "- Backslashes MUST be escaped: \\\\",
@@ -587,7 +600,7 @@ function extractToolCalls(text: string): {
 
   // Pattern 2: JSON blocks with tool call structure
   const jsonBlockPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite|WebSearch|WebFetch|SubAgent|GitHubSearch)"[\s\S]*?\})\s*\n```/g;
+    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite|WebSearch|WebFetch|SubAgent|GitHubSearch|AcquireUrl|AcquireArchive|GitHubOps)"[\s\S]*?\})\s*\n```/g;
 
   while ((match = jsonBlockPattern.exec(text)) !== null) {
     const parsed = parseToolCallPayload(match[1]!);
@@ -1348,6 +1361,8 @@ export async function runAgentLoop(
   let executionNudges = 0;
   const MAX_EXECUTION_NUDGES = 2;
   let executedToolsThisTurn = 0;
+  // ExecutionPolicy (DTR Phase 6): track completed tool names for dependency gating
+  const completedToolsThisTurn = new Set<string>();
   // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
   let pipelineContinuationNudges = 0;
   // CLI auto-continuation: refill round budget when exhausted mid-pipeline
@@ -2037,6 +2052,28 @@ export async function runAgentLoop(
         }
       }
 
+      // DTR Phase 6: ExecutionPolicy dependency gate — block tools whose declared
+      // dependsOn tools have not yet completed in this turn.
+      if (isPipelineWorkflow) {
+        const depCheck = globalExecutionPolicy.dependenciesSatisfied(
+          toolCall.name,
+          completedToolsThisTurn,
+        );
+        if (!depCheck.satisfied) {
+          const missing = depCheck.missing!.join(", ");
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${RED}[exec-policy] BLOCKED ${toolCall.name} — missing deps: ${missing}${RESET}\n`,
+            );
+          }
+          toolResults.push(
+            `SYSTEM: ${toolCall.name} is blocked — required tools have not completed yet: ${missing}. ` +
+            `Run the required tools first, then retry ${toolCall.name}.`,
+          );
+          continue;
+        }
+      }
+
       // Premature commit blocker: block GitCommit/GitPush when no files have been
       // modified this session. Grok models confabulate file edits in their narrative
       // text, then try to commit non-existent changes.
@@ -2239,6 +2276,8 @@ export async function runAgentLoop(
         } catch {
           // Non-fatal: DTR verification errors must not interrupt execution
         }
+        // DTR Phase 6: mark tool as completed for dependency gating
+        completedToolsThisTurn.add(toolCall.name);
       }
 
       // Record the tool call in the session
@@ -2639,6 +2678,15 @@ export async function runAgentLoop(
 
   // Update session timestamp
   session.updatedAt = new Date().toISOString();
+
+  // Persist acquired artifacts (downloads, archives) alongside the durable run record
+  const acquiredArtifacts = globalArtifactStore.getByKind("download")
+    .concat(globalArtifactStore.getByKind("archive_extract"));
+  if (acquiredArtifacts.length > 0) {
+    try {
+      await durableRunStore.persistArtifacts(durableRun.id, acquiredArtifacts);
+    } catch { /* Non-fatal — artifact log is informational */ }
+  }
 
   await durableRunStore.completeRun(durableRun.id, {
     session,
