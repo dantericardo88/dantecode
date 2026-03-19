@@ -295,6 +295,22 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     "5. Be precise with file paths. Use the Glob tool to find files if unsure.",
     "6. Explain what you are doing and why.",
     "",
+    "## Tool Execution Protocol — Sequential Verification",
+    "",
+    "Tool calls in a single response execute ONE AT A TIME in order. Each result appears BEFORE the next tool runs.",
+    "",
+    "VERIFY BEFORE PROCEEDING — after any Bash command (git clone, npm install, mkdir), confirm it succeeded:",
+    "- After `git clone <url> <dir>`: use ListDir to verify `<dir>` exists before reading files inside it.",
+    "- After Bash commands that create directories/files: verify with ListDir before referencing them.",
+    "- After `Write <file>`: the SUCCESS result confirms the file exists. If you see ERROR, do NOT proceed as if it succeeded.",
+    "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
+    "",
+    "JSON TOOL CALL FORMAT — malformed JSON causes SILENT DROPS (file never written, command never ran):",
+    "- Double quotes inside string values MUST be escaped: \\\"",
+    "- Backslashes MUST be escaped: \\\\",
+    "- Real newlines inside string values MUST be \\n (not a literal newline character)",
+    "- Test JSON mentally: every { must close with }, every \" must be paired.",
+    "",
   ];
 
   // Skill execution: when a skill is active, inject either the full Claude Workflow
@@ -538,8 +554,13 @@ function parseToolCallPayload(
  *
  * Also handles JSON code blocks that look like tool calls.
  */
-function extractToolCalls(text: string): { cleanText: string; toolCalls: ExtractedToolCall[] } {
+function extractToolCalls(text: string): {
+  cleanText: string;
+  toolCalls: ExtractedToolCall[];
+  parseErrors: string[]; // raw content of malformed <tool_use> blocks
+} {
   const toolCalls: ExtractedToolCall[] = [];
+  const parseErrors: string[] = [];
   let cleanText = text;
 
   // Pattern 1: XML-style tool use blocks
@@ -554,6 +575,9 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
         name: parsed.name,
         input: parsed.input,
       });
+    } else {
+      // Capture malformed blocks so the execution loop can report them to the model
+      parseErrors.push(match[1]!.slice(0, 300).trim());
     }
     cleanText = cleanText.replace(match[0], "");
   }
@@ -574,7 +598,7 @@ function extractToolCalls(text: string): { cleanText: string; toolCalls: Extract
     }
   }
 
-  return { cleanText: cleanText.trim(), toolCalls };
+  return { cleanText: cleanText.trim(), toolCalls, parseErrors };
 }
 
 // ----------------------------------------------------------------------------
@@ -1460,6 +1484,7 @@ export async function runAgentLoop(
     // Generate response from model (streaming with tool calling support)
     let responseText = "";
     let toolCalls: ExtractedToolCall[] = [];
+    let toolCallParseErrors: string[] = []; // malformed <tool_use> blocks from this round
     let cleanText = "";
     try {
       const renderer = new StreamRenderer(!!config.silent);
@@ -1537,6 +1562,12 @@ export async function runAgentLoop(
         const extracted = extractToolCalls(responseText);
         cleanText = extracted.cleanText;
         toolCalls = extracted.toolCalls;
+        toolCallParseErrors = extracted.parseErrors;
+        if (extracted.parseErrors.length > 0 && !config.silent) {
+          process.stdout.write(
+            `${RED}[tool-parse-error] ${extracted.parseErrors.length} malformed <tool_use> block(s) — will report to model${RESET}\n`,
+          );
+        }
       }
 
       totalTokensUsed += responseText.length; // Approximate token count
@@ -1665,6 +1696,32 @@ export async function runAgentLoop(
 
     // If no tool calls, we're done with this turn
     if (toolCalls.length === 0) {
+      // Parse error nudge: if all <tool_use> blocks were malformed JSON, the model
+      // thinks it ran tools but NOTHING executed. Report the errors so the model
+      // can fix its JSON and retry — this prevents silent ENOENT in subsequent rounds.
+      if (toolCallParseErrors.length > 0) {
+        const errorSummary = toolCallParseErrors
+          .map((e, i) => `  Block ${i + 1}: ${e}`)
+          .join("\n");
+        messages.push({ role: "assistant" as const, content: responseText });
+        messages.push({
+          role: "user" as const,
+          content:
+            `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) contained malformed JSON and were NOT executed:\n${errorSummary}\n\n` +
+            `No files were written. No commands ran. REQUIRED: Fix the JSON and re-emit the tool call(s).\n` +
+            `Common fixes:\n` +
+            `  - Escape double quotes inside string values: " → \\"\n` +
+            `  - Escape backslashes: \\ → \\\\\n` +
+            `  - Escape newlines inside string values: use \\n not a real newline\n` +
+            `  - Avoid unescaped special chars in JSON string values`,
+        });
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${RED}[tool-parse-error] ${toolCallParseErrors.length} block(s) malformed — forcing retry${RESET}\n`,
+          );
+        }
+        continue;
+      }
       if (
         executedToolsThisTurn === 0 &&
         (promptRequestsToolExecution(durablePrompt) ||
@@ -1800,6 +1857,15 @@ export async function runAgentLoop(
 
     // Execute each tool call
     const toolResults: string[] = [];
+    // If some <tool_use> blocks were valid but others were malformed, report the
+    // malformed ones alongside valid tool results so the model can fix and retry.
+    if (toolCallParseErrors.length > 0) {
+      const errorSummary = toolCallParseErrors.map((e, i) => `  Block ${i + 1}: ${e}`).join("\n");
+      toolResults.push(
+        `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n` +
+        `Fix JSON escaping and re-emit those tool calls in your next response.`,
+      );
+    }
     const roundWrittenFiles: string[] = [];
     let roundMajorEditGateResult: MajorEditBatchGateResult | null = null;
     let toolIndex = 0;

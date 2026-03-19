@@ -549,6 +549,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "6. Do NOT make up file names, test counts, or progress percentages. If you haven't read or run something, say 'not verified'.",
       "7. When asked about progress, report ONLY what tool calls have actually confirmed. Everything else is 'pending' or 'unverified'.",
       "",
+      "## Tool Execution Protocol — Sequential Verification",
+      "Tool calls in a single response execute ONE AT A TIME in order. Each result appears BEFORE the next tool runs.",
+      "",
+      "VERIFY BEFORE PROCEEDING — after any Bash command (git clone, npm install, mkdir), confirm it succeeded:",
+      "- After `git clone <url> <dir>`: use ListDir to verify `<dir>` exists before reading files inside it.",
+      "- After `Bash` commands that create directories/files: verify with ListDir or Read before referencing them.",
+      "- After `Write <file>`: the SUCCESS result confirms the file exists. If you see an ERROR result, do NOT proceed as if it succeeded.",
+      "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
+      "",
+      "JSON TOOL CALL FORMAT — malformed JSON causes silent drops (file never written, command never ran):",
+      "- Double quotes inside string values MUST be escaped: \\\"",
+      "- Backslashes MUST be escaped: \\\\",
+      "- Real newlines inside string values MUST be \\n (not a literal newline character)",
+      "- Test JSON mentally: every { must close with }, every \" must be paired.",
+      "",
       "## Response Formatting",
       "Format every response for maximum readability in the VS Code sidebar:",
       "- Start with a brief **Summary** of what you did or will do.",
@@ -1084,7 +1099,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.updateStatusBar({ contextPercent: ctxUtil.percent });
 
         // Extract tool calls from the response
-        const { toolCalls } = extractToolCalls(fullResponse);
+        const { toolCalls, parseErrors: toolCallParseErrors } = extractToolCalls(fullResponse);
 
         // ---- Anti-confabulation: empty response circuit breaker ----
         if (fullResponse.trim().length === 0 && toolCalls.length === 0) {
@@ -1137,6 +1152,32 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
+          // Parse error nudge: ALL <tool_use> blocks were malformed JSON — nothing executed.
+          // The model thinks tools ran, but they were silently dropped, causing ENOENT in
+          // subsequent rounds (model references files it thinks it wrote but never did).
+          if (toolCallParseErrors.length > 0) {
+            const errorSummary = toolCallParseErrors
+              .map((e, i) => `  Block ${i + 1}: ${e}`)
+              .join("\n");
+            agentMessages.push({ role: "assistant", content: fullResponse });
+            agentMessages.push({
+              role: "user",
+              content:
+                `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n\n` +
+                `No files were written. No commands ran. Fix the JSON and re-emit:\n` +
+                `  - Escape double quotes inside values: " → \\"\n` +
+                `  - Escape backslashes: \\ → \\\\\n` +
+                `  - Escape newlines inside strings: use \\n not real newline`,
+            });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n\n---\n> **Tool parse error** — ${toolCallParseErrors.length} malformed \`<tool_use>\` block(s), nothing executed. Asking model to fix JSON.\n\n`,
+                partial: "",
+              },
+            });
+            continue;
+          }
           const isExecutionMode = agentMode === "yolo" || agentMode === "build";
           const needsExecutionNudge =
             isExecutionMode &&
@@ -1259,6 +1300,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // so tool execution output is visible in the chat in real-time
 
         const toolResultParts: string[] = [];
+        // Report malformed blocks alongside valid tool results so model can fix and retry.
+        if (toolCallParseErrors.length > 0) {
+          const errorSummary = toolCallParseErrors
+            .map((e, i) => `  Block ${i + 1}: ${e}`)
+            .join("\n");
+          toolResultParts.push(
+            `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n` +
+            `Fix JSON escaping and re-emit those tool calls in your next response.`,
+          );
+        }
 
         for (let ti = 0; ti < toolCalls.length; ti++) {
           executedToolsThisTurn++;
