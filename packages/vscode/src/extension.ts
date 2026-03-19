@@ -663,9 +663,17 @@ async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void
       name: "DanteCode Self-Update",
       cwd: installContext.repoRoot,
     });
-    terminal.sendText("node packages/cli/dist/index.js self-update --verbose");
+    // Auto-commit any local changes before self-update (self-update refuses on dirty repo).
+    // Stage tracked modifications, commit if anything changed, push, then update.
+    const autoCommitAndUpdate = [
+      `git add -u`,
+      `git diff --cached --quiet || git commit -m "chore: auto-snapshot before self-update"`,
+      `git push origin HEAD`,
+      `node packages/cli/dist/index.js self-update --verbose`,
+    ].join(" && ");
+    terminal.sendText(autoCommitAndUpdate);
     terminal.show();
-    void vscode.window.showInformationMessage("DanteCode: Repo self-update started in terminal");
+    void vscode.window.showInformationMessage("DanteCode: Committing, pushing, and self-updating…");
     return;
   }
 

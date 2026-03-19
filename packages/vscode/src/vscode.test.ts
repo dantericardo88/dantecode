@@ -1519,10 +1519,13 @@ describe("VS Code Extension", () => {
       const terminal = (vscode.window.createTerminal as ReturnType<typeof vi.fn>).mock.results[0]
         ?.value as { sendText: (value: string) => void; show: () => void };
       expect(terminal.sendText).toHaveBeenCalledWith(
-        "node packages/cli/dist/index.js self-update --verbose",
+        expect.stringContaining("git add -u"),
+      );
+      expect(terminal.sendText).toHaveBeenCalledWith(
+        expect.stringContaining("node packages/cli/dist/index.js self-update --verbose"),
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        "DanteCode: Repo self-update started in terminal",
+        "DanteCode: Committing, pushing, and self-updating…",
       );
     });
 
