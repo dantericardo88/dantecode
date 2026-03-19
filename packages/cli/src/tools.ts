@@ -12,6 +12,8 @@ import {
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
   resolvePreferredShell,
+  acquireUrl,
+  acquireArchive,
 } from "@dantecode/core";
 import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
 import {
@@ -95,7 +97,9 @@ export type ToolName =
   | "WebFetch"
   | "SubAgent"
   | "GitHubSearch"
-  | "GitHubOps";
+  | "GitHubOps"
+  | "AcquireUrl"
+  | "AcquireArchive";
 
 // ----------------------------------------------------------------------------
 // Path Resolution
@@ -1628,6 +1632,30 @@ export async function executeTool(
     case "GitHubOps":
       result = await toolGitHubOps(input, projectRoot);
       break;
+    case "AcquireUrl": {
+      const acquireResult = await acquireUrl({
+        url: input["url"] as string,
+        dest: input["dest"] as string,
+        projectRoot,
+        minSizeBytes: typeof input["min_size_bytes"] === "number" ? input["min_size_bytes"] : undefined,
+        overwrite: input["overwrite"] === true,
+        timeoutMs: typeof input["timeout_ms"] === "number" ? input["timeout_ms"] : undefined,
+      });
+      result = { content: acquireResult.content, isError: acquireResult.isError };
+      break;
+    }
+    case "AcquireArchive": {
+      const archiveResult = await acquireArchive({
+        url: input["url"] as string,
+        extractTo: input["extract_to"] as string,
+        projectRoot,
+        stripComponents: typeof input["strip_components"] === "number" ? input["strip_components"] : undefined,
+        overwrite: input["overwrite"] === true,
+        timeoutMs: typeof input["timeout_ms"] === "number" ? input["timeout_ms"] : undefined,
+      });
+      result = { content: archiveResult.content, isError: archiveResult.isError };
+      break;
+    }
     default:
       result = { content: `Unknown tool: ${name}`, isError: true };
   }

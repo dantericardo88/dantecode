@@ -243,6 +243,52 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
           .describe("Run in an isolated git worktree to prevent file conflicts with other agents (default: false)"),
       }),
     },
+
+    AcquireUrl: {
+      description:
+        "Download a file from a URL to a local path. Verifies the download (size check, SHA-256 hash), registers it as a tracked artifact, and returns the local path. Use instead of `curl` or `wget` in Bash for reliable, verified downloads.",
+      parameters: z.object({
+        url: z.string().describe("The URL to download (must be HTTP or HTTPS)"),
+        dest: z
+          .string()
+          .describe("Destination file path (absolute or relative to project root)"),
+        min_size_bytes: z
+          .number()
+          .optional()
+          .describe("Minimum expected size in bytes — rejects error/empty responses (default: 64)"),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe("Overwrite dest if it already exists (default: false)"),
+        timeout_ms: z
+          .number()
+          .optional()
+          .describe("Download timeout in milliseconds (default: 120000)"),
+      }),
+    },
+
+    AcquireArchive: {
+      description:
+        "Download an archive (.tar.gz, .tgz, .zip, .tar.bz2) from a URL and extract it to a local directory. Verifies extraction produced files. Registers both the archive and extracted directory as tracked artifacts. Use for cloning OSS repositories without git when a tarball/zip is available.",
+      parameters: z.object({
+        url: z.string().describe("The URL of the archive to download (must be HTTP or HTTPS)"),
+        extract_to: z
+          .string()
+          .describe("Directory to extract the archive into (absolute or relative to project root)"),
+        strip_components: z
+          .number()
+          .optional()
+          .describe("Number of leading path components to strip during extraction (default: 0). Use 1 to skip the top-level folder inside the archive."),
+        overwrite: z
+          .boolean()
+          .optional()
+          .describe("Overwrite extract_to if it already exists (default: false)"),
+        timeout_ms: z
+          .number()
+          .optional()
+          .describe("Download timeout in milliseconds (default: 120000)"),
+      }),
+    },
   };
 
   // Merge MCP tools when available

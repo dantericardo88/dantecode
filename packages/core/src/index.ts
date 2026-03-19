@@ -746,6 +746,26 @@ export type {
   CommandPaletteOptions,
 } from "./command-palette.js";
 
+// ─── DTR Phase 3: Artifact Acquisition Tools ────────────────────────────────
+
+export { acquireUrl } from "./tool-runtime/acquire-url.js";
+export type { AcquireUrlOptions, AcquireUrlResult } from "./tool-runtime/acquire-url.js";
+
+export { acquireArchive } from "./tool-runtime/acquire-archive.js";
+export type { AcquireArchiveOptions, AcquireArchiveResult } from "./tool-runtime/acquire-archive.js";
+
+// ─── DTR Phase 6: Execution Policy ───────────────────────────────────────────
+
+export {
+  BUILTIN_TOOL_POLICIES,
+  ExecutionPolicyRegistry,
+  globalExecutionPolicy,
+} from "./tool-runtime/execution-policy.js";
+export type {
+  ExecutionClass,
+  ToolExecutionPolicy,
+} from "./tool-runtime/execution-policy.js";
+
 // ─── DTR Phase 2: Tool Adapters ─────────────────────────────────────────────
 
 export {

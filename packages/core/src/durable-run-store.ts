@@ -13,6 +13,7 @@ import type { AutoforgeCheckpointFile } from "./autoforge-checkpoint.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { EventSourcedCheckpointer } from "./checkpointer.js";
 import { SessionStore } from "./session-store.js";
+import type { ArtifactRecord } from "./tool-runtime/tool-call-types.js";
 
 interface InitializeDurableRunOptions {
   runId?: string;
@@ -35,6 +36,7 @@ interface DurableRunCheckpointPayload {
 const RUN_FILENAME = "run.json";
 const RESUME_FILENAME = "resume.json";
 const EVIDENCE_FILENAME = "evidence.json";
+const ARTIFACTS_FILENAME = "artifacts.json";
 
 export class DurableRunStore {
   private readonly runsDir: string;
@@ -411,6 +413,39 @@ export class DurableRunStore {
 
   private getEvidenceFilePath(runId: string): string {
     return join(this.getRunDir(runId), EVIDENCE_FILENAME);
+  }
+
+  private getArtifactsFilePath(runId: string): string {
+    return join(this.getRunDir(runId), ARTIFACTS_FILENAME);
+  }
+
+  // ─── DTR Phase 4: Artifact Persistence ───────────────────────────────────
+
+  /**
+   * Persist DTR ArtifactRecords alongside the run's evidence.
+   * Called by the agent loop after each successful Bash/Write/AcquireUrl/AcquireArchive.
+   * Non-destructive: merges with existing artifacts (deduplicates by id).
+   */
+  async persistArtifacts(runId: string, artifacts: ArtifactRecord[]): Promise<void> {
+    if (artifacts.length === 0) return;
+    try {
+      await this.ensureRunDir(runId);
+      const existing = await this.loadArtifacts(runId);
+      const existingIds = new Set(existing.map((a) => a.id));
+      const merged = [...existing, ...artifacts.filter((a) => !existingIds.has(a.id))];
+      await this.writeJson(this.getArtifactsFilePath(runId), merged);
+    } catch {
+      // Non-fatal: artifact persistence failures must not interrupt the session
+    }
+  }
+
+  /**
+   * Load persisted DTR ArtifactRecords for a run.
+   * Returns [] if no artifacts file exists (e.g., pre-DTR runs).
+   */
+  async loadArtifacts(runId: string): Promise<ArtifactRecord[]> {
+    const records = await this.readJson<ArtifactRecord[]>(this.getArtifactsFilePath(runId));
+    return records ?? [];
   }
 
   private async ensureRunDir(runId: string): Promise<void> {
