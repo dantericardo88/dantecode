@@ -91,6 +91,7 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.waveState = replState.waveState ?? undefined;
   agentConfig.resumeFrom = replState.pendingResumeRunId ?? undefined;
   agentConfig.expectedWorkflow = replState.pendingExpectedWorkflow ?? undefined;
+  agentConfig.workflowContext = replState.pendingWorkflowContext ?? undefined;
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
@@ -154,6 +155,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     pendingAgentPrompt: null,
     pendingResumeRunId: null,
     pendingExpectedWorkflow: null,
+    pendingWorkflowContext: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
@@ -286,6 +288,7 @@ async function processInput(
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
         replState.pendingResumeRunId = null;
         replState.pendingExpectedWorkflow = null;
+        replState.pendingWorkflowContext = null;
         replState.activeAbortController = null;
       }
     } else {
@@ -296,6 +299,7 @@ async function processInput(
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
       replState.pendingResumeRunId = null;
       replState.pendingExpectedWorkflow = null;
+      replState.pendingWorkflowContext = null;
       replState.activeAbortController = null;
     }
   } catch (err: unknown) {

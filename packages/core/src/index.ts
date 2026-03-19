@@ -336,6 +336,29 @@ export type {
   ResolvePreferredShellOptions,
 } from "./runtime-update.js";
 
+export {
+  WORKFLOW_CONTRACT_VERSION,
+  loadWorkflowCommand,
+  loadWorkflowCommands,
+  parseWorkflowCommand,
+  createWorkflowExecutionContext,
+  buildWorkflowInvocationPrompt,
+  summarizeWorkflowBlocked,
+  summarizeWorkflowCompleted,
+} from "./workflow-runtime.js";
+export type {
+  WorkflowContract,
+  WorkflowCommand,
+  WorkflowParseResult,
+  WorkflowExecutionContext,
+  WorkflowEvidenceEvent,
+  WorkflowExecutionMode,
+  WorkflowFailurePolicy,
+  WorkflowRollbackPolicy,
+  WorkflowWorktreePolicy,
+  WorkflowRunStatus,
+} from "./workflow-runtime.js";
+
 // ─── Version Migration ──────────────────────────────────────────────────────
 
 export {

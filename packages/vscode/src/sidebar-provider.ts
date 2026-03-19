@@ -84,6 +84,7 @@ interface WebviewInboundMessage {
     | "pick_image"
     | "remove_attachment"
     | "paste_image"
+    | "file_drop"
     | "save_agent_config"
     | "load_agent_config"
     | "user_confirmed_self_mod";
@@ -388,6 +389,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       case "paste_image":
         // Image data comes as base64 from the webview; store for next request
         this.pendingImages.push(String(message.payload["data"] ?? ""));
+        break;
+      case "file_drop":
+        // Non-image file dragged onto the chat. Save content to .dantecode/context-drops/
+        // and add the path to contextFiles so it appears as a context pill.
+        await this.handleFileDrop(
+          String(message.payload["name"] ?? "dropped-file"),
+          String(message.payload["content"] ?? ""),
+        );
         break;
       case "save_agent_config":
         await this.handleSaveAgentConfig(message.payload as Partial<AgentConfig>);
@@ -1117,7 +1126,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Pipeline detection: used by both no-tool-calls handling and tool execution guards
         const isPipelineWorkflow =
           this.activeSkill !== null ||
-          /\/(?:magic|autoforge|party|inferno|blaze|ember|forge|verify|ship)\b/i.test(text);
+          /\/(?:magic|autoforge|party|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest)\b/i.test(text);
         const PREMATURE_SUMMARY_RE =
           /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
 
@@ -1319,6 +1328,36 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
               `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
               `then commit. Do NOT claim you already made changes — only tool results count.`,
+            );
+            continue;
+          }
+
+          // Destructive-git pipeline guard: block git clean, git checkout --, git reset --hard.
+          // These commands wipe untracked/unstaged work, destroying all in-progress edits.
+          // Applies to ALL models (Grok, GPT, Claude) running ANY DanteForge command or skill.
+          const DESTRUCTIVE_GIT_RE =
+            /\bgit\s+(?:clean\s+-[a-z]*f[a-z]*|checkout\s+--\s+[./]|reset\s+--(?:hard|merge))\b/;
+          if (
+            toolCall.name === "Bash" &&
+            isPipelineWorkflow &&
+            DESTRUCTIVE_GIT_RE.test((toolCall.input["command"] as string | undefined) ?? "")
+          ) {
+            const blockedCmd = toolCall.input["command"] as string;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **[PIPELINE GUARD] BLOCKED:** destructive git command \`${blockedCmd.slice(0, 80)}\` — this would undo all in-progress work.\n`,
+                partial: "",
+              },
+            });
+            toolResultParts.push(
+              `[PIPELINE GUARD] Destructive git command BLOCKED: \`${blockedCmd}\`\n` +
+              `This command would undo all in-progress work. During a pipeline/workflow you MUST NOT run:\n` +
+              `  - git clean (removes untracked files)\n` +
+              `  - git checkout -- . (discards unstaged changes)\n` +
+              `  - git reset --hard / --merge (discards ALL changes)\n` +
+              `Instead: use Edit/Write/Read tools to make file changes. ` +
+              `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
             );
             continue;
           }
@@ -2069,6 +2108,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // --------------------------------------------------------------------------
   // File, model, and skill handlers (existing)
   // --------------------------------------------------------------------------
+
+  /**
+   * Handles a file dragged onto the chat from outside VS Code (e.g. a PRD .md file
+   * from Explorer or Finder). Saves the content to `.dantecode/context-drops/<name>`
+   * then adds that path to contextFiles so it appears as a context pill and is
+   * included in the next agent request's system prompt.
+   */
+  private async handleFileDrop(fileName: string, content: string): Promise<void> {
+    if (!content) return;
+    try {
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const dropsDir = join(this.getProjectRoot(), ".dantecode", "context-drops");
+      await mkdir(dropsDir, { recursive: true });
+      const safeName = fileName.replace(/[/\\:*?"<>|]/g, "_");
+      const destPath = join(dropsDir, safeName);
+      await writeFile(destPath, content, "utf-8");
+      this.handleFileAdd(destPath);
+    } catch {
+      // Non-fatal — fall back to adding by name only
+      this.handleFileAdd(fileName);
+    }
+  }
 
   public handleFileAdd(filePath: string): void {
     if (filePath.length === 0) {
@@ -4031,6 +4093,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 renderAttachments();
               };
               reader.readAsDataURL(file);
+            } else {
+              // Non-image file: read as text and add to context (e.g. .md, .ts, .json PRD files)
+              var textReader = new FileReader();
+              textReader.onload = function(ev) {
+                vscode.postMessage({
+                  type: 'file_drop',
+                  payload: { name: file.name, content: ev.target.result }
+                });
+              };
+              textReader.readAsText(file);
             }
           });
         }

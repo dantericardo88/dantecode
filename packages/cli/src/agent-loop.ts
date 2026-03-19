@@ -28,7 +28,8 @@ import {
   ApproachMemory,
   formatApproachesForPrompt,
 } from "@dantecode/core";
-import type { WaveOrchestratorState } from "@dantecode/core";
+import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
+import { buildWorkflowInvocationPrompt } from "@dantecode/core";
 import {
   recordSuccessPattern,
   queryLessons,
@@ -124,6 +125,13 @@ export interface AgentLoopConfig {
   };
   /** Expected workflow name queued by the slash command router. */
   expectedWorkflow?: string;
+  /**
+   * Full workflow execution context from workflow-runtime.ts.
+   * When present, the system prompt is augmented with the contract preamble
+   * (stages, failure policy, rollback policy) from the loaded WorkflowCommand.
+   * This gives non-Claude models structured guidance instead of raw markdown text.
+   */
+  workflowContext?: WorkflowExecutionContext;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -157,7 +165,18 @@ const PIVOT_INSTRUCTION =
   "- Should we read more context first?";
 
 const EXECUTION_CONTINUATION_PATTERN = /^(?:please\s+)?(?:continue|resume|run|verify)\b/i;
-const EXECUTION_WORKFLOW_PATTERN = /^\/(?:autoforge|party|magic|forge|verify|ship)\b/i;
+// Covers ALL DanteForge commands, not just a subset, so any model running any command
+// gets pipeline protections (guards, nudges, elevated budget).
+const EXECUTION_WORKFLOW_PATTERN =
+  /^\/(?:autoforge|party|magic|forge|verify|ship|inferno|ember|blaze|spark|oss|harvest)\b/i;
+
+/**
+ * Destructive git commands that must never run during a pipeline/workflow execution.
+ * These wipe untracked files or discard all in-progress changes — undoing everything
+ * an agent has written. Blocked for ALL models (Grok, GPT, Claude) inside pipelines.
+ */
+const DESTRUCTIVE_GIT_RE =
+  /\bgit\s+(?:clean\s+-[a-z]*f[a-z]*|checkout\s+--\s+[./]|reset\s+--(?:hard|merge))\b/;
 
 /** Detects premature wrap-up responses that should trigger pipeline continuation. */
 const PREMATURE_SUMMARY_PATTERN =
@@ -301,6 +320,14 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
         "",
       );
     }
+  }
+
+  // Workflow contract preamble: when a DanteForge command provides a structured
+  // WorkflowExecutionContext, inject the contract metadata (stages, failure policy,
+  // rollback policy) so all models get deterministic guidance instead of raw markdown.
+  if (config.workflowContext) {
+    const preamble = buildWorkflowInvocationPrompt(config.workflowContext);
+    sections.push(preamble, "");
   }
 
   sections.push(
@@ -1775,6 +1802,27 @@ export async function runAgentLoop(
             );
             toolResults.push(
               `SAFETY HOOK: Bash command blocked — ${blockReason}. Use a safer approach.`,
+            );
+            continue;
+          }
+
+          // Destructive-git pipeline guard: block git clean, git checkout --, git reset --hard
+          // during ANY pipeline or workflow execution (applies to ALL models — Grok, GPT, Claude).
+          // These commands wipe untracked/unstaged work, destroying everything written this session.
+          if (isPipelineWorkflow && DESTRUCTIVE_GIT_RE.test(bashCmd)) {
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[pipeline-guard] BLOCKED destructive git command — \`${bashCmd.slice(0, 80)}\`${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `[PIPELINE GUARD] Destructive git command BLOCKED: \`${bashCmd}\`\n` +
+              `This command would undo all in-progress work. During a pipeline/workflow you MUST NOT run:\n` +
+              `  - git clean (removes untracked files)\n` +
+              `  - git checkout -- . (discards unstaged changes)\n` +
+              `  - git reset --hard / --merge (discards ALL changes)\n` +
+              `Instead: use Edit/Write/Read tools to make file changes. ` +
+              `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
             );
             continue;
           }

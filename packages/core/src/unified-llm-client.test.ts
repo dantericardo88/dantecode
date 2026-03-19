@@ -6,7 +6,7 @@
  * network calls are made.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { LLMCallOptions, LLMCallResult, LLMExecutorFn } from "./unified-llm-client.js";
 import { UnifiedLLMClient } from "./unified-llm-client.js";
 
@@ -45,11 +45,28 @@ describe("UnifiedLLMClient", () => {
     client = new UnifiedLLMClient({ executorFn: mockExecutor, maxRetries: 2 });
   });
 
-  // Helper: advance all timers for retry delays.
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Helper: run an async fn that needs fake timers to complete.
+   * Attaches a .catch() IMMEDIATELY to prevent Node/Vitest from flagging
+   * the promise as an unhandled rejection while we advance fake timers.
+   * After timers finish, the outcome is re-observed and rethrown if needed.
+   */
   async function runWithTimers<T>(fn: () => Promise<T>): Promise<T> {
     const promise = fn();
+    // Eagerly capture settlement so Node never sees this as unhandled
+    const settled = promise.then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
     await vi.runAllTimersAsync();
-    return promise;
+    const result = await settled;
+    if (result.ok) return result.value;
+    throw result.error;
   }
 
   // 1. call() invokes executorFn

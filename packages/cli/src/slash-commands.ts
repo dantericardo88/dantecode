@@ -25,7 +25,8 @@ import {
   parseSkillWaves,
   createWaveState,
 } from "@dantecode/core";
-import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
+import type { MultiAgentProgressCallback, WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
+import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -96,6 +97,12 @@ export interface ReplState {
   pendingResumeRunId: string | null;
   /** Expected workflow name for the next agent loop turn. */
   pendingExpectedWorkflow: string | null;
+  /**
+   * Full workflow execution context loaded from workflow-runtime.ts.
+   * When set, the agent loop injects the contract preamble (stages, failure/rollback
+   * policy) into the system prompt — giving all models structured pipeline guidance.
+   */
+  pendingWorkflowContext?: WorkflowExecutionContext | null;
   /** Active abort controller for cancelling streaming generation via Ctrl+C. */
   activeAbortController: AbortController | null;
   /** Live sandbox bridge when sandbox mode is enabled. */
@@ -2483,6 +2490,16 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
   if (command.source === "markdown") {
     state.pendingAgentPrompt = trimmed;
     state.pendingExpectedWorkflow = command.name;
+    // Load the full workflow contract so the agent loop can inject structured context
+    // (stages, failure/rollback policy) into the system prompt for all models.
+    try {
+      const loaded = await loadWorkflowCommand(state.projectRoot, command.name);
+      if (loaded.command) {
+        state.pendingWorkflowContext = createWorkflowExecutionContext(loaded.command, trimmed);
+      }
+    } catch {
+      // Non-fatal: workflow context enrichment is best-effort
+    }
     return `${GREEN}Activated markdown-backed workflow /${command.name}.${RESET}\n${DIM}Queued for agent execution using the synced command file.${RESET}`;
   }
 
