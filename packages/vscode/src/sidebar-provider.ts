@@ -1335,8 +1335,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           // Destructive-git pipeline guard: block git clean, git checkout --, git reset --hard.
           // These commands wipe untracked/unstaged work, destroying all in-progress edits.
           // Applies to ALL models (Grok, GPT, Claude) running ANY DanteForge command or skill.
+          //
+          // NOTE: `git clean\b` matches ALL forms — `-fd`, `-d -f`, `--force`, etc.
+          // The old pattern `clean\s+-[a-z]*f[a-z]*` missed space-separated flags and long form.
           const DESTRUCTIVE_GIT_RE =
-            /\bgit\s+(?:clean\s+-[a-z]*f[a-z]*|checkout\s+--\s+[./]|reset\s+--(?:hard|merge))\b/;
+            /\bgit\s+(?:clean\b|checkout\s+--\s+[./]|reset\s+--(?:hard|merge)\b|stash(?:\s+push)?\b[^\n]*--include-untracked)/;
           if (
             toolCall.name === "Bash" &&
             isPipelineWorkflow &&
@@ -1356,8 +1359,36 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               `  - git clean (removes untracked files)\n` +
               `  - git checkout -- . (discards unstaged changes)\n` +
               `  - git reset --hard / --merge (discards ALL changes)\n` +
+              `  - git stash --include-untracked (stashes new files out of existence)\n` +
               `Instead: use Edit/Write/Read tools to make file changes. ` +
               `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
+            );
+            continue;
+          }
+
+          // rm -rf source directory guard: block deletion of package/source dirs during pipelines.
+          // When typecheck fails on a newly-created package, Grok often runs `rm -rf packages/<name>`
+          // to "clean up" the broken package — destroying all in-progress work.
+          const RM_SOURCE_RE =
+            /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\b)[^\n]*\b(?:packages|src|lib)\//;
+          if (
+            toolCall.name === "Bash" &&
+            isPipelineWorkflow &&
+            RM_SOURCE_RE.test((toolCall.input["command"] as string | undefined) ?? "")
+          ) {
+            const blockedCmd = toolCall.input["command"] as string;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **[PIPELINE GUARD] BLOCKED:** \`rm -rf\` on source directory \`${blockedCmd.slice(0, 80)}\` — this destroys in-progress work.\n`,
+                partial: "",
+              },
+            });
+            toolResultParts.push(
+              `[PIPELINE GUARD] Destructive rm BLOCKED: \`${blockedCmd}\`\n` +
+              `Deleting package/source directories during a pipeline destroys all in-progress work.\n` +
+              `Instead: fix the TypeScript errors in the new package using Edit. ` +
+              `Read the failing file, then Edit to correct the type issues.`,
             );
             continue;
           }

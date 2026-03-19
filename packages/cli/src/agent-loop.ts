@@ -174,9 +174,21 @@ const EXECUTION_WORKFLOW_PATTERN =
  * Destructive git commands that must never run during a pipeline/workflow execution.
  * These wipe untracked files or discard all in-progress changes — undoing everything
  * an agent has written. Blocked for ALL models (Grok, GPT, Claude) inside pipelines.
+ *
+ * NOTE: `git clean\b` matches ALL forms — `-fd`, `-d -f`, `--force`, etc. The old
+ * pattern `clean\s+-[a-z]*f[a-z]*` missed space-separated flags (`-d -f`) and long
+ * form (`--force`), which is why files were still being deleted.
  */
 const DESTRUCTIVE_GIT_RE =
-  /\bgit\s+(?:clean\s+-[a-z]*f[a-z]*|checkout\s+--\s+[./]|reset\s+--(?:hard|merge))\b/;
+  /\bgit\s+(?:clean\b|checkout\s+--\s+[./]|reset\s+--(?:hard|merge)\b|stash(?:\s+push)?\b[^\n]*--include-untracked)/;
+
+/**
+ * Blocks `rm -rf` (and variants) on source/package directories during pipeline execution.
+ * When typecheck fails on a new package, Grok often runs `rm -rf packages/<name>` to
+ * "clean up" the broken package — destroying all in-progress work just as surely as git clean.
+ */
+const RM_SOURCE_RE =
+  /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\b)[^\n]*\b(?:packages|src|lib)\//;
 
 /** Detects premature wrap-up responses that should trigger pipeline continuation. */
 const PREMATURE_SUMMARY_PATTERN =
@@ -1821,8 +1833,27 @@ export async function runAgentLoop(
               `  - git clean (removes untracked files)\n` +
               `  - git checkout -- . (discards unstaged changes)\n` +
               `  - git reset --hard / --merge (discards ALL changes)\n` +
+              `  - git stash --include-untracked (stashes new files out of existence)\n` +
               `Instead: use Edit/Write/Read tools to make file changes. ` +
               `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
+            );
+            continue;
+          }
+
+          // rm -rf source directory guard: block deletion of package/source dirs during pipelines.
+          // When typecheck fails on a newly-created package, Grok often runs `rm -rf packages/<name>`
+          // to "clean up" the broken package — destroying all in-progress work.
+          if (isPipelineWorkflow && RM_SOURCE_RE.test(bashCmd)) {
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[pipeline-guard] BLOCKED rm on source directory — \`${bashCmd.slice(0, 80)}\`${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `[PIPELINE GUARD] Destructive rm BLOCKED: \`${bashCmd}\`\n` +
+              `Deleting package/source directories during a pipeline destroys all in-progress work.\n` +
+              `Instead: fix the TypeScript errors in the new package using Edit. ` +
+              `Read the failing file, then Edit to correct the type issues.`,
             );
             continue;
           }
