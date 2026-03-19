@@ -388,6 +388,43 @@ export type { CacheableSection } from "./prompt-cache.js";
 export { GitSnapshotRecovery } from "./git-snapshot-recovery.js";
 export type { GitSnapshot, GitSnapshotOptions } from "./git-snapshot-recovery.js";
 
+// ─── Playbook Memory ──────────────────────────────────────────────────────
+
+export { PlaybookMemory } from "./playbook-memory.js";
+export type { PlaybookEntry, PlaybookQueryResult } from "./playbook-memory.js";
+
+// ─── Verification Engine ──────────────────────────────────────────────────
+
+export { VerificationEngine } from "./verification-engine.js";
+export type {
+  VerificationStage,
+  VerificationStageResult,
+  VerificationReport,
+  TestRunnerInfo,
+  VerificationEngineOptions,
+} from "./verification-engine.js";
+
+// ─── Patch Validator ────────────────────────────────────────────────────────
+
+export { PatchValidator } from "./patch-validator.js";
+export type {
+  PatchValidationResult,
+  DiffValidationResult,
+  CommitGateResult,
+  PatchValidatorOptions,
+} from "./patch-validator.js";
+
+// ─── Reasoning Chain ─────────────────────────────────────────────────────
+
+export { ReasoningChain } from "./reasoning-chain.js";
+export type {
+  ReasoningPhase,
+  ReasoningChainOptions,
+  ChainStep,
+  ReasoningTier,
+  CritiqueResult,
+} from "./reasoning-chain.js";
+
 // ─── Search Providers ──────────────────────────────────────────────────────
 
 export {
