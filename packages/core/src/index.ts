@@ -536,3 +536,51 @@ export type {
   SecretsPattern,
   SecretsScannerOptions,
 } from "./secrets-scanner.js";
+
+// ─── SubAgent Manager ──────────────────────────────────────────────────────
+
+export { SubAgentManager } from "./subagent-manager.js";
+export type {
+  SubAgentConfig,
+  SubAgentTask,
+  SpawnOptions,
+  ParallelResult,
+  MergedResult,
+  SubAgentManagerOptions,
+} from "./subagent-manager.js";
+
+// ─── SubAgent Context ──────────────────────────────────────────────────────
+
+export { SubAgentContext } from "./subagent-context.js";
+export type {
+  ContextSlice,
+  ContextMemoryEntry,
+  ContextMergeResult,
+  IsolatedContextOptions,
+} from "./subagent-context.js";
+
+// ─── Sandbox Engine ────────────────────────────────────────────────────────
+
+export { SandboxEngine } from "./sandbox-engine.js";
+export type {
+  SandboxMode,
+  SandboxStatus,
+  SandboxPolicy,
+  SandboxInstance,
+  ExecResult,
+  SandboxEngineOptions,
+} from "./sandbox-engine.js";
+
+// ─── Policy Enforcer ───────────────────────────────────────────────────────
+
+export { PolicyEnforcer } from "./policy-enforcer.js";
+export type {
+  PolicyEffect,
+  PolicyResourceType,
+  PolicyCondition,
+  PolicyRule,
+  PolicyRequest,
+  PolicyDecision,
+  PolicySet,
+  PolicyEnforcerOptions,
+} from "./policy-enforcer.js";
