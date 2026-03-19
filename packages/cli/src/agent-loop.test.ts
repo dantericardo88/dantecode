@@ -135,6 +135,26 @@ vi.mock("@dantecode/core", () => {
     })),
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
+    // Skill wave orchestrator — real implementations for integration testing
+    getCurrentWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string; instructions: string }> }) => {
+      if (state.currentIndex >= state.waves.length) return null;
+      return state.waves[state.currentIndex];
+    }),
+    advanceWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number }>; completedWaves: number[] }) => {
+      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+      if (!current) return false;
+      state.completedWaves.push(current.number);
+      state.currentIndex++;
+      return state.currentIndex < state.waves.length;
+    }),
+    recordWaveFailure: vi.fn(() => true),
+    buildWavePrompt: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
+      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+      if (!current) return "All waves complete.";
+      return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
+    }),
+    isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
+    CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
   };
 });
 
@@ -1673,5 +1693,114 @@ describe("Universal skill completion (skillActive)", () => {
     // Should have made more than 15 generate calls (the default budget)
     // because skillActive elevates the budget to 50
     expect(mockGenerateText.mock.calls.length).toBeGreaterThan(15);
+  });
+
+  // ---- Wave orchestration integration tests ----
+
+  it("injects Claude Workflow Mode when waveState has multiple waves", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Starting wave 1.",
+      usage: { totalTokens: 50 },
+    });
+
+    const waveState = {
+      waves: [
+        { number: 1, title: "Research", instructions: "Search GitHub." },
+        { number: 2, title: "Implement", instructions: "Write code." },
+      ],
+      currentIndex: 0,
+      completedWaves: [] as number[],
+      attempts: { 1: 0, 2: 0 },
+      maxRetries: 2,
+    };
+
+    const session = makeSession();
+    await runAgentLoop("do the skill", session, makeConfig({ skillActive: true, waveState }));
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    // Should contain Claude Workflow Mode, NOT the basic tool recipes
+    expect(systemPrompt).toContain("Claude Workflow Mode");
+    expect(systemPrompt).toContain("Wave 1/2");
+    expect(systemPrompt).toContain("Research");
+  });
+
+  it("advances to next wave when model signals [WAVE COMPLETE]", async () => {
+    const waveState = {
+      waves: [
+        { number: 1, title: "Research", instructions: "Search GitHub." },
+        { number: 2, title: "Implement", instructions: "Write code." },
+        { number: 3, title: "Verify", instructions: "Run tests." },
+      ],
+      currentIndex: 0,
+      completedWaves: [] as number[],
+      attempts: { 1: 0, 2: 0, 3: 0 },
+      maxRetries: 2,
+    };
+
+    // Wave 1: model does work then signals completion
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading files.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    // Wave 1 complete signal (with tool call to verify it's mid-pipeline)
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Research done. [WAVE COMPLETE]\n<tool_use>\n{"name":"Read","input":{"file_path":"src/utils.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "utils content", isError: false });
+
+    // Wave 2: model works on next wave
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Implementing changes. [WAVE COMPLETE]",
+      usage: { totalTokens: 50 },
+    });
+
+    // Wave 3 (after text-only [WAVE COMPLETE] with executedToolsThisTurn > 0):
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Running tests. [WAVE COMPLETE]",
+      usage: { totalTokens: 50 },
+    });
+
+    // Final
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All done.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("run the skill", session, makeConfig({ skillActive: true, waveState }));
+
+    // Wave state should have advanced
+    expect(waveState.completedWaves).toContain(1);
+    // The system prompt should have contained Claude Workflow Mode
+    const firstCallSystem = mockGenerateText.mock.calls[0]![0].system as string;
+    expect(firstCallSystem).toContain("Claude Workflow Mode");
+  });
+
+  it("uses basic tool recipes when waveState has only one wave", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Doing everything at once.",
+      usage: { totalTokens: 50 },
+    });
+
+    const waveState = {
+      waves: [{ number: 1, title: "Full Execution", instructions: "Do all the things." }],
+      currentIndex: 0,
+      completedWaves: [] as number[],
+      attempts: { 1: 0 },
+      maxRetries: 2,
+    };
+
+    const session = makeSession();
+    await runAgentLoop("do the skill", session, makeConfig({ skillActive: true, waveState }));
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    // Single wave = basic protocol, not Claude Workflow Mode
+    expect(systemPrompt).not.toContain("Claude Workflow Mode");
+    expect(systemPrompt).toContain("Tool Recipes for Skill Execution");
   });
 });

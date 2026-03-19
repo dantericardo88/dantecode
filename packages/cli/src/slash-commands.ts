@@ -21,8 +21,10 @@ import {
   RecoveryEngine,
   EventSourcedCheckpointer,
   LoopDetector,
+  parseSkillWaves,
+  createWaveState,
 } from "@dantecode/core";
-import type { MultiAgentProgressCallback } from "@dantecode/core";
+import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -101,6 +103,8 @@ export interface ReplState {
   _codeIndex?: unknown;
   /** Currently active skill name, or null. Used to enable universal pipeline continuation. */
   activeSkill: string | null;
+  /** Wave orchestrator state for step-by-step skill execution (Claude Workflow Mode). */
+  waveState: WaveOrchestratorState | null;
 }
 
 /** A single slash command handler. */
@@ -621,42 +625,78 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
     return `${RED}Skill not found: ${skillName}${RESET}`;
   }
 
-  // Inject the skill instructions into the session as a system message.
-  // Include a structured execution preamble that forces step-by-step execution
-  // and teaches tool usage patterns — critical for non-Claude models (Grok, GPT)
-  // that otherwise confabulate or skip steps.
-  const skillPreamble = [
-    `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}`,
-    "",
-    "## MANDATORY: Step-by-Step Execution",
-    "",
-    "Before reading the skill instructions below, understand these ABSOLUTE rules:",
-    "",
-    "1. Your FIRST action must be: use TodoWrite to decompose this skill into numbered steps.",
-    "2. Then execute each step ONE AT A TIME with real tool calls.",
-    "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
-    "4. After each step, verify your work (Read the file, run a check, etc.).",
-    "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
-    "6. For web content: `curl -sL 'url' | head -200`",
-    "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
-    "8. Mark each TodoWrite step completed as you finish it.",
-    "",
-    "---",
-    "",
-    skill.instructions,
-  ].join("\n");
+  // Parse skill instructions into waves for step-by-step orchestration.
+  // If the skill has wave/step/phase structure, we feed one wave at a time
+  // (Claude Workflow Mode). Otherwise, inject the full instructions with
+  // a basic execution preamble.
+  const waves = parseSkillWaves(skill.instructions);
+  const hasWaves = waves.length > 1;
 
-  state.session.messages.push({
-    id: randomUUID(),
-    role: "system",
-    content: skillPreamble,
-    timestamp: new Date().toISOString(),
-  });
+  if (hasWaves) {
+    // Wave orchestration: store state, inject only metadata + first wave reference.
+    // The actual wave prompt is injected by buildSystemPrompt via config.waveState.
+    state.waveState = createWaveState(waves);
+
+    const waveList = waves
+      .map((w: { number: number; title: string }) => `  ${w.number}. ${w.title}`)
+      .join("\n");
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: [
+        `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}`,
+        "",
+        `This skill has ${waves.length} waves. You will receive ONE wave at a time.`,
+        "",
+        "Wave overview:",
+        waveList,
+        "",
+        "You are starting with Wave 1. The full instructions for each wave will be",
+        "provided in the system prompt. When a wave is complete, signal with [WAVE COMPLETE].",
+      ].join("\n"),
+      timestamp: new Date().toISOString(),
+    });
+  } else {
+    // No wave structure: inject full instructions with execution preamble
+    const skillPreamble = [
+      `Activated skill "${skill.frontmatter.name}": ${skill.frontmatter.description}`,
+      "",
+      "## MANDATORY: Step-by-Step Execution",
+      "",
+      "Before reading the skill instructions below, understand these ABSOLUTE rules:",
+      "",
+      "1. Your FIRST action must be: use TodoWrite to decompose this skill into numbered steps.",
+      "2. Then execute each step ONE AT A TIME with real tool calls.",
+      "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
+      "4. After each step, verify your work (Read the file, run a check, etc.).",
+      "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+      "6. For web content: `curl -sL 'url' | head -200`",
+      "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
+      "8. Mark each TodoWrite step completed as you finish it.",
+      "",
+      "---",
+      "",
+      skill.instructions,
+    ].join("\n");
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: skillPreamble,
+      timestamp: new Date().toISOString(),
+    });
+
+    state.waveState = null;
+  }
 
   // Track active skill so pipeline continuation protections apply universally
   state.activeSkill = skill.frontmatter.name;
 
-  return `${GREEN}Activated skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n${DIM}${skill.frontmatter.description}${RESET}`;
+  const waveInfo = hasWaves
+    ? `\n${DIM}Detected ${waves.length} waves — Claude Workflow Mode active${RESET}`
+    : "";
+  return `${GREEN}Activated skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n${DIM}${skill.frontmatter.description}${RESET}${waveInfo}`;
 }
 
 async function agentsCommand(_args: string, state: ReplState): Promise<string> {

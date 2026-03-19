@@ -19,7 +19,14 @@ import {
   formatErrorsForFixPrompt,
   computeErrorSignature,
   runStartupHealthCheck,
+  getCurrentWave,
+  advanceWave,
+  recordWaveFailure,
+  buildWavePrompt,
+  isWaveComplete,
+  CLAUDE_WORKFLOW_MODE,
 } from "@dantecode/core";
+import type { WaveOrchestratorState } from "@dantecode/core";
 import {
   recordSuccessPattern,
   queryLessons,
@@ -93,6 +100,12 @@ export interface AgentLoopConfig {
    * prompt text — ensuring ALL skills run to completion.
    */
   skillActive?: boolean;
+  /**
+   * Wave orchestrator state for step-by-step skill execution.
+   * When present, the agent loop feeds one wave at a time and enforces
+   * verification gates between waves (Claude Workflow Mode).
+   */
+  waveState?: WaveOrchestratorState;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -199,54 +212,60 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     "",
   ];
 
-  // Skill execution: inject tool recipes and execution protocol when a skill is active.
-  // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations that
-  // Claude Code handles natively (WebSearch, WebFetch, Agent) using Bash equivalents,
-  // and enforces step-by-step execution with verification gates.
+  // Skill execution: when a skill is active, inject either the full Claude Workflow
+  // Mode (if wave orchestration is active) or the basic tool recipes + execution protocol.
   if (config.skillActive) {
-    sections.push(
-      "## Tool Recipes for Skill Execution",
-      "",
-      "When executing skills, you may need capabilities beyond the basic tool set.",
-      "Use Bash to access these — do NOT skip steps because a dedicated tool is missing.",
-      "",
-      "### Searching GitHub",
-      "```bash",
-      'gh search repos "react state management" --limit 10 --json name,url,description,stargazersCount',
-      "```",
-      "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
-      "",
-      "### Fetching Web Content",
-      "```bash",
-      "curl -sL 'https://example.com/page' | head -200",
-      "```",
-      "",
-      "### Cloning and Analyzing Repositories",
-      "```bash",
-      "git clone --depth 1 'https://github.com/org/repo.git' /tmp/oss-scan/reponame",
-      "```",
-      "Then use Glob, Grep, and Read to analyze the cloned repository.",
-      "",
-      "### GitHub API Queries",
-      "```bash",
-      "gh api repos/owner/repo --jq '.stargazers_count, .license.spdx_id'",
-      "gh api 'search/repositories?q=topic:state-management+language:typescript&sort=stars' --jq '.items[:5] | .[].full_name'",
-      "```",
-      "",
-      "## Skill Execution Protocol",
-      "",
-      "You are executing a multi-step skill workflow. Follow this protocol STRICTLY:",
-      "",
-      "1. **DECOMPOSE FIRST**: Use TodoWrite to create a numbered checklist of all steps before doing any work.",
-      "2. **READ BEFORE EDIT**: Always Read a file before modifying it. Never edit blind.",
-      "3. **ONE STEP AT A TIME**: Complete one step fully, verify it, then advance to the next.",
-      "4. **EVERY RESPONSE = TOOL CALLS**: Never respond with only text/narration. Every response MUST include at least one tool call.",
-      "5. **VERIFY EACH STEP**: After completing a step, verify with a concrete check (Read the file, run a test, check git status).",
-      "6. **UPDATE PROGRESS**: Mark each TodoWrite item as completed before starting the next.",
-      "7. **USE BASH FOR EXTERNAL OPS**: GitHub search, web fetch, repo cloning — use Bash with the recipes above.",
-      "8. **NEVER CONFABULATE**: Only claim a file was modified AFTER a successful Edit/Write tool result. Only claim tests pass AFTER a successful Bash test result.",
-      "",
-    );
+    if (config.waveState && config.waveState.waves.length > 1) {
+      // Wave orchestration: inject Claude Workflow Mode + current wave prompt
+      sections.push(CLAUDE_WORKFLOW_MODE, "", buildWavePrompt(config.waveState), "");
+    } else {
+      // No wave structure detected: inject tool recipes + basic execution protocol.
+      // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations
+      // that Claude Code handles natively using Bash equivalents.
+      sections.push(
+        "## Tool Recipes for Skill Execution",
+        "",
+        "When executing skills, you may need capabilities beyond the basic tool set.",
+        "Use Bash to access these — do NOT skip steps because a dedicated tool is missing.",
+        "",
+        "### Searching GitHub",
+        "```bash",
+        'gh search repos "react state management" --limit 10 --json name,url,description,stargazersCount',
+        "```",
+        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+        "",
+        "### Fetching Web Content",
+        "```bash",
+        "curl -sL 'https://example.com/page' | head -200",
+        "```",
+        "",
+        "### Cloning and Analyzing Repositories",
+        "```bash",
+        "git clone --depth 1 'https://github.com/org/repo.git' /tmp/oss-scan/reponame",
+        "```",
+        "Then use Glob, Grep, and Read to analyze the cloned repository.",
+        "",
+        "### GitHub API Queries",
+        "```bash",
+        "gh api repos/owner/repo --jq '.stargazers_count, .license.spdx_id'",
+        "gh api 'search/repositories?q=topic:state-management+language:typescript&sort=stars' --jq '.items[:5] | .[].full_name'",
+        "```",
+        "",
+        "## Skill Execution Protocol",
+        "",
+        "You are executing a multi-step skill workflow. Follow this protocol STRICTLY:",
+        "",
+        "1. **DECOMPOSE FIRST**: Use TodoWrite to create a numbered checklist of all steps before doing any work.",
+        "2. **READ BEFORE EDIT**: Always Read a file before modifying it. Never edit blind.",
+        "3. **ONE STEP AT A TIME**: Complete one step fully, verify it, then advance to the next.",
+        "4. **EVERY RESPONSE = TOOL CALLS**: Never respond with only text/narration. Every response MUST include at least one tool call.",
+        "5. **VERIFY EACH STEP**: After completing a step, verify with a concrete check (Read the file, run a test, check git status).",
+        "6. **UPDATE PROGRESS**: Mark each TodoWrite item as completed before starting the next.",
+        "7. **USE BASH FOR EXTERNAL OPS**: GitHub search, web fetch, repo cloning — use Bash with the recipes above.",
+        "8. **NEVER CONFABULATE**: Only claim a file was modified AFTER a successful Edit/Write tool result. Only claim tests pass AFTER a successful Bash test result.",
+        "",
+      );
+    }
   }
 
   sections.push(
@@ -1062,6 +1081,46 @@ export async function runAgentLoop(
         continue;
       }
 
+      // Wave completion check: if the model signals [WAVE COMPLETE] and we have
+      // wave orchestration active, advance to the next wave instead of stopping.
+      if (
+        config.waveState &&
+        isWaveComplete(responseText) &&
+        executedToolsThisTurn > 0 &&
+        maxToolRounds > 0
+      ) {
+        const waveState = config.waveState;
+        const completedWave = getCurrentWave(waveState);
+        const hasMore = advanceWave(waveState);
+        if (!config.silent && completedWave) {
+          process.stdout.write(
+            `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
+          );
+        }
+        if (hasMore) {
+          // Inject next wave prompt and continue
+          const nextWavePrompt = buildWavePrompt(waveState);
+          messages.push({ role: "assistant" as const, content: responseText });
+          messages.push({ role: "user" as const, content: nextWavePrompt });
+          if (!config.silent) {
+            const next = getCurrentWave(waveState);
+            process.stdout.write(
+              `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+            );
+          }
+          // Reset per-wave counters
+          pipelineContinuationNudges = 0;
+          confabulationNudges = 0;
+          continue;
+        }
+        // All waves complete — fall through to normal break
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
+          );
+        }
+      }
+
       // Pipeline continuation nudge: if we're in a pipeline workflow (e.g., /magic,
       // /autoforge) and the model emitted a summary-like response with no tool calls
       // but has clearly done work (executedToolsThisTurn > 0), it may be wrapping up
@@ -1618,6 +1677,40 @@ export async function runAgentLoop(
       toolResults.push(
         `SYSTEM: Verification has failed ${MAX_VERIFY_RETRIES} times. Stop retrying and ask the user for guidance.`,
       );
+    }
+
+    // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
+    // in a response that also had tool calls, advance to the next wave now.
+    if (
+      config.waveState &&
+      isWaveComplete(responseText) &&
+      maxToolRounds > 0
+    ) {
+      const waveState = config.waveState;
+      const completedWave = getCurrentWave(waveState);
+      const hasMore = advanceWave(waveState);
+      if (!config.silent && completedWave) {
+        process.stdout.write(
+          `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
+        );
+      }
+      if (hasMore) {
+        const nextWavePrompt = buildWavePrompt(waveState);
+        toolResults.push(`SYSTEM: Wave complete. Next wave instructions:\n\n${nextWavePrompt}`);
+        if (!config.silent) {
+          const next = getCurrentWave(waveState);
+          process.stdout.write(
+            `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+          );
+        }
+        // Reset per-wave counters
+        pipelineContinuationNudges = 0;
+        confabulationNudges = 0;
+      } else if (!config.silent) {
+        process.stdout.write(
+          `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
+        );
+      }
     }
 
     // Add tool results to messages for the next model call

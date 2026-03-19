@@ -344,3 +344,21 @@ export {
   LATEST_CONFIG_VERSION,
 } from "./version-migration.js";
 export type { MigrationResult, MigrationRunResult } from "./version-migration.js";
+
+// ─── Skill Wave Orchestrator ────────────────────────────────────────────────
+
+export {
+  parseSkillWaves,
+  createWaveState,
+  getCurrentWave,
+  advanceWave,
+  recordWaveFailure,
+  buildWavePrompt,
+  isWaveComplete,
+  CLAUDE_WORKFLOW_MODE,
+  WAVE_COMPLETE_RE,
+} from "./skill-wave-orchestrator.js";
+export type {
+  SkillWave,
+  WaveOrchestratorState,
+} from "./skill-wave-orchestrator.js";
