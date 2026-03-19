@@ -24,6 +24,8 @@ import {
   buildWavePrompt,
   isWaveComplete,
   CLAUDE_WORKFLOW_MODE,
+  ApproachMemory,
+  formatApproachesForPrompt,
 } from "@dantecode/core";
 import type { WaveOrchestratorState } from "@dantecode/core";
 import {
@@ -658,7 +660,7 @@ function compactMessages(
     return result;
   }
 
-  // Tier 3: Over 75% — aggressive compaction
+  // Tier 3: 75-90% — summarize dropped messages (keep key facts)
   const KEEP_RECENT = 10;
   if (messages.length <= KEEP_RECENT + 1) {
     return messages;
@@ -666,16 +668,99 @@ function compactMessages(
 
   const first = messages[0]!;
   const recent = messages.slice(-KEEP_RECENT);
-  const droppedCount = messages.length - KEEP_RECENT - 1;
+  const dropped = messages.slice(1, messages.length - KEEP_RECENT);
+
+  // Generate a structured summary of dropped messages
+  const summary = summarizeDroppedMessages(dropped);
 
   return [
     first,
     {
       role: "system" as const,
-      content: `[Context compacted: ${droppedCount} earlier messages removed to fit context window. Recent conversation preserved below.]`,
+      content: summary,
     },
     ...recent,
   ];
+}
+
+/**
+ * Generate a meaningful summary of dropped messages, preserving key facts
+ * about what files were read, edited, and what commands were run.
+ */
+function summarizeDroppedMessages(
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+): string {
+  const filesRead = new Set<string>();
+  const filesEdited = new Set<string>();
+  const bashCommands: string[] = [];
+  const keyDecisions: string[] = [];
+
+  for (const msg of messages) {
+    const text = msg.content;
+
+    // Extract file reads
+    const readMatches = text.matchAll(/(?:Read|read|Reading)\s+[`"]?([^\s`"]+\.\w+)/g);
+    for (const m of readMatches) filesRead.add(m[1]!);
+
+    // Extract file edits/writes
+    const editMatches = text.matchAll(/(?:Edit|Write|Edited|Wrote|Modified)\s+[`"]?([^\s`"]+\.\w+)/g);
+    for (const m of editMatches) filesEdited.add(m[1]!);
+
+    // Extract bash commands (first line only)
+    const bashMatches = text.matchAll(/(?:Bash|command|ran|execute)[:\s]+[`"]?([^\n`"]{5,80})/gi);
+    for (const m of bashMatches) {
+      if (bashCommands.length < 5) bashCommands.push(m[1]!.trim());
+    }
+
+    // Extract tool result file paths
+    const toolPathMatches = text.matchAll(/file_path[":=\s]+([^\s"',}]+\.\w+)/g);
+    for (const m of toolPathMatches) {
+      if (msg.role === "user") filesRead.add(m[1]!);
+    }
+  }
+
+  const parts = [
+    `[Context compacted: ${messages.length} earlier messages summarized]`,
+    "",
+    "## Earlier Session Activity",
+  ];
+
+  if (filesRead.size > 0) {
+    parts.push(`Files read: ${[...filesRead].slice(0, 15).join(", ")}`);
+  }
+  if (filesEdited.size > 0) {
+    parts.push(`Files modified: ${[...filesEdited].slice(0, 10).join(", ")}`);
+  }
+  if (bashCommands.length > 0) {
+    parts.push(`Commands run: ${bashCommands.join("; ")}`);
+  }
+  if (keyDecisions.length > 0) {
+    parts.push(`Key decisions: ${keyDecisions.join("; ")}`);
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Extract file paths the model claims to have modified from its response text.
+ * Looks for patterns like "I updated/modified/edited <path>" or "Write to <path>".
+ */
+function extractClaimedFiles(text: string): string[] {
+  const patterns = [
+    /(?:updated|modified|edited|wrote|created|changed)\s+[`"']?([^\s`"',]+\.\w{1,6})/gi,
+    /(?:Write|Edit)\s+(?:to\s+)?[`"']?([^\s`"',]+\.\w{1,6})/g,
+  ];
+  const files = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const path = match[1]!;
+      // Filter out common false positives
+      if (path.length > 3 && !path.startsWith("http") && !path.startsWith("//")) {
+        files.add(path);
+      }
+    }
+  }
+  return [...files];
 }
 
 function supportsExtendedThinking(model: ModelConfig): boolean {
@@ -758,14 +843,20 @@ function createSubAgentExecutor(
   parentSession: Session,
   parentConfig: AgentLoopConfig,
 ): SubAgentExecutor {
-  return async (prompt: string, options?: SubAgentOptions): Promise<SubAgentResult> => {
-    const maxRounds = options?.maxRounds ?? 30;
+  // Track background tasks for async sub-agent execution
+  const backgroundTasks = new Map<string, Promise<SubAgentResult>>();
+  const completedTasks = new Map<string, SubAgentResult>();
+
+  async function executeSubAgent(
+    prompt: string,
+    projectRoot: string,
+    maxRounds: number,
+  ): Promise<SubAgentResult> {
     const startTime = Date.now();
 
-    // Create a child session — inherits project root + model but gets fresh messages
     const childSession: Session = {
       id: `sub-${parentSession.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`,
-      projectRoot: parentSession.projectRoot,
+      projectRoot,
       messages: [],
       activeFiles: [],
       readOnlyFiles: [],
@@ -786,33 +877,26 @@ function createSubAgentExecutor(
       todoList: [],
     };
 
-    // Child config: limited rounds, no sub-agent nesting beyond 2 levels
-    const nestingDepth = (parentSession.agentStack?.length ?? 0);
     const childConfig: AgentLoopConfig = {
       ...parentConfig,
       requiredRounds: maxRounds,
-      silent: true, // Sub-agents run silently
-      onToken: undefined, // No streaming for sub-agents
+      silent: true,
+      onToken: undefined,
       abortSignal: parentConfig.abortSignal,
-      // Prevent excessive nesting — disable sub-agent spawning beyond depth 2
-      ...(nestingDepth >= 2 ? {} : {}),
     };
 
     try {
       const completedSession = await runAgentLoop(prompt, childSession, childConfig);
 
-      // Extract last assistant message as output
       const assistantMsgs = completedSession.messages.filter(
         (m: SessionMessage) => m.role === "assistant",
       );
       const lastMsg = assistantMsgs[assistantMsgs.length - 1];
       const output = lastMsg?.content ?? "(no output)";
 
-      // Collect touched files from tool results
       const touchedFiles: string[] = [];
       for (const msg of completedSession.messages) {
         if (msg.role === "assistant" && typeof msg.content === "string") {
-          // Extract file paths from "Successfully wrote/edited ..." patterns
           const writeMatches = msg.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
           for (const match of writeMatches) {
             if (match[1]) touchedFiles.push(match[1]);
@@ -835,6 +919,91 @@ function createSubAgentExecutor(
         success: false,
         error: message,
       };
+    }
+  }
+
+  return async (prompt: string, options?: SubAgentOptions): Promise<SubAgentResult> => {
+    const maxRounds = options?.maxRounds ?? 30;
+
+    // Handle background task status queries
+    if (prompt.startsWith("status ")) {
+      const taskId = prompt.slice(7).trim();
+      const completed = completedTasks.get(taskId);
+      if (completed) {
+        return completed;
+      }
+      if (backgroundTasks.has(taskId)) {
+        return {
+          output: `Background task ${taskId} is still running.`,
+          touchedFiles: [],
+          durationMs: 0,
+          success: true,
+        };
+      }
+      return {
+        output: `No background task found with ID: ${taskId}`,
+        touchedFiles: [],
+        durationMs: 0,
+        success: false,
+        error: "Task not found",
+      };
+    }
+
+    // Worktree isolation: create isolated branch for this agent
+    let worktreeDir: string | undefined;
+    if (options?.worktreeIsolation && parentConfig.enableGit) {
+      try {
+        const { createWorktree } = await import("@dantecode/git-engine");
+        const sessionId = `sub-${randomUUID().slice(0, 8)}`;
+        const result = createWorktree({
+          directory: parentSession.projectRoot,
+          branch: `agent-${sessionId}`,
+          baseBranch: "HEAD",
+          sessionId,
+        });
+        worktreeDir = result.directory;
+      } catch {
+        // Worktree creation failed — fall back to shared directory
+      }
+    }
+
+    const workDir = worktreeDir ?? parentSession.projectRoot;
+
+    // Background execution: queue task and return immediately
+    if (options?.background) {
+      const taskId = randomUUID().slice(0, 12);
+      const taskPromise = executeSubAgent(prompt, workDir, maxRounds).then((result) => {
+        completedTasks.set(taskId, result);
+        backgroundTasks.delete(taskId);
+        // Clean up worktree after background task completes
+        if (worktreeDir) {
+          import("@dantecode/git-engine")
+            .then(({ removeWorktree }) => removeWorktree(worktreeDir!))
+            .catch(() => {});
+        }
+        return result;
+      });
+      backgroundTasks.set(taskId, taskPromise);
+      return {
+        output: `Background task started: ${taskId}. Use SubAgent with prompt "status ${taskId}" to check progress.`,
+        touchedFiles: [],
+        durationMs: 0,
+        success: true,
+      };
+    }
+
+    // Synchronous execution with worktree cleanup
+    try {
+      return await executeSubAgent(prompt, workDir, maxRounds);
+    } finally {
+      if (worktreeDir) {
+        try {
+          const { removeWorktree } = await import("@dantecode/git-engine");
+          removeWorktree(worktreeDir);
+        } catch {
+          // Best-effort cleanup
+        }
+      }
     }
   };
 }
@@ -918,6 +1087,9 @@ export async function runAgentLoop(
   let executedToolsThisTurn = 0;
   // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
   let pipelineContinuationNudges = 0;
+  // CLI auto-continuation: refill round budget when exhausted mid-pipeline
+  let autoContinuations = 0;
+  const MAX_AUTO_CONTINUATIONS = 3;
   // Anti-confabulation guards
   let consecutiveEmptyRounds = 0;
   let confabulationNudges = 0;
@@ -936,6 +1108,18 @@ export async function runAgentLoop(
   const approachLog: ApproachLogEntry[] = [];
   let currentApproachDescription = "";
   let currentApproachToolCalls = 0;
+
+  // Persistent approach memory: load historical approaches for similar tasks
+  const persistentMemory = new ApproachMemory(session.projectRoot);
+  let historicalFailures: string | undefined;
+  try {
+    const failed = await persistentMemory.getFailedApproaches(prompt, 5);
+    if (failed.length > 0) {
+      historicalFailures = formatApproachesForPrompt(failed);
+    }
+  } catch {
+    // Non-fatal
+  }
 
   // ---- Feature: Pivot logic ----
   // Track consecutive failures with similar error signatures for strategy change.
@@ -963,9 +1147,13 @@ export async function runAgentLoop(
   // Planning phase: for complex tasks, inject a planning instruction into messages
   // so the model creates a plan before diving into execution
   if (planningEnabled) {
+    let planContent = `## Planning Required (complexity: ${lexicalComplexity.toFixed(2)})\n\n${PLANNING_INSTRUCTION}`;
+    if (historicalFailures) {
+      planContent += `\n\n## Previously Failed Approaches (from past sessions)\n${historicalFailures}\nAvoid repeating these failed strategies.`;
+    }
     messages.push({
       role: "system" as const,
-      content: `## Planning Required (complexity: ${lexicalComplexity.toFixed(2)})\n\n${PLANNING_INSTRUCTION}`,
+      content: planContent,
     });
     if (!config.silent) {
       process.stdout.write(
@@ -975,6 +1163,21 @@ export async function runAgentLoop(
   }
 
   while (maxToolRounds > 0) {
+    // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
+    if (maxToolRounds <= 1 && isPipelineWorkflow && autoContinuations < MAX_AUTO_CONTINUATIONS && filesModified > 0) {
+      autoContinuations++;
+      maxToolRounds += config.skillActive ? 50 : 15;
+      messages.push({
+        role: "user" as const,
+        content: "Continue executing remaining steps. Do not summarize — keep working.",
+      });
+      if (!config.silent) {
+        process.stdout.write(
+          `\n${YELLOW}[auto-continue ${autoContinuations}/${MAX_AUTO_CONTINUATIONS}]${RESET} ${DIM}(rounds low mid-pipeline — refilling budget)${RESET}\n`,
+        );
+      }
+    }
+
     maxToolRounds--;
     roundCounter++;
 
@@ -1772,6 +1975,13 @@ export async function runAgentLoop(
             outcome: "success",
             toolCalls: currentApproachToolCalls,
           });
+          // Persist success to cross-session memory
+          persistentMemory.record({
+            description: approachDesc,
+            outcome: "success",
+            toolCalls: currentApproachToolCalls,
+            sessionId: session.id,
+          }).catch(() => {});
           // Reset pivot tracking on success
           consecutiveSameSignatureFailures = 0;
           lastPivotErrorSignature = "";
@@ -1781,6 +1991,14 @@ export async function runAgentLoop(
             outcome: "failed",
             toolCalls: currentApproachToolCalls,
           });
+          // Persist failure to cross-session memory
+          persistentMemory.record({
+            description: approachDesc,
+            outcome: "failed",
+            errorSignature: lastErrorSignature || undefined,
+            toolCalls: currentApproachToolCalls,
+            sessionId: session.id,
+          }).catch(() => {});
 
           // Inject approach memory into the retry prompt so the model knows what was tried
           if (approachLog.length > 1) {
@@ -1846,6 +2064,23 @@ export async function runAgentLoop(
       content: `Tool execution results:\n\n${toolResults.join("\n\n---\n\n")}`,
     };
     messages.push(toolResultsMessage);
+  }
+
+  // Diff-based anti-confabulation: compare claimed vs actual file changes (advisory)
+  if (config.verbose && touchedFiles.length > 0) {
+    const lastAssistant = messages.filter(m => m.role === "assistant").pop();
+    if (lastAssistant) {
+      const claimedFiles = extractClaimedFiles(lastAssistant.content);
+      if (claimedFiles.length > 0) {
+        const actualSet = new Set(touchedFiles.map(f => f.replace(/\\/g, "/")));
+        const unverified = claimedFiles.filter((f: string) => !actualSet.has(f.replace(/\\/g, "/")));
+        if (unverified.length > 0) {
+          process.stdout.write(
+            `\n${YELLOW}[confab-diff] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
+          );
+        }
+      }
+    }
   }
 
   // Run DanteForge pipeline on touched files

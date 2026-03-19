@@ -119,13 +119,21 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
 
     WebSearch: {
       description:
-        "Search the web using DuckDuckGo and return structured results with titles, URLs, and snippets. Results are cached for 15 minutes.",
+        "Search the web using multiple engines (DuckDuckGo + Brave) with result ranking via reciprocal rank fusion. Results are cached for 15 minutes.",
       parameters: z.object({
         query: z.string().describe("The search query"),
         max_results: z
           .number()
           .optional()
           .describe("Maximum number of results to return (default: 10, max: 20)"),
+        engine: z
+          .enum(["auto", "duckduckgo", "brave"])
+          .optional()
+          .describe("Search engine to use (default: auto — uses all available)"),
+        follow_up: z
+          .boolean()
+          .optional()
+          .describe("Chain follow-up searches to refine results (default: false)"),
       }),
     },
 
@@ -164,11 +172,47 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       }),
     },
 
+    GitHubOps: {
+      description:
+        "Perform GitHub operations via the gh CLI. Supports PR creation/review/merge, issue management, workflow triggers, and search. Superset of GitHubSearch.",
+      parameters: z.object({
+        action: z
+          .enum([
+            "search_repos", "search_code", "search_issues", "search_prs",
+            "create_pr", "view_pr", "review_pr", "merge_pr", "list_prs",
+            "create_issue", "comment_issue", "close_issue", "list_issues",
+            "trigger_workflow", "view_run",
+          ])
+          .describe("The operation to perform"),
+        query: z.string().optional().describe("Search query (for search_* actions)"),
+        title: z.string().optional().describe("Title (for create_pr, create_issue)"),
+        body: z.string().optional().describe("Body text (for create_pr, create_issue, comment_issue, review_pr)"),
+        number: z.number().optional().describe("PR or issue number"),
+        base: z.string().optional().describe("Base branch for PR (for create_pr)"),
+        draft: z.boolean().optional().describe("Create as draft PR (for create_pr)"),
+        review_action: z
+          .enum(["approve", "request-changes", "comment"])
+          .optional()
+          .describe("Review action (for review_pr)"),
+        merge_method: z
+          .enum(["merge", "squash", "rebase"])
+          .optional()
+          .describe("Merge method (for merge_pr)"),
+        state: z.string().optional().describe("Filter by state: open, closed, all"),
+        labels: z.string().optional().describe("Comma-separated labels"),
+        reason: z.string().optional().describe("Reason for closing (for close_issue)"),
+        workflow: z.string().optional().describe("Workflow name or file (for trigger_workflow)"),
+        ref: z.string().optional().describe("Git ref for workflow (for trigger_workflow)"),
+        run_id: z.string().optional().describe("Run ID (for view_run)"),
+        limit: z.number().optional().describe("Max results (default: 10, max: 50)"),
+      }),
+    },
+
     SubAgent: {
       description:
-        "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result.",
+        "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result. Supports worktree isolation for parallel agents and background execution.",
       parameters: z.object({
-        prompt: z.string().describe("The task description for the sub-agent to execute"),
+        prompt: z.string().describe("The task description for the sub-agent to execute, or 'status <taskId>' to check a background task"),
         max_rounds: z
           .number()
           .optional()
@@ -177,6 +221,10 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
           .boolean()
           .optional()
           .describe("Run in background and return task ID instead of waiting (default: false)"),
+        worktree_isolation: z
+          .boolean()
+          .optional()
+          .describe("Run in an isolated git worktree to prevent file conflicts with other agents (default: false)"),
       }),
     },
   };

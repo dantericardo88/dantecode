@@ -259,4 +259,67 @@ describe("LoopDetector", () => {
       expect(/^[0-9a-f]+$/.test(fp)).toBe(true);
     });
   });
+
+  describe("semantic similarity detection", () => {
+    it("detects near-identical actions with slight variations", () => {
+      const detector = new LoopDetector({
+        semanticThreshold: 0.8,
+        semanticWindowSize: 5,
+        identicalThreshold: 10, // disable identical detection
+        maxIterations: 100,
+      });
+
+      // Record 3 near-identical edit actions with slightly different paths
+      detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication bug in the login handler");
+      detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication issue in the login handler");
+      const result = detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication error in the login handler");
+
+      expect(result.stuck).toBe(true);
+      expect(result.reason).toBe("semantic_similarity");
+    });
+
+    it("does not trigger for genuinely different actions", () => {
+      const detector = new LoopDetector({
+        semanticThreshold: 0.85,
+        maxIterations: 100,
+        identicalThreshold: 10,
+      });
+
+      detector.recordAction("edit", "Fix the authentication bug in user login");
+      detector.recordAction("bash", "npm run test -- --coverage");
+      const result = detector.recordAction("edit", "Add new API endpoint for user registration");
+
+      expect(result.stuck).toBe(false);
+    });
+
+    it("skips semantic check for allowed repeat types", () => {
+      const detector = new LoopDetector({
+        semanticThreshold: 0.5, // very low threshold
+        allowedRepeatTypes: ["continue"],
+        maxIterations: 100,
+        identicalThreshold: 10,
+      });
+
+      detector.recordAction("continue", "please continue executing the remaining steps");
+      detector.recordAction("continue", "please continue executing the remaining tasks");
+      const result = detector.recordAction("continue", "please continue executing the remaining items");
+
+      expect(result.stuck).toBe(false);
+    });
+
+    it("only compares same-type actions", () => {
+      const detector = new LoopDetector({
+        semanticThreshold: 0.8,
+        maxIterations: 100,
+        identicalThreshold: 10,
+      });
+
+      detector.recordAction("edit", "fix the authentication bug in login");
+      detector.recordAction("bash", "fix the authentication bug in login");
+      const result = detector.recordAction("edit", "fix the authentication issue in login");
+
+      // Only 1 same-type match (not 2), so should not trigger
+      expect(result.stuck).toBe(false);
+    });
+  });
 });

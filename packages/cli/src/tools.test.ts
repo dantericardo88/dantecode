@@ -363,7 +363,7 @@ describe("WebSearch tool", () => {
     expect(result.content).toContain("No search results found");
   });
 
-  it("handles HTTP errors gracefully", async () => {
+  it("handles HTTP errors gracefully (returns no results)", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
@@ -371,16 +371,18 @@ describe("WebSearch tool", () => {
     });
 
     const result = await executeTool("WebSearch", { query: "rate limited" }, "/proj", makeContext());
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("HTTP 429");
+    // Multi-engine search degrades gracefully: returns no results instead of hard error
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("No search results");
   });
 
-  it("handles network errors gracefully", async () => {
+  it("handles network errors gracefully (returns no results)", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
 
     const result = await executeTool("WebSearch", { query: "timeout test" }, "/proj", makeContext());
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("Network timeout");
+    // Multi-engine search degrades gracefully: returns no results instead of hard error
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("No search results");
   });
 
   it("uses cache for repeated queries", async () => {
@@ -619,6 +621,7 @@ describe("SubAgent tool", () => {
     expect(mockExecutor).toHaveBeenCalledWith("find and update files", {
       maxRounds: 30,
       background: false,
+      worktreeIsolation: false,
     });
   });
 
@@ -640,6 +643,7 @@ describe("SubAgent tool", () => {
     expect(mockExecutor).toHaveBeenCalledWith("quick task", {
       maxRounds: 10,
       background: false,
+      worktreeIsolation: false,
     });
   });
 
@@ -661,6 +665,7 @@ describe("SubAgent tool", () => {
     expect(mockExecutor).toHaveBeenCalledWith("long task", {
       maxRounds: 100,
       background: false,
+      worktreeIsolation: false,
     });
   });
 
@@ -850,5 +855,337 @@ describe("GitHubSearch tool", () => {
   it("advertises GitHubSearch in tool definitions", () => {
     const tools = getToolDefinitions();
     expect(tools.some((t) => t.name === "GitHubSearch")).toBe(true);
+  });
+});
+
+// ============================================================================
+// GitHubOps tool
+// ============================================================================
+
+describe("GitHubOps tool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExecSync.mockReset();
+    mockResolvePreferredShell.mockReturnValue("/bin/bash");
+  });
+
+  it("rejects invalid action", async () => {
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "invalid_action" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("action must be one of");
+  });
+
+  it("delegates search_repos to GitHubSearch", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify([
+      {
+        name: "test-repo",
+        url: "https://github.com/user/test-repo",
+        description: "A test",
+        stargazersCount: 42,
+        language: "TypeScript",
+        updatedAt: "2026-03-15T00:00:00Z",
+      },
+    ]));
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "search_repos", query: "test" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("test-repo");
+    expect(result.content).toContain("42 stars");
+  });
+
+  it("creates a PR with title and body", async () => {
+    mockExecSync.mockReturnValue("https://github.com/user/repo/pull/99\n");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "create_pr", title: "Add feature X", body: "This PR adds feature X" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("PR created");
+    expect(result.content).toContain("pull/99");
+    expect(mockExecSync).toHaveBeenCalledWith(
+      expect.stringContaining("gh pr create"),
+      expect.objectContaining({ cwd: "/proj" }),
+    );
+  });
+
+  it("creates a draft PR with base branch", async () => {
+    mockExecSync.mockReturnValue("https://github.com/user/repo/pull/100\n");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "create_pr", title: "WIP: feature", base: "develop", draft: true },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    const cmd = mockExecSync.mock.calls[0]![0] as string;
+    expect(cmd).toContain("--draft");
+    expect(cmd).toContain("--base");
+  });
+
+  it("returns error when create_pr missing title", async () => {
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "create_pr" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("title is required");
+  });
+
+  it("views a PR with structured output", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify({
+      title: "Fix bug",
+      state: "OPEN",
+      url: "https://github.com/user/repo/pull/42",
+      body: "Fixes the crash",
+      author: { login: "dev" },
+      reviewDecision: "APPROVED",
+      mergeable: "MERGEABLE",
+      additions: 10,
+      deletions: 3,
+      changedFiles: 2,
+    }));
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "view_pr", number: 42 },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Fix bug");
+    expect(result.content).toContain("OPEN");
+    expect(result.content).toContain("APPROVED");
+    expect(result.content).toContain("+10 -3");
+  });
+
+  it("reviews a PR with approve", async () => {
+    mockExecSync.mockReturnValue("Approved");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "review_pr", number: 42, review_action: "approve", body: "LGTM" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("reviewed (approve)");
+    const cmd = mockExecSync.mock.calls[0]![0] as string;
+    expect(cmd).toContain("--approve");
+  });
+
+  it("rejects invalid review action", async () => {
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "review_pr", number: 42, review_action: "reject" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("review_action must be one of");
+  });
+
+  it("merges a PR with squash", async () => {
+    mockExecSync.mockReturnValue("Merged");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "merge_pr", number: 42, merge_method: "squash" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("merged (squash)");
+    const cmd = mockExecSync.mock.calls[0]![0] as string;
+    expect(cmd).toContain("--squash");
+  });
+
+  it("rejects invalid merge method", async () => {
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "merge_pr", number: 42, merge_method: "fast-forward" },
+      "/proj",
+      makeContext(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("merge_method must be one of");
+  });
+
+  it("lists open PRs", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify([
+      {
+        number: 1,
+        title: "First PR",
+        state: "OPEN",
+        url: "https://github.com/user/repo/pull/1",
+        author: { login: "dev1" },
+        headRefName: "feature-a",
+      },
+      {
+        number: 2,
+        title: "Second PR",
+        state: "OPEN",
+        url: "https://github.com/user/repo/pull/2",
+        author: { login: "dev2" },
+        headRefName: "feature-b",
+      },
+    ]));
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "list_prs", state: "open" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("First PR");
+    expect(result.content).toContain("Second PR");
+    expect(result.content).toContain("feature-a");
+  });
+
+  it("creates an issue with labels", async () => {
+    mockExecSync.mockReturnValue("https://github.com/user/repo/issues/55\n");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "create_issue", title: "Bug report", body: "Steps to reproduce", labels: "bug,critical" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Issue created");
+    const cmd = mockExecSync.mock.calls[0]![0] as string;
+    expect(cmd).toContain("--label");
+  });
+
+  it("comments on an issue", async () => {
+    mockExecSync.mockReturnValue("");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "comment_issue", number: 55, body: "Working on this now" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Comment added to #55");
+  });
+
+  it("closes an issue", async () => {
+    mockExecSync.mockReturnValue("");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "close_issue", number: 55, reason: "completed" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Issue #55 closed");
+  });
+
+  it("triggers a workflow", async () => {
+    mockExecSync.mockReturnValue("");
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "trigger_workflow", workflow: "ci.yml", ref: "main" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Workflow triggered");
+  });
+
+  it("views a workflow run", async () => {
+    mockExecSync.mockReturnValue(JSON.stringify({
+      name: "CI",
+      status: "completed",
+      conclusion: "success",
+      url: "https://github.com/user/repo/actions/runs/123",
+      headBranch: "main",
+      event: "push",
+      createdAt: "2026-03-18T10:00:00Z",
+      updatedAt: "2026-03-18T10:05:00Z",
+    }));
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "view_run", run_id: "123" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("CI");
+    expect(result.content).toContain("completed");
+    expect(result.content).toContain("success");
+  });
+
+  it("handles gh not installed", async () => {
+    mockExecSync.mockImplementation(() => {
+      const err = new Error("Command failed") as Error & { stderr: string };
+      err.stderr = "gh: command not found";
+      throw err;
+    });
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "create_pr", title: "test" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("not installed");
+  });
+
+  it("handles gh not authenticated", async () => {
+    mockExecSync.mockImplementation(() => {
+      const err = new Error("Command failed") as Error & { stderr: string };
+      err.stderr = "To get started with GitHub CLI, please run: gh auth login";
+      throw err;
+    });
+
+    const result = await executeTool(
+      "GitHubOps",
+      { action: "view_pr", number: 1 },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("not authenticated");
+  });
+
+  it("advertises GitHubOps in tool definitions", () => {
+    const tools = getToolDefinitions();
+    expect(tools.some((t) => t.name === "GitHubOps")).toBe(true);
   });
 });

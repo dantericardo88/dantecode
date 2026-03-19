@@ -33,7 +33,7 @@ export interface LoopDetectionResult {
   /** Whether the agent is stuck in a loop. */
   stuck: boolean;
   /** Why the loop was detected. */
-  reason?: "max_iterations" | "identical_consecutive" | "cyclic_pattern";
+  reason?: "max_iterations" | "identical_consecutive" | "cyclic_pattern" | "semantic_similarity";
   /** Human-readable explanation. */
   details?: string;
   /** Current iteration count. */
@@ -56,6 +56,10 @@ export interface LoopDetectorOptions {
   maxCycleLength?: number;
   /** Action types that are allowed to repeat (e.g. "continue", "empty"). */
   allowedRepeatTypes?: string[];
+  /** Semantic similarity threshold (0-1). Default: 0.85. Actions above this are "near-identical". */
+  semanticThreshold?: number;
+  /** Window size for semantic similarity checks. Default: 5. */
+  semanticWindowSize?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -67,6 +71,8 @@ const DEFAULT_IDENTICAL_THRESHOLD = 3;
 const DEFAULT_PATTERN_WINDOW = 10;
 const DEFAULT_MIN_CYCLE = 2;
 const DEFAULT_MAX_CYCLE = 5;
+const DEFAULT_SEMANTIC_THRESHOLD = 0.85;
+const DEFAULT_SEMANTIC_WINDOW = 5;
 
 // ----------------------------------------------------------------------------
 // LoopDetector
@@ -97,6 +103,8 @@ export class LoopDetector {
   private readonly minCycleLength: number;
   private readonly maxCycleLength: number;
   private readonly allowedRepeatTypes: Set<string>;
+  private readonly semanticThreshold: number;
+  private readonly semanticWindowSize: number;
   private history: ActionRecord[] = [];
   private iterations = 0;
 
@@ -107,6 +115,8 @@ export class LoopDetector {
     this.minCycleLength = options.minCycleLength ?? DEFAULT_MIN_CYCLE;
     this.maxCycleLength = options.maxCycleLength ?? DEFAULT_MAX_CYCLE;
     this.allowedRepeatTypes = new Set(options.allowedRepeatTypes ?? ["continue", "empty"]);
+    this.semanticThreshold = options.semanticThreshold ?? DEFAULT_SEMANTIC_THRESHOLD;
+    this.semanticWindowSize = options.semanticWindowSize ?? DEFAULT_SEMANTIC_WINDOW;
   }
 
   /**
@@ -163,6 +173,20 @@ export class LoopDetector {
       };
     }
 
+    // Check 4: Semantic similarity — catches near-identical actions with slight arg variations
+    if (!this.allowedRepeatTypes.has(type)) {
+      const semantic = this.detectSemanticLoop();
+      if (semantic) {
+        return {
+          stuck: true,
+          reason: "semantic_similarity",
+          details: `Last action is semantically similar (${(semantic.similarity * 100).toFixed(0)}%) to ${semantic.matchCount} recent actions`,
+          iterationCount: this.iterations,
+          consecutiveRepeats: this.countConsecutiveRepeats(),
+        };
+      }
+    }
+
     return {
       stuck: false,
       iterationCount: this.iterations,
@@ -194,6 +218,48 @@ export class LoopDetector {
   // --------------------------------------------------------------------------
   // Private — Detection algorithms
   // --------------------------------------------------------------------------
+
+  /**
+   * Detects semantic loops: same approach with slightly different arguments.
+   * Uses token-level Jaccard similarity on the raw content of recent actions.
+   * If the latest action is >85% similar to 2+ actions in the recent window,
+   * it's likely a semantic loop (same approach, different args).
+   */
+  private detectSemanticLoop(): { similarity: number; matchCount: number } | null {
+    if (this.history.length < 3) return null;
+
+    const latest = this.history[this.history.length - 1]!;
+    const latestTokens = tokenizeContent(latest.content);
+    if (latestTokens.size === 0) return null;
+
+    const windowStart = Math.max(0, this.history.length - 1 - this.semanticWindowSize);
+    const window = this.history.slice(windowStart, this.history.length - 1);
+
+    let matchCount = 0;
+    let maxSimilarity = 0;
+
+    for (const record of window) {
+      // Only compare same-type actions
+      if (record.type !== latest.type) continue;
+      // Skip if it's an exact match (already caught by identical detection)
+      if (record.fingerprint === latest.fingerprint) continue;
+
+      const recordTokens = tokenizeContent(record.content);
+      const sim = tokenJaccard(latestTokens, recordTokens);
+
+      if (sim >= this.semanticThreshold) {
+        matchCount++;
+        maxSimilarity = Math.max(maxSimilarity, sim);
+      }
+    }
+
+    // Require 2+ near-identical matches to declare a semantic loop
+    if (matchCount >= 2) {
+      return { similarity: maxSimilarity, matchCount };
+    }
+
+    return null;
+  }
 
   /**
    * Counts how many consecutive identical fingerprints at the end of history.
@@ -279,4 +345,29 @@ function arraysEqual(a: string[], b: string[]): boolean {
     if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+/** Tokenize action content into a set of normalized words. */
+function tokenizeContent(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s_\-/.]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t.length > 2),
+  );
+}
+
+/** Compute Jaccard similarity between two token sets. */
+function tokenJaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+
+  let intersection = 0;
+  for (const token of a) {
+    if (b.has(token)) intersection++;
+  }
+
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
 }

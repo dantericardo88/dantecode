@@ -362,3 +362,28 @@ export type {
   SkillWave,
   WaveOrchestratorState,
 } from "./skill-wave-orchestrator.js";
+
+// ─── Approach Memory ────────────────────────────────────────────────────────
+
+export {
+  ApproachMemory,
+  tokenize as approachTokenize,
+  jaccardSimilarity,
+  formatApproachesForPrompt,
+} from "./approach-memory.js";
+export type { ApproachRecord, ApproachQueryOptions } from "./approach-memory.js";
+
+// ─── Prompt Cache ───────────────────────────────────────────────────────────
+
+export {
+  shouldUsePromptCache,
+  buildCacheablePrompt,
+  toCacheControlBlocks,
+  estimateCacheSavings,
+} from "./prompt-cache.js";
+export type { CacheableSection } from "./prompt-cache.js";
+
+// ─── Git Snapshot Recovery ──────────────────────────────────────────────────
+
+export { GitSnapshotRecovery } from "./git-snapshot-recovery.js";
+export type { GitSnapshot, GitSnapshotOptions } from "./git-snapshot-recovery.js";

@@ -155,6 +155,18 @@ vi.mock("@dantecode/core", () => {
     }),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
+    // Approach memory + prompt cache mocks
+    ApproachMemory: class MockApproachMemory {
+      async load() {}
+      async save() {}
+      async record() {}
+      async findSimilar() { return []; }
+      async getFailedApproaches() { return []; }
+      async getAll() { return []; }
+      async clear() {}
+      get size() { return 0; }
+    },
+    formatApproachesForPrompt: vi.fn().mockReturnValue(""),
   };
 });
 

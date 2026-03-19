@@ -20,6 +20,16 @@ import {
   checkWriteSafety,
   checkContentForSecrets,
 } from "./safety.js";
+import {
+  extractReadableArticle,
+  extractByCSS,
+  extractPageMetadata as extractPageMeta,
+} from "./html-parser.js";
+import {
+  MultiEngineSearch,
+  createSearchEngine,
+  type SearchResult,
+} from "./web-search-engine.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -46,6 +56,8 @@ export interface SubAgentOptions {
   maxRounds?: number;
   /** Whether to run in background and return a task ID instead of waiting. */
   background?: boolean;
+  /** Whether to isolate the sub-agent in a git worktree (default: false). */
+  worktreeIsolation?: boolean;
 }
 
 /** Executor function type for sub-agent dispatch. Set by the agent loop. */
@@ -79,7 +91,8 @@ export type ToolName =
   | "WebSearch"
   | "WebFetch"
   | "SubAgent"
-  | "GitHubSearch";
+  | "GitHubSearch"
+  | "GitHubOps";
 
 // ----------------------------------------------------------------------------
 // Path Resolution
@@ -782,100 +795,34 @@ async function toolTodoWrite(
 // WebSearch + WebFetch
 // ----------------------------------------------------------------------------
 
-/** Simple in-memory + disk cache for web search/fetch results. */
-const webCache = new Map<string, { content: string; timestamp: number }>();
+/** Shared search engine instance (lazy init). */
+let _searchEngine: MultiEngineSearch | null = null;
+function getSearchEngine(): MultiEngineSearch {
+  if (!_searchEngine) _searchEngine = createSearchEngine();
+  return _searchEngine;
+}
+
+/** Simple in-memory cache for web fetch results. */
+const webFetchCache = new Map<string, { content: string; timestamp: number }>();
 const WEB_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
-function getCachedWebResult(key: string): string | null {
-  const entry = webCache.get(key);
+function getCachedFetchResult(key: string): string | null {
+  const entry = webFetchCache.get(key);
   if (entry && Date.now() - entry.timestamp < WEB_CACHE_TTL_MS) {
     return entry.content;
   }
-  webCache.delete(key);
+  webFetchCache.delete(key);
   return null;
 }
 
-function setCachedWebResult(key: string, content: string): void {
-  webCache.set(key, { content, timestamp: Date.now() });
+function setCachedFetchResult(key: string, content: string): void {
+  webFetchCache.set(key, { content, timestamp: Date.now() });
 }
 
 /**
- * Strips HTML tags and extracts readable text content.
- * Handles common HTML entities and collapses whitespace.
- */
-function htmlToText(html: string): string {
-  return html
-    // Remove script and style blocks
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    // Remove HTML comments
-    .replace(/<!--[\s\S]*?-->/g, "")
-    // Replace block-level elements with newlines
-    .replace(/<\/?(?:div|p|br|hr|h[1-6]|li|tr|td|th|blockquote|pre|section|article|header|footer|nav|aside|main)\b[^>]*>/gi, "\n")
-    // Remove remaining tags
-    .replace(/<[^>]+>/g, "")
-    // Decode common HTML entities
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    // Collapse whitespace
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n/g, "\n\n")
-    .trim();
-}
-
-/**
- * Extracts search result items from DuckDuckGo HTML response.
- */
-function parseDuckDuckGoResults(html: string): Array<{
-  title: string;
-  url: string;
-  snippet: string;
-}> {
-  const results: Array<{ title: string; url: string; snippet: string }> = [];
-
-  // DuckDuckGo HTML results are in <div class="result..."> blocks
-  // Each result has a link in <a class="result__a" href="...">title</a>
-  // and snippet in <a class="result__snippet" ...>
-  const resultBlocks = html.match(/<div[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) || [];
-
-  for (const block of resultBlocks) {
-    // Extract URL and title from the result link
-    const linkMatch = block.match(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i);
-    if (!linkMatch) continue;
-
-    const url = linkMatch[1]!;
-    const title = htmlToText(linkMatch[2]!);
-
-    // Extract snippet
-    const snippetMatch = block.match(/<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i);
-    const snippet = snippetMatch ? htmlToText(snippetMatch[1]!) : "";
-
-    if (title && url && !url.startsWith("//duckduckgo.com")) {
-      results.push({ title, url, snippet });
-    }
-  }
-
-  // Fallback: try extracting links with surrounding text if structured parsing fails
-  if (results.length === 0) {
-    const linkMatches = [...html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
-    for (const match of linkMatches) {
-      const url = match[1]!;
-      const title = htmlToText(match[2]!);
-      // Skip DuckDuckGo internal links
-      if (url.includes("duckduckgo.com") || !title || title.length < 3) continue;
-      results.push({ title, url, snippet: "" });
-    }
-  }
-
-  return results;
-}
-
-/**
- * WebSearch tool: searches the web using DuckDuckGo HTML and returns structured results.
+ * WebSearch tool: multi-engine search with result ranking and optional chaining.
+ * Engines: DuckDuckGo (always), Brave (if BRAVE_API_KEY set).
+ * Results are deduplicated via reciprocal rank fusion.
  */
 async function toolWebSearch(
   input: Record<string, unknown>,
@@ -887,50 +834,47 @@ async function toolWebSearch(
   }
 
   const maxResults = typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 10;
-
-  const cacheKey = `search:${query}:${maxResults}`;
-  const cached = getCachedWebResult(cacheKey);
-  if (cached) {
-    return { content: cached, isError: false };
-  }
+  const engine = input["engine"] as string | undefined;
+  const followUp = input["follow_up"] === true;
 
   try {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "DanteCode/1.0 (CLI agent tool)",
-        "Accept": "text/html",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
+    const searcher = getSearchEngine();
+    let results: SearchResult[];
 
-    if (!response.ok) {
-      return {
-        content: `WebSearch failed: HTTP ${response.status} ${response.statusText}`,
-        isError: true,
-      };
+    if (followUp) {
+      // Chain search: run initial query, then refine based on results
+      results = await searcher.chainSearch(
+        query,
+        (currentResults) => {
+          // Simple refinement: if results are too generic, add specificity
+          if (currentResults.length < 3) return `${query} tutorial guide`;
+          return null; // Satisfied with results
+        },
+        2, // max 2 follow-up chains
+        maxResults,
+      );
+    } else {
+      results = await searcher.search(query, maxResults, engine);
     }
 
-    const html = await response.text();
-    const results = parseDuckDuckGoResults(html).slice(0, maxResults);
-
     if (results.length === 0) {
-      const output = `No search results found for: "${query}"`;
-      setCachedWebResult(cacheKey, output);
-      return { content: output, isError: false };
+      return { content: `No search results found for: "${query}"`, isError: false };
     }
 
     const formatted = results
       .map((r, i) => {
         const parts = [`${i + 1}. **${r.title}**`, `   URL: ${r.url}`];
         if (r.snippet) parts.push(`   ${r.snippet}`);
+        if (r.source && r.source.includes("+")) parts.push(`   Sources: ${r.source}`);
         return parts.join("\n");
       })
       .join("\n\n");
 
-    const output = `Search results for "${query}" (${results.length} results):\n\n${formatted}`;
-    setCachedWebResult(cacheKey, output);
-    return { content: output, isError: false };
+    const engineLabel = engine && engine !== "auto" ? ` (${engine})` : results.some(r => r.source?.includes("+")) ? " (multi-engine)" : "";
+    return {
+      content: `Search results for "${query}"${engineLabel} (${results.length} results):\n\n${formatted}`,
+      isError: false,
+    };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `WebSearch error: ${message}`, isError: true };
@@ -938,8 +882,8 @@ async function toolWebSearch(
 }
 
 /**
- * WebFetch tool: fetches a URL, converts HTML to readable text, and optionally
- * extracts content based on a prompt/selector.
+ * WebFetch tool: fetches a URL with proper HTML parsing, readability extraction,
+ * CSS selector support, and page metadata extraction.
  */
 async function toolWebFetch(
   input: Record<string, unknown>,
@@ -968,7 +912,7 @@ async function toolWebFetch(
   const raw = input["raw"] === true;
 
   const cacheKey = `fetch:${url}:${maxChars}:${selector ?? ""}:${raw}`;
-  const cached = getCachedWebResult(cacheKey);
+  const cached = getCachedFetchResult(cacheKey);
   if (cached) {
     return { content: cached, isError: false };
   }
@@ -977,7 +921,7 @@ async function toolWebFetch(
     const response = await fetch(url, {
       headers: {
         "User-Agent": "DanteCode/1.0 (CLI agent tool)",
-        "Accept": "text/html, application/json, text/plain, */*",
+        Accept: "text/html, application/json, text/plain, */*",
       },
       redirect: "follow",
       signal: AbortSignal.timeout(15000),
@@ -999,13 +943,13 @@ async function toolWebFetch(
       // Return raw content (JSON, plain text)
       content = body;
     } else {
-      // Apply CSS selector extraction if requested (simple id/class match)
+      // Apply CSS selector extraction if requested
       if (selector) {
-        const selectorContent = extractBySelector(body, selector);
-        content = selectorContent ? selectorContent : htmlToText(body);
+        const selectorContent = extractByCSS(body, selector);
+        content = selectorContent ?? extractReadableArticle(body);
       } else {
-        // Smart content extraction: try main content area first
-        content = extractMainContent(body);
+        // Smart content extraction via readability algorithm
+        content = extractReadableArticle(body);
       }
     }
 
@@ -1015,88 +959,23 @@ async function toolWebFetch(
     }
 
     // Extract page metadata for context
-    const metadata = extractPageMetadata(body, contentType);
-    const metaHeader = metadata ? `${metadata}\n\n` : "";
+    let metaHeader = "";
+    if (contentType.includes("html")) {
+      const meta = extractPageMeta(body);
+      const parts: string[] = [];
+      if (meta.title) parts.push(`Title: ${meta.title}`);
+      if (meta.description) parts.push(`Description: ${meta.description}`);
+      if (meta.author) parts.push(`Author: ${meta.author}`);
+      if (parts.length > 0) metaHeader = parts.join("\n") + "\n\n";
+    }
 
     const output = `Fetched ${url} (${contentType || "unknown type"}, ${body.length} bytes):\n\n${metaHeader}${content}`;
-    setCachedWebResult(cacheKey, output);
+    setCachedFetchResult(cacheKey, output);
     return { content: output, isError: false };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `WebFetch error: ${message}`, isError: true };
   }
-}
-
-/**
- * Extracts content from HTML by a simple CSS selector (id or class).
- */
-function extractBySelector(html: string, selector: string): string | null {
-  // Support #id and .class selectors
-  let regex: RegExp;
-  if (selector.startsWith("#")) {
-    const id = selector.slice(1);
-    regex = new RegExp(`<[^>]+id="${id}"[^>]*>([\\s\\S]*?)<\\/`, "i");
-  } else if (selector.startsWith(".")) {
-    const cls = selector.slice(1);
-    regex = new RegExp(`<[^>]+class="[^"]*${cls}[^"]*"[^>]*>([\\s\\S]*?)<\\/`, "i");
-  } else {
-    // Tag selector
-    regex = new RegExp(`<${selector}[^>]*>([\\s\\S]*?)<\\/${selector}>`, "i");
-  }
-
-  const match = html.match(regex);
-  if (match) {
-    return htmlToText(match[0]!);
-  }
-  return null;
-}
-
-/**
- * Smart content extraction: tries to find the main content area of a page.
- * Falls back to full htmlToText if no main content area is detected.
- */
-function extractMainContent(html: string): string {
-  // Try semantic content tags in priority order
-  const contentSelectors = [
-    /<article[^>]*>([\s\S]*?)<\/article>/i,
-    /<main[^>]*>([\s\S]*?)<\/main>/i,
-    /<div[^>]+(?:class|id)="[^"]*(?:content|readme|article|post|entry|body)[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-  ];
-
-  for (const re of contentSelectors) {
-    const match = html.match(re);
-    if (match?.[1] && match[1].length > 200) {
-      return htmlToText(match[1]);
-    }
-  }
-
-  // Fallback to full page
-  return htmlToText(html);
-}
-
-/**
- * Extracts page metadata (title, description, canonical URL) from HTML.
- */
-function extractPageMetadata(html: string, contentType: string): string | null {
-  if (!contentType.includes("html")) return null;
-
-  const parts: string[] = [];
-
-  // Extract title
-  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (titleMatch?.[1]) {
-    const title = htmlToText(titleMatch[1]).trim();
-    if (title) parts.push(`Title: ${title}`);
-  }
-
-  // Extract meta description
-  const descMatch = html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i)
-    ?? html.match(/<meta[^>]+content="([^"]+)"[^>]+name="description"/i);
-  if (descMatch?.[1]) {
-    parts.push(`Description: ${descMatch[1]}`);
-  }
-
-  return parts.length > 0 ? parts.join("\n") : null;
 }
 
 // ----------------------------------------------------------------------------
@@ -1127,9 +1006,10 @@ async function toolSubAgent(
 
   const maxRounds = typeof input["max_rounds"] === "number" ? Math.min(input["max_rounds"], 100) : 30;
   const background = input["background"] === true;
+  const worktreeIsolation = input["worktree_isolation"] === true;
 
   try {
-    const result = await context.subAgentExecutor(prompt, { maxRounds, background });
+    const result = await context.subAgentExecutor(prompt, { maxRounds, background, worktreeIsolation });
 
     if (!result.success) {
       return {
@@ -1327,6 +1207,267 @@ function formatGitHubResults(type: string, results: unknown[]): string {
 }
 
 // ----------------------------------------------------------------------------
+// GitHubOps — full GitHub operations via `gh` CLI
+// ----------------------------------------------------------------------------
+
+/** Valid GitHubOps actions */
+type GitHubOpsAction =
+  | "search_repos" | "search_code" | "search_issues" | "search_prs"
+  | "create_pr" | "view_pr" | "review_pr" | "merge_pr" | "list_prs"
+  | "create_issue" | "comment_issue" | "close_issue" | "list_issues"
+  | "trigger_workflow" | "view_run";
+
+const VALID_ACTIONS = new Set<string>([
+  "search_repos", "search_code", "search_issues", "search_prs",
+  "create_pr", "view_pr", "review_pr", "merge_pr", "list_prs",
+  "create_issue", "comment_issue", "close_issue", "list_issues",
+  "trigger_workflow", "view_run",
+]);
+
+/**
+ * Execute a `gh` command and return stdout. Throws on failure.
+ */
+function execGh(command: string, projectRoot: string): string {
+  return execSync(command, {
+    cwd: projectRoot,
+    encoding: "utf-8",
+    timeout: 30000,
+    maxBuffer: 5 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: resolvePreferredShell(),
+  });
+}
+
+/**
+ * GitHubOps tool: comprehensive GitHub operations via the `gh` CLI.
+ * Superset of GitHubSearch — adds PR, issue, review, and workflow ops.
+ */
+async function toolGitHubOps(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const action = (input["action"] as string) || "search_repos";
+
+  if (!VALID_ACTIONS.has(action)) {
+    return {
+      content: `Error: action must be one of: ${[...VALID_ACTIONS].join(", ")}`,
+      isError: true,
+    };
+  }
+
+  try {
+    switch (action as GitHubOpsAction) {
+      // ---- Search operations (delegate to existing logic) ----
+      case "search_repos":
+      case "search_code":
+      case "search_issues":
+      case "search_prs": {
+        const searchType = action.replace("search_", "");
+        return toolGitHubSearch(
+          { ...input, type: searchType },
+          projectRoot,
+        );
+      }
+
+      // ---- PR operations ----
+      case "create_pr": {
+        const title = input["title"] as string;
+        const body = input["body"] as string | undefined;
+        const base = input["base"] as string | undefined;
+        const draft = input["draft"] as boolean | undefined;
+        if (!title) return { content: "Error: title is required for create_pr", isError: true };
+
+        const args = [`gh pr create --title ${JSON.stringify(title)}`];
+        if (body) args.push(`--body ${JSON.stringify(body)}`);
+        if (base) args.push(`--base ${JSON.stringify(base)}`);
+        if (draft) args.push("--draft");
+        const out = execGh(args.join(" "), projectRoot);
+        return { content: `PR created:\n${out.trim()}`, isError: false };
+      }
+
+      case "view_pr": {
+        const number = input["number"] as number | undefined;
+        if (!number) return { content: "Error: number is required for view_pr", isError: true };
+        const out = execGh(
+          `gh pr view ${number} --json title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles`,
+          projectRoot,
+        );
+        const pr = JSON.parse(out);
+        const lines = [
+          `**#${number}: ${pr.title}** [${pr.state}]`,
+          `Author: ${pr.author?.login ?? "unknown"} | Review: ${pr.reviewDecision ?? "NONE"}`,
+          `Mergeable: ${pr.mergeable ?? "unknown"} | +${pr.additions ?? 0} -${pr.deletions ?? 0} (${pr.changedFiles ?? 0} files)`,
+          `URL: ${pr.url}`,
+        ];
+        if (pr.body) lines.push("", pr.body.slice(0, 1000));
+        return { content: lines.join("\n"), isError: false };
+      }
+
+      case "review_pr": {
+        const number = input["number"] as number | undefined;
+        const reviewAction = input["review_action"] as string | undefined;
+        const body = input["body"] as string | undefined;
+        if (!number) return { content: "Error: number is required for review_pr", isError: true };
+
+        const validReviewActions = ["approve", "request-changes", "comment"];
+        const ra = reviewAction || "comment";
+        if (!validReviewActions.includes(ra)) {
+          return { content: `Error: review_action must be one of: ${validReviewActions.join(", ")}`, isError: true };
+        }
+
+        const args = [`gh pr review ${number} --${ra}`];
+        if (body) args.push(`--body ${JSON.stringify(body)}`);
+        const out = execGh(args.join(" "), projectRoot);
+        return { content: `PR #${number} reviewed (${ra}):\n${out.trim()}`, isError: false };
+      }
+
+      case "merge_pr": {
+        const number = input["number"] as number | undefined;
+        const method = input["merge_method"] as string | undefined;
+        if (!number) return { content: "Error: number is required for merge_pr", isError: true };
+
+        const validMethods = ["merge", "squash", "rebase"];
+        const mm = method || "merge";
+        if (!validMethods.includes(mm)) {
+          return { content: `Error: merge_method must be one of: ${validMethods.join(", ")}`, isError: true };
+        }
+
+        const out = execGh(`gh pr merge ${number} --${mm}`, projectRoot);
+        return { content: `PR #${number} merged (${mm}):\n${out.trim()}`, isError: false };
+      }
+
+      case "list_prs": {
+        const state = (input["state"] as string) || "open";
+        const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+        const out = execGh(
+          `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,headRefName`,
+          projectRoot,
+        );
+        const prs = JSON.parse(out) as Array<{
+          number?: number; title?: string; state?: string; url?: string;
+          author?: { login?: string }; createdAt?: string; headRefName?: string;
+        }>;
+        if (prs.length === 0) return { content: `No ${state} PRs found.`, isError: false };
+        const lines = prs.map((pr, i) =>
+          `${i + 1}. #${pr.number ?? "?"} **${pr.title ?? "untitled"}** [${pr.state ?? "?"}]\n   Branch: ${pr.headRefName ?? "?"} | Author: ${pr.author?.login ?? "?"}\n   ${pr.url ?? ""}`
+        );
+        return { content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+      }
+
+      // ---- Issue operations ----
+      case "create_issue": {
+        const title = input["title"] as string;
+        const body = input["body"] as string | undefined;
+        const labels = input["labels"] as string[] | string | undefined;
+        if (!title) return { content: "Error: title is required for create_issue", isError: true };
+
+        const args = [`gh issue create --title ${JSON.stringify(title)}`];
+        if (body) args.push(`--body ${JSON.stringify(body)}`);
+        if (labels) {
+          const labelList = Array.isArray(labels) ? labels.join(",") : labels;
+          args.push(`--label ${JSON.stringify(labelList)}`);
+        }
+        const out = execGh(args.join(" "), projectRoot);
+        return { content: `Issue created:\n${out.trim()}`, isError: false };
+      }
+
+      case "comment_issue": {
+        const number = input["number"] as number | undefined;
+        const body = input["body"] as string | undefined;
+        if (!number) return { content: "Error: number is required for comment_issue", isError: true };
+        if (!body) return { content: "Error: body is required for comment_issue", isError: true };
+
+        const out = execGh(`gh issue comment ${number} --body ${JSON.stringify(body)}`, projectRoot);
+        return { content: `Comment added to #${number}:\n${out.trim()}`, isError: false };
+      }
+
+      case "close_issue": {
+        const number = input["number"] as number | undefined;
+        const reason = input["reason"] as string | undefined;
+        if (!number) return { content: "Error: number is required for close_issue", isError: true };
+
+        const args = [`gh issue close ${number}`];
+        if (reason) args.push(`--reason ${JSON.stringify(reason)}`);
+        const out = execGh(args.join(" "), projectRoot);
+        return { content: `Issue #${number} closed:\n${out.trim()}`, isError: false };
+      }
+
+      case "list_issues": {
+        const state = (input["state"] as string) || "open";
+        const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+        const labels = input["labels"] as string[] | string | undefined;
+        const args = [`gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`];
+        if (labels) {
+          const labelList = Array.isArray(labels) ? labels.join(",") : labels;
+          args.push(`--label ${JSON.stringify(labelList)}`);
+        }
+        const out = execGh(args.join(" "), projectRoot);
+        const issues = JSON.parse(out) as Array<{
+          number?: number; title?: string; state?: string; url?: string;
+          author?: { login?: string }; labels?: Array<{ name?: string }>;
+        }>;
+        if (issues.length === 0) return { content: `No ${state} issues found.`, isError: false };
+        const lines = issues.map((iss, i) => {
+          const lbls = iss.labels?.map(l => l.name).filter(Boolean).join(", ");
+          return `${i + 1}. #${iss.number ?? "?"} **${iss.title ?? "untitled"}** [${iss.state ?? "?"}]${lbls ? `\n   Labels: ${lbls}` : ""}\n   ${iss.url ?? ""}`;
+        });
+        return { content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+      }
+
+      // ---- Workflow operations ----
+      case "trigger_workflow": {
+        const workflow = input["workflow"] as string | undefined;
+        const ref = input["ref"] as string | undefined;
+        if (!workflow) return { content: "Error: workflow is required for trigger_workflow", isError: true };
+
+        const args = [`gh workflow run ${JSON.stringify(workflow)}`];
+        if (ref) args.push(`--ref ${JSON.stringify(ref)}`);
+        const out = execGh(args.join(" "), projectRoot);
+        return { content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`, isError: false };
+      }
+
+      case "view_run": {
+        const runId = input["run_id"] as string | number | undefined;
+        if (!runId) return { content: "Error: run_id is required for view_run", isError: true };
+
+        const out = execGh(
+          `gh run view ${runId} --json status,conclusion,name,url,createdAt,updatedAt,headBranch,event`,
+          projectRoot,
+        );
+        const run = JSON.parse(out);
+        const lines = [
+          `**${run.name ?? "Run"}** [${run.status}${run.conclusion ? ` — ${run.conclusion}` : ""}]`,
+          `Branch: ${run.headBranch ?? "?"} | Event: ${run.event ?? "?"}`,
+          `Created: ${run.createdAt ?? "?"} | Updated: ${run.updatedAt ?? "?"}`,
+          `URL: ${run.url ?? "N/A"}`,
+        ];
+        return { content: lines.join("\n"), isError: false };
+      }
+
+      default:
+        return { content: `Unknown action: ${action}`, isError: true };
+    }
+  } catch (err: unknown) {
+    const error = err as { stderr?: string; message?: string };
+    const stderr = typeof error.stderr === "string" ? error.stderr : "";
+    if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
+      return {
+        content: "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
+        isError: true,
+      };
+    }
+    if (stderr.includes("not logged in") || stderr.includes("auth login")) {
+      return {
+        content: "Error: GitHub CLI is not authenticated. Run `gh auth login` first.",
+        isError: true,
+      };
+    }
+    const message = stderr || (err instanceof Error ? err.message : String(err));
+    return { content: `GitHubOps error: ${message}`, isError: true };
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
@@ -1463,6 +1604,9 @@ export async function executeTool(
       break;
     case "GitHubSearch":
       result = await toolGitHubSearch(input, projectRoot);
+      break;
+    case "GitHubOps":
+      result = await toolGitHubOps(input, projectRoot);
       break;
     default:
       result = { content: `Unknown tool: ${name}`, isError: true };
@@ -1755,7 +1899,7 @@ export function getToolDefinitions(): Array<{
     {
       name: "WebSearch",
       description:
-        "Search the web using DuckDuckGo and return structured results with titles, URLs, and snippets. Results are cached for 15 minutes.",
+        "Search the web using multiple engines (DuckDuckGo + Brave) with result ranking. Supports engine selection and follow-up search chaining. Results are cached for 15 minutes.",
       parameters: {
         type: "object",
         properties: {
@@ -1764,6 +1908,15 @@ export function getToolDefinitions(): Array<{
             type: "number",
             description: "Maximum number of results to return (default: 10, max: 20)",
           },
+          engine: {
+            type: "string",
+            enum: ["auto", "duckduckgo", "brave"],
+            description: "Search engine to use (default: auto — uses all available)",
+          },
+          follow_up: {
+            type: "boolean",
+            description: "Chain follow-up searches to refine results (default: false)",
+          },
         },
         required: ["query"],
       },
@@ -1771,7 +1924,7 @@ export function getToolDefinitions(): Array<{
     {
       name: "WebFetch",
       description:
-        "Fetch content from a URL. HTML is converted to readable text. JSON and plain text are returned as-is. Results are cached for 15 minutes.",
+        "Fetch content from a URL with readability extraction. HTML is parsed into clean readable text using content density scoring. JSON and plain text returned as-is. Results are cached for 15 minutes.",
       parameters: {
         type: "object",
         properties: {
@@ -1782,7 +1935,7 @@ export function getToolDefinitions(): Array<{
           },
           selector: {
             type: "string",
-            description: "CSS selector (#id, .class, or tag) to extract specific content",
+            description: "CSS selector (#id, .class, tag, tag#id, tag.class) to extract specific content",
           },
           raw: {
             type: "boolean",
@@ -1813,15 +1966,55 @@ export function getToolDefinitions(): Array<{
       },
     },
     {
+      name: "GitHubOps",
+      description:
+        "Perform GitHub operations via the gh CLI. Supports PR creation/review/merge, issue management, workflow triggers, and search. Superset of GitHubSearch.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            description:
+              "The operation to perform: search_repos, search_code, search_issues, search_prs, create_pr, view_pr, review_pr, merge_pr, list_prs, create_issue, comment_issue, close_issue, list_issues, trigger_workflow, view_run",
+          },
+          query: { type: "string", description: "Search query (for search_* actions)" },
+          title: { type: "string", description: "Title (for create_pr, create_issue)" },
+          body: { type: "string", description: "Body text (for create_pr, create_issue, comment_issue, review_pr)" },
+          number: { type: "number", description: "PR or issue number (for view_pr, review_pr, merge_pr, comment_issue, close_issue)" },
+          base: { type: "string", description: "Base branch for PR (for create_pr)" },
+          draft: { type: "boolean", description: "Create as draft PR (for create_pr)" },
+          review_action: {
+            type: "string",
+            description: "Review action: approve, request-changes, or comment (for review_pr)",
+          },
+          merge_method: {
+            type: "string",
+            description: "Merge method: merge, squash, or rebase (for merge_pr)",
+          },
+          state: { type: "string", description: "Filter by state: open, closed, all (for list_prs, list_issues)" },
+          labels: {
+            type: "string",
+            description: "Comma-separated labels (for create_issue, list_issues)",
+          },
+          reason: { type: "string", description: "Reason for closing (for close_issue)" },
+          workflow: { type: "string", description: "Workflow name or file (for trigger_workflow)" },
+          ref: { type: "string", description: "Git ref for workflow (for trigger_workflow)" },
+          run_id: { type: "string", description: "Run ID (for view_run)" },
+          limit: { type: "number", description: "Max results (for search/list actions, default: 10, max: 50)" },
+        },
+        required: ["action"],
+      },
+    },
+    {
       name: "SubAgent",
       description:
-        "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result. Use for parallelizable tasks, research queries, or code changes that can be isolated.",
+        "Spawn a sub-agent to handle a specific task. Supports worktree isolation for parallel agents and background execution. Use 'status <taskId>' prompt to check background tasks.",
       parameters: {
         type: "object",
         properties: {
           prompt: {
             type: "string",
-            description: "The task description for the sub-agent to execute",
+            description: "The task description for the sub-agent, or 'status <taskId>' to check a background task",
           },
           max_rounds: {
             type: "number",
@@ -1830,6 +2023,10 @@ export function getToolDefinitions(): Array<{
           background: {
             type: "boolean",
             description: "Run in background and return task ID instead of waiting for completion (default: false)",
+          },
+          worktree_isolation: {
+            type: "boolean",
+            description: "Run in an isolated git worktree to prevent file conflicts with other agents (default: false)",
           },
         },
         required: ["prompt"],
