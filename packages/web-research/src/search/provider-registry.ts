@@ -1,5 +1,5 @@
-import type { SearchProvider } from "../types";
-import { DuckDuckGoProvider } from "./duckduckgo";
+import type { SearchProvider } from "../types.js";
+import { DuckDuckGoProvider } from "./duckduckgo.js";
 
 export class SearchProviderRegistry {
   private providers = new Map<string, SearchProvider>();

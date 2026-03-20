@@ -1,4 +1,4 @@
-import { WebFetchOptions } from "./types.js";
+import type { WebFetchOptions } from "./types.js";
 
 export class MarkdownCleaner {
   /**
@@ -81,6 +81,6 @@ export class MarkdownCleaner {
 
   extractTitle(html: string): string {
     const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
-    return match ? match[1].trim() : "";
+    return match ? (match[1] ?? "").trim() : "";
   }
 }

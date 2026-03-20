@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { SearchResult } from "../types";
-import { generateCacheKey } from "./cache-key";
+import type { SearchResult } from "../types.js";
+import { generateCacheKey } from "./cache-key.js";
 
 /**
  * Persistent research cache for storing search results.

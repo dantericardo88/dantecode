@@ -24,7 +24,6 @@ export class BasicFetchProvider implements FetchProvider {
       }
 
       const text = await response.text();
-      const contentType = response.headers.get("content-type") || "";
 
       return {
         url,

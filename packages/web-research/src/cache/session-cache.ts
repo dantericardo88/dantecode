@@ -1,4 +1,4 @@
-import { SearchResult } from "../types.js";
+import type { SearchResult } from "../types.js";
 
 /**
  * In-memory cache for the current research session.

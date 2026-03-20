@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-import * as cheerio from "cheerio";
 import { normalizeUrl } from "../cache/cache-key.js";
 
 export interface FetchOptions {
@@ -17,18 +15,41 @@ export interface FetchResult {
 }
 
 /**
- * Basic web fetcher with HTML cleaning.
+ * Strips all HTML tags from a string using regex.
+ */
+function stripTags(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<header[\s\S]*?<\/header>/gi, " ")
+    .replace(/<[^>]+>/g, " ");
+}
+
+function extractTitle(html: string): string {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  if (m) return m[1]!.trim();
+  const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+  if (h1) return h1[1]!.replace(/<[^>]+>/g, "").trim();
+  return "Untitled";
+}
+
+/**
+ * Basic web fetcher with lightweight HTML cleaning.
+ * Uses native Node.js fetch (18+) — no external dependencies.
  */
 export class WebFetcher {
   async fetch(url: string, options: FetchOptions = {}): Promise<FetchResult> {
     const timeout = options.timeoutMs ?? 10000;
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
+    const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
-      const response = await fetch(url, {
+      const response = await globalThis.fetch(url, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           ...options.headers
         },
         signal: controller.signal
@@ -39,13 +60,8 @@ export class WebFetcher {
       }
 
       const html = await response.text();
-      const $ = cheerio.load(html);
-      
-      // Basic cleaning: remove scripts, styles, etc.
-      $("script, style, nav, footer, header, noscript").remove();
-      
-      const title = $("title").text().trim() || $("h1").first().text().trim() || "Untitled";
-      const content = this.cleanText($("body").text());
+      const title = extractTitle(html);
+      const content = this.cleanText(stripTags(html));
 
       return {
         url,
@@ -55,14 +71,14 @@ export class WebFetcher {
         timestamp: new Date().toISOString()
       };
     } finally {
-      clearTimeout(id);
+      clearTimeout(timer);
     }
   }
 
   private cleanText(text: string): string {
     return text
+      .replace(/&[a-z0-9]+;/gi, " ")
       .replace(/\s+/g, " ")
-      .replace(/\n\s*\n/g, "\n\n")
       .trim();
   }
 }

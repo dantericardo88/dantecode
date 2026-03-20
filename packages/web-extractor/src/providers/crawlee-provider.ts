@@ -8,7 +8,7 @@ import { FetchProvider, WebFetchOptions, WebFetchResult } from "../types.js";
 export class CrawleeProvider implements FetchProvider {
   readonly name = "crawlee";
 
-  async fetch(url: string, options: WebFetchOptions): Promise<Partial<WebFetchResult>> {
+  async fetch(url: string, _options: WebFetchOptions): Promise<Partial<WebFetchResult>> {
     // For now, this acts as a placeholder or delegates to another provider
     // Real implementation would require adding 'crawlee' as a dependency.
     console.log(`CrawleeProvider fetching: ${url}`);

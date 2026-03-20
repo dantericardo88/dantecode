@@ -1,5 +1,5 @@
 import type { EvidenceBundle, EvidenceSource } from "@dantecode/runtime-spine";
-import { SemanticDeduper } from "../extractor/deduper";
+import { SemanticDeduper } from "../extractor/deduper.js";
 
 /**
  * Aggregates multiple evidence sources into a single EvidenceBundle.

@@ -3,8 +3,6 @@ import {
   SearchOptions,
   SearchProvider
 } from "../types.js";
-import fetch from "node-fetch";
-import * as cheerio from "cheerio";
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -18,6 +16,46 @@ function randomUserAgent(): string {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Lightweight HTML parser for DDG search results.
+ * Uses regex to avoid cheerio ESM/type dependency issues.
+ */
+function parseResults(html: string, limit: number): Array<{ title: string; url: string; snippet: string }> {
+  const results: Array<{ title: string; url: string; snippet: string }> = [];
+
+  // Match DDG result blocks
+  const blockRe = /<div class="result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi;
+  let blockMatch: RegExpExecArray | null;
+  let position = 0;
+
+  while ((blockMatch = blockRe.exec(html)) !== null && results.length < limit) {
+    const block = blockMatch[0] ?? "";
+
+    // Extract title
+    const titleMatch = /class="result__title"[^>]*>.*?<a[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    const title = titleMatch ? titleMatch[1]!.replace(/<[^>]+>/g, "").trim() : "";
+
+    // Extract URL
+    const urlMatch = /class="result__url"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    const rawUrl = urlMatch ? urlMatch[1]!.replace(/<[^>]+>/g, "").trim() : "";
+
+    // Extract snippet
+    const snippetMatch = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
+    const snippet = snippetMatch ? snippetMatch[1]!.replace(/<[^>]+>/g, "").trim() : "";
+
+    if (title && rawUrl) {
+      results.push({
+        title,
+        url: rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`,
+        snippet,
+      });
+      position++;
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -56,14 +94,22 @@ export class DuckDuckGoProvider implements SearchProvider {
       }
 
       try {
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": randomUserAgent(),
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.9",
-          },
-          signal: AbortSignal.timeout(10_000),
-        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            headers: {
+              "User-Agent": randomUserAgent(),
+              "Accept": "text/html,application/xhtml+xml",
+              "Accept-Language": "en-US,en;q=0.9",
+            },
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
 
         if (response.status === 429) {
           continue; // Rate limited — backoff and retry
@@ -74,34 +120,20 @@ export class DuckDuckGoProvider implements SearchProvider {
         }
 
         const html = await response.text();
-        const $ = cheerio.load(html);
-        const results: SearchResult[] = [];
+        const parsed = parseResults(html, limit);
 
-        $(".result").each((i, element) => {
-          if (results.length >= limit) return;
-
-          const titleEl = $(element).find(".result__title a");
-          const title = titleEl.text().trim();
-          const rawUrl = $(element).find(".result__url").text().trim();
-          const snippet = $(element).find(".result__snippet").text().trim();
-
-          if (title && rawUrl) {
-            results.push({
-              title,
-              url: rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`,
-              snippet,
-              position: i + 1,
-            });
-          }
-        });
-
-        return results;
+        return parsed.map((r, i) => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.snippet,
+          position: i + 1,
+        }));
       } catch {
         // Retry on transient errors
       }
     }
 
-    // All retries exhausted — return empty rather than throwing to match resilience contract
+    // All retries exhausted — return empty rather than throwing
     return [];
   }
 }
