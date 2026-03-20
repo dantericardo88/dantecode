@@ -1,0 +1,55 @@
+{
+  "name": "@dantecode/ux-polish",
+  "version": "1.0.0",
+  "description": "Shared UX/Polish engine for DanteCode — rich rendering, progress, onboarding, theming, and accessibility across CLI/REPL/VS Code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
+    "directory": "packages/ux-polish"
+  },
+  "keywords": [
+    "dantecode",
+    "ux",
+    "polish",
+    "cli",
+    "theme",
+    "progress",
+    "onboarding"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run --config ../../vitest.package.config.ts",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@dantecode/core": "1.0.0",
+    "@dantecode/config-types": "1.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

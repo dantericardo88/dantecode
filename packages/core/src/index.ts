@@ -499,6 +499,139 @@ export type {
   VerificationGraphRunResult,
 } from "./verification-graph.js";
 
+// ─── Confidence Synthesizer ─────────────────────────────────────────────────
+
+export { synthesizeConfidence, DEFAULT_CONFIDENCE_THRESHOLDS } from "./confidence-synthesizer.js";
+export type {
+  ConfidenceDecision,
+  ConfidenceThresholds,
+  ConfidenceSynthesisInput,
+  ConfidenceSynthesisResult,
+} from "./confidence-synthesizer.js";
+
+// ─── Metric Suite ────────────────────────────────────────────────────────────
+
+export {
+  MetricSuiteRegistry,
+  globalMetricSuiteRegistry,
+  toVerificationMetricScores,
+} from "./metric-suite.js";
+export type {
+  MetricId,
+  MetricInput,
+  MetricResult,
+  MetricDefinition as VerificationMetricDefinition,
+  MetricSuiteRunResult,
+} from "./metric-suite.js";
+
+// ─── Verification Trace Recorder ─────────────────────────────────────────────
+
+export {
+  VerificationTraceRecorder,
+  globalTraceRecorder,
+} from "./verification-trace-recorder.js";
+export type {
+  VerificationTraceEventKind,
+  VerificationTraceEvent,
+  VerificationTrace,
+} from "./verification-trace-recorder.js";
+
+// ─── Verification Trace Serializer ───────────────────────────────────────────
+
+export {
+  serializeTrace,
+  deserializeTrace,
+  validateSerializedTrace,
+  summarizeTrace,
+  filterEvents as filterTraceEvents,
+} from "./verification-trace-serializer.js";
+export type {
+  SerializedTrace,
+  TraceValidationResult,
+} from "./verification-trace-serializer.js";
+
+// ─── Verification Consensus ──────────────────────────────────────────────────
+
+export { computeConsensus } from "./verification-consensus.js";
+export type {
+  ConsensusVerdict,
+  ConsensusVote,
+  ConsensusOptions,
+  ConsensusResult,
+} from "./verification-consensus.js";
+
+// ─── Verification Critic Runner ──────────────────────────────────────────────
+
+export {
+  VerificationCriticRunner,
+  COMPLETENESS_CRITIC,
+  HALLUCINATION_CRITIC,
+  RELEVANCE_CRITIC,
+  globalCriticRunner,
+} from "./verification-critic-runner.js";
+export type {
+  CriticInput,
+  CriticOutput,
+  CriticFn,
+  CriticRegistration,
+  CriticRunResult,
+  DebateResult,
+} from "./verification-critic-runner.js";
+
+// ─── Verification Suite Runner ───────────────────────────────────────────────
+
+export {
+  VerificationSuiteRunner,
+  buildCoverageTestCase,
+  buildSafetyTestCase,
+  buildStructureTestCase,
+  globalSuiteRunner,
+} from "./verification-suite-runner.js";
+export type {
+  TestCaseKind,
+  VerificationTestCase,
+  TestCaseResult,
+  SuiteRunReport,
+  SuiteDefinition,
+} from "./verification-suite-runner.js";
+
+// ─── Verification Benchmark Runner ───────────────────────────────────────────
+
+export {
+  VerificationBenchmarkRunner,
+  createStandardBenchmarkCorpus,
+  globalBenchmarkRunner,
+} from "./verification-benchmark-runner.js";
+export type {
+  BenchmarkTask,
+  BenchmarkTaskResult,
+  BenchmarkReport,
+  BenchmarkBaseline,
+} from "./verification-benchmark-runner.js";
+
+// ─── Verification Bootstrapping ──────────────────────────────────────────────
+
+export { VerificationBootstrapper } from "./verification-bootstrapping.js";
+export type {
+  LabeledDecision,
+  LabeledExample,
+  CalibrationResult,
+  BootstrapOptions,
+} from "./verification-bootstrapping.js";
+
+// ─── Verification Tuning ─────────────────────────────────────────────────────
+
+export {
+  VerificationTuner,
+  globalVerificationTuner,
+} from "./verification-tuning.js";
+export type {
+  TuningFeedback,
+  VerifierOutcome,
+  TuningSuggestion,
+  TuningReport,
+} from "./verification-tuning.js";
+
 // ─── Patch Validator ────────────────────────────────────────────────────────
 
 export { PatchValidator } from "./patch-validator.js";

@@ -10,7 +10,7 @@ export class Dedupe {
 
     for (const chunk of chunks) {
       const normalized = chunk.trim().toLowerCase().replace(/\W/g, "");
-      if (normalized.length < 10) {
+      if (normalized.length < 3) {
         result.push(chunk);
         continue;
       }

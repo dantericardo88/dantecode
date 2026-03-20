@@ -331,6 +331,36 @@ vi.mock("@dantecode/core", () => {
       (_toolName: string, _input: Record<string, unknown>, raw: { content: string; isError: boolean }) => raw,
     ),
     formatEvidenceSummary: vi.fn(() => ""),
+    // UXEngine — required because stream-renderer.ts imports it from @dantecode/core
+    UXEngine: class MockUXEngine {
+      constructor(_opts?: Record<string, unknown>) {}
+      applyTheme() {}
+      getTheme() { return { name: "default", icons: {}, colors: {} }; }
+      getThemeName() { return "default"; }
+      listThemes() { return ["default"]; }
+      formatProgress() { return ""; }
+      formatError(msg: string) { return `Error: ${msg}`; }
+      formatSuccess(msg: string) { return `✓ ${msg}`; }
+      formatWarning(msg: string) { return `⚠ ${msg}`; }
+      formatInfo(msg: string) { return `ℹ ${msg}`; }
+      generateHint() { return ""; }
+      buildStatusLine() { return ""; }
+      stripColors(t: string) { return t; }
+      truncate(t: string) { return t; }
+      formatTable() { return ""; }
+      formatMarkdown(t: string) { return t; }
+      formatDiff() { return ""; }
+    },
+    // Spinner — also exported from ux-engine via @dantecode/core
+    Spinner: class MockSpinner {
+      constructor(_opts?: Record<string, unknown>) {}
+      start() {}
+      update() {}
+      succeed() {}
+      fail() {}
+      warn() {}
+      stop() {}
+    },
   };
 });
 

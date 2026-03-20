@@ -100,3 +100,37 @@ export type {
   QueuedAutomationRun,
   GitAutomationOrchestratorOptions,
 } from "./automation-orchestrator.js";
+
+// ─── Event Normalizer ────────────────────────────────────────────────────────
+
+export { normalizeGitEvent, computeEventFingerprint, isNoiseEvent, sortByPriority } from "./event-normalizer.js";
+export type {
+  GitAutomationEvent,
+  GitAutomationEventType,
+  GitAutomationEventPriority,
+  RawGitEvent,
+  NoiseDetectionOptions,
+} from "./event-normalizer.js";
+
+// ─── Event Queue ─────────────────────────────────────────────────────────────
+
+export { GitEventQueue } from "./event-queue.js";
+export type { EventQueueEntry, EventQueueOptions, EventQueueStats } from "./event-queue.js";
+
+// ─── Rate Limiter ─────────────────────────────────────────────────────────────
+
+export { GitEventRateLimiter } from "./rate-limiter.js";
+export type {
+  RateLimiterOptions,
+  RateLimiterRepoStats,
+  RateLimiterGlobalStats,
+} from "./rate-limiter.js";
+
+// ─── Multi-Repo Coordinator ──────────────────────────────────────────────────
+
+export { MultiRepoCoordinator } from "./multi-repo-coordinator.js";
+export type {
+  RepoCoordinatorEntry,
+  MultiRepoCoordinatorOptions,
+  WorkflowStartResult,
+} from "./multi-repo-coordinator.js";
