@@ -45,6 +45,7 @@
     "@dantecode/danteforge": "1.0.0",
     "@dantecode/git-engine": "1.0.0",
     "@dantecode/runtime-spine": "1.0.0",
+    "@dantecode/web-extractor": "1.0.0",
     "@dantecode/web-research": "1.0.0",
     "@dantecode/agent-orchestrator": "1.0.0",
     "@modelcontextprotocol/sdk": "^1.0.4",

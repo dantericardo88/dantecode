@@ -5,16 +5,15 @@ import {
   criticDebate,
   createEmbeddingProvider,
   globalVerificationRailRegistry,
-  WebSearchOrchestrator,
   runQaSuite,
-  SmartExtractor,
   ModelRouterImpl,
   readOrInitializeState,
-  SubAgentManager,
   verifyOutput,
+  BrowserAgent,
   PersistentMemory,
   SessionStore,
 } from "@dantecode/core";
+import { WebExtractor } from "@dantecode/web-extractor";
 import {
   DuckDuckGoProvider,
 } from "@dantecode/web-research";
@@ -310,9 +309,8 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const url = requiredString(args, "url");
       const instructions = optionalString(args, "instructions");
       const schemaStr = optionalString(args, "schema");
-      const combinedInstructions = schemaStr ? `${instructions || ""}\nSchema:\n${schemaStr}`.trim() : instructions;
-      const options = args["options"] as Record<string, unknown> | undefined;
-      const projectRoot = process.cwd();
+      const options = (args["options"] as Record<string, unknown> | undefined) || {};
+      const projectRoot = (options["projectRoot"] as string) || process.cwd();
       
       const state = await readOrInitializeState(projectRoot);
       const routerConfig = {
@@ -321,10 +319,15 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
         overrides: state.model.taskOverrides
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
-      const extractor = new SmartExtractor(router);
+      const browserAgent = new BrowserAgent({ headless: true });
+      const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
       
-      const extracted = await extractor.extract(url, { instructions: combinedInstructions, ...options });
-      return serialize(extracted);
+      const result = await extractor.fetch(url, { 
+        instructions, 
+        schema: schemaStr,
+        ...options 
+      });
+      return serialize(result);
     },
     smart_extract: async (args) => {
       const url = requiredString(args, "url");
@@ -338,10 +341,11 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
         overrides: state.model.taskOverrides
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
-      const extractor = new SmartExtractor(router);
+      const browserAgent = new BrowserAgent({ headless: true });
+      const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
       
-      const extracted = await extractor.extract(url, { instructions: goal });
-      return serialize(extracted);
+      const result = await extractor.fetch(url, { instructions: goal });
+      return serialize(result);
     },
     batch_fetch: async (args) => {
       const urls = args["urls"] as string[];
@@ -358,13 +362,10 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
         overrides: state.model.taskOverrides
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
-      const extractor = new SmartExtractor(router);
+      const browserAgent = new BrowserAgent({ headless: true });
+      const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
       
-      const results = await Promise.all(
-        urls.map((url) =>
-          extractor.extract(url, { instructions: commonInstructions })
-        )
-      );
+      const results = await extractor.batchFetch(urls, { instructions: commonInstructions });
       return serialize({ results });
     },
     spawn_subagent: async (args) => {

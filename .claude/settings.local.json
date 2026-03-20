@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install --workspace=packages/runtime-spine --workspace=packages/web-research --workspace=packages/web-extractor --workspace=packages/agent-orchestrator)",
+      "Bash(npm run build --workspace=packages/runtime-spine)"
+    ]
+  }
+}

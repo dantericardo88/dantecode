@@ -23,6 +23,7 @@ export interface WebFetchResult {
     renderMode: RenderMode;
     cacheHit: boolean;
     extractedAt: string;
+    relevanceScore?: number;
   };
   sources: Array<{
     url: string;

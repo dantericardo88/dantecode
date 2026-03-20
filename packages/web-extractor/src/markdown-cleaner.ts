@@ -6,7 +6,7 @@ export class MarkdownCleaner {
    * Strips nav, footer, ads, and script/style tags.
    * Preserves headings, tables, and lists.
    */
-  clean(html: string, options: WebFetchOptions): string {
+  clean(html: string, options: WebFetchOptions = {}): string {
     let content = html;
 
     // 1. Remove comments
@@ -58,9 +58,11 @@ export class MarkdownCleaner {
 
     // 8. Final Cleanup: Whitespace and newlines
     content = content
-      .replace(/[^\S\n]+/g, " ") // Collapse horizontal whitespace
-      .replace(/\n\s*\n/g, "\n\n") // Collapse multiple newlines
-      .replace(/^\s+|\s+$/g, ""); // Trim
+      .split("\n")
+      .map(line => line.trim().replace(/[^\S\n]+/g, " "))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n") // Max 2 newlines
+      .trim();
 
     return content;
   }

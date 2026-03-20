@@ -26,8 +26,8 @@ export class PersistentResearchCache {
       const data = await readFile(filePath, "utf-8");
       const entry = JSON.parse(data);
       
-      // TTL check (e.g., 24 hours)
-      const TTL = 24 * 60 * 60 * 1000;
+      // TTL: 7 days (per PRD — persistent cache should survive multi-day sessions)
+      const TTL = 7 * 24 * 60 * 60 * 1000;
       if (Date.now() - entry.timestamp > TTL) {
         return null;
       }
