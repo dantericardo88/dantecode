@@ -980,3 +980,19 @@ export type {
   RecoveryMessengerOptions,
   RecoveryScenario,
 } from "./recovery-messenger.js";
+
+export { ContextualSuggestions, contextualSuggestions } from "./contextual-suggestions.js";
+export type {
+  Suggestion,
+  SuggestionContext,
+  SuggestionTrigger,
+  ContextualSuggestionsOptions,
+} from "./contextual-suggestions.js";
+
+export { ThemePreferences } from "./theme-preferences.js";
+export type {
+  UXPreferences,
+  PreferenceKey,
+  PreferenceValue,
+  ThemePreferencesOptions,
+} from "./theme-preferences.js";
