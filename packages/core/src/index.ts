@@ -954,3 +954,22 @@ export * from "./semantic-recall.js";
 export * from "./pruning-engine.js";
 export * from "./entity-extractor.js";
 export * from "./memory-orchestrator.js";
+
+// ─── UX Polish Layer (PRD v1 Part 6) ────────────────────────────────────────
+
+export { Spinner } from "./ux-engine.js";
+export type { SpinnerOptions } from "./ux-engine.js";
+
+export { ProgressOrchestrator } from "./progress-orchestrator.js";
+export type {
+  ProgressTask,
+  ProgressOrchestratorOptions,
+  TaskState,
+} from "./progress-orchestrator.js";
+
+export { ErrorHelper, errorHelper } from "./error-helper.js";
+export type {
+  ErrorAnalysis,
+  ErrorKind,
+  FormatOptions,
+} from "./error-helper.js";

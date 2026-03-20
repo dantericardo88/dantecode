@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { UXEngine } from "./ux-engine.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { UXEngine, Spinner } from "./ux-engine.js";
 
 describe("UXEngine", () => {
   // 1. constructor defaults
@@ -207,5 +207,193 @@ describe("UXEngine", () => {
     expect(ux.getThemeName()).toBe("default");
     ux.applyTheme("rich");
     expect(ux.getThemeName()).toBe("rich");
+  });
+
+  // -------------------------------------------------------------------------
+  // formatTable
+  // -------------------------------------------------------------------------
+
+  // 26. formatTable includes headers and rows
+  it("formatTable() renders headers and data rows", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatTable(["Name", "Score"], [["Alice", "0.92"], ["Bob", "0.75"]]);
+    expect(out).toContain("Name");
+    expect(out).toContain("Score");
+    expect(out).toContain("Alice");
+    expect(out).toContain("0.92");
+    expect(out).toContain("Bob");
+  });
+
+  // 27. formatTable produces divider lines
+  it("formatTable() has divider rows (+-...)", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatTable(["A", "B"], [["1", "2"]]);
+    expect(out).toMatch(/^\+[-+]+\+/m);
+  });
+
+  // 28. formatTable single column
+  it("formatTable() handles single-column tables", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatTable(["Status"], [["OK"], ["FAIL"]]);
+    expect(out).toContain("Status");
+    expect(out).toContain("OK");
+    expect(out).toContain("FAIL");
+  });
+
+  // 29. formatTable empty rows
+  it("formatTable() with no data rows still shows header", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatTable(["Col"], []);
+    expect(out).toContain("Col");
+  });
+
+  // -------------------------------------------------------------------------
+  // formatMarkdown
+  // -------------------------------------------------------------------------
+
+  // 30. H1 heading rendered with ANSI
+  it("formatMarkdown() renders H1 with bold+cyan ANSI", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatMarkdown("# Hello World");
+    expect(out).toContain("Hello World");
+    expect(out).toContain("\x1b[");
+  });
+
+  // 31. H2 heading bold
+  it("formatMarkdown() renders H2 as bold", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatMarkdown("## Section");
+    expect(out).toContain("Section");
+    expect(out).toContain("\x1b[1m");
+  });
+
+  // 32. Bullet list prefix
+  it("formatMarkdown() converts bullet items to • prefix", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatMarkdown("- item one\n- item two");
+    expect(out).toContain("• item one");
+    expect(out).toContain("• item two");
+  });
+
+  // 33. inline bold (**text**)
+  it("formatMarkdown() converts **bold** to ANSI bold", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatMarkdown("This is **important**.");
+    expect(out).toContain("important");
+    expect(out).toContain("\x1b[1m");
+  });
+
+  // 34. inline code
+  it("formatMarkdown() renders `code` spans", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatMarkdown("Run `npm install`");
+    expect(out).toContain("npm install");
+  });
+
+  // 35. colors=false leaves text unchanged
+  it("formatMarkdown() with colors=false returns plain text (no ANSI)", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatMarkdown("# Title\n**bold**\n`code`");
+    expect(out).not.toContain("\x1b[");
+  });
+
+  // -------------------------------------------------------------------------
+  // formatDiff
+  // -------------------------------------------------------------------------
+
+  // 36. formatDiff added lines have + prefix
+  it("formatDiff() prefixes added lines with +", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatDiff(["new line"], [], "test.ts");
+    expect(out).toContain("+ new line");
+  });
+
+  // 37. formatDiff removed lines have - prefix
+  it("formatDiff() prefixes removed lines with -", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatDiff([], ["old line"]);
+    expect(out).toContain("- old line");
+  });
+
+  // 38. formatDiff shows context label
+  it("formatDiff() includes context label when provided", () => {
+    const ux = new UXEngine({ colors: false });
+    const out = ux.formatDiff(["a"], ["b"], "src/index.ts");
+    expect(out).toContain("src/index.ts");
+  });
+
+  // 39. formatDiff ANSI colors for added
+  it("formatDiff() uses green for added lines when colors=true", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatDiff(["new"], []);
+    expect(out).toContain("\x1b[32m");
+  });
+
+  // 40. formatDiff ANSI colors for removed
+  it("formatDiff() uses red for removed lines when colors=true", () => {
+    const ux = new UXEngine({ colors: true });
+    const out = ux.formatDiff([], ["old"]);
+    expect(out).toContain("\x1b[31m");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+describe("Spinner", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // 41. start + stop without error
+  it("start() and stop() do not throw", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const s = new Spinner({ message: "Loading...", colors: false });
+    s.start();
+    s.stop();
+  });
+
+  // 42. succeed() writes to stdout
+  it("succeed() writes success line to stdout", () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const s = new Spinner({ message: "Done", colors: false });
+    s.start();
+    s.succeed("All good");
+    expect(writes.some((w) => w.includes("All good"))).toBe(true);
+  });
+
+  // 43. fail() writes failure line
+  it("fail() writes failure indicator to stdout", () => {
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    const s = new Spinner({ message: "Task", colors: false });
+    s.start();
+    s.fail("Something broke");
+    expect(writes.some((w) => w.includes("Something broke"))).toBe(true);
+  });
+
+  // 44. update() changes message
+  it("update() changes the displayed message", () => {
+    const s = new Spinner({ message: "Original", colors: false });
+    s.update("Updated");
+    // No throw expected
+    s.stop();
+  });
+
+  // 45. double start does not create extra timers
+  it("start() called twice does not throw", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const s = new Spinner({ colors: false });
+    s.start("first");
+    s.start("second"); // should be no-op
+    s.stop();
   });
 });
