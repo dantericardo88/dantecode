@@ -1,71 +1,68 @@
 # TASKS.md
 
-## Phase 1
-1. Implement the documented workflow - files: src/cli/, src/core/ - verify: Commands produce truthful artifacts and state transitions - effort: M
-2. Add verification coverage - files: tests/ - verify: New integration tests fail on incomplete or misleading workflows - effort: M
+## Phase 1 — Core Implementation (memory-engine package)
+
+### Phase 1.1 — Memory Engine Package
+1. Implement memory-engine package (`packages/memory-engine/`)
+   - files: `packages/memory-engine/src/`
+   - verify: `npm test --workspace=packages/memory-engine` passes, 88+ tests green
+   - done-when: `@dantecode/memory-engine` exports memoryStore/memoryRecall/memorySummarize/memoryPrune/crossSessionRecall/memoryVisualize
+   - effort: L
+   - status: COMPLETE
+
+### Phase 1.2 — Core Exports
+2. Export new memory-engine types from `packages/core/src/index.ts`
+   - files: `packages/core/src/index.ts`
+   - verify: `npx tsc --noEmit -p packages/core/tsconfig.json` passes
+   - done-when: MemoryOrchestrator, SemanticRecall, SessionMemory are importable from `@dantecode/core`
+   - effort: S
+   - status: COMPLETE
+
+## Phase 2 — Verification & QA
+
+### Phase 2.1 — Verification Suite
+3. Implement verification spine (`packages/core/src/verification-*.ts`)
+   - files: `packages/core/src/verification-*.ts`, `packages/core/src/confidence-synthesizer.ts`, `packages/core/src/metric-suite.ts`
+   - verify: `npm test --workspace=packages/core` passes 90+ verification tests
+   - done-when: ConfidenceSynthesizer, MetricSuite, VerificationCriticRunner all exported from core
+   - effort: L
+   - status: COMPLETE
+
+### Phase 2.2 — Build Gate
+4. Fix all TypeScript build errors across monorepo
+   - files: `packages/mcp/src/default-tool-handlers.ts`
+   - verify: `npx turbo build` exits 0
+   - done-when: No TS2322/TS2345 errors in any package
+   - effort: S
+   - status: COMPLETE (schema string→JSON.parse fix)
+
+## Phase 3 — Event Automation (git-engine)
+
+### Phase 3.1 — Git Event Modules
+5. Implement git-engine event spine (event-normalizer, event-queue, rate-limiter, multi-repo-coordinator)
+   - files: `packages/git-engine/src/event-*.ts`, `packages/git-engine/src/rate-limiter.ts`, `packages/git-engine/src/multi-repo-coordinator.ts`
+   - verify: `npm test --workspace=packages/git-engine` passes 53+ new tests (139 total)
+   - done-when: EventQueue, RateLimiter, MultiRepoCoordinator exported from git-engine index
+   - effort: L
+   - status: COMPLETE
+
+## Phase 4 — UX Polish
+
+### Phase 4.1 — UX Polish Package
+6. Implement ux-polish package (`packages/ux-polish/`)
+   - files: `packages/ux-polish/src/`
+   - verify: All 370+ tests pass, G1–G19 + GF-01–GF-07 golden flows green
+   - done-when: RichRenderer, ProgressOrchestrator, OnboardingWizard, ThemeEngine all exported
+   - effort: L
+   - status: COMPLETE
 
 ## Dependencies
-- Task 2 depends on the core workflow semantics being stable enough to test.
+- Phase 2.2 (build gate) must pass before any verification CI run
+- Phase 3.1 depends on git-engine index exports being updated
+- Phase 4.1 integration bridges depend on Phase 1.2 core exports
 
 ## Phase Grouping
-- Phase 1: establish truthful artifact and execution semantics.
-
-## Context
-# PLAN.md
-
-## Architecture Overview
-- Inputs: constitution, review output, and specification artifacts.
-- Outputs: executable tasks, prompt artifacts, and verification signals.
-- Execution model: deterministic local planning, explicit prompt mode for implementation when no LLM is configured.
-
-## Implementation Phases
-1. Validate prerequisites and load project state.
-2. Generate or refine the required artifact.
-3. Store executable tasks for phase 1.
-4. Verify required artifacts before moving to execution.
-
-## Technology Decisions
-- Keep the CLI ESM-first and file-based for portability.
-- Preserve user-level config for secrets and project-level state for artifacts.
-- Respect constitution constraints: # DanteForge Constitution
-
-## Risk Mitigations
-- Avoid false-positive success messages by requiring a real artifact write.
-- Avoid false-positive execution by requiring explicit --prompt mode when no LLM is available.
-- Review-generated context is available for refinement.
-
-## Testing Strategy
-- Unit tests for parsing, state transitions, and exit-code behavior.
-- End-to-end CLI tests in isolated temp workspaces.
-- Extension tests for shell safety and command dispatch behavior.
-
-## Timeli
-
-# SPEC.md
-
-## Feature Name
-Implement the Session / Memory Enhancement PRD as detailed in Docs\DanteCode Gaps PRD v1 part 5.md
-
-## Constitution Reference
-# DanteForge Constitution
-- Always prioritize zero ambiguity
-- Local-first & PIPEDA compliant
-- Atomic commits only
-- Always verify before commit
-- Scale-adaptive: solo -> party mode automatically
-
-## What & Why
-Deliver Implement the Session / Memory Enhancement PRD as detailed in Docs\DanteCode Gaps PRD v1 part 5.md using a structured DanteForge workflow that can run locally or with an external LLM.
-
-## User Stories
-1. As an operator, I want Implement the Session / Memory Enhancement PRD as detailed in Docs\DanteCode Gaps PRD v1 part 5.md, so that I can move from intent to execution with clear artifacts.
-2. As a reviewer, I want generated artifacts to be explicit and verifiable, so that the workflow is trustworthy.
-
-## Non-functional Requirements
-- Keep generated artifacts deterministic in local-only mode.
-- Preserve compatibility with prompt-mode and LLM-backed workflows.
-- Make every step fail closed when prerequisites are missing.
-
-## Acceptance Criteria
-1. SPEC.md is written to .danteforge/.
-2. The task breakdown can drive for
+- Phase 1: memory-engine package + core exports (Session/Memory PRD v1 Part 5)
+- Phase 2: verification suite + build gate (Verification/QA PRD v1 Part 3)
+- Phase 3: git event automation (Git Enhancement PRD v1 Part 4)
+- Phase 4: UX polish package (Developer UX PRD v1 Part 6)

@@ -322,10 +322,13 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const browserAgent = new BrowserAgent({ headless: true });
       const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
       
-      const result = await extractor.fetch(url, { 
-        instructions, 
-        schema: schemaStr,
-        ...options 
+      const schema: Record<string, unknown> | undefined = schemaStr
+        ? (JSON.parse(schemaStr) as Record<string, unknown>)
+        : undefined;
+      const result = await extractor.fetch(url, {
+        instructions,
+        schema,
+        ...options
       });
       return serialize(result);
     },

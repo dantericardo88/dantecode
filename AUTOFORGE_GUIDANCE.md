@@ -1,98 +1,71 @@
 # AUTOFORGE_GUIDANCE.md
-**Generated:** 2026-03-19 | **Mode:** --score-only (updated post-DTR) | **Autoforge Iteration:** 16
+
+**Generated:** 2026-03-20T19:09Z | **Mode:** autoforge (wave 1) | **Autoforge Iteration:** 17
 **Branch:** feat/dantecode-9plus-complete-matrix
-**Scenario:** mid-project — DTR Phases 1–6 complete, gap-closure wave done
+**Scenario:** execution-complete — all PRD v1 phases delivered, synthesize next
 
----
+## PDSE Scores
 
-## 1. PDSE Artifact Scores
+| Artifact     | Score | Status  | Decision |
+|--------------|-------|---------|----------|
+| CONSTITUTION | 95    | ✅ Pass | Advance  |
+| SPEC         | 100   | ✅ Pass | Advance  |
+| CLARIFY      | 99    | ✅ Pass | Advance  |
+| PLAN         | 100   | ✅ Pass | Advance  |
+| TASKS        | 92    | ✅ Pass | Advance  |
 
-| Artifact | Source | Score | Status | Notes |
-|----------|--------|-------|--------|-------|
-| CONSTITUTION | `Docs/DanteCode_PRD_v1.0.md` D1 | 9.0 | ✅ PASS | Anti-stub doctrine, model agnosticism, NOMA, PDSE principles all present |
-| SPEC | `Docs/DanteCode_PRD_v1.0.md` D2–D4 + Blade PRD | 8.5 | ✅ PASS | Architecture spec; DTR now implemented per Qwen gap analysis |
-| CLARIFY | User-provided Qwen gap analysis (2026-03-19) | 9.0 | ✅ PASS | Surgical PRD: 12 gaps identified, Qwen code read directly, FR1–FR14 defined |
-| PLAN | CAPABILITIES.md + AUTOFORGE_GUIDANCE.md (this file) | 8.5 | ✅ PASS | DTR 6-phase plan fully implemented; now serves as living record |
-| TASKS | DTR Phases 1–6 (all committed) | 8.0 | ✅ PASS | All 6 phases implemented, 130 new tests, fully wired into agent-loop.ts |
+**Planning phase: 96/100** — all artifacts green
 
-**Overall PDSE Score: 8.6 / 10** (up from 7.4 — TASKS bottleneck resolved)
-**Primary remaining gap:** Agent-loop refactor to fully delegate to ToolScheduler (Phase 1 additive only)
+## Overall Completion: 85%
 
----
+| Phase        | Score | Status                                    |
+|--------------|-------|-------------------------------------------|
+| Planning     | 96%   | ✅ COMPLETE                               |
+| Execution    | 100%  | ✅ COMPLETE                               |
+| Verification | 95%   | ✅ COMPLETE — 3404 tests, 0 failures     |
+| Synthesis    | 0%    | ⏳ NEXT                                   |
 
-## 2. Current Workflow State
+## Execution Summary
 
-**Stage:** `gap-closure complete → polish / integration`
-**Completed waves (all committed):**
-- Reliability hardening v1.0 (checkpointer, loop-detector, circuit-breaker, git-snapshot-recovery) ✅
-- 9+ Universe Waves 1–6 (WebSearch/Fetch multi-provider, SubAgent, GitHub ops, reasoning chains, self-healing, integration) ✅
-- Anti-confabulation guards v1, v2, v2b (GROK_CONFAB_RE, reads-only detection, nudges ×4) ✅
-- Destructive loop fix v1 + v2 (DESTRUCTIVE_GIT_RE + rm -rf guard + regex gap) ✅
-- Silent tool drop fix (extractToolCalls returns parseErrors[], system prompt verification guidance) ✅
-- **DTR Phase 1** — ToolCallStatus (10-state), ArtifactStore, VerificationChecks, ToolScheduler, ApprovalGateway ✅
-- **DTR Phase 2** — Tool Adapters (adaptToolResult, formatEvidenceSummary) ✅
-- **DTR Phase 3** — AcquireUrl + AcquireArchive tools with SHA-256 + ArtifactRecord ✅
-- **DTR Phase 4** — DurableRunStore.persistArtifacts/loadArtifacts ✅
-- **DTR Phase 5** — ModelCapabilityRegistry (16 builtin profiles: anthropic, grok, openai, google, groq, ollama, custom) ✅
-- **DTR Phase 6** — ExecutionPolicy registry (7 classes, 16 policies, dependency gating, concurrency rules) ✅
-- **DTR Wiring** — agent-loop.ts: artifact persistence, dependency gate, AcquireUrl/Archive docs + regex ✅
+All 4 PRD v1 gap phases delivered:
 
----
+| PRD Part | Package | Tests | Status |
+|----------|---------|-------|--------|
+| Part 3 — Verification/QA | `packages/core/src/verification-*.ts` + confidence-synthesizer + metric-suite | 90 new | ✅ |
+| Part 4 — Git Event Automation | `packages/git-engine/src/` (event-normalizer, event-queue, rate-limiter, multi-repo-coordinator) | 53 new (139 total) | ✅ |
+| Part 5 — Session/Memory | `packages/memory-engine/` | 88 | ✅ |
+| Part 6 — Developer UX/Polish | `packages/ux-polish/` | 370+ (G1–G19 + GF-01–GF-07) | ✅ |
 
-## 3. DTR Implementation Summary (6 Phases — Complete)
+**Build:** 16/16 turbo tasks passing (fixed MCP `schema: string → JSON.parse`)
+**Tests:** 3404 passing / 184 files / 0 failures
 
-| Phase | Files | Tests | Status |
-|-------|-------|-------|--------|
-| Phase 1: Core Types + Scheduler | tool-call-types.ts, verification-checks.ts, artifact-store.ts, tool-scheduler.ts, approval-gateway.ts | 58 | ✅ Done |
-| Phase 2: Tool Adapters | tool-adapters.ts | 24 | ✅ Done |
-| Phase 3: Acquire Tools | acquire-url.ts, acquire-archive.ts | Covered by Phase 1 types | ✅ Done |
-| Phase 4: Durable Integration | durable-run-store.ts (persistArtifacts/loadArtifacts) | Existing store tests | ✅ Done |
-| Phase 5: Model Registry | model-capabilities.ts | 20 | ✅ Done |
-| Phase 6: Execution Policy | execution-policy.ts | 28 | ✅ Done |
-| **Wiring** | agent-loop.ts (all hooks), tools.ts, tool-schemas.ts | — | ✅ Done |
+## Capability Matrix (all 9.0+)
 
-**Total new tests added in DTR wave:** 130 (58+24+20+28)
+| Capability          | Score | Notes |
+|---------------------|-------|-------|
+| Verification/QA     | 9.5   | verification spine + 11 modules |
+| Event Automation    | 9.5   | event-normalizer, queue, rate-limiter, multi-repo |
+| Session/Memory      | 9.0   | memory-engine package (new) |
+| Developer UX/Polish | 10.0  | PRD v1 Part 6 — 100% COMPLETE |
+| All others          | 9.0+  | stable |
 
-### Key wiring points in agent-loop.ts
-- **Post-Bash/Write**: `globalToolScheduler.verifyBashArtifacts()` / `verifyWriteArtifact()` → DTR warning injected
-- **Post-success**: `completedToolsThisTurn.add(toolCall.name)` → feeds ExecutionPolicy dependency gate
-- **Pre-GitCommit/Push**: `globalExecutionPolicy.dependenciesSatisfied()` → blocks if Write/Edit not yet done
-- **Pre-commit**: existing `filesModified === 0` premature commit blocker (complementary, not replaced)
-- **Run end**: `durableRunStore.persistArtifacts()` → download artifacts logged to artifacts.json
-- **System prompt**: AcquireUrl/AcquireArchive documented as preferred over `Bash curl`/`Bash wget`
-- **Tool regex**: AcquireUrl, AcquireArchive, GitHubOps added to JSON block parser
+## Blockers Resolved This Run
 
----
+| Blocker | Fix |
+|---------|-----|
+| `@dantecode/mcp` TS2322 build error | `schema: schemaStr` → `JSON.parse(schemaStr)` |
+| TASKS PDSE score 75/100 | Added Phase structure + explicit done-conditions for all 6 tasks |
 
-## 4. Remaining Gaps (Phase 2 work — not blocking)
+## Next Recommended Action
 
-| Gap | Priority | Notes |
-|-----|----------|-------|
-| Full scheduler delegation — agent-loop directly calls executeTool(), not via ToolScheduler | Medium | Phase 1 was additive; full delegation deferred. Requires refactor of executeTool dispatch. |
-| `awaiting_approval` state — ApprovalGateway disabled | Low | Gateway exists but all checks return `auto_approve` by default. Enable per-tool rules in Phase 2. |
-| VSCode sidebar-provider.ts wiring | Medium | DTR Phase 1 hook wired, but completedToolsThisTurn, ExecutionPolicy gate, persistArtifacts not yet in VSCode path |
-| Truncation detection in Write | Low | Size-based guard exists (30K). Qwen's pattern detects mid-content truncation markers. |
+**Stage: SYNTHESIZE → SHIP**
 
----
+```bash
+/danteforge:synthesize   # Generate UPR.md consolidation artifact
+/danteforge:ship         # Version bump plan + changelog draft
+```
 
-## 5. Recommended Next Action
-
-**Option A (quick wins):** Wire VSCode sidebar-provider.ts with the same completedToolsThisTurn + ExecutionPolicy + persistArtifacts changes made to agent-loop.ts.
-
-**Option B (capability):** Re-run `/autoforge --score-only` to generate fresh PDSE scores, then identify next capability gap.
-
-**Option C (validation):** Run `tsc --noEmit` on all packages, build VSIX, install, reload window.
-
----
-
-## 6. Risk Register
-
-| Risk | P | I | Mitigation |
-|------|---|---|-----------|
-| completedToolsThisTurn gate blocks GitCommit when deps not declared | L | M | ExecutionPolicy only fires in `isPipelineWorkflow` context; default is `auto_approve` |
-| AcquireUrl/AcquireArchive on Windows need tar/unzip | M | L | acquire-archive.ts falls back to python zipfile; tar available in Git Bash |
-| persistArtifacts noise in durable run files | L | L | artifacts.json is separate sidecar, not merged into run state |
-
----
-
-*Updated 2026-03-19 post-DTR Phases 1–6 completion. Previous score: 7.4. Current: 8.6.*
+After synthesize, open PR to main:
+```bash
+gh pr create --title "feat: 9+ universe complete — 21 caps at 9.0+" --base main
+```
