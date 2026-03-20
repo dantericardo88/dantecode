@@ -44,7 +44,7 @@ describe("EventEngine", () => {
     const wf = makeWorkflow();
     engine.registerWorkflow(wf);
     expect(engine.getWorkflows()).toHaveLength(1);
-    expect(engine.getWorkflows()[0].id).toBe("wf-1");
+    expect(engine.getWorkflows()[0]!.id).toBe("wf-1");
   });
 
   // 2
@@ -72,15 +72,15 @@ describe("EventEngine", () => {
   // 5
   it("enableWorkflow() and disableWorkflow() toggle enabled flag", () => {
     engine.registerWorkflow(makeWorkflow({ enabled: false }));
-    expect(engine.getWorkflows()[0].enabled).toBe(false);
+    expect(engine.getWorkflows()[0]!.enabled).toBe(false);
 
     const enabled = engine.enableWorkflow("wf-1");
     expect(enabled).toBe(true);
-    expect(engine.getWorkflows()[0].enabled).toBe(true);
+    expect(engine.getWorkflows()[0]!.enabled).toBe(true);
 
     const disabled = engine.disableWorkflow("wf-1");
     expect(disabled).toBe(true);
-    expect(engine.getWorkflows()[0].enabled).toBe(false);
+    expect(engine.getWorkflows()[0]!.enabled).toBe(false);
   });
 
   // 6
@@ -177,7 +177,7 @@ describe("EventEngine", () => {
     const event = engine.createEvent("git:commit", {});
     const matches = engine.routeEvent(event);
     expect(matches).toHaveLength(1);
-    expect(matches[0].id).toBe("wf-a");
+    expect(matches[0]!.id).toBe("wf-a");
   });
 
   // 16
@@ -209,7 +209,7 @@ describe("EventEngine", () => {
     await engine.processAll();
     const processed = engine.getProcessedEvents();
     expect(processed).toHaveLength(1);
-    expect(processed[0].payload).toEqual({ msg: "hello" });
+    expect(processed[0]!.payload).toEqual({ msg: "hello" });
   });
 
   // 20
@@ -322,7 +322,7 @@ describe("EventEngine", () => {
     );
     engine.enqueue("git:commit", { branch: "feature/x", sha: "abc123" });
     await engine.processAll();
-    expect(captured[0].payload).toEqual({ branch: "feature/x", sha: "abc123" });
+    expect(captured[0]!.payload).toEqual({ branch: "feature/x", sha: "abc123" });
   });
 
   // 30
@@ -340,6 +340,6 @@ describe("EventEngine", () => {
 
     await engine.processAll();
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0].payload.branch).toBe("main");
+    expect(handler.mock.calls[0]![0].payload.branch).toBe("main");
   });
 });

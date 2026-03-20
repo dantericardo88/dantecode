@@ -27,9 +27,10 @@ import { ApprovalGateway } from "./approval-gateway.js";
 // ─── ToolCallStatus / transitions ─────────────────────────────────────────────
 
 describe("ToolCallStatus state machine", () => {
-  it("TERMINAL_STATES contains the 4 terminal states", () => {
+  it("TERMINAL_STATES contains the terminal states", () => {
     expect(TERMINAL_STATES.has("success")).toBe(true);
     expect(TERMINAL_STATES.has("error")).toBe(true);
+    expect(TERMINAL_STATES.has("blocked_by_dependency")).toBe(true);
     expect(TERMINAL_STATES.has("cancelled")).toBe(true);
     expect(TERMINAL_STATES.has("timed_out")).toBe(true);
   });
@@ -409,6 +410,142 @@ describe("ToolScheduler", () => {
     expect(scheduler.isRunning()).toBe(false);
   });
 
+  it("resumeToolCalls restores awaiting approval as an active scheduler blocker", () => {
+    const now = Date.now();
+
+    scheduler.resumeToolCalls([
+      {
+        id: "call-approval",
+        toolName: "Bash",
+        input: { command: "git push origin main" },
+        requestId: "req-resume",
+        status: "awaiting_approval",
+        statusHistory: [
+          { status: "created", ts: now - 50 },
+          { status: "validating", ts: now - 40 },
+          { status: "awaiting_approval", ts: now - 30, reason: "approval required" },
+        ],
+        createdAt: now - 50,
+      },
+    ]);
+
+    expect(scheduler.isRunning()).toBe(true);
+    expect(scheduler.get("call-approval")?.status).toBe("awaiting_approval");
+
+    scheduler.approve("call-approval");
+
+    expect(scheduler.get("call-approval")?.status).toBe("executing");
+  });
+
+  it("resumeToolCalls normalizes executing calls with persisted success evidence into verifying", () => {
+    const now = Date.now();
+
+    const restored = scheduler.resumeToolCalls([
+      {
+        id: "call-executing",
+        toolName: "Write",
+        input: { file_path: "src/app.ts", content: "export const resumed = true;" },
+        requestId: "req-resume",
+        status: "executing",
+        statusHistory: [
+          { status: "created", ts: now - 50 },
+          { status: "validating", ts: now - 40 },
+          { status: "scheduled", ts: now - 30 },
+          { status: "executing", ts: now - 20 },
+        ],
+        createdAt: now - 50,
+        startedAt: now - 20,
+        result: {
+          content: "write ok",
+          isError: false,
+          evidence: {
+            filesWritten: ["src/app.ts"],
+          },
+        },
+      },
+    ]);
+
+    expect(restored[0]?.status).toBe("verifying");
+    expect(restored[0]?.statusHistory.at(-1)?.status).toBe("verifying");
+    expect(scheduler.get("call-executing")?.status).toBe("verifying");
+    expect(scheduler.isRunning()).toBe(true);
+  });
+
+  it("resumeToolCalls normalizes executing calls without persisted result evidence into error", () => {
+    const now = Date.now();
+
+    const restored = scheduler.resumeToolCalls([
+      {
+        id: "call-executing-missing",
+        toolName: "Bash",
+        input: { command: "npm test" },
+        requestId: "req-resume",
+        status: "executing",
+        statusHistory: [
+          { status: "created", ts: now - 50 },
+          { status: "validating", ts: now - 40 },
+          { status: "scheduled", ts: now - 30 },
+          { status: "executing", ts: now - 20 },
+        ],
+        createdAt: now - 50,
+        startedAt: now - 20,
+      },
+    ]);
+
+    expect(restored[0]?.status).toBe("error");
+    expect(restored[0]?.errorMessage).toContain("persisted execution evidence");
+    expect(scheduler.get("call-executing-missing")?.status).toBe("error");
+    expect(scheduler.isRunning()).toBe(false);
+  });
+
+  it("resumeToolCalls finalizes verifying calls when persisted verification failed", () => {
+    const now = Date.now();
+
+    const restored = scheduler.resumeToolCalls([
+      {
+        id: "call-verifying",
+        toolName: "Write",
+        input: { file_path: "src/app.ts" },
+        requestId: "req-resume",
+        status: "verifying",
+        statusHistory: [
+          { status: "created", ts: now - 60 },
+          { status: "validating", ts: now - 50 },
+          { status: "scheduled", ts: now - 40 },
+          { status: "executing", ts: now - 30 },
+          { status: "verifying", ts: now - 20 },
+        ],
+        createdAt: now - 60,
+        startedAt: now - 30,
+        result: {
+          content: "write ok",
+          isError: false,
+        },
+        verificationResult: {
+          passed: false,
+          checks: [
+            {
+              check: { kind: "file_exists", path: "src/app.ts" },
+              passed: false,
+              errorMessage: "File not found",
+            },
+          ],
+          failedChecks: [
+            {
+              check: { kind: "file_exists", path: "src/app.ts" },
+              passed: false,
+              errorMessage: "File not found",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(restored[0]?.status).toBe("error");
+    expect(restored[0]?.errorMessage).toContain("verification");
+    expect(scheduler.get("call-verifying")?.status).toBe("error");
+  });
+
   it("error transitions to error state", () => {
     const rec = scheduler.submit("Bash", { command: "bad" }, "req_1");
     scheduler.schedule(rec.id);
@@ -501,5 +638,159 @@ describe("ToolScheduler", () => {
     const decision = gateway.check("Bash", { command: "git push origin main --force" });
     expect(decision.decision).toBe("requires_approval");
     expect(decision.reason).toContain("approval");
+  });
+
+  it("executeBatch runs tool calls through scheduler lifecycle transitions", async () => {
+    const executed: string[] = [];
+
+    const results = await scheduler.executeBatch(
+      [
+        { id: "call-read", toolName: "Read", input: { file_path: "src/app.ts" } },
+        { id: "call-write", toolName: "Write", input: { file_path: "src/app.ts" } },
+      ],
+      {
+        requestId: "req-batch",
+        projectRoot: "/tmp",
+        execute: async (call) => {
+          executed.push(call.toolName);
+          return {
+            content: `${call.toolName} ok`,
+            isError: false,
+          };
+        },
+      },
+    );
+
+    expect(executed).toEqual(["Read", "Write"]);
+    expect(results.map((result) => result.record.status)).toEqual(["success", "success"]);
+    expect(results.map((result) => result.record.id)).toEqual(["call-read", "call-write"]);
+  });
+
+  it("executeBatch marks blocked dependencies without invoking the executor", async () => {
+    const blockingScheduler = new ToolScheduler(undefined, undefined, {
+      policies: [
+        { tool: "AcquireUrl", executionClass: "acquire" },
+        { tool: "Read", executionClass: "read_only", dependsOn: ["AcquireUrl"] },
+      ],
+    });
+    const executed: string[] = [];
+
+    const results = await blockingScheduler.executeBatch(
+      [{ id: "call-read", toolName: "Read", input: { file_path: "external/spec.md" } }],
+      {
+        requestId: "req-blocked",
+        projectRoot: "/tmp",
+        execute: async (call) => {
+          executed.push(call.toolName);
+          return { content: `${call.toolName} ok`, isError: false };
+        },
+      },
+    );
+
+    expect(executed).toEqual([]);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.executed).toBe(false);
+    expect(results[0]!.record.status).toBe("blocked_by_dependency");
+    expect(results[0]!.blockedReason).toContain("AcquireUrl");
+  });
+
+  it("executeBatch honors explicit call-id dependencies even when the batch order is reversed", async () => {
+    const executed: string[] = [];
+
+    const results = await scheduler.executeBatch(
+      [
+        {
+          id: "call-write",
+          toolName: "Write",
+          input: { file_path: "src/app.ts", content: "export const ready = true;" },
+          dependsOn: ["call-read"],
+        },
+        {
+          id: "call-read",
+          toolName: "Read",
+          input: { file_path: "src/app.ts" },
+        },
+      ],
+      {
+        requestId: "req-explicit-deps",
+        projectRoot: "/tmp",
+        execute: async (call) => {
+          executed.push(call.toolName);
+          return { content: `${call.toolName} ok`, isError: false };
+        },
+      },
+    );
+
+    expect(executed).toEqual(["Read", "Write"]);
+    expect(results.map((result) => result.record.status)).toEqual(["success", "success"]);
+    expect(results[0]!.record.dependsOn).toEqual(["call-read"]);
+  });
+
+  it("executeBatch blocks explicit call-id dependencies that never become satisfiable", async () => {
+    const executed: string[] = [];
+
+    const results = await scheduler.executeBatch(
+      [
+        {
+          id: "call-write",
+          toolName: "Write",
+          input: { file_path: "src/app.ts", content: "export const ready = true;" },
+          dependsOn: ["missing-call"],
+        },
+      ],
+      {
+        requestId: "req-missing-deps",
+        projectRoot: "/tmp",
+        execute: async (call) => {
+          executed.push(call.toolName);
+          return { content: `${call.toolName} ok`, isError: false };
+        },
+      },
+    );
+
+    expect(executed).toEqual([]);
+    expect(results[0]!.record.status).toBe("blocked_by_dependency");
+    expect(results[0]!.blockedReason).toContain("missing-call");
+  });
+
+  it("executeBatch moves approval-gated tools into awaiting_approval without invoking the executor", async () => {
+    const approvalScheduler = new ToolScheduler(undefined, undefined, {
+      approvalGateway: new ApprovalGateway({
+        enabled: true,
+        rules: [
+          {
+            reason: "git push requires approval",
+            tools: ["Bash"],
+            pathPatterns: [/\bgit\s+push\b/],
+            decision: "requires_approval",
+          },
+        ],
+      }),
+    });
+    const executed: string[] = [];
+
+    const results = await approvalScheduler.executeBatch(
+      [
+        {
+          id: "call-push",
+          toolName: "Bash",
+          input: { command: "git push origin main" },
+        },
+      ],
+      {
+        requestId: "req-approval",
+        projectRoot: "/tmp",
+        execute: async (call) => {
+          executed.push(call.toolName);
+          return { content: "unexpected execution", isError: false };
+        },
+      },
+    );
+
+    expect(executed).toEqual([]);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.executed).toBe(false);
+    expect(results[0]!.record.status).toBe("awaiting_approval");
+    expect(results[0]!.blockedReason).toContain("approval");
   });
 });

@@ -6,19 +6,16 @@
  * Phase 2+: interactive approval flow with resumable confirm handler.
  */
 
-export type ApprovalDecision = 'auto_approve' | 'requires_approval' | 'auto_deny';
+import {
+  evaluateVerificationRules,
+  type VerificationRule,
+  type VerificationRuleDecision,
+  type VerificationRuleEvaluation,
+} from "./verification-rules.js";
 
-export interface ApprovalRule {
-  /** Human-readable reason shown when requiring approval */
-  reason: string;
-  /** Tools this rule applies to (empty = all tools) */
-  tools?: string[];
-  /** URL domains this rule applies to (for WebFetch/WebSearch) */
-  domains?: string[];
-  /** File path patterns (for Write/Edit/Bash) */
-  pathPatterns?: RegExp[];
-  decision: ApprovalDecision;
-}
+export type ApprovalDecision = VerificationRuleDecision;
+export interface ApprovalRule extends VerificationRule {}
+export interface ApprovalCheckResult extends VerificationRuleEvaluation {}
 
 export interface ApprovalGatewayConfig {
   /** Whether the gateway is active (false = all auto_approve, for non-pipeline mode) */
@@ -27,7 +24,7 @@ export interface ApprovalGatewayConfig {
 }
 
 /** Default rules — conservative for pipeline mode */
-const DEFAULT_RULES: ApprovalRule[] = [
+export const DEFAULT_APPROVAL_RULES: ApprovalRule[] = [
   {
     reason: 'Writing to system/config directories requires approval',
     tools: ['Write', 'Edit', 'Bash'],
@@ -55,7 +52,7 @@ export class ApprovalGateway {
   constructor(config: Partial<ApprovalGatewayConfig> = {}) {
     this._config = {
       enabled: config.enabled ?? false, // Phase 1: disabled by default (additive)
-      rules: config.rules ?? DEFAULT_RULES,
+      rules: config.rules ?? DEFAULT_APPROVAL_RULES,
     };
   }
 
@@ -65,47 +62,17 @@ export class ApprovalGateway {
   check(
     toolName: string,
     input: Record<string, unknown>,
-  ): { decision: ApprovalDecision; reason?: string } {
+  ): ApprovalCheckResult {
     if (!this._config.enabled) {
-      return { decision: 'auto_approve' };
+      return {
+        decision: "auto_approve",
+        warnings: [],
+        matchedRules: [],
+        enforcedRules: [],
+      };
     }
 
-    for (const rule of this._config.rules) {
-      if (!this._ruleApplies(rule, toolName, input)) continue;
-      return { decision: rule.decision, reason: rule.reason };
-    }
-
-    return { decision: 'auto_approve' };
-  }
-
-  private _ruleApplies(
-    rule: ApprovalRule,
-    toolName: string,
-    input: Record<string, unknown>,
-  ): boolean {
-    // Check tool name filter
-    if (rule.tools && rule.tools.length > 0 && !rule.tools.includes(toolName)) {
-      return false;
-    }
-
-    // Check domain filter (for WebFetch/WebSearch)
-    if (rule.domains && rule.domains.length > 0) {
-      const url = String(input['url'] ?? input['query'] ?? '');
-      const matchesDomain = rule.domains.some((d) => url.includes(d));
-      if (!matchesDomain) return false;
-    }
-
-    // Check path patterns
-    if (rule.pathPatterns && rule.pathPatterns.length > 0) {
-      // For Bash: check command string
-      // For Write/Edit: check file_path
-      const checkStr =
-        String(input['command'] ?? input['file_path'] ?? input['path'] ?? '');
-      const matchesPath = rule.pathPatterns.some((p) => p.test(checkStr));
-      if (!matchesPath) return false;
-    }
-
-    return true;
+    return evaluateVerificationRules(toolName, input, this._config.rules);
   }
 
   get enabled(): boolean {

@@ -1,0 +1,17 @@
+{
+  "artifact": "PLAN",
+  "score": 100,
+  "dimensions": {
+    "completeness": 20,
+    "clarity": 20,
+    "testability": 20,
+    "constitutionAlignment": 20,
+    "integrationFitness": 10,
+    "freshness": 10
+  },
+  "issues": [],
+  "remediationSuggestions": [],
+  "timestamp": "2026-03-20T07:05:12.129Z",
+  "autoforgeDecision": "advance",
+  "hasCEOReviewBonus": false
+}

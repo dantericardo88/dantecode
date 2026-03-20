@@ -253,9 +253,9 @@ describe("SecurityEngine", () => {
 
       const entries = engine.getQuarantine();
       expect(entries).toHaveLength(1);
-      expect(entries[0].id).toBe(id);
-      expect(entries[0].resolved).toBe(false);
-      expect(entries[0].action).toEqual(criticalAction);
+      expect(entries[0]!.id).toBe(id);
+      expect(entries[0]!.resolved).toBe(false);
+      expect(entries[0]!.action).toEqual(criticalAction);
     });
 
     // 14. resolveQuarantine marks resolved
@@ -265,7 +265,7 @@ describe("SecurityEngine", () => {
 
       expect(resolved).toBe(true);
       const entries = engine.getQuarantine();
-      expect(entries[0].resolved).toBe(true);
+      expect(entries[0]!.resolved).toBe(true);
     });
 
     it("resolveQuarantine returns false for unknown ID", () => {
@@ -309,10 +309,10 @@ describe("SecurityEngine", () => {
       const initialCount = engine.getRules().length;
       const ruleToRemove = engine.getRules()[0];
 
-      const removed = engine.removeRule(ruleToRemove.id);
+      const removed = engine.removeRule(ruleToRemove!.id);
       expect(removed).toBe(true);
       expect(engine.getRules().length).toBe(initialCount - 1);
-      expect(engine.getRules().find((r) => r.id === ruleToRemove.id)).toBeUndefined();
+      expect(engine.getRules().find((r) => r.id === ruleToRemove!.id)).toBeUndefined();
     });
 
     it("removeRule returns false for unknown ID", () => {
@@ -359,9 +359,9 @@ describe("SecurityEngine", () => {
       const limited = engine.getActionHistory(3);
       expect(limited).toHaveLength(3);
       // Should return the most recent 3
-      expect(limited[0].command).toBe("cmd_7");
-      expect(limited[1].command).toBe("cmd_8");
-      expect(limited[2].command).toBe("cmd_9");
+      expect(limited[0]!.command).toBe("cmd_7");
+      expect(limited[1]!.command).toBe("cmd_8");
+      expect(limited[2]!.command).toBe("cmd_9");
     });
 
     // 21. clearHistory empties history

@@ -76,6 +76,16 @@
           "name": "Audit Log"
         },
         {
+          "type": "webview",
+          "id": "dantecode.automationView",
+          "name": "Automation"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.verificationView",
+          "name": "Verification"
+        },
+        {
           "id": "dantecode.repoMap",
           "name": "Repo Map",
           "type": "tree"

@@ -8,13 +8,17 @@ import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  appendAuditEvent,
+  criticDebate,
   createSelfImprovementContext,
   getProviderCatalogEntry,
   getContextUtilization,
+  globalVerificationRailRegistry,
   parseModelReference,
   readAuditEvents,
   MultiAgent,
   ModelRouterImpl,
+  runQaSuite,
   SessionStore,
   DurableRunStore,
   AutoforgeCheckpointManager,
@@ -24,8 +28,20 @@ import {
   LoopDetector,
   parseSkillWaves,
   createWaveState,
+  verifyOutput,
+  VerificationHistoryStore,
+  VerificationBenchmarkStore,
 } from "@dantecode/core";
-import type { MultiAgentProgressCallback, WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
+import type {
+  CriticOpinion,
+  MultiAgentProgressCallback,
+  QaSuiteOutputInput,
+  VerificationHistoryKind,
+  VerificationRail,
+  VerifyOutputInput,
+  WaveOrchestratorState,
+  WorkflowExecutionContext,
+} from "@dantecode/core";
 import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -46,6 +62,17 @@ import {
   createWorktree,
   mergeWorktree,
   removeWorktree,
+  watchGitEvents,
+  listGitWatchers,
+  stopGitWatcher,
+  addChangeset,
+  WebhookListener,
+  listWebhookListeners,
+  stopWebhookListener,
+  scheduleGitTask,
+  listScheduledGitTasks,
+  stopScheduledGitTask,
+  GitAutomationOrchestrator,
 } from "@dantecode/git-engine";
 import type {
   Session,
@@ -54,6 +81,7 @@ import type {
   ModelConfig,
   ModelRouterConfig,
 } from "@dantecode/config-types";
+import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { runAgentLoop } from "./agent-loop.js";
 import {
@@ -115,6 +143,8 @@ export interface ReplState {
   };
   /** Background agent runner (lazily initialized by /bg). */
   _bgRunner?: unknown;
+  /** Durable git automation orchestrator for workflow/webhook/schedule pipelines. */
+  _gitAutomationOrchestrator?: unknown;
   /** Code index (lazily initialized by /index and /search). */
   _codeIndex?: unknown;
   /** Currently active skill name, or null. Used to enable universal pipeline continuation. */
@@ -229,6 +259,396 @@ async function ensureBackgroundRunner(state: ReplState) {
   }
 
   return runner;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRequiredString(record: Record<string, unknown>, key: string, context: string): string {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${context} must include a non-empty "${key}" string.`);
+  }
+  return value;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function shorten(value: string, max = 96): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, max - 3)}...`;
+}
+
+function formatFraction(value: number | undefined): string {
+  return typeof value === "number" ? value.toFixed(2) : "-";
+}
+
+function formatPassFail(passed: boolean): string {
+  return passed ? `${GREEN}PASSED${RESET}` : `${RED}FAILED${RESET}`;
+}
+
+function hasFlag(args: string, flag: string): boolean {
+  return new RegExp(`(^|\\s)${escapeRegExp(flag)}(?=\\s|$)`).test(args);
+}
+
+function readFlagValue(args: string, flag: string): string | undefined {
+  const match = args.match(new RegExp(`${escapeRegExp(flag)}\\s+([^\\s]+)`));
+  return match?.[1];
+}
+
+function stripFlag(args: string, flag: string): string {
+  return args.replace(new RegExp(`(^|\\s)${escapeRegExp(flag)}(?=\\s|$)`, "g"), " ").trim();
+}
+
+function stripFlagWithValue(args: string, flag: string): string {
+  return args.replace(new RegExp(`${escapeRegExp(flag)}\\s+([^\\s]+)`, "g"), " ").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function loadJsonFile(relativeFilePath: string, state: ReplState): Promise<Record<string, unknown>> {
+  const resolved = resolve(state.projectRoot, relativeFilePath.replace(/^['"]|['"]$/g, ""));
+  const raw = await readFile(resolved, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function getGitAutomationOrchestrator(state: ReplState): GitAutomationOrchestrator {
+  if (!state._gitAutomationOrchestrator) {
+    state._gitAutomationOrchestrator = new GitAutomationOrchestrator({
+      projectRoot: state.projectRoot,
+      sessionId: state.session.id,
+      modelId: `${state.session.model.provider}/${state.session.model.modelId}`,
+    });
+  }
+
+  return state._gitAutomationOrchestrator as GitAutomationOrchestrator;
+}
+
+async function loadJsonCommandInput(
+  args: string,
+  state: ReplState,
+  usage: string,
+): Promise<unknown> {
+  const filePath = args.trim();
+  if (!filePath) {
+    throw new Error(`Usage: ${usage}`);
+  }
+
+  const resolved = resolve(state.projectRoot, filePath.replace(/^['"]|['"]$/g, ""));
+
+  try {
+    const raw = await readFile(resolved, "utf-8");
+    return JSON.parse(raw) as unknown;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not load JSON input from ${relative(state.projectRoot, resolved)}: ${message}`);
+  }
+}
+
+function parseVerificationRailRecord(
+  record: Record<string, unknown>,
+  context: string,
+): VerificationRail {
+  const requiredSubstrings = readStringArray(record["requiredSubstrings"]);
+  const forbiddenPatterns = readStringArray(record["forbiddenPatterns"]);
+  const mode = record["mode"] === "soft" ? "soft" : record["mode"] === "hard" ? "hard" : undefined;
+
+  return {
+    id: readRequiredString(record, "id", context),
+    name: readRequiredString(record, "name", context),
+    ...(readOptionalString(record, "description") ? { description: readOptionalString(record, "description") } : {}),
+    ...(mode ? { mode } : {}),
+    ...(requiredSubstrings.length > 0 ? { requiredSubstrings } : {}),
+    ...(forbiddenPatterns.length > 0 ? { forbiddenPatterns } : {}),
+    ...(readOptionalNumber(record, "minLength") !== undefined
+      ? { minLength: readOptionalNumber(record, "minLength") }
+      : {}),
+    ...(readOptionalNumber(record, "maxLength") !== undefined
+      ? { maxLength: readOptionalNumber(record, "maxLength") }
+      : {}),
+  };
+}
+
+function parseVerificationCriteria(
+  value: unknown,
+): VerifyOutputInput["criteria"] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const requiredKeywords = readStringArray(value["requiredKeywords"]);
+  const forbiddenPatterns = readStringArray(value["forbiddenPatterns"]);
+  const expectedSections = readStringArray(value["expectedSections"]);
+  const minLength = readOptionalNumber(value, "minLength");
+  const pdseGate = readOptionalNumber(value, "pdseGate");
+  const weightsValue = value["weights"];
+  const weights = isRecord(weightsValue)
+    ? {
+        ...(readOptionalNumber(weightsValue, "faithfulness") !== undefined
+          ? { faithfulness: readOptionalNumber(weightsValue, "faithfulness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "correctness") !== undefined
+          ? { correctness: readOptionalNumber(weightsValue, "correctness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "hallucination") !== undefined
+          ? { hallucination: readOptionalNumber(weightsValue, "hallucination") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "completeness") !== undefined
+          ? { completeness: readOptionalNumber(weightsValue, "completeness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "safety") !== undefined
+          ? { safety: readOptionalNumber(weightsValue, "safety") }
+          : {}),
+      }
+    : undefined;
+
+  return {
+    ...(requiredKeywords.length > 0 ? { requiredKeywords } : {}),
+    ...(forbiddenPatterns.length > 0 ? { forbiddenPatterns } : {}),
+    ...(expectedSections.length > 0 ? { expectedSections } : {}),
+    ...(minLength !== undefined ? { minLength } : {}),
+    ...(pdseGate !== undefined ? { pdseGate } : {}),
+    ...(weights && Object.keys(weights).length > 0 ? { weights } : {}),
+  };
+}
+
+function parseVerifyOutputInput(payload: unknown): VerifyOutputInput {
+  if (!isRecord(payload)) {
+    throw new Error("verify-output input must be a JSON object.");
+  }
+
+  const railsValue = payload["rails"];
+  const rails = Array.isArray(railsValue)
+    ? railsValue.map((entry, index) => {
+        if (!isRecord(entry)) {
+          throw new Error(`verify-output rails[${index}] must be an object.`);
+        }
+        return parseVerificationRailRecord(entry, `verify-output rails[${index}]`);
+      })
+    : undefined;
+
+  return {
+    task: readRequiredString(payload, "task", "verify-output input"),
+    output: readRequiredString(payload, "output", "verify-output input"),
+    ...(parseVerificationCriteria(payload["criteria"]) ? { criteria: parseVerificationCriteria(payload["criteria"]) } : {}),
+    ...(rails && rails.length > 0 ? { rails } : {}),
+  };
+}
+
+function parseQaSuiteInput(
+  payload: unknown,
+): { planId: string; benchmarkId?: string; outputs: QaSuiteOutputInput[] } {
+  if (!isRecord(payload)) {
+    throw new Error("qa-suite input must be a JSON object.");
+  }
+
+  const rawOutputs = payload["outputs"];
+  if (!Array.isArray(rawOutputs) || rawOutputs.length === 0) {
+    throw new Error('qa-suite input must include a non-empty "outputs" array.');
+  }
+
+  const outputs = rawOutputs.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`qa-suite outputs[${index}] must be an object.`);
+    }
+
+    const parsed = parseVerifyOutputInput(entry);
+    return {
+      id:
+        readOptionalString(entry, "id") ??
+        `output-${index + 1}`,
+      ...parsed,
+    };
+  });
+
+  return {
+    planId: readRequiredString(payload, "planId", "qa-suite input"),
+    ...(readOptionalString(payload, "benchmarkId")
+      ? { benchmarkId: readOptionalString(payload, "benchmarkId") }
+      : {}),
+    outputs,
+  };
+}
+
+function parseCriticDebateInput(payload: unknown): { opinions: CriticOpinion[]; output?: string } {
+  if (!isRecord(payload)) {
+    throw new Error("critic-debate input must be a JSON object.");
+  }
+
+  const rawOpinions = payload["subagents"] ?? payload["opinions"] ?? payload["agents"];
+  if (!Array.isArray(rawOpinions) || rawOpinions.length === 0) {
+    throw new Error('critic-debate input must include a non-empty "subagents" array.');
+  }
+
+  const opinions = rawOpinions.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`critic-debate subagents[${index}] must be an object.`);
+    }
+
+    const verdict = readRequiredString(entry, "verdict", `critic-debate subagents[${index}]`);
+    if (verdict !== "pass" && verdict !== "warn" && verdict !== "fail") {
+      throw new Error(`critic-debate subagents[${index}] verdict must be pass, warn, or fail.`);
+    }
+
+    const findings = readStringArray(entry["findings"]);
+    const confidence = readOptionalNumber(entry, "confidence");
+    return {
+      agentId:
+        readOptionalString(entry, "agentId") ??
+        readOptionalString(entry, "id") ??
+        `critic-${index + 1}`,
+      verdict,
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(findings.length > 0 ? { findings } : {}),
+      ...(readOptionalString(entry, "critique") ? { critique: readOptionalString(entry, "critique") } : {}),
+    } satisfies CriticOpinion;
+  });
+
+  return {
+    opinions,
+    ...(readOptionalString(payload, "output") ? { output: readOptionalString(payload, "output") } : {}),
+  };
+}
+
+function parseVerificationHistoryArgs(
+  args: string,
+): { limit: number; kind?: VerificationHistoryKind } {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return { limit: 10 };
+  }
+
+  const kindMatch = trimmed.match(/--kind\s+([^\s]+)/);
+  const kindCandidate = kindMatch?.[1] as VerificationHistoryKind | undefined;
+  const kind =
+    kindCandidate &&
+    ["verify_output", "qa_suite", "critic_debate", "verification_rail"].includes(kindCandidate)
+      ? kindCandidate
+      : undefined;
+
+  const limitMatch = trimmed.match(/\b(\d+)\b/);
+  const limit = limitMatch ? Math.max(1, Math.min(Number(limitMatch[1]), 50)) : 10;
+  return kind ? { limit, kind } : { limit };
+}
+
+async function persistVerificationTelemetry(
+  state: ReplState,
+  input: {
+    kind: VerificationHistoryKind;
+    label: string;
+    summary: string;
+    payload: Record<string, unknown>;
+    passed?: boolean;
+    pdseScore?: number;
+    averageConfidence?: number;
+    auditType: "verification_run" | "qa_suite_run" | "critic_debate_run" | "verification_rail_add";
+  },
+): Promise<string[]> {
+  const warnings: string[] = [];
+  const historyStore = new VerificationHistoryStore(state.projectRoot);
+
+  try {
+    await historyStore.append({
+      kind: input.kind,
+      source: "cli",
+      label: input.label,
+      summary: input.summary,
+      sessionId: state.session.id,
+      ...(input.passed !== undefined ? { passed: input.passed } : {}),
+      ...(input.pdseScore !== undefined ? { pdseScore: input.pdseScore } : {}),
+      ...(input.averageConfidence !== undefined ? { averageConfidence: input.averageConfidence } : {}),
+      payload: input.payload,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`History persistence failed: ${message}`);
+  }
+
+  try {
+    await appendAuditEvent(state.projectRoot, {
+      sessionId: state.session.id,
+      type: input.auditType,
+      payload: input.payload,
+      modelId: state.session.model.modelId,
+      projectRoot: state.projectRoot,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (input.pdseScore !== undefined && input.auditType !== "critic_debate_run") {
+      await appendAuditEvent(state.projectRoot, {
+        sessionId: state.session.id,
+        type: input.passed ? "pdse_gate_pass" : "pdse_gate_fail",
+        payload: {
+          score: input.pdseScore,
+          source: input.kind,
+          label: input.label,
+        },
+        modelId: state.session.model.modelId,
+        projectRoot: state.projectRoot,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`Audit logging failed: ${message}`);
+  }
+
+  return warnings;
+}
+
+async function persistVerificationBenchmark(
+  state: ReplState,
+  input: {
+    benchmarkId: string;
+    planId: string;
+    passed: boolean;
+    averagePdseScore: number;
+    outputCount: number;
+    failingOutputIds: string[];
+    payload: Record<string, unknown>;
+  },
+): Promise<string[]> {
+  const warnings: string[] = [];
+  const store = new VerificationBenchmarkStore(state.projectRoot);
+
+  try {
+    await store.append({
+      benchmarkId: input.benchmarkId,
+      planId: input.planId,
+      source: "cli",
+      passed: input.passed,
+      averagePdseScore: input.averagePdseScore,
+      outputCount: input.outputCount,
+      failingOutputIds: input.failingOutputIds,
+      payload: input.payload,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`Benchmark persistence failed: ${message}`);
+  }
+
+  return warnings;
 }
 
 // ----------------------------------------------------------------------------
@@ -555,6 +975,279 @@ async function qaCommand(_args: string, state: ReplState): Promise<string> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return `${RED}GStack error: ${message}${RESET}`;
+  }
+}
+
+async function verifyOutputCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/verify-output <input.json>");
+    const input = parseVerifyOutputInput(payload);
+    const report = verifyOutput(input);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "verify_output",
+      auditType: "verification_run",
+      label: shorten(input.task, 72),
+      summary: report.overallPassed ? "verify_output passed" : "verify_output failed",
+      passed: report.overallPassed,
+      pdseScore: report.pdseScore,
+      payload: {
+        task: input.task,
+        passed: report.overallPassed,
+        pdseScore: report.pdseScore,
+        warnings: report.warnings,
+        failingRails: report.railFindings
+          .filter((finding) => !finding.passed)
+          .map((finding) => finding.railName),
+      },
+    });
+
+    const lines = [
+      `${BOLD}Verification Output${RESET} ${formatPassFail(report.overallPassed)}`,
+      "",
+      `  Task:        ${shorten(input.task, 80)}`,
+      `  PDSE Score:  ${report.passedGate ? GREEN : RED}${formatFraction(report.pdseScore)}${RESET}`,
+      `  Rail checks: ${report.railFindings.length}`,
+      "",
+      `  ${BOLD}Metrics${RESET}`,
+      ...report.metrics.map(
+        (metric) =>
+          `    ${metric.passed ? GREEN : RED}${metric.name.padEnd(14)}${RESET} ${formatFraction(metric.score)} ${DIM}${metric.reason}${RESET}`,
+      ),
+      "",
+      `  ${BOLD}Critique Trace${RESET}`,
+      ...report.critiqueTrace.map(
+        (stage) =>
+          `    ${stage.passed ? GREEN : RED}${stage.stage.padEnd(10)}${RESET} ${DIM}${stage.summary}${RESET}`,
+      ),
+    ];
+
+    if (report.warnings.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Warnings${RESET}`);
+      lines.push(...report.warnings.map((warning) => `    ${YELLOW}- ${warning}${RESET}`));
+    }
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function qaSuiteCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/qa-suite <input.json>");
+    const { planId, benchmarkId, outputs } = parseQaSuiteInput(payload);
+    const report = runQaSuite(planId, outputs);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "qa_suite",
+      auditType: "qa_suite_run",
+      label: shorten(planId, 72),
+      summary: report.overallPassed ? "qa_suite passed" : "qa_suite failed",
+      passed: report.overallPassed,
+      pdseScore: report.averagePdseScore,
+      payload: {
+        planId: report.planId,
+        passed: report.overallPassed,
+        averagePdseScore: report.averagePdseScore,
+        failingOutputIds: report.failingOutputIds,
+        outputCount: report.outputReports.length,
+      },
+    });
+    const benchmarkWarnings = await persistVerificationBenchmark(state, {
+      benchmarkId: benchmarkId ?? planId,
+      planId: report.planId,
+      passed: report.overallPassed,
+      averagePdseScore: report.averagePdseScore,
+      outputCount: report.outputReports.length,
+      failingOutputIds: report.failingOutputIds,
+      payload: {
+        outputIds: report.outputReports.map((entry) => entry.id),
+      },
+    });
+
+    const lines = [
+      `${BOLD}QA Suite${RESET} ${formatPassFail(report.overallPassed)}`,
+      "",
+      `  Plan:         ${report.planId}`,
+      `  Outputs:      ${report.outputReports.length}`,
+      `  Avg PDSE:     ${report.averagePdseScore >= 0.85 ? GREEN : YELLOW}${formatFraction(report.averagePdseScore)}${RESET}`,
+      `  Failing IDs:  ${report.failingOutputIds.length > 0 ? report.failingOutputIds.join(", ") : `${GREEN}none${RESET}`}`,
+      "",
+      `  ${BOLD}Per Output${RESET}`,
+      ...report.outputReports.map(
+        (entry) =>
+          `    ${entry.report.overallPassed ? GREEN : RED}${entry.id.padEnd(14)}${RESET} score=${formatFraction(entry.report.pdseScore)} warnings=${entry.report.warnings.length}`,
+      ),
+    ];
+
+    if (telemetryWarnings.length > 0 || benchmarkWarnings.length > 0) {
+      lines.push("");
+      lines.push(
+        ...[...telemetryWarnings, ...benchmarkWarnings].map(
+          (warning) => `${YELLOW}${warning}${RESET}`,
+        ),
+      );
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function criticDebateCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/critic-debate <input.json>");
+    const { opinions, output } = parseCriticDebateInput(payload);
+    const report = criticDebate(opinions, output);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "critic_debate",
+      auditType: "critic_debate_run",
+      label: `critic debate (${opinions.length})`,
+      summary: report.summary,
+      averageConfidence: report.averageConfidence,
+      payload: {
+        consensus: report.consensus,
+        averageConfidence: report.averageConfidence,
+        verdictCounts: report.verdictCounts,
+        blockingFindings: report.blockingFindings,
+      },
+    });
+
+    const lines = [
+      `${BOLD}Critic Debate${RESET}`,
+      "",
+      `  Consensus:    ${report.consensus === "pass" ? GREEN : report.consensus === "warn" ? YELLOW : RED}${report.consensus.toUpperCase()}${RESET}`,
+      `  Confidence:   ${formatFraction(report.averageConfidence)}`,
+      `  Verdicts:     pass=${report.verdictCounts.pass} warn=${report.verdictCounts.warn} fail=${report.verdictCounts.fail}`,
+      `  Summary:      ${report.summary}`,
+    ];
+
+    if (report.blockingFindings.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Blocking Findings${RESET}`);
+      lines.push(...report.blockingFindings.map((finding) => `    ${RED}- ${finding}${RESET}`));
+    }
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function addVerificationRailCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/add-verification-rail <input.json>");
+    const rawRail = isRecord(payload) && isRecord(payload["rule"]) ? payload["rule"] : payload;
+    if (!isRecord(rawRail)) {
+      throw new Error('add-verification-rail input must be a rail object or { "rule": { ... } }.');
+    }
+
+    const rail = parseVerificationRailRecord(rawRail, "add-verification-rail input");
+    const added = globalVerificationRailRegistry.addRail(rail);
+    const totalRails = globalVerificationRailRegistry.listRails().length;
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "verification_rail",
+      auditType: "verification_rail_add",
+      label: rail.name,
+      summary: added ? "verification rail added" : "verification rail replaced",
+      passed: true,
+      payload: {
+        railId: rail.id,
+        name: rail.name,
+        mode: rail.mode ?? "hard",
+        totalRails,
+      },
+    });
+
+    const lines = [
+      `${BOLD}Verification Rail${RESET} ${GREEN}${added ? "REGISTERED" : "UPDATED"}${RESET}`,
+      "",
+      `  ID:           ${rail.id}`,
+      `  Name:         ${rail.name}`,
+      `  Mode:         ${rail.mode ?? "hard"}`,
+      `  Total rails:  ${totalRails}`,
+    ];
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function verificationHistoryCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const filter = parseVerificationHistoryArgs(args);
+    const store = new VerificationHistoryStore(state.projectRoot);
+    const benchmarkStore = new VerificationBenchmarkStore(state.projectRoot);
+    const [entries, summaries] = await Promise.all([
+      store.list({
+        limit: filter.limit,
+        ...(filter.kind ? { kind: filter.kind } : {}),
+      }),
+      benchmarkStore.summarizeAll(5),
+    ]);
+
+    if (entries.length === 0 && summaries.length === 0) {
+      return `${DIM}No verification history recorded yet.${RESET}`;
+    }
+
+    const lines = [`${BOLD}Verification History${RESET}`, ""];
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        const parts = [
+          new Date(entry.recordedAt).toLocaleString(),
+          entry.kind,
+          entry.passed === undefined ? undefined : entry.passed ? "pass" : "fail",
+          typeof entry.pdseScore === "number" ? `pdse=${formatFraction(entry.pdseScore)}` : undefined,
+          typeof entry.averageConfidence === "number"
+            ? `confidence=${formatFraction(entry.averageConfidence)}`
+            : undefined,
+        ].filter((part): part is string => Boolean(part));
+
+        lines.push(`  ${CYAN}${entry.label}${RESET}`);
+        lines.push(`    ${DIM}${parts.join(" | ")}${RESET}`);
+        lines.push(`    ${entry.summary}`);
+      }
+    }
+
+    if (summaries.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Benchmark Summary${RESET}`);
+      for (const summary of summaries) {
+        lines.push(`    ${CYAN}${summary.benchmarkId}${RESET}`);
+        lines.push(
+          `      ${DIM}runs=${summary.totalRuns} passRate=${formatFraction(summary.passRate)} avgPdse=${formatFraction(summary.averagePdseScore)}${RESET}`,
+        );
+        if (summary.latestFailingOutputIds.length > 0) {
+          lines.push(`      latest failing: ${summary.latestFailingOutputIds.join(", ")}`);
+        }
+      }
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
   }
 }
 
@@ -1423,19 +2116,19 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
         `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
         `  Iterations: ${result.iterations}`,
-        `  Lanes used: ${result.outputs.map((o) => o.lane).join(", ")}`,
+        `  Lanes used: ${result.outputs.map((o) => o.role).join(", ")}`,
         "",
       ];
 
       for (const output of result.outputs) {
         const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
         lines.push(
-          `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
+          `  ${BOLD}${output.role.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
         );
       }
 
       const combinedContent = result.outputs
-        .map((o) => `## ${o.lane} (PDSE: ${o.pdseScore})\n\n${o.content}`)
+        .map((o) => `## ${o.role} (PDSE: ${o.pdseScore})\n\n${o.content}`)
         .join("\n\n---\n\n");
 
       state.session.messages.push({
@@ -1779,6 +2472,460 @@ async function mcpCommand(_args: string, state: ReplState): Promise<string> {
 
   lines.push("", `${DIM}Total: ${tools.length} MCP tools available to the agent.${RESET}`);
   return lines.join("\n");
+}
+
+async function gitWatchCommand(args: string, state: ReplState): Promise<string> {
+  let trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const watchers = await listGitWatchers(state.projectRoot);
+    if (watchers.length === 0) {
+      return `${DIM}No Git watchers registered. Start one with /git-watch <eventType> [path].${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Git Watchers${RESET}`, ""];
+    for (const watcher of watchers) {
+      lines.push(
+        `  ${GREEN}${watcher.id}${RESET} ${DIM}${watcher.status}${RESET} ${watcher.eventType} ${watcher.targetPath ?? "."}`,
+      );
+      lines.push(
+        `    ${DIM}events=${watcher.eventCount} updated=${watcher.updatedAt}${RESET}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopGitWatcher(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped Git watcher ${stopMatch[1]}.${RESET}`
+      : `${RED}Git watcher not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  const workflowPath = readFlagValue(trimmed, "--workflow");
+  trimmed = stripFlagWithValue(trimmed, "--workflow");
+  const eventFile = readFlagValue(trimmed, "--event");
+  trimmed = stripFlagWithValue(trimmed, "--event");
+  const [eventTypeToken, ...rest] = trimmed.split(/\s+/);
+  const eventType = eventTypeToken as GitEventType | undefined;
+  if (
+    eventType !== "post-commit" &&
+    eventType !== "pre-push" &&
+    eventType !== "branch-update" &&
+    eventType !== "file-change"
+  ) {
+    return `${RED}Usage: /git-watch [list | stop <id> | <post-commit|pre-push|branch-update|file-change> [path] [--workflow path] [--event event.json]]${RESET}`;
+  }
+
+  const targetPath = rest.join(" ").trim() || undefined;
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+  const watcher = watchGitEvents(eventType, targetPath, { cwd: state.projectRoot });
+  watcher.on("event", (event) => {
+    const data = event as { type: string; data: { relativePath: string } };
+    if (workflowPath) {
+      const orchestrator = getGitAutomationOrchestrator(state);
+      void orchestrator
+        .runWorkflowInBackground({
+          workflowPath,
+          eventPayload: {
+            ...(eventPayload ?? {}),
+            eventName: data.type,
+            watchId: watcher.id,
+            relativePath: data.data.relativePath,
+          },
+          trigger: {
+            kind: "watch",
+            sourceId: watcher.id,
+            label: `${data.type} ${data.data.relativePath}`,
+          },
+        })
+        .then((queued) => {
+          process.stdout.write(
+            `${DIM}[git-watch ${watcher.id}] queued ${queued.executionId} for ${data.type} ${data.data.relativePath}${RESET}\n`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          process.stdout.write(
+            `${RED}[git-watch ${watcher.id}] automation failed: ${message}${RESET}\n`,
+          );
+        });
+      return;
+    }
+
+    process.stdout.write(
+      `${DIM}[git-watch ${watcher.id}] ${data.type} ${data.data.relativePath}${RESET}\n`,
+    );
+  });
+
+  return [
+    "",
+    `${GREEN}${BOLD}Git Watcher Started${RESET}`,
+    `  ID:        ${watcher.id}`,
+    `  Event:     ${eventType}`,
+    `  Target:    ${targetPath ?? "."}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    `  Project:   ${state.projectRoot}`,
+    "",
+  ].join("\n");
+}
+
+async function runWorkflowCommand(args: string, state: ReplState): Promise<string> {
+  let trimmed = args.trim();
+  if (!trimmed) {
+    return `${RED}Usage: /run-workflow <workflowPath> [event.json] [--background]${RESET}`;
+  }
+
+  const background = hasFlag(trimmed, "--background");
+  trimmed = stripFlag(trimmed, "--background");
+  const [workflowPath, eventFile] = trimmed.split(/\s+/, 2);
+  if (!workflowPath) {
+    return `${RED}Usage: /run-workflow <workflowPath> [event.json] [--background]${RESET}`;
+  }
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+
+  if (background) {
+    const queued = await getGitAutomationOrchestrator(state).runWorkflowInBackground({
+      workflowPath,
+      eventPayload,
+      trigger: {
+        kind: "manual",
+        label: "CLI /run-workflow",
+      },
+    });
+
+    return [
+      "",
+      `${GREEN}${BOLD}Workflow Queued${RESET}`,
+      `  Execution: ${queued.executionId}`,
+      `  Task:      ${queued.backgroundTaskId}`,
+      `  Workflow:  ${workflowPath}`,
+      "",
+    ].join("\n");
+  }
+
+  const result = await getGitAutomationOrchestrator(state).runWorkflow({
+    workflowPath,
+    eventPayload,
+    trigger: {
+      kind: "manual",
+      label: "CLI /run-workflow",
+    },
+  });
+
+  const lines = [
+    "",
+    `${BOLD}Workflow Run${RESET}`,
+    `  Name:      ${result.workflowName ?? workflowPath}`,
+    `  Status:    ${formatPassFail(result.status === "completed")}`,
+    `  Gate:      ${result.gateStatus}`,
+    `  Execution: ${result.id}`,
+  ];
+  if (result.modifiedFiles.length > 0) {
+    lines.push(`  Files:     ${result.modifiedFiles.join(", ")}`);
+  }
+  if (typeof result.pdseScore === "number") {
+    lines.push(`  PDSE:      ${formatFraction(result.pdseScore)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+async function autoPrCommand(args: string, state: ReplState): Promise<string> {
+  let remaining = args.trim();
+  if (!remaining) {
+    return `${RED}Usage: /auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]${RESET}`;
+  }
+
+  const background = hasFlag(remaining, "--background");
+  remaining = stripFlag(remaining, "--background");
+  const draft = hasFlag(remaining, "--draft");
+  remaining = stripFlag(remaining, "--draft");
+  const bodyFile = readFlagValue(remaining, "--body-file");
+  remaining = stripFlagWithValue(remaining, "--body-file");
+  const base = readFlagValue(remaining, "--base");
+  remaining = stripFlagWithValue(remaining, "--base");
+
+  const changesetMatch = remaining.match(/--changeset\s+(patch|minor|major):([^\s]+)/);
+  let changesetFiles: string[] = [];
+  if (changesetMatch?.[0]) {
+    remaining = remaining.replace(changesetMatch[0], " ").trim();
+  }
+
+  const title = remaining.trim();
+  if (!title) {
+    return `${RED}A PR title is required.${RESET}`;
+  }
+
+  const body = bodyFile
+    ? await readFile(resolve(state.projectRoot, bodyFile), "utf-8")
+    : "";
+
+  if (changesetMatch?.[1] && changesetMatch[2]) {
+    const packages = changesetMatch[2].split(",").map((entry) => entry.trim()).filter(Boolean);
+    const changeset = await addChangeset(
+      changesetMatch[1] as "patch" | "minor" | "major",
+      packages,
+      title,
+      { cwd: state.projectRoot },
+    );
+    if (!changeset.success || !changeset.filePath) {
+      return `${RED}Changeset generation failed: ${changeset.error ?? "Unknown error"}${RESET}`;
+    }
+    changesetFiles = [changeset.filePath];
+  }
+
+  const orchestrator = getGitAutomationOrchestrator(state);
+  if (background) {
+    const queued = await orchestrator.runAutoPRInBackground({
+      title,
+      body,
+      changesetFiles,
+      options: {
+        cwd: state.projectRoot,
+        ...(base ? { base } : {}),
+        draft,
+      },
+      trigger: {
+        kind: "manual",
+        label: "CLI /auto-pr",
+      },
+    });
+
+    return [
+      "",
+      `${GREEN}${BOLD}Pull Request Queued${RESET}`,
+      `  Execution: ${queued.executionId}`,
+      `  Task:      ${queued.backgroundTaskId}`,
+      `  Title:     ${title}`,
+      "",
+    ].join("\n");
+  }
+
+  const execution = await orchestrator.createPullRequest({
+    title,
+    body,
+    changesetFiles,
+    options: {
+      cwd: state.projectRoot,
+      ...(base ? { base } : {}),
+      draft,
+    },
+    trigger: {
+      kind: "manual",
+      label: "CLI /auto-pr",
+    },
+  });
+
+  if (execution.status !== "completed") {
+    const reason = execution.error ?? execution.summary ?? "Unknown error";
+    return `${RED}PR creation ${execution.status}: ${reason}${RESET}`;
+  }
+
+  return [
+    "",
+    `${GREEN}${BOLD}Pull Request Created${RESET}`,
+    `  ID:        ${execution.id}`,
+    `  URL:       ${execution.prUrl ?? "(gh returned no URL)"}`,
+    `  Base:      ${base ?? "(default)"}`,
+    `  Draft:     ${draft ? "yes" : "no"}`,
+    `  Changeset: ${changesetFiles.length > 0 ? relative(state.projectRoot, changesetFiles[0]!) : "none"}`,
+    "",
+  ].join("\n");
+}
+
+async function webhookListenCommand(args: string, state: ReplState): Promise<string> {
+  let trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const listeners = await listWebhookListeners(state.projectRoot);
+    if (listeners.length === 0) {
+      return `${DIM}No webhook listeners registered. Start one with /webhook-listen [github|gitlab|custom] [port].${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Webhook Listeners${RESET}`, ""];
+    for (const listener of listeners) {
+      lines.push(
+        `  ${GREEN}${listener.id}${RESET} ${DIM}${listener.status}${RESET} ${listener.provider} ${listener.path} port=${listener.port}`,
+      );
+      lines.push(
+        `    ${DIM}received=${listener.receivedCount} updated=${listener.updatedAt}${RESET}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopWebhookListener(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped webhook listener ${stopMatch[1]}.${RESET}`
+      : `${RED}Webhook listener not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  let remaining = trimmed;
+  const pathFlag = readFlagValue(remaining, "--path");
+  remaining = stripFlagWithValue(remaining, "--path");
+  const portFlag = readFlagValue(remaining, "--port");
+  remaining = stripFlagWithValue(remaining, "--port");
+  const workflowPath = readFlagValue(remaining, "--workflow");
+  remaining = stripFlagWithValue(remaining, "--workflow");
+  const providerToken = remaining.split(/\s+/, 1)[0];
+  const provider =
+    providerToken === "gitlab" || providerToken === "custom" ? providerToken : "github";
+
+  const port = portFlag ? Number(portFlag) : 3000;
+  const listener = new WebhookListener({
+    cwd: state.projectRoot,
+    provider: provider as WebhookProvider,
+    port,
+    path: pathFlag ?? "/webhook",
+    secret:
+      provider === "github"
+        ? process.env.GITHUB_WEBHOOK_SECRET
+        : provider === "gitlab"
+          ? process.env.GITLAB_WEBHOOK_SECRET
+          : process.env.CUSTOM_WEBHOOK_SECRET,
+  });
+  await listener.start();
+  listener.on("any-event", (event) => {
+    const data = event as { event: string; provider: string; payload: Record<string, unknown> };
+    if (workflowPath) {
+      const orchestrator = getGitAutomationOrchestrator(state);
+      void orchestrator
+        .runWorkflowInBackground({
+          workflowPath,
+          eventPayload: {
+            ...data.payload,
+            eventName: data.event,
+          },
+          trigger: {
+            kind: "webhook",
+            sourceId: listener.id,
+            label: `${data.provider}:${data.event}`,
+          },
+        })
+        .then((queued) => {
+          process.stdout.write(
+            `${DIM}[webhook ${listener.id}] queued ${queued.executionId} for ${data.provider}:${data.event}${RESET}\n`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          process.stdout.write(`${RED}[webhook ${listener.id}] ${message}${RESET}\n`);
+        });
+      return;
+    }
+
+    process.stdout.write(
+      `${DIM}[webhook ${listener.id}] ${data.provider}:${data.event}${RESET}\n`,
+    );
+  });
+
+  return [
+    "",
+    `${GREEN}${BOLD}Webhook Listener Started${RESET}`,
+    `  ID:        ${listener.id}`,
+    `  Provider:  ${provider}`,
+    `  Port:      ${listener.port}`,
+    `  Path:      ${pathFlag ?? "/webhook"}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    "",
+  ].join("\n");
+}
+
+async function scheduleGitTaskCommand(args: string, state: ReplState): Promise<string> {
+  const trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const tasks = await listScheduledGitTasks(state.projectRoot);
+    if (tasks.length === 0) {
+      return `${DIM}No scheduled Git tasks registered. Start one with /schedule-git-task <cron|intervalMs> <task>${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Scheduled Git Tasks${RESET}`, ""];
+    for (const task of tasks) {
+      lines.push(
+        `  ${GREEN}${task.id}${RESET} ${DIM}${task.status}${RESET} ${task.schedule} ${task.taskName}`,
+      );
+      lines.push(
+        `    ${DIM}runs=${task.runCount} next=${task.nextRunAt ?? "unknown"}${RESET}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopScheduledGitTask(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped scheduled task ${stopMatch[1]}.${RESET}`
+      : `${RED}Scheduled task not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  let remaining = trimmed;
+  const workflowPath = readFlagValue(remaining, "--workflow");
+  remaining = stripFlagWithValue(remaining, "--workflow");
+  const eventFile = readFlagValue(remaining, "--event");
+  remaining = stripFlagWithValue(remaining, "--event");
+
+  const tokens = remaining.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return `${RED}Usage: /schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]${RESET}`;
+  }
+
+  let scheduleValue: string | number;
+  let taskName: string;
+  if (/^\d+$/.test(tokens[0]!)) {
+    scheduleValue = Number(tokens[0]);
+    taskName = tokens.slice(1).join(" ");
+  } else if (tokens.length >= 6 && tokens.slice(0, 5).every((token) => /^[\d*/,\-]+$/.test(token))) {
+    scheduleValue = tokens.slice(0, 5).join(" ");
+    taskName = tokens.slice(5).join(" ");
+  } else {
+    return `${RED}Provide either an interval in milliseconds or a 5-field cron expression.${RESET}`;
+  }
+
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+  const resolvedTaskName =
+    taskName.trim() || (workflowPath ? `Run workflow ${workflowPath}` : "Scheduled Git task");
+
+  const task = scheduleGitTask(
+    scheduleValue,
+    async () => {
+      if (workflowPath) {
+        await getGitAutomationOrchestrator(state).runWorkflowInBackground({
+          workflowPath,
+          eventPayload,
+          trigger: {
+            kind: "schedule",
+            sourceId: task.id,
+            label: resolvedTaskName,
+          },
+        });
+        return;
+      }
+      process.stdout.write(
+        `${DIM}[schedule ${resolvedTaskName}] fired at ${new Date().toISOString()}${RESET}\n`,
+      );
+    },
+    {
+      cwd: state.projectRoot,
+      taskName: resolvedTaskName,
+      runOnStart: false,
+    },
+  );
+
+  return [
+    "",
+    `${GREEN}${BOLD}Scheduled Git Task Started${RESET}`,
+    `  ID:        ${task.id}`,
+    `  Schedule:  ${task.schedule}`,
+    `  Task:      ${resolvedTaskName}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    "",
+  ].join("\n");
 }
 
 async function listenCommand(args: string, state: ReplState): Promise<string> {
@@ -2314,6 +3461,36 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand },
   {
+    name: "verify-output",
+    description: "Run structured output verification from JSON input",
+    usage: "/verify-output <input.json>",
+    handler: verifyOutputCommand,
+  },
+  {
+    name: "qa-suite",
+    description: "Run the QA harness across multiple outputs from JSON input",
+    usage: "/qa-suite <input.json>",
+    handler: qaSuiteCommand,
+  },
+  {
+    name: "critic-debate",
+    description: "Aggregate critic verdicts from JSON input",
+    usage: "/critic-debate <input.json>",
+    handler: criticDebateCommand,
+  },
+  {
+    name: "add-verification-rail",
+    description: "Register an output verification rail from JSON input",
+    usage: "/add-verification-rail <input.json>",
+    handler: addVerificationRailCommand,
+  },
+  {
+    name: "verification-history",
+    description: "Show recent verification reports and benchmark entries",
+    usage: "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
+    handler: verificationHistoryCommand,
+  },
+  {
     name: "audit",
     description: "Show recent audit log entries",
     usage: "/audit",
@@ -2421,6 +3598,36 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List MCP servers and tools",
     usage: "/mcp",
     handler: mcpCommand,
+  },
+  {
+    name: "git-watch",
+    description: "Start, list, or stop durable Git event watchers",
+    usage: "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
+    handler: gitWatchCommand,
+  },
+  {
+    name: "run-workflow",
+    description: "Run a local GitHub-style workflow file",
+    usage: "/run-workflow <workflowPath> [event.json] [--background]",
+    handler: runWorkflowCommand,
+  },
+  {
+    name: "auto-pr",
+    description: "Create a PR with optional changeset generation",
+    usage: "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
+    handler: autoPrCommand,
+  },
+  {
+    name: "webhook-listen",
+    description: "Start, list, or stop local webhook listeners",
+    usage: "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
+    handler: webhookListenCommand,
+  },
+  {
+    name: "schedule-git-task",
+    description: "Start, list, or stop durable scheduled git tasks",
+    usage: "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
+    handler: scheduleGitTaskCommand,
   },
   {
     name: "bg",

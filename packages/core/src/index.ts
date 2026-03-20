@@ -428,6 +428,77 @@ export type {
   VerificationEngineOptions,
 } from "./verification-engine.js";
 
+export {
+  scorePdseMetrics,
+  DEFAULT_PDSE_WEIGHTS,
+} from "./pdse-scorer.js";
+export type {
+  VerificationMetricName,
+  VerificationMetricScore,
+  PdseWeights,
+  PdseScoreReport,
+  PdseScoreOptions,
+} from "./pdse-scorer.js";
+
+export {
+  VerificationRailRegistry,
+  evaluateRail,
+  globalVerificationRailRegistry,
+} from "./rails-enforcer.js";
+export type {
+  VerificationRail,
+  VerificationRailMode,
+  VerificationRailFinding,
+} from "./rails-enforcer.js";
+
+export {
+  verifyOutput,
+  generateQaTestCases,
+  runQaSuite,
+} from "./qa-harness.js";
+export type {
+  GeneratedQaTestCase,
+  VerificationCriteria,
+  VerificationTraceStage,
+  VerifyOutputInput,
+  OutputVerificationReport,
+  QaSuiteOutputInput,
+  QaSuiteReport,
+} from "./qa-harness.js";
+
+export { criticDebate } from "./critic-debater.js";
+export type {
+  CriticVerdict,
+  CriticOpinion,
+  CriticDebateResult,
+} from "./critic-debater.js";
+
+export { VerificationHistoryStore } from "./verification-history-store.js";
+export type {
+  VerificationHistoryKind,
+  VerificationHistorySource,
+  VerificationHistoryEntry,
+  VerificationHistoryFilter,
+  VerificationHistoryEntryInput,
+} from "./verification-history-store.js";
+
+export { VerificationBenchmarkStore } from "./verification-benchmark-store.js";
+export type {
+  VerificationBenchmarkSource,
+  VerificationBenchmarkRun,
+  VerificationBenchmarkRunInput,
+  VerificationBenchmarkSummary,
+  VerificationBenchmarkFilter,
+} from "./verification-benchmark-store.js";
+
+export { VerificationGraph } from "./verification-graph.js";
+export type {
+  VerificationGraphInput,
+  VerificationGraphNode,
+  VerificationGraphTrace,
+  VerificationGraphRunResult,
+} from "./verification-graph.js";
+
 // ─── Patch Validator ────────────────────────────────────────────────────────
 
 export { PatchValidator } from "./patch-validator.js";
@@ -447,6 +518,8 @@ export type {
   ChainStep,
   ReasoningTier,
   CritiqueResult,
+  VerifyReasoningPhaseOptions,
+  ReasoningVerificationResult,
 } from "./reasoning-chain.js";
 
 // ─── Search Providers ──────────────────────────────────────────────────────
@@ -484,6 +557,11 @@ export type {
   WebSearchOptions,
   OrchestratedSearchResult,
 } from "./web-search-orchestrator.js";
+
+// ─── Smart Extractor ───────────────────────────────────────────────────────
+
+export { SmartExtractor } from "./smart-extractor.js";
+export type { ExtractorConfig, ExtractedData } from "./smart-extractor.js";
 
 // ─── Search Synthesizer ────────────────────────────────────────────────────
 
@@ -572,6 +650,11 @@ export type {
   MergedResult,
   SubAgentManagerOptions,
 } from "./subagent-manager.js";
+
+// ─── Handoff Engine ────────────────────────────────────────────────────────
+
+export { HandoffEngine } from "./handoff-engine.js";
+export type { HandoffSignal, HandoffEngineOptions, AgentContext } from "./handoff-engine.js";
 
 // ─── SubAgent Context ──────────────────────────────────────────────────────
 
@@ -766,6 +849,12 @@ export type {
   ToolExecutionPolicy,
 } from "./tool-runtime/execution-policy.js";
 
+export { DependencyGraph } from "./tool-runtime/dependency-graph.js";
+export type {
+  DependencyNodeState,
+  DependencyReadiness,
+} from "./tool-runtime/dependency-graph.js";
+
 // ─── DTR Phase 2: Tool Adapters ─────────────────────────────────────────────
 
 export {
@@ -836,10 +925,32 @@ export type { SchedulerEvents } from "./tool-runtime/tool-scheduler.js";
 
 export {
   ApprovalGateway,
+  DEFAULT_APPROVAL_RULES,
   globalApprovalGateway,
 } from "./tool-runtime/approval-gateway.js";
 export type {
+  ApprovalCheckResult,
   ApprovalDecision,
   ApprovalRule,
   ApprovalGatewayConfig,
 } from "./tool-runtime/approval-gateway.js";
+
+export {
+  evaluateVerificationRules,
+  matchesVerificationRule,
+} from "./tool-runtime/verification-rules.js";
+export type {
+  VerificationGate,
+  VerificationRule,
+  VerificationRuleDecision,
+  VerificationRuleEvaluation,
+  VerificationRuleMatch,
+  VerificationRuleMatchKind,
+} from "./tool-runtime/verification-rules.js";
+
+// ─── Memory Enhancements ────────────────────────────────────────────────────
+
+export * from "./semantic-recall.js";
+export * from "./pruning-engine.js";
+export * from "./entity-extractor.js";
+export * from "./memory-orchestrator.js";

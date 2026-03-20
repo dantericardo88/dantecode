@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { SubAgentContext } from "./subagent-context.js";
-import type { ContextSlice } from "./subagent-context.js";
 
 describe("SubAgentContext", () => {
   let ctx: SubAgentContext;

@@ -6,6 +6,8 @@
 // ============================================================================
 
 import { tokenize, jaccardSimilarity } from "./approach-memory.js";
+import { verifyOutput, type OutputVerificationReport, type VerificationCriteria } from "./qa-harness.js";
+import type { VerificationRail } from "./rails-enforcer.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -62,6 +64,26 @@ export interface CritiqueResult {
   shouldEscalate: boolean;
   /** Human-readable recommendation based on the score. */
   recommendation: string;
+}
+
+/** Optional verification configuration for a reasoning phase. */
+export interface VerifyReasoningPhaseOptions {
+  /** Verification criteria applied to the phase content. */
+  criteria?: VerificationCriteria;
+  /** Runtime rails applied to the phase content. */
+  rails?: VerificationRail[];
+}
+
+/** Result of verifying a reasoning phase against the QA harness. */
+export interface ReasoningVerificationResult {
+  /** Full QA report for the phase content. */
+  report: OutputVerificationReport;
+  /** Self-critique derived from the QA score. */
+  critique: CritiqueResult;
+  /** Recorded chain step with PDSE score attached to the phase. */
+  step: ChainStep;
+  /** Current tier after any automatic escalation. */
+  tierAfterReview: ReasoningTier;
 }
 
 // ----------------------------------------------------------------------------
@@ -357,6 +379,61 @@ export class ReasoningChain {
     return this.stepCounter;
   }
 
+  /**
+   * Verify a reasoning phase with the shared QA harness, record it in history,
+   * and auto-escalate the tier when the score falls below the configured threshold.
+   */
+  verifyPhase(
+    task: string,
+    phase: ReasoningPhase,
+    options: VerifyReasoningPhaseOptions = {},
+  ): ReasoningVerificationResult {
+    const report = verifyOutput({
+      task,
+      output: phase.content,
+      ...(options.criteria ? { criteria: options.criteria } : {}),
+      ...(options.rails ? { rails: options.rails } : {}),
+    });
+    const scoredPhase: ReasoningPhase = {
+      ...phase,
+      pdseScore: report.pdseScore,
+    };
+    const critique = this.selfCritique(
+      scoredPhase,
+      report.pdseScore,
+      report.warnings.join(" "),
+    );
+
+    if (critique.shouldEscalate) {
+      this.currentTier = this.escalateTier();
+    }
+
+    const playbookBullets =
+      this.options.playbookDistill && report.pdseScore >= 0.85
+        ? this.distillPlaybook([
+            {
+              stepNumber: this.stepCounter + 1,
+              phase: scoredPhase,
+              escalated: critique.shouldEscalate,
+            },
+          ])
+        : undefined;
+
+    const step = this.recordStep(
+      scoredPhase,
+      critique.rootCause,
+      playbookBullets,
+      critique.shouldEscalate,
+    );
+
+    return {
+      report,
+      critique,
+      step,
+      tierAfterReview: this.currentTier,
+    };
+  }
+
   // --------------------------------------------------------------------------
   // Reset
   // --------------------------------------------------------------------------
@@ -368,4 +445,10 @@ export class ReasoningChain {
     this.currentTier = "quick";
   }
 
+  private escalateTier(): ReasoningTier {
+    if (this.currentTier === "quick") {
+      return "deep";
+    }
+    return "expert";
+  }
 }

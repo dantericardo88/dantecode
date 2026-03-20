@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   WebSearchOrchestrator,
   createWebSearchOrchestrator,
@@ -48,6 +52,17 @@ const RESULT_C: SearchResult = {
   rank: 2,
 };
 
+const tempRoots = new Set<string>();
+
+function createTestOrchestrator(
+  config?: ConstructorParameters<typeof WebSearchOrchestrator>[0],
+  providers?: ConstructorParameters<typeof WebSearchOrchestrator>[1],
+): WebSearchOrchestrator {
+  const projectRoot = join(tmpdir(), `dantecode-wso-${randomUUID()}`);
+  tempRoots.add(projectRoot);
+  return new WebSearchOrchestrator(config, providers, projectRoot);
+}
+
 // ============================================================================
 // WebSearchOrchestrator
 // ============================================================================
@@ -60,7 +75,7 @@ describe("WebSearchOrchestrator", () => {
 
   it("searches with a single provider", async () => {
     const provider = createMockProvider("test", [RESULT_A, RESULT_B]);
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     const result = await orch.search("test query");
     expect(result.results).toHaveLength(2);
@@ -71,7 +86,7 @@ describe("WebSearchOrchestrator", () => {
 
   it("returns cached results on second call", async () => {
     const provider = createMockProvider("test", [RESULT_A]);
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     await orch.search("same query");
     const second = await orch.search("same query");
@@ -82,7 +97,7 @@ describe("WebSearchOrchestrator", () => {
   it("merges results from multiple providers via RRF", async () => {
     const providerA = createMockProvider("a", [RESULT_A, RESULT_C], true, 0);
     const providerB = createMockProvider("b", [RESULT_B], true, 0);
-    const orch = new WebSearchOrchestrator({}, [providerA, providerB]);
+    const orch = createTestOrchestrator({}, [providerA, providerB]);
 
     const result = await orch.search("multi query");
     expect(result.results.length).toBeGreaterThanOrEqual(2);
@@ -94,7 +109,7 @@ describe("WebSearchOrchestrator", () => {
     const resultDup: SearchResult = { ...RESULT_A, source: "b", url: "https://www.example.com/a/" };
     const providerA = createMockProvider("a", [RESULT_A], true, 0);
     const providerB = createMockProvider("b", [resultDup], true, 0);
-    const orch = new WebSearchOrchestrator({}, [providerA, providerB]);
+    const orch = createTestOrchestrator({}, [providerA, providerB]);
 
     const result = await orch.search("dedup test");
     const urls = result.results.map((r) => r.url);
@@ -105,7 +120,7 @@ describe("WebSearchOrchestrator", () => {
   it("respects preferred provider", async () => {
     const tavily = createMockProvider("tavily", [RESULT_A]);
     const ddg = createMockProvider("duckduckgo", [RESULT_B], true, 0);
-    const orch = new WebSearchOrchestrator({}, [tavily, ddg]);
+    const orch = createTestOrchestrator({}, [tavily, ddg]);
 
     const result = await orch.search("pref query", { preferredProvider: "tavily" });
     expect(result.providersUsed).toEqual(["tavily"]);
@@ -120,7 +135,7 @@ describe("WebSearchOrchestrator", () => {
       search: vi.fn(async () => { throw new Error("fail"); }),
     };
     const ddg = createMockProvider("duckduckgo", [RESULT_B], true, 0);
-    const orch = new WebSearchOrchestrator({}, [failing, ddg]);
+    const orch = createTestOrchestrator({}, [failing, ddg]);
 
     const result = await orch.search("fallback test", { preferredProvider: "failing" });
     // Should fall through to multi-provider search
@@ -130,7 +145,7 @@ describe("WebSearchOrchestrator", () => {
   it("respects cost cap", async () => {
     const expensive = createMockProvider("expensive", [RESULT_A], true, 0.10);
     const cheap = createMockProvider("cheap", [RESULT_B], true, 0.01);
-    const orch = new WebSearchOrchestrator({ costCapPerCall: 0.05 }, [expensive, cheap]);
+    const orch = createTestOrchestrator({ costCapPerCall: 0.05 }, [expensive, cheap]);
 
     const result = await orch.search("budget test");
     // Should skip expensive provider
@@ -140,7 +155,7 @@ describe("WebSearchOrchestrator", () => {
 
   it("returns empty when no providers available", async () => {
     const unavailable = createMockProvider("unavail", [], false);
-    const orch = new WebSearchOrchestrator({}, [unavailable]);
+    const orch = createTestOrchestrator({}, [unavailable]);
 
     const result = await orch.search("no providers");
     expect(result.results).toEqual([]);
@@ -149,7 +164,7 @@ describe("WebSearchOrchestrator", () => {
 
   it("tracks session cost", async () => {
     const provider = createMockProvider("test", [RESULT_A], true, 0.01);
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     expect(orch.sessionCost).toBe(0);
     await orch.search("q1");
@@ -180,7 +195,7 @@ describe("WebSearchOrchestrator.chainSearch", () => {
         return callCount === 1 ? [RESULT_A] : [RESULT_A, RESULT_B, RESULT_C];
       }),
     };
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     const result = await orch.chainSearch("initial query", {
       refineFn: (results) => results.length < 3 ? "refined query" : null,
@@ -212,7 +227,7 @@ describe("WebSearchOrchestrator.agenticSearch", () => {
         return [RESULT_A, RESULT_B, RESULT_C]; // good results
       }),
     };
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     const result = await orch.agenticSearch("agentic query");
     expect(result.iterations).toBeGreaterThanOrEqual(2);
@@ -226,7 +241,7 @@ describe("WebSearchOrchestrator.agenticSearch", () => {
       available: () => true,
       search: vi.fn(async () => []), // always empty
     };
-    const orch = new WebSearchOrchestrator({}, [provider]);
+    const orch = createTestOrchestrator({}, [provider]);
 
     const result = await orch.agenticSearch("never found");
     expect(result.iterations).toBeLessThanOrEqual(3);
@@ -239,12 +254,12 @@ describe("WebSearchOrchestrator.agenticSearch", () => {
 
 describe("WebSearchOrchestrator.evaluateResultConfidence", () => {
   it("returns 0 for empty results", () => {
-    const orch = new WebSearchOrchestrator({}, []);
+    const orch = createTestOrchestrator({}, []);
     expect(orch.evaluateResultConfidence([], "test")).toBe(0);
   });
 
   it("returns higher confidence for many relevant results", () => {
-    const orch = new WebSearchOrchestrator({}, []);
+    const orch = createTestOrchestrator({}, []);
     const results = [RESULT_A, RESULT_B, RESULT_C, { ...RESULT_A, url: "https://x.com/1" }, { ...RESULT_B, url: "https://y.com/2" }];
     const confidence = orch.evaluateResultConfidence(results, "test query");
     expect(confidence).toBeGreaterThan(0.3);
@@ -257,7 +272,7 @@ describe("WebSearchOrchestrator.evaluateResultConfidence", () => {
 
 describe("WebSearchOrchestrator.reciprocalRankFusion", () => {
   it("merges and ranks results from multiple sources", () => {
-    const orch = new WebSearchOrchestrator({}, []);
+    const orch = createTestOrchestrator({}, []);
     const fused = orch.reciprocalRankFusion([
       [RESULT_A, RESULT_C],
       [RESULT_B, RESULT_A], // A appears in both
@@ -282,4 +297,13 @@ describe("createWebSearchOrchestrator", () => {
     // DuckDuckGo should always be available
     expect(orch.availableProviders).toContain("duckduckgo");
   });
+});
+
+afterEach(async () => {
+  await Promise.all(
+    [...tempRoots].map(async (root) => {
+      tempRoots.delete(root);
+      await rm(root, { recursive: true, force: true });
+    }),
+  );
 });

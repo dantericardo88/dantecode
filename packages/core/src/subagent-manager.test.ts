@@ -4,13 +4,7 @@
 // ============================================================================
 
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  SubAgentManager,
-  type SubAgentConfig,
-  type SubAgentTask,
-  type MergedResult,
-  type ParallelResult,
-} from "./subagent-manager.js";
+import { SubAgentManager } from "./subagent-manager.js";
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -279,7 +273,7 @@ describe("SubAgentManager", () => {
     const t1 = manager.spawn("a");
     const t2 = manager.spawn("b");
     const t3 = manager.spawn("c");
-    const t4 = manager.spawn("d");
+    manager.spawn("d");
     manager.completeTask(t1.id, "done");
     manager.failTask(t2.id, "err");
     manager.cancelTask(t3.id);
@@ -450,5 +444,39 @@ describe("SubAgentManager", () => {
     expect(stats.completed).toBe(0);
     expect(stats.failed).toBe(0);
     expect(stats.cancelled).toBe(0);
+  });
+
+  // --------------------------------------------------------------------------
+  // 36. Critic integration
+  // --------------------------------------------------------------------------
+
+  it("deriveCriticOpinions() converts completed and failed tasks into critic verdicts", () => {
+    const good = manager.spawn("deploy review");
+    const risky = manager.spawn("rollback review");
+    const broken = manager.spawn("incident review");
+
+    manager.completeTask(good.id, "Deployment looks solid and verified.");
+    manager.completeTask(risky.id, "Warning: rollback steps need proof before merge.");
+    manager.failTask(broken.id, "Health-check evidence missing.");
+
+    const opinions = manager.deriveCriticOpinions([good.id, risky.id, broken.id]);
+
+    expect(opinions).toHaveLength(3);
+    expect(opinions.find((opinion) => opinion.agentId === good.agentId)?.verdict).toBe("pass");
+    expect(opinions.find((opinion) => opinion.agentId === risky.agentId)?.verdict).toBe("warn");
+    expect(opinions.find((opinion) => opinion.agentId === broken.agentId)?.verdict).toBe("fail");
+  });
+
+  it("debateResults() feeds derived critic opinions into the consensus helper", () => {
+    const verified = manager.spawn("verified lane");
+    const failed = manager.spawn("failed lane");
+
+    manager.completeTask(verified.id, "Everything passed with evidence.");
+    manager.failTask(failed.id, "Missing rollback validation.");
+
+    const debate = manager.debateResults([verified.id, failed.id], "Release plan output");
+
+    expect(debate.consensus).toBe("fail");
+    expect(debate.blockingFindings).toContain("Missing rollback validation.");
   });
 });

@@ -20,6 +20,14 @@ const {
   mockInitializeRun,
   mockAppendEvidence,
   mockLoadResumeHint,
+  mockLoadToolCallRecords,
+  mockSchedulerExecuteBatch,
+  mockSchedulerResumeToolCalls,
+  mockLoadBackgroundTask,
+  mockPersistPendingToolCalls,
+  mockPersistToolCallRecords,
+  mockLoadPendingToolCalls,
+  mockClearPendingToolCalls,
 } = vi.hoisted(() => ({
   mockGetLatestWaitingRun: vi.fn().mockResolvedValue(null),
   mockLoadSessionSnapshot: vi.fn().mockResolvedValue(null),
@@ -28,6 +36,14 @@ const {
   mockInitializeRun: vi.fn(),
   mockAppendEvidence: vi.fn(),
   mockLoadResumeHint: vi.fn().mockResolvedValue(null),
+  mockLoadToolCallRecords: vi.fn().mockResolvedValue([]),
+  mockSchedulerExecuteBatch: vi.fn(),
+  mockSchedulerResumeToolCalls: vi.fn((toolCalls) => toolCalls),
+  mockLoadBackgroundTask: vi.fn().mockResolvedValue(null),
+  mockPersistPendingToolCalls: vi.fn(),
+  mockPersistToolCallRecords: vi.fn(),
+  mockLoadPendingToolCalls: vi.fn().mockResolvedValue([]),
+  mockClearPendingToolCalls: vi.fn(),
 }));
 
 vi.mock("ai", () => ({
@@ -166,6 +182,18 @@ vi.mock("@dantecode/core", () => {
     async appendEvidence(runId: string, evidence: unknown) {
       mockAppendEvidence(runId, evidence);
     }
+    async persistPendingToolCalls(runId: string, toolCalls: unknown[]) {
+      mockPersistPendingToolCalls(runId, toolCalls);
+    }
+    async persistToolCallRecords(runId: string, toolCalls: unknown[]) {
+      mockPersistToolCallRecords(runId, toolCalls);
+    }
+    async loadPendingToolCalls(runId: string) {
+      return mockLoadPendingToolCalls(runId);
+    }
+    async clearPendingToolCalls(runId: string) {
+      mockClearPendingToolCalls(runId);
+    }
     async completeRun() {}
     async failRun() {}
     async loadRun() {
@@ -183,12 +211,27 @@ vi.mock("@dantecode/core", () => {
     async getResumeHint(runId: string) {
       return mockLoadResumeHint(runId);
     }
+    async loadToolCallRecords(runId: string) {
+      return mockLoadToolCallRecords(runId);
+    }
+  }
+
+  class MockBackgroundTaskStore {
+    constructor(_projectRoot: string) {}
+    async saveTask() {}
+    async loadTask(taskId: string) {
+      return mockLoadBackgroundTask(taskId);
+    }
+    async listTasks() {
+      return [];
+    }
   }
 
   return {
     ModelRouterImpl: MockModelRouterImpl,
     SessionStore: MockSessionStore,
     DurableRunStore: MockDurableRunStore,
+    BackgroundTaskStore: MockBackgroundTaskStore,
     _mockGetRecentSummaries: mockGetRecentSummaries,
     appendAuditEvent: vi.fn().mockResolvedValue(undefined),
     shouldContinueLoop: vi.fn(() => true),
@@ -247,6 +290,47 @@ vi.mock("@dantecode/core", () => {
       get size() { return 0; }
     },
     formatApproachesForPrompt: vi.fn().mockReturnValue(""),
+    buildWorkflowInvocationPrompt: vi.fn(() => "## Workflow Contract\nTest workflow contract."),
+    globalToolScheduler: {
+      executeBatch: mockSchedulerExecuteBatch.mockImplementation(async (toolCalls, options) => {
+        const results = [];
+        for (const toolCall of toolCalls) {
+          const raw = await options.execute(toolCall);
+          results.push({
+            request: toolCall,
+            record: {
+              id: toolCall.id,
+              toolName: toolCall.toolName,
+              input: toolCall.input,
+              dependsOn: toolCall.dependsOn,
+              requestId: options.requestId,
+              status: raw.isError ? "error" : "success",
+              statusHistory: [],
+              createdAt: Date.now(),
+              result: raw,
+            },
+            result: raw,
+            executed: true,
+            verificationMessage: undefined,
+          });
+        }
+        return results;
+      }),
+      resumeToolCalls: mockSchedulerResumeToolCalls,
+      verifyBashArtifacts: vi.fn().mockResolvedValue(null),
+      verifyWriteArtifact: vi.fn().mockResolvedValue(null),
+    },
+    globalArtifactStore: {
+      getByKind: vi.fn(() => []),
+    },
+    globalExecutionPolicy: {
+      dependenciesSatisfied: vi.fn(() => ({ satisfied: true })),
+      isBlocked: vi.fn(() => ({ blocked: false })),
+    },
+    adaptToolResult: vi.fn(
+      (_toolName: string, _input: Record<string, unknown>, raw: { content: string; isError: boolean }) => raw,
+    ),
+    formatEvidenceSummary: vi.fn(() => ""),
   };
 });
 
@@ -316,7 +400,11 @@ vi.mock("./tool-schemas.js", () => ({
 
 // Safety module is NOT mocked — we test it for real
 
-import { runAgentLoop, type AgentLoopConfig } from "./agent-loop.js";
+import {
+  maybeAutoResumeDurableRunAfterBackgroundTask,
+  runAgentLoop,
+  type AgentLoopConfig,
+} from "./agent-loop.js";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
@@ -395,9 +483,41 @@ describe("runAgentLoop smoke tests", () => {
     vi.clearAllMocks();
     mockAnalyzeComplexityValue = 0.3;
     mockEscalateTier.mockReset();
+    mockGenerateText.mockReset();
+    mockExecuteTool.mockReset();
+    mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
     mockGetLatestWaitingRun.mockResolvedValue(null);
     mockLoadSessionSnapshot.mockResolvedValue(null);
     mockLoadResumeHint.mockResolvedValue(null);
+    mockLoadBackgroundTask.mockResolvedValue(null);
+    mockPersistPendingToolCalls.mockReset();
+    mockLoadPendingToolCalls.mockReset();
+    mockLoadPendingToolCalls.mockResolvedValue([]);
+    mockClearPendingToolCalls.mockReset();
+    mockSchedulerExecuteBatch.mockReset();
+    mockSchedulerExecuteBatch.mockImplementation(async (toolCalls, options) => {
+      const results = [];
+      for (const toolCall of toolCalls) {
+        const raw = await options.execute(toolCall);
+        results.push({
+          request: toolCall,
+          record: {
+            id: toolCall.id,
+            toolName: toolCall.toolName,
+            input: toolCall.input,
+            requestId: options.requestId,
+            status: raw.isError ? "error" : "success",
+            statusHistory: [],
+            createdAt: Date.now(),
+            result: raw,
+          },
+          result: raw,
+          executed: true,
+          verificationMessage: undefined,
+        });
+      }
+      return results;
+    });
   });
 
   it("basic prompt produces response with no tool calls", async () => {
@@ -491,6 +611,426 @@ describe("runAgentLoop smoke tests", () => {
     // Verify tool result is in the session
     const toolResultMsg = result.messages.find((m) => m.role === "tool");
     expect(toolResultMsg).toBeDefined();
+  });
+
+  it("routes executable tool batches through the scheduler", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'I will read the file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done reading.",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("/magic inspect src/index.ts", session, makeConfig());
+
+    expect(mockSchedulerExecuteBatch).toHaveBeenCalledTimes(1);
+    expect(mockSchedulerExecuteBatch).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          id: expect.any(String),
+          toolName: "Read",
+          input: { file_path: "src/index.ts" },
+        }),
+      ],
+      expect.objectContaining({
+        requestId: expect.stringContaining("round-"),
+        projectRoot: "/tmp/test-project",
+        execute: expect.any(Function),
+      }),
+    );
+  });
+
+  it("pauses the durable run when a tool call is awaiting approval", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'I need to push.\n<tool_use>\n{"name":"Bash","input":{"command":"git push origin main"}}\n</tool_use>',
+      usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+    });
+    mockSchedulerExecuteBatch.mockResolvedValueOnce([
+      {
+        request: {
+          id: "tool-approval-1",
+          toolName: "Bash",
+          input: { command: "git push origin main" },
+        },
+        record: {
+          id: "tool-approval-1",
+          toolName: "Bash",
+          input: { command: "git push origin main" },
+          requestId: "round-1",
+          status: "awaiting_approval",
+          statusHistory: [],
+          createdAt: Date.now(),
+        },
+        executed: false,
+        blockedReason: "git push requires approval",
+      },
+    ]);
+
+    const session = makeSession();
+    const result = await runAgentLoop("/magic push the branch", session, makeConfig());
+
+    expect(mockPersistToolCallRecords).toHaveBeenCalledWith(
+      "durable-run-1",
+      [
+        expect.objectContaining({
+          id: "tool-approval-1",
+          status: "awaiting_approval",
+        }),
+      ],
+    );
+    expect(mockPauseRun).toHaveBeenCalledWith(
+      "durable-run-1",
+      expect.objectContaining({
+        reason: "user_input_required",
+        nextAction: "Approve the requested action and then continue the durable run.",
+      }),
+    );
+    expect(mockExecuteTool).not.toHaveBeenCalled();
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("requires approval"),
+      ),
+    ).toBe(true);
+  });
+
+  it("replays persisted tool calls when an approval-paused run continues", async () => {
+    const now = new Date().toISOString();
+    mockGetLatestWaitingRun.mockResolvedValueOnce({
+      id: "durable-run-1",
+      projectRoot: "/tmp/test-project",
+      sessionId: "test-session",
+      prompt: "/magic push the branch",
+      workflow: "magic",
+      status: "waiting_user",
+      createdAt: now,
+      updatedAt: now,
+      touchedFiles: [],
+      evidenceCount: 0,
+      nextAction: "Approve the requested action and then continue the durable run.",
+    });
+    mockLoadResumeHint.mockResolvedValueOnce({
+      runId: "durable-run-1",
+      summary: "Approval received for the requested action.",
+      nextAction: "Approve the requested action and then continue the durable run.",
+      continueCommand: "continue",
+    });
+    mockLoadToolCallRecords.mockResolvedValueOnce([
+      {
+        id: "tool-approval-1",
+        toolName: "Bash",
+        input: { command: "git push origin main" },
+        requestId: "round-1",
+        status: "awaiting_approval",
+        statusHistory: [],
+        createdAt: Date.now(),
+      },
+    ]);
+    mockLoadPendingToolCalls.mockResolvedValueOnce([
+      {
+        id: "tool-bash-1",
+        name: "Bash",
+        input: {
+          command: "git push origin main",
+        },
+      },
+    ]);
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The approved tool call completed. [COMPLEXITY: 0.2]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("continue", session, makeConfig());
+
+    expect(mockSchedulerResumeToolCalls).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "tool-approval-1",
+        status: "awaiting_approval",
+      }),
+    ]);
+    expect(mockClearPendingToolCalls).toHaveBeenCalledWith("durable-run-1");
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Bash",
+      {
+        command: "git push origin main",
+      },
+      expect.any(String),
+      expect.any(Object),
+    );
+    expect(result.messages.some((message) => message.toolUse?.name === "Bash")).toBe(true);
+  });
+
+  it("persists normalized scheduler tool-call state when resuming an interrupted execution", async () => {
+    const now = new Date().toISOString();
+    mockGetLatestWaitingRun.mockResolvedValueOnce({
+      id: "durable-run-1",
+      projectRoot: "/tmp/test-project",
+      sessionId: "test-session",
+      prompt: "/magic continue verification",
+      workflow: "magic",
+      status: "waiting_user",
+      createdAt: now,
+      updatedAt: now,
+      touchedFiles: [],
+      evidenceCount: 0,
+      nextAction: "Resume the interrupted verification step.",
+    });
+    mockLoadResumeHint.mockResolvedValueOnce({
+      runId: "durable-run-1",
+      summary: "Tool execution was interrupted after writing the file.",
+      nextAction: "Resume the interrupted verification step.",
+      continueCommand: "continue",
+    });
+    mockLoadToolCallRecords.mockResolvedValueOnce([
+      {
+        id: "tool-write-1",
+        toolName: "Write",
+        input: { file_path: "src/app.ts", content: "export const ready = true;\n" },
+        requestId: "round-1",
+        status: "executing",
+        statusHistory: [],
+        createdAt: Date.now(),
+        result: {
+          content: "write ok",
+          isError: false,
+        },
+      },
+    ]);
+    mockSchedulerResumeToolCalls.mockReturnValueOnce([
+      {
+        id: "tool-write-1",
+        toolName: "Write",
+        input: { file_path: "src/app.ts", content: "export const ready = true;\n" },
+        requestId: "round-1",
+        status: "verifying",
+        statusHistory: [],
+        createdAt: Date.now(),
+        result: {
+          content: "write ok",
+          isError: false,
+        },
+      },
+    ]);
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will address the resumed verification state. [COMPLEXITY: 0.2]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    await runAgentLoop("continue", makeSession(), makeConfig());
+
+    expect(mockSchedulerResumeToolCalls).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "tool-write-1",
+        status: "executing",
+      }),
+    ]);
+    expect(mockPersistToolCallRecords).toHaveBeenCalledWith(
+      "durable-run-1",
+      [
+        expect.objectContaining({
+          id: "tool-write-1",
+          status: "verifying",
+        }),
+      ],
+    );
+  });
+
+  it("pauses the durable run when a background sub-agent is launched", async () => {
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: 'I will delegate.\n<tool_use>\n{"name":"SubAgent","input":{"prompt":"inspect auth flow","background":true}}\n</tool_use>',
+        usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+      })
+      .mockResolvedValueOnce({
+        text: "Waiting for the delegated work.",
+        usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+      });
+    mockExecuteTool.mockResolvedValueOnce({
+      content:
+        'Background task started: bg-123. Use SubAgent with prompt "status bg-123" to check progress.',
+      isError: false,
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("/magic inspect auth flow", session, makeConfig());
+
+    expect(mockPauseRun).toHaveBeenCalledWith(
+      "durable-run-1",
+      expect.objectContaining({
+        reason: "user_input_required",
+        nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+      }),
+    );
+    expect(mockPersistPendingToolCalls).toHaveBeenCalledWith("durable-run-1", []);
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("Background task bg-123 is still running"),
+      ),
+    ).toBe(true);
+  });
+
+  it("persists remaining tool calls after a background sub-agent pause", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: [
+        "I will delegate and then update the file.",
+        "<tool_use>",
+        '{"name":"SubAgent","input":{"prompt":"inspect auth flow","background":true}}',
+        "</tool_use>",
+        "<tool_use>",
+        '{"name":"Write","input":{"file_path":"src/app.ts","content":"export const resumed = true;\\n"}}',
+        "</tool_use>",
+      ].join("\n"),
+      usage: { promptTokens: 50, completionTokens: 50, totalTokens: 100 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content:
+        'Background task started: bg-123. Use SubAgent with prompt "status bg-123" to check progress.',
+      isError: false,
+    });
+
+    const session = makeSession();
+    await runAgentLoop("/magic inspect auth flow", session, makeConfig());
+
+    expect(mockPersistPendingToolCalls).toHaveBeenCalledWith("durable-run-1", [
+      {
+        id: expect.any(String),
+        name: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const resumed = true;\n",
+        },
+      },
+    ]);
+  });
+
+  it("keeps a durable run paused when a background sub-agent is still running on continue", async () => {
+    const now = new Date().toISOString();
+    mockGetLatestWaitingRun.mockResolvedValueOnce({
+      id: "durable-run-1",
+      projectRoot: "/tmp/test-project",
+      sessionId: "test-session",
+      prompt: "/magic inspect auth flow",
+      workflow: "magic",
+      status: "waiting_user",
+      createdAt: now,
+      updatedAt: now,
+      touchedFiles: [],
+      evidenceCount: 0,
+      nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+    });
+    mockLoadResumeHint.mockResolvedValueOnce({
+      runId: "durable-run-1",
+      summary: "Waiting for background task bg-123 to finish.",
+      nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+      continueCommand: "continue",
+    });
+    mockLoadBackgroundTask.mockResolvedValueOnce({
+      id: "bg-123",
+      prompt: "inspect auth flow",
+      status: "running",
+      createdAt: now,
+      startedAt: now,
+      progress: "Inspecting authentication flow",
+      touchedFiles: [],
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("continue", session, makeConfig());
+
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(mockPauseRun).toHaveBeenCalledWith(
+      "durable-run-1",
+      expect.objectContaining({
+        reason: "user_input_required",
+        nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+      }),
+    );
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("Background task bg-123 is still running"),
+      ),
+    ).toBe(true);
+  });
+
+  it("replays persisted tool calls after a background sub-agent completes", async () => {
+    const now = new Date().toISOString();
+    mockGetLatestWaitingRun.mockResolvedValueOnce({
+      id: "durable-run-1",
+      projectRoot: "/tmp/test-project",
+      sessionId: "test-session",
+      prompt: "/magic inspect auth flow",
+      workflow: "magic",
+      status: "waiting_user",
+      createdAt: now,
+      updatedAt: now,
+      touchedFiles: [],
+      evidenceCount: 0,
+      nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+    });
+    mockLoadResumeHint.mockResolvedValueOnce({
+      runId: "durable-run-1",
+      summary: "Waiting for background task bg-123 to finish.",
+      nextAction: "Wait for background task bg-123 to finish, then continue the durable run.",
+      continueCommand: "continue",
+    });
+    mockLoadBackgroundTask.mockResolvedValueOnce({
+      id: "bg-123",
+      prompt: "inspect auth flow",
+      status: "completed",
+      createdAt: now,
+      startedAt: now,
+      completedAt: now,
+      progress: "Completed auth review",
+      output: "Background analysis complete",
+      touchedFiles: ["notes/auth.md"],
+    });
+    mockLoadPendingToolCalls.mockResolvedValueOnce([
+      {
+        id: "tool-write-1",
+        name: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const resumed = true;\n",
+        },
+        dependsOn: ["tool-read-1"],
+      },
+    ]);
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The replayed tool call completed. [COMPLEXITY: 0.2]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("continue", session, makeConfig());
+
+    expect(mockClearPendingToolCalls).toHaveBeenCalledWith("durable-run-1");
+    expect(mockSchedulerExecuteBatch.mock.calls[0]?.[0]?.[0]).toMatchObject({
+      id: "tool-write-1",
+      toolName: "Write",
+      dependsOn: ["tool-read-1"],
+    });
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Write",
+      {
+        file_path: "src/app.ts",
+        content: "export const resumed = true;\n",
+      },
+      expect.any(String),
+      expect.any(Object),
+    );
+    expect(result.messages.some((message) => message.toolUse?.name === "Write")).toBe(true);
   });
 
   it("recovers multiline Bash tool calls whose JSON string contains raw newlines", async () => {
@@ -994,6 +1534,93 @@ describe("Approach memory: recording after verification", () => {
 
     expect(mockEscalateTier).toHaveBeenCalledWith(expect.stringContaining("repeat-sig"));
   });
+
+  it("pauses the durable run after verification retries are exhausted", async () => {
+    mockGenerateText.mockReset();
+    mockExecuteTool.mockReset();
+    mockPauseRun.mockReset();
+    const config = makeConfig();
+    (config.state.project as unknown as Record<string, unknown>).lintCommand = "npm run lint";
+    (config.state.project as unknown as Record<string, unknown>).testCommand = "npm test";
+    (config.state.project as unknown as Record<string, unknown>).buildCommand = "npm run build";
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"src/app.ts","content":"broken code"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+
+    mockExecuteTool.mockImplementation(async (name: string) => {
+      if (name === "Write") {
+        return { content: "ok", isError: false };
+      }
+      if (name === "Bash") {
+        return { content: "verification failed", isError: true };
+      }
+      return { content: "ok", isError: false };
+    });
+
+    const result = await runAgentLoop("Update app", makeSession(), config);
+
+    expect(mockPauseRun).toHaveBeenCalledWith(
+      "durable-run-1",
+      expect.objectContaining({
+        reason: "verification_failed",
+        nextAction: "Fix the verification issues and then continue the durable run.",
+      }),
+    );
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.content === "string" &&
+          message.content.includes("verification failed 3 times"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("background durable auto-resume", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("auto-resumes a durable run after background task completion", async () => {
+    const resumeLoop = vi.fn().mockResolvedValue(makeSession());
+
+    const resumed = await maybeAutoResumeDurableRunAfterBackgroundTask({
+      durableRunId: "durable-run-1",
+      workflowName: "magic",
+      parentSession: makeSession(),
+      parentConfig: makeConfig({ silent: false }),
+      runAgentLoopImpl: resumeLoop,
+    });
+
+    expect(resumed).toBe(true);
+    expect(resumeLoop).toHaveBeenCalledWith(
+      "continue",
+      expect.objectContaining({ id: "test-session" }),
+      expect.objectContaining({
+        runId: "durable-run-1",
+        resumeFrom: "durable-run-1",
+        expectedWorkflow: "magic",
+        silent: true,
+        onToken: undefined,
+      }),
+    );
+  });
+
+  it("does not auto-resume when no durable run id is available", async () => {
+    const resumeLoop = vi.fn().mockResolvedValue(makeSession());
+
+    const resumed = await maybeAutoResumeDurableRunAfterBackgroundTask({
+      parentSession: makeSession(),
+      parentConfig: makeConfig(),
+      runAgentLoopImpl: resumeLoop,
+    });
+
+    expect(resumed).toBe(false);
+    expect(resumeLoop).not.toHaveBeenCalled();
+  });
 });
 
 describe("Major edit batch gating", () => {
@@ -1301,14 +1928,14 @@ describe("Pipeline continuation nudge", () => {
 
     // Round 3: after nudge, model continues with tool calls
     mockGenerateText.mockResolvedValueOnce({
-      text: 'Continuing.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/other.ts"}}\n</tool_use>',
+      text: 'Continuing.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/other.ts","old_string":"before","new_string":"after"}}\n</tool_use>',
       usage: { totalTokens: 100 },
     });
-    mockExecuteTool.mockResolvedValueOnce({ content: "other file", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "updated file", isError: false });
 
     // Round 4: model genuinely finishes
     mockGenerateText.mockResolvedValueOnce({
-      text: "All steps are now truly complete.",
+      text: "The requested update is in place.",
       usage: { totalTokens: 30 },
     });
 
@@ -1386,7 +2013,7 @@ describe("Pipeline continuation nudge", () => {
       usage: { totalTokens: 30 },
     });
 
-    // Rounds 5-6: pipeline nudges exhausted → confab gate fires (filesModified=0, max 2)
+    // Rounds 5-8: pipeline nudges exhausted → confab gate fires (filesModified=0, max 4)
     mockGenerateText.mockResolvedValueOnce({
       text: "## Summary\nStill done.",
       usage: { totalTokens: 30 },
@@ -1395,8 +2022,16 @@ describe("Pipeline continuation nudge", () => {
       text: "## Summary\nReally done.",
       usage: { totalTokens: 30 },
     });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nAbsolutely done.",
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "## Summary\nNothing else to do.",
+      usage: { totalTokens: 30 },
+    });
 
-    // Round 7: both pipeline nudges and confab nudges exhausted — model is allowed to stop
+    // Round 9: both pipeline nudges and confab nudges exhausted — model is allowed to stop
     mockGenerateText.mockResolvedValueOnce({
       text: "## Summary\nFinal answer.",
       usage: { totalTokens: 30 },
@@ -1405,8 +2040,8 @@ describe("Pipeline continuation nudge", () => {
     const session = makeSession();
     await runAgentLoop("/autoforge improve code", session, makeConfig());
 
-    // 1 (tool) + 3 (pipeline nudges) + 2 (confab nudges) + 1 (allowed to break) = 7
-    expect(mockGenerateText).toHaveBeenCalledTimes(7);
+    // 1 (tool) + 3 (pipeline nudges) + 4 (confab nudges) + 1 (allowed to break) = 9
+    expect(mockGenerateText).toHaveBeenCalledTimes(9);
   });
 });
 
@@ -1490,14 +2125,14 @@ describe("Universal skill completion (skillActive)", () => {
 
     // Round 3: after nudge, model continues
     mockGenerateText.mockResolvedValueOnce({
-      text: 'Continuing.\n<tool_use>\n{"name":"Read","input":{"file_path":"utils.ts"}}\n</tool_use>',
+      text: 'Continuing.\n<tool_use>\n{"name":"Edit","input":{"file_path":"utils.ts","old_string":"alpha","new_string":"beta"}}\n</tool_use>',
       usage: { totalTokens: 100 },
     });
-    mockExecuteTool.mockResolvedValueOnce({ content: "utils content", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "utils updated", isError: false });
 
     // Round 4: genuinely finishes
     mockGenerateText.mockResolvedValueOnce({
-      text: "Task complete.",
+      text: "The requested change is applied.",
       usage: { totalTokens: 30 },
     });
 
@@ -1528,7 +2163,7 @@ describe("Universal skill completion (skillActive)", () => {
     const rounds = 17;
     for (let i = 0; i < rounds; i++) {
       mockGenerateText.mockResolvedValueOnce({
-        text: `Step ${i}.\n<tool_use>\n{"name":"Read","input":{"file_path":"skill-file-${i}.ts"}}\n</tool_use>`,
+        text: `Step ${i}.\n<tool_use>\n{"name":"Edit","input":{"file_path":"skill-file-${i}.ts","old_string":"old","new_string":"new-${i}"}}\n</tool_use>`,
         usage: { totalTokens: 100 },
       });
       mockExecuteTool.mockResolvedValueOnce({ content: `content ${i}`, isError: false });
@@ -1536,7 +2171,7 @@ describe("Universal skill completion (skillActive)", () => {
 
     // Final: model finishes
     mockGenerateText.mockResolvedValueOnce({
-      text: "All skill steps done.",
+      text: "The skill run has reached a stable stopping point.",
       usage: { totalTokens: 30 },
     });
 
@@ -1550,10 +2185,10 @@ describe("Universal skill completion (skillActive)", () => {
   it("treats 'continue' as execution continuation when skill activation system message exists", async () => {
     // Round 1: model continues from skill context
     mockGenerateText.mockResolvedValueOnce({
-      text: 'Working.\n<tool_use>\n{"name":"Read","input":{"file_path":"skill-work.ts"}}\n</tool_use>',
+      text: 'Working.\n<tool_use>\n{"name":"Edit","input":{"file_path":"skill-work.ts","old_string":"draft","new_string":"ready"}}\n</tool_use>',
       usage: { totalTokens: 100 },
     });
-    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file updated", isError: false });
 
     // Round 2: premature summary — should get nudged because isExecutionContinuationPrompt
     // detects the skill activation system message
@@ -1564,7 +2199,7 @@ describe("Universal skill completion (skillActive)", () => {
 
     // Round 3: continues after nudge (text must NOT match PREMATURE_SUMMARY_PATTERN)
     mockGenerateText.mockResolvedValueOnce({
-      text: "Understood, continuing with the next step now.",
+      text: "The edit has been applied.",
       usage: { totalTokens: 30 },
     });
 
@@ -1687,7 +2322,7 @@ describe("Universal skill completion (skillActive)", () => {
       (m: { role: string; content: string }) => m.role === "user",
     );
     const hasConfabWarning = userMsgs.some((m: { content: string }) =>
-      m.content.includes("NO files were actually modified"),
+      m.content.includes("ZERO files were actually written"),
     );
     expect(hasConfabWarning).toBe(true);
   });

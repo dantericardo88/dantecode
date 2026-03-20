@@ -13,7 +13,7 @@ import type { AutoforgeCheckpointFile } from "./autoforge-checkpoint.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { EventSourcedCheckpointer } from "./checkpointer.js";
 import { SessionStore } from "./session-store.js";
-import type { ArtifactRecord } from "./tool-runtime/tool-call-types.js";
+import type { ArtifactRecord, ToolCallRecord } from "./tool-runtime/tool-call-types.js";
 
 interface InitializeDurableRunOptions {
   runId?: string;
@@ -37,6 +37,15 @@ const RUN_FILENAME = "run.json";
 const RESUME_FILENAME = "resume.json";
 const EVIDENCE_FILENAME = "evidence.json";
 const ARTIFACTS_FILENAME = "artifacts.json";
+const PENDING_TOOL_CALLS_FILENAME = "pending-tool-calls.json";
+const TOOL_CALLS_FILENAME = "tool-calls.json";
+
+export interface DurablePendingToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  dependsOn?: string[];
+}
 
 export class DurableRunStore {
   private readonly runsDir: string;
@@ -419,6 +428,14 @@ export class DurableRunStore {
     return join(this.getRunDir(runId), ARTIFACTS_FILENAME);
   }
 
+  private getPendingToolCallsFilePath(runId: string): string {
+    return join(this.getRunDir(runId), PENDING_TOOL_CALLS_FILENAME);
+  }
+
+  private getToolCallsFilePath(runId: string): string {
+    return join(this.getRunDir(runId), TOOL_CALLS_FILENAME);
+  }
+
   // ─── DTR Phase 4: Artifact Persistence ───────────────────────────────────
 
   /**
@@ -446,6 +463,37 @@ export class DurableRunStore {
   async loadArtifacts(runId: string): Promise<ArtifactRecord[]> {
     const records = await this.readJson<ArtifactRecord[]>(this.getArtifactsFilePath(runId));
     return records ?? [];
+  }
+
+  async persistToolCallRecords(runId: string, toolCalls: ToolCallRecord[]): Promise<void> {
+    if (toolCalls.length === 0) return;
+    await this.ensureRunDir(runId);
+    const existing = await this.loadToolCallRecords(runId);
+    const merged = new Map(existing.map((record) => [record.id, record]));
+    for (const toolCall of toolCalls) {
+      merged.set(toolCall.id, toolCall);
+    }
+    await this.writeJson(this.getToolCallsFilePath(runId), [...merged.values()]);
+  }
+
+  async loadToolCallRecords(runId: string): Promise<ToolCallRecord[]> {
+    return (await this.readJson<ToolCallRecord[]>(this.getToolCallsFilePath(runId))) ?? [];
+  }
+
+  async persistPendingToolCalls(runId: string, toolCalls: DurablePendingToolCall[]): Promise<void> {
+    await this.ensureRunDir(runId);
+    await this.writeJson(this.getPendingToolCallsFilePath(runId), toolCalls);
+  }
+
+  async loadPendingToolCalls(runId: string): Promise<DurablePendingToolCall[]> {
+    return (
+      (await this.readJson<DurablePendingToolCall[]>(this.getPendingToolCallsFilePath(runId))) ?? []
+    );
+  }
+
+  async clearPendingToolCalls(runId: string): Promise<void> {
+    await this.ensureRunDir(runId);
+    await this.writeJson(this.getPendingToolCallsFilePath(runId), []);
   }
 
   private async ensureRunDir(runId: string): Promise<void> {

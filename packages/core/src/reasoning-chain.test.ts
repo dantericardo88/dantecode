@@ -364,4 +364,48 @@ describe("ReasoningChain", () => {
       expect(chain.getCurrentTier()).toBe("quick");
     });
   });
+
+  // --------------------------------------------------------------------------
+  // 10. verifyPhase (2 tests)
+  // --------------------------------------------------------------------------
+
+  describe("verifyPhase", () => {
+    it("scores a reasoning phase, records it, and keeps the current tier when quality is high", () => {
+      const phase = makePhase(
+        "thinking",
+        "Steps\n1. Inspect the deploy script.\n2. Confirm rollback instructions and health checks.",
+      );
+
+      const result = chain.verifyPhase("Provide deployment steps and rollback guidance", phase, {
+        criteria: {
+          requiredKeywords: ["deploy", "rollback"],
+          expectedSections: ["Steps"],
+          minLength: 50,
+        },
+      });
+
+      expect(result.report.overallPassed).toBe(true);
+      expect(result.step.phase.pdseScore).toBeGreaterThan(0.85);
+      expect(result.critique.shouldEscalate).toBe(false);
+      expect(result.tierAfterReview).toBe("quick");
+      expect(chain.getHistory()).toHaveLength(1);
+    });
+
+    it("auto-escalates the tier when verification exposes a weak reasoning phase", () => {
+      const phase = makePhase("thinking", "TODO: missing context for the analysis");
+
+      const result = chain.verifyPhase("Explain the incident response flow", phase, {
+        criteria: {
+          requiredKeywords: ["incident", "response"],
+          minLength: 60,
+        },
+      });
+
+      expect(result.report.overallPassed).toBe(false);
+      expect(result.critique.shouldEscalate).toBe(true);
+      expect(result.step.rootCause).toBe("missing context");
+      expect(result.tierAfterReview).toBe("deep");
+      expect(chain.getCurrentTier()).toBe("deep");
+    });
+  });
 });

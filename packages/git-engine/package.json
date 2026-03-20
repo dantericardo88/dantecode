@@ -38,7 +38,10 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0"
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0",
+    "@dantecode/danteforge": "1.0.0",
+    "yaml": "^2.7.0"
   },
   "publishConfig": {
     "access": "public"

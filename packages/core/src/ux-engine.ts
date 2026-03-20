@@ -203,7 +203,6 @@ export class UXEngine {
 
   /** Strip ANSI escape codes from a string. */
   stripColors(text: string): string {
-    // eslint-disable-next-line no-control-regex
     return text.replace(/\x1b\[[0-9;]*m/g, "");
   }
 

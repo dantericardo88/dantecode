@@ -23,12 +23,18 @@ import type {
 } from './tool-call-types.js';
 import { TERMINAL_STATES, VALID_TRANSITIONS } from './tool-call-types.js';
 import { ArtifactStore } from './artifact-store.js';
+import { DependencyGraph } from './dependency-graph.js';
 import {
   buildFileWriteChecks,
   formatVerificationMessage,
   inferVerificationChecks,
   runVerificationChecks,
 } from './verification-checks.js';
+import { ApprovalGateway, globalApprovalGateway } from './approval-gateway.js';
+import {
+  ExecutionPolicyRegistry,
+  type ToolExecutionPolicy,
+} from './execution-policy.js';
 
 export interface SchedulerEvents {
   stateChange: (record: ToolCallRecord, previousStatus: ToolCallStatus) => void;
@@ -37,13 +43,51 @@ export interface SchedulerEvents {
   artifactRecorded: (artifact: ArtifactRecord) => void;
 }
 
+export interface ToolSchedulerExecutionRequest {
+  id?: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  dependsOn?: string[];
+}
+
+export interface ToolSchedulerExecutionContext {
+  requestId: string;
+  projectRoot?: string;
+  completedTools?: Set<string>;
+  execute: (
+    request: Required<ToolSchedulerExecutionRequest>,
+    record: ToolCallRecord,
+  ) => Promise<ToolExecutionResult>;
+}
+
+export interface ToolSchedulerExecutionResult {
+  request: Required<ToolSchedulerExecutionRequest>;
+  record: ToolCallRecord;
+  result?: ToolExecutionResult;
+  executed: boolean;
+  blockedReason?: string;
+  verificationMessage?: string;
+}
+
+export interface ToolSchedulerRuntimeConfig {
+  approvalGateway?: ApprovalGateway;
+  executionPolicy?: ExecutionPolicyRegistry;
+  policies?: ToolExecutionPolicy[];
+}
+
 export class ToolScheduler extends EventEmitter {
   private readonly _calls = new Map<string, ToolCallRecord>();
   private readonly _artifacts: ArtifactStore;
   private readonly _config: Required<ToolSchedulerConfig>;
+  private readonly _approvalGateway: ApprovalGateway;
+  private readonly _executionPolicy: ExecutionPolicyRegistry;
   private _activeCallId: string | null = null;
 
-  constructor(artifactStore?: ArtifactStore, config: ToolSchedulerConfig = {}) {
+  constructor(
+    artifactStore?: ArtifactStore,
+    config: ToolSchedulerConfig = {},
+    runtime: ToolSchedulerRuntimeConfig = {},
+  ) {
     super();
     this._artifacts = artifactStore ?? new ArtifactStore();
     this._config = {
@@ -53,6 +97,8 @@ export class ToolScheduler extends EventEmitter {
       defaultTimeoutMs: config.defaultTimeoutMs ?? 120_000,
       verifyAfterExecution: config.verifyAfterExecution ?? true,
     };
+    this._approvalGateway = runtime.approvalGateway ?? globalApprovalGateway;
+    this._executionPolicy = runtime.executionPolicy ?? new ExecutionPolicyRegistry(runtime.policies);
   }
 
   // ─── State Query ────────────────────────────────────────────────────────────
@@ -81,17 +127,45 @@ export class ToolScheduler extends EventEmitter {
     return this._artifacts;
   }
 
+  resumeToolCalls(records: ToolCallRecord[]): ToolCallRecord[] {
+    const restoredRecords = records.map((record) => this._normalizeResumedRecord(record));
+
+    for (const record of restoredRecords) {
+      this._calls.set(record.id, record);
+    }
+
+    const activeRecord = [...this._calls.values()]
+      .filter((record) =>
+        record.status === 'awaiting_approval' ||
+        record.status === 'verifying',
+      )
+      .sort((left, right) => {
+        const leftTs = left.statusHistory[left.statusHistory.length - 1]?.ts ?? left.createdAt;
+        const rightTs = right.statusHistory[right.statusHistory.length - 1]?.ts ?? right.createdAt;
+        return rightTs - leftTs;
+      })[0];
+
+    this._activeCallId = activeRecord?.id ?? null;
+    return restoredRecords;
+  }
+
   // ─── Lifecycle Management ───────────────────────────────────────────────────
 
   /** Create a new tool call record and transition to 'validating' */
-  submit(toolName: string, input: Record<string, unknown>, requestId: string): ToolCallRecord {
-    const id = randomUUID();
+  submit(
+    toolName: string,
+    input: Record<string, unknown>,
+    requestId: string,
+    options?: { id?: string; dependsOn?: string[] },
+  ): ToolCallRecord {
+    const id = options?.id ?? randomUUID();
     const now = Date.now();
     const record: ToolCallRecord = {
       id,
       toolName,
       input,
       requestId,
+      dependsOn: options?.dependsOn,
       status: 'created',
       statusHistory: [{ status: 'created', ts: now }],
       createdAt: now,
@@ -99,6 +173,221 @@ export class ToolScheduler extends EventEmitter {
     this._calls.set(id, record);
     this._transition(record, 'validating');
     return record;
+  }
+
+  async executeBatch(
+    toolCalls: ToolSchedulerExecutionRequest[],
+    context: ToolSchedulerExecutionContext,
+  ): Promise<ToolSchedulerExecutionResult[]> {
+    const results = new Map<string, ToolSchedulerExecutionResult>();
+    const completedTools = context.completedTools ?? new Set<string>();
+    const dependencyGraph = new DependencyGraph();
+    const prepared = toolCalls.map((toolCall) => {
+      const request: Required<ToolSchedulerExecutionRequest> = {
+        id: toolCall.id ?? randomUUID(),
+        toolName: toolCall.toolName,
+        input: toolCall.input,
+        dependsOn: toolCall.dependsOn ?? [],
+      };
+      const record = this.submit(request.toolName, request.input, context.requestId, {
+        id: request.id,
+        dependsOn: request.dependsOn,
+      });
+      dependencyGraph.register(request.id, request.dependsOn);
+      return { request, record };
+    });
+
+    for (const { request } of prepared) {
+      for (const dependencyId of request.dependsOn) {
+        if (dependencyGraph.has(dependencyId)) {
+          continue;
+        }
+
+        const existing = this._calls.get(dependencyId);
+        if (!existing) {
+          continue;
+        }
+
+        dependencyGraph.register(dependencyId, existing.dependsOn ?? []);
+        dependencyGraph.setState(dependencyId, this._dependencyStateFromRecord(existing));
+      }
+    }
+
+    const pending = [...prepared];
+    while (pending.length > 0) {
+      let progressed = false;
+
+      for (let index = 0; index < pending.length; ) {
+        const current = pending[index]!;
+        const { request, record } = current;
+
+        const explicitDependencies = dependencyGraph.inspect(request.id);
+        if (!explicitDependencies.ready) {
+          if (explicitDependencies.pending.length > 0) {
+            index += 1;
+            continue;
+          }
+
+          const blockedReason = this._formatExplicitDependencyReason(request, explicitDependencies);
+          this._transition(record, 'blocked_by_dependency', blockedReason);
+          dependencyGraph.setState(request.id, 'failed');
+          results.set(request.id, {
+            request,
+            record,
+            executed: false,
+            blockedReason,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        }
+
+        const dependencyState = this._executionPolicy.dependenciesSatisfied(
+          request.toolName,
+          completedTools,
+        );
+        if (!dependencyState.satisfied) {
+          const pendingToolDependencies = (dependencyState.missing ?? []).filter((dependencyTool) =>
+            pending.some((candidate) =>
+              candidate.request.id !== request.id && candidate.request.toolName === dependencyTool
+            ),
+          );
+          if (pendingToolDependencies.length > 0) {
+            index += 1;
+            continue;
+          }
+
+          const blockedReason =
+            `Missing required tools: ${dependencyState.missing?.join(', ') ?? 'unknown'}`;
+          this._transition(record, 'blocked_by_dependency', blockedReason);
+          dependencyGraph.setState(request.id, 'failed');
+          results.set(request.id, {
+            request,
+            record,
+            executed: false,
+            blockedReason,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        }
+
+        const approval = this._approvalGateway.check(request.toolName, request.input);
+        if (approval.decision === 'auto_deny') {
+          const deniedReason = approval.reason ?? 'Approval denied.';
+          record.errorMessage = deniedReason;
+          this._transition(record, 'error', deniedReason);
+          dependencyGraph.setState(request.id, 'failed');
+          results.set(request.id, {
+            request,
+            record,
+            executed: false,
+            blockedReason: deniedReason,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        }
+
+        if (approval.decision === 'requires_approval') {
+          const approvalReason = approval.reason ?? 'Approval required.';
+          this._transition(record, 'awaiting_approval', approvalReason);
+          results.set(request.id, {
+            request,
+            record,
+            executed: false,
+            blockedReason: approvalReason,
+          });
+          pending.splice(index, 1);
+          this._flushPausedRequests(pending, results, `${request.toolName} is awaiting approval.`);
+          return prepared.map(({ request: preparedRequest }) => results.get(preparedRequest.id)!);
+        }
+
+        this.schedule(record.id);
+        if (record.status !== 'executing') {
+          const blockedReason = record.status === 'awaiting_approval'
+            ? 'Approval required.'
+            : `Tool did not enter executing state (status=${record.status}).`;
+          results.set(request.id, {
+            request,
+            record,
+            executed: false,
+            blockedReason,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        }
+
+        try {
+          const result = await context.execute(request, record);
+          record.result = result;
+
+          if (result.isError) {
+            this.error(record.id, result.content);
+            dependencyGraph.setState(request.id, 'failed');
+            results.set(request.id, {
+              request,
+              record,
+              result,
+              executed: true,
+            });
+            pending.splice(index, 1);
+            progressed = true;
+            continue;
+          }
+
+          const completion = await this.complete(record.id, result, {
+            bashCommand: request.toolName === 'Bash'
+              ? String(request.input['command'] ?? '')
+              : undefined,
+            writtenFile: request.toolName === 'Write' || request.toolName === 'Edit'
+              ? String(request.input['file_path'] ?? '')
+              : undefined,
+            projectRoot: context.projectRoot,
+          });
+          if (this._shouldCountAsCompleted(request, result)) {
+            completedTools.add(request.toolName);
+            dependencyGraph.setState(request.id, 'satisfied');
+          } else {
+            dependencyGraph.setState(request.id, 'pending');
+          }
+          results.set(request.id, {
+            request,
+            record,
+            result,
+            executed: true,
+            verificationMessage: completion.verificationMessage,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.error(record.id, message);
+          dependencyGraph.setState(request.id, 'failed');
+          results.set(request.id, {
+            request,
+            record,
+            result: {
+              content: message,
+              isError: true,
+            },
+            executed: true,
+          });
+          pending.splice(index, 1);
+          progressed = true;
+          continue;
+        }
+      }
+
+      if (!progressed) {
+        this._flushBlockedRequests(pending, dependencyGraph, completedTools, results);
+        break;
+      }
+    }
+
+    return prepared.map(({ request }) => results.get(request.id)!);
   }
 
   /** Transition a call through: validating → scheduled → executing */
@@ -270,6 +559,171 @@ export class ToolScheduler extends EventEmitter {
     return this._config.requireApprovalFor.includes(record.toolName);
   }
 
+  private _normalizeResumedRecord(record: ToolCallRecord): ToolCallRecord {
+    const restored: ToolCallRecord = {
+      ...record,
+      input: { ...record.input },
+      dependsOn: record.dependsOn ? [...record.dependsOn] : undefined,
+      statusHistory: [...record.statusHistory],
+      artifacts: record.artifacts ? [...record.artifacts] : undefined,
+      result: record.result
+        ? {
+          ...record.result,
+          evidence: record.result.evidence ? { ...record.result.evidence } : undefined,
+        }
+        : undefined,
+      verificationResult: record.verificationResult
+        ? {
+          passed: record.verificationResult.passed,
+          checks: [...record.verificationResult.checks],
+          failedChecks: [...record.verificationResult.failedChecks],
+        }
+        : undefined,
+    };
+
+    if (restored.status === 'executing') {
+      if (restored.result?.isError) {
+        this._resumeWithError(
+          restored,
+          restored.result.content || 'Tool execution failed before resume.',
+        );
+      } else if (restored.result) {
+        this._resumeTransition(
+          restored,
+          'verifying',
+          'Resumed from persisted execution evidence.',
+        );
+      } else {
+        this._resumeWithError(
+          restored,
+          'Tool was executing when interrupted but no persisted execution evidence was available.',
+        );
+      }
+    } else if (restored.status === 'verifying') {
+      if (restored.verificationResult?.passed === true) {
+        this._resumeTransition(
+          restored,
+          'success',
+          'Verification completed before resume.',
+        );
+        restored.completedAt ??= Date.now();
+      } else if (restored.verificationResult?.passed === false) {
+        this._resumeWithError(restored, 'Tool verification failed before resume.');
+      } else if (restored.result?.isError) {
+        this._resumeWithError(
+          restored,
+          restored.result.content || 'Tool execution failed before verification completed.',
+        );
+      }
+    }
+
+    return restored;
+  }
+
+  private _dependencyStateFromRecord(record: ToolCallRecord): 'pending' | 'satisfied' | 'failed' {
+    if (record.status === 'success') {
+      if (record.toolName === 'SubAgent' && record.input['background'] === true) {
+        return 'pending';
+      }
+      return 'satisfied';
+    }
+
+    if (
+      record.status === 'error' ||
+      record.status === 'blocked_by_dependency' ||
+      record.status === 'cancelled' ||
+      record.status === 'timed_out'
+    ) {
+      return 'failed';
+    }
+
+    return 'pending';
+  }
+
+  private _formatExplicitDependencyReason(
+    request: Required<ToolSchedulerExecutionRequest>,
+    readiness: ReturnType<DependencyGraph['inspect']>,
+  ): string {
+    if (readiness.cycle) {
+      return `Dependency cycle detected: ${readiness.cycle.join(' -> ')}`;
+    }
+
+    const parts: string[] = [];
+    if (readiness.missing.length > 0) {
+      parts.push(`missing tool calls: ${readiness.missing.join(', ')}`);
+    }
+    if (readiness.failed.length > 0) {
+      parts.push(`failed prerequisites: ${readiness.failed.join(', ')}`);
+    }
+    if (readiness.pending.length > 0) {
+      parts.push(`pending prerequisites: ${readiness.pending.join(', ')}`);
+    }
+
+    return `${request.toolName} is blocked by dependency state (${parts.join('; ')})`;
+  }
+
+  private _flushPausedRequests(
+    pending: Array<{
+      request: Required<ToolSchedulerExecutionRequest>;
+      record: ToolCallRecord;
+    }>,
+    results: Map<string, ToolSchedulerExecutionResult>,
+    reason: string,
+  ): void {
+    for (const { request, record } of pending) {
+      this._transition(record, 'blocked_by_dependency', reason);
+      results.set(request.id, {
+        request,
+        record,
+        executed: false,
+        blockedReason: reason,
+      });
+    }
+  }
+
+  private _flushBlockedRequests(
+    pending: Array<{
+      request: Required<ToolSchedulerExecutionRequest>;
+      record: ToolCallRecord;
+    }>,
+    dependencyGraph: DependencyGraph,
+    completedTools: Set<string>,
+    results: Map<string, ToolSchedulerExecutionResult>,
+  ): void {
+    for (const { request, record } of pending) {
+      const explicitDependencies = dependencyGraph.inspect(request.id);
+      const policyDependencies = this._executionPolicy.dependenciesSatisfied(
+        request.toolName,
+        completedTools,
+      );
+      const blockedReason = explicitDependencies.ready
+        ? `Missing required tools: ${policyDependencies.missing?.join(', ') ?? 'unknown'}`
+        : this._formatExplicitDependencyReason(request, explicitDependencies);
+      this._transition(record, 'blocked_by_dependency', blockedReason);
+      results.set(request.id, {
+        request,
+        record,
+        executed: false,
+        blockedReason,
+      });
+    }
+  }
+
+  private _shouldCountAsCompleted(
+    request: Required<ToolSchedulerExecutionRequest>,
+    result: ToolExecutionResult,
+  ): boolean {
+    if (result.isError) {
+      return false;
+    }
+
+    if (request.toolName === 'SubAgent' && request.input['background'] === true) {
+      return false;
+    }
+
+    return true;
+  }
+
   private _transition(record: ToolCallRecord, to: ToolCallStatus, reason?: string): void {
     const from = record.status;
     const valid = VALID_TRANSITIONS[from];
@@ -282,6 +736,29 @@ export class ToolScheduler extends EventEmitter {
     record.status = to;
     record.statusHistory.push({ status: to, ts: Date.now(), reason });
     this.emit('stateChange', record, previous);
+  }
+
+  private _resumeTransition(
+    record: ToolCallRecord,
+    to: ToolCallStatus,
+    reason: string,
+  ): void {
+    if (record.status === to) {
+      return;
+    }
+
+    if (!VALID_TRANSITIONS[record.status].includes(to)) {
+      return;
+    }
+
+    record.status = to;
+    record.statusHistory.push({ status: to, ts: Date.now(), reason });
+  }
+
+  private _resumeWithError(record: ToolCallRecord, message: string): void {
+    record.errorMessage = message;
+    this._resumeTransition(record, 'error', message);
+    record.completedAt ??= Date.now();
   }
 
   private async _runPostExecutionVerification(

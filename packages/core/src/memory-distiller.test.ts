@@ -40,8 +40,8 @@ describe("distillEntries", () => {
     const result = distillEntries([entry]);
 
     expect(result.distilled).toHaveLength(1);
-    expect(result.distilled[0].sourceIds).toEqual(["e1"]);
-    expect(result.distilled[0].content).toBe(entry.content);
+    expect(result.distilled[0]!.sourceIds).toEqual(["e1"]);
+    expect(result.distilled[0]!.content).toBe(entry.content);
     expect(result.mergedCount).toBe(0);
     expect(result.keptCount).toBe(1);
   });
@@ -67,14 +67,14 @@ describe("distillEntries", () => {
     const result = distillEntries(entries, { mergeThreshold: 0.5 });
 
     expect(result.distilled).toHaveLength(1);
-    expect(result.distilled[0].sourceIds).toContain("e1");
-    expect(result.distilled[0].sourceIds).toContain("e2");
+    expect(result.distilled[0]!.sourceIds).toContain("e1");
+    expect(result.distilled[0]!.sourceIds).toContain("e2");
     // Picks the longest content
-    expect(result.distilled[0].content).toBe(entries[1].content);
+    expect(result.distilled[0]!.content).toBe(entries[1]!.content);
     // Averages scores
-    expect(result.distilled[0].combinedScore).toBeCloseTo(0.7, 5);
+    expect(result.distilled[0]!.combinedScore).toBeCloseTo(0.7, 5);
     // Keeps latest timestamp
-    expect(result.distilled[0].timestamp).toBe("2026-03-19T02:00:00.000Z");
+    expect(result.distilled[0]!.timestamp).toBe("2026-03-19T02:00:00.000Z");
     expect(result.mergedCount).toBe(1);
   });
 
@@ -111,8 +111,8 @@ describe("distillEntries", () => {
     expect(result.removedCount).toBe(1);
     expect(result.keptCount).toBe(2);
     // Highest scores kept
-    expect(result.distilled[0].combinedScore).toBe(0.9);
-    expect(result.distilled[1].combinedScore).toBe(0.7);
+    expect(result.distilled[0]!.combinedScore).toBe(0.9);
+    expect(result.distilled[1]!.combinedScore).toBe(0.7);
   });
 
   it("groups by category before merging", () => {

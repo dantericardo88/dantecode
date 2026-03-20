@@ -117,6 +117,310 @@ const DANTEFORGE_TOOLS = [
       required: ["projectRoot"],
     },
   },
+  {
+    name: "verify_output",
+    description:
+      "Run the multi-stage QA harness against a task output and return PDSE-style metrics, critique trace, and rail findings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        task: { type: "string", description: "Task or requirement being verified" },
+        output: { type: "string", description: "Output text to verify" },
+        criteria: { type: "object", description: "Optional verification criteria and metric overrides" },
+        rails: {
+          type: "array",
+          items: { type: "object" as const },
+          description: "Optional output verification rails applied for this call",
+        },
+      },
+      required: ["task", "output"],
+    },
+  },
+  {
+    name: "run_qa_suite",
+    description:
+      "Run the QA harness across multiple outputs for a plan or batch and return an aggregate pass/fail report.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        planId: { type: "string", description: "Identifier for the plan or batch under evaluation" },
+        outputs: {
+          type: "array",
+          items: { type: "object" as const },
+          description: "Outputs to verify, each with id, task, output, and optional criteria/rails",
+        },
+      },
+      required: ["planId", "outputs"],
+    },
+  },
+  {
+    name: "critic_debate",
+    description:
+      "Aggregate critic or sub-agent verdicts into a consensus decision with blocking findings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        subagents: {
+          type: "array",
+          items: { type: "object" as const },
+          description: "Critic verdicts with agentId, verdict, confidence, and findings",
+        },
+        output: { type: "string", description: "Optional output being debated" },
+      },
+      required: ["subagents"],
+    },
+  },
+  {
+    name: "add_verification_rail",
+    description:
+      "Register a runtime output verification rail so subsequent verification calls apply the guard automatically.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        rule: { type: "object", description: "Verification rail definition to register" },
+      },
+      required: ["rule"],
+    },
+  },
+  {
+    name: "web_search",
+    description:
+      "Search the web using DanteCode's intelligent multi-provider orchestrator with persistent caching.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "The search query" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "web_fetch",
+    description:
+      "Fetch a URL and extract clean markdown or structured JSON using the DanteCode Smart Extractor pipeline.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        url: { type: "string", description: "The URL to fetch and extract" },
+        instructions: { type: "string", description: "Optional extraction instructions" },
+        schema: { type: "string", description: "Optional Zod schema string for structured output" },
+        options: { type: "object", description: "Optional fetch options/configuration" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "smart_extract",
+    description:
+      "Intelligently extract specific information from a webpage based on a goal.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        url: { type: "string", description: "The URL to extract from" },
+        goal: { type: "string", description: "The extraction goal or task description" },
+      },
+      required: ["url", "goal"],
+    },
+  },
+  {
+    name: "batch_fetch",
+    description:
+      "Fetch multiple URLs concurrently with common extraction instructions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of URLs to fetch",
+        },
+        commonInstructions: { type: "string", description: "Common extraction instructions for all URLs" },
+      },
+      required: ["urls"],
+    },
+  },
+  {
+    name: "spawn_subagent",
+    description:
+      "Spawn a dynamic, role-specialized sub-agent for parallel or isolated task execution with worktree support.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        role: { type: "string", description: "The dynamic role/specialty of the agent" },
+        task: { type: "string", description: "The specific sub-task to execute" },
+      },
+      required: ["role", "task"],
+    },
+  },
+  {
+    name: "git_watch",
+    description:
+      "Start, list, or stop durable Git event watchers for post-commit, pre-push, branch-update, and file-change events.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: { type: "string", description: "start, list, or stop" },
+        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
+        eventType: { type: "string", description: "Event type to watch (post-commit, pre-push, file-change, branch-update)" },
+        path: { type: "string", description: "Optional specific file or folder path to watch" },
+        workflowPath: { type: "string", description: "Optional workflow file to queue when a matching event fires" },
+        eventPayload: { type: "object", description: "Optional base payload merged into queued workflow runs" },
+        options: { type: "object", description: "Optional options such as debounceMs or cwd" },
+        watchId: { type: "string", description: "Watcher ID to stop when action=stop" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "run_github_workflow",
+    description:
+      "Executes a local GitHub-style workflow file with event payload injection, matrix expansion, and persisted run metadata.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root used as the default workflow cwd" },
+        workflowPath: { type: "string", description: "Path to the workflow file" },
+        eventPayload: { type: "object", description: "Optional payload simulating Github event injection" },
+        background: { type: "boolean", description: "When true, queues the workflow as a durable background automation run" },
+        options: { type: "object", description: "Optional execution options like working directory" },
+      },
+      required: ["workflowPath"],
+    },
+  },
+  {
+    name: "auto_pr_create",
+    description:
+      "Automatically creates a Pull Request with optional changeset generation and persisted run metadata.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root where gh and optional changeset generation should run" },
+        title: { type: "string", description: "Title of the PR" },
+        body: { type: "string", description: "Body of the PR" },
+        base: { type: "string", description: "Base branch for the PR" },
+        draft: { type: "boolean", description: "Whether to create a draft PR" },
+        background: { type: "boolean", description: "When true, queues PR creation as a durable background automation run" },
+        generateChangeset: { type: "boolean", description: "Whether to generate a changeset" },
+        bumpType: { type: "string", enum: ["patch", "minor", "major"], description: "Type of version bump if changeset generated" },
+        packages: { type: "array", items: { type: "string" }, description: "Packages to include in the changeset" },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "webhook_listen",
+    description:
+      "Start, list, or stop local webhook listeners for GitHub, GitLab, or custom providers with persisted listener metadata.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: { type: "string", description: "start, list, or stop" },
+        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
+        provider: { type: "string", description: "github, gitlab, or custom" },
+        port: { type: "number", description: "Port to listen on (default 3000)" },
+        path: { type: "string", description: "HTTP path to bind, defaults to /webhook" },
+        secret: { type: "string", description: "Optional webhook secret for signature validation" },
+        workflowPath: { type: "string", description: "Optional workflow file to queue for each received webhook event" },
+        listenerId: { type: "string", description: "Listener ID to stop when action=stop" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "schedule_git_task",
+    description:
+      "Start, list, or stop durable scheduled git tasks using either a cron expression or interval milliseconds.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: { type: "string", description: "start, list, or stop" },
+        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
+        taskName: { type: "string", description: "Description or name of the task" },
+        intervalMs: { type: "number", description: "Interval in milliseconds" },
+        cron: { type: "string", description: "Optional cron expression in minute/hour/day/month/weekday form" },
+        workflowPath: { type: "string", description: "Optional workflow file to run on each schedule" },
+        eventPayload: { type: "object", description: "Optional workflow event payload passed on each run" },
+        taskId: { type: "string", description: "Task ID to stop when action=stop" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "memory_store",
+    description: "Store a new memory entry across sessions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        key: { type: "string", description: "Summary key or tag for the memory" },
+        value: { type: "string", description: "The content to store" },
+        scope: { type: "string", description: "Optional session ID scope" },
+        category: { type: "string", description: "Optional category (fact, decision, error, strategy, context)" },
+      },
+      required: ["projectRoot", "key", "value"],
+    },
+  },
+  {
+    name: "memory_recall",
+    description: "Recall memory entries by semantic query.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        query: { type: "string", description: "Search query" },
+        limit: { type: "number", description: "Max results" },
+        scope: { type: "string", description: "Optional session ID scope" },
+      },
+      required: ["projectRoot", "query"],
+    },
+  },
+  {
+    name: "memory_summarize",
+    description: "Generate a summary of a specific session.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        sessionId: { type: "string", description: "Session ID to summarize" },
+      },
+      required: ["projectRoot", "sessionId"],
+    },
+  },
+  {
+    name: "memory_prune",
+    description: "Prune or compress the persistent memory store.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        threshold: { type: "number", description: "Target number of max entries" },
+      },
+      required: ["projectRoot"],
+    },
+  },
+  {
+    name: "cross_session_recall",
+    description: "Retrieve semantic long-term memory across sessions using a user goal or prompt.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        userGoal: { type: "string", description: "User goal or complex query" },
+      },
+      required: ["projectRoot", "userGoal"],
+    },
+  },
+  {
+    name: "memory_visualize",
+    description: "Visualize the trace and entity map of the persistent memory.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: ["projectRoot"],
+    },
+  },
 ];
 
 /** The tool names exposed by the server (for testing/validation). */

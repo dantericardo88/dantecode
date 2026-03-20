@@ -152,7 +152,7 @@ describe("GitHookHandler", () => {
     mockedReadFile.mockImplementation(async (path) => {
       const p = String(path);
       if (p.endsWith("pre-commit") || p.endsWith("post-commit")) {
-        return "#!/bin/sh\n" as unknown as Buffer;
+        return "#!/bin/sh\n";
       }
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });

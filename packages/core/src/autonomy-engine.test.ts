@@ -144,7 +144,7 @@ describe("AutonomyEngine", () => {
 
     const active = engine.listGoals("active");
     expect(active).toHaveLength(1);
-    expect(active[0].id).toBe(g1.id);
+    expect(active[0]!.id).toBe(g1.id);
   });
 
   // 10 ----------------------------------------------------------------------
@@ -155,9 +155,9 @@ describe("AutonomyEngine", () => {
     await engine.addGoal("High", "desc", [], 10);
 
     const goals = engine.listGoals();
-    expect(goals[0].priority).toBe(10);
-    expect(goals[1].priority).toBe(5);
-    expect(goals[2].priority).toBe(1);
+    expect(goals[0]!.priority).toBe(10);
+    expect(goals[1]!.priority).toBe(5);
+    expect(goals[2]!.priority).toBe(1);
   });
 
   // 11 ----------------------------------------------------------------------
@@ -213,9 +213,9 @@ describe("AutonomyEngine", () => {
 
     const history = engine.getAdaptationHistory();
     expect(history).toHaveLength(1);
-    expect(history[0].goalId).toBe(g.id);
-    expect(history[0].previousStatus).toBe("active");
-    expect(history[0].reason).toBe("Goal is now irrelevant to the project");
+    expect(history[0]!.goalId).toBe(g.id);
+    expect(history[0]!.previousStatus).toBe("active");
+    expect(history[0]!.reason).toBe("Goal is now irrelevant to the project");
   });
 
   // 16 ----------------------------------------------------------------------

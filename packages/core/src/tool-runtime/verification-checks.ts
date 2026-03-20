@@ -31,7 +31,7 @@ export function detectGitCloneTarget(command: string): string | null {
   if (!/^git\s+clone\b/.test(cmd)) return null;
 
   // Strip flags: --, --depth N, --branch X, --single-branch, --no-tags, --shallow, --quiet, -q
-  let stripped = cmd
+  const stripped = cmd
     .replace(/git\s+clone\s+/, '')
     .replace(/--depth\s+\d+\s*/g, '')
     .replace(/--branch\s+\S+\s*/g, '')

@@ -1,0 +1,93 @@
+project: dantecode
+lastHandoff: tasks -> next (2026-03-20T07:07:09.374Z)
+workflowStage: tasks
+currentPhase: 1
+tasks:
+  "1":
+    - name: Implement the documented workflow
+      files:
+        - src/cli/
+        - src/core/
+      verify: Commands produce truthful artifacts and state transitions
+    - name: Add verification coverage
+      files:
+        - tests/
+      verify: New integration tests fail on incomplete or misleading workflows
+auditLog:
+  - "2026-03-20T07:05:11.901Z | review: CURRENT_STATE.md generated locally (500
+    source files)"
+  - "2026-03-20T07:05:11.918Z | review artifact: CURRENT_STATE.md"
+  - "2026-03-20T07:05:11.918Z | handoff: review -> next"
+  - "2026-03-20T07:05:11.932Z | pdse-score | post-review overall: 0%"
+  - "2026-03-20T07:05:11.946Z | handoff: constitution -> next"
+  - "2026-03-20T07:05:11.966Z | pdse-score | post-constitution overall: 5%"
+  - "2026-03-20T07:05:11.996Z | handoff: spec -> next"
+  - "2026-03-20T07:05:12.008Z | pdse-score | post-specify overall: 10%"
+  - "2026-03-20T07:05:12.029Z | clarify: CLARIFY.md generated locally"
+  - "2026-03-20T07:05:12.047Z | pdse-score | post-clarify overall: 15%"
+  - "2026-03-20T07:05:12.074Z | plan: PLAN.md generated locally"
+  - "2026-03-20T07:05:12.094Z | pdse-score | post-plan overall: 20%"
+  - "2026-03-20T07:05:12.120Z | tasks: 2 tasks generated locally"
+  - "2026-03-20T07:05:12.137Z | pdse-score | post-tasks overall: 24%"
+  - 2026-03-20T07:05:12.269Z | magic-preset:magic completed-with-failures (2
+    steps, 0.6s)
+  - "2026-03-20T07:06:32.328Z | review: CURRENT_STATE.md generated locally (500
+    source files)"
+  - "2026-03-20T07:06:32.370Z | review artifact: CURRENT_STATE.md"
+  - "2026-03-20T07:06:32.370Z | handoff: review -> next"
+  - "2026-03-20T07:06:35.633Z | handoff: constitution -> next"
+  - "2026-03-20T07:06:42.772Z | handoff: spec -> next"
+  - "2026-03-20T07:06:58.385Z | clarify: CLARIFY.md generated locally"
+  - "2026-03-20T07:07:02.135Z | tech-decide: manual guidance displayed"
+  - "2026-03-20T07:07:05.149Z | plan: PLAN.md generated locally"
+  - "2026-03-20T07:07:09.374Z | tasks: 2 tasks generated locally"
+profile: balanced
+constitution: |-
+  # DanteForge Constitution
+  - Always prioritize zero ambiguity
+  - Local-first & PIPEDA compliant
+  - Atomic commits only
+  - Always verify before commit
+  - Scale-adaptive: solo -> party mode automatically
+enforcementMode: strict
+autoforgeFailedAttempts: 3
+projectType: web
+completionTracker:
+  overall: 24
+  phases:
+    planning:
+      score: 94
+      complete: true
+      artifacts:
+        CONSTITUTION:
+          score: 95
+          complete: true
+        SPEC:
+          score: 100
+          complete: true
+        CLARIFY:
+          score: 99
+          complete: true
+        PLAN:
+          score: 100
+          complete: true
+        TASKS:
+          score: 75
+          complete: true
+    execution:
+      score: 0
+      complete: false
+      currentPhase: 1
+      wavesComplete: 0
+      totalWaves: 1
+    verification:
+      score: 0
+      complete: false
+      qaScore: 0
+      testsPassing: false
+    synthesis:
+      score: 0
+      complete: false
+      retroDelta: null
+  lastUpdated: 2026-03-20T07:05:12.137Z
+  projectedCompletion: 1 more forge wave + verify + synthesize

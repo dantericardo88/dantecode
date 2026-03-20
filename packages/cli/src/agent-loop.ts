@@ -11,6 +11,7 @@ import {
   ModelRouterImpl,
   SessionStore,
   DurableRunStore,
+  BackgroundTaskStore,
   estimateMessageTokens,
   getContextUtilization,
   isProtectedWriteTarget,
@@ -29,7 +30,6 @@ import {
   formatApproachesForPrompt,
   globalToolScheduler,
   globalArtifactStore,
-  globalExecutionPolicy,
   adaptToolResult,
   formatEvidenceSummary,
 } from "@dantecode/core";
@@ -73,6 +73,20 @@ const RED = "\x1b[31m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
+
+type BackgroundTaskRegistry = {
+  pending: Map<string, Promise<SubAgentResult>>;
+  store: BackgroundTaskStore;
+};
+
+const backgroundTaskRegistries = new Map<string, BackgroundTaskRegistry>();
+const autoResumingDurableRuns = new Set<string>();
+
+type RunAgentLoopFn = (
+  prompt: string,
+  session: Session,
+  config: AgentLoopConfig,
+) => Promise<Session>;
 
 // ----------------------------------------------------------------------------
 // Types
@@ -497,6 +511,7 @@ interface ExtractedToolCall {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  dependsOn?: string[];
 }
 
 function escapeLiteralControlCharsInJsonStrings(payload: string): string {
@@ -546,14 +561,19 @@ function escapeLiteralControlCharsInJsonStrings(payload: string): string {
 
 function parseToolCallPayload(
   payload: string,
-): { name?: string; input?: Record<string, unknown> } | null {
+): { name?: string; input?: Record<string, unknown>; dependsOn?: string[] } | null {
   try {
-    return JSON.parse(payload) as { name?: string; input?: Record<string, unknown> };
+    return JSON.parse(payload) as {
+      name?: string;
+      input?: Record<string, unknown>;
+      dependsOn?: string[];
+    };
   } catch {
     try {
       return JSON.parse(escapeLiteralControlCharsInJsonStrings(payload)) as {
         name?: string;
         input?: Record<string, unknown>;
+        dependsOn?: string[];
       };
     } catch {
       return null;
@@ -590,6 +610,9 @@ function extractToolCalls(text: string): {
         id: randomUUID(),
         name: parsed.name,
         input: parsed.input,
+        dependsOn: Array.isArray(parsed.dependsOn)
+          ? parsed.dependsOn.filter((value): value is string => typeof value === "string")
+          : undefined,
       });
     } else {
       // Capture malformed blocks so the execution loop can report them to the model
@@ -609,6 +632,9 @@ function extractToolCalls(text: string): {
         id: randomUUID(),
         name: parsed.name,
         input: parsed.input,
+        dependsOn: Array.isArray(parsed.dependsOn)
+          ? parsed.dependsOn.filter((value): value is string => typeof value === "string")
+          : undefined,
       });
       cleanText = cleanText.replace(match[0], "");
     }
@@ -951,6 +977,109 @@ function buildResumePrompt(
   return lines.join("\n");
 }
 
+function getBackgroundTaskRegistry(projectRoot: string): BackgroundTaskRegistry {
+  const existing = backgroundTaskRegistries.get(projectRoot);
+  if (existing) {
+    return existing;
+  }
+
+  const registry: BackgroundTaskRegistry = {
+    pending: new Map<string, Promise<SubAgentResult>>(),
+    store: new BackgroundTaskStore(projectRoot),
+  };
+  backgroundTaskRegistries.set(projectRoot, registry);
+  return registry;
+}
+
+function cloneSessionForBackgroundResume(session: Session): Session {
+  return {
+    ...session,
+    messages: [...session.messages],
+    activeFiles: [...session.activeFiles],
+    readOnlyFiles: [...session.readOnlyFiles],
+    agentStack: [...session.agentStack],
+    todoList: [...session.todoList],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function maybeAutoResumeDurableRunAfterBackgroundTask(params: {
+  durableRunId?: string;
+  workflowName?: string;
+  parentSession: Session;
+  parentConfig: AgentLoopConfig;
+  runAgentLoopImpl?: RunAgentLoopFn;
+}): Promise<boolean> {
+  if (!params.durableRunId) {
+    return false;
+  }
+
+  const resumeKey = `${params.parentSession.projectRoot}:${params.durableRunId}`;
+  if (autoResumingDurableRuns.has(resumeKey)) {
+    return false;
+  }
+
+  autoResumingDurableRuns.add(resumeKey);
+  try {
+    const resumeConfig: AgentLoopConfig = {
+      ...params.parentConfig,
+      runId: params.durableRunId,
+      resumeFrom: params.durableRunId,
+      expectedWorkflow: params.workflowName ?? params.parentConfig.expectedWorkflow,
+      silent: true,
+      onToken: undefined,
+    };
+
+    const resumeSession = cloneSessionForBackgroundResume(params.parentSession);
+    const runAgentLoopImpl = params.runAgentLoopImpl ?? runAgentLoop;
+    await runAgentLoopImpl("continue", resumeSession, resumeConfig);
+    return true;
+  } finally {
+    autoResumingDurableRuns.delete(resumeKey);
+  }
+}
+
+function extractBackgroundTaskId(text?: string): string | null {
+  if (!text) {
+    return null;
+  }
+
+  const explicitStart = text.match(/Background task started:\s*([a-z0-9-]+)/i);
+  if (explicitStart?.[1]) {
+    return explicitStart[1];
+  }
+
+  const genericMention = text.match(/background task\s+([a-z0-9-]+)/i);
+  if (genericMention?.[1]) {
+    return genericMention[1];
+  }
+
+  const statusHint = text.match(/status\s+([a-z0-9-]+)/i);
+  return statusHint?.[1] ?? null;
+}
+
+function formatBackgroundWaitNotice(runId: string, taskId: string, progress?: string): string {
+  const detail = progress?.trim() ? ` ${progress.trim()}.` : "";
+  return (
+    `Background task ${taskId} is still running.${detail} ` +
+    `Type continue or /resume ${runId} after it finishes.`
+  );
+}
+
+function getBackgroundResumeNextAction(taskId: string): string {
+  return `Wait for background task ${taskId} to finish, then continue the durable run.`;
+}
+
+function estimateBackgroundTaskDurationMs(task: {
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}): number {
+  const start = task.startedAt ?? task.createdAt;
+  const end = task.completedAt ?? task.startedAt ?? task.createdAt;
+  return Math.max(0, new Date(end).getTime() - new Date(start).getTime());
+}
+
 function buildExecutionEvidence(
   toolName: string,
   toolInput: Record<string, unknown>,
@@ -1084,10 +1213,14 @@ function isExecutionContinuationPrompt(prompt: string, session: Session): boolea
 function createSubAgentExecutor(
   parentSession: Session,
   parentConfig: AgentLoopConfig,
+  runtime?: {
+    durableRunId?: string;
+    workflowName?: string;
+  },
 ): SubAgentExecutor {
-  // Track background tasks for async sub-agent execution
-  const backgroundTasks = new Map<string, Promise<SubAgentResult>>();
-  const completedTasks = new Map<string, SubAgentResult>();
+  const backgroundRegistry = getBackgroundTaskRegistry(parentSession.projectRoot);
+  const backgroundTasks = backgroundRegistry.pending;
+  const backgroundTaskStore = backgroundRegistry.store;
 
   async function executeSubAgent(
     prompt: string,
@@ -1170,13 +1303,31 @@ function createSubAgentExecutor(
     // Handle background task status queries
     if (prompt.startsWith("status ")) {
       const taskId = prompt.slice(7).trim();
-      const completed = completedTasks.get(taskId);
-      if (completed) {
-        return completed;
-      }
-      if (backgroundTasks.has(taskId)) {
+      const persistedTask = await backgroundTaskStore.loadTask(taskId);
+      if (persistedTask?.status === "completed") {
         return {
-          output: `Background task ${taskId} is still running.`,
+          output: persistedTask.output ?? "(no output)",
+          touchedFiles: persistedTask.touchedFiles ?? [],
+          durationMs: estimateBackgroundTaskDurationMs(persistedTask),
+          success: true,
+        };
+      }
+      if (persistedTask?.status === "failed" || persistedTask?.status === "cancelled") {
+        return {
+          output: persistedTask.output ?? "",
+          touchedFiles: persistedTask.touchedFiles ?? [],
+          durationMs: estimateBackgroundTaskDurationMs(persistedTask),
+          success: false,
+          error: persistedTask.error ?? persistedTask.progress,
+        };
+      }
+      if (
+        persistedTask?.status === "queued" ||
+        persistedTask?.status === "running" ||
+        backgroundTasks.has(taskId)
+      ) {
+        return {
+          output: `Background task ${taskId} is still running.${persistedTask?.progress ? ` ${persistedTask.progress}.` : ""}`,
           touchedFiles: [],
           durationMs: 0,
           success: true,
@@ -1214,8 +1365,56 @@ function createSubAgentExecutor(
     // Background execution: queue task and return immediately
     if (options?.background) {
       const taskId = randomUUID().slice(0, 12);
-      const taskPromise = executeSubAgent(prompt, workDir, maxRounds).then((result) => {
-        completedTasks.set(taskId, result);
+      const createdAt = new Date().toISOString();
+      await backgroundTaskStore.saveTask({
+        id: taskId,
+        prompt,
+        status: "queued",
+        createdAt,
+        progress: "Queued background sub-agent work",
+        touchedFiles: [],
+        worktreeDir,
+      });
+
+      const taskPromise = (async () => {
+        const startedAt = new Date().toISOString();
+        await backgroundTaskStore.saveTask({
+          id: taskId,
+          prompt,
+          status: "running",
+          createdAt,
+          startedAt,
+          progress: "Background sub-agent is running",
+          touchedFiles: [],
+          worktreeDir,
+        });
+
+        const result = await executeSubAgent(prompt, workDir, maxRounds);
+        const completedAt = new Date().toISOString();
+
+        await backgroundTaskStore.saveTask({
+          id: taskId,
+          prompt,
+          status: result.success ? "completed" : "failed",
+          createdAt,
+          startedAt,
+          completedAt,
+          progress: result.success ? "Background sub-agent completed" : "Background sub-agent failed",
+          output: result.output,
+          touchedFiles: result.touchedFiles,
+          error: result.error,
+          worktreeDir,
+        });
+
+        if (result.success && runtime?.durableRunId) {
+          await maybeAutoResumeDurableRunAfterBackgroundTask({
+            durableRunId: runtime.durableRunId,
+            workflowName: runtime.workflowName,
+            parentSession,
+            parentConfig,
+          });
+        }
+
         backgroundTasks.delete(taskId);
         // Clean up worktree after background task completes
         if (worktreeDir) {
@@ -1224,7 +1423,7 @@ function createSubAgentExecutor(
             .catch(() => {});
         }
         return result;
-      });
+      })();
       backgroundTasks.set(taskId, taskPromise);
       return {
         output: `Background task started: ${taskId}. Use SubAgent with prompt "status ${taskId}" to check progress.`,
@@ -1275,6 +1474,7 @@ export async function runAgentLoop(
 
   const durableRunStore = new DurableRunStore(session.projectRoot);
   let durablePrompt = prompt;
+  let replayToolCalls: ExtractedToolCall[] = [];
   let durableRunId = config.resumeFrom ?? config.runId;
   let workflowName = inferWorkflowName(prompt, config);
   const shouldCheckForResume =
@@ -1284,16 +1484,122 @@ export async function runAgentLoop(
     const resumeTarget = config.resumeFrom
       ? await durableRunStore.loadRun(config.resumeFrom)
       : await durableRunStore.getLatestWaitingUserRun();
+    let resumeHint:
+      | {
+          summary?: string;
+          lastConfirmedStep?: string;
+          lastSuccessfulTool?: string;
+          nextAction?: string;
+        }
+      | null = null;
+    let resumeBackgroundTaskId: string | null = null;
 
     if (resumeTarget) {
       durableRunId = resumeTarget.id;
       workflowName = resumeTarget.workflow || workflowName;
       const snapshot = await durableRunStore.loadSessionSnapshot(resumeTarget.id);
-      const resumeHint = await durableRunStore.getResumeHint(resumeTarget.id);
+      const persistedToolCalls = await durableRunStore.loadToolCallRecords(resumeTarget.id);
+      resumeHint = await durableRunStore.getResumeHint(resumeTarget.id);
+      let shouldReplayPendingToolCalls = false;
       if (snapshot) {
         session = snapshot;
       }
+      if (persistedToolCalls.length > 0) {
+        const restoredToolCalls = globalToolScheduler.resumeToolCalls(persistedToolCalls);
+        await durableRunStore.persistToolCallRecords(resumeTarget.id, restoredToolCalls);
+      }
       durablePrompt = buildResumePrompt(resumeTarget.id, resumeHint, prompt);
+      resumeBackgroundTaskId =
+        extractBackgroundTaskId(resumeHint?.nextAction) ??
+        extractBackgroundTaskId(resumeTarget.nextAction);
+      shouldReplayPendingToolCalls = !resumeBackgroundTaskId;
+
+      if (resumeBackgroundTaskId) {
+        const backgroundTaskStore = getBackgroundTaskRegistry(session.projectRoot).store;
+        const backgroundTask = await backgroundTaskStore.loadTask(resumeBackgroundTaskId);
+        if (backgroundTask?.status === "queued" || backgroundTask?.status === "running") {
+          let durableRun = await durableRunStore.loadRun(resumeTarget.id);
+          if (!durableRun) {
+            durableRun = await durableRunStore.initializeRun({
+              runId: resumeTarget.id,
+              session,
+              prompt: durablePrompt,
+              workflow: workflowName,
+            });
+          }
+
+          session.messages.push({
+            id: randomUUID(),
+            role: "user",
+            content: durablePrompt,
+            timestamp: new Date().toISOString(),
+          });
+
+          const waitingNotice = formatBackgroundWaitNotice(
+            durableRun.id,
+            resumeBackgroundTaskId,
+            backgroundTask.progress,
+          );
+          await durableRunStore.pauseRun(durableRun.id, {
+            reason: "user_input_required",
+            session,
+            touchedFiles: [],
+            lastConfirmedStep:
+              resumeHint?.lastConfirmedStep ?? "Waiting for background sub-agent completion.",
+            lastSuccessfulTool: resumeHint?.lastSuccessfulTool,
+            nextAction: getBackgroundResumeNextAction(resumeBackgroundTaskId),
+            message: waitingNotice,
+            evidence: [],
+          });
+
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: waitingNotice,
+            timestamp: new Date().toISOString(),
+          });
+
+          return session;
+        }
+
+        if (backgroundTask?.status === "completed") {
+          const completionLines = [
+            durablePrompt,
+            `Background task ${resumeBackgroundTaskId} completed.`,
+          ];
+          if (backgroundTask.touchedFiles.length > 0) {
+            completionLines.push(
+              `Touched files: ${backgroundTask.touchedFiles.join(", ")}`,
+            );
+          }
+          if (backgroundTask.output) {
+            completionLines.push(`Background output:\n${backgroundTask.output}`);
+          }
+          durablePrompt = completionLines.join("\n");
+          shouldReplayPendingToolCalls = true;
+        } else if (backgroundTask?.status === "failed") {
+          durablePrompt = [
+            durablePrompt,
+            `Background task ${resumeBackgroundTaskId} failed: ${backgroundTask.error ?? backgroundTask.progress}.`,
+            backgroundTask.output ? `Background output:\n${backgroundTask.output}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+        }
+      }
+
+      if (shouldReplayPendingToolCalls) {
+        const pendingToolCalls = await durableRunStore.loadPendingToolCalls(resumeTarget.id);
+        if (pendingToolCalls.length > 0) {
+          replayToolCalls = pendingToolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.name,
+            input: toolCall.input,
+            dependsOn: toolCall.dependsOn,
+          }));
+          await durableRunStore.clearPendingToolCalls(resumeTarget.id);
+        }
+      }
     }
   }
 
@@ -1505,6 +1811,12 @@ export async function runAgentLoop(
     let toolCallParseErrors: string[] = []; // malformed <tool_use> blocks from this round
     let cleanText = "";
     try {
+      if (replayToolCalls.length > 0) {
+        responseText = "Replaying pending durable tool calls after background task completion.";
+        cleanText = responseText;
+        toolCalls = replayToolCalls;
+        replayToolCalls = [];
+      } else {
       const renderer = new StreamRenderer(!!config.silent);
       renderer.printHeader();
       const useNativeTools = config.state.model.default.supportsToolCalls;
@@ -1589,6 +1901,7 @@ export async function runAgentLoop(
       }
 
       totalTokensUsed += responseText.length; // Approximate token count
+      }
 
       // Model-assisted complexity scoring: extract on first response
       if (!router.getModelRatedComplexity()) {
@@ -2054,26 +2367,6 @@ export async function runAgentLoop(
 
       // DTR Phase 6: ExecutionPolicy dependency gate — block tools whose declared
       // dependsOn tools have not yet completed in this turn.
-      if (isPipelineWorkflow) {
-        const depCheck = globalExecutionPolicy.dependenciesSatisfied(
-          toolCall.name,
-          completedToolsThisTurn,
-        );
-        if (!depCheck.satisfied) {
-          const missing = depCheck.missing!.join(", ");
-          if (!config.silent) {
-            process.stdout.write(
-              `\n${RED}[exec-policy] BLOCKED ${toolCall.name} — missing deps: ${missing}${RESET}\n`,
-            );
-          }
-          toolResults.push(
-            `SYSTEM: ${toolCall.name} is blocked — required tools have not completed yet: ${missing}. ` +
-            `Run the required tools first, then retry ${toolCall.name}.`,
-          );
-          continue;
-        }
-      }
-
       // Premature commit blocker: block GitCommit/GitPush when no files have been
       // modified this session. Grok models confabulate file edits in their narrative
       // text, then try to commit non-existent changes.
@@ -2146,31 +2439,131 @@ export async function runAgentLoop(
         typeof toolCall.input["command"] === "string";
 
       const _toolStartMs = Date.now();
-      let result: { content: string; isError: boolean };
-      if (isMCPTool) {
-        try {
-          const mcpResult = await config.mcpClient!.callToolByName(toolCall.name, toolCall.input);
-          result = { content: mcpResult, isError: false };
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          result = { content: `MCP tool error: ${msg}`, isError: true };
-        }
-      } else if (useSandbox) {
-        result = await activeSandboxBridge.runInSandbox(
-          toolCall.input["command"] as string,
-          (toolCall.input["timeout"] as number | undefined) ?? 120000,
-        );
-      } else {
-        result = await executeTool(toolCall.name, toolCall.input, session.projectRoot, {
-          sessionId: session.id,
-          roundId: `round-${roundCounter}`,
-          sandboxEnabled: false,
-          selfImprovement: config.selfImprovement,
-          readTracker,
-          editAttempts,
-          subAgentExecutor: createSubAgentExecutor(session, config),
-        });
+      const [schedulerResult] = await globalToolScheduler.executeBatch(
+        [{
+          id: toolCall.id,
+          toolName: toolCall.name,
+          input: toolCall.input,
+          dependsOn: toolCall.dependsOn,
+        }],
+        {
+          requestId: `round-${roundCounter}`,
+          projectRoot: session.projectRoot,
+          completedTools: completedToolsThisTurn,
+          execute: async (scheduledToolCall) => {
+            if (isMCPTool) {
+              try {
+                const mcpResult = await config.mcpClient!.callToolByName(
+                  scheduledToolCall.toolName,
+                  scheduledToolCall.input,
+                );
+                return { content: mcpResult, isError: false };
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return { content: `MCP tool error: ${msg}`, isError: true };
+              }
+            }
+
+            if (useSandbox) {
+              return activeSandboxBridge.runInSandbox(
+                scheduledToolCall.input["command"] as string,
+                (scheduledToolCall.input["timeout"] as number | undefined) ?? 120000,
+              );
+            }
+
+            return executeTool(scheduledToolCall.toolName, scheduledToolCall.input, session.projectRoot, {
+              sessionId: session.id,
+              roundId: `round-${roundCounter}`,
+              sandboxEnabled: false,
+              selfImprovement: config.selfImprovement,
+              readTracker,
+              editAttempts,
+              subAgentExecutor: createSubAgentExecutor(session, config, {
+                durableRunId: durableRun.id,
+                workflowName,
+              }),
+            });
+          },
+        },
+      );
+
+      if (schedulerResult?.record) {
+        await durableRunStore.persistToolCallRecords(durableRun.id, [schedulerResult.record]);
       }
+
+      if (!schedulerResult || !schedulerResult.executed || !schedulerResult.result) {
+        const blockedReason = schedulerResult?.blockedReason ?? "Execution did not start.";
+        if (schedulerResult?.record.status === "awaiting_approval") {
+          await durableRunStore.persistPendingToolCalls(
+            durableRun.id,
+            toolCalls.slice(Math.max(toolIndex - 1, 0)).map((pendingToolCall) => ({
+              id: pendingToolCall.id,
+              name: pendingToolCall.name,
+              input: pendingToolCall.input,
+              dependsOn: pendingToolCall.dependsOn,
+            })),
+          );
+
+          const approvalNotice =
+            `Execution paused for durable run ${durableRun.id} because ${toolCall.name} requires approval. ` +
+            `${blockedReason} Type continue or /resume ${durableRun.id} after approving the action.`;
+
+          evidenceLedger.push({
+            id: randomUUID(),
+            kind: "blocked_action",
+            success: false,
+            label: `${toolCall.name} requires approval`,
+            timestamp: new Date().toISOString(),
+            command: typeof toolCall.input["command"] === "string"
+              ? toolCall.input["command"]
+              : undefined,
+            filePath: typeof toolCall.input["file_path"] === "string"
+              ? toolCall.input["file_path"]
+              : undefined,
+            sourceUrl: typeof toolCall.input["url"] === "string"
+              ? toolCall.input["url"]
+              : undefined,
+            details: {
+              reason: blockedReason,
+              toolName: toolCall.name,
+              toolCallId: toolCall.id,
+            },
+          });
+
+          await durableRunStore.pauseRun(durableRun.id, {
+            reason: "user_input_required",
+            session,
+            touchedFiles,
+            lastConfirmedStep,
+            lastSuccessfulTool,
+            nextAction: "Approve the requested action and then continue the durable run.",
+            message: approvalNotice,
+            evidence: evidenceLedger,
+          });
+
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: approvalNotice,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (localSandboxBridge) {
+            await localSandboxBridge.shutdown();
+          }
+
+          return session;
+        }
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${RED}[dtr] ${toolCall.name} blocked — ${blockedReason}${RESET}\n`,
+          );
+        }
+        toolResults.push(`SYSTEM: ${toolCall.name} is blocked — ${blockedReason}.`);
+        continue;
+      }
+
+      const result = schedulerResult.result;
 
       // Tool output truncation (opencode pattern): cap large outputs to avoid
       // blowing the context window. Truncate to 2000 lines / 50KB.
@@ -2248,36 +2641,11 @@ export async function runAgentLoop(
 
       toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
 
-      // DTR Phase 1: Post-execution verification for Bash and Write tools.
-      // After git clone, mkdir, curl/wget, or Write — verify the artifact actually exists.
-      // If verification fails, inject a warning message before the model's next turn so
-      // it knows the artifact is missing and can retry rather than proceeding blindly.
-      if (!result.isError) {
-        try {
-          let dtrVerifyMsg: string | null = null;
-          if (toolCall.name === "Bash") {
-            const bashCmd = (toolCall.input["command"] as string) || "";
-            dtrVerifyMsg = await globalToolScheduler.verifyBashArtifacts(
-              bashCmd,
-              session.projectRoot,
-            );
-          } else if (toolCall.name === "Write" && writtenFile) {
-            dtrVerifyMsg = await globalToolScheduler.verifyWriteArtifact(
-              writtenFile,
-              session.projectRoot,
-            );
-          }
-          if (dtrVerifyMsg) {
-            if (!config.silent) {
-              process.stdout.write(`\n${RED}${dtrVerifyMsg.split("\n")[0]}${RESET}\n`);
-            }
-            toolResults.push(dtrVerifyMsg);
-          }
-        } catch {
-          // Non-fatal: DTR verification errors must not interrupt execution
+      if (schedulerResult.verificationMessage) {
+        if (!config.silent) {
+          process.stdout.write(`\n${RED}${schedulerResult.verificationMessage.split("\n")[0]}${RESET}\n`);
         }
-        // DTR Phase 6: mark tool as completed for dependency gating
-        completedToolsThisTurn.add(toolCall.name);
+        toolResults.push(schedulerResult.verificationMessage);
       }
 
       // Record the tool call in the session
@@ -2306,6 +2674,50 @@ export async function runAgentLoop(
         },
       };
       session.messages.push(toolResultMessage);
+
+      const backgroundTaskId =
+        !result.isError &&
+        toolCall.name === "SubAgent" &&
+        toolCall.input["background"] === true
+          ? extractBackgroundTaskId(result.content)
+          : null;
+
+      if (backgroundTaskId) {
+        lastConfirmedStep = `Launched background task ${backgroundTaskId}`;
+        await durableRunStore.persistPendingToolCalls(
+          durableRun.id,
+          toolCalls.slice(toolIndex).map((pendingToolCall) => ({
+            id: pendingToolCall.id,
+            name: pendingToolCall.name,
+            input: pendingToolCall.input,
+            dependsOn: pendingToolCall.dependsOn,
+          })),
+        );
+        const waitingNotice = formatBackgroundWaitNotice(durableRun.id, backgroundTaskId);
+        await durableRunStore.pauseRun(durableRun.id, {
+          reason: "user_input_required",
+          session,
+          touchedFiles,
+          lastConfirmedStep,
+          lastSuccessfulTool,
+          nextAction: getBackgroundResumeNextAction(backgroundTaskId),
+          message: waitingNotice,
+          evidence: evidenceLedger,
+        });
+
+        session.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          content: waitingNotice,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (localSandboxBridge) {
+          await localSandboxBridge.shutdown();
+        }
+
+        return session;
+      }
 
       // Progress tracking: emit a progress line every PROGRESS_EMIT_INTERVAL tool calls
       if (toolCallsThisTurn > 0 && toolCallsThisTurn % PROGRESS_EMIT_INTERVAL === 0) {
@@ -2375,6 +2787,7 @@ export async function runAgentLoop(
       const verifyCommands = getVerifyCommands(config);
       let verificationPassed = true;
       let verificationErrorSig = "";
+      let verificationRetriesExhausted = false;
 
       for (const vc of verifyCommands) {
         try {
@@ -2388,6 +2801,7 @@ export async function runAgentLoop(
           if (vcResult.isError) {
             verifyRetries++;
             verificationPassed = false;
+            verificationRetriesExhausted = verifyRetries >= MAX_VERIFY_RETRIES;
 
             // Self-healing: parse errors into structured format for targeted fixes
             const parsedErrors = parseVerificationErrors(vcResult.content);
@@ -2478,7 +2892,8 @@ export async function runAgentLoop(
         }
       }
 
-      if (config.checkpointPolicy?.afterVerification ?? true) {
+      const checkpointAfterVerification = config.checkpointPolicy?.afterVerification ?? true;
+      if (checkpointAfterVerification) {
         await durableRunStore.checkpoint(durableRun.id, {
           session,
           touchedFiles,
@@ -2537,6 +2952,39 @@ export async function runAgentLoop(
         // Reset for the next approach
         currentApproachDescription = "";
         currentApproachToolCalls = 0;
+      }
+
+      if (!verificationPassed && verificationRetriesExhausted) {
+        const verificationPauseNotice =
+          `Execution paused for durable run ${durableRun.id} because verification failed ${MAX_VERIFY_RETRIES} times. ` +
+          `Type continue or /resume ${durableRun.id} after addressing the reported verification issues.`;
+
+        await durableRunStore.pauseRun(durableRun.id, {
+          reason: "verification_failed",
+          session,
+          touchedFiles,
+          lastConfirmedStep,
+          lastSuccessfulTool,
+          nextAction: "Fix the verification issues and then continue the durable run.",
+          message: verificationPauseNotice,
+          evidence: checkpointAfterVerification ? [] : evidenceLedger,
+        });
+        if (!checkpointAfterVerification) {
+          evidenceLedger.length = 0;
+        }
+
+        session.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          content: verificationPauseNotice,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (localSandboxBridge) {
+          await localSandboxBridge.shutdown();
+        }
+
+        return session;
       }
     } else if (wroteCode && verifyRetries >= MAX_VERIFY_RETRIES) {
       toolResults.push(

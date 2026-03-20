@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecutionEvidence, Session } from "@dantecode/config-types";
 import { DurableRunStore } from "./durable-run-store.js";
+import type { ArtifactRecord, ToolCallRecord } from "./tool-runtime/tool-call-types.js";
 
 function makeSession(projectRoot: string): Session {
   const now = new Date().toISOString();
@@ -172,5 +173,116 @@ describe("DurableRunStore", () => {
     expect(ids).toContain("task-legacy");
     expect(runs.find((run) => run.id === "af-legacy")?.legacySource).toBe("autoforge_checkpoint");
     expect(runs.find((run) => run.id === "task-legacy")?.legacySource).toBe("background_task");
+  });
+
+  it("persists and restores tool-runtime artifacts for resume flows", async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-durable-artifacts-"));
+    const store = new DurableRunStore(projectRoot);
+    const session = makeSession(projectRoot);
+
+    const run = await store.initializeRun({
+      runId: "run-artifacts",
+      session,
+      prompt: "/magic acquire a spec",
+      workflow: "magic",
+    });
+
+    const artifacts: ArtifactRecord[] = [
+      {
+        id: "art-download-1",
+        kind: "download",
+        path: join(projectRoot, "external", "spec.txt"),
+        toolCallId: "acquire-call",
+        createdAt: Date.now(),
+        verified: true,
+        verifiedAt: Date.now(),
+        sourceUrl: "https://example.com/spec.txt",
+        sizeBytes: 512,
+      },
+    ];
+
+    await store.persistArtifacts(run.id, artifacts);
+
+    const loaded = await store.loadArtifacts(run.id);
+
+    expect(loaded).toHaveLength(1);
+    expect(loaded[0]?.id).toBe("art-download-1");
+    expect(loaded[0]?.verified).toBe(true);
+    expect(loaded[0]?.sourceUrl).toBe("https://example.com/spec.txt");
+  });
+
+  it("persists and clears pending tool calls for background resume flows", async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-durable-pending-tools-"));
+    const store = new DurableRunStore(projectRoot);
+    const session = makeSession(projectRoot);
+
+    const run = await store.initializeRun({
+      runId: "run-pending-tools",
+      session,
+      prompt: "/magic continue background work",
+      workflow: "magic",
+    });
+
+    await store.persistPendingToolCalls(run.id, [
+      {
+        id: "tool-write-1",
+        name: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const resumed = true;\n",
+        },
+        dependsOn: ["tool-read-1"],
+      },
+    ]);
+
+    expect(await store.loadPendingToolCalls(run.id)).toEqual([
+      {
+        id: "tool-write-1",
+        name: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const resumed = true;\n",
+        },
+        dependsOn: ["tool-read-1"],
+      },
+    ]);
+
+    await store.clearPendingToolCalls(run.id);
+
+    expect(await store.loadPendingToolCalls(run.id)).toEqual([]);
+  });
+
+  it("persists exact tool-call records for resume-safe scheduler state", async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-durable-tool-calls-"));
+    const store = new DurableRunStore(projectRoot);
+    const session = makeSession(projectRoot);
+
+    const run = await store.initializeRun({
+      runId: "run-tool-calls",
+      session,
+      prompt: "/magic resume approval state",
+      workflow: "magic",
+    });
+
+    const toolCalls: ToolCallRecord[] = [
+      {
+        id: "call-approval-1",
+        toolName: "Bash",
+        input: { command: "git push origin main" },
+        requestId: "round-1",
+        dependsOn: ["call-read-1"],
+        status: "awaiting_approval",
+        statusHistory: [
+          { status: "created", ts: Date.now() - 1000 },
+          { status: "validating", ts: Date.now() - 900 },
+          { status: "awaiting_approval", ts: Date.now() - 800, reason: "Push requires approval" },
+        ],
+        createdAt: Date.now() - 1000,
+      },
+    ];
+
+    await store.persistToolCallRecords(run.id, toolCalls);
+
+    expect(await store.loadToolCallRecords(run.id)).toEqual(toolCalls);
   });
 });

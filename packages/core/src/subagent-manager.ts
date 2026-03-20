@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { fingerprintAction, LoopDetector } from "./loop-detector.js";
+import { criticDebate, type CriticDebateResult, type CriticOpinion } from "./critic-debater.js";
 
 // ----------------------------------------------------------------------------
 // Types & Interfaces
@@ -118,6 +119,10 @@ export interface SubAgentManagerOptions {
   maxDepth?: number;
   /** Default maximum rounds per agent. Default: 50. */
   defaultMaxRounds?: number;
+  /** Injectable hook to create an isolated git worktree and return its path. */
+  createWorktreeHook?: (agentId: string) => Promise<string>;
+  /** Injectable hook to cleanup the worktree after task completion. */
+  cleanupWorktreeHook?: (agentId: string) => Promise<void>;
 }
 
 // ----------------------------------------------------------------------------
@@ -156,6 +161,8 @@ export class SubAgentManager {
   private readonly tasks: Map<string, SubAgentTask> = new Map();
   /** Maps agentId → current nesting depth of that agent. */
   private readonly currentDepth: Map<string, number> = new Map();
+  /** Maps task/agent → assigned isolated worktree path. */
+  public readonly agentWorktrees: Map<string, string> = new Map();
   private readonly options: Required<SubAgentManagerOptions>;
 
   constructor(options: SubAgentManagerOptions = {}) {
@@ -163,6 +170,8 @@ export class SubAgentManager {
       maxConcurrency: options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
       maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
       defaultMaxRounds: options.defaultMaxRounds ?? DEFAULT_MAX_ROUNDS,
+      createWorktreeHook: options.createWorktreeHook ?? (async () => ""),
+      cleanupWorktreeHook: options.cleanupWorktreeHook ?? (async () => {}),
     };
   }
 
@@ -226,6 +235,19 @@ export class SubAgentManager {
   }
 
   /**
+   * Initializes the worktree for an isolated agent. Must be called immediately after spawn if `worktreeIsolation` is true.
+   */
+  async initializeWorktree(agentId: string): Promise<string> {
+    const config = this.agents.get(agentId);
+    if (!config || !config.worktreeIsolation) return "";
+    const wtPath = await this.options.createWorktreeHook(agentId);
+    if (wtPath) {
+      this.agentWorktrees.set(agentId, wtPath);
+    }
+    return wtPath;
+  }
+
+  /**
    * Spawns multiple agents in parallel, one per prompt.
    *
    * All tasks are created synchronously and returned as an array.
@@ -269,6 +291,12 @@ export class SubAgentManager {
     task.result = result;
     task.completedAt = new Date().toISOString();
     this.tasks.set(taskId, task);
+
+    // Trigger async cleanup
+    if (this.agentWorktrees.has(task.agentId)) {
+      this.options.cleanupWorktreeHook(task.agentId).catch(() => {});
+      this.agentWorktrees.delete(task.agentId);
+    }
   }
 
   /**
@@ -285,6 +313,12 @@ export class SubAgentManager {
     task.error = error;
     task.completedAt = new Date().toISOString();
     this.tasks.set(taskId, task);
+
+    // Trigger async cleanup on failure too
+    if (this.agentWorktrees.has(task.agentId)) {
+      this.options.cleanupWorktreeHook(task.agentId).catch(() => {});
+      this.agentWorktrees.delete(task.agentId);
+    }
   }
 
   /**
@@ -389,6 +423,51 @@ export class SubAgentManager {
     };
   }
 
+  /**
+   * Converts completed and failed task outcomes into critic opinions that can
+   * be fed into the verification debate layer.
+   */
+  deriveCriticOpinions(taskIds: string[]): CriticOpinion[] {
+    const opinions: CriticOpinion[] = [];
+
+    for (const taskId of taskIds) {
+      const task = this.tasks.get(taskId);
+      if (!task) continue;
+      if (task.status !== "completed" && task.status !== "failed") continue;
+
+      if (task.status === "failed") {
+        const finding = task.error ?? "Sub-agent task failed.";
+        opinions.push({
+          agentId: task.agentId,
+          verdict: "fail",
+          confidence: 0.95,
+          critique: finding,
+          findings: [finding],
+        });
+        continue;
+      }
+
+      const findings = extractCriticFindings(task.result ?? "");
+      opinions.push({
+        agentId: task.agentId,
+        verdict: findings.length > 0 ? "warn" : "pass",
+        confidence: findings.length > 0 ? 0.68 : 0.82,
+        critique: task.result,
+        ...(findings.length > 0 ? { findings } : {}),
+      });
+    }
+
+    return opinions;
+  }
+
+  /**
+   * Runs the shared critic debate helper against a set of completed sub-agent
+   * tasks, allowing sub-agent outputs to act as verification critics.
+   */
+  debateResults(taskIds: string[], output?: string): CriticDebateResult {
+    return criticDebate(this.deriveCriticOpinions(taskIds), output);
+  }
+
   // --------------------------------------------------------------------------
   // Delegation Decisions
   // --------------------------------------------------------------------------
@@ -466,3 +545,14 @@ export class SubAgentManager {
 // Re-export loop-detector utilities for consumers that import from this module
 // ----------------------------------------------------------------------------
 export { LoopDetector, fingerprintAction };
+
+function extractCriticFindings(result: string): string[] {
+  return result
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        /\b(warning|risk|todo|follow-up|missing|needs proof|needs evidence)\b/i.test(line),
+    )
+    .slice(0, 4);
+}

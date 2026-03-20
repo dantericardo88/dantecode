@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DanteCodeState, Session } from "@dantecode/config-types";
-import { DurableRunStore } from "@dantecode/core";
+import { DurableRunStore, globalVerificationRailRegistry } from "@dantecode/core";
+import { GitAutomationStore } from "@dantecode/git-engine";
 import type { ReplState } from "./slash-commands.js";
 
 const {
@@ -320,5 +321,279 @@ describe("/party --autoforge", () => {
     expect(output).toContain("run-resume");
     expect(state.pendingAgentPrompt).toBe("continue");
     expect(state.pendingResumeRunId).toBe("run-resume");
+  });
+});
+
+describe("verification slash commands", () => {
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    globalVerificationRailRegistry.clear();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-verification-cli-"));
+  });
+
+  it("runs /verify-output from JSON input and records telemetry", async () => {
+    await writeFile(
+      join(projectRoot, "verify-input.json"),
+      JSON.stringify(
+        {
+          task: "Provide deploy and rollback guidance",
+          output: "Deploy steps:\n1. Build\n2. Deploy\nRollback if checks fail.",
+          criteria: {
+            requiredKeywords: ["deploy", "rollback"],
+            minLength: 40,
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const output = await routeSlashCommand("/verify-output verify-input.json", makeState(projectRoot));
+
+    expect(output).toContain("Verification Output");
+    expect(output).toContain("PASSED");
+
+    const historyPath = join(projectRoot, ".danteforge", "reports", "verification-history.jsonl");
+    const historyRaw = await readFile(historyPath, "utf-8");
+    expect(historyRaw).toContain("verify_output");
+
+    const auditPath = join(projectRoot, ".dantecode", "audit.jsonl");
+    const auditRaw = await readFile(auditPath, "utf-8");
+    expect(auditRaw).toContain("verification_run");
+    expect(auditRaw).toContain("pdse_gate_pass");
+  });
+
+  it("runs /qa-suite and exposes persisted history through /verification-history", async () => {
+    await writeFile(
+      join(projectRoot, "qa-suite.json"),
+      JSON.stringify(
+        {
+          planId: "plan-42",
+          outputs: [
+            {
+              id: "deploy",
+              task: "Explain the deploy flow",
+              output: "Deploy steps:\n1. Build\n2. Deploy\nRollback if checks fail.",
+              criteria: {
+                requiredKeywords: ["deploy", "rollback"],
+                minLength: 40,
+              },
+            },
+            {
+              id: "incident",
+              task: "Explain the incident flow",
+              output: "TODO",
+              criteria: {
+                requiredKeywords: ["incident"],
+                minLength: 30,
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const state = makeState(projectRoot);
+    const suiteOutput = await routeSlashCommand("/qa-suite qa-suite.json", state);
+    const historyOutput = await routeSlashCommand("/verification-history 5 --kind qa_suite", state);
+
+    expect(suiteOutput).toContain("QA Suite");
+    expect(suiteOutput).toContain("plan-42");
+    expect(historyOutput).toContain("qa_suite");
+    expect(historyOutput).toContain("plan-42");
+
+    const benchmarkPath = join(projectRoot, ".danteforge", "reports", "verification-benchmarks.jsonl");
+    const benchmarkRaw = await readFile(benchmarkPath, "utf-8");
+    expect(benchmarkRaw).toContain("plan-42");
+  });
+
+  it("registers rails and runs critic debate from JSON input", async () => {
+    await writeFile(
+      join(projectRoot, "rail.json"),
+      JSON.stringify(
+        {
+          id: "steps-required",
+          name: "Steps required",
+          requiredSubstrings: ["Steps"],
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    await writeFile(
+      join(projectRoot, "debate.json"),
+      JSON.stringify(
+        {
+          subagents: [
+            { agentId: "critic-1", verdict: "fail", confidence: 0.9, findings: ["Missing proof"] },
+            { agentId: "critic-2", verdict: "warn", confidence: 0.6 },
+            { agentId: "critic-3", verdict: "pass", confidence: 0.4 },
+          ],
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const state = makeState(projectRoot);
+    const railOutput = await routeSlashCommand("/add-verification-rail rail.json", state);
+    const debateOutput = await routeSlashCommand("/critic-debate debate.json", state);
+
+    expect(railOutput).toContain("Verification Rail");
+    expect(railOutput).toContain("REGISTERED");
+    expect(debateOutput).toContain("Critic Debate");
+    expect(debateOutput).toContain("FAIL");
+  });
+});
+
+describe("git automation slash commands", () => {
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-git-automation-cli-"));
+    mockRunLocalPDSEScorer.mockReturnValue({
+      overall: 96,
+      passedGate: true,
+      completeness: 96,
+      correctness: 96,
+      clarity: 96,
+      consistency: 96,
+      violations: [],
+      scoredAt: new Date().toISOString(),
+      scoredBy: "test",
+    });
+  });
+
+  it("starts, lists, and stops a git watcher", async () => {
+    await mkdir(join(projectRoot, "src"), { recursive: true });
+    await writeFile(join(projectRoot, "src", "app.ts"), "export const value = 1;\n", "utf-8");
+    const state = makeState(projectRoot);
+
+    const startOutput = await routeSlashCommand("/git-watch file-change src", state);
+    const watchId = startOutput.match(/ID:\s+([a-z0-9-]+)/i)?.[1];
+    const listOutput = await routeSlashCommand("/git-watch list", state);
+
+    expect(startOutput).toContain("Git Watcher Started");
+    expect(watchId).toBeDefined();
+    expect(listOutput).toContain("file-change");
+
+    const stopOutput = await routeSlashCommand(`/git-watch stop ${watchId}`, state);
+    expect(stopOutput).toContain("Stopped Git watcher");
+  });
+
+  it("runs a local workflow from the CLI", async () => {
+    await writeFile(
+      join(projectRoot, "workflow.yml"),
+      [
+        "name: CLI Workflow",
+        "jobs:",
+        "  build:",
+        "    steps:",
+        "      - name: Echo",
+        "        run: node -e \"console.log('workflow-ok')\"",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const output = await routeSlashCommand("/run-workflow workflow.yml", makeState(projectRoot));
+
+    expect(output).toContain("Workflow Run");
+    expect(output).toContain("PASSED");
+    expect(output).toContain("CLI Workflow");
+  });
+
+  it("queues durable workflow automation runs in the background", async () => {
+    await writeFile(
+      join(projectRoot, "workflow.yml"),
+      [
+        "name: CLI Workflow",
+        "jobs:",
+        "  build:",
+        "    steps:",
+        "      - name: Echo",
+        "        run: node -e \"console.log('workflow-ok')\"",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const output = await routeSlashCommand(
+      "/run-workflow workflow.yml --background",
+      makeState(projectRoot),
+    );
+
+    expect(output).toContain("Workflow Queued");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const executions = await new GitAutomationStore(projectRoot).listAutomationExecutions();
+    expect(executions.length).toBeGreaterThanOrEqual(1);
+    expect(executions[0]?.kind).toBe("workflow");
+  });
+
+  it("blocks /auto-pr when automation gates fail before invoking gh", async () => {
+    mockRunLocalPDSEScorer.mockReturnValue({
+      overall: 40,
+      passedGate: false,
+      completeness: 40,
+      correctness: 40,
+      clarity: 40,
+      consistency: 40,
+      violations: [],
+      scoredAt: new Date().toISOString(),
+      scoredBy: "test",
+    });
+
+    const output = await routeSlashCommand(
+      "/auto-pr Release prep --changeset patch:pkg-a",
+      makeState(projectRoot),
+    );
+
+    expect(output).toContain("PR creation blocked");
+  });
+
+  it("starts and stops scheduled tasks and webhook listeners", async () => {
+    const state = makeState(projectRoot);
+
+    const scheduleOutput = await routeSlashCommand(
+      "/schedule-git-task 60000 refresh-index",
+      state,
+    );
+    const taskId = scheduleOutput.match(/ID:\s+([a-z0-9-]+)/i)?.[1];
+    const scheduleList = await routeSlashCommand("/schedule-git-task list", state);
+
+    expect(scheduleOutput).toContain("Scheduled Git Task Started");
+    expect(taskId).toBeDefined();
+    expect(scheduleList).toContain("refresh-index");
+
+    const stopTaskOutput = await routeSlashCommand(`/schedule-git-task stop ${taskId}`, state);
+    expect(stopTaskOutput).toContain("Stopped scheduled task");
+
+    const webhookOutput = await routeSlashCommand(
+      "/webhook-listen github --port 0 --path /hooks",
+      state,
+    );
+    const listenerId = webhookOutput.match(/ID:\s+([a-z0-9-]+)/i)?.[1];
+    const webhookList = await routeSlashCommand("/webhook-listen list", state);
+
+    expect(webhookOutput).toContain("Webhook Listener Started");
+    expect(listenerId).toBeDefined();
+    expect(webhookList).toContain("github");
+
+    const stopListenerOutput = await routeSlashCommand(
+      `/webhook-listen stop ${listenerId}`,
+      state,
+    );
+    expect(stopListenerOutput).toContain("Stopped webhook listener");
   });
 });

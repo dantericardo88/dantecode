@@ -396,24 +396,73 @@ export class DuckDuckGoProvider implements SearchProvider {
   }
 
   async search(query: string, options: SearchProviderOptions): Promise<SearchResult[]> {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "DanteCode/1.0 (CLI agent tool)",
-        Accept: "text/html",
-      },
-      signal: AbortSignal.timeout(15000),
-    });
+    const results: SearchResult[] = [];
+    const maxResults = options.maxResults || 15;
+    
+    let df = "";
+    if (options.timeRange === "day") df = "d";
+    else if (options.timeRange === "week") df = "w";
+    else if (options.timeRange === "month") df = "m";
+    else if (options.timeRange === "year") df = "y";
 
-    if (!response.ok) {
-      throw new Error(`DuckDuckGo HTTP ${response.status}`);
+    let vqd = "";
+    let s = "0";
+    let isFirst = true;
+    const nextUrl = "https://html.duckduckgo.com/html/";
+
+    while (results.length < maxResults) {
+      const params = new URLSearchParams();
+      if (isFirst) {
+        params.append("q", query);
+        if (df) params.append("df", df);
+      } else {
+        params.append("q", query);
+        if (df) params.append("df", df);
+        params.append("vqd", vqd);
+        params.append("s", s);
+      }
+
+      const requestUrl = isFirst ? `${nextUrl}?${params.toString()}` : nextUrl;
+
+      const response = await fetch(requestUrl, {
+        method: isFirst ? "GET" : "POST",
+        body: isFirst ? undefined : params,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          // Only include Content-Type for POST
+          ...(isFirst ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
+        },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`DuckDuckGo HTTP ${response.status}`);
+      }
+
+      const html = await response.text();
+      const pageResults = this.parseResults(html, maxResults - results.length);
+      results.push(...pageResults);
+
+      // Check for next page pagination data
+      const vqdMatch = html.match(/<input[^>]*name="vqd"[^>]*value="([^"]+)"[^>]*>/i);
+      const sMatch = html.match(/<input[^>]*name="s"[^>]*value="([^"]+)"[^>]*>/i);
+
+      if (vqdMatch && sMatch && pageResults.length > 0) {
+        vqd = vqdMatch[1]!;
+        s = sMatch[1]!;
+        isFirst = false;
+        // Pause briefly to respect rate limits
+        await new Promise((r) => setTimeout(r, 750));
+      } else {
+        break; // No more pages or failed to find pagination tokens
+      }
     }
 
-    const html = await response.text();
-    return this.parseResults(html, options.maxResults);
+    return results.map((r, i) => ({ ...r, rank: i + 1 }));
   }
 
-  private parseResults(html: string, maxResults: number): SearchResult[] {
+  private parseResults(html: string, maxLimit: number): SearchResult[] {
     const results: SearchResult[] = [];
 
     const resultBlocks =
@@ -422,7 +471,7 @@ export class DuckDuckGoProvider implements SearchProvider {
       ) ?? [];
 
     for (const block of resultBlocks) {
-      if (results.length >= maxResults) break;
+      if (results.length >= maxLimit) break;
 
       const linkMatch = block.match(
         /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i,
@@ -437,7 +486,8 @@ export class DuckDuckGoProvider implements SearchProvider {
       );
       const snippet = snippetMatch ? htmlToReadableText(snippetMatch[1]!) : "";
 
-      if (title && url && !url.startsWith("//duckduckgo.com")) {
+      // Deduplicate duckduckgo ad links or self-referential links
+      if (title && url && !url.startsWith("//duckduckgo.com") && !url.includes("duckduckgo.com/y.js")) {
         results.push({ title, url, snippet, source: this.name });
       }
     }
@@ -450,7 +500,7 @@ export class DuckDuckGoProvider implements SearchProvider {
         ),
       ];
       for (const match of linkMatches) {
-        if (results.length >= maxResults) break;
+        if (results.length >= maxLimit) break;
         const url = match[1]!;
         const title = htmlToReadableText(match[2]!);
         if (url.includes("duckduckgo.com") || !title || title.length < 3) continue;

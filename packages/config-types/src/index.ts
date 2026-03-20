@@ -512,7 +512,14 @@ export type AuditEventType =
   | "loop_terminated"
   | "tier_escalation"
   | "cost_update"
-  | "webhook_received";
+  | "webhook_received"
+  | "git_automation_run"
+  | "git_automation_gate_pass"
+  | "git_automation_gate_fail"
+  | "verification_run"
+  | "qa_suite_run"
+  | "critic_debate_run"
+  | "verification_rail_add";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {

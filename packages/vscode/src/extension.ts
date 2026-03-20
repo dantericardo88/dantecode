@@ -10,6 +10,8 @@ import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecod
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
+import { AutomationPanelProvider } from "./automation-panel-provider.js";
+import { VerificationPanelProvider } from "./verification-panel-provider.js";
 import { DanteCodeCompletionProvider, disposeInlinePDSEDiagnostics } from "./inline-completion.js";
 import {
   createStatusBar,
@@ -30,6 +32,8 @@ import { DiffReviewProvider, type PendingDiffReview } from "./diff-review-provid
 let statusBarState: StatusBarState | undefined;
 let chatSidebarProvider: ChatSidebarProvider | undefined;
 let auditPanelProvider: AuditPanelProvider | undefined;
+let automationPanelProvider: AutomationPanelProvider | undefined;
+let verificationPanelProvider: VerificationPanelProvider | undefined;
 let completionProvider: DanteCodeCompletionProvider | undefined;
 let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
@@ -107,6 +111,22 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(auditViewRegistration);
 
+  automationPanelProvider = new AutomationPanelProvider(extensionUri);
+  const automationViewRegistration = vscode.window.registerWebviewViewProvider(
+    AutomationPanelProvider.viewType,
+    automationPanelProvider,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
+  context.subscriptions.push(automationViewRegistration);
+
+  verificationPanelProvider = new VerificationPanelProvider(extensionUri);
+  const verificationViewRegistration = vscode.window.registerWebviewViewProvider(
+    VerificationPanelProvider.viewType,
+    verificationPanelProvider,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
+  context.subscriptions.push(verificationViewRegistration);
+
   // ── Inline completion ──
   completionProvider = new DanteCodeCompletionProvider();
   const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
@@ -146,6 +166,8 @@ export function deactivate(): void {
   statusBarState?.item.dispose();
   chatSidebarProvider = undefined;
   auditPanelProvider = undefined;
+  automationPanelProvider = undefined;
+  verificationPanelProvider = undefined;
   completionProvider = undefined;
   checkpointManager = undefined;
   diffReviewProvider = undefined;

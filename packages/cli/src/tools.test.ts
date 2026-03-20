@@ -633,6 +633,31 @@ describe("SubAgent tool", () => {
     });
   });
 
+  it("returns a truthful launch message for background sub-agents", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output: 'Background task started: bg-123. Use SubAgent with prompt "status bg-123" to check progress.',
+      touchedFiles: [],
+      durationMs: 0,
+      success: true,
+    });
+
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "inspect auth flow", background: true },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Background task started: bg-123");
+    expect(result.content).not.toContain("completed successfully");
+    expect(mockExecutor).toHaveBeenCalledWith("inspect auth flow", {
+      maxRounds: 30,
+      background: true,
+      worktreeIsolation: false,
+    });
+  });
+
   it("passes max_rounds option to executor", async () => {
     const mockExecutor = vi.fn().mockResolvedValue({
       output: "done",

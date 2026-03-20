@@ -87,7 +87,7 @@ describe("PolicyEnforcer", () => {
     const decision = enforcer.evaluate(makeRequest({ action: "write" }));
     expect(decision.effect).toBe("deny");
     expect(decision.matchedRules).toHaveLength(1);
-    expect(decision.matchedRules[0].id).toBe("deny-writes");
+    expect(decision.matchedRules[0]!.id).toBe("deny-writes");
   });
 
   // -------------------------------------------------------------------------
@@ -171,7 +171,7 @@ describe("PolicyEnforcer", () => {
     );
     // Only the first (highest priority) deny rule should be collected.
     expect(decision.matchedRules).toHaveLength(1);
-    expect(decision.matchedRules[0].id).toBe("deny-high");
+    expect(decision.matchedRules[0]!.id).toBe("deny-high");
     expect(decision.effect).toBe("deny");
   });
 
@@ -268,11 +268,11 @@ describe("PolicyEnforcer", () => {
 
     const fileRules = enforcer.getRules("file");
     expect(fileRules).toHaveLength(1);
-    expect(fileRules[0].id).toBe("file-rule");
+    expect(fileRules[0]!.id).toBe("file-rule");
 
     const cmdRules = enforcer.getRules("command");
     expect(cmdRules).toHaveLength(1);
-    expect(cmdRules[0].id).toBe("cmd-rule");
+    expect(cmdRules[0]!.id).toBe("cmd-rule");
   });
 
   // -------------------------------------------------------------------------
@@ -365,7 +365,7 @@ describe("PolicyEnforcer", () => {
     expect(set.id).toBeTruthy();
     expect(set.name).toBe("Hardened Tool Policy");
     expect(set.rules).toHaveLength(1);
-    expect(set.rules[0].id).toBe("set-rule-1");
+    expect(set.rules[0]!.id).toBe("set-rule-1");
 
     // Applying the set should add the rule to the engine.
     const countBefore = enforcer.getRules().length;

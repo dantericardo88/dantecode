@@ -138,6 +138,11 @@ ${BOLD}REPL SLASH COMMANDS${RESET}
   /lessons            Show project lessons from the lessons DB
   /pdse <file>        Run PDSE scorer on a file
   /qa                 Run GStack QA pipeline
+  /verify-output      Run structured output verification from JSON input
+  /qa-suite           Run a QA suite batch from JSON input
+  /critic-debate      Aggregate critic verdicts from JSON input
+  /add-verification-rail Register an output guardrail from JSON input
+  /verification-history Show recent verification reports and benchmarks
   /audit              Show recent audit log entries
   /clear              Clear the conversation history
   /tokens             Show token usage for the current session
@@ -146,6 +151,11 @@ ${BOLD}REPL SLASH COMMANDS${RESET}
   /agents             List available agent definitions
   /worktree           Create a git worktree for isolated changes
   /sandbox            Toggle sandbox mode on/off
+  /git-watch          Start, list, or stop durable Git watchers
+  /run-workflow       Run a local GitHub-style workflow file
+  /auto-pr            Create a PR with optional changeset generation
+  /webhook-listen     Start, list, or stop local webhook listeners
+  /schedule-git-task  Start, list, or stop scheduled Git tasks
 
 ${DIM}Documentation: https://dantecode.dev/docs${RESET}
 `;

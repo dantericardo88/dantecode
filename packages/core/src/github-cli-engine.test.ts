@@ -101,7 +101,7 @@ describe("GitHubCLIEngine", () => {
   it("10. createPR() calls gh pr create", () => {
     mockExec.mockReturnValueOnce("https://github.com/owner/repo/pull/42");
     engine.createPR("owner/repo", { title: "Fix bug", body: "Details" });
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh pr create");
     expect(cmd).toContain("--repo");
     expect(cmd).toContain("Fix bug");
@@ -121,7 +121,7 @@ describe("GitHubCLIEngine", () => {
   it("12. viewPR() calls gh pr view with JSON flag", () => {
     mockExec.mockReturnValueOnce('{"number":5,"title":"Fix"}');
     engine.viewPR("owner/repo", 5);
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh pr view 5");
     expect(cmd).toContain("--json");
   });
@@ -133,7 +133,7 @@ describe("GitHubCLIEngine", () => {
   it("13. reviewPR() approve calls correct command", () => {
     mockExec.mockReturnValueOnce("");
     engine.reviewPR("owner/repo", 7, "approve", "LGTM!");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh pr review 7");
     expect(cmd).toContain("--approve");
     expect(cmd).toContain("LGTM!");
@@ -146,14 +146,14 @@ describe("GitHubCLIEngine", () => {
   it("14. mergePR() calls gh pr merge", () => {
     mockExec.mockReturnValueOnce("");
     engine.mergePR("owner/repo", 3);
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh pr merge 3");
   });
 
   it("15. mergePR() uses strategy flag --squash", () => {
     mockExec.mockReturnValueOnce("");
     engine.mergePR("owner/repo", 3, "squash");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("--squash");
   });
 
@@ -164,7 +164,7 @@ describe("GitHubCLIEngine", () => {
   it("16. listPRs() calls gh pr list", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.listPRs("owner/repo");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh pr list");
     expect(cmd).toContain("owner/repo");
   });
@@ -176,7 +176,7 @@ describe("GitHubCLIEngine", () => {
   it("17. createIssue() calls gh issue create", () => {
     mockExec.mockReturnValueOnce("https://github.com/owner/repo/issues/1");
     engine.createIssue("owner/repo", { title: "Bug", body: "It broke" });
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh issue create");
     expect(cmd).toContain("Bug");
   });
@@ -188,7 +188,7 @@ describe("GitHubCLIEngine", () => {
   it("18. commentIssue() calls gh issue comment", () => {
     mockExec.mockReturnValueOnce("");
     engine.commentIssue("owner/repo", 10, "Thanks!");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh issue comment 10");
     expect(cmd).toContain("Thanks!");
   });
@@ -200,7 +200,7 @@ describe("GitHubCLIEngine", () => {
   it("19. closeIssue() calls gh issue close", () => {
     mockExec.mockReturnValueOnce("");
     engine.closeIssue("owner/repo", 99);
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh issue close 99");
   });
 
@@ -211,7 +211,7 @@ describe("GitHubCLIEngine", () => {
   it("20. listIssues() calls gh issue list", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.listIssues("owner/repo");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh issue list");
   });
 
@@ -222,7 +222,7 @@ describe("GitHubCLIEngine", () => {
   it("21. searchRepos() calls gh search repos", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.searchRepos("typescript lsp");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh search repos");
     expect(cmd).toContain("typescript lsp");
   });
@@ -234,7 +234,7 @@ describe("GitHubCLIEngine", () => {
   it("22. searchCode() calls gh search code", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.searchCode("useState hook");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh search code");
     expect(cmd).toContain("useState hook");
   });
@@ -246,7 +246,7 @@ describe("GitHubCLIEngine", () => {
   it("23. triggerWorkflow() calls gh workflow run", () => {
     mockExec.mockReturnValueOnce("");
     engine.triggerWorkflow("owner/repo", "ci.yml", "main");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("gh workflow run");
     expect(cmd).toContain("ci.yml");
     expect(cmd).toContain("--ref");
@@ -295,14 +295,14 @@ describe("GitHubCLIEngine", () => {
   it("28. listPRs() with closed state filter", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.listPRs("owner/repo", "closed");
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("--state closed");
   });
 
   it("29. searchRepos() with limit parameter", () => {
     mockExec.mockReturnValueOnce("[]");
     engine.searchRepos("react hooks", 25);
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("--limit 25");
   });
 
@@ -313,7 +313,7 @@ describe("GitHubCLIEngine", () => {
       body: "Not ready",
       draft: true,
     });
-    const cmd = mockExec.mock.calls[0][0] as string;
+    const cmd = mockExec.mock.calls[0]![0] as string;
     expect(cmd).toContain("--draft");
   });
 });

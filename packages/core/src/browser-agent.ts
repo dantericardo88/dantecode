@@ -8,11 +8,13 @@
 // ─── Public Interfaces ───────────────────────────────────────────────────────
 
 export interface BrowserAction {
-  type: "goto" | "click" | "type" | "screenshot" | "accessibility_tree" | "scroll";
+  type: "goto" | "click" | "type" | "screenshot" | "accessibility_tree" | "scroll" | "wait" | "evaluate";
   url?: string;
   selector?: string;
   text?: string;
   direction?: "up" | "down";
+  timeMs?: number;
+  script?: string;
 }
 
 export interface BrowserActionResult {
@@ -208,6 +210,10 @@ export class BrowserAgent {
         return this.getAccessibilityTree();
       case "scroll":
         return this.scroll(action.direction ?? "down");
+      case "wait":
+        return this.wait(action.timeMs ?? Math.max(1000, action.text ? parseInt(action.text) : 1000));
+      case "evaluate":
+        return this.evaluate(action.script ?? "return null;");
       default: {
         const unknownType = (action as { type: string }).type;
         return { success: false, error: `Unknown action type: ${unknownType}` };
@@ -357,6 +363,40 @@ export class BrowserAgent {
       return { success: true, data: direction };
     } catch (err: unknown) {
       return { success: false, error: `Scroll failed: ${errorMessage(err)}` };
+    }
+  }
+
+  /**
+   * Wait for a specified number of milliseconds (stagehand-style pre-action delay).
+   */
+  async wait(ms: number): Promise<BrowserActionResult> {
+    const page = await this.ensurePage();
+    if (!page) {
+      return { success: false, error: PLAYWRIGHT_NOT_INSTALLED };
+    }
+
+    try {
+      await new Promise((r) => setTimeout(r, ms));
+      return { success: true, data: `Waited ${ms}ms` };
+    } catch (err: unknown) {
+      return { success: false, error: `Wait failed: ${errorMessage(err)}` };
+    }
+  }
+
+  /**
+   * Evaluate a custom script in the browser context (stagehand-style pre-action).
+   */
+  async evaluate(script: string): Promise<BrowserActionResult> {
+    const page = await this.ensurePage();
+    if (!page) {
+      return { success: false, error: PLAYWRIGHT_NOT_INSTALLED };
+    }
+
+    try {
+      const result = await page.evaluate(script);
+      return { success: true, data: typeof result === "string" ? result : JSON.stringify(result) };
+    } catch (err: unknown) {
+      return { success: false, error: `Script evaluation failed: ${errorMessage(err)}` };
     }
   }
 

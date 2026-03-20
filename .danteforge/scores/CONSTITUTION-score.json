@@ -1,0 +1,17 @@
+{
+  "artifact": "CONSTITUTION",
+  "score": 95,
+  "dimensions": {
+    "completeness": 20,
+    "clarity": 20,
+    "testability": 20,
+    "constitutionAlignment": 15,
+    "integrationFitness": 10,
+    "freshness": 10
+  },
+  "issues": [],
+  "remediationSuggestions": [],
+  "timestamp": "2026-03-20T07:05:12.128Z",
+  "autoforgeDecision": "advance",
+  "hasCEOReviewBonus": false
+}

@@ -68,7 +68,7 @@ describe("PersistentMemory", () => {
       await mem.store("hello", "fact");
 
       // The writeFile call should reference the custom dir
-      const writePath = mockWriteFile.mock.calls[0][0] as string;
+      const writePath = mockWriteFile.mock.calls[0]![0] as string;
       expect(writePath).toContain(".custom");
     });
   });
@@ -157,8 +157,8 @@ describe("PersistentMemory", () => {
       const results = mem.search("authentication login bug");
 
       expect(results.length).toBeGreaterThan(0);
-      expect(results[0].entry.content).toContain("authentication");
-      expect(results[0].score).toBeGreaterThan(0);
+      expect(results[0]!.entry.content).toContain("authentication");
+      expect(results[0]!.score).toBeGreaterThan(0);
     });
 
     it("filters by category", async () => {
@@ -171,7 +171,7 @@ describe("PersistentMemory", () => {
       const results = mem.search("ESM imports", { category: "decision" });
 
       expect(results.length).toBe(1);
-      expect(results[0].entry.category).toBe("decision");
+      expect(results[0]!.entry.category).toBe("decision");
     });
 
     it("respects minRelevance threshold", async () => {
@@ -224,7 +224,7 @@ describe("PersistentMemory", () => {
 
       const results = mem.search("session memory entry", { sessionId: "session-a" });
       expect(results.length).toBe(1);
-      expect(results[0].entry.sessionId).toBe("session-a");
+      expect(results[0]!.entry.sessionId).toBe("session-a");
     });
   });
 
@@ -325,8 +325,8 @@ describe("PersistentMemory", () => {
 
       expect(mem.size()).toBe(2);
       const all = mem.getAll();
-      expect(all[0].content).toBe("persisted fact");
-      expect(all[1].content).toBe("persisted decision");
+      expect(all[0]!.content).toBe("persisted fact");
+      expect(all[1]!.content).toBe("persisted decision");
     });
 
     it("handles missing file gracefully on load", async () => {
@@ -359,7 +359,7 @@ describe("PersistentMemory", () => {
       expect(mockWriteFile).toHaveBeenCalled();
 
       // Verify JSON content
-      const writtenJson = mockWriteFile.mock.calls[0][1] as string;
+      const writtenJson = mockWriteFile.mock.calls[0]![1] as string;
       const parsed = JSON.parse(writtenJson);
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed[0].content).toBe("data to persist");
@@ -496,7 +496,7 @@ describe("PersistentMemory", () => {
 
       // Verify save was called with empty array
       const lastWriteCall = mockWriteFile.mock.calls[mockWriteFile.mock.calls.length - 1];
-      const parsed = JSON.parse(lastWriteCall[1] as string);
+      const parsed = JSON.parse(lastWriteCall![1] as string);
       expect(parsed).toEqual([]);
     });
   });
@@ -557,7 +557,7 @@ describe("PersistentMemory", () => {
       expect(entry.tags).toEqual(["alpha", "beta", "gamma"]);
 
       const all = mem.getAll();
-      expect(all[0].tags).toEqual(["alpha", "beta", "gamma"]);
+      expect(all[0]!.tags).toEqual(["alpha", "beta", "gamma"]);
     });
   });
 
@@ -588,7 +588,7 @@ describe("PersistentMemory", () => {
       await mem.store("the only entry about database migration", "fact");
       const results = mem.search("database migration");
       expect(results.length).toBe(1);
-      expect(results[0].score).toBeGreaterThan(0);
+      expect(results[0]!.score).toBeGreaterThan(0);
     });
 
     it("identical content is fully deduplicated", async () => {
@@ -600,7 +600,7 @@ describe("PersistentMemory", () => {
       await mem.store("exact same content repeated", "fact");
 
       expect(mem.size()).toBe(1);
-      const entry = mem.getAll()[0];
+      const entry = mem.getAll()[0]!;
       expect(entry.accessCount).toBe(3);
     });
 
@@ -713,8 +713,8 @@ describe("PersistentMemory", () => {
 
       const all = mem.getAll();
       expect(all.length).toBe(1);
-      expect(all[0].tags).toContain("auth");
-      expect(all[0].tags).toContain("login");
+      expect(all[0]!.tags).toContain("auth");
+      expect(all[0]!.tags).toContain("login");
     });
 
     it("distill keeps higher relevanceScore when merging", async () => {
@@ -741,7 +741,7 @@ describe("PersistentMemory", () => {
 
       const all = mem.getAll();
       expect(all.length).toBe(1);
-      expect(all[0].relevanceScore).toBe(0.9);
+      expect(all[0]!.relevanceScore).toBe(0.9);
     });
 
     it("save handles write errors silently", async () => {

@@ -20,6 +20,7 @@ export type ToolCallStatus =
   | 'verifying'
   | 'success'
   | 'error'
+  | 'blocked_by_dependency'
   | 'cancelled'
   | 'timed_out';
 
@@ -27,6 +28,7 @@ export type ToolCallStatus =
 export const TERMINAL_STATES: ReadonlySet<ToolCallStatus> = new Set([
   'success',
   'error',
+  'blocked_by_dependency',
   'cancelled',
   'timed_out',
 ]);
@@ -34,13 +36,14 @@ export const TERMINAL_STATES: ReadonlySet<ToolCallStatus> = new Set([
 /** Valid state transitions */
 export const VALID_TRANSITIONS: Readonly<Record<ToolCallStatus, ReadonlyArray<ToolCallStatus>>> = {
   created: ['validating', 'cancelled'],
-  validating: ['awaiting_approval', 'scheduled', 'error', 'cancelled'],
+  validating: ['awaiting_approval', 'scheduled', 'error', 'blocked_by_dependency', 'cancelled'],
   awaiting_approval: ['scheduled', 'cancelled'],
   scheduled: ['executing', 'cancelled'],
   executing: ['verifying', 'success', 'error', 'timed_out', 'cancelled'],
   verifying: ['success', 'error'],
   success: [],
   error: [],
+  blocked_by_dependency: [],
   cancelled: [],
   timed_out: [],
 };
@@ -53,6 +56,7 @@ export interface ToolCallRecord {
   readonly toolName: string;
   readonly input: Record<string, unknown>;
   readonly requestId: string; // parent LLM turn ID
+  readonly dependsOn?: string[];
   status: ToolCallStatus;
   statusHistory: Array<{ status: ToolCallStatus; ts: number; reason?: string }>;
   createdAt: number;

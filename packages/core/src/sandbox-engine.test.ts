@@ -4,11 +4,10 @@
 // No module-level mocking — every test constructs its own engine instance.
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   SandboxEngine,
   type SandboxEngineOptions,
-  type SandboxPolicy,
 } from "./sandbox-engine.js";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────

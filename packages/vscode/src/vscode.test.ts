@@ -9,6 +9,58 @@ const mockCollectionSet = vi.fn();
 const mockCollectionDelete = vi.fn();
 const mockCollectionClear = vi.fn();
 const mockCollectionDispose = vi.fn();
+const mockVerificationHistoryList = vi.fn().mockResolvedValue([
+  {
+    id: "vh-1",
+    kind: "qa_suite",
+    source: "cli",
+    recordedAt: "2026-03-20T10:00:00.000Z",
+    label: "plan-42",
+    summary: "qa_suite failed",
+    passed: false,
+    pdseScore: 0.62,
+    payload: { planId: "plan-42" },
+  },
+]);
+const mockBenchmarkSummaries = vi.fn().mockResolvedValue([
+  {
+    benchmarkId: "plan-42",
+    totalRuns: 2,
+    passRate: 0.5,
+    averagePdseScore: 0.76,
+    averageOutputCount: 2,
+    latestRunAt: "2026-03-20T10:00:00.000Z",
+    latestFailingOutputIds: ["incident"],
+    lastPassed: false,
+  },
+]);
+const mockAutomationExecutionsList = vi.fn().mockResolvedValue([
+  {
+    id: "exec-1",
+    kind: "workflow",
+    cwd: "/test/project",
+    status: "blocked",
+    gateStatus: "failed",
+    createdAt: "2026-03-20T09:59:00.000Z",
+    updatedAt: "2026-03-20T10:01:00.000Z",
+    workflowName: "Nightly CI",
+    trigger: { kind: "schedule", label: "Nightly schedule" },
+    modifiedFiles: ["src/generated.ts"],
+    pdseScore: 0.61,
+    backgroundTaskId: "bg-1",
+    summary: "Workflow Nightly CI finished",
+  },
+]);
+const mockBackgroundTasksList = vi.fn().mockResolvedValue([
+  {
+    id: "bg-1",
+    prompt: "automation",
+    status: "paused",
+    createdAt: "2026-03-20T09:59:00.000Z",
+    progress: "Waiting for retry",
+    touchedFiles: [],
+  },
+]);
 
 const mockStatusBarItem = {
   text: "",
@@ -153,7 +205,7 @@ vi.mock("vscode", () => {
     },
     window: {
       createStatusBarItem: vi.fn(() => mockStatusBarItem),
-      showInformationMessage: vi.fn(),
+      showInformationMessage: vi.fn().mockResolvedValue(undefined),
       showWarningMessage: vi.fn(),
       showErrorMessage: vi.fn(),
       showQuickPick: vi.fn(),
@@ -386,6 +438,15 @@ vi.mock("@dantecode/core", () => ({
       workspaceIsRepoRoot: workspaceRoot === "/test/project",
     }),
   ),
+  VerificationHistoryStore: vi.fn().mockImplementation(() => ({
+    list: mockVerificationHistoryList,
+  })),
+  VerificationBenchmarkStore: vi.fn().mockImplementation(() => ({
+    summarizeAll: mockBenchmarkSummaries,
+  })),
+  BackgroundTaskStore: vi.fn().mockImplementation(() => ({
+    listTasks: mockBackgroundTasksList,
+  })),
   ModelRouterImpl: vi.fn(),
   parseModelReference: vi.fn((model: string) => {
     const slashIndex = model.indexOf("/");
@@ -435,6 +496,9 @@ vi.mock("@dantecode/git-engine", () => ({
   generateRepoMap: vi.fn().mockReturnValue([]),
   autoCommit: (...args: unknown[]) => mockAutoCommit(...args),
   pushBranch: (...args: unknown[]) => mockPushBranch(...args),
+  GitAutomationStore: vi.fn().mockImplementation(() => ({
+    listAutomationExecutions: mockAutomationExecutionsList,
+  })),
   generateColoredHunk: vi.fn().mockReturnValue({
     filePath: "test.ts",
     linesAdded: 1,
@@ -559,6 +623,8 @@ import {
 } from "./agent-tools.js";
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
+import { AutomationPanelProvider } from "./automation-panel-provider.js";
+import { VerificationPanelProvider } from "./verification-panel-provider.js";
 import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import { activate, deactivate, setPendingDiff } from "./extension.js";
 import { generateColoredHunk } from "@dantecode/git-engine";
@@ -579,6 +645,58 @@ describe("VS Code Extension", () => {
     mockStatusBarItem.command = undefined;
     mockStatusBarItem.backgroundColor = undefined;
     mockStatusBarItem.color = undefined;
+    mockVerificationHistoryList.mockResolvedValue([
+      {
+        id: "vh-1",
+        kind: "qa_suite",
+        source: "cli",
+        recordedAt: "2026-03-20T10:00:00.000Z",
+        label: "plan-42",
+        summary: "qa_suite failed",
+        passed: false,
+        pdseScore: 0.62,
+        payload: { planId: "plan-42" },
+      },
+    ]);
+    mockBenchmarkSummaries.mockResolvedValue([
+      {
+        benchmarkId: "plan-42",
+        totalRuns: 2,
+        passRate: 0.5,
+        averagePdseScore: 0.76,
+        averageOutputCount: 2,
+        latestRunAt: "2026-03-20T10:00:00.000Z",
+        latestFailingOutputIds: ["incident"],
+        lastPassed: false,
+      },
+    ]);
+    mockAutomationExecutionsList.mockResolvedValue([
+      {
+        id: "exec-1",
+        kind: "workflow",
+        cwd: "/test/project",
+        status: "blocked",
+        gateStatus: "failed",
+        createdAt: "2026-03-20T09:59:00.000Z",
+        updatedAt: "2026-03-20T10:01:00.000Z",
+        workflowName: "Nightly CI",
+        trigger: { kind: "schedule", label: "Nightly schedule" },
+        modifiedFiles: ["src/generated.ts"],
+        pdseScore: 0.61,
+        backgroundTaskId: "bg-1",
+        summary: "Workflow Nightly CI finished",
+      },
+    ]);
+    mockBackgroundTasksList.mockResolvedValue([
+      {
+        id: "bg-1",
+        prompt: "automation",
+        status: "paused",
+        createdAt: "2026-03-20T09:59:00.000Z",
+        progress: "Waiting for retry",
+        touchedFiles: [],
+      },
+    ]);
   });
 
   describe("PDSEDiagnosticProvider", () => {
@@ -1386,7 +1504,7 @@ describe("VS Code Extension", () => {
       const context = createMockContext();
       activate(context);
 
-      expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(2);
+      expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(4);
     });
 
     it("activate registers inline completion provider", () => {
@@ -1417,6 +1535,24 @@ describe("VS Code Extension", () => {
       // At minimum: 2 webview providers + inline completion + status bar item
       // + config watcher + diagnostics + 11 commands + output channel
       expect(context.subscriptions.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it("registers the verification view provider", () => {
+      const context = createMockContext();
+      activate(context);
+
+      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock.calls;
+      const viewTypes = callArgs.map((c: unknown[]) => c[0]);
+      expect(viewTypes).toContain("dantecode.verificationView");
+    });
+
+    it("registers the automation view provider", () => {
+      const context = createMockContext();
+      activate(context);
+
+      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock.calls;
+      const viewTypes = callArgs.map((c: unknown[]) => c[0]);
+      expect(viewTypes).toContain("dantecode.automationView");
     });
 
     it("deactivate does not throw", () => {
@@ -1525,7 +1661,8 @@ describe("VS Code Extension", () => {
         expect.stringContaining("node packages/cli/dist/index.js self-update --verbose"),
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        "DanteCode: Committing, pushing, and self-updating…",
+        "DanteCode: Committing, pushing, and self-updating… Reload window when the terminal finishes.",
+        "Reload Now",
       );
     });
 
@@ -1571,6 +1708,42 @@ describe("VS Code Extension", () => {
 
       expect(
         manifest.contributes?.commands?.some((entry) => entry.command === "dantecode.selfUpdate"),
+      ).toBe(true);
+    });
+
+    it("contributes the verification webview in the extension manifest", async () => {
+      const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const repoManifestPath = join(process.cwd(), "packages", "vscode", "package.json");
+      const manifestPath = await actualFs
+        .access(repoManifestPath)
+        .then(() => repoManifestPath)
+        .catch(() => join(process.cwd(), "package.json"));
+      const manifest = JSON.parse(await actualFs.readFile(manifestPath, "utf-8")) as {
+        contributes?: { views?: Record<string, Array<{ id: string }>> };
+      };
+
+      expect(
+        manifest.contributes?.views?.["dantecode"]?.some(
+          (entry) => entry.id === "dantecode.verificationView",
+        ),
+      ).toBe(true);
+    });
+
+    it("contributes the automation webview in the extension manifest", async () => {
+      const actualFs = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+      const repoManifestPath = join(process.cwd(), "packages", "vscode", "package.json");
+      const manifestPath = await actualFs
+        .access(repoManifestPath)
+        .then(() => repoManifestPath)
+        .catch(() => join(process.cwd(), "package.json"));
+      const manifest = JSON.parse(await actualFs.readFile(manifestPath, "utf-8")) as {
+        contributes?: { views?: Record<string, Array<{ id: string }>> };
+      };
+
+      expect(
+        manifest.contributes?.views?.["dantecode"]?.some(
+          (entry) => entry.id === "dantecode.automationView",
+        ),
       ).toBe(true);
     });
 
@@ -1644,6 +1817,82 @@ describe("VS Code Extension", () => {
       expect(mockDiffReviewApply).toHaveBeenCalledWith(
         expect.objectContaining({ filePath: "/test/project/src/app.ts" }),
         [0],
+      );
+    });
+
+    it("verification panel provider posts history and benchmark summaries to the webview", async () => {
+      const provider = new VerificationPanelProvider(vscode.Uri.file("/test"));
+      const postMessage = vi.fn();
+      const onDidReceiveMessage = vi.fn();
+      const onDidDispose = vi.fn();
+
+      provider.resolveWebviewView(
+        {
+          webview: {
+            options: {},
+            html: "",
+            postMessage,
+            onDidReceiveMessage,
+          },
+          onDidDispose,
+        } as unknown as vscode.WebviewView,
+        {} as vscode.WebviewViewResolveContext,
+        {} as vscode.CancellationToken,
+      );
+
+      await provider.refreshEntries();
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "verificationData",
+          payload: expect.objectContaining({
+            entries: expect.arrayContaining([
+              expect.objectContaining({ label: "plan-42", kind: "qa_suite" }),
+            ]),
+            summaries: expect.arrayContaining([
+              expect.objectContaining({ benchmarkId: "plan-42", totalRuns: 2 }),
+            ]),
+          }),
+        }),
+      );
+    });
+
+    it("automation panel provider posts durable automation runs and background task state", async () => {
+      const provider = new AutomationPanelProvider(vscode.Uri.file("/test"));
+      const postMessage = vi.fn();
+      const onDidReceiveMessage = vi.fn();
+      const onDidDispose = vi.fn();
+
+      provider.resolveWebviewView(
+        {
+          webview: {
+            options: {},
+            html: "",
+            postMessage,
+            onDidReceiveMessage,
+          },
+          onDidDispose,
+        } as unknown as vscode.WebviewView,
+        {} as vscode.WebviewViewResolveContext,
+        {} as vscode.CancellationToken,
+      );
+
+      await provider.refreshEntries();
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "automationData",
+          payload: expect.objectContaining({
+            executions: expect.arrayContaining([
+              expect.objectContaining({
+                label: "Nightly CI",
+                status: "blocked",
+                backgroundStatus: "paused",
+              }),
+            ]),
+            counts: expect.objectContaining({ total: 1, blocked: 1 }),
+          }),
+        }),
       );
     });
   });

@@ -1042,6 +1042,10 @@ async function toolSubAgent(
       };
     }
 
+    if (background) {
+      return { content: result.output, isError: false };
+    }
+
     const parts: string[] = [
       `Sub-agent completed successfully (${result.durationMs}ms).`,
     ];
