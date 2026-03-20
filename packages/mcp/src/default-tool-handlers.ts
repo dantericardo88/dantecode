@@ -1,7 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { 
-  CodeIndex, 
+import {
+  CodeIndex,
   criticDebate,
   createEmbeddingProvider,
   globalVerificationRailRegistry,
@@ -15,6 +15,10 @@ import {
   PersistentMemory,
   SessionStore,
 } from "@dantecode/core";
+import {
+  DuckDuckGoProvider,
+} from "@dantecode/web-research";
+import { UpliftOrchestrator } from "@dantecode/agent-orchestrator";
 import {
   formatLessonsForPrompt,
   queryLessons,
@@ -293,16 +297,15 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
     },
     web_search: async (args) => {
       const query = requiredString(args, "query");
-      const projectRoot = process.cwd();
-      const orchestrator = new WebSearchOrchestrator({}, undefined, projectRoot);
-      const result = await orchestrator.search(query);
+      const provider = new DuckDuckGoProvider();
+      const results = await provider.search(query);
       return serialize({
         query,
-        results: result.results,
-        providersUsed: result.providersUsed,
-        fromCache: result.fromCache
+        results,
+        uplifted: true
       });
     },
+
     web_fetch: async (args) => {
       const url = requiredString(args, "url");
       const instructions = optionalString(args, "instructions");
@@ -367,20 +370,19 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
     spawn_subagent: async (args) => {
       const role = requiredString(args, "role");
       const task = requiredString(args, "task");
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
       
-      // Temporary basic instantiation for MCP exposure
-      const manager = new SubAgentManager({
-        maxConcurrency: 2
-      });
+      const orchestrator = new UpliftOrchestrator({ projectRoot });
+      const message = await orchestrator.executeSubTask("mcp-root", role, task);
       
-      const subagentTask = manager.spawn(task, { name: role, description: `MCP Spawns ${role}` });
       return serialize({
-        id: subagentTask.id,
         role,
-        status: "spawned",
-        message: `Agent started in background: ${subagentTask.id}`
+        status: "completed",
+        uplifted: true,
+        message
       });
     },
+
     git_watch: async (args) => {
       const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
       const action = optionalString(args, "action") ?? "start";

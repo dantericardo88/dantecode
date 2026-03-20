@@ -249,6 +249,22 @@
       "relatedCommands": [
         "spec"
       ]
+    },
+    {
+      "id": "4a393d91-4ef9-4735-9d50-078ff696a0e1",
+      "timestamp": "2026-03-20T10:49:34.551Z",
+      "sessionId": "05af507d-760a-49b8-a0eb-deae3a715368",
+      "tokenCount": 40,
+      "category": "command",
+      "summary": "AutoForge executed: doctor",
+      "detail": "Scenario: stuck-looping. Reason: Diagnose the issue before retrying. Goal: C:\\Projects\\DanteCode\\Docs\\DanteCode Gaps PRD v1 part 1.md",
+      "tags": [
+        "autoforge",
+        "doctor"
+      ],
+      "relatedCommands": [
+        "doctor"
+      ]
     }
   ]
 }

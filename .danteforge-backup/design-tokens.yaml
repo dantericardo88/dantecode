@@ -1,0 +1,281 @@
+# ============================================================================
+# DanteCode VS Code Sidebar — Design Tokens
+# Generated: 2026-03-15 | Source: DESIGN.op
+# ============================================================================
+#
+# These tokens map to VS Code CSS custom properties. The VS Code webview
+# runtime resolves them at render time based on the active color theme.
+# Tokens prefixed with `--vscode-` are native; others are DanteCode-specific.
+# ============================================================================
+
+meta:
+  name: "DanteCode VS Code Sidebar"
+  version: "1.0.0"
+  target: "vscode-webview"
+  format: "css-custom-properties"
+
+# ============================================================================
+# COLOR TOKENS
+# ============================================================================
+
+colors:
+  # ---- Surface colors ----
+  surface:
+    sidebar-bg: "--vscode-sideBar-background"
+    editor-bg: "--vscode-editor-background"
+    section-header-bg: "--vscode-sideBarSectionHeader-background"
+    input-bg: "--vscode-input-background"
+    dropdown-bg: "--vscode-dropdown-background"
+    code-block-bg: "--vscode-textCodeBlock-background"
+    error-bg: "--vscode-inputValidation-errorBackground"
+
+  # ---- Text colors ----
+  text:
+    foreground: "--vscode-foreground"
+    section-header-fg: "--vscode-sideBarSectionHeader-foreground"
+    description: "--vscode-descriptionForeground"
+    input-fg: "--vscode-input-foreground"
+    input-placeholder: "--vscode-input-placeholderForeground"
+    dropdown-fg: "--vscode-dropdown-foreground"
+    error-fg: "--vscode-errorForeground"
+    link: "--vscode-textLink-foreground"
+
+  # ---- Accent colors ----
+  accent:
+    user-message: "--vscode-textLink-foreground" # Blue — user messages
+    assistant-message: "--vscode-charts-green" # Green — assistant messages
+    button-bg: "--vscode-button-background"
+    button-fg: "--vscode-button-foreground"
+    button-hover: "--vscode-button-hoverBackground"
+    badge-bg: "--vscode-badge-background"
+    badge-fg: "--vscode-badge-foreground"
+    focus-border: "--vscode-focusBorder"
+
+  # ---- Border colors ----
+  border:
+    panel: "--vscode-panel-border"
+    input: "--vscode-input-border"
+    dropdown: "--vscode-dropdown-border"
+    error: "--vscode-inputValidation-errorBorder"
+    keybinding: "--vscode-keybindingLabel-border"
+
+  # ---- Status colors ----
+  status:
+    gate-passed: "--vscode-testing-iconPassed"
+    gate-failed: "--vscode-testing-iconFailed"
+    gate-passed-overlay: "#FFFFFF" # White text on green badge
+    gate-failed-overlay: "#FFFFFF" # White text on red badge
+    statusbar-fg: "--vscode-statusBarItem-foreground"
+    statusbar-error-bg: "--vscode-statusBarItem-errorBackground"
+    statusbar-error-fg: "--vscode-statusBarItem-errorForeground"
+    statusbar-warning-bg: "--vscode-statusBarItem-warningBackground"
+    statusbar-warning-fg: "--vscode-statusBarItem-warningForeground"
+
+  # ---- Keybinding label colors ----
+  keybinding:
+    bg: "--vscode-keybindingLabel-background"
+    fg: "--vscode-keybindingLabel-foreground"
+    border: "--vscode-keybindingLabel-border"
+
+# ============================================================================
+# TYPOGRAPHY TOKENS
+# ============================================================================
+
+typography:
+  font-family: "--vscode-font-family"
+  font-size: "--vscode-font-size"
+  editor-font-family: "--vscode-editor-font-family"
+  editor-font-size: "--vscode-editor-font-size"
+
+  scale:
+    xs: 10 # event timestamps, counters
+    sm: 11 # labels, pills, descriptions
+    base: 12 # dropdown text, filter input
+    md: 13 # message body, input text, buttons, header title
+    lg: 16 # welcome heading
+
+  weight:
+    normal: 400
+    medium: 500 # event labels
+    semibold: 600 # header title, welcome heading, PDSE badge
+
+  line-height:
+    tight: 1.0
+    normal: 1.4 # textarea input
+    relaxed: 1.5 # message body
+    loose: 1.6 # welcome text
+
+# ============================================================================
+# SPACING TOKENS
+# ============================================================================
+
+spacing:
+  # Base unit: 2px
+  unit: 2
+
+  # Named spacing values (in px)
+  xxs: 2 # pill internal padding-y, badge padding-y
+  xs: 4 # gaps (pills, context-bar, filter bar), pill padding-y, code inline padding-y
+  sm: 6 # model-bar padding-y, context-bar padding-y, input-area gap, filter gap, audit-event padding-y
+  md: 8 # header padding-y, input padding-y, pre-block padding, model-bar gap, audit-event gap, welcome gap-inner
+  lg: 12 # header padding-x, model-bar padding-x, context-bar padding-x, input-area padding-x/y, messages padding, messages gap
+  xl: 16 # welcome padding-x
+  xxl: 32 # welcome padding-y
+
+# ============================================================================
+# BORDER TOKENS
+# ============================================================================
+
+borders:
+  width:
+    thin: 1 # panel borders, input borders
+    accent: 3 # message left accent border
+
+  radius:
+    xs: 2 # dropdown, filter input
+    sm: 3 # inline code, keybinding label
+    md: 4 # textarea, send button, pre-block
+    lg: 6 # message body card
+    pill: 10 # context pills, PDSE badge
+
+# ============================================================================
+# DIMENSION TOKENS
+# ============================================================================
+
+dimensions:
+  sidebar:
+    width-min: 200
+    width-default: 300
+    width-max: 600
+
+  header:
+    height: 36
+
+  model-bar:
+    height: 32
+
+  context-bar:
+    height-min: 0 # hidden when no files
+    height-max: 80
+
+  input:
+    textarea-min-height: 36
+    textarea-max-height: 120
+    area-min-height: 52
+    area-max-height: 148
+
+  messages:
+    gap: 12
+
+  pills:
+    height: 22
+    max-width: 200
+
+  audit:
+    event-height: 44
+    max-events: 200
+
+  status-bar:
+    height: 22
+    priority: 100
+
+# ============================================================================
+# ICON TOKENS (VS Code Codicons)
+# ============================================================================
+
+icons:
+  # Activity bar
+  sidebar: "dante-fire" # Custom registered icon
+
+  # Status bar gate
+  gate-passed: "pass-filled"
+  gate-failed: "error"
+  gate-pending: "loading~spin"
+  gate-none: "dash"
+
+  # Audit event types
+  events:
+    session_start: "play"
+    session_end: "debug-stop"
+    file_read: "file"
+    file_write: "file-add"
+    file_edit: "edit"
+    bash_execute: "terminal"
+    git_commit: "git-commit"
+    git_worktree_create: "git-branch"
+    git_worktree_merge: "git-merge"
+    pdse_gate_pass: "pass-filled"
+    pdse_gate_fail: "error"
+    autoforge_start: "rocket"
+    autoforge_iteration: "sync"
+    autoforge_success: "check-all"
+    autoforge_abort: "close"
+    skill_import: "extensions"
+    skill_activate: "zap"
+    lesson_record: "book"
+    lesson_inject: "lightbulb"
+    agent_spawn: "vm-running"
+    agent_complete: "vm"
+    noma_violation: "warning"
+    constitution_violation: "shield"
+    sandbox_start: "vm-running"
+    sandbox_stop: "vm"
+
+  # UI controls
+  refresh: "refresh"
+  remove: "\u00D7" # multiplication sign
+
+# ============================================================================
+# ANIMATION TOKENS
+# ============================================================================
+
+animations:
+  typing-indicator:
+    type: "pulse"
+    duration: "1.5s"
+    note: "Subtle opacity pulse while streaming"
+
+  loading-spinner:
+    type: "spin"
+    duration: "1s"
+    note: "Codicon loading~spin in status bar"
+
+  badge-appear:
+    type: "fade-in"
+    duration: "200ms"
+    note: "PDSE badge fade-in on first score"
+
+# ============================================================================
+# SEMANTIC MAPPING
+# ============================================================================
+
+semantic:
+  # Role → Color mapping
+  roles:
+    user: "accent.user-message"
+    assistant: "accent.assistant-message"
+    error: "text.error-fg"
+    system: "text.description"
+
+  # Gate status → Style mapping
+  gate-status:
+    passed:
+      icon: "icons.gate-passed"
+      badge-bg: "status.gate-passed"
+      badge-fg: "status.gate-passed-overlay"
+      statusbar-bg: null
+      statusbar-fg: "status.statusbar-fg"
+    failed:
+      icon: "icons.gate-failed"
+      badge-bg: "status.gate-failed"
+      badge-fg: "status.gate-failed-overlay"
+      statusbar-bg: "status.statusbar-error-bg"
+      statusbar-fg: "status.statusbar-error-fg"
+    pending:
+      icon: "icons.gate-pending"
+      statusbar-bg: "status.statusbar-warning-bg"
+      statusbar-fg: "status.statusbar-warning-fg"
+    none:
+      icon: "icons.gate-none"
+      statusbar-bg: null
+      statusbar-fg: null

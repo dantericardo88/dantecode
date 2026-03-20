@@ -41,6 +41,9 @@ auditLog:
   - "2026-03-20T07:07:02.135Z | tech-decide: manual guidance displayed"
   - "2026-03-20T07:07:05.149Z | plan: PLAN.md generated locally"
   - "2026-03-20T07:07:09.374Z | tasks: 2 tasks generated locally"
+  - "2026-03-20T10:49:34.501Z | doctor: 9/13 ok, 0 fail, 4 warn"
+  - "2026-03-20T10:49:34.545Z | pdse-score | post-doctor overall: 24%"
+  - 2026-03-20T10:49:34.581Z | magic-preset:magic complete (2 steps, 0.3s)
 profile: balanced
 constitution: |-
   # DanteForge Constitution
@@ -50,7 +53,8 @@ constitution: |-
   - Always verify before commit
   - Scale-adaptive: solo -> party mode automatically
 enforcementMode: strict
-autoforgeFailedAttempts: 3
+autoforgeFailedAttempts: 0
+autoforgeLastRunAt: 2026-03-20T10:49:34.560Z
 projectType: web
 completionTracker:
   overall: 24
@@ -89,5 +93,5 @@ completionTracker:
       score: 0
       complete: false
       retroDelta: null
-  lastUpdated: 2026-03-20T07:05:12.137Z
+  lastUpdated: 2026-03-20T10:49:34.545Z
   projectedCompletion: 1 more forge wave + verify + synthesize
