@@ -973,3 +973,10 @@ export type {
   ErrorKind,
   FormatOptions,
 } from "./error-helper.js";
+
+export { RecoveryMessenger, recoveryMessenger } from "./recovery-messenger.js";
+export type {
+  RecoveryMessage,
+  RecoveryMessengerOptions,
+  RecoveryScenario,
+} from "./recovery-messenger.js";
