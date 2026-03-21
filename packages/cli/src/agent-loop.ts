@@ -35,6 +35,8 @@ import {
   globalArtifactStore,
   adaptToolResult,
   formatEvidenceSummary,
+  SecurityEngine,
+  SecretsScanner,
 } from "@dantecode/core";
 import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
 import { buildWorkflowInvocationPrompt } from "@dantecode/core";
@@ -1765,6 +1767,12 @@ export async function runAgentLoop(
   let lastMajorEditGatePassed = true;
   const readTracker = new Map<string, string>();
   const editAttempts = new Map<string, number>();
+
+  // ---- Security: per-session SecurityEngine + SecretsScanner ----
+  // Instantiated once and reused across all rounds. SecurityEngine accumulates
+  // action history for anomaly detection; SecretsScanner is stateless.
+  const securityEngine = new SecurityEngine({ anomalyDetection: true });
+  const secretsScanner = new SecretsScanner();
   const evidenceLedger: ExecutionEvidence[] = [];
   let lastConfirmedStep = "Started execution.";
   let lastSuccessfulTool: string | undefined;
@@ -2369,6 +2377,46 @@ export async function runAgentLoop(
             );
             continue;
           }
+
+          // SecurityEngine: zero-trust multi-layer check for Bash commands.
+          // Evaluates command against built-in rules (critical: curl|sh, dd, mkfs, fork bomb, etc.)
+          // and anomaly detection. Runs AFTER existing destructive guards to avoid double-blocking.
+          const secCheckResult = securityEngine.checkAction({
+            layer: "tool",
+            tool: "Bash",
+            command: bashCmd,
+          });
+          if (secCheckResult.decision === "block" || secCheckResult.decision === "quarantine") {
+            if (secCheckResult.decision === "quarantine") {
+              securityEngine.quarantineAction({ layer: "tool", tool: "Bash", command: bashCmd }, secCheckResult);
+            }
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[security-engine] BLOCKED Bash (${secCheckResult.riskLevel}): ${secCheckResult.reasons.join("; ")}${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `SECURITY ENGINE: Bash command BLOCKED (risk: ${secCheckResult.riskLevel}). ` +
+              `Reasons: ${secCheckResult.reasons.join("; ")}. ` +
+              `Use a safer approach to accomplish this task.`,
+            );
+            continue;
+          }
+
+          // SecurityEngine: scan bash command content for secrets (e.g. tokens passed as env vars).
+          const bashSecretScan = secretsScanner.scan(bashCmd);
+          if (!bashSecretScan.clean) {
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[secrets-scanner] WARNING: Bash command may contain secrets — ${bashSecretScan.summary}${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `SECRETS WARNING: Bash command may contain secrets: ${bashSecretScan.summary}. ` +
+              `Avoid passing secrets directly in command arguments. Use environment variables or files.`,
+            );
+            // Warn but do not block — bash commands legitimately use env vars by name
+          }
         }
       }
 
@@ -2398,6 +2446,29 @@ export async function runAgentLoop(
             process.stdout.write(
               `\n${YELLOW}[confab-guard] Write payload is ${Math.round(writeContent.length / 1000)}K chars — large file.${RESET}\n`,
             );
+          }
+        }
+
+        // SecretsScanner: block Write if content contains detected secrets.
+        // Runs on ALL Write tool calls (before execution) to prevent accidentally
+        // persisting API keys, tokens, private keys, or passwords to disk.
+        const writeContentToScan = toolCall.input["content"] as string | undefined;
+        if (writeContentToScan) {
+          const scanResult = secretsScanner.scan(writeContentToScan);
+          if (!scanResult.clean) {
+            const writeFilePath = toolCall.input["file_path"] as string | undefined;
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[secrets-scanner] BLOCKED Write to "${writeFilePath ?? "unknown"}" — ${scanResult.summary}${RESET}\n`,
+              );
+            }
+            toolResults.push(
+              `SYSTEM: Write BLOCKED — secrets detected in content: ${scanResult.summary}. ` +
+              `Do NOT hardcode secrets (API keys, tokens, private keys, passwords) in source files. ` +
+              `Use environment variables or a secrets manager instead. ` +
+              `Remove the sensitive values before retrying the Write.`,
+            );
+            continue;
           }
         }
       }
@@ -2570,6 +2641,9 @@ export async function runAgentLoop(
                 durableRunId: durableRun.id,
                 workflowName,
               }),
+              // Pass sandboxBridge into context so toolBash() can route through it
+              // even when the tool scheduler doesn't take the useSandbox fast path.
+              sandboxBridge: activeSandboxBridge,
             });
           },
         },
