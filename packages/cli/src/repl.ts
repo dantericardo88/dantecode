@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
+import { checkForUpdate } from "./lib/auto-update.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
 import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
@@ -20,6 +21,7 @@ import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import { DanteSandbox } from "@dantecode/dante-sandbox";
+import { createMemoryOrchestrator } from "@dantecode/memory-engine";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -59,6 +61,10 @@ export interface ReplOptions {
    *  Used by council createSelfExecutor so worktree-spawned processes
    *  still read API keys and settings from the main repo. */
   configRoot?: string;
+  /** --continue / -C: resume the last session on startup. */
+  resumeFromLastSession?: boolean;
+  /** --fearset-block-on-nogo: block and prompt when FearSet returns no-go. */
+  fearSetBlockOnNoGo?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -161,6 +167,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   if (!options.silent) {
     const banner = getBanner(state.model.default, options.projectRoot);
     process.stdout.write(banner);
+    void checkForUpdate("2.0.0");
   }
 
   // Initialize REPL state
@@ -184,6 +191,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     activeSkill: null,
     waveState: null,
     gaslight: null, // populated immediately after agentConfig.gaslight is created below
+    memoryOrchestrator: null, // populated after DanteSandbox.setup() below
   };
 
   // Agent loop config
@@ -193,6 +201,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
     silent: options.silent,
+    fearSetBlockOnNoGo: options.fearSetBlockOnNoGo === true,
   };
 
   // DanteGaslight: wire the closed Gaslight→Skillbook→Gaslight feedback loop.
@@ -225,6 +234,38 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     projectRoot: options.projectRoot,
     config: { mode: "auto", allowHostEscape: false },
   });
+
+  // Initialize DanteMemory orchestrator — non-fatal if it fails.
+  // /memory and /compact degrade gracefully when null.
+  try {
+    const mo = createMemoryOrchestrator(options.projectRoot); // SYNC — no await
+    await mo.initialize();
+    replState.memoryOrchestrator = mo;
+  } catch {
+    // Non-fatal: /memory and /compact degrade gracefully when null
+  }
+
+  // --continue / -C: resume the most recent session
+  if (options.resumeFromLastSession) {
+    try {
+      const { SessionStore } = await import("@dantecode/core");
+      const store = new SessionStore(options.projectRoot);
+      const sessions = await store.list();
+      if (sessions.length > 0) {
+        const latest = sessions[0]; // list() already sorted newest-first
+        if (latest) {
+          replState.pendingResumeRunId = latest.id;
+          if (!options.silent) {
+            process.stdout.write(
+              `${DIM}[--continue] Resuming session ${latest.id.slice(0, 8)}...${RESET}\n`,
+            );
+          }
+        }
+      }
+    } catch {
+      // Non-fatal: --continue failure falls back to fresh session
+    }
+  }
 
   // Initialize sandbox bridge when --sandbox is enabled
   if (options.enableSandbox) {

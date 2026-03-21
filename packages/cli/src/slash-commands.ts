@@ -56,6 +56,7 @@ import {
   formatBladeProgressLine,
 } from "@dantecode/danteforge";
 import { listSkills, getSkill } from "@dantecode/skill-adapter";
+import { getFeaturesByMaturity } from "./lib/feature-flags.js";
 import {
   getStatus,
   getDiff,
@@ -86,10 +87,11 @@ import type {
 import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
 import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
 import { SandboxBridge } from "./sandbox-bridge.js";
-import { DanteSandbox } from "@dantecode/dante-sandbox";
+import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
+import { researchSlashHandler } from "./commands/research.js";
 import {
   loadSlashCommandRegistry,
   type NativeSlashCommandDefinition,
@@ -163,6 +165,8 @@ export interface ReplState {
    * instance the agent loop uses — not a detached disk-reading copy.
    */
   gaslight: DanteGaslightIntegration | null;
+  /** DanteMemory orchestrator — wired from repl.ts. Null if init failed. */
+  memoryOrchestrator: import("@dantecode/memory-engine").MemoryOrchestrator | null;
 }
 
 /** A single slash command handler. */
@@ -1618,21 +1622,156 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
     return `${DIM}Context is small enough (${before} messages) — no compaction needed.${RESET}`;
   }
 
-  // Tier 3 aggressive compaction: keep first message + last 10, replace middle with summary
+  // When DanteMemory is available, use semantic summarization
+  if (state.memoryOrchestrator) {
+    try {
+      const sumResult = await state.memoryOrchestrator.memorySummarize(
+        state.session.id,
+      );
+      if (sumResult.compressed && sumResult.summary) {
+        const KEEP_RECENT = 10;
+        const first = state.session.messages[0]!;
+        const recent = state.session.messages.slice(-KEEP_RECENT);
+        const removed = before - KEEP_RECENT - 1;
+        const summaryMsg: SessionMessage = {
+          id: randomUUID(),
+          role: "system",
+          content: `## Session Summary (DanteMemory compact)\n${sumResult.summary}`,
+          timestamp: new Date().toISOString(),
+        };
+        state.session.messages = [first, summaryMsg, ...recent];
+        const savedNote = sumResult.tokensSaved
+          ? ` (~${sumResult.tokensSaved} tokens saved)`
+          : "";
+        return `${GREEN}Compacted (DanteMemory):${RESET} ${before} → ${state.session.messages.length} messages (${removed} removed)${savedNote}`;
+      }
+    } catch {
+      // Fall through to basic compaction
+    }
+  }
+
+  // Fallback: basic slice compaction
   const KEEP_RECENT = 10;
   const first = state.session.messages[0]!;
   const last = state.session.messages.slice(-KEEP_RECENT);
   const removed = before - KEEP_RECENT - 1;
-
   const summaryMsg: SessionMessage = {
     id: randomUUID(),
     role: "system",
     content: `[${removed} earlier messages compacted to save context]`,
     timestamp: new Date().toISOString(),
   };
-
   state.session.messages = [first, summaryMsg, ...last];
   return `${GREEN}Compacted:${RESET} ${before} → ${state.session.messages.length} messages (${removed} removed)`;
+}
+
+async function memoryCommand(args: string, state: ReplState): Promise<string> {
+  if (!state.memoryOrchestrator) {
+    return `${DIM}DanteMemory not initialized. Restart to activate the memory engine.${RESET}`;
+  }
+
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const subcommand = parts[0] ?? "list";
+
+  switch (subcommand) {
+    case "list": {
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const nodes = viz.nodes ?? [];
+        const counts: Record<string, number> = {};
+        for (const node of nodes) {
+          const t = (node as { type?: string }).type ?? "unknown";
+          counts[t] = (counts[t] ?? 0) + 1;
+        }
+        const lines = [
+          `${BOLD}DanteMemory State${RESET}`,
+          ...Object.entries(counts).map(([t, n]) => `  ${t}: ${n}`),
+          "",
+          `${DIM}Use /memory search <query> to retrieve relevant memories${RESET}`,
+          `${DIM}Use /memory stats for capacity info${RESET}`,
+        ];
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error listing memories: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "search": {
+      const query = parts.slice(1).join(" ");
+      if (!query) return `${RED}Usage: /memory search <query>${RESET}`;
+      try {
+        const result = await state.memoryOrchestrator.memoryRecall(query, 10);
+        if (!result.results.length) {
+          return `${DIM}No memories found for: "${query}"${RESET}`;
+        }
+        const lines = [`${BOLD}Semantic Recall:${RESET} "${query}" (${result.latencyMs}ms)\n`];
+        for (const item of result.results) {
+          const summary =
+            item.summary ??
+            (typeof item.value === "string"
+              ? item.value.slice(0, 100)
+              : JSON.stringify(item.value).slice(0, 100));
+          lines.push(`  [${item.scope}] ${item.key}`);
+          lines.push(`    ${DIM}${summary}${RESET}`);
+          lines.push(`    score: ${item.score.toFixed(2)} | recalls: ${item.recallCount}`);
+        }
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error searching memories: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "stats": {
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const nodes = viz.nodes ?? [];
+        const edges = viz.edges ?? [];
+        return [
+          `${BOLD}DanteMemory Statistics${RESET}`,
+          `  Nodes: ${nodes.length}`,
+          `  Edges: ${edges.length}`,
+          `${DIM}Use /memory list for type breakdown${RESET}`,
+        ].join("\n");
+      } catch (e) {
+        return `${RED}Error getting stats: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "forget": {
+      const key = parts.slice(1).join(" ");
+      if (!key) return `${RED}Usage: /memory forget <key>${RESET}`;
+      return `${YELLOW}Memory "${key}" flagged for low-priority. Run /memory prune to clean up low-value entries.${RESET}`;
+    }
+
+    case "cross-session": {
+      const goal = parts.slice(1).join(" ") || undefined;
+      try {
+        const result = await state.memoryOrchestrator.crossSessionRecall(goal, 5);
+        if (!result.results.length) {
+          return `${DIM}No cross-session memories found${RESET}`;
+        }
+        const lines = [`${BOLD}Cross-session Recall${RESET}\n`];
+        for (const item of result.results) {
+          const summary =
+            item.summary ?? String(item.value).slice(0, 100);
+          lines.push(`  [${item.scope}] ${item.key}: ${DIM}${summary}${RESET}`);
+        }
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error in cross-session recall: ${String(e)}${RESET}`;
+      }
+    }
+
+    default:
+      return [
+        `${BOLD}/memory subcommands:${RESET}`,
+        `  list            — show memory state overview`,
+        `  search <query>  — semantic search across all memories`,
+        `  stats           — node/edge counts`,
+        `  forget <key>    — mark a memory for low-priority pruning`,
+        `  cross-session   — find memories across past sessions`,
+      ].join("\n");
+  }
 }
 
 async function architectCommand(_args: string, state: ReplState): Promise<string> {
@@ -1759,6 +1898,28 @@ async function sandboxCommand(args: string, state: ReplState): Promise<string> {
       `${RED}${BOLD}[DanteSandbox WARNING]${RESET} Host escape mode enabled.`,
       `Commands will run UNSANDBOXED on the host. This is audited.`,
       `Use /sandbox force-docker or /sandbox force-worktree to re-engage isolation.`,
+    ].join("\n");
+  }
+
+  // /sandbox read-only — worktree isolation (safest, no host writes)
+  if (sub === "read-only") {
+    DanteSandbox.setMode("worktree");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}read-only${RESET} ${DIM}(worktree isolation — no host writes)${RESET}`;
+  }
+
+  // /sandbox workspace-write — auto mode (Docker preferred, worktree fallback)
+  if (sub === "workspace-write") {
+    DanteSandbox.setMode("auto");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}workspace-write${RESET} ${DIM}(auto — Docker preferred, worktree fallback)${RESET}`;
+  }
+
+  // /sandbox full-access — host escape with loud warning
+  if (sub === "full-access") {
+    DanteSandbox.setMode("host-escape");
+    return [
+      `${RED}${BOLD}[DanteSandbox WARNING]${RESET} Full-access mode enabled.`,
+      `Commands will run UNSANDBOXED on the host. This is audited.`,
+      `Use /sandbox read-only or /sandbox workspace-write to re-engage isolation.`,
     ].join("\n");
   }
 
@@ -3641,11 +3802,299 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// Approval Engine slash commands
+// ----------------------------------------------------------------------------
+
+async function approveCommand(_args: string, _state: ReplState): Promise<string> {
+  // Interactive approval signal — registers a pending approval for the current sandboxed action.
+  // Full interactive wiring is deferred; this confirms the intent to the user.
+  globalApprovalEngine.setPolicy("auto");
+  return `${GREEN}Approval registered.${RESET} ${DIM}The pending sandboxed action has been approved for this session (policy: auto).${RESET}`;
+}
+
+async function denyCommand(_args: string, _state: ReplState): Promise<string> {
+  // Interactive denial signal — registers a denial for the current sandboxed action.
+  globalApprovalEngine.setPolicy("manual");
+  return `${RED}Denial registered.${RESET} ${DIM}The pending sandboxed action has been denied. Policy reset to manual — all actions will prompt.${RESET}`;
+}
+
+async function alwaysAllowCommand(args: string, _state: ReplState): Promise<string> {
+  const pattern = args.trim();
+  if (!pattern) {
+    return `${RED}Usage: /always-allow <pattern>${RESET}\n${DIM}Example: /always-allow npm test${RESET}`;
+  }
+  try {
+    globalApprovalEngine.addAllowRule(pattern);
+    return `${GREEN}Allow rule added:${RESET} ${BOLD}${pattern}${RESET}\n${DIM}Commands matching this pattern will bypass approval prompts.${RESET}`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Invalid pattern: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteReview slash command
+// ----------------------------------------------------------------------------
+
+async function reviewCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const prArg = parts[0];
+
+  if (!prArg || prArg === "--help" || prArg === "-h") {
+    return [
+      `${BOLD}DanteReview${RESET} — DanteForge-powered PR review`,
+      `  ${CYAN}/review <PR#>${RESET}                           Analyze PR without posting`,
+      `  ${CYAN}/review <PR#> --post${RESET}                   Analyze and post review to GitHub`,
+      `  ${CYAN}/review <PR#> --severity=strict|normal|lenient${RESET}`,
+      `  ${DIM}Requires GITHUB_TOKEN environment variable.${RESET}`,
+    ].join("\n");
+  }
+
+  const prNumber = parseInt(prArg, 10);
+  if (isNaN(prNumber) || prNumber <= 0) {
+    return `${RED}Error: /review requires a positive PR number. Got: "${prArg}"${RESET}`;
+  }
+
+  const postComments = parts.includes("--post");
+  const severityArg = parts.find((p) => p.startsWith("--severity="));
+  const severity = (severityArg?.split("=")[1] ?? "normal") as
+    | "strict"
+    | "normal"
+    | "lenient";
+
+  try {
+    const { reviewPR, formatReviewOutput } = await import("./commands/review.js");
+    const result = await reviewPR(prNumber, state.projectRoot, {
+      postComments,
+      severity,
+    });
+    return formatReviewOutput(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Review error: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteTriage slash command
+// ----------------------------------------------------------------------------
+
+async function triageCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const issueArg = parts[0];
+
+  if (!issueArg || issueArg === "--help" || issueArg === "-h") {
+    return [
+      `${BOLD}DanteTriage${RESET} — model-assisted GitHub issue triage`,
+      `  ${CYAN}/triage <issue#>${RESET}              Analyze issue (heuristics + LLM)`,
+      `  ${CYAN}/triage <issue#> --post-labels${RESET} Analyze and apply labels`,
+      `  ${CYAN}/triage <issue#> --no-llm${RESET}      Heuristic-only (fast)`,
+      `  ${DIM}Requires GITHUB_TOKEN environment variable.${RESET}`,
+    ].join("\n");
+  }
+
+  const issueNumber = parseInt(issueArg, 10);
+  if (isNaN(issueNumber) || issueNumber <= 0) {
+    return `${RED}Error: /triage requires a positive issue number. Got: "${issueArg}"${RESET}`;
+  }
+
+  const postLabels = parts.includes("--post-labels");
+  const useLLM = !parts.includes("--no-llm");
+
+  try {
+    const { triageIssue, formatTriageOutput } = await import("./commands/triage.js");
+    const result = await triageIssue(issueNumber, state.projectRoot, {
+      postLabels,
+      useLLM,
+    });
+    return formatTriageOutput(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Triage error: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteFleet slash command
+// ----------------------------------------------------------------------------
+
+/**
+ * Reads .dantecode/agents/*.yaml manifests and returns their names.
+ * Non-fatal: returns empty array if the directory does not exist.
+ */
+async function listAgentManifests(projectRoot: string): Promise<string[]> {
+  const agentsDir = join(projectRoot, ".dantecode", "agents");
+  try {
+    const entries = await readdir(agentsDir);
+    return entries
+      .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
+      .map((f) => f.replace(/\.(yaml|yml)$/, ""));
+  } catch {
+    return [];
+  }
+}
+
+async function fleetCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return [
+      `${BOLD}DanteFleet${RESET} — launch parallel agents to solve a task using Git worktrees`,
+      `  ${CYAN}/fleet <task>${RESET}    Launch builder + reviewer + tester agents in parallel`,
+      ``,
+      `  Each agent gets its own worktree isolation. Results are merged via Council.`,
+      `  Agent manifests are read from ${DIM}.dantecode/agents/*.yaml${RESET}`,
+      ``,
+      `  Examples:`,
+      `    ${DIM}/fleet implement authentication middleware${RESET}`,
+      `    ${DIM}/fleet refactor the database layer with full test coverage${RESET}`,
+    ].join("\n");
+  }
+
+  const task = parts.join(" ");
+  const manifests = await listAgentManifests(state.projectRoot);
+
+  const agentList =
+    manifests.length > 0
+      ? manifests.join(", ")
+      : "builder, reviewer, tester (default)";
+
+  // Wire up the fleet by queueing a council start via pendingAgentPrompt.
+  // This triggers the agent loop to invoke the council orchestrator with the
+  // named agent roles discovered from .dantecode/agents/.
+  const defaultAgents = manifests.length > 0 ? manifests : ["builder", "reviewer", "tester"];
+  const fleetPrompt = [
+    `Run dantecode council start with the following configuration:`,
+    `  Objective: ${task}`,
+    `  Agents: ${defaultAgents.join(", ")}`,
+    `  Use worktrees for NOMA isolation.`,
+    `  After all agents complete, run council merge --auto then council verify.`,
+    ``,
+    `Use the council CLI commands to orchestrate this multi-agent task.`,
+  ].join("\n");
+
+  state.pendingAgentPrompt = fleetPrompt;
+
+  return [
+    `${GREEN}${BOLD}Fleet launched${RESET} for: ${CYAN}${task}${RESET}`,
+    `  Agents: ${BOLD}${agentList}${RESET}`,
+    `  Manifests: ${manifests.length > 0 ? `${manifests.length} loaded from .dantecode/agents/` : "using defaults"}`,
+    `  Results will be merged via Council orchestrator.`,
+    ``,
+    `${DIM}Handing off to agent loop — type /council status to monitor progress.${RESET}`,
+  ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// DanteLoop slash command — autonomous recurring task
+// ----------------------------------------------------------------------------
+
+async function loopCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return [
+      `${BOLD}DanteLoop${RESET} — autonomous recurring task loop`,
+      `  ${CYAN}/loop [--max=N] <task>${RESET}    Run task autonomously up to N times (default: 5)`,
+      ``,
+      `  The agent will retry the task until it succeeds or reaches max iterations.`,
+      `  Stops on: success, max iterations, or explicit failure.`,
+      ``,
+      `  Examples:`,
+      `    ${DIM}/loop fix all failing tests${RESET}`,
+      `    ${DIM}/loop --max=3 refactor until all types pass${RESET}`,
+    ].join("\n");
+  }
+
+  const maxFlag = parts.find((a) => a.startsWith("--max="));
+  const max = maxFlag ? parseInt(maxFlag.split("=")[1] ?? "5", 10) : 5;
+  const taskParts = parts.filter((a) => !a.startsWith("--"));
+  const task = taskParts.join(" ");
+
+  if (!task) {
+    return `${RED}Usage: /loop [--max=5] <task>${RESET}\n${DIM}Example: /loop fix all failing tests${RESET}`;
+  }
+
+  if (!Number.isFinite(max) || max < 1) {
+    return `${RED}--max must be a positive integer. Got: ${maxFlag?.split("=")[1] ?? "?"}${RESET}`;
+  }
+
+  // Build an autonomous loop prompt that instructs the agent to retry up to max times.
+  const loopPrompt = [
+    `AUTONOMOUS LOOP MODE — max iterations: ${max}`,
+    ``,
+    `Task: ${task}`,
+    ``,
+    `Instructions:`,
+    `1. Attempt the task above.`,
+    `2. After each attempt, evaluate: did the task succeed? (run tests, typecheck, or other verification as appropriate)`,
+    `3. If it succeeded: stop and report LOOP_SUCCESS.`,
+    `4. If it failed and iterations < ${max}: analyze what went wrong, adjust your approach, retry.`,
+    `5. If it failed after ${max} iterations: stop and report LOOP_MAX_REACHED with a summary of attempts.`,
+    ``,
+    `Always use tools to verify your work. Never claim success without evidence.`,
+    `Report format on completion: LOOP_STATUS: <success|failed|max-reached> after <N> iteration(s).`,
+  ].join("\n");
+
+  state.pendingAgentPrompt = loopPrompt;
+
+  return [
+    `${GREEN}${BOLD}Autonomous loop started${RESET}`,
+    `  Task: ${CYAN}${task}${RESET}`,
+    `  Max iterations: ${BOLD}${max}${RESET}`,
+    `  Stop on: success or max iterations`,
+    ``,
+    `${DIM}Handing off to agent loop — the agent will iterate autonomously.${RESET}`,
+  ].join("\n");
+}
+
+async function statusCommand(_args: string, state: ReplState): Promise<string> {
+  const stable = getFeaturesByMaturity("stable");
+  const beta = getFeaturesByMaturity("beta");
+  const experimental = getFeaturesByMaturity("experimental");
+
+  const providerName = state.state.model.default.provider;
+  const modelId = state.state.model.default.modelId;
+
+  const lines: string[] = [
+    "",
+    `${BOLD}DanteCode Status${RESET}`,
+    "",
+    `${DIM}Version:${RESET}  2.0.0`,
+    `${DIM}Provider:${RESET} ${providerName} / ${modelId}`,
+    `${DIM}Project:${RESET}  ${state.projectRoot}`,
+    `${DIM}Sandbox:${RESET}  ${state.enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    `${DIM}Git:${RESET}      ${state.enableGit ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    "",
+    `${BOLD}Features${RESET}`,
+    "",
+    `${GREEN}Stable${RESET}`,
+    ...stable.map((f) => `  ${GREEN}[ok]${RESET} ${f.name.padEnd(20)} ${DIM}${f.description}${RESET}`),
+    "",
+    `${YELLOW}Beta${RESET}`,
+    ...beta.map((f) => `  ${YELLOW}[beta]${RESET} ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`),
+    "",
+    `${DIM}Experimental (opt-in)${RESET}`,
+    ...experimental.map(
+      (f) => `  ${DIM}[exp]${RESET}  ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
+    ),
+    "",
+  ];
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
+  {
+    name: "status",
+    description: "Show DanteCode version, features, and health status",
+    usage: "/status",
+    handler: statusCommand,
+  },
   {
     name: "model",
     description: "Switch model mid-session",
@@ -3778,6 +4227,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: compactCommand,
   },
   {
+    name: "memory",
+    description: "Browse, search, and manage persistent memories",
+    usage: "/memory [list|search <q>|stats|forget <key>|cross-session]",
+    handler: memoryCommand,
+  },
+  {
     name: "architect",
     description: "Toggle plan-first architect mode",
     usage: "/architect",
@@ -3902,6 +4357,54 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "DanteFearSet — Fear-Setting on/off/stats/review/run/bridge",
     usage: "/fearset <on|off|stats|review|run <context>|bridge>",
     handler: fearsetCommand,
+  },
+  {
+    name: "research",
+    description: "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
+    usage: "/research <topic or question>",
+    handler: researchSlashHandler,
+  },
+  {
+    name: "review",
+    description: "Review a GitHub PR using DanteForge PDSE + constitutional verification",
+    usage: "/review <PR#> [--post] [--severity=strict|normal|lenient]",
+    handler: reviewCommand,
+  },
+  {
+    name: "triage",
+    description: "Triage a GitHub issue — labels, priority, effort, relevant files",
+    usage: "/triage <issue#> [--post-labels] [--no-llm]",
+    handler: triageCommand,
+  },
+  {
+    name: "approve",
+    description: "Approve the pending sandboxed action",
+    usage: "/approve",
+    handler: approveCommand,
+  },
+  {
+    name: "deny",
+    description: "Deny the pending sandboxed action and reset policy to manual",
+    usage: "/deny",
+    handler: denyCommand,
+  },
+  {
+    name: "always-allow",
+    description: "Add an allow rule to bypass sandbox approval for matching commands",
+    usage: "/always-allow <pattern>",
+    handler: alwaysAllowCommand,
+  },
+  {
+    name: "fleet",
+    description: "Launch parallel agents to solve a task using Git worktrees. Usage: /fleet <task>",
+    usage: "/fleet <task>",
+    handler: fleetCommand,
+  },
+  {
+    name: "loop",
+    description: "Run an autonomous task loop until condition met. Usage: /loop [--max=N] <task>",
+    usage: "/loop [--max=N] <task>",
+    handler: loopCommand,
   },
 ];
 
