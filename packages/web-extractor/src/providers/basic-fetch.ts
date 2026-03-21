@@ -15,7 +15,6 @@ export class BasicFetchProvider implements FetchProvider {
           "User-Agent": "DanteCode-WebExtractor/1.0 (compatible; Mozilla/5.0)",
           Accept:
             "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          ...(options.preActions ? {} : {}), // Placeholder for potential future header logic
         },
         signal: controller.signal,
       });

@@ -238,7 +238,7 @@ export function createStandardBenchmarkCorpus(): BenchmarkTask[] {
       label: "Stub response",
       category: "code-generation",
       task: "Implement user authentication",
-      output: "TODO: implement authentication here.",
+      output: "TODO: implement authentication here.", // antistub-ok: benchmark test fixture — intentional stub output for scoring validation
       criteria: { requiredKeywords: ["auth"], minLength: 50 },
       goldDecision: "block",
     },

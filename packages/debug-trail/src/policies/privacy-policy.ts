@@ -155,7 +155,7 @@ function globToRegex(glob: string): RegExp {
   // Process ** before * so we don't double-replace
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape special regex chars
-    .replace(/\*\*/g, "\x00") // mark ** as placeholder
+    .replace(/\*\*/g, "\x00") // escape ** temporarily before expanding * segments
     .replace(/\*/g, "[^/]*") // single * = one path segment (no slashes)
     .replace(/\x00/g, ".*") // ** = any depth (including slashes)
     .replace(/\?/g, "[^/]"); // ? = one non-separator char

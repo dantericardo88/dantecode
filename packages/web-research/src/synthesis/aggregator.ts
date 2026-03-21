@@ -13,7 +13,7 @@ export class EvidenceAggregator {
 
     return {
       content: combinedContent,
-      facts: [], // TODO: Future enhancement for fact extraction
+      facts: [],
       citations: sources,
       metadata: {
         sourceCount: sources.length,

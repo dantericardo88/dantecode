@@ -53,7 +53,7 @@ export interface SecretsScannerOptions {
   /** Pattern names to exclude from scanning. */
   excludePatterns?: string[];
   /** Redaction style. Default: "masked". */
-  redactionStyle?: "masked" | "removed" | "placeholder";
+  redactionStyle?: "masked" | "removed" | "placeholder"; // antistub-ok: "placeholder" is a valid style name, not a code stub
 }
 
 // ----------------------------------------------------------------------------
@@ -176,7 +176,7 @@ const BUILTIN_PATTERNS: SecretsPattern[] = [
  */
 export class SecretsScanner {
   private patterns: SecretsPattern[];
-  private readonly redactionStyle: "masked" | "removed" | "placeholder";
+  private readonly redactionStyle: "masked" | "removed" | "placeholder"; // antistub-ok
 
   constructor(options: SecretsScannerOptions = {}) {
     const excludeSet = new Set(options.excludePatterns ?? []);

@@ -679,7 +679,11 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const key = requiredString(args, "key");
       const value = requiredString(args, "value");
       const scope = optionalString(args, "scope");
-      const category = (optionalString(args, "category") ?? "fact") as any;
+      const rawCategory = optionalString(args, "category") ?? "fact";
+      const category =
+        (["fact", "decision", "error", "strategy", "context"] as const).find(
+          (c) => c === rawCategory,
+        ) ?? "fact";
 
       const memory = new PersistentMemory(projectRoot);
       await memory.load();

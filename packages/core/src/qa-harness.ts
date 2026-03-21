@@ -248,7 +248,7 @@ export function generateQaTestCases(task: string): GeneratedQaTestCase[] {
       forbiddenPatterns: ["TODO", "FIXME", "TBD", "placeholder"],
       minLength: 20,
     },
-    rationale: "Flags placeholder language and shallow outputs before they ship.",
+    rationale: "Flags placeholder language and shallow outputs before they ship.", // antistub-ok
   });
 
   return cases;

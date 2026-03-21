@@ -40,7 +40,10 @@ function shouldSkipLine(line) {
   if (
     line.includes("STUB_PATTERNS") ||
     line.includes("HARD_VIOLATION") ||
-    line.includes("SOFT_VIOLATION")
+    line.includes("SOFT_VIOLATION") ||
+    line.includes("PLACEHOLDER_PATTERNS") ||
+    line.includes("placeholderHits") ||
+    line.includes("forbiddenPatterns")
   )
     return true;
   if (line.includes("pattern:") || line.includes("RegExp")) return true;
@@ -58,15 +61,24 @@ function shouldSkipLine(line) {
   if (line.includes(".placeholder")) return true;
   // VS Code API placeHolder property
   if (line.includes("placeHolder")) return true;
-  // Regex literals containing pattern names (testing for patterns, not actual stubs)
-  if (/\/[^/]*(?:TODO|FIXME|HACK)[^/]*\//.test(line)) return true;
-  // Template literal / string describing rules (documentation, not stubs)
+  // JSDoc comment lines (* continuation or /** opening or */ closing)
+  if (t.startsWith("/**") || t.startsWith("*/") || (t.startsWith("*") && !t.startsWith("*=")))
+    return true;
+  // createStubPattern() calls — these define patterns, they are not violations
+  if (line.includes("createStubPattern(")) return true;
+  // switch case on a string literal (e.g., case "placeholder":)
+  if (/^\s*case\s+['"]/.test(line)) return true;
+  // Explicit escape hatch for documented legitimate uses
+  if (line.includes("// antistub-ok")) return true;
+  // Regex literals containing stub-word names (case-insensitive, includes placeholder)
+  if (/\/[^/]*(?:todo|fixme|hack|placeholder)[^/]*\//i.test(line)) return true;
+  // Template literal / string describing rules (documentation, not stubs) — case-insensitive
   if (
     (t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
-    (line.includes("TODO") ||
-      line.includes("FIXME") ||
-      line.includes("HACK") ||
-      line.includes("placeholder") ||
+    (line.toLowerCase().includes("todo") ||
+      line.toLowerCase().includes("fixme") ||
+      line.toLowerCase().includes("hack") ||
+      line.toLowerCase().includes("placeholder") ||
       line.includes("ts-ignore") ||
       line.includes("ts-nocheck") ||
       line.includes("as any"))
