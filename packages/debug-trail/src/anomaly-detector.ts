@@ -334,42 +334,56 @@ export class AnomalyDetector {
   }
 
   // -------------------------------------------------------------------------
-  // Untracked write (write to path never seen in a read tool call)
+  // Untracked write (write to path never seen in a preceding read tool call)
   // -------------------------------------------------------------------------
 
   private detectUntrackedWrite(events: TrailEvent[], sessionId?: string): AnomalyFlag[] {
-    // Build set of paths seen in tool_call read events
-    const readPaths = new Set<string>();
-    for (const e of events) {
-      if (e.kind === "tool_call") {
-        const direct = e.payload["filePath"];
-        if (typeof direct === "string") readPaths.add(direct);
-        const args = e.payload["args"];
-        if (args && typeof args === "object" && args !== null) {
-          const argsFilePath = (args as Record<string, unknown>)["file_path"];
-          if (typeof argsFilePath === "string") readPaths.add(argsFilePath);
-        }
+    // Extract the filePath referenced by a tool_call event (either direct payload or args).
+    const toolCallFilePath = (e: TrailEvent): string | null => {
+      const direct = e.payload["filePath"];
+      if (typeof direct === "string") return direct;
+      const args = e.payload["args"];
+      if (args && typeof args === "object" && args !== null) {
+        const fp = (args as Record<string, unknown>)["file_path"];
+        if (typeof fp === "string") return fp;
       }
-    }
-    // Auto-detect: only meaningful when callers have established tool_call → file_write
-    // causality. If no tool_call reads exist and the explicit override is off, skip to
-    // avoid false positives from direct logFileWrite() calls.
-    if (readPaths.size === 0 && !this.config.detectUntrackedWrites) return [];
+      return null;
+    };
 
+    // Auto-detect mode (default): only activate when callers have established
+    // tool_call → file_write causality by logging at least one tool_call with a filePath.
+    // Without this guard every direct logFileWrite() call (no preceding tool_call) would fire.
+    if (!this.config.detectUntrackedWrites) {
+      const hasAnyToolCallRead = events.some(
+        (e) => e.kind === "tool_call" && toolCallFilePath(e) !== null,
+      );
+      if (!hasAnyToolCallRead) return [];
+    }
+
+    // Per-write causality: for each file_write at position i, check whether any
+    // tool_call event at position j < i references the same file path.
+    // This prevents a single incidental tool_call for fileA from suppressing
+    // detection of an unrelated untracked write to fileB.
     const flags: AnomalyFlag[] = [];
-    for (const e of events) {
-      if (e.kind === "file_write") {
-        const fp = String(e.payload["filePath"] ?? "");
-        if (fp && !readPaths.has(fp)) {
-          flags.push({
-            anomalyType: "untracked_write",
-            severity: "medium",
-            description: `Write to ${fp} with no preceding Read tool call`,
-            relatedEventIds: [e.id],
-            detectedAt: new Date().toISOString(),
-            sessionId: sessionId ?? e.provenance.sessionId,
-          });
-        }
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i]!;
+      if (e.kind !== "file_write") continue;
+      const fp = String(e.payload["filePath"] ?? "");
+      if (!fp) continue;
+
+      const hasPrecedingRead = events
+        .slice(0, i)
+        .some((prior) => prior.kind === "tool_call" && toolCallFilePath(prior) === fp);
+
+      if (!hasPrecedingRead) {
+        flags.push({
+          anomalyType: "untracked_write",
+          severity: "medium",
+          description: `Write to ${fp} with no preceding Read tool call`,
+          relatedEventIds: [e.id],
+          detectedAt: new Date().toISOString(),
+          sessionId: sessionId ?? e.provenance.sessionId,
+        });
       }
     }
     return flags;

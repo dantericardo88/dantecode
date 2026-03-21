@@ -1865,7 +1865,8 @@ describe("Round 8 fixes", () => {
     }
     const result = await logger.flush();
     expect(result.bufferTruncated).toBe(true);
-    expect(result.analyzedCount).toBe(2); // only the 2 buffered events were analyzed
+    // Round 11: disk spill now loads overflow, so all 5 events are analyzed
+    expect(result.analyzedCount).toBe(5);
     await rm(storageRoot, { recursive: true, force: true });
   });
 
@@ -1896,7 +1897,8 @@ describe("Round 8 fixes", () => {
     await logger.flush();
     expect(received).not.toBeNull();
     expect(received!.bufferTruncated).toBe(true);
-    expect(received!.analyzedCount).toBe(2);
+    // Round 11: disk spill now loads overflow, so all 4 events are analyzed
+    expect(received!.analyzedCount).toBe(4);
     await rm(storageRoot, { recursive: true, force: true });
   });
 
@@ -2434,5 +2436,253 @@ describe("Round 10 fixes", () => {
     expect(data["success"]).toBe(true);
     expect(Array.isArray(data["events"])).toBe(true);
     await rm(storageRoot, { recursive: true, force: true });
+  });
+});
+
+// ============================================================================
+// Round 11 — sessionEventsBufferLimit disk spill + detectUntrackedWrite per-write causality
+// ============================================================================
+
+describe("Round 11 — buffer overflow spill + untracked-write causality", () => {
+  // ---------------------------------------------------------------------------
+  // Fix 1: sessionEventsBufferLimit disk spill path
+  // ---------------------------------------------------------------------------
+
+  it("flush() reads overflow events from disk when buffer is truncated", async () => {
+    // Use a tiny buffer limit of 5 to trigger truncation easily
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r11-spill-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, sessionEventsBufferLimit: 5 },
+      sessionId: "sess_r11_spill",
+    });
+    await logger.init();
+
+    // Log 5 events to fill the buffer (indices 0–4)
+    for (let i = 0; i < 5; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+
+    // Log 3 file_delete events as overflow (indices 5–7, beyond buffer limit)
+    await logger.logFileDelete("/src/a.ts", "hash-a");
+    await logger.logFileDelete("/src/b.ts", "hash-b");
+    await logger.logFileDelete("/src/c.ts", "hash-c");
+
+    const result = await logger.flush();
+
+    // Buffer should be marked truncated
+    expect(result.bufferTruncated).toBe(true);
+
+    // All 8 events should have been analyzed (5 buffer + 3 overflow)
+    // (anomaly_flag events are excluded from analyzedCount — only non-anomaly events)
+    expect(result.analyzedCount).toBeGreaterThanOrEqual(8);
+
+    // The 3 overflow deletions should trigger burst_deletion (3 in 5s)
+    const burstFlags = result.anomalies.filter((a) => a.anomalyType === "burst_deletion");
+    expect(burstFlags).toHaveLength(1);
+    expect(burstFlags[0]!.relatedEventIds).toHaveLength(3);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("overflow events are only analyzed once across multiple flush() calls", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r11-spill2-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, sessionEventsBufferLimit: 3 },
+      sessionId: "sess_r11_spill2",
+    });
+    await logger.init();
+
+    // Fill buffer with 3 events
+    for (let i = 0; i < 3; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+
+    // 2 overflow events (indices 3, 4 — beyond buffer limit)
+    await logger.log("tool_call", "Actor", "overflow-a", {});
+    await logger.log("tool_call", "Actor", "overflow-b", {});
+
+    // First flush — analyzes 3 buffer + 2 overflow = 5 total
+    const r1 = await logger.flush({ endSession: false });
+    expect(r1.analyzedCount).toBe(5);
+
+    // Add 2 more overflow events (indices 5, 6)
+    await logger.log("tool_call", "Actor", "overflow-c", {});
+    await logger.log("tool_call", "Actor", "overflow-d", {});
+
+    // Second flush — should analyze ONLY the 2 new overflow events, not re-analyze the 5 from before
+    const r2 = await logger.flush({ endSession: false });
+    expect(r2.analyzedCount).toBe(2);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Fix 2: detectUntrackedWrite per-write causality
+  // ---------------------------------------------------------------------------
+
+  it("untracked_write: read of a DIFFERENT file does not protect an unrelated write", () => {
+    const detector = new AnomalyDetector({ detectUntrackedWrites: false });
+    const sess = "sess_r11_ut1";
+
+    const events: TrailEvent[] = [
+      // tool_call reads fileA
+      makeEvent({
+        kind: "tool_call",
+        actor: "Read",
+        summary: "Read tool: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+      // file_write to fileB (never read) — should be flagged
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/other.ts",
+        payload: { filePath: "/src/other.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    // /src/other.ts has no preceding read — must be flagged even though /src/auth.ts was read
+    expect(untrackedFlags).toHaveLength(1);
+    expect(untrackedFlags[0]!.description).toContain("/src/other.ts");
+  });
+
+  it("untracked_write: preceding read of same file suppresses the flag", () => {
+    const detector = new AnomalyDetector({ detectUntrackedWrites: false });
+    const sess = "sess_r11_ut2";
+
+    const events: TrailEvent[] = [
+      makeEvent({
+        kind: "tool_call",
+        actor: "Read",
+        summary: "Read tool: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    expect(untrackedFlags).toHaveLength(0);
+  });
+
+  it("untracked_write: read AFTER write does not protect the write", () => {
+    const detector = new AnomalyDetector({ detectUntrackedWrites: false });
+    const sess = "sess_r11_ut3";
+
+    const events: TrailEvent[] = [
+      // write happens FIRST
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+      // read comes AFTER the write — too late to establish causality
+      makeEvent({
+        kind: "tool_call",
+        actor: "Read",
+        summary: "Read tool: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    // Write had no preceding read — must still be flagged
+    expect(untrackedFlags).toHaveLength(1);
+    expect(untrackedFlags[0]!.description).toContain("/src/auth.ts");
+  });
+
+  it("untracked_write with detectUntrackedWrites:true always fires regardless of auto-detection", () => {
+    // With explicit flag, detection runs even without any tool_call reads in window
+    const detector = new AnomalyDetector({ detectUntrackedWrites: true });
+    const sess = "sess_r11_ut4";
+
+    const events: TrailEvent[] = [
+      // No tool_call reads at all — just a write
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/secret.ts",
+        payload: { filePath: "/src/secret.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    expect(untrackedFlags).toHaveLength(1);
+    expect(untrackedFlags[0]!.description).toContain("/src/secret.ts");
+  });
+
+  it("untracked_write auto-mode: no tool_call reads = no flags (default off)", () => {
+    // detectUntrackedWrites: false (default), no tool_call reads → no false positives
+    const detector = new AnomalyDetector({ detectUntrackedWrites: false });
+    const sess = "sess_r11_ut5";
+
+    const events: TrailEvent[] = [
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/main.ts",
+        payload: { filePath: "/src/main.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    // No tool_call reads → auto-mode stays silent
+    expect(untrackedFlags).toHaveLength(0);
+  });
+
+  it("untracked_write: mixed window — only the file without a preceding read is flagged", () => {
+    // fileA has a read before its write → no flag
+    // fileB has no read before its write → flagged
+    const detector = new AnomalyDetector({ detectUntrackedWrites: false });
+    const sess = "sess_r11_ut6";
+
+    const events: TrailEvent[] = [
+      makeEvent({
+        kind: "tool_call",
+        actor: "Read",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+        summary: "Read /src/auth.ts",
+      }),
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        payload: { filePath: "/src/auth.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+        summary: "Write /src/auth.ts",
+      }),
+      // fileB write has no preceding read
+      makeEvent({
+        kind: "file_write",
+        actor: "FileSystem",
+        payload: { filePath: "/src/config.ts" },
+        provenance: makeProvenance({ sessionId: sess }),
+        summary: "Write /src/config.ts",
+      }),
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
+    expect(untrackedFlags).toHaveLength(1);
+    expect(untrackedFlags[0]!.description).toContain("/src/config.ts");
   });
 });

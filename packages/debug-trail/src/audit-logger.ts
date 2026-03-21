@@ -77,6 +77,10 @@ export class AuditLogger {
   // Tracks event IDs already reported as anomalies to prevent duplicate flags across flush boundaries.
   // A cross-boundary burst produces the same relatedEventIds each flush — dedup filters them.
   private reportedAnomalyEventIds = new Set<string>();
+  // Seq number of the last overflow (post-buffer) event analyzed via disk fallback.
+  // When bufferTruncated=true, flush() queries disk for events with seq > diskEventCursor
+  // that are not already in sessionEvents. Prevents re-analysis on subsequent flush() calls.
+  private diskEventCursor = -1;
   private onAnomalyDetected?: (result: FlushResult) => void;
 
   constructor(options: AuditLoggerOptions = {}) {
@@ -119,6 +123,7 @@ export class AuditLogger {
     this.detectionCursor = 0;
     this.bufferTruncated = false;
     this.reportedAnomalyEventIds = new Set<string>();
+    this.diskEventCursor = -1;
   }
 
   // -------------------------------------------------------------------------
@@ -467,11 +472,13 @@ export class AuditLogger {
    * Prepended to the unanalyzed slice so cross-boundary bursts (spanning two flush() calls)
    * are visible to the detector. Advisory only — lookback events are filtered out of final
    * results via reportedAnomalyEventIds dedup.
+   *
+   * @param earliest - The earliest event in the full unanalyzed window (memory + disk overflow).
+   *   Used as the anchor for the lookback window calculation. Null if nothing to analyze.
    */
-  private computeLookbackContext(unanalyzed: TrailEvent[]): TrailEvent[] {
-    if (this.detectionCursor === 0 || unanalyzed.length === 0) return [];
-    const earliestUnanalyzed = unanalyzed[0]!;
-    const anchorMs = new Date(earliestUnanalyzed.timestamp).getTime();
+  private computeLookbackContext(earliest: TrailEvent | null): TrailEvent[] {
+    if (this.detectionCursor === 0 || !earliest) return [];
+    const anchorMs = new Date(earliest.timestamp).getTime();
     const detectorConfig = this.anomalyDetector.getConfig();
     const lookbackWindowMs = Math.max(
       detectorConfig.burstDeletionWindowMs,
@@ -506,21 +513,41 @@ export class AuditLogger {
       .slice(this.detectionCursor)
       .filter((e) => e.kind !== "anomaly_flag");
 
+    // When the in-memory buffer was truncated, supplement with events from disk that
+    // exceed the buffer limit. This prevents silent detection blind spots on large sessions
+    // without paying disk-read costs for normal (non-truncated) sessions.
+    let overflowUnanalyzed: TrailEvent[] = [];
+    if (this.bufferTruncated) {
+      const bufferedIds = new Set(this.sessionEvents.map((e) => e.id));
+      try {
+        const diskEvents = await this.store.queryBySession(this.provenance.sessionId);
+        overflowUnanalyzed = diskEvents.filter(
+          (e) => !bufferedIds.has(e.id) && e.seq > this.diskEventCursor && e.kind !== "anomaly_flag",
+        );
+      } catch {
+        // advisory — disk read failure never blocks flush
+      }
+    }
+
+    const totalUnanalyzed = [...unanalyzed, ...overflowUnanalyzed];
     let detectedAnomalies: AnomalyFlag[] = [];
     let analyzedCount = 0;
 
-    if (unanalyzed.length > 0) {
+    if (totalUnanalyzed.length > 0) {
       // Compute lookback context BEFORE advancing the cursor — computeLookbackContext uses
       // slice(0, cursor) to find prior events, so it must see the OLD cursor value.
-      const lookback = this.computeLookbackContext(unanalyzed);
+      const lookback = this.computeLookbackContext(totalUnanalyzed[0] ?? null);
 
       // Advance cursor BEFORE logging anomaly events so those events are not re-analyzed
       this.detectionCursor = this.sessionEvents.length;
-      analyzedCount = unanalyzed.length;
+      if (overflowUnanalyzed.length > 0) {
+        this.diskEventCursor = overflowUnanalyzed[overflowUnanalyzed.length - 1]!.seq;
+      }
+      analyzedCount = totalUnanalyzed.length;
 
       try {
         // Prepend lookback context so bursts spanning two flush() calls are visible.
-        const windowForAnalysis = [...lookback, ...unanalyzed];
+        const windowForAnalysis = [...lookback, ...totalUnanalyzed];
         const anomalies = this.anomalyDetector.analyze(windowForAnalysis, this.provenance.sessionId);
 
         // Dedup: skip anomalies whose relatedEventIds were ALL reported in a prior flush.
