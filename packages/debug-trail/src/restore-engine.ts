@@ -1,0 +1,183 @@
+// ============================================================================
+// @dantecode/debug-trail — Restore Engine
+// Restores files from forensic snapshots with full audit trail.
+// PRD hard rule: no restore without audit record.
+// ============================================================================
+
+import { existsSync } from "node:fs";
+import type { DebugRestoreResult } from "./types.js";
+import { FileSnapshotter } from "./file-snapshotter.js";
+import { AuditLogger } from "./audit-logger.js";
+import { hashFile } from "./hash-engine.js";
+
+// ---------------------------------------------------------------------------
+// Restore options
+// ---------------------------------------------------------------------------
+
+export interface RestoreOptions {
+  /** Target path. Defaults to the original file path recorded in the snapshot. */
+  targetPath?: string;
+  /** Whether to overwrite if target already exists. Default: true. */
+  overwrite?: boolean;
+  /** Dry run — check if restore is possible without writing. */
+  dryRun?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Restore Engine
+// ---------------------------------------------------------------------------
+
+export class RestoreEngine {
+  constructor(
+    private readonly snapshotter: FileSnapshotter,
+    private readonly logger: AuditLogger,
+  ) {}
+
+  /**
+   * Restore a file from a snapshot ID.
+   * PRD: no restore without audit record.
+   */
+  async restoreFromSnapshot(
+    snapshotId: string,
+    originalFilePath: string,
+    options: RestoreOptions = {},
+  ): Promise<DebugRestoreResult> {
+    const targetPath = options.targetPath ?? originalFilePath;
+    const provenance = this.logger.getProvenance();
+
+    // Check snapshot exists
+    const snapshotExists = await this.snapshotter.snapshotExists(snapshotId);
+    if (!snapshotExists) {
+      const auditEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Restore failed: snapshot ${snapshotId} not found`,
+        { snapshotId, targetPath, error: "snapshot_not_found" },
+      );
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        auditEventId,
+        error: `Snapshot ${snapshotId} not found in storage`,
+      };
+    }
+
+    // Check target safety
+    if (existsSync(targetPath) && !options.overwrite) {
+      const auditEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Restore blocked: target exists and overwrite=false`,
+        { snapshotId, targetPath, error: "target_exists" },
+      );
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        auditEventId,
+        error: `Target path ${targetPath} already exists and overwrite is disabled`,
+      };
+    }
+
+    if (options.dryRun) {
+      return { snapshotId, restored: false, targetPath, error: "dry_run" };
+    }
+
+    // Capture current state of target before overwriting (audit trail)
+    const currentHash = await hashFile(targetPath);
+    let preRestoreSnapshotId: string | undefined;
+    if (currentHash) {
+      const pre = await this.snapshotter.captureSnapshot(
+        targetPath,
+        "pre-restore-capture",
+        provenance,
+      );
+      preRestoreSnapshotId = pre?.snapshotId;
+    }
+
+    // Perform the restore
+    const success = await this.snapshotter.restoreSnapshot(snapshotId, targetPath);
+
+    if (!success) {
+      const auditEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Restore failed: could not write to ${targetPath}`,
+        { snapshotId, targetPath, error: "write_failed" },
+      );
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        auditEventId,
+        error: `Failed to write restored content to ${targetPath}`,
+      };
+    }
+
+    // Capture after-state
+    const afterHash = await hashFile(targetPath);
+    const afterSnap = afterHash
+      ? await this.snapshotter.captureSnapshot(targetPath, "post-restore-capture", provenance)
+      : null;
+
+    // Mandatory audit record
+    const auditEventId = await this.logger.log(
+      "file_restore",
+      "RestoreEngine",
+      `Restored ${targetPath} from snapshot ${snapshotId}`,
+      {
+        snapshotId,
+        targetPath,
+        originalPath: originalFilePath,
+        preRestoreSnapshotId,
+        afterSnapshotId: afterSnap?.snapshotId,
+      },
+      { afterHash: afterSnap?.contentHash },
+    );
+
+    return { snapshotId, restored: true, targetPath, auditEventId };
+  }
+
+  /**
+   * Restore a deleted file from its tombstone.
+   */
+  async restoreDeletedFile(
+    filePath: string,
+    options: RestoreOptions = {},
+  ): Promise<DebugRestoreResult> {
+    const tombstone = this.snapshotter.getTombstoneForFile(filePath);
+
+    if (!tombstone) {
+      return {
+        snapshotId: "",
+        restored: false,
+        targetPath: filePath,
+        error: `No tombstone found for ${filePath} — deletion not recorded or file was never tracked`,
+      };
+    }
+
+    if (!tombstone.lastSnapshotId) {
+      return {
+        snapshotId: tombstone.tombstoneId,
+        restored: false,
+        targetPath: filePath,
+        error: `Tombstone exists for ${filePath} but before-state was not captured: ${tombstone.missingBeforeReason ?? "unknown reason"}`,
+      };
+    }
+
+    return this.restoreFromSnapshot(tombstone.lastSnapshotId, filePath, options);
+  }
+
+  /**
+   * List restorable snapshots for a file path.
+   */
+  getRestorableSnapshots(filePath: string): Array<{ snapshotId: string; deletedAt: string; hasBeforeState: boolean }> {
+    const tombstones = this.snapshotter.getTombstones().allForFile(filePath);
+    return tombstones.map((t) => ({
+      snapshotId: t.lastSnapshotId ?? t.tombstoneId,
+      deletedAt: t.deletedAt,
+      hasBeforeState: t.beforeStateCaptured,
+    }));
+  }
+}

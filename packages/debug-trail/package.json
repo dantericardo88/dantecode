@@ -1,19 +1,21 @@
 {
-  "name": "@dantecode/cli",
+  "name": "@dantecode/debug-trail",
   "version": "1.0.0",
-  "description": "DanteCode CLI - portable skill runtime and coding agent with DanteForge verification",
+  "description": "Always-on, immutable, queryable forensic debug spine for DanteCode agents",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dantericardo88/dantecode.git",
-    "directory": "packages/cli"
+    "directory": "packages/debug-trail"
   },
   "keywords": [
     "dantecode",
-    "cli",
-    "ai",
-    "coding-agent",
-    "terminal"
+    "debug",
+    "audit",
+    "forensic",
+    "trail",
+    "snapshot",
+    "replay"
   ],
   "engines": {
     "node": ">=18"
@@ -22,9 +24,6 @@
     "dist"
   ],
   "type": "module",
-  "bin": {
-    "dantecode": "dist/index.js"
-  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -34,8 +33,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",
@@ -43,19 +41,13 @@
   },
   "dependencies": {
     "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
-    "@dantecode/danteforge": "1.0.0",
-    "@dantecode/debug-trail": "1.0.0",
-    "@dantecode/git-engine": "1.0.0",
-    "@dantecode/sandbox": "1.0.0",
-    "@dantecode/skill-adapter": "1.0.0",
-    "yaml": "^2.6.0",
-    "zod": "^3.24.0"
+    "@dantecode/core": "1.0.0"
   },
   "publishConfig": {
     "access": "public"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

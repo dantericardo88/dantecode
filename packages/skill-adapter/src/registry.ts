@@ -31,7 +31,7 @@ export interface SkillRegistryEntry {
   name: string;
   /** The skill description from frontmatter. */
   description: string;
-  /** The import source (claude, continue, opencode). */
+  /** The import source (claude, continue, opencode, skillbridge). */
   importSource: string;
   /** The adapter version used during wrapping. */
   adapterVersion: string;
@@ -43,6 +43,15 @@ export interface SkillRegistryEntry {
   originalTools?: string[];
   /** The mode (primary/subagent) if specified. */
   mode?: string;
+  // --- SkillBridge-specific fields (only present for skillbridge-sourced skills) ---
+  /** Conversion score from DanteForge (0–1). Only for skillbridge source. */
+  conversionScore?: number;
+  /** Quality bucket: green/amber/red. Only for skillbridge source. */
+  bucket?: "green" | "amber" | "red";
+  /** Runtime capability warnings. Only for skillbridge source. */
+  runtimeWarnings?: string[];
+  /** Capability classification. Only for skillbridge source. */
+  classification?: string;
 }
 
 /** Result of validating a skill. */
@@ -210,10 +219,13 @@ export async function loadSkillRegistry(projectRoot: string): Promise<SkillRegis
     const fm = extractFrontmatter(content);
     if (fm === null) continue;
 
+    const importSource =
+      typeof fm["import_source"] === "string" ? fm["import_source"] : "unknown";
+
     const registryEntry: SkillRegistryEntry = {
       name: typeof fm["name"] === "string" ? fm["name"] : entry,
       description: typeof fm["description"] === "string" ? fm["description"] : "",
-      importSource: typeof fm["import_source"] === "string" ? fm["import_source"] : "unknown",
+      importSource,
       adapterVersion: typeof fm["adapter_version"] === "string" ? fm["adapter_version"] : "unknown",
       wrappedAt: typeof fm["wrapped_at"] === "string" ? fm["wrapped_at"] : "",
       path: skillFilePath,
@@ -222,6 +234,35 @@ export async function loadSkillRegistry(projectRoot: string): Promise<SkillRegis
         : undefined,
       mode: typeof fm["mode"] === "string" ? fm["mode"] : undefined,
     };
+
+    // Augment with bridge metadata if this is a skillbridge-sourced skill
+    if (importSource === "skillbridge") {
+      try {
+        const bridgeMetaPath = join(skillDir, "bridge-meta.json");
+        const bridgeMetaRaw = await readFile(bridgeMetaPath, "utf-8");
+        const bridgeMeta = JSON.parse(bridgeMetaRaw) as Record<string, unknown>;
+        if (typeof bridgeMeta["conversionScore"] === "number") {
+          registryEntry.conversionScore = bridgeMeta["conversionScore"];
+        }
+        if (
+          bridgeMeta["bucket"] === "green" ||
+          bridgeMeta["bucket"] === "amber" ||
+          bridgeMeta["bucket"] === "red"
+        ) {
+          registryEntry.bucket = bridgeMeta["bucket"];
+        }
+        if (Array.isArray(bridgeMeta["runtimeWarnings"])) {
+          registryEntry.runtimeWarnings = (bridgeMeta["runtimeWarnings"] as unknown[]).filter(
+            (w): w is string => typeof w === "string",
+          );
+        }
+        if (typeof bridgeMeta["classification"] === "string") {
+          registryEntry.classification = bridgeMeta["classification"];
+        }
+      } catch {
+        // bridge-meta.json missing or unreadable — non-fatal
+      }
+    }
 
     registry.push(registryEntry);
   }

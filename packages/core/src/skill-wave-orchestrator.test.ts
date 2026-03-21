@@ -14,7 +14,10 @@ import {
   buildWavePrompt,
   isWaveComplete,
   CLAUDE_WORKFLOW_MODE,
+  buildBridgeWarningPreamble,
+  hasBridgeCapabilityGaps,
 } from "./skill-wave-orchestrator.js";
+import type { BridgeActivationWarnings } from "./skill-wave-orchestrator.js";
 
 // ---------------------------------------------------------------------------
 // Wave Parsing
@@ -324,5 +327,131 @@ describe("CLAUDE_WORKFLOW_MODE", () => {
     expect(CLAUDE_WORKFLOW_MODE).toContain("Surgical Edit");
     expect(CLAUDE_WORKFLOW_MODE).toContain("[WAVE COMPLETE]");
     expect(CLAUDE_WORKFLOW_MODE).toContain("gh search repos");
+  });
+});
+
+// ============================================================================
+// SkillBridge Warning Surface Tests
+// ============================================================================
+
+describe("buildBridgeWarningPreamble", () => {
+  const base: BridgeActivationWarnings = {
+    skillName: "test-skill",
+    bucket: "green",
+    conversionScore: 0.95,
+    runtimeWarnings: [],
+    conversionWarnings: [],
+    hasCapabilityGaps: false,
+  };
+
+  it("returns empty string for green skill with no warnings", () => {
+    expect(buildBridgeWarningPreamble(base)).toBe("");
+  });
+
+  it("returns non-empty string when bucket is amber", () => {
+    const amber: BridgeActivationWarnings = { ...base, bucket: "amber" };
+    expect(buildBridgeWarningPreamble(amber).length).toBeGreaterThan(0);
+  });
+
+  it("returns non-empty string when bucket is red", () => {
+    const red: BridgeActivationWarnings = { ...base, bucket: "red" };
+    expect(buildBridgeWarningPreamble(red).length).toBeGreaterThan(0);
+  });
+
+  it("includes WARNING prefix for amber bucket", () => {
+    const amber: BridgeActivationWarnings = { ...base, bucket: "amber" };
+    expect(buildBridgeWarningPreamble(amber)).toContain("WARNING:");
+  });
+
+  it("includes BLOCKED prefix for red bucket", () => {
+    const red: BridgeActivationWarnings = { ...base, bucket: "red" };
+    expect(buildBridgeWarningPreamble(red)).toContain("BLOCKED:");
+  });
+
+  it("does not include emoji characters", () => {
+    const amber: BridgeActivationWarnings = { ...base, bucket: "amber" };
+    const result = buildBridgeWarningPreamble(amber);
+    expect(result).not.toMatch(/[⚠❌]/u);
+  });
+
+  it("lists runtime warnings in output", () => {
+    const withWarnings: BridgeActivationWarnings = {
+      ...base,
+      runtimeWarnings: ["needs shell", "needs browser"],
+      hasCapabilityGaps: true,
+    };
+    const result = buildBridgeWarningPreamble(withWarnings);
+    expect(result).toContain("needs shell");
+    expect(result).toContain("needs browser");
+  });
+
+  it("lists conversion warnings in output", () => {
+    const withConv: BridgeActivationWarnings = {
+      ...base,
+      bucket: "amber",
+      conversionWarnings: ["check MCP config"],
+    };
+    const result = buildBridgeWarningPreamble(withConv);
+    expect(result).toContain("check MCP config");
+  });
+
+  it("ends with separator line for non-green", () => {
+    const amber: BridgeActivationWarnings = { ...base, bucket: "amber" };
+    const result = buildBridgeWarningPreamble(amber);
+    expect(result).toMatch(/---\n$/);
+  });
+
+  it("includes SkillBridge Activation Notice header for non-green", () => {
+    const amber: BridgeActivationWarnings = { ...base, bucket: "amber" };
+    expect(buildBridgeWarningPreamble(amber)).toContain("SkillBridge Activation Notice");
+  });
+});
+
+describe("hasBridgeCapabilityGaps", () => {
+  it("returns false for empty warnings array", () => {
+    expect(hasBridgeCapabilityGaps([])).toBe(false);
+  });
+
+  it("returns true for non-empty warnings array", () => {
+    expect(hasBridgeCapabilityGaps(["needs shell"])).toBe(true);
+  });
+
+  it("returns true for multiple warnings", () => {
+    expect(hasBridgeCapabilityGaps(["needs shell", "needs browser", "needs mcp"])).toBe(true);
+  });
+});
+
+describe("buildWavePrompt with bridgeWarnings", () => {
+  it("prepends bridge preamble when bridgeWarnings is amber", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something\n\n## Step 2\nDo more");
+    const state = createWaveState(waves);
+    const warnings: BridgeActivationWarnings = {
+      skillName: "test",
+      bucket: "amber",
+      conversionScore: 0.7,
+      runtimeWarnings: ["needs shell"],
+      conversionWarnings: [],
+      hasCapabilityGaps: true,
+    };
+    const prompt = buildWavePrompt(state, warnings);
+    expect(prompt).toContain("SkillBridge Activation Notice");
+  });
+
+  it("no preamble when bridgeWarnings is undefined", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something");
+    const state = createWaveState(waves);
+    const prompt = buildWavePrompt(state);
+    expect(prompt).not.toContain("SkillBridge Activation Notice");
+  });
+
+  it("no preamble when bridgeWarnings is green with no warnings", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something");
+    const state = createWaveState(waves);
+    const greenWarnings: BridgeActivationWarnings = {
+      skillName: "test", bucket: "green", conversionScore: 0.95,
+      runtimeWarnings: [], conversionWarnings: [], hasCapabilityGaps: false,
+    };
+    const prompt = buildWavePrompt(state, greenWarnings);
+    expect(prompt).not.toContain("SkillBridge Activation Notice");
   });
 });

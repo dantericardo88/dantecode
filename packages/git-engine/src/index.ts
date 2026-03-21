@@ -134,3 +134,35 @@ export type {
   MultiRepoCoordinatorOptions,
   WorkflowStartResult,
 } from "./multi-repo-coordinator.js";
+
+// ─── Council Merge Helpers ───────────────────────────────────────────────────
+
+export {
+  preserveCandidate,
+  attemptMerge,
+  rollbackMerge,
+  applyPatch as applyGitPatch,
+  getMergedBranches,
+  getMergeBase,
+} from "./merge.js";
+export type {
+  MergeAttemptResult,
+  CandidateSnapshot,
+  MergeOptions,
+} from "./merge.js";
+
+// ─── Council Conflict Scanner ───────────────────────────────────────────────
+
+export {
+  listConflictedFiles,
+  scanFileConflicts,
+  scanAllConflicts,
+  diffSymbols,
+  predictConflicts,
+} from "./conflict-scan.js";
+export type {
+  ConflictHunk,
+  FileConflictInfo,
+  ConflictScanResult,
+  SymbolDiffEntry,
+} from "./conflict-scan.js";

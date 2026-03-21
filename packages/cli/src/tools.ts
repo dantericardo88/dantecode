@@ -180,6 +180,18 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
     await mkdir(dirname(resolved), { recursive: true });
     await writeFile(resolved, content, "utf-8");
     const lineCount = content.split("\n").length;
+
+    // Always-on debug trail logging (non-blocking, fire-and-forget)
+    try {
+      const { getGlobalLogger } = await import("@dantecode/debug-trail");
+      const logger = getGlobalLogger();
+      if (logger) {
+        void logger.logFileWrite(resolved, undefined, undefined, undefined, undefined);
+      }
+    } catch {
+      // debug-trail is optional — never fail the tool
+    }
+
     return {
       content: `Successfully wrote ${lineCount} lines to ${resolved}`,
       isError: false,
@@ -269,6 +281,17 @@ async function toolEdit(
     context?.editAttempts?.delete(attemptKey);
 
     const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
+
+    // Always-on debug trail logging (non-blocking, fire-and-forget)
+    try {
+      const { getGlobalLogger } = await import("@dantecode/debug-trail");
+      const logger = getGlobalLogger();
+      if (logger) {
+        void logger.logFileWrite(resolved, undefined, undefined, undefined, undefined);
+      }
+    } catch {
+      // debug-trail is optional — never fail the tool
+    }
 
     return {
       content: `Successfully edited ${resolved} (${replacementCount} replacement${replacementCount !== 1 ? "s" : ""})`,

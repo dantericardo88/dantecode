@@ -12,6 +12,9 @@ import {
   validateSkill,
   importSkills,
   wrapSkillWithAdapter,
+  importSkillBridgeBundle,
+  listBridgeWarnings,
+  validateBridgeSkill,
 } from "@dantecode/skill-adapter";
 import type { ImportSource, ParsedSkill } from "@dantecode/skill-adapter";
 
@@ -46,6 +49,12 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
     case "import":
       await skillsImport(args.slice(1), projectRoot);
       break;
+    case "import-bridge":
+      await skillsImportBridge(args.slice(1), projectRoot);
+      break;
+    case "convert":
+      await skillsConvert(args.slice(1), projectRoot);
+      break;
     case "wrap":
       await skillsWrap(args.slice(1), projectRoot);
       break;
@@ -61,21 +70,17 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
-      process.stdout.write(`  dantecode skills list                   List registered skills\n`);
-      process.stdout.write(`  dantecode skills import --from-claude   Import skills from Claude\n`);
-      process.stdout.write(
-        `  dantecode skills import --from-continue Import skills from Continue.dev\n`,
-      );
-      process.stdout.write(
-        `  dantecode skills import --from-opencode Import skills from OpenCode\n`,
-      );
-      process.stdout.write(
-        `  dantecode skills import --file <path>   Import a single skill file\n`,
-      );
-      process.stdout.write(`  dantecode skills wrap <name>            Wrap an existing skill\n`);
-      process.stdout.write(`  dantecode skills show <name>            Show skill definition\n`);
-      process.stdout.write(`  dantecode skills validate <name>        Validate a skill\n`);
-      process.stdout.write(`  dantecode skills remove <name>          Remove a skill\n`);
+      process.stdout.write(`  dantecode skills list                        List registered skills\n`);
+      process.stdout.write(`  dantecode skills import --from-claude        Import from Claude\n`);
+      process.stdout.write(`  dantecode skills import --from-continue      Import from Continue.dev\n`);
+      process.stdout.write(`  dantecode skills import --from-opencode      Import from OpenCode\n`);
+      process.stdout.write(`  dantecode skills import --file <path>        Import a single skill file\n`);
+      process.stdout.write(`  dantecode skills import-bridge <bundle-dir>  Import a SkillBridge bundle\n`);
+      process.stdout.write(`  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`);
+      process.stdout.write(`  dantecode skills wrap <name>                 Wrap an existing skill\n`);
+      process.stdout.write(`  dantecode skills show <name>                 Show skill definition\n`);
+      process.stdout.write(`  dantecode skills validate <name>             Validate a skill\n`);
+      process.stdout.write(`  dantecode skills remove <name>               Remove a skill\n`);
       break;
   }
 }
@@ -118,8 +123,16 @@ async function skillsList(projectRoot: string): Promise<void> {
     const version = skill.adapterVersion.slice(0, versionWidth).padEnd(versionWidth);
     const desc = skill.description.slice(0, 60);
 
+    // Bridge bucket indicator
+    let bucketTag = "";
+    if (skill.importSource === "skillbridge" && skill.bucket) {
+      const bucketColor =
+        skill.bucket === "green" ? GREEN : skill.bucket === "amber" ? YELLOW : RED;
+      bucketTag = ` ${bucketColor}[${skill.bucket}]${RESET}`;
+    }
+
     process.stdout.write(
-      `  ${YELLOW}${name}${RESET} ${DIM}${source}${RESET} ${DIM}${version}${RESET} ${desc}\n`,
+      `  ${YELLOW}${name}${RESET} ${DIM}${source}${RESET} ${DIM}${version}${RESET} ${desc}${bucketTag}\n`,
     );
   }
 
@@ -338,6 +351,11 @@ async function skillsShow(args: string[], projectRoot: string): Promise<void> {
 
   process.stdout.write(`\n${BOLD}Instructions:${RESET}\n`);
   process.stdout.write(`${skill.instructions}\n\n`);
+
+  // Show bridge metadata if this is a skillbridge-sourced skill
+  if (skill.importSource === "skillbridge") {
+    await showBridgeDetails(skillName, projectRoot);
+  }
 }
 
 /**
@@ -374,7 +392,18 @@ async function skillsValidate(args: string[], projectRoot: string): Promise<void
 
   // Overall
   const overallIcon = result.overallPassed ? `${GREEN}PASSED${RESET}` : `${RED}FAILED${RESET}`;
-  process.stdout.write(`\n  ${BOLD}Overall:${RESET} ${overallIcon}\n\n`);
+  process.stdout.write(`\n  ${BOLD}Overall:${RESET} ${overallIcon}\n`);
+
+  // For bridge skills, also validate bundle integrity
+  const skillDef = await getSkill(skillName, projectRoot);
+  if (skillDef?.importSource === "skillbridge") {
+    const bridgeValid = await validateBridgeSkill(skillName, projectRoot);
+    const bridgeIcon = bridgeValid ? `${GREEN}VALID${RESET}` : `${RED}INVALID${RESET}`;
+    process.stdout.write(`  Bridge manifest:    ${bridgeIcon}\n`);
+    process.stdout.write("\n");
+  } else {
+    process.stdout.write("\n");
+  }
 }
 
 /**
@@ -393,4 +422,167 @@ async function skillsRemove(args: string[], projectRoot: string): Promise<void> 
   } else {
     process.stdout.write(`${RED}Skill not found: ${skillName}${RESET}\n`);
   }
+}
+
+/**
+ * Imports a compiled SkillBridge bundle into the local project.
+ * Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked]
+ */
+async function skillsImportBridge(args: string[], projectRoot: string): Promise<void> {
+  const bundleDir = args.find((a) => !a.startsWith("--"));
+  const allowBlocked = args.includes("--allow-blocked");
+
+  if (!bundleDir) {
+    process.stdout.write(
+      `${RED}Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked]${RESET}\n\n` +
+        `${DIM}  <bundle-dir>     Path to the compiled SkillBridge bundle (contains skillbridge.json)\n` +
+        `  --allow-blocked  Import even if the bundle is classified as red (blocked)${RESET}\n`,
+    );
+    return;
+  }
+
+  const resolvedBundleDir = resolve(projectRoot, bundleDir);
+  process.stdout.write(`\n${DIM}Importing SkillBridge bundle from: ${resolvedBundleDir}${RESET}\n`);
+
+  const result = await importSkillBridgeBundle({
+    bundleDir: resolvedBundleDir,
+    projectRoot,
+    allowBlocked,
+  });
+
+  if (!result.success) {
+    process.stdout.write(`\n${RED}Import failed:${RESET} ${result.error ?? "Unknown error"}\n\n`);
+    return;
+  }
+
+  // Bucket indicator
+  const bucketColor =
+    result.bucket === "green" ? GREEN : result.bucket === "amber" ? YELLOW : RED;
+  const bucketLabel = result.bucket.toUpperCase();
+
+  process.stdout.write(
+    `\n${GREEN}Bundle imported:${RESET} ${BOLD}${result.slug}${RESET}\n` +
+      `  ${DIM}Skill dir:       ${result.skillDir}${RESET}\n` +
+      `  ${DIM}Quality bucket:  ${bucketColor}${bucketLabel}${RESET}\n` +
+      `  ${DIM}Conv. score:     ${(result.conversionScore * 100).toFixed(0)}%${RESET}\n`,
+  );
+
+  if (result.runtimeWarnings.length > 0) {
+    process.stdout.write(`\n${YELLOW}Runtime warnings (${result.runtimeWarnings.length}):${RESET}\n`);
+    for (const w of result.runtimeWarnings) {
+      process.stdout.write(`  ${YELLOW}!${RESET} ${w}\n`);
+    }
+  }
+
+  if (result.conversionWarnings.length > 0) {
+    process.stdout.write(
+      `\n${DIM}Conversion warnings (${result.conversionWarnings.length}):${RESET}\n`,
+    );
+    for (const w of result.conversionWarnings) {
+      process.stdout.write(`  ${DIM}- ${w}${RESET}\n`);
+    }
+  }
+
+  process.stdout.write(
+    `\n${DIM}Use 'dantecode skills show ${result.slug}' to view the skill.${RESET}\n\n`,
+  );
+}
+
+/**
+ * Facade command: dantecode skills convert <source> --to dantecode
+ * Delegates conversion to DanteForge binary, then imports the resulting bundle.
+ */
+async function skillsConvert(args: string[], projectRoot: string): Promise<void> {
+  const source = args.find((a) => !a.startsWith("--"));
+  const toTargets = (() => {
+    const idx = args.indexOf("--to");
+    return idx !== -1 && args[idx + 1] ? (args[idx + 1] ?? "dantecode") : "dantecode";
+  })();
+
+  if (!source) {
+    process.stdout.write(
+      `${RED}Usage: dantecode skills convert <source> --to dantecode${RESET}\n\n` +
+        `${DIM}  <source>   Local folder, single SKILL.md, or GitHub URL\n` +
+        `  --to       Target(s): dantecode,qwen-skill,mcp (default: dantecode)${RESET}\n` +
+        `\n${DIM}This command delegates to 'danteforge skills convert' and then imports\n` +
+        `the resulting bundle via 'dantecode skills import-bridge'.${RESET}\n`,
+    );
+    return;
+  }
+
+  process.stdout.write(
+    `\n${DIM}Converting skill source via DanteForge: ${source}${RESET}\n` +
+      `${DIM}Target(s): ${toTargets}${RESET}\n\n`,
+  );
+
+  // Shell out to danteforge binary for the actual compilation
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+
+  const dfArgs = ["skills", "convert", source, "--to", toTargets, "--verify"];
+
+  try {
+    const { stdout, stderr } = await execFileAsync("danteforge", dfArgs, {
+      cwd: projectRoot,
+      timeout: 120_000,
+    });
+    if (stdout) process.stdout.write(stdout);
+    if (stderr) process.stderr.write(stderr);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stdout.write(
+      `${RED}DanteForge conversion failed:${RESET} ${message}\n` +
+        `\n${DIM}Make sure 'danteforge' is installed and available in PATH.\n` +
+        `Alternatively, run the conversion manually and use:\n` +
+        `  dantecode skills import-bridge <bundle-dir>${RESET}\n`,
+    );
+    return;
+  }
+
+  // Derive the expected bundle output path
+  // DanteForge defaults to .danteforge/converted/<slug>/
+  const rawSlug =
+    resolve(projectRoot, source)
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .pop() ?? "skill";
+  const slug = rawSlug.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const bundleDir = join(projectRoot, ".danteforge", "converted", slug);
+
+  process.stdout.write(`\n${DIM}Importing bundle: ${bundleDir}${RESET}\n`);
+  await skillsImportBridge([bundleDir], projectRoot);
+}
+
+/**
+ * Augments skillsShow to display bridge metadata when present.
+ * Called from show for skillbridge-sourced skills.
+ */
+async function showBridgeDetails(skillName: string, projectRoot: string): Promise<void> {
+  const warnings = await listBridgeWarnings(skillName, projectRoot);
+  if (!warnings) return;
+
+  const bucketColor =
+    warnings.bucket === "green" ? GREEN : warnings.bucket === "amber" ? YELLOW : RED;
+
+  process.stdout.write(`\n${BOLD}SkillBridge Metadata:${RESET}\n`);
+  process.stdout.write(
+    `  ${DIM}Quality bucket:  ${bucketColor}${warnings.bucket.toUpperCase()}${RESET}\n`,
+  );
+  process.stdout.write(
+    `  ${DIM}Conv. score:     ${(warnings.conversionScore * 100).toFixed(0)}%${RESET}\n`,
+  );
+
+  if (warnings.runtimeWarnings.length > 0) {
+    process.stdout.write(
+      `\n${YELLOW}Runtime warnings (${warnings.runtimeWarnings.length}):${RESET}\n`,
+    );
+    for (const w of warnings.runtimeWarnings) {
+      process.stdout.write(`  ${YELLOW}!${RESET} ${w}\n`);
+    }
+  }
+
+  const valid = await validateBridgeSkill(skillName, projectRoot);
+  const validIcon = valid ? `${GREEN}VALID${RESET}` : `${RED}INVALID${RESET}`;
+  process.stdout.write(`\n  ${DIM}Bundle integrity: ${validIcon}\n${RESET}`);
 }

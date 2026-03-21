@@ -1,0 +1,1003 @@
+// ============================================================================
+// @dantecode/debug-trail — Test Suite
+// Covers all 7 golden flows + unit tests for every module.
+// ============================================================================
+
+import { describe, it, expect, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises";
+
+// --- Modules under test ---
+import { hashContent, hashFile, makeSnapshotId, makeTombstoneId, shortHash, hashesEqual } from "./hash-engine.js";
+import { diffText, formatUnifiedDiff, isBinaryContent } from "./diff-engine.js";
+import { TrailEventIndex } from "./state/trail-index.js";
+import { SessionMap } from "./state/session-map.js";
+import { TombstoneRegistry } from "./state/tombstones.js";
+import { AnomalyDetector } from "./anomaly-detector.js";
+import { scoreCompleteness } from "./export-engine.js";
+import { parseNaturalLanguageQuery, TrailQueryEngine } from "./trail-query-engine.js";
+import { RetentionPolicy } from "./policies/retention-policy.js";
+import { CompressionPolicy } from "./policies/compression-policy.js";
+import { PrivacyPolicy } from "./policies/privacy-policy.js";
+import type { TrailEvent, TrailProvenance, DeleteTombstone, FileSnapshotRecord } from "./types.js";
+import { defaultConfig } from "./types.js";
+import { FileSnapshotter } from "./file-snapshotter.js";
+import { AuditLogger } from "./audit-logger.js";
+import { ReplayOrchestrator } from "./replay-orchestrator.js";
+import { TrailStore } from "./sqlite-store.js";
+
+// ============================================================================
+// Test helpers
+// ============================================================================
+
+function makeProvenance(overrides?: Partial<TrailProvenance>): TrailProvenance {
+  return {
+    sessionId: `sess_test_${randomUUID().slice(0, 8)}`,
+    runId: `run_test_${randomUUID().slice(0, 8)}`,
+    ...overrides,
+  };
+}
+
+function makeEvent(overrides?: Partial<TrailEvent>): TrailEvent {
+  const provenance = makeProvenance();
+  return {
+    id: `evt_${randomUUID().slice(0, 8)}`,
+    seq: 0,
+    timestamp: new Date().toISOString(),
+    kind: "tool_call",
+    actor: "TestActor",
+    summary: "Test event",
+    payload: {},
+    provenance,
+    ...overrides,
+  };
+}
+
+function makeDeletedTombstone(overrides?: Partial<DeleteTombstone>): DeleteTombstone {
+  const provenance = makeProvenance();
+  return {
+    tombstoneId: `tomb_${randomUUID().slice(0, 8)}`,
+    filePath: "/test/file.ts",
+    deletedAt: new Date().toISOString(),
+    deletedBy: "TestActor",
+    beforeStateCaptured: true,
+    lastSnapshotId: `snap_${randomUUID().slice(0, 8)}`,
+    provenance,
+    trailEventId: `evt_${randomUUID().slice(0, 8)}`,
+    ...overrides,
+  };
+}
+
+// ============================================================================
+// Hash Engine
+// ============================================================================
+
+describe("hash-engine", () => {
+  it("hashContent returns consistent SHA-256 hex for strings", () => {
+    const h1 = hashContent("hello world");
+    const h2 = hashContent("hello world");
+    expect(h1).toBe(h2);
+    expect(h1).toHaveLength(64);
+  });
+
+  it("hashContent differs for different inputs", () => {
+    expect(hashContent("foo")).not.toBe(hashContent("bar"));
+  });
+
+  it("hashFile returns null for nonexistent file", async () => {
+    const result = await hashFile("/nonexistent/path/file.ts");
+    expect(result).toBeNull();
+  });
+
+  it("hashFile hashes an actual file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-test-"));
+    const filePath = join(dir, "test.txt");
+    await writeFile(filePath, "hello test content");
+    const hash = await hashFile(filePath);
+    expect(hash).not.toBeNull();
+    expect(hash!).toHaveLength(64);
+    await rm(dir, { recursive: true });
+  });
+
+  it("shortHash returns 8-char prefix", () => {
+    const h = hashContent("test");
+    expect(shortHash(h)).toHaveLength(8);
+    expect(h.startsWith(shortHash(h))).toBe(true);
+  });
+
+  it("makeSnapshotId produces stable unique ID", () => {
+    const id1 = makeSnapshotId("/a/b.ts", "abc123", "2024-01-01T00:00:00Z");
+    const id2 = makeSnapshotId("/a/b.ts", "abc123", "2024-01-01T00:00:00Z");
+    expect(id1).toBe(id2);
+    expect(id1).toMatch(/^snap_/);
+  });
+
+  it("makeTombstoneId produces stable unique ID", () => {
+    const id = makeTombstoneId("/a/b.ts", "2024-01-01T00:00:00Z");
+    expect(id).toMatch(/^tomb_/);
+  });
+
+  it("hashesEqual works correctly", () => {
+    expect(hashesEqual("abc", "abc")).toBe(true);
+    expect(hashesEqual("abc", "def")).toBe(false);
+    expect(hashesEqual(null, "abc")).toBe(false);
+    expect(hashesEqual(undefined, undefined)).toBe(false);
+  });
+});
+
+// ============================================================================
+// Diff Engine
+// ============================================================================
+
+describe("diff-engine", () => {
+  it("diffText detects additions", () => {
+    const result = diffText("line1\nline2", "line1\nline2\nline3");
+    expect(result.linesAdded).toBe(1);
+    expect(result.linesRemoved).toBe(0);
+  });
+
+  it("diffText detects removals", () => {
+    const result = diffText("line1\nline2\nline3", "line1\nline2");
+    expect(result.linesAdded).toBe(0);
+    expect(result.linesRemoved).toBe(1);
+  });
+
+  it("diffText reports correct summary", () => {
+    const result = diffText("a\nb", "a\nc\nd");
+    expect(result.summary).toBe("+2 -1");
+  });
+
+  it("diffText with identical content produces 0 changes", () => {
+    const text = "line1\nline2\nline3";
+    const result = diffText(text, text);
+    expect(result.linesAdded).toBe(0);
+    expect(result.linesRemoved).toBe(0);
+    expect(result.hunks).toHaveLength(0);
+  });
+
+  it("formatUnifiedDiff produces valid unified diff", () => {
+    const diff = diffText("old content\n", "new content\n", { filePath: "test.ts" });
+    const formatted = formatUnifiedDiff(diff);
+    expect(formatted).toContain("--- a/test.ts");
+    expect(formatted).toContain("+++ b/test.ts");
+  });
+
+  it("isBinaryContent detects null bytes", () => {
+    const binary = Buffer.from([0, 1, 2, 3, 0, 0]);
+    expect(isBinaryContent(binary)).toBe(true);
+    expect(isBinaryContent("plain text")).toBe(false);
+  });
+
+  it("diffText handles empty before", () => {
+    const result = diffText("", "line1\nline2");
+    expect(result.linesAdded).toBe(2);
+  });
+
+  it("diffText handles empty after", () => {
+    const result = diffText("line1\nline2", "");
+    expect(result.linesRemoved).toBe(2);
+  });
+});
+
+// ============================================================================
+// Trail Event Index
+// ============================================================================
+
+describe("trail-index", () => {
+  it("indexes events by session", () => {
+    const index = new TrailEventIndex();
+    const sessionId = "sess_abc";
+    const e1 = makeEvent({ provenance: makeProvenance({ sessionId }), kind: "file_write" });
+    const e2 = makeEvent({ provenance: makeProvenance({ sessionId }), kind: "tool_call" });
+    index.index(e1);
+    index.index(e2);
+    expect(index.findBySession(sessionId)).toHaveLength(2);
+  });
+
+  it("indexes events by file path", () => {
+    const index = new TrailEventIndex();
+    const e = makeEvent({ payload: { filePath: "/src/auth.ts" } });
+    index.index(e);
+    expect(index.findByFile("/src/auth.ts")).toHaveLength(1);
+  });
+
+  it("searches by text in summary", () => {
+    const index = new TrailEventIndex();
+    const e = makeEvent({ summary: "File deleted: auth.ts" });
+    index.index(e);
+    const results = index.search("auth.ts");
+    expect(results).toHaveLength(1);
+  });
+
+  it("findByFilePrefix matches directory", () => {
+    const index = new TrailEventIndex();
+    const e1 = makeEvent({ payload: { filePath: "/src/auth/login.ts" } });
+    const e2 = makeEvent({ payload: { filePath: "/src/auth/logout.ts" } });
+    const e3 = makeEvent({ payload: { filePath: "/test/auth.test.ts" } });
+    index.index(e1);
+    index.index(e2);
+    index.index(e3);
+    const results = index.findByFilePrefix("/src/auth/");
+    expect(results).toHaveLength(2);
+  });
+
+  it("findByKind filters correctly", () => {
+    const index = new TrailEventIndex();
+    index.index(makeEvent({ kind: "file_write" }));
+    index.index(makeEvent({ kind: "file_delete" }));
+    index.index(makeEvent({ kind: "file_write" }));
+    expect(index.findByKind("file_write")).toHaveLength(2);
+    expect(index.findByKind("file_delete")).toHaveLength(1);
+  });
+
+  it("bulk indexes correctly", () => {
+    const index = new TrailEventIndex();
+    const events = Array.from({ length: 10 }, (_, i) => makeEvent({ seq: i }));
+    index.bulkIndex(events);
+    expect(index.size()).toBe(10);
+  });
+
+  it("clear resets all data", () => {
+    const index = new TrailEventIndex();
+    index.index(makeEvent());
+    index.clear();
+    expect(index.size()).toBe(0);
+  });
+});
+
+// ============================================================================
+// Session Map
+// ============================================================================
+
+describe("session-map", () => {
+  it("starts a new session", () => {
+    const map = new SessionMap();
+    const info = map.startSession({ sessionId: "s1", runId: "r1" });
+    expect(info.sessionId).toBe("s1");
+    expect(info.runId).toBe("r1");
+    expect(map.current()?.sessionId).toBe("s1");
+  });
+
+  it("returns existing session on re-start", () => {
+    const map = new SessionMap();
+    map.startSession({ sessionId: "s1" });
+    const info2 = map.startSession({ sessionId: "s1" });
+    expect(info2.sessionId).toBe("s1");
+  });
+
+  it("ends session and clears current", () => {
+    const map = new SessionMap();
+    map.startSession({ sessionId: "s1" });
+    map.endSession("s1");
+    expect(map.current()).toBeNull();
+    expect(map.get("s1")?.endedAt).toBeDefined();
+  });
+
+  it("records event counts", () => {
+    const map = new SessionMap();
+    map.startSession({ sessionId: "s1" });
+    map.recordEvent("s1", "file_write");
+    map.recordEvent("s1", "file_delete");
+    map.recordEvent("s1", "other");
+    const info = map.get("s1")!;
+    expect(info.eventCount).toBe(3);
+    expect(info.fileModCount).toBe(1);
+    expect(info.fileDeleteCount).toBe(1);
+  });
+
+  it("pins and unpins sessions", () => {
+    const map = new SessionMap();
+    map.startSession({ sessionId: "s1" });
+    map.pin("s1");
+    expect(map.get("s1")?.pinned).toBe(true);
+    map.unpin("s1");
+    expect(map.get("s1")?.pinned).toBe(false);
+  });
+
+  it("serializes and restores", () => {
+    const map = new SessionMap();
+    map.startSession({ sessionId: "s1" });
+    const data = map.toJSON();
+    const map2 = new SessionMap();
+    map2.loadFrom(data);
+    expect(map2.get("s1")?.sessionId).toBe("s1");
+  });
+});
+
+// ============================================================================
+// Tombstone Registry
+// ============================================================================
+
+describe("tombstone-registry", () => {
+  it("registers and retrieves tombstones", () => {
+    const reg = new TombstoneRegistry();
+    const t = makeDeletedTombstone({ filePath: "/a/b.ts" });
+    reg.register(t);
+    expect(reg.latestForFile("/a/b.ts")).toEqual(t);
+  });
+
+  it("returns most recent tombstone for file", () => {
+    const reg = new TombstoneRegistry();
+    const t1 = makeDeletedTombstone({ filePath: "/a/b.ts", deletedAt: "2024-01-01T00:00:00Z" });
+    const t2 = makeDeletedTombstone({ filePath: "/a/b.ts", deletedAt: "2024-01-02T00:00:00Z" });
+    reg.register(t1);
+    reg.register(t2);
+    expect(reg.latestForFile("/a/b.ts")?.deletedAt).toBe("2024-01-02T00:00:00Z");
+  });
+
+  it("forSession filters correctly", () => {
+    const reg = new TombstoneRegistry();
+    const p1 = makeProvenance({ sessionId: "s1" });
+    const p2 = makeProvenance({ sessionId: "s2" });
+    reg.register(makeDeletedTombstone({ provenance: p1 }));
+    reg.register(makeDeletedTombstone({ provenance: p2 }));
+    expect(reg.forSession("s1")).toHaveLength(1);
+  });
+
+  it("withoutBeforeState finds capture gaps", () => {
+    const reg = new TombstoneRegistry();
+    reg.register(makeDeletedTombstone({ beforeStateCaptured: false, lastSnapshotId: undefined }));
+    reg.register(makeDeletedTombstone({ beforeStateCaptured: true }));
+    expect(reg.withoutBeforeState()).toHaveLength(1);
+  });
+
+  it("bulk loads tombstones", () => {
+    const reg = new TombstoneRegistry();
+    const tombstones = [makeDeletedTombstone(), makeDeletedTombstone(), makeDeletedTombstone()];
+    reg.bulkLoad(tombstones);
+    expect(reg.size()).toBe(3);
+  });
+});
+
+// ============================================================================
+// Anomaly Detector
+// ============================================================================
+
+describe("anomaly-detector", () => {
+  it("detects burst deletions", () => {
+    const detector = new AnomalyDetector({ burstDeletionCount: 3, burstDeletionWindowMs: 5000 });
+    const sessionId = "s1";
+    const now = Date.now();
+    const events: TrailEvent[] = [
+      makeEvent({ kind: "file_delete", timestamp: new Date(now).toISOString(), payload: { filePath: "/a.ts" } }),
+      makeEvent({ kind: "file_delete", timestamp: new Date(now + 1000).toISOString(), payload: { filePath: "/b.ts" } }),
+      makeEvent({ kind: "file_delete", timestamp: new Date(now + 2000).toISOString(), payload: { filePath: "/c.ts" } }),
+    ];
+    const flags = detector.analyze(events, sessionId);
+    const burst = flags.filter((f) => f.anomalyType === "burst_deletion");
+    expect(burst.length).toBeGreaterThan(0);
+    expect(burst[0]!.severity).toBe("high");
+  });
+
+  it("does not flag deletions outside time window", () => {
+    const detector = new AnomalyDetector({ burstDeletionCount: 3, burstDeletionWindowMs: 1000 });
+    const now = Date.now();
+    const events: TrailEvent[] = [
+      makeEvent({ kind: "file_delete", timestamp: new Date(now).toISOString() }),
+      makeEvent({ kind: "file_delete", timestamp: new Date(now + 5000).toISOString() }),
+      makeEvent({ kind: "file_delete", timestamp: new Date(now + 10000).toISOString() }),
+    ];
+    const flags = detector.analyze(events);
+    expect(flags.filter((f) => f.anomalyType === "burst_deletion")).toHaveLength(0);
+  });
+
+  it("detects phantom commits", () => {
+    const detector = new AnomalyDetector();
+    const events: TrailEvent[] = [
+      makeEvent({ kind: "tool_call", actor: "GitCommit", timestamp: new Date().toISOString() }),
+    ];
+    const flags = detector.analyze(events);
+    expect(flags.filter((f) => f.anomalyType === "phantom_commit")).toHaveLength(1);
+  });
+
+  it("detects missing before state", () => {
+    const detector = new AnomalyDetector();
+    const events: TrailEvent[] = [
+      makeEvent({ kind: "file_delete", payload: { filePath: "/x.ts" } }),
+    ];
+    const flags = detector.analyze(events);
+    expect(flags.filter((f) => f.anomalyType === "missing_before_state")).toHaveLength(1);
+  });
+
+  it("detects rapid loop", () => {
+    const detector = new AnomalyDetector({ rapidLoopCount: 3, rapidLoopWindowMs: 60000 });
+    const now = Date.now();
+    const events: TrailEvent[] = Array.from({ length: 3 }, (_, i) =>
+      makeEvent({ kind: "tool_call", actor: "Bash", timestamp: new Date(now + i * 1000).toISOString() }),
+    );
+    const flags = detector.analyze(events);
+    expect(flags.filter((f) => f.anomalyType === "rapid_loop")).toHaveLength(1);
+  });
+
+  it("detects high error rate", () => {
+    const detector = new AnomalyDetector({ errorRateThreshold: 0.3 });
+    const events: TrailEvent[] = [
+      ...Array.from({ length: 4 }, () => makeEvent({ kind: "error" })),
+      makeEvent({ kind: "tool_call" }),
+    ];
+    const flags = detector.analyze(events);
+    expect(flags.filter((f) => f.anomalyType === "high_error_rate")).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// Export Engine — scoreCompleteness
+// ============================================================================
+
+describe("export-engine scoreCompleteness", () => {
+  it("perfect score for empty session", () => {
+    const result = scoreCompleteness([], [], "s1");
+    expect(result.score).toBe(1.0);
+  });
+
+  it("penalizes missing provenance", () => {
+    const event = makeEvent();
+    // Corrupt provenance
+    (event.provenance as Partial<TrailProvenance>).sessionId = "";
+    const result = scoreCompleteness([event], [], "s1");
+    expect(result.missingProvenance).toHaveLength(1);
+    expect(result.score).toBeLessThan(1);
+  });
+
+  it("penalizes file events without snapshots", () => {
+    const event = makeEvent({ kind: "file_write" }); // no afterSnapshotId
+    const result = scoreCompleteness([event], [], "s1");
+    expect(result.snapshotGaps).toHaveLength(1);
+    expect(result.score).toBeLessThan(1);
+  });
+
+  it("full score when file events have snapshots", () => {
+    const event = makeEvent({ kind: "file_write", afterSnapshotId: "snap_abc" });
+    const result = scoreCompleteness([event], [], "s1");
+    expect(result.fileEventsWithSnapshots).toBe(1);
+    expect(result.score).toBe(1);
+  });
+
+  it("tombstones without before-state reduce score", () => {
+    const event = makeEvent({ kind: "file_delete", beforeSnapshotId: undefined });
+    const tombstone = makeDeletedTombstone({ beforeStateCaptured: false, lastSnapshotId: undefined });
+    const result = scoreCompleteness([event], [tombstone], "s1");
+    expect(result.snapshotGaps.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// Natural Language Query Parser
+// ============================================================================
+
+describe("parseNaturalLanguageQuery", () => {
+  it("detects error keywords", () => {
+    const q = parseNaturalLanguageQuery("show me all errors from today");
+    expect(q.errorsOnly).toBe(true);
+  });
+
+  it("detects deletion keywords", () => {
+    const q = parseNaturalLanguageQuery("what deleted auth.ts yesterday?");
+    expect(q.kinds).toContain("file_delete");
+  });
+
+  it("extracts file path from query", () => {
+    const q = parseNaturalLanguageQuery("what changed auth.ts?");
+    expect(q.text).toBe("auth.ts");
+  });
+
+  it("detects yesterday time range", () => {
+    const q = parseNaturalLanguageQuery("what happened yesterday?");
+    expect(q.afterDate).toBeDefined();
+    expect(q.beforeDate).toBeDefined();
+  });
+
+  it("detects last week time range", () => {
+    const q = parseNaturalLanguageQuery("show all errors last week");
+    expect(q.afterDate).toBeDefined();
+    expect(q.beforeDate).toBeUndefined();
+  });
+
+  it("detects today time range", () => {
+    const q = parseNaturalLanguageQuery("what ran today?");
+    expect(q.afterDate).toBeDefined();
+  });
+
+  it("passes text through for generic queries", () => {
+    const q = parseNaturalLanguageQuery("something unusual happened");
+    expect(q.text).toBeDefined();
+  });
+});
+
+// ============================================================================
+// Retention Policy
+// ============================================================================
+
+describe("retention-policy", () => {
+  function makeSession(daysAgo: number, pinned = false) {
+    const lastEventAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    return {
+      sessionId: `s_${daysAgo}`,
+      runId: "r1",
+      startedAt: lastEventAt,
+      lastEventAt,
+      eventCount: 10,
+      pinned,
+    };
+  }
+
+  it("keeps recent sessions", () => {
+    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+    const sessions = { s1: makeSession(2) };
+    const decisions = policy.evaluate(sessions);
+    expect(decisions[0]?.decision).toBe("keep");
+  });
+
+  it("prunes old sessions", () => {
+    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+    const sessions = { s1: makeSession(35) };
+    const decisions = policy.evaluate(sessions);
+    expect(decisions[0]?.decision).toBe("prune");
+  });
+
+  it("compresses middle-age sessions", () => {
+    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30, enableCompression: true });
+    const sessions = { s1: makeSession(15) };
+    const decisions = policy.evaluate(sessions);
+    expect(decisions[0]?.decision).toBe("compress");
+  });
+
+  it("always keeps pinned sessions", () => {
+    const policy = new RetentionPolicy({ prunePastDays: 1 });
+    const sessions = { s1: makeSession(100, true) };
+    const decisions = policy.evaluate(sessions);
+    expect(decisions[0]?.decision).toBe("keep");
+    expect(decisions[0]?.pinned).toBe(true);
+  });
+
+  it("getPruneList returns only prune decisions", () => {
+    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+    const sessions = {
+      recent: makeSession(2),
+      old: makeSession(35),
+    };
+    const pruneList = policy.getPruneList(sessions);
+    expect(pruneList).toContain("old");
+    expect(pruneList).not.toContain("recent");
+  });
+});
+
+// ============================================================================
+// Compression Policy
+// ============================================================================
+
+describe("compression-policy", () => {
+  function makeSnapshot(daysAgo: number, sizeBytes: number, compressed = false): FileSnapshotRecord {
+    const capturedAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    const provenance = makeProvenance();
+    return {
+      snapshotId: `snap_${daysAgo}`,
+      filePath: "/test.ts",
+      contentHash: hashContent(`content_${daysAgo}`),
+      sizeBytes,
+      capturedAt,
+      storagePath: `/tmp/snap_${daysAgo}`,
+      compressed,
+      provenance,
+      trailEventId: `evt_test`,
+    };
+  }
+
+  it("keeps recent small snapshots", () => {
+    const policy = new CompressionPolicy({ compressAfterDays: 7, maxSnapshotSizeBytes: 10_000_000 });
+    const snap = makeSnapshot(2, 1000);
+    const decisions = policy.evaluate([snap]);
+    expect(decisions[0]?.action).toBe("keep");
+  });
+
+  it("compresses old snapshots", () => {
+    const policy = new CompressionPolicy({ compressAfterDays: 7 });
+    const snap = makeSnapshot(10, 1000);
+    const decisions = policy.evaluate([snap]);
+    expect(decisions[0]?.action).toBe("compress");
+  });
+
+  it("compresses large snapshots", () => {
+    const policy = new CompressionPolicy({ maxSnapshotSizeBytes: 1000 });
+    const snap = makeSnapshot(1, 5000);
+    const decisions = policy.evaluate([snap]);
+    expect(decisions[0]?.action).toBe("compress");
+  });
+
+  it("marks already compressed as keep", () => {
+    const policy = new CompressionPolicy();
+    const snap = makeSnapshot(30, 1000, true);
+    const decisions = policy.evaluate([snap]);
+    expect(decisions[0]?.action).toBe("keep");
+  });
+
+  it("deduplicates identical content hashes", () => {
+    const policy = new CompressionPolicy({ enableDeduplication: true, pruneIdenticalHashes: true });
+    const hash = hashContent("same content");
+    const snap1 = { ...makeSnapshot(1, 100), contentHash: hash, snapshotId: "snap_a", capturedAt: new Date(Date.now() - 1000).toISOString() };
+    const snap2 = { ...makeSnapshot(2, 100), contentHash: hash, snapshotId: "snap_b", capturedAt: new Date(Date.now() - 2000).toISOString() };
+    const decisions = policy.evaluate([snap1, snap2]);
+    const prune = decisions.filter((d) => d.action === "prune_duplicate");
+    expect(prune).toHaveLength(1);
+    // The older one should be pruned
+    expect(prune[0]?.snapshotId).toBe("snap_b");
+  });
+});
+
+// ============================================================================
+// Privacy Policy
+// ============================================================================
+
+describe("privacy-policy", () => {
+  it("excludes node_modules by default", () => {
+    const policy = new PrivacyPolicy();
+    expect(policy.shouldExcludePath("/project/node_modules/pkg/index.ts")).toBe(true);
+    expect(policy.shouldExcludePath("/project/src/main.ts")).toBe(false);
+  });
+
+  it("redacts .env content", () => {
+    const policy = new PrivacyPolicy();
+    expect(policy.shouldRedactContent("/project/.env")).toBe(true);
+    expect(policy.shouldRedactContent("/project/.env.local")).toBe(true);
+    expect(policy.shouldRedactContent("/project/config.json")).toBe(false);
+  });
+
+  it("detects oversized files", () => {
+    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1000 });
+    expect(policy.tooLargeForSnapshot(500)).toBe(false);
+    expect(policy.tooLargeForSnapshot(2000)).toBe(true);
+  });
+
+  it("sanitizes env var patterns from event payload", () => {
+    const policy = new PrivacyPolicy({ redactEnvVars: true });
+    const event = makeEvent({
+      payload: { command: "export DATABASE_URL=postgres://user:pass@localhost/db" },
+    });
+    const sanitized = policy.sanitizeEvent(event);
+    expect(JSON.stringify(sanitized.payload)).not.toContain("postgres://");
+    expect(JSON.stringify(sanitized.payload)).toContain("[REDACTED]");
+  });
+
+  it("filterForExport removes excluded path events", () => {
+    const policy = new PrivacyPolicy();
+    const events = [
+      makeEvent({ payload: { filePath: "/src/main.ts" } }),
+      makeEvent({ payload: { filePath: "/node_modules/pkg/index.js" } }),
+    ];
+    const filtered = policy.filterForExport(events);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.payload["filePath"]).toBe("/src/main.ts");
+  });
+});
+
+// ============================================================================
+// Default config
+// ============================================================================
+
+describe("defaultConfig", () => {
+  it("returns valid config", () => {
+    const config = defaultConfig();
+    expect(config.enabled).toBe(true);
+    expect(config.retentionDays).toBe(30);
+    expect(config.storageRoot).toContain(".dantecode/debug-trail");
+  });
+});
+
+// ============================================================================
+// Gap fixes
+// ============================================================================
+
+describe("Gap fixes", () => {
+  // -------------------------------------------------------------------------
+  // Gap 1 — Snapshot deduplication
+  // -------------------------------------------------------------------------
+  describe("Gap 1: snapshot deduplication", () => {
+    it("captureSnapshot twice for same content writes only one .bin file", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-snap-dedup-"));
+      const storageRoot = join(dir, "trail");
+      const srcFile = join(dir, "source.ts");
+      await writeFile(srcFile, "const x = 1;");
+
+      const snapshotter = new FileSnapshotter({ storageRoot });
+      await snapshotter.init();
+
+      const provenance: TrailProvenance = {
+        sessionId: `sess_${randomUUID().slice(0, 8)}`,
+        runId: `run_${randomUUID().slice(0, 8)}`,
+      };
+
+      const snap1 = await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
+      const snap2 = await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
+
+      // Both calls must succeed and return a valid record
+      expect(snap1).not.toBeNull();
+      expect(snap2).not.toBeNull();
+
+      // Both records must share the same contentHash
+      expect(snap1!.contentHash).toBe(snap2!.contentHash);
+
+      // Only one .bin file should exist on disk (dedup skips re-write)
+      const snapshotsDir = join(storageRoot, "snapshots");
+      const files = await readdir(snapshotsDir);
+      const binFiles = files.filter((f) => f.endsWith(".bin"));
+      expect(binFiles).toHaveLength(1);
+
+      await rm(dir, { recursive: true });
+    });
+
+    it("captureSnapshot for different content writes two .bin files", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-snap-diff-"));
+      const storageRoot = join(dir, "trail");
+      const srcFile = join(dir, "source.ts");
+
+      const snapshotter = new FileSnapshotter({ storageRoot });
+      await snapshotter.init();
+
+      const provenance: TrailProvenance = {
+        sessionId: `sess_${randomUUID().slice(0, 8)}`,
+        runId: `run_${randomUUID().slice(0, 8)}`,
+      };
+
+      await writeFile(srcFile, "const x = 1;");
+      await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
+
+      await writeFile(srcFile, "const x = 2;");
+      await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
+
+      const snapshotsDir = join(storageRoot, "snapshots");
+      const files = await readdir(snapshotsDir);
+      const binFiles = files.filter((f) => f.endsWith(".bin"));
+      expect(binFiles).toHaveLength(2);
+
+      await rm(dir, { recursive: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 3 — Iterative LCS diff
+  // -------------------------------------------------------------------------
+  describe("Gap 3: iterative LCS diff", () => {
+    it("diffText on 3000+ line files does not throw", () => {
+      const makeText = (n: number, prefix: string) =>
+        Array.from({ length: n }, (_, i) => `${prefix} line ${i}`).join("\n");
+
+      const before = makeText(1600, "before");
+      const after = makeText(1600, "after");
+
+      expect(() => diffText(before, after)).not.toThrow();
+      const result = diffText(before, after);
+      // All before lines removed, all after lines added
+      expect(result.linesAdded).toBeGreaterThan(0);
+      expect(result.linesRemoved).toBeGreaterThan(0);
+    });
+
+    it("diffText produces correct result after iterative fix (no truncation sentinel)", () => {
+      const before = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
+      const after = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+      const result = diffText(before, after);
+      // Iterative path must not emit the old "[N lines]" sentinel
+      const allContent = result.hunks.flatMap((h) => h.lines.map((l) => l.content));
+      expect(allContent.some((c) => c.startsWith("[") && c.endsWith("lines]"))).toBe(false);
+      expect(result.linesAdded).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 4 — Async write queue
+  // -------------------------------------------------------------------------
+  describe("Gap 4: async write queue", () => {
+    it("multiple rapid log() calls produce correct sequential output after drain()", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-queue-"));
+      const storageRoot = join(dir, "trail");
+
+      const logger = new AuditLogger({
+        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
+        sessionId: "sess_queue_test",
+        runId: "run_queue_test",
+      });
+      await logger.init();
+
+      // Fire 20 rapid log calls without awaiting in between
+      const promises = Array.from({ length: 20 }, (_, i) =>
+        logger.log("tool_call", "TestActor", `event ${i}`, { seq: i }),
+      );
+      await Promise.all(promises);
+
+      // Drain ensures all queued disk writes complete
+      await logger.drain();
+
+      // Verify all events reached disk by reading the store directly
+      const store = logger.getStore();
+      const events = await store.readAllEvents();
+      expect(events).toHaveLength(20);
+
+      await rm(dir, { recursive: true });
+    });
+
+    it("flush() waits for queued writes before persisting index", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-flush-"));
+      const storageRoot = join(dir, "trail");
+
+      const logger = new AuditLogger({
+        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
+      });
+      await logger.init();
+
+      // Log 5 events then flush immediately
+      for (let i = 0; i < 5; i++) {
+        void logger.log("tool_call", "Actor", `event ${i}`);
+      }
+      await logger.flush();
+
+      const store = logger.getStore();
+      const events = await store.readAllEvents();
+      expect(events).toHaveLength(5);
+
+      await rm(dir, { recursive: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 5 — Cache invalidation
+  // -------------------------------------------------------------------------
+  describe("Gap 5: cache invalidation on new events", () => {
+    it("invalidateCache() is called on each log() call via setOnNewEventCallback", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-cache-inval-"));
+      const storageRoot = join(dir, "trail");
+
+      const logger = new AuditLogger({
+        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
+      });
+      await logger.init();
+
+      const invalidateSpy = vi.fn();
+      logger.setOnNewEventCallback(invalidateSpy);
+
+      await logger.log("tool_call", "Actor", "first event");
+      await logger.log("tool_call", "Actor", "second event");
+
+      expect(invalidateSpy).toHaveBeenCalledTimes(2);
+
+      await rm(dir, { recursive: true });
+    });
+
+    it("TrailQueryEngine sees fresh data after log() when cache was invalidated", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-qe-fresh-"));
+      const storageRoot = join(dir, "trail");
+
+      const logger = new AuditLogger({
+        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
+        sessionId: "sess_fresh",
+        runId: "run_fresh",
+      });
+      await logger.init();
+
+      const queryEngine = new TrailQueryEngine(
+        { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
+        logger.getIndex(),
+      );
+      // Wire cache invalidation
+      logger.setOnNewEventCallback(() => queryEngine.invalidateCache());
+
+      // Log an event, drain, then query — should see the event
+      await logger.log("file_write", "FileSystem", "File write: /test.ts", { filePath: "/test.ts" });
+      await logger.drain();
+
+      const result = await queryEngine.query({ sessionId: "sess_fresh", limit: 10 });
+      expect(result.totalMatches).toBeGreaterThan(0);
+
+      await rm(dir, { recursive: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 6 — ReplayOrchestrator returns full trail
+  // -------------------------------------------------------------------------
+  describe("Gap 6: replaySession returns full trail", () => {
+    it("replaySession without step returns all events in trail", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-replay-full-"));
+      const storageRoot = join(dir, "trail");
+
+      // Seed the store directly with 10 events
+      const store = new TrailStore(storageRoot);
+      await store.init();
+      const sessionId = "sess_replay_test";
+      const runId = "run_replay_test";
+
+      for (let i = 0; i < 10; i++) {
+        await store.appendEvent({
+          id: `evt_${i}`,
+          seq: i,
+          timestamp: new Date().toISOString(),
+          kind: "tool_call",
+          actor: "TestActor",
+          summary: `event ${i}`,
+          payload: {},
+          provenance: { sessionId, runId },
+        });
+      }
+
+      const orchestrator = new ReplayOrchestrator({ storageRoot });
+      const result = await orchestrator.replaySession(sessionId);
+
+      // Full trail must contain all 10 events
+      expect(result.trail).toHaveLength(10);
+      expect(result.replayed).toBe(true);
+
+      await rm(dir, { recursive: true });
+    });
+
+    it("replaySession with step returns events up to that step only", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-replay-step-"));
+      const storageRoot = join(dir, "trail");
+
+      const store = new TrailStore(storageRoot);
+      await store.init();
+      const sessionId = "sess_replay_step";
+      const runId = "run_replay_step";
+
+      for (let i = 0; i < 8; i++) {
+        await store.appendEvent({
+          id: `evt_${i}`,
+          seq: i,
+          timestamp: new Date().toISOString(),
+          kind: "tool_call",
+          actor: "TestActor",
+          summary: `event ${i}`,
+          payload: {},
+          provenance: { sessionId, runId },
+        });
+      }
+
+      const orchestrator = new ReplayOrchestrator({ storageRoot });
+      const result = await orchestrator.replaySession(sessionId, 4);
+
+      // trail must contain events 0..4 (5 events)
+      expect(result.trail).toHaveLength(5);
+      expect(result.step).toBe(4);
+
+      await rm(dir, { recursive: true });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 2 — Snapshot manifest persistence
+  // -------------------------------------------------------------------------
+  describe("Gap 2: snapshot manifest persistence", () => {
+    it("snapshot records survive across FileSnapshotter instances", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "dt-manifest-"));
+      const storageRoot = join(dir, "trail");
+      const srcFile = join(dir, "source.ts");
+      await writeFile(srcFile, "export const x = 42;");
+
+      const provenance: TrailProvenance = {
+        sessionId: "sess_manifest",
+        runId: "run_manifest",
+      };
+
+      // First instance: capture snapshot
+      const snapshotter1 = new FileSnapshotter({ storageRoot });
+      await snapshotter1.init();
+      const snap = await snapshotter1.captureSnapshot(srcFile, "evt1", provenance);
+      expect(snap).not.toBeNull();
+
+      // Second instance: init should load manifest and populate dedup cache
+      const snapshotter2 = new FileSnapshotter({ storageRoot });
+      await snapshotter2.init();
+
+      // Writing same content again should reuse cached record (no new .bin file)
+      const snap2 = await snapshotter2.captureSnapshot(srcFile, "evt2", provenance);
+      expect(snap2).not.toBeNull();
+      expect(snap2!.contentHash).toBe(snap!.contentHash);
+
+      const snapshotsDir = join(storageRoot, "snapshots");
+      const files = await readdir(snapshotsDir);
+      const binFiles = files.filter((f) => f.endsWith(".bin"));
+      expect(binFiles).toHaveLength(1);
+
+      await rm(dir, { recursive: true });
+    });
+  });
+});

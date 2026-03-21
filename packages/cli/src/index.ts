@@ -12,6 +12,7 @@ import { runSkillsCommand } from "./commands/skills.js";
 import { runAgentCommand } from "./commands/agent.js";
 import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
+import { runCouncilCommand } from "./commands/council.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
 
 // ----------------------------------------------------------------------------
@@ -75,7 +76,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     showHelp: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council"]);
   let i = 0;
   let foundCommand = false;
 
@@ -262,6 +263,9 @@ async function main(): Promise<void> {
         return;
       case "git":
         await runGitCommand(parsed.subArgs, projectRoot);
+        return;
+      case "council":
+        await runCouncilCommand(parsed.subArgs, projectRoot);
         return;
       case "self-update":
         await runSelfUpdateCommand(projectRoot, {

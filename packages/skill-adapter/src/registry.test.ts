@@ -350,4 +350,88 @@ describe("skill-adapter registry", () => {
       expect(skill?.frontmatter.description).toBe("");
     });
   });
+
+  // ============================================================================
+  // SkillBridge metadata loading tests
+  // ============================================================================
+
+  describe("loadSkillRegistry — bridge metadata", () => {
+    it("loads bridge metadata from bridge-meta.json for skillbridge skills", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const skillDir = join(skillsDir, "my-bridge-skill");
+      await mkdir(skillDir, { recursive: true });
+
+      // Write SKILL.dc.md with import_source: skillbridge
+      await writeFile(
+        join(skillDir, "SKILL.dc.md"),
+        [
+          "---",
+          "name: my-bridge-skill",
+          "description: A bridged skill",
+          "import_source: skillbridge",
+          "adapter_version: '1.0.0'",
+          "wrapped_at: '2026-03-20T00:00:00Z'",
+          "---",
+          "Bridged skill instructions.",
+        ].join("\n"),
+      );
+
+      // Write bridge-meta.json
+      const bridgeMeta = {
+        slug: "my-bridge-skill",
+        name: "my-bridge-skill",
+        description: "A bridged skill",
+        bundleDir: skillDir,
+        conversionScore: 0.88,
+        bucket: "amber",
+        runtimeWarnings: ["needs shell"],
+        conversionWarnings: [],
+        importedAt: "2026-03-20T00:00:00Z",
+        classification: "tool-bound",
+        emitterStatuses: { dantecode: "warning" },
+      };
+      await writeFile(join(skillDir, "bridge-meta.json"), JSON.stringify(bridgeMeta));
+
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+      const entry = registry[0]!;
+      expect(entry.importSource).toBe("skillbridge");
+      expect(entry.conversionScore).toBe(0.88);
+      expect(entry.bucket).toBe("amber");
+      expect(entry.runtimeWarnings).toContain("needs shell");
+      expect(entry.classification).toBe("tool-bound");
+    });
+
+    it("loads skill without bridge fields when bridge-meta.json is absent", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const skillDir = join(skillsDir, "bridge-no-meta");
+      await mkdir(skillDir, { recursive: true });
+
+      // Write SKILL.dc.md with import_source: skillbridge but NO bridge-meta.json
+      await writeFile(
+        join(skillDir, "SKILL.dc.md"),
+        [
+          "---",
+          "name: bridge-no-meta",
+          "description: Skill without bridge-meta.json",
+          "import_source: skillbridge",
+          "adapter_version: '1.0.0'",
+          "wrapped_at: '2026-03-20T00:00:00Z'",
+          "---",
+          "Instructions without bridge metadata.",
+        ].join("\n"),
+      );
+      // No bridge-meta.json written
+
+      const registry = await loadSkillRegistry(testDir);
+      expect(registry).toHaveLength(1);
+      const entry = registry[0]!;
+      expect(entry.importSource).toBe("skillbridge");
+      // Bridge fields should be undefined — graceful degradation
+      expect(entry.conversionScore).toBeUndefined();
+      expect(entry.bucket).toBeUndefined();
+      expect(entry.runtimeWarnings).toBeUndefined();
+      expect(entry.classification).toBeUndefined();
+    });
+  });
 });

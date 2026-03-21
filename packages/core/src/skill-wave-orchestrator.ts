@@ -9,6 +9,25 @@
 // Types
 // ----------------------------------------------------------------------------
 
+/**
+ * Warnings produced when activating a skill via the SkillBridge adapter.
+ * Surfaced in the wave prompt preamble for non-green skills.
+ */
+export interface BridgeActivationWarnings {
+  /** The skill name for display. */
+  skillName: string;
+  /** Conversion quality bucket: green = fully compatible, amber = warnings, red = blocked. */
+  bucket: "green" | "amber" | "red";
+  /** Numeric conversion score (0–1). */
+  conversionScore: number;
+  /** Runtime capability gaps detected (e.g., "needs shell", "needs browser"). */
+  runtimeWarnings: string[];
+  /** Warnings emitted during conversion (e.g., "check MCP config"). */
+  conversionWarnings: string[];
+  /** Whether any capability gaps were found. */
+  hasCapabilityGaps: boolean;
+}
+
 /** A single decomposed wave from a skill's instructions. */
 export interface SkillWave {
   /** 1-based wave number. */
@@ -185,6 +204,66 @@ export function recordWaveFailure(state: WaveOrchestratorState): boolean {
 }
 
 // ----------------------------------------------------------------------------
+// Bridge Warning Helpers
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns true when the runtimeWarnings array has at least one entry.
+ */
+export function hasBridgeCapabilityGaps(runtimeWarnings: string[]): boolean {
+  return runtimeWarnings.length > 0;
+}
+
+/**
+ * Builds a markdown preamble block for skills converted via SkillBridge that
+ * have amber or red quality buckets. Returns an empty string for green skills.
+ */
+export function buildBridgeWarningPreamble(warnings: BridgeActivationWarnings): string {
+  if (warnings.bucket === "green" && !warnings.hasCapabilityGaps) {
+    return "";
+  }
+
+  const lines: string[] = [
+    "## SkillBridge Activation Notice",
+    "",
+  ];
+
+  if (warnings.bucket === "red") {
+    lines.push(
+      "> BLOCKED: This skill was classified as BLOCKED during conversion. Manual review is",
+      "> required before execution. Proceed with caution.",
+      "",
+    );
+  } else {
+    lines.push(
+      "> WARNING: This skill was converted with warnings. Some features may behave differently",
+      "> than in the original environment.",
+      "",
+    );
+  }
+
+  if (warnings.runtimeWarnings.length > 0) {
+    lines.push("**Runtime capability gaps:**");
+    for (const w of warnings.runtimeWarnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push("");
+  }
+
+  if (warnings.conversionWarnings.length > 0) {
+    lines.push("**Conversion warnings:**");
+    for (const w of warnings.conversionWarnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---\n");
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Prompt Building
 // ----------------------------------------------------------------------------
 
@@ -223,11 +302,17 @@ export const CLAUDE_WORKFLOW_MODE = [
  * Builds the prompt injection for the current wave.
  * Includes: wave context, current wave instructions, workflow rules.
  */
-export function buildWavePrompt(state: WaveOrchestratorState): string {
+export function buildWavePrompt(
+  state: WaveOrchestratorState,
+  bridgeWarnings?: BridgeActivationWarnings,
+): string {
   const current = getCurrentWave(state);
   if (!current) {
     return "All waves complete. Summarize what was accomplished.";
   }
+
+  // Inject bridge warning preamble on first wave if bridge skill
+  const bridgePreamble = bridgeWarnings ? buildBridgeWarningPreamble(bridgeWarnings) : "";
 
   const progress = state.completedWaves.length;
   const total = state.waves.length;
@@ -266,7 +351,7 @@ export function buildWavePrompt(state: WaveOrchestratorState): string {
     "Do NOT proceed to the next wave — it will be provided automatically.",
   );
 
-  return parts.join("\n");
+  return bridgePreamble + parts.join("\n");
 }
 
 /**

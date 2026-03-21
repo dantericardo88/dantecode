@@ -34,3 +34,36 @@ export type { ImportOptions, ImportResult, SkippedSkill } from "./importer.js";
 // --- Skill Registry ---
 export { loadSkillRegistry, getSkill, listSkills, removeSkill, validateSkill } from "./registry.js";
 export type { SkillRegistryEntry, SkillValidationResult } from "./registry.js";
+
+// --- SkillBridge Types ---
+export type {
+  SkillBridgeManifest,
+  SkillBridgeSource,
+  SkillBridgeEmitters,
+  SkillBridgeVerification,
+  SkillBridgeTarget,
+  SkillBridgeParseResult,
+  SkillClassification,
+  SkillRiskLevel,
+  EmitterStatus,
+  EmitterResult,
+  CapabilityProfile,
+  NormalizedSkill,
+  BridgeBundleMetadata,
+  BundleBucket,
+} from "./types/skillbridge.js";
+
+// --- SkillBridge Parser ---
+export {
+  parseSkillBridgeManifest,
+  bundleHasDanteCodeTarget,
+  getDanteCodeTargetPath,
+} from "./parsers/skillbridge.js";
+
+// --- SkillBridge Import Bridge ---
+export {
+  importSkillBridgeBundle,
+  listBridgeWarnings,
+  validateBridgeSkill,
+} from "./import-bridge.js";
+export type { ImportBridgeOptions, ImportBridgeResult } from "./import-bridge.js";
