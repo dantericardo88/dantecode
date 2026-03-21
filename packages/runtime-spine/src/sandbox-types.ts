@@ -22,6 +22,7 @@ export type SandboxMode = z.infer<typeof SandboxModeSchema>;
 
 /** The concrete isolation strategy selected for a specific execution. */
 export const IsolationStrategySchema = z.enum([
+  "native",    // OS-native sandbox (macOS Seatbelt / Linux bwrap)
   "docker",    // Docker container
   "worktree",  // git worktree isolation
   "host",      // host execution (escape path — must be audited)

@@ -158,7 +158,7 @@ export class SandboxEngine {
     // Find the layer for the selected strategy; fall back through the chain if none registered.
     let layer = this.layers.get(strategy);
     if (!layer) {
-      const fallbackOrder: IsolationStrategy[] = ["docker", "worktree", "host"];
+      const fallbackOrder: IsolationStrategy[] = ["native", "docker", "worktree", "host"];
       for (const fb of fallbackOrder) {
         if (fb !== strategy && this.layers.has(fb)) {
           layer = this.layers.get(fb);
@@ -255,8 +255,9 @@ export class SandboxEngine {
     if (mode === "host-escape") return "host";
     if (mode === "off") return "host";
 
-    // auto: Docker preferred, worktree fallback
+    // auto: Prefer native (zero-dep, fast) → docker → worktree → host
     const isTrusted = this.config.trustedTaskClasses.includes(request.taskType);
+    if (this.layers.has("native")) return "native";
     if (!isTrusted && await isDockerAvailable()) return "docker";
     if (await isWorktreeAvailable()) return "worktree";
     if (await isDockerAvailable()) return "docker";

@@ -3,7 +3,7 @@
 // ============================================================================
 
 // ── Primary Integration Surface ───────────────────────────────────────────────
-export { DanteSandbox } from "./integration.js";
+export { DanteSandbox, getEngine } from "./integration.js";
 export type { DanteSandboxSetupOptions } from "./integration.js";
 
 // ── Execution Proxy ────────────────────────────────────────────────────────────
@@ -19,6 +19,7 @@ export {
 export { SandboxEngine } from "./sandbox-engine.js";
 
 // ── Isolation Layers ──────────────────────────────────────────────────────────
+export { NativeSandbox } from "./native-sandbox.js";
 export { DockerIsolationLayer } from "./docker-isolation.js";
 export { WorktreeIsolationLayer } from "./worktree-isolation.js";
 export { HostEscapeLayer } from "./host-escape.js";
@@ -60,3 +61,7 @@ export type {
   ProxyCallOptions,
   SandboxEngineConfig,
 } from "./types.js";
+
+// ── Approval Engine ───────────────────────────────────────────────────────────
+export { ApprovalEngine, globalApprovalEngine, getGlobalApprovalEngine } from './approval-engine.js';
+export type { ApprovalPolicy, ApprovalRequest } from './approval-engine.js';

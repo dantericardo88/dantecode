@@ -202,6 +202,10 @@ export type {
 } from "./event-triggers.js";
 export { slugifyTitle } from "./event-triggers.js";
 
+// ─── Credential Vault ────────────────────────────────────────────────────────
+export { CredentialVault } from "./credential-vault.js";
+export type { CredentialVaultOptions } from "./credential-vault.js";
+
 // ─── Webhook Server ─────────────────────────────────────────────────────────
 
 export { createWebhookServer } from "./webhook-server.js";
@@ -687,3 +691,15 @@ export type { VerificationHistoryKind } from "./verification-history-store.js";
 
 export { BridgeListener } from "./council/bridge-listener.js";
 export type { AgentCommandConfig, BridgeListenerOptions, SpawnFn } from "./council/bridge-listener.js";
+
+// ─── GitHub Client ───────────────────────────────────────────────────────────
+
+export { GitHubClient } from "./github-client.js";
+export type {
+  GitHubClientConfig,
+  PRDetails,
+  PRFile,
+  Issue as GitHubIssue,
+  CheckRun,
+  WorkflowRun,
+} from "./github-client.js";

@@ -19,6 +19,22 @@ import type {
 } from "@dantecode/config-types";
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
+import { CredentialVault } from "./credential-vault.js";
+
+// ─── Vault singleton ──────────────────────────────────────────────────────────
+let _vaultInstance: CredentialVault | null = null;
+function getVault(): CredentialVault {
+  if (!_vaultInstance) _vaultInstance = new CredentialVault();
+  return _vaultInstance;
+}
+
+/**
+ * Resolves an API key, preferring the encrypted vault over plain env vars.
+ */
+async function resolveApiKey(envVar: string, vaultKey: string): Promise<string | undefined> {
+  const fromVault = await getVault().retrieve(vaultKey).catch(() => null);
+  return fromVault ?? process.env[envVar] ?? undefined;
+}
 
 type ProviderOptionValue =
   | string
@@ -353,6 +369,23 @@ export class ModelRouterImpl {
   }
 
   /**
+   * Opportunistically resolves an API key from the encrypted vault and returns
+   * a shallow copy of the config with `apiKey` set (if the config does not
+   * already carry one). Only anthropic and grok are touched (conservative).
+   */
+  private async _enrichConfigApiKey(config: ModelConfig): Promise<ModelConfig> {
+    if (config.apiKey) return config;
+    let apiKey: string | undefined;
+    if (config.provider === "anthropic") {
+      apiKey = await resolveApiKey("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY");
+    } else if (config.provider === "grok") {
+      apiKey = await resolveApiKey("XAI_API_KEY", "XAI_API_KEY");
+    }
+    if (!apiKey) return config;
+    return { ...config, apiKey };
+  }
+
+  /**
    * Attempts a generateText call with a single provider. Returns either
    * the success result or the captured error.
    */
@@ -367,7 +400,8 @@ export class ModelRouterImpl {
 
     try {
       const builder = this.resolveProvider(config);
-      const model = builder(config);
+      const enrichedConfig = await this._enrichConfigApiKey(config);
+      const model = builder(enrichedConfig);
       const providerOptions = this.buildProviderOptions(config, options);
 
       this.logEntry(config, "attempt", 0);
@@ -431,7 +465,8 @@ export class ModelRouterImpl {
 
     try {
       const builder = this.resolveProvider(config);
-      const model = builder(config);
+      const enrichedConfig = await this._enrichConfigApiKey(config);
+      const model = builder(enrichedConfig);
       const providerOptions = this.buildProviderOptions(config, options);
 
       this.logEntry(config, "attempt", 0);

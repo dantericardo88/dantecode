@@ -21,7 +21,7 @@ import { TrailStore, getTrailStore } from "./sqlite-store.js";
 // Export formats
 // ---------------------------------------------------------------------------
 
-export type ExportFormat = "json" | "ndjson" | "markdown";
+export type ExportFormat = "json" | "ndjson" | "markdown" | "csv" | "sarif";
 
 export interface ExportOptions {
   format?: ExportFormat;
@@ -33,6 +33,14 @@ export interface ExportOptions {
   includeCompleteness?: boolean;
   /** Custom output path. Default: ~/.dantecode/debug-trail/exports/<sessionId>.<format> */
   outputPath?: string;
+  /** Logger instance for evidence chain export. If provided, evidence is included in JSON exports. */
+  logger?: import("./audit-logger.js").AuditLogger;
+  /** If true and logger provided, seal the session and include in export. */
+  seal?: boolean;
+  /** Config for seal generation (required if seal=true). */
+  sealConfig?: Record<string, unknown>;
+  /** Metrics for seal generation (optional, defaults to []). */
+  sealMetrics?: Record<string, unknown>[];
 }
 
 // ---------------------------------------------------------------------------
@@ -174,8 +182,8 @@ export class ExportEngine {
     const exportsDir = join(this.config.storageRoot, "exports");
     await mkdir(exportsDir, { recursive: true });
 
-    const outputPath = options.outputPath ??
-      join(exportsDir, `${sessionId}.${format === "markdown" ? "md" : format}`);
+    const ext = format === "markdown" ? "md" : format === "sarif" ? "sarif" : format;
+    const outputPath = options.outputPath ?? join(exportsDir, `${sessionId}.${ext}`);
 
     let content: string;
 
@@ -183,6 +191,10 @@ export class ExportEngine {
       content = sorted.map((e) => JSON.stringify(e)).join("\n");
     } else if (format === "markdown") {
       content = this.buildMarkdownReport(sessionId, sorted, sessionTombstones, completeness, exportedAt);
+    } else if (format === "csv") {
+      content = this.buildCSVReport(sorted);
+    } else if (format === "sarif") {
+      content = this.buildSARIFReport(sessionId, sorted, exportedAt);
     } else {
       const doc = {
         exportedAt,
@@ -193,6 +205,29 @@ export class ExportEngine {
         events: sorted,
         tombstones: options.includeTombstones !== false ? sessionTombstones : [],
       };
+      if (options.logger) {
+        const evidenceExport = options.logger.exportEvidenceChain();
+        if (evidenceExport) {
+          (doc as Record<string, unknown>)["evidence"] = {
+            chain: evidenceExport.chain,
+            receipts: evidenceExport.receipts,
+            merkleRoot: evidenceExport.merkleRoot,
+          };
+        }
+        if (options.seal && options.sealConfig) {
+          const seal = options.logger.sealSession(options.sealConfig, options.sealMetrics ?? []);
+          if (seal) {
+            (doc as Record<string, unknown>)["seal"] = seal;
+            (doc as Record<string, unknown>)["verificationInstructions"] = [
+              "This export includes a CertificationSeal.",
+              "To verify: install @dantecode/evidence-chain (MIT, npm)",
+              "Use EvidenceSealer.verifySeal(seal, config, metrics) with the original config and metrics.",
+              "The seal hash covers: evidence Merkle root + config hash + metrics hash.",
+              "Any modification to any event, config value, or metric will fail verification.",
+            ];
+          }
+        }
+      }
       content = JSON.stringify(doc, null, 2);
     }
 
@@ -291,5 +326,94 @@ export class ExportEngine {
       anomaly_flag: "⚠️",
     };
     return icons[kind] ?? "•";
+  }
+
+  // -------------------------------------------------------------------------
+  // CSV report
+  // -------------------------------------------------------------------------
+
+  private buildCSVReport(events: TrailEvent[]): string {
+    const header = "timestamp,kind,actor,summary,filePath,outcome";
+    const rows = events.map((e) => {
+      const filePath = typeof e.payload["filePath"] === "string" ? e.payload["filePath"] : "";
+      const outcome = e.kind === "error" ? "error" : "ok";
+      const fields = [e.timestamp, e.kind, e.actor, e.summary, filePath, outcome];
+      return fields
+        .map((f) =>
+          String(f).includes(",") || String(f).includes('"')
+            ? `"${String(f).replace(/"/g, '""')}"`
+            : String(f),
+        )
+        .join(",");
+    });
+    return [header, ...rows].join("\n");
+  }
+
+  // -------------------------------------------------------------------------
+  // SARIF report
+  // -------------------------------------------------------------------------
+
+  private buildSARIFReport(
+    sessionId: string,
+    events: TrailEvent[],
+    exportedAt: string,
+  ): string {
+    const levelMap: Record<string, string> = {
+      error: "error",
+      anomaly_flag: "error",
+      verification: "warning",
+      timeout: "warning",
+    };
+
+    const ruleIds = [...new Set(events.map((e) => e.kind))];
+    const rules = ruleIds.map((id) => ({
+      id,
+      name: id,
+      shortDescription: { text: `DanteCode trail event: ${id}` },
+    }));
+
+    const results = events.map((e) => {
+      const filePath =
+        typeof e.payload["filePath"] === "string" ? e.payload["filePath"] : undefined;
+      const result: Record<string, unknown> = {
+        ruleId: e.kind,
+        message: { text: e.summary },
+        level: levelMap[e.kind] ?? "none",
+      };
+      if (filePath) {
+        result["locations"] = [
+          {
+            physicalLocation: {
+              artifactLocation: { uri: filePath },
+            },
+          },
+        ];
+      }
+      return result;
+    });
+
+    const sarif = {
+      $schema: "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0.json",
+      version: "2.1.0",
+      runs: [
+        {
+          tool: {
+            driver: {
+              name: "DanteCode DebugTrail",
+              version: "1.0.0",
+              informationUri: "https://github.com/dantecode",
+              rules,
+            },
+          },
+          results,
+          properties: {
+            sessionId,
+            exportedAt,
+          },
+        },
+      ],
+    };
+
+    return JSON.stringify(sarif, null, 2);
   }
 }

@@ -9,6 +9,7 @@ import { SandboxEngine } from "./sandbox-engine.js";
 import { ExecutionProxy, setGlobalProxy, sandboxRun, toToolResult } from "./execution-proxy.js";
 import { SandboxAuditLog, noopAuditSink } from "./audit-log.js";
 import { buildDanteForgeGate, permissiveGate } from "./danteforge-gate.js";
+import { NativeSandbox } from "./native-sandbox.js";
 import { DockerIsolationLayer } from "./docker-isolation.js";
 import { WorktreeIsolationLayer } from "./worktree-isolation.js";
 import { HostEscapeLayer } from "./host-escape.js";
@@ -57,6 +58,7 @@ export const DanteSandbox = {
     const engine = new SandboxEngine({ config: opts.config, gateFn: gate, auditSink });
 
     // Register all isolation layers (engine selects the best available one)
+    engine.registerLayer(new NativeSandbox(opts.projectRoot));
     engine.registerLayer(new DockerIsolationLayer(opts.projectRoot));
     engine.registerLayer(new WorktreeIsolationLayer(opts.projectRoot));
     engine.registerLayer(new HostEscapeLayer());
@@ -136,4 +138,12 @@ export const DanteSandbox = {
     return _proxy !== null;
   },
 };
+
+/**
+ * Returns the active SandboxEngine instance, or null if not initialized.
+ * Useful for tests and introspection.
+ */
+export function getEngine(): SandboxEngine | null {
+  return _engine;
+}
 

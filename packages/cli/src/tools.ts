@@ -1385,6 +1385,15 @@ const VALID_ACTIONS = new Set<string>([
 ]);
 
 /**
+ * Actions that use GitHubClient (Octokit) as primary path when GITHUB_TOKEN is set.
+ * Falls back to execGh() shell path when no token is available.
+ */
+const API_FIRST_ACTIONS = new Set([
+  "create_pr", "view_pr", "list_prs",
+  "create_issue", "list_issues", "comment_issue", "close_issue",
+]);
+
+/**
  * Execute a `gh` command and return stdout. Throws on failure.
  */
 function execGh(command: string, projectRoot: string): string {
@@ -1399,8 +1408,103 @@ function execGh(command: string, projectRoot: string): string {
 }
 
 /**
- * GitHubOps tool: comprehensive GitHub operations via the `gh` CLI.
- * Superset of GitHubSearch — adds PR, issue, review, and workflow ops.
+ * API-first path for GitHubOps: uses Octokit GitHubClient when GITHUB_TOKEN is available.
+ * Handles the 7 structured CRUD actions with typed responses and pagination.
+ */
+async function toolGitHubOpsApiPath(
+  action: GitHubOpsAction,
+  input: Record<string, unknown>,
+  projectRoot: string,
+  token: string,
+): Promise<ToolResult> {
+  const { GitHubClient } = await import("@dantecode/core");
+  const client = new GitHubClient({ token });
+  await client.inferFromGitRemote(projectRoot);
+
+  switch (action) {
+    case "create_pr": {
+      const title = input["title"] as string;
+      if (!title) return { content: "Error: title is required for create_pr", isError: true };
+      const result = await client.createPR({
+        title,
+        body: input["body"] as string | undefined,
+        base: input["base"] as string | undefined,
+        head: input["head"] as string | undefined,
+        draft: input["draft"] as boolean | undefined,
+      });
+      return { content: `PR #${result.number} created: ${result.url}`, isError: false };
+    }
+    case "view_pr": {
+      const number = input["number"] as number | undefined;
+      if (!number) return { content: "Error: number is required for view_pr", isError: true };
+      const pr = await client.getPR(number);
+      const lines = [
+        `**#${pr.number}: ${pr.title}** [${pr.state}]`,
+        `Author: ${pr.author} | Review: ${pr.reviewDecision ?? "NONE"}`,
+        `Mergeable: ${pr.mergeable ?? "unknown"} | +${pr.additions} -${pr.deletions} (${pr.changedFiles} files)`,
+        `URL: ${pr.url}`,
+      ];
+      if (pr.body) lines.push("", pr.body.slice(0, 1000));
+      return { content: lines.join("\n"), isError: false };
+    }
+    case "list_prs": {
+      const rawState = (input["state"] as string) || "open";
+      const state: "open" | "closed" | "all" =
+        rawState === "closed" ? "closed" : rawState === "all" ? "all" : "open";
+      const prs = await client.listPRs(state);
+      if (prs.length === 0) return { content: `No ${state} PRs found.`, isError: false };
+      const lines = prs.map((pr, i) =>
+        `${i + 1}. #${pr.number} **${pr.title}** [${pr.state}]\n   Author: ${pr.author}\n   ${pr.url}`,
+      );
+      return { content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+    }
+    case "create_issue": {
+      const title = input["title"] as string;
+      if (!title) return { content: "Error: title is required for create_issue", isError: true };
+      const labels = input["labels"] as string[] | string | undefined;
+      const labelArr = Array.isArray(labels) ? labels : labels ? labels.split(",").map(s => s.trim()) : undefined;
+      const result = await client.createIssue({
+        title,
+        body: input["body"] as string | undefined,
+        labels: labelArr,
+      });
+      return { content: `Issue #${result.number} created: ${result.url}`, isError: false };
+    }
+    case "list_issues": {
+      const rawState = (input["state"] as string) || "open";
+      const state: "open" | "closed" | "all" =
+        rawState === "closed" ? "closed" : rawState === "all" ? "all" : "open";
+      const issues = await client.listIssues(state);
+      if (issues.length === 0) return { content: `No ${state} issues found.`, isError: false };
+      const lines = issues.map((iss, i) => {
+        const lbls = iss.labels.length > 0 ? `\n   Labels: ${iss.labels.join(", ")}` : "";
+        return `${i + 1}. #${iss.number} **${iss.title}** [${iss.state}]${lbls}\n   ${iss.url}`;
+      });
+      return { content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+    }
+    case "comment_issue": {
+      const number = input["number"] as number | undefined;
+      const body = input["body"] as string | undefined;
+      if (!number) return { content: "Error: number is required for comment_issue", isError: true };
+      if (!body?.trim()) return { content: "Error: body must be non-empty for comment_issue", isError: true };
+      await client.commentIssue(number, body);
+      return { content: `Comment added to issue #${number}.`, isError: false };
+    }
+    case "close_issue": {
+      const number = input["number"] as number | undefined;
+      if (!number) return { content: "Error: number is required for close_issue", isError: true };
+      await client.closeIssue(number);
+      return { content: `Issue #${number} closed.`, isError: false };
+    }
+    default:
+      return { content: `API path not supported for action: ${action}`, isError: true };
+  }
+}
+
+/**
+ * GitHubOps tool: comprehensive GitHub operations.
+ * Uses GitHubClient (Octokit) as primary path for structured CRUD actions when
+ * GITHUB_TOKEN is set. Falls back to `gh` CLI shell for remaining actions.
  */
 async function toolGitHubOps(
   input: Record<string, unknown>,
@@ -1415,6 +1519,19 @@ async function toolGitHubOps(
     };
   }
 
+  // API-first routing: use GitHubClient when token is available
+  const token = process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? "";
+  if (token && API_FIRST_ACTIONS.has(action)) {
+    try {
+      return await toolGitHubOpsApiPath(action as GitHubOpsAction, input, projectRoot, token);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { content: `GitHubOps API error: ${msg}`, isError: true };
+    }
+  }
+
+  // Shell fallback for remaining actions (search, review_pr, merge_pr, trigger_workflow, view_run)
+  // and API-first actions when no token is set
   try {
     switch (action as GitHubOpsAction) {
       // ---- Search operations (delegate to existing logic) ----

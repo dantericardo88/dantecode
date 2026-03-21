@@ -17,6 +17,11 @@ import { runSelfUpdateCommand } from "./commands/self-update.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runSkillbookCommand } from "./commands/skillbook.js";
 import { runFearsetCommand } from "./commands/fearset.js";
+import { runResearchCommand } from "./commands/research.js";
+import { runReviewCommand } from "./commands/review.js";
+import { runTriageCommand } from "./commands/triage.js";
+import { runAuditCommand } from "./commands/audit.js";
+import { runVaultCommand } from "./commands/vault.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -60,6 +65,10 @@ interface ParsedArgs {
   maxRounds: number | undefined;
   /** --config-root <path> — override config directory for non-interactive mode */
   configRoot: string | undefined;
+  /** --continue / -C: resume the last session */
+  resume: boolean;
+  /** --fearset-block-on-nogo: block and prompt for confirmation when FearSet returns no-go */
+  fearSetBlockOnNoGo: boolean;
 }
 
 /**
@@ -86,9 +95,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     promptFile: undefined,
     maxRounds: undefined,
     configRoot: undefined,
+    resume: false,
+    fearSetBlockOnNoGo: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset", "research", "audit", "vault", "review", "triage"]);
   let i = 0;
   let foundCommand = false;
 
@@ -166,6 +177,18 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (arg === "--config-root") {
       result.configRoot = args[i + 1];
       i += 2;
+      continue;
+    }
+
+    if (arg === "--continue" || arg === "-C") {
+      result.resume = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--fearset-block-on-nogo") {
+      result.fearSetBlockOnNoGo = true;
+      i += 1;
       continue;
     }
 
@@ -293,6 +316,8 @@ async function main(): Promise<void> {
     configPath: parsed.configPath,
     maxRounds: parsed.maxRounds,
     configRoot: parsed.configRoot,
+    resumeFromLastSession: parsed.resume,
+    fearSetBlockOnNoGo: parsed.fearSetBlockOnNoGo,
   };
 
   // Route to the appropriate command
@@ -330,6 +355,21 @@ async function main(): Promise<void> {
         return;
       case "fearset":
         await runFearsetCommand(parsed.subArgs, projectRoot);
+        return;
+      case "research":
+        await runResearchCommand(parsed.subArgs, projectRoot);
+        return;
+      case "audit":
+        await runAuditCommand(parsed.subArgs, projectRoot);
+        return;
+      case "vault":
+        await runVaultCommand(parsed.subArgs);
+        return;
+      case "review":
+        await runReviewCommand(parsed.subArgs, projectRoot);
+        return;
+      case "triage":
+        await runTriageCommand(parsed.subArgs, projectRoot);
         return;
     }
   }

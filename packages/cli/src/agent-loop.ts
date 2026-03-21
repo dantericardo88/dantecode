@@ -4,6 +4,7 @@
 // runs the DanteForge pipeline on generated code, and streams responses.
 // ============================================================================
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -69,6 +70,12 @@ import { normalizeAndCheckBash } from "./safety.js";
 import { StreamRenderer } from "./stream-renderer.js";
 import { getAISDKTools } from "./tool-schemas.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { confirmDestructive } from "./confirm-flow.js";
+import {
+  createMemoryOrchestrator,
+  type MemoryOrchestrator,
+} from "@dantecode/memory-engine";
+import { getGlobalLogger, type AuditLogger } from "@dantecode/debug-trail";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -89,6 +96,8 @@ type BackgroundTaskRegistry = {
 
 const backgroundTaskRegistries = new Map<string, BackgroundTaskRegistry>();
 const autoResumingDurableRuns = new Set<string>();
+/** Per-lane AsyncLocalStorage context: isolates backgroundTaskRegistries per concurrent runAgentLoop invocation. */
+const _laneCtx = new AsyncLocalStorage<{ sessionId: string }>();
 
 type RunAgentLoopFn = (
   prompt: string,
@@ -166,6 +175,31 @@ export interface AgentLoopConfig {
    * `dantecode gaslight bridge`.
    */
   gaslight?: DanteGaslightIntegration;
+  /**
+   * When true, prompt the user for explicit confirmation before proceeding
+   * if FearSet analysis returns a no-go decision.
+   * Default false — non-blocking/advisory mode for all existing callers.
+   * Non-TTY environments (CI/CD) are always non-blocking regardless of this flag.
+   */
+  fearSetBlockOnNoGo?: boolean;
+  /**
+   * Confidence-gated escalation: when enabled (mode: "on-request"), the agent
+   * loop scans each model response for a structured low-confidence signal.
+   * If detected (confidence < threshold, default 0.5), execution pauses and the
+   * user is prompted before continuing. Non-TTY environments always skip the gate.
+   *
+   * Signal format recognized in model output:
+   *   <!-- DANTE_CONFIDENCE: 0.3 reason="..." -->
+   *   or: [CONFIDENCE:0.3 reason="..."]
+   *
+   * Default: disabled.
+   */
+  confidenceGating?: {
+    /** "on-request" = pause and ask user when confidence is low; "log-only" = emit warning only */
+    mode: "on-request" | "log-only";
+    /** Confidence threshold below which escalation fires. Default: 0.5 */
+    threshold?: number;
+  };
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -574,22 +608,73 @@ function escapeLiteralControlCharsInJsonStrings(payload: string): string {
   return result;
 }
 
-/** Pure Jaccard word-overlap [0–1]. ES2022-safe — no findLastIndex, Array.at, etc. */
+/**
+ * Multiset Jaccard word-overlap [0–1]. ES2022-safe — no findLastIndex, Array.at, etc.
+ * Uses frequency maps (Map<string, number>) instead of sets, so repeated words count.
+ * Intersection = Σ min(countA[w], countB[w]); Union = Σ max(countA[w], countB[w]).
+ * This prevents a rewrite from gaming the check by padding with repeated critique keywords.
+ */
 function jaccardWordOverlap(a: string, b: string): number {
-  const tokenize = (s: string): Set<string> => {
+  const tokenize = (s: string): Map<string, number> => {
     const words = s.toLowerCase().match(/[a-z]{3,}/g) ?? [];
-    const out = new Set<string>();
-    for (const w of words) out.add(w);
-    return out;
+    const freq = new Map<string, number>();
+    for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
+    return freq;
   };
-  const setA = tokenize(a);
-  const setB = tokenize(b);
-  if (setA.size === 0 && setB.size === 0) return 1;
+  const freqA = tokenize(a);
+  const freqB = tokenize(b);
+  const allWords = new Set<string>([...freqA.keys(), ...freqB.keys()]);
+  if (allWords.size === 0) return 1;
   let intersection = 0;
-  for (const w of setA) { if (setB.has(w)) intersection++; }
-  let union = setA.size;
-  for (const w of setB) { if (!setA.has(w)) union++; }
+  let union = 0;
+  for (const w of allWords) {
+    const cA = freqA.get(w) ?? 0;
+    const cB = freqB.get(w) ?? 0;
+    intersection += Math.min(cA, cB);
+    union += Math.max(cA, cB);
+  }
   return union === 0 ? 1 : intersection / union;
+}
+
+/**
+ * Derives an adaptive Jaccard similarity threshold from critique severity.
+ * More severe critiques → lower threshold → more divergence required from the original.
+ * Range: [0.72, 0.93].
+ *   0 high, 0 med, 0 low → 0.93  (minor critique — small word-set change is sufficient)
+ *   3 high, 0 med, 0 low → 0.80
+ *   5+ high              → 0.72  (clamped minimum)
+ *   0 high, 0 med, 5 low → 0.88  (all-low-severity: still tighter than default)
+ */
+function adaptiveJaccardThreshold(highCount: number, medCount: number, lowCount: number): number {
+  const raw = 0.95 - highCount * 0.05 - medCount * 0.02 - lowCount * 0.01;
+  return Math.min(0.93, Math.max(0.72, raw));
+}
+
+/**
+ * Bigram coverage check: for each critique point description, extract all consecutive
+ * 2-word phrases (bigrams). A point is "covered" if any bigram appears verbatim in
+ * the rewrite. Falls back to unigrams for single-word descriptions.
+ * Returns { covered, total }.
+ *
+ * This is harder to game than single-word checks: the model must produce
+ * the specific phrase "authentication validation" — not just the word "authentication".
+ */
+function checkBigramCoverage(
+  descriptions: string[],
+  rewrite: string,
+): { covered: number; total: number } {
+  const rewriteLower = rewrite.toLowerCase();
+  let covered = 0;
+  for (const desc of descriptions) {
+    const words = (desc.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+    const bigrams: string[] = [];
+    for (let i = 0; i < words.length - 1; i++) {
+      bigrams.push(`${words[i]} ${words[i + 1]}`);
+    }
+    const checks = bigrams.length > 0 ? bigrams : words;
+    if (checks.some((b) => rewriteLower.includes(b))) covered++;
+  }
+  return { covered, total: descriptions.length };
 }
 
 function parseToolCallPayload(
@@ -1011,7 +1096,9 @@ function buildResumePrompt(
 }
 
 function getBackgroundTaskRegistry(projectRoot: string): BackgroundTaskRegistry {
-  const existing = backgroundTaskRegistries.get(projectRoot);
+  const ctx = _laneCtx.getStore();
+  const key = ctx ? `${ctx.sessionId}:${projectRoot}` : projectRoot;
+  const existing = backgroundTaskRegistries.get(key);
   if (existing) {
     return existing;
   }
@@ -1020,7 +1107,7 @@ function getBackgroundTaskRegistry(projectRoot: string): BackgroundTaskRegistry 
     pending: new Map<string, Promise<SubAgentResult>>(),
     store: new BackgroundTaskStore(projectRoot),
   };
-  backgroundTaskRegistries.set(projectRoot, registry);
+  backgroundTaskRegistries.set(key, registry);
   return registry;
 }
 
@@ -1485,7 +1572,32 @@ function createSubAgentExecutor(
 // Module-level flag: run startup health check only once per process.
 let _healthCheckCompleted = false;
 
+/**
+ * Public wrapper — creates an isolated AsyncLocalStorage context via `run()` (not
+ * `enterWith()`). Using `run()` ensures recursive invocations from
+ * maybeAutoResumeDurableRunAfterBackgroundTask receive their own nested context and
+ * cannot corrupt the parent lane's backgroundTaskRegistries key. The try/finally covers
+ * ALL exit paths of `_runAgentLoopCore` (including early returns) with a single cleanup.
+ */
 export async function runAgentLoop(
+  prompt: string,
+  session: Session,
+  config: AgentLoopConfig,
+): Promise<Session> {
+  return _laneCtx.run({ sessionId: session.id }, async () => {
+    try {
+      return await _runAgentLoopCore(prompt, session, config);
+    } finally {
+      // Fires on every exit path — normal completion and all early returns.
+      const _exitCtx = _laneCtx.getStore();
+      backgroundTaskRegistries.delete(
+        _exitCtx ? `${_exitCtx.sessionId}:${session.projectRoot}` : session.projectRoot,
+      );
+    }
+  });
+}
+
+async function _runAgentLoopCore(
   prompt: string,
   session: Session,
   config: AgentLoopConfig,
@@ -1697,6 +1809,11 @@ export async function runAgentLoop(
   // Self-healing loop: track error signatures to detect repeated identical failures
   let lastErrorSignature = "";
   let sameErrorCount = 0;
+  // sessionFailureCount: monotonically increasing failure counter — never resets.
+  // Unlike sameErrorCount (which resets on signature change), this accumulates ALL
+  // verification failures regardless of whether the error signature changes.
+  // Feeds the FearSet repeated-failure channel which needs total failure count.
+  let sessionFailureCount = 0;
   let executionNudges = 0;
   const MAX_EXECUTION_NUDGES = 2;
   let executedToolsThisTurn = 0;
@@ -1779,7 +1896,6 @@ export async function runAgentLoop(
     });
   }
 
-
   // ---- Feature: Pivot logic ----
   // Track consecutive failures with similar error signatures for strategy change.
   // This is different from the existing tier escalation — it's about changing
@@ -1802,6 +1918,54 @@ export async function runAgentLoop(
   // action history for anomaly detection; SecretsScanner is stateless.
   const securityEngine = new SecurityEngine({ anomalyDetection: true });
   const secretsScanner = new SecretsScanner();
+
+  // ---- DanteMemory: four-layer persistent memory ----
+  // createMemoryOrchestrator is SYNCHRONOUS — no await.
+  const memoryOrchestrator: MemoryOrchestrator = createMemoryOrchestrator(
+    session.projectRoot,
+  );
+  let memoryInitialized = false;
+  try {
+    await memoryOrchestrator.initialize();
+    memoryInitialized = true;
+  } catch {
+    // Non-fatal: memory init failure must not block the agent
+  }
+  // getGlobalLogger creates-if-absent: first call with sessionId initializes the singleton.
+  // tools.ts dynamic import of debug-trail will pick up the same session-scoped instance.
+  const auditLogger: AuditLogger = getGlobalLogger({ sessionId: session.id });
+
+  // ---- DanteMemory: semantic recall injection ----
+  // Injects semantically relevant memories from the full memory engine (cross-session).
+  if (memoryInitialized) {
+    try {
+      const recallResult = await memoryOrchestrator.memoryRecall(durablePrompt, 10);
+      if (recallResult.results.length > 0) {
+        const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const memoryLines = recallResult.results.map((m) => {
+          const storedAt =
+            (m.meta?.storedAt as string | undefined) ?? m.createdAt;
+          const isStale =
+            now - new Date(storedAt).getTime() > THIRTY_DAYS_MS;
+          const staleFlag = isStale ? " [STALE: >30 days old]" : "";
+          const summary =
+            m.summary ??
+            (typeof m.value === "string"
+              ? m.value.slice(0, 200)
+              : JSON.stringify(m.value).slice(0, 200));
+          return `- [${m.scope}] ${m.key}: ${summary}${staleFlag}`;
+        });
+        messages.push({
+          role: "system" as const,
+          content: `## DanteMemory (Semantic Recall)\n${memoryLines.join("\n")}`,
+        });
+      }
+    } catch {
+      // Non-fatal: recall failure must not block execution
+    }
+  }
+
   const evidenceLedger: ExecutionEvidence[] = [];
   let lastConfirmedStep = "Started execution.";
   let lastSuccessfulTool: string | undefined;
@@ -1889,6 +2053,27 @@ export async function runAgentLoop(
         process.stdout.write(
           `${RED}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens — use /compact or /new for fresh session]${RESET}\n`,
         );
+      }
+    }
+
+    // ---- DanteMemory: auto-compaction at 80% context utilization ----
+    if (memoryInitialized && utilization.percent > 80) {
+      try {
+        const sumResult = await memoryOrchestrator.memorySummarize(session.id);
+        if (sumResult.compressed && sumResult.summary) {
+          const KEEP_RECENT = 8;
+          const first = messages[0];
+          const recent = messages.slice(-KEEP_RECENT);
+          if (first && messages.length > KEEP_RECENT + 1) {
+            const summaryMsg = {
+              role: "system" as const,
+              content: `## Session Summary (DanteMemory auto-compact)\n${sumResult.summary}`,
+            };
+            messages.splice(0, messages.length, first, summaryMsg, ...recent);
+          }
+        }
+      } catch {
+        // Non-fatal: fall through to existing compaction behavior
       }
     }
 
@@ -2154,6 +2339,66 @@ export async function runAgentLoop(
     // Display the assistant's text response (suppressed in silent mode)
     if (cleanText.length > 0 && !config.silent) {
       process.stdout.write(`${cleanText}\n`);
+    }
+
+    // ---- Confidence-gated escalation ----
+    // When confidenceGating is enabled, scan the model output for a structured
+    // low-confidence signal. If confidence < threshold, pause and ask the user
+    // whether to continue. Non-TTY environments skip the gate (CI/CD safety).
+    //
+    // Recognized signal formats (either format in response text triggers detection):
+    //   <!-- DANTE_CONFIDENCE: 0.3 reason="..." -->
+    //   [CONFIDENCE:0.3 reason="..."]
+    if (config.confidenceGating && cleanText.length > 0) {
+      try {
+        const cgThreshold = config.confidenceGating.threshold ?? 0.5;
+        // Match HTML comment style: <!-- DANTE_CONFIDENCE: 0.35 reason="..." -->
+        const htmlMatch = cleanText.match(
+          /<!--\s*DANTE_CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\s*-->/i,
+        );
+        // Match bracket style: [CONFIDENCE:0.35 reason="..."]
+        const bracketMatch = cleanText.match(
+          /\[CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\]/i,
+        );
+        const match = htmlMatch ?? bracketMatch;
+        if (match) {
+          const parsedScore = parseFloat(match[1] ?? "1");
+          const reason = match[2] ?? "unspecified";
+          if (Number.isFinite(parsedScore) && parsedScore < cgThreshold) {
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${YELLOW}[confidence-gate] Low confidence signal detected: ${parsedScore.toFixed(2)} < ${cgThreshold} (reason: ${reason})${RESET}\n`,
+              );
+            }
+            if (config.confidenceGating.mode === "on-request" && process.stdin.isTTY !== false) {
+              const shouldContinue = await confirmDestructive(
+                "Agent expressed low confidence — continue anyway?",
+                {
+                  operation: `Confidence: ${parsedScore.toFixed(2)} (threshold: ${cgThreshold})`,
+                  detail: `Reason: ${reason}`,
+                },
+              );
+              if (!shouldContinue) {
+                if (!config.silent) {
+                  process.stdout.write(
+                    `\n${RED}[confidence-gate] Escalation: user chose not to continue (confidence ${parsedScore.toFixed(2)}).${RESET}\n`,
+                  );
+                }
+                const escalationMsg: SessionMessage = {
+                  id: randomUUID(),
+                  role: "assistant",
+                  content: `Execution paused: agent expressed low confidence (${parsedScore.toFixed(2)}) and user declined to continue. Reason: ${reason}`,
+                  timestamp: new Date().toISOString(),
+                };
+                session.messages.push(escalationMsg);
+                return session;
+              }
+            }
+          }
+        }
+      } catch {
+        // Non-fatal: confidence-gate failure must never block the agent response
+      }
     }
 
     // If no tool calls, we're done with this turn
@@ -3014,6 +3259,7 @@ export async function runAgentLoop(
               verificationErrorSig = errorSig;
               if (errorSig === lastErrorSignature) {
                 sameErrorCount++;
+                sessionFailureCount++;
                 if (sameErrorCount >= 2) {
                   // Same errors persisting across retries — escalate model tier
                   const reason = `Persistent verification signature ${errorSig} repeated ${sameErrorCount + 1} times`;
@@ -3031,6 +3277,7 @@ export async function runAgentLoop(
                 }
               } else {
                 sameErrorCount = 0;
+                sessionFailureCount++; // different sig = still a failure
               }
               lastErrorSignature = errorSig;
 
@@ -3265,6 +3512,23 @@ export async function runAgentLoop(
       }
     }
 
+    // ---- DanteMemory: retain tool round outcome for cross-session recall ----
+    if (memoryInitialized && toolCalls.length > 0) {
+      const touchedFilesList =
+        touchedFiles.slice(0, 3).map((f: string) => f.split("/").pop()).join(", ");
+      const roundSummary = `Round ${roundCounter}: ${toolCalls.length} tool(s)${touchedFilesList ? ` | files: ${touchedFilesList}` : ""}`;
+      if (secretsScanner.scan(roundSummary).clean) {
+        memoryOrchestrator
+          .memoryStore(
+            `round-${roundCounter}-${session.id}`,
+            roundSummary,
+            "session",
+            { source: session.id, summary: roundSummary, tags: ["round"] },
+          )
+          .catch(() => {}); // fire-and-forget, non-fatal
+      }
+    }
+
     // Add tool results to messages for the next model call
     const assistantToolMessage = {
       role: "assistant" as const,
@@ -3414,6 +3678,9 @@ export async function runAgentLoop(
   // and persists sessions to disk. Lesson-eligible (PASS) sessions are surfaced
   // to the user for distillation via `dantecode gaslight bridge`.
   if (config.gaslight) {
+    // Declared outside the gaslight try-block so the FearSet block below can read
+    // the last iteration's gateScore as its verificationScore.
+    let gaslightSession: Awaited<ReturnType<typeof config.gaslight.maybeGaslight>> = null;
     try {
       // Read draft from session.messages (durable), not local messages (LLM API array).
       // After a two-round loop the final response is pushed to session.messages then
@@ -3433,11 +3700,18 @@ export async function runAgentLoop(
         let lastCritiqueSummary: string | undefined;
         // Fix B (structural pre-gate): capture the original draft at session start.
         // onGate receives each rewrite attempt; Jaccard overlap vs this baseline
-        // must be ≤ 0.88 — a higher overlap means the model copy-pasted rather than rewrote.
+        // is measured against an adaptive threshold derived from critique severity.
         const originalDraft = lastDraft;
         let lastCritiquePoints: string | undefined;
+        // Fix 1+2: severity counts and full descriptions for adaptive threshold + bigram check.
+        let lastCritiqueHighCount = 0;
+        let lastCritiqueMedCount = 0;
+        let lastCritiqueDescriptions: string[] = [];
+        // Fix 5: low-severity tracking — previously bypassed all checks.
+        let lastCritiqueLowCount = 0;
+        let lastCritiqueLowDescriptions: string[] = [];
 
-        const gaslightSession = await config.gaslight.maybeGaslight({
+        gaslightSession = await config.gaslight.maybeGaslight({
           message: durablePrompt,
           draft: lastDraft,
           callbacks: {
@@ -3459,10 +3733,17 @@ export async function runAgentLoop(
                     };
                     if (typeof parsed.summary === "string") lastCritiqueSummary = parsed.summary;
                     if (Array.isArray(parsed.points)) {
-                      const highMed = parsed.points
-                        .filter((p) => p.severity === "high" || p.severity === "medium")
-                        .map((p) => `- ${p.description ?? ""}`)
-                        .join("\n");
+                      lastCritiqueHighCount = parsed.points.filter((p) => p.severity === "high").length;
+                      lastCritiqueMedCount = parsed.points.filter((p) => p.severity === "medium").length;
+                      lastCritiqueLowCount = parsed.points.filter((p) => p.severity === "low").length;
+                      const highMedPoints = parsed.points.filter(
+                        (p) => p.severity === "high" || p.severity === "medium",
+                      );
+                      lastCritiqueDescriptions = highMedPoints.map((p) => p.description ?? "");
+                      lastCritiqueLowDescriptions = parsed.points
+                        .filter((p) => p.severity === "low")
+                        .map((p) => p.description ?? "");
+                      const highMed = highMedPoints.map((p) => `- ${p.description ?? ""}`).join("\n");
                       if (highMed) lastCritiquePoints = highMed;
                     }
                   }
@@ -3472,44 +3753,65 @@ export async function runAgentLoop(
                 return null; // engine falls back to buildFallbackCritique
               }
             },
-            // Fix 2: Critique-aware gate (threshold raised 0.75 → 0.85).
-            // When critique context is available, asks "does this address the critique?"
-            // instead of "rate from 0-1" — much harder for the model to self-approve.
+            // Critique-aware gate: deterministic structural checks then comparative LLM judgment.
             onGate: async (draft: string) => {
               try {
                 // ── Structural pre-gate (deterministic — cannot be self-gamed) ──────────────
-                // Two checks. Either failing → immediate "fail" (score: 0.2) with no LLM call.
-                // This is the adversarial layer: math cannot be argued with by the model.
+                // Four checks. Any failure → immediate "fail" (score: 0.2) with no LLM call.
                 const structuralIssues: string[] = [];
 
                 // Check 1 — Differentiation: rewrite must diverge meaningfully from original.
-                // Jaccard word-overlap > 0.88 = copy-paste job, not a genuine improvement.
+                // Threshold adapts to critique severity: more severe critique → lower threshold
+                // (more divergence required). Range [0.72, 0.93].
+                const jaccardThreshold = adaptiveJaccardThreshold(
+                  lastCritiqueHighCount, lastCritiqueMedCount, lastCritiqueLowCount,
+                );
                 const overlap = jaccardWordOverlap(originalDraft, draft);
-                if (overlap > 0.88) {
+                if (overlap > jaccardThreshold) {
                   structuralIssues.push(
-                    `Rewrite too similar to original (${(overlap * 100).toFixed(0)}% word overlap > 88%)`,
+                    `Rewrite too similar to original (${(overlap * 100).toFixed(0)}% overlap > ${(jaccardThreshold * 100).toFixed(0)}% threshold)`,
                   );
                 }
 
-                // Check 2 — Coverage: concept words from critique bullets must appear in rewrite.
-                // Extract up to 3 meaningful words (≥4 chars) per bullet; allow 40% absent,
-                // but if 60%+ are missing the model is ignoring the critique entirely.
-                if (lastCritiquePoints) {
-                  const conceptWords = lastCritiquePoints
-                    .split("\n")
-                    .flatMap(
-                      (line) => (line.replace(/^-\s*/, "").match(/[a-z]{4,}/gi) ?? []).slice(0, 3),
-                    );
-                  if (conceptWords.length > 0) {
-                    const rewriteLower = draft.toLowerCase();
-                    const missingCount = conceptWords.filter(
-                      (w) => !rewriteLower.includes(w.toLowerCase()),
-                    ).length;
-                    if (missingCount > conceptWords.length * 0.6) {
+                // Check 2.5 — New vocabulary ratio (keyword stuffing detection).
+                // Skipped for condensations (rewrite < 50% original token count) — condensing
+                // a response is a valid improvement; the Jaccard check handles differentiation.
+                {
+                  const origTokensArr = (originalDraft.toLowerCase().match(/\b[a-z]{4,}\b/g) ?? []);
+                  const origTokenSet = new Set(origTokensArr);
+                  const rewriteTokens = (draft.toLowerCase().match(/\b[a-z]{4,}\b/g) ?? []);
+                  if (rewriteTokens.length >= origTokensArr.length * 0.5) {
+                    const newCount = rewriteTokens.filter((w) => !origTokenSet.has(w)).length;
+                    const ratio = newCount / Math.max(1, rewriteTokens.length);
+                    const minRatio = lastCritiqueHighCount > 0 ? 0.08 : 0.05;
+                    if (ratio < minRatio) {
                       structuralIssues.push(
-                        `Rewrite ignores critique (${missingCount}/${conceptWords.length} concept words absent)`,
+                        `Insufficient new vocabulary (${(ratio * 100).toFixed(1)}% new tokens < ${(minRatio * 100).toFixed(0)}% required)`,
                       );
                     }
+                  }
+                }
+
+                // Check 3 — High/med bigram coverage (70% required).
+                // Each critique point must have at least one 2-word phrase appear in the rewrite.
+                if (lastCritiqueDescriptions.length > 0) {
+                  const { covered, total } = checkBigramCoverage(lastCritiqueDescriptions, draft);
+                  if (covered / total < 0.70) {
+                    structuralIssues.push(
+                      `Critique not addressed (${covered}/${total} points covered < 70% required)`,
+                    );
+                  }
+                }
+
+                // Check 4 — Low-severity bigram coverage (40% required).
+                // Previously, all-low-severity critiques bypassed every structural check.
+                // Advisory bar (40% vs 70%) reflects lower urgency of low-severity points.
+                if (lastCritiqueLowDescriptions.length > 0) {
+                  const { covered, total } = checkBigramCoverage(lastCritiqueLowDescriptions, draft);
+                  if (covered / total < 0.40) {
+                    structuralIssues.push(
+                      `Low-severity critique ignored (${covered}/${total} low points covered < 40% required)`,
+                    );
                   }
                 }
 
@@ -3519,28 +3821,54 @@ export async function runAgentLoop(
                 }
                 // ─────────────────────────────────────────────────────────────────────────────
 
+                // ── ARCHITECTURAL LIMITATION ─────────────────────────────────────────────────
+                // The gate evaluator is the same model family that wrote the original and the
+                // rewrite. True independence requires a different model. Mitigations in place:
+                //   1. Fresh context: generate() receives no prior messages (zero shared history).
+                //   2. Adversarial framing: system prompt assumes the rewrite was crafted to cheat.
+                //   3. thinkingBudget forces deliberate reasoning rather than fast self-approval.
+                // Full independence requires routing infrastructure changes outside this file.
+                // ─────────────────────────────────────────────────────────────────────────────
+
+                // Comparative PASS/FAIL gate: shows both ORIGINAL and REWRITE so the
+                // model must make a binary comparative judgment rather than self-grading its
+                // own output on a continuous scale. Binary choice is harder to self-approve.
                 let gatePrompt: string;
                 if (lastCritiqueSummary) {
                   const pointsBlock = lastCritiquePoints
-                    ? `\n\nSpecific issues to address:\n${lastCritiquePoints}` : "";
+                    ? `\n\nSpecific issues:\n${lastCritiquePoints}` : "";
                   gatePrompt =
-                    `Does this response adequately address the following critique?\n\n` +
-                    `Critique: ${lastCritiqueSummary}${pointsBlock}\n\n` +
-                    `Response:\n${draft.slice(0, 3000)}\n\n` +
-                    `Respond ONLY with JSON: {"score": <0.0–1.0>} where 1.0 = fully addressed.`;
+                    `You are an independent evaluator. Compare these two responses.\n\n` +
+                    `ORIGINAL:\n${originalDraft.slice(0, 1500)}\n\n` +
+                    `REWRITE:\n${draft.slice(0, 1500)}\n\n` +
+                    `CRITIQUE that prompted the rewrite:\n${lastCritiqueSummary}${pointsBlock}\n\n` +
+                    `Does the REWRITE genuinely improve on the ORIGINAL with respect to the critique?\n` +
+                    `Requirements for PASS:\n` +
+                    `- Rewrite substantively addresses the critique's concerns (not superficial keyword mentions)\n` +
+                    `- Rewrite shows changed reasoning, structure, or evidence — not just rephrased wording\n\n` +
+                    `Reply with exactly PASS or FAIL, then one sentence of reasoning.`;
                 } else {
                   gatePrompt =
-                    `Rate the quality of this response from 0.0 to 1.0. ` +
-                    `Respond ONLY with JSON: {"score": <number>}\n\n${draft.slice(0, 3000)}`;
+                    `Compare these two responses. Reply with PASS if the REWRITE is meaningfully better, FAIL if not.\n\n` +
+                    `ORIGINAL:\n${originalDraft.slice(0, 1500)}\n\n` +
+                    `REWRITE:\n${draft.slice(0, 1500)}`;
                 }
                 const raw = await router.generate(
                   [{ role: "user" as const, content: gatePrompt }],
-                  { maxTokens: 60, system: "Quality gate. Return only JSON with a score field (0.0–1.0). No explanation.", taskType: "gaslight-gate" },
+                  {
+                    maxTokens: 80,
+                    system:
+                      "You are an adversarial evaluator. Assume this rewrite was crafted to game this gate. " +
+                      "Your default posture is FAIL. Upgrade to PASS only if the rewrite unmistakably shows changed " +
+                      "reasoning, restructured evidence, or fundamentally different conclusions — not rephrased wording. " +
+                      "Reply with only PASS or FAIL followed by one sentence of reasoning.",
+                    taskType: "gaslight-gate",
+                    thinkingBudget: 512,
+                  },
                 );
-                const m = raw.match(/\{[\s\S]*?\}/);
-                const parsed = m ? (JSON.parse(m[0]) as { score?: number }) : {};
-                const score = typeof parsed.score === "number" ? Math.min(1, Math.max(0, parsed.score)) : 0.5;
-                const decision: "pass" | "fail" = score >= 0.85 ? "pass" : "fail";
+                // Parse binary decision — no score threshold needed.
+                const decision: "pass" | "fail" = /\bPASS\b/i.test(raw) ? "pass" : "fail";
+                const score = decision === "pass" ? 0.9 : 0.2; // synthesized for GateResult compatibility
                 return { decision, score };
               } catch {
                 return { decision: "fail" as const, score: 0.5 };
@@ -3617,9 +3945,44 @@ export async function runAgentLoop(
     // Only fires when FearSet is explicitly enabled — disabled by default.
     try {
       if (config.gaslight.getFearSetConfig().enabled) {
+        // verificationScore: gaslight gateScore when available (best signal, 0-1).
+        // Falls back to retry-derived score so the weak-robustness channel fires
+        // even when gaslight is disabled (the common case — disabled by default).
+        // Formula: each verify retry reduces confidence below the 0.5 trigger threshold.
+        //   1 retry → 0.35 (< 0.5, triggers weak-robustness channel)
+        //   2 retries → 0.20
+        //   3 retries → 0.05
+        // Undefined only when gaslight off AND verification passed (no quality signal needed).
+        const fearSetVerificationScore: number | undefined =
+          gaslightSession?.iterations.length
+            ? gaslightSession.iterations[gaslightSession.iterations.length - 1]?.gateScore
+            : verifyRetries > 0
+              ? Math.max(0, 0.5 - verifyRetries * 0.15)
+              : undefined;
+
+        // taskClass is intentionally not set here — the policy channel requires explicit
+        // user configuration of policyTaskClasses in FearSet config. Agent-loop has no
+        // reliable basis for inferring task classes that are only meaningful to
+        // user-defined policy. The two-tier classifier handles destructive/long-horizon
+        // patterns independently via its own channel logic.
+        //
+        // priorFailureCount: sessionFailureCount is the monotonic session-level failure count.
+        // sameErrorCount resets on signature change — misses varied-error failure patterns.
+        const fearSetPriorFailureCount = sessionFailureCount;
+
         const fearSetResult = await config.gaslight.maybeFearSet({
           message: durablePrompt,
+          verificationScore: fearSetVerificationScore,
+          priorFailureCount: fearSetPriorFailureCount,
           callbacks: {
+            onClassify: async (message: string, rubricPrompt: string) => {
+              try {
+                return await router.generate(
+                  [{ role: "user" as const, content: `${rubricPrompt}\n\nMessage to classify:\n${message}` }],
+                  { maxTokens: 200, taskType: "fearset-classify" },
+                );
+              } catch { return null; }
+            },
             onColumn: async (sysPrompt: string, userPrompt: string, _col: string) => {
               try {
                 return await router.generate(
@@ -3633,6 +3996,22 @@ export async function runAgentLoop(
                 return await router.generate(
                   [{ role: "user" as const, content: prompt }],
                   { maxTokens: 400, system: "Score this FearSet plan. Return JSON only.", taskType: "fearset-gate" },
+                );
+              } catch { return null; }
+            },
+            onSynthesize: async (columnsMarkdown: string) => {
+              try {
+                return await router.generate(
+                  [{ role: "user" as const, content:
+                    `Based on the following Fear-Setting analysis, produce a final go/no-go/conditional decision.\n\n` +
+                    `Return ONLY this JSON (no markdown, no explanation):\n` +
+                    `{"decision": "go"|"no-go"|"conditional", "reasoning": "2-3 sentences", "conditions": ["list", "of", "conditions"]}\n\n` +
+                    columnsMarkdown }],
+                  {
+                    maxTokens: 400,
+                    system: "You are a decision synthesizer. Evaluate the Fear-Setting analysis and return a JSON go/no-go decision. Return JSON only.",
+                    taskType: "fearset-synthesize",
+                  },
                 );
               } catch { return null; }
             },
@@ -3651,6 +4030,34 @@ export async function runAgentLoop(
             },
           },
         });
+
+        // FearSet enforcement gate: when enabled, block on explicit user confirmation
+        // if the analysis returns no-go. Default off — non-breaking for existing callers.
+        // Non-TTY (CI/CD) is always non-blocking — guard prevents readline hangs.
+        if (
+          fearSetResult?.synthesizedRecommendation?.decision === "no-go" &&
+          config.fearSetBlockOnNoGo === true &&
+          process.stdin.isTTY !== false
+        ) {
+          const reasoning = fearSetResult.synthesizedRecommendation.reasoning.slice(0, 120);
+          const robustness = fearSetResult.robustnessScore?.overall.toFixed(2) ?? "n/a";
+          const shouldProceed = await confirmDestructive(
+            "Proceed despite FearSet NO-GO recommendation?",
+            {
+              operation: `FearSet analysis returned NO-GO (robustness: ${robustness})`,
+              detail: reasoning,
+            },
+          );
+          if (!shouldProceed) {
+            if (!config.silent) {
+              process.stdout.write(
+                `\n${RED}[fearset] Aborted by user — FearSet NO-GO blocked this operation.${RESET}\n`,
+              );
+            }
+            return session;
+          }
+        }
+
         if (fearSetResult && !config.silent) {
           process.stdout.write(
             `\n${CYAN}[fearset] Auto-triggered (${fearSetResult.trigger.channel}): ` +
@@ -3661,6 +4068,34 @@ export async function runAgentLoop(
     } catch {
       // Non-fatal: fearset failure must never block the agent response
     }
+  }
+
+  // ---- DanteMemory: session-end persist + prune ----
+  if (memoryInitialized) {
+    try {
+      const sessionSummaryValue = `${durablePrompt.slice(0, 120)} | files: ${filesModified}`;
+      if (secretsScanner.scan(sessionSummaryValue).clean) {
+        await memoryOrchestrator.memoryStore(
+          `session::${session.id}`,
+          sessionSummaryValue,
+          "project", // project scope persists cross-session
+          {
+            source: session.id,
+            summary: sessionSummaryValue,
+            tags: ["session-summary"],
+          },
+        );
+      }
+      await memoryOrchestrator.memoryPrune();
+    } catch {
+      // Non-fatal
+    }
+  }
+  // ---- debug-trail: flush session audit log ----
+  try {
+    await auditLogger.flush({ endSession: true });
+  } catch {
+    // Non-fatal
   }
 
   return session;
