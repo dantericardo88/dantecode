@@ -103,6 +103,21 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       }),
     },
 
+    GitHooksInstall: {
+      description:
+        "Install DanteCode git hooks (post-commit and pre-push by default) into the project's " +
+        ".git/hooks/ directory so that git events are forwarded to the DanteCode event engine.",
+      parameters: z.object({
+        hooks: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Hook types to install. Valid values: pre-commit, post-commit, pre-push, " +
+              "post-merge, pre-rebase. Defaults to ['post-commit', 'pre-push'].",
+          ),
+      }),
+    },
+
     TodoWrite: {
       description: "Update the session's to-do list with a complete replacement.",
       parameters: z.object({

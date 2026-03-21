@@ -6,7 +6,7 @@
 
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import { parseModelReference, readOrInitializeState } from "@dantecode/core";
+import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
@@ -14,6 +14,8 @@ import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { watchGitEvents } from "@dantecode/git-engine";
+import type { GitEventWatcher } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -177,6 +179,36 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     replState.sandboxBridge = agentConfig.sandboxBridge;
   }
 
+  // Start GitEventWatcher when events.enabled is true in STATE.yaml
+  let gitEventWatcher: GitEventWatcher | null = null;
+  const eventsEnabled = (state as Record<string, unknown>)["events"] !== undefined &&
+    typeof (state as Record<string, unknown>)["events"] === "object" &&
+    ((state as Record<string, unknown>)["events"] as Record<string, unknown>)["enabled"] === true;
+
+  if (eventsEnabled) {
+    try {
+      gitEventWatcher = watchGitEvents("post-commit", undefined, {
+        cwd: options.projectRoot,
+        persist: false,
+      });
+      gitEventWatcher.on("event", (evt) => {
+        appendAuditEvent(options.projectRoot, {
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+          type: "git_commit",
+          payload: { source: "git-event-watcher", event: evt },
+          modelId: "system",
+          projectRoot: options.projectRoot,
+        }).catch(() => {});
+      });
+      if (!options.silent) {
+        process.stdout.write(`${DIM}[git-event-watcher: monitoring post-commit events]${RESET}\n`);
+      }
+    } catch {
+      // GitEventWatcher startup failure must not prevent the REPL from starting
+    }
+  }
+
   // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
@@ -251,6 +283,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   });
 
   rl.on("close", async () => {
+    // Stop GitEventWatcher if running
+    if (gitEventWatcher) {
+      await gitEventWatcher.stop().catch(() => {});
+    }
     // Shut down sandbox container if running
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
