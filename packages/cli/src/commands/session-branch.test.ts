@@ -1,32 +1,17 @@
 // ============================================================================
-// @dantecode/cli — Session Branch Tests
+// @dantecode/cli -- Session Branch Tests
 // ============================================================================
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-
-const { mockSessionStoreSave } = vi.hoisted(() => ({
-  mockSessionStoreSave: vi.fn().mockResolvedValue(undefined),
-}));
+import { existsSync } from "node:fs";
 
 vi.mock("@dantecode/core", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@dantecode/core");
-  class MockSessionStore {
-    constructor(_root: string) {}
-    async save(file: unknown) { return mockSessionStoreSave(file); }
-    async list() { return []; }
-    async load(_id: string) { return null; }
-    async deleteAll() { return 0; }
-    async summarize(_s: unknown) { return ""; }
-    async delete(_id: string) { return true; }
-    async exists(_id: string) { return false; }
-    getSessionsDir() { return "/mock/.dantecode/sessions"; }
-  }
   return {
     ...actual,
-    SessionStore: MockSessionStore,
     getProviderCatalogEntry: vi.fn(() => ({ label: "Mock" })),
     getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
     parseModelReference: vi.fn((ref: string) => ({ provider: "anthropic", modelId: ref })),
@@ -155,6 +140,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     gaslight: null,
     memoryOrchestrator: null,
     reasoningOverrideSession: false,
+    theme: "default",
   };
 }
 
@@ -201,16 +187,48 @@ describe("/branch command", () => {
     expect(sysMsg).toBeDefined();
   });
 
-  it("parent session is saved before branching", async () => {
+  it("parent session file is written to disk before branching", async () => {
     const state = makeState(tempDir);
     const parentId = state.session.id;
     await routeSlashCommand("/branch sub", state);
-    // SessionStore.save() should have been called at least twice:
-    // once for the parent session before fork, once for the new branch
-    expect(mockSessionStoreSave).toHaveBeenCalledTimes(2);
-    // First call should include the parent session id
-    const firstCallArg = mockSessionStoreSave.mock.calls[0]?.[0] as { id: string } | undefined;
-    expect(firstCallArg?.id).toBe(parentId);
+
+    // Real SessionStore writes to <projectRoot>/.dantecode/sessions/<id>.json
+    const parentFile = join(tempDir, ".dantecode", "sessions", `${parentId}.json`);
+    expect(existsSync(parentFile)).toBe(true);
+
+    const raw = await readFile(parentFile, "utf8");
+    const saved = JSON.parse(raw) as { id: string };
+    expect(saved.id).toBe(parentId);
+  });
+
+  it("branched session file is written to disk with new ID", async () => {
+    const state = makeState(tempDir);
+    const parentId = state.session.id;
+    await routeSlashCommand("/branch new-id-test", state);
+
+    const newId = state.session.id;
+    expect(newId).not.toBe(parentId);
+
+    const branchFile = join(tempDir, ".dantecode", "sessions", `${newId}.json`);
+    expect(existsSync(branchFile)).toBe(true);
+
+    const raw = await readFile(branchFile, "utf8");
+    const saved = JSON.parse(raw) as { id: string; title: string };
+    expect(saved.id).toBe(newId);
+    expect(saved.title).toBe("new-id-test");
+  });
+
+  it("both parent and branch session files exist after branching", async () => {
+    const state = makeState(tempDir);
+    const parentId = state.session.id;
+    await routeSlashCommand("/branch both-files", state);
+    const branchId = state.session.id;
+
+    const sessionsDir = join(tempDir, ".dantecode", "sessions");
+    const files = await readdir(sessionsDir);
+
+    expect(files).toContain(`${parentId}.json`);
+    expect(files).toContain(`${branchId}.json`);
   });
 
   it("branch with no name generates timestamp-based name", async () => {
@@ -256,12 +274,16 @@ describe("/name command", () => {
     expect(result).toContain("existing-name");
   });
 
-  it("/name persists session to disk (SessionStore.save called)", async () => {
+  it("/name persists session to disk via real SessionStore.save", async () => {
     const state = makeState(tempDir);
     await routeSlashCommand("/name persisted-name", state);
-    // SessionStore.save() should have been called to persist the rename
-    expect(mockSessionStoreSave).toHaveBeenCalledTimes(1);
-    const savedFile = mockSessionStoreSave.mock.calls[0]?.[0] as { id: string; title: string } | undefined;
-    expect(savedFile?.title).toBe("persisted-name");
+
+    // Real SessionStore writes to <projectRoot>/.dantecode/sessions/<id>.json
+    const sessionFile = join(tempDir, ".dantecode", "sessions", `${state.session.id}.json`);
+    expect(existsSync(sessionFile)).toBe(true);
+
+    const raw = await readFile(sessionFile, "utf8");
+    const saved = JSON.parse(raw) as { id: string; title: string };
+    expect(saved.title).toBe("persisted-name");
   });
 });

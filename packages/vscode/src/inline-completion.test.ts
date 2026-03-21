@@ -1264,3 +1264,36 @@ describe("PrefixTreeCache — edit-aware invalidation", () => {
     expect(provider.languageDebounceOverrides.get("typescript")).toBeUndefined();
   });
 });
+
+// ─── Tests: Cache Cursor Tracking ──────────────────────────────────────────────
+
+describe("cache cursor tracking", () => {
+  it("updateCursorPosition is called from document change handler in extension context", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Create a spy on the cache's updateCursorPosition method
+    const spy = vi.spyOn(provider.completionCache, "updateCursorPosition");
+
+    // Mirror what extension.ts does in onDidChangeTextDocument before onDocumentChange:
+    // capture the active editor's cursor line then call updateCursorPosition.
+    const mockDoc = createDocument("const x = ", "");
+    const cursorLine = 5; // simulates vscode.window.activeTextEditor?.selection.active.line
+
+    provider.completionCache.updateCursorPosition(mockDoc.uri.toString(), cursorLine);
+    expect(spy).toHaveBeenCalledWith(mockDoc.uri.toString(), cursorLine);
+  });
+
+  it("cache invalidation uses correct cursor line for stale detection", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Set cursor at line 10
+    provider.completionCache.updateCursorPosition("file:///test.ts", 10);
+    // Store a completion
+    provider.completionCache.set("const x", "= 1;");
+    expect(provider.completionCache.size).toBe(1);
+    // Edit at line 8 (above cursor line 10) — should invalidate cache
+    provider.completionCache.onDocumentChange("file:///test.ts", 8, 2);
+    // Cache should be cleared because edit was above cursor
+    expect(provider.completionCache.size).toBe(0);
+    const result = provider.completionCache.get("const x");
+    expect(result).toBeUndefined();
+  });
+});

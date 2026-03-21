@@ -36,6 +36,12 @@ export interface LaneAssignmentRequest {
   branch: string;
   baseBranch: string;
   assumptions?: string[];
+  /**
+   * Nesting depth of this lane in a recursive sub-agent hierarchy.
+   * 0 = root lane (default). 1 = first level sub-agent. Etc.
+   * Enforced against CouncilConfig.maxNestingDepth by CouncilOrchestrator.assignLane().
+   */
+  nestingDepth?: number;
 }
 
 export interface LaneAssignmentResult {
@@ -189,6 +195,7 @@ export class CouncilRouter {
       taskCategory: request.taskCategory,
       touchedFiles: [],
       retryCount: 0,
+      nestingDepth: request.nestingDepth ?? 0,
     };
 
     if (this.runState) {

@@ -174,7 +174,8 @@ export function renderFleetDashboard(state: FleetDashboardState): string {
     for (const lane of state.lanes) {
       const icon = getStatusIcon(lane.status);
       const agentName = padRight(lane.agentName.slice(0, 12), 12);
-      const status = padRight(colorStatus(lane.status), 10 + (colorStatus(lane.status).length - lane.status.length));
+      const coloredStatus = colorStatus(lane.status);
+      const status = padRight(coloredStatus, 10);
       const tokens = padRight(formatTokens(lane.tokensUsed), 7);
       const pdse = lane.pdseScore !== undefined
         ? padRight(String(Math.round(lane.pdseScore)), 6)
@@ -268,6 +269,15 @@ export class FleetDashboard {
       process.stdout.write(CR + CLEAR_EOL + line + "\n");
     }
 
+    // If the new render is shorter, erase leftover lines from the previous render.
+    if (lineCount < this.lastLineCount) {
+      const extra = this.lastLineCount - lineCount;
+      for (let i = 0; i < extra; i++) {
+        process.stdout.write(CR + CLEAR_EOL + "\n");
+      }
+      process.stdout.write(CURSOR_UP(extra));
+    }
+
     this.lastLineCount = lineCount;
   }
 
@@ -280,7 +290,7 @@ export class FleetDashboard {
     for (let i = 0; i < this.lastLineCount; i++) {
       process.stdout.write(CR + CLEAR_EOL + "\n");
     }
-    process.stdout.write(CURSOR_UP(this.lastLineCount));
+    // Cursor is now below the cleared area — correct position for subsequent output.
     this.lastLineCount = 0;
   }
 

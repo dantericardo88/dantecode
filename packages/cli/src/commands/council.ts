@@ -1136,6 +1136,18 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     dashboard.updateFleet({ budgetRemaining: report.budgetRemaining });
     dashboard.draw();
   });
+  orchestrator.on("lane:retry-pending", ({ laneId, retryCount }) => {
+    dashboard.updateLane(laneId, { status: "retrying", progressHint: `retry #${retryCount}` });
+    dashboard.draw();
+  });
+  orchestrator.on("lane:paused", ({ laneId }) => {
+    dashboard.updateLane(laneId, { status: "pending", progressHint: "paused (conflict)" });
+    dashboard.draw();
+  });
+  orchestrator.on("lane:resumed", ({ laneId }) => {
+    dashboard.updateLane(laneId, { status: "running", progressHint: undefined });
+    dashboard.draw();
+  });
   orchestrator.on("merge:complete", (r) => {
     dashboard.updateFleet({ status: `merge:${r.synthesis.decision}` });
     dashboard.draw();

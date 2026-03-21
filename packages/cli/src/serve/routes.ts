@@ -8,12 +8,31 @@
 // ============================================================================
 
 import { randomBytes } from "node:crypto";
+import { readFile as fsReadFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Router, ParsedRequest, RouteResponse } from "./router.js";
 import type { SessionEventEmitter } from "./session-emitter.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * Options passed to the injected agent runner for fire-and-forget execution.
+ * Decouples routes.ts from agent-loop.ts — the real runner is injected by
+ * commands/serve.ts; tests can inject a mock runner without mocking the module.
+ */
+export interface AgentRunnerOpts {
+  sessionId: string;
+  prompt: string;
+  model: string;
+  projectRoot: string;
+  /** Full message history at the time of the call, for context. */
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  abortSignal: AbortSignal;
+  /** Called when the agent needs approval before executing a destructive action. */
+  onApprovalNeeded: (toolName: string, command: string, riskLevel: string) => Promise<boolean>;
+}
 
 /** A server-side session record. */
 export interface SessionRecord {
@@ -42,6 +61,8 @@ export interface ServerContext {
   sessions: Map<string, SessionRecord>;
   sessionEmitter: SessionEventEmitter;
   model: string;
+  /** Injected by commands/serve.ts to execute the AI agent loop. Fire-and-forget. */
+  agentRunner?: (opts: AgentRunnerOpts) => void;
 }
 
 type RouteHandler = (req: ParsedRequest) => Promise<RouteResponse>;
@@ -150,7 +171,30 @@ function sendMessage(ctx: ServerContext): RouteHandler {
     // Signal SSE clients that a prompt was received
     ctx.sessionEmitter.emitStatus(session.id, `[message:${messageId}] User message received`);
 
-    return ok({ messageId, sessionId: req.params["id"], ts });
+    // Wire abort controller for in-flight cancellation
+    const ac = new AbortController();
+    session.abortController = ac;
+
+    // Fire-and-forget: invoke agent loop if wired
+    ctx.agentRunner?.({
+      sessionId: session.id,
+      prompt: content,
+      model: session.model,
+      projectRoot: ctx.projectRoot,
+      history: session.messages.map((m) => ({ role: m.role, content: m.content })),
+      abortSignal: ac.signal,
+      onApprovalNeeded: (toolName, command, riskLevel) =>
+        new Promise<boolean>((resolve) => {
+          session.pendingApproval = { toolName, command, riskLevel, resolve };
+          ctx.sessionEmitter.emitApprovalNeeded(session.id, toolName, command, riskLevel);
+        }),
+    });
+
+    return {
+      status: 202,
+      body: { messageId, sessionId: req.params["id"], ts, status: "running" },
+      headers: undefined,
+    };
   };
 }
 
@@ -250,9 +294,47 @@ function runVerification(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const fileList = Array.isArray(body["files"]) ? (body["files"] as string[]) : [];
-    // Delegate to DanteForge pipeline — caller must wire AgentLoopConfig.eventEmitter
-    // to receive pdse/tool_end events from the running agent loop.
-    return ok({ projectRoot: ctx.projectRoot, files: fileList, pdseScore: null, findings: [] });
+
+    // Short-circuit: empty file list returns null score immediately with no imports needed
+    if (fileList.length === 0) {
+      return ok({ projectRoot: ctx.projectRoot, files: [], pdseScore: null, findings: [] });
+    }
+
+    type SkillFinding = {
+      severity: "critical" | "warning" | "info";
+      category: string;
+      message: string;
+      line?: number;
+    };
+    type VerifyResult = { passed: boolean; overallScore: number; findings: SkillFinding[] };
+
+    const { verifySkill, detectSkillSources, parseUniversalSkill } =
+      await import("@dantecode/skill-adapter");
+
+    const results: VerifyResult[] = await Promise.all(
+      fileList.slice(0, 20).map(async (f): Promise<VerifyResult> => {
+        try {
+          const detections = await detectSkillSources(join(ctx.projectRoot, f));
+          if (detections.length === 0) {
+            return { passed: true, overallScore: 100, findings: [] };
+          }
+          const best = detections.sort((a, b) => b.confidence - a.confidence)[0]!;
+          const filePath = best.paths[0] ?? join(ctx.projectRoot, f);
+          const parsed = await parseUniversalSkill(filePath, best.format);
+          const result = await verifySkill(parsed);
+          return { passed: result.passed, overallScore: result.overallScore, findings: result.findings };
+        } catch {
+          return { passed: true, overallScore: 100, findings: [] };
+        }
+      }),
+    );
+
+    const avgScore =
+      results.length > 0
+        ? results.reduce((sum, r) => sum + r.overallScore, 0) / results.length
+        : null;
+    const allFindings = results.flatMap((r) => r.findings);
+    return ok({ projectRoot: ctx.projectRoot, files: fileList, pdseScore: avgScore, findings: allFindings });
   };
 }
 
@@ -260,9 +342,21 @@ function getEvidence(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const sessionId = req.params["sessionId"]!;
     if (!ctx.sessions.has(sessionId)) return notFound(sessionId);
-    // Evidence chain is built during agent execution via @dantecode/evidence-chain.
-    // Caller wires EvidenceSealer results into sessionEmitter "pdse" events.
-    return ok({ sessionId, chain: [], receipts: [], merkleRoot: null, seal: null });
+    const evidencePath = join(
+      ctx.projectRoot,
+      ".dantecode",
+      "evidence",
+      `${sessionId}.json`,
+    );
+    let bundle: { chain: unknown[]; receipts: unknown[]; merkleRoot: string | null; seal: unknown | null } =
+      { chain: [], receipts: [], merkleRoot: null, seal: null };
+    try {
+      const raw = await fsReadFile(evidencePath, "utf-8");
+      bundle = JSON.parse(raw) as typeof bundle;
+    } catch {
+      // File doesn't exist yet — return empty bundle
+    }
+    return ok({ sessionId, ...bundle });
   };
 }
 
@@ -270,18 +364,57 @@ function getEvidence(ctx: ServerContext): RouteHandler {
 // Skills
 // ---------------------------------------------------------------------------
 
-function listSkills(): RouteHandler {
-  return async () => ok({ skills: [] });
+function listSkills(ctx: ServerContext): RouteHandler {
+  // Lazy-load SkillCatalog once and cache it
+  let catalogPromise: Promise<{ getAll: () => unknown[] }> | null = null;
+  const getCatalog = (): Promise<{ getAll: () => unknown[] }> => {
+    if (!catalogPromise) {
+      catalogPromise = import("@dantecode/skill-adapter").then(async ({ SkillCatalog }) => {
+        const catalog = new SkillCatalog(ctx.projectRoot);
+        await catalog.load();
+        return catalog;
+      });
+    }
+    return catalogPromise;
+  };
+
+  return async () => {
+    try {
+      const catalog = await getCatalog();
+      const skills = catalog.getAll();
+      return ok({ skills });
+    } catch {
+      return ok({ skills: [] });
+    }
+  };
 }
 
-function installSkill(): RouteHandler {
+function installSkill(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const name = body["name"];
-    if (typeof name !== "string" || name.trim().length === 0) {
-      return badRequest("Missing or empty skill name");
+    const source = body["source"] ?? body["name"];
+    if (typeof source !== "string" || source.trim().length === 0) {
+      return badRequest("Missing or empty skill source");
     }
-    return ok({ name, installedPath: null, verification: null });
+    try {
+      const { installSkill: doInstall } = await import("@dantecode/skill-adapter");
+      const result = await doInstall({ source }, ctx.projectRoot);
+      return ok({
+        name: result.name,
+        installedPath: result.installedPath || null,
+        verification: result.verification ?? null,
+        success: result.success,
+        error: result.error ?? null,
+      });
+    } catch (err) {
+      return {
+        status: 500,
+        body: {
+          error: `Failed to install skill: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        headers: undefined,
+      };
+    }
   };
 }
 
@@ -336,8 +469,8 @@ export function buildRoutes(router: Router, context: ServerContext): void {
   router.get("/api/evidence/:sessionId", getEvidence(context));
 
   // Skills
-  router.get("/api/skills", listSkills());
-  router.post("/api/skills/install", installSkill());
+  router.get("/api/skills", listSkills(context));
+  router.post("/api/skills/install", installSkill(context));
 
   // Health
   router.get("/api/health", healthCheck(context));

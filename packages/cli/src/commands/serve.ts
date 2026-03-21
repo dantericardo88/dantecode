@@ -14,6 +14,10 @@
 // ============================================================================
 
 import { startServer } from "../serve/server.js";
+import { runAgentLoop } from "../agent-loop.js";
+import type { AgentLoopConfig } from "../agent-loop.js";
+import type { AgentRunnerOpts } from "../serve/routes.js";
+import { readOrInitializeState } from "@dantecode/core";
 
 // ANSI color codes (inline to avoid circular imports)
 const GREEN = "\x1b[32m";
@@ -61,14 +65,89 @@ export async function runServeCommand(args: string[]): Promise<void> {
     );
   }
 
+  // serverHandle is assigned immediately after startServer resolves.
+  // The agentRunner closure only executes when a client sends a message —
+  // which happens after the server is fully running — so serverHandle is
+  // guaranteed to be set by the time agentRunner is first called.
+  // The definite-assignment assertion (!) tells TypeScript this is safe.
+  // eslint-disable-next-line prefer-const
+  let serverHandle!: Awaited<ReturnType<typeof startServer>>;
+
+  const agentRunner = (opts: AgentRunnerOpts): void => {
+    void (async () => {
+      let state;
+      try {
+        state = await readOrInitializeState(opts.projectRoot);
+      } catch {
+        serverHandle.sessionEmitter.emitError(opts.sessionId, "Failed to load project state");
+        return;
+      }
+
+      // Build the minimal Session object required by runAgentLoop
+      const now = new Date().toISOString();
+      const loopSession: import("@dantecode/config-types").Session = {
+        id: opts.sessionId,
+        projectRoot: opts.projectRoot,
+        messages: [],
+        activeFiles: [],
+        readOnlyFiles: [],
+        model: state.model.default,
+        createdAt: now,
+        updatedAt: now,
+        agentStack: [],
+        todoList: [],
+      };
+
+      const agentConfig: AgentLoopConfig = {
+        state,
+        verbose: false,
+        enableGit: false,
+        enableSandbox: false,
+        silent: true,
+        abortSignal: opts.abortSignal,
+        eventEmitter: serverHandle.sessionEmitter,
+        eventSessionId: opts.sessionId,
+      };
+
+      const startMs = Date.now();
+      try {
+        const resultSession = await runAgentLoop(opts.prompt, loopSession, agentConfig);
+        // Extract assistant reply from the last message in the result session
+        const lastMsg = resultSession.messages[resultSession.messages.length - 1];
+        const assistantContent =
+          lastMsg && lastMsg.role === "assistant"
+            ? typeof lastMsg.content === "string"
+              ? lastMsg.content
+              : ""
+            : "";
+        // Emit done so SSE clients can close their stream
+        serverHandle.sessionEmitter.emitDone(opts.sessionId, 0, Date.now() - startMs);
+        if (assistantContent) {
+          serverHandle.sessionEmitter.emitStatus(
+            opts.sessionId,
+            `[assistant:reply] ${assistantContent.slice(0, 200)}`,
+          );
+        }
+      } catch (err: unknown) {
+        serverHandle.sessionEmitter.emitError(
+          opts.sessionId,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    })();
+  };
+
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
-    server = await startServer({ port, host, projectRoot, password, enableMdns });
+    server = await startServer({ port, host, projectRoot, password, enableMdns, agentRunner });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${"\x1b[31m"}Failed to start server: ${message}${RESET}\n`);
     process.exit(1);
   }
+
+  // Assign serverHandle NOW — the server is running, clients can now send messages
+  serverHandle = server;
 
   // Startup banner
   process.stdout.write(`\n${GREEN}${BOLD}DanteCode server running at ${server.url}${RESET}\n`);
@@ -94,14 +173,14 @@ export async function runServeCommand(args: string[]): Promise<void> {
   // Open browser if requested
   if (openBrowser) {
     try {
-      const { exec } = await import("node:child_process");
+      const { execFile } = await import("node:child_process");
       const openCmd =
         process.platform === "darwin"
           ? "open"
           : process.platform === "win32"
             ? "start"
             : "xdg-open";
-      exec(`${openCmd} ${server.url}`);
+      execFile(openCmd, [server.url]);
     } catch {
       // Non-fatal — browser open failure should not crash the server
     }

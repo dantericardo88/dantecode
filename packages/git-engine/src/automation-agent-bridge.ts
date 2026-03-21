@@ -52,20 +52,136 @@ export function substitutePromptVars(
   });
 }
 
+// Module specifiers stored in variables so Vite/vitest import-analysis does not
+// statically resolve them at transform time (avoiding "Missing specifier" errors
+// when this package is used without @dantecode/cli installed).
+const _CLI_AGENT_LOOP_DIST = "@dantecode/cli/dist/agent-loop.js";
+const _CLI_AGENT_LOOP_SRC = "@dantecode/cli/src/agent-loop.js";
+
 async function defaultAgentRunner(
   prompt: string,
-  _projectRoot: string,
-  _rounds: number,
+  projectRoot: string,
+  maxRounds: number,
 ): Promise<AgentRunResult> {
-  // Dynamic import to avoid circular deps
-  // In production this would import from @dantecode/cli agent loop.
-  // For now, returns a structured result indicating the automation was queued.
-  return {
-    output: `Automation agent queued: ${prompt.slice(0, 100)}`,
-    filesChanged: [],
-    tokensUsed: 0,
-    success: true,
-  };
+  try {
+    // Dynamic import to avoid circular deps at module load time.
+    // @dantecode/cli is an optional peer — if this package is used standalone
+    // (e.g. in git-engine unit tests), callers should inject a custom agentRunner
+    // via AgentBridgeConfig.agentRunner instead.
+    const agentLoopModule = await import(/* @vite-ignore */ _CLI_AGENT_LOOP_DIST).catch(async () => {
+      // Fallback: try the src path in dev / non-compiled environments
+      return import(/* @vite-ignore */ _CLI_AGENT_LOOP_SRC).catch(() => null);
+    });
+
+    if (!agentLoopModule) {
+      return {
+        output: "",
+        filesChanged: [],
+        tokensUsed: 0,
+        success: false,
+        error: "Agent runner unavailable: @dantecode/cli not found in this context. Inject agentRunner via AgentBridgeConfig.",
+      };
+    }
+
+    // runAgentLoop requires a Session and AgentLoopConfig — build minimal versions
+    const { runAgentLoop } = agentLoopModule as {
+      runAgentLoop: (
+        prompt: string,
+        session: Record<string, unknown>,
+        config: Record<string, unknown>,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    if (typeof runAgentLoop !== "function") {
+      return {
+        output: "",
+        filesChanged: [],
+        tokensUsed: 0,
+        success: false,
+        error: "Agent runner unavailable: runAgentLoop is not exported from @dantecode/cli agent-loop module",
+      };
+    }
+
+    const { parseModelReference, readOrInitializeState } = await import("@dantecode/core");
+    const state = await readOrInitializeState(projectRoot).catch(() => null);
+
+    if (!state) {
+      return {
+        output: "",
+        filesChanged: [],
+        tokensUsed: 0,
+        success: false,
+        error: "Agent runner unavailable: could not load DanteCode state from project root",
+      };
+    }
+
+    const modelId = process.env["DANTECODE_MODEL"] ?? "claude-sonnet-4-6";
+    const modelConfig = parseModelReference(modelId);
+    const { randomUUID: _uuid } = await import("node:crypto");
+    const session = {
+      id: _uuid(),
+      projectRoot,
+      model: modelConfig,
+      messages: [],
+      tokenCount: { input: 0, output: 0 },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const agentConfig = {
+      state,
+      verbose: false,
+      silent: true,
+      enableGit: true,
+      enableSandbox: false,
+      nonInteractive: true,
+      requiredRounds: maxRounds,
+    };
+
+    const resultSession = await runAgentLoop(prompt, session, agentConfig);
+
+    const messages = (resultSession as Record<string, unknown>)["messages"];
+    const tokenCount = (resultSession as Record<string, unknown>)["tokenCount"] as
+      | { input: number; output: number }
+      | undefined;
+
+    // Extract last assistant message as the output
+    const lastAssistant = Array.isArray(messages)
+      ? [...messages]
+          .reverse()
+          .find(
+            (m: unknown) =>
+              m !== null &&
+              typeof m === "object" &&
+              (m as Record<string, unknown>)["role"] === "assistant",
+          )
+      : undefined;
+
+    const outputText =
+      lastAssistant !== undefined &&
+      lastAssistant !== null &&
+      typeof lastAssistant === "object" &&
+      typeof (lastAssistant as Record<string, unknown>)["content"] === "string"
+        ? ((lastAssistant as Record<string, unknown>)["content"] as string)
+        : "";
+
+    return {
+      output: outputText,
+      filesChanged: [],
+      tokensUsed: tokenCount ? tokenCount.input + tokenCount.output : 0,
+      success: true,
+    };
+  } catch (err) {
+    // If @dantecode/cli isn't available in this context (e.g. git-engine standalone),
+    // callers should inject a custom agentRunner via AgentBridgeConfig.agentRunner.
+    return {
+      output: "",
+      filesChanged: [],
+      tokensUsed: 0,
+      success: false,
+      error: `Agent runner unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 }
 
 async function defaultForgeRunner(

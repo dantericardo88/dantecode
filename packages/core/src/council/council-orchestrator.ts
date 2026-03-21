@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { EventEmitter } from "node:events";
-import type { AgentKind, CouncilRunState } from "./council-types.js";
+import type { AgentKind, CouncilRunState, CouncilConfig } from "./council-types.js";
 import { createCouncilRunState } from "./council-types.js";
 import {
   saveCouncilRun,
@@ -23,7 +23,11 @@ import type { LaneAssignmentRequest, ReassignmentRequest } from "./council-route
 import { WorktreeObserver } from "./worktree-observer.js";
 import { MergeBrain } from "./merge-brain.js";
 import type { MergeBrainResult } from "./merge-brain.js";
+import { MergeConfidenceScorer } from "./merge-confidence.js";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
+import { FleetBudget } from "./fleet-budget.js";
+import type { FleetBudgetReport } from "./fleet-budget.js";
+import { TaskRedistributor } from "./task-redistributor.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -71,6 +75,11 @@ export interface CouncilOrchestratorOptions {
    * Hard cap on backoff delay in ms (default 30_000).
    */
   retryMaxDelayMs?: number;
+  /**
+   * Fleet-plus configuration: budget limits, PDSE threshold, nesting depth.
+   * All fields optional — omit for unlimited/default behaviour.
+   */
+  councilConfig?: CouncilConfig;
 }
 
 export interface OrchestratorStartOptions {
@@ -95,6 +104,18 @@ type OrchestratorEvents = {
   "lane:paused": [{ laneId: string; agentKind: string; pausedForRetry: string }];
   /** Emitted when a paused lane resumes because its coordinating retry finished or was promoted. */
   "lane:resumed": [{ laneId: string; agentKind: string }];
+  /** Emitted when per-lane verification passes. */
+  "lane:verified": [{ laneId: string; pdseScore: number }];
+  /** Emitted when per-lane verification produces a score below the PDSE threshold. */
+  "lane:accepted-with-warning": [{ laneId: string; pdseScore: number }];
+  /** Emitted when the fleet budget crosses the warning threshold. */
+  "budget:warning": [FleetBudgetReport];
+  /** Emitted when fleet budget is fully exhausted — all lanes aborted. */
+  "budget:exhausted": [FleetBudgetReport];
+  /** Emitted when a single agent's per-agent token limit is reached. */
+  "budget:agent-limit": [{ agentId: string; report: FleetBudgetReport }];
+  /** Emitted when TaskRedistributor finds a redistribution candidate for an idle lane. */
+  "redistribution": [{ fromLaneId: string; toLaneId: string; subObjective: string }];
   "error": [{ message: string; context?: string }];
 };
 
@@ -115,6 +136,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private router: CouncilRouter | null = null;
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
+  private readonly _scorer: MergeConfidenceScorer;
   private readonly options: Required<CouncilOrchestratorOptions>;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
@@ -123,6 +145,14 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private _pendingWrite: Promise<void> = Promise.resolve();
   /** Last persist error for observability; null means the most recent write succeeded. */
   private _lastPersistError: string | null = null;
+  /** Fleet-wide resource budget tracker. */
+  private readonly _budget: FleetBudget;
+  /** Set to true after the first budget:warning emission to prevent duplicate events. */
+  private _budgetWarnFired = false;
+  /** Dynamic task redistribution engine. */
+  private readonly _redistributor: TaskRedistributor;
+  /** Fleet-plus configuration (nesting depth, PDSE threshold, budget). */
+  private readonly _config: CouncilConfig;
 
   constructor(
     adapters: Map<AgentKind, CouncilAgentAdapter>,
@@ -132,6 +162,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.adapters = adapters;
     this.ledger = new UsageLedger();
     this.brain = new MergeBrain();
+    this._scorer = new MergeConfidenceScorer();
+    this._config = options.councilConfig ?? {};
+    this._budget = new FleetBudget(this._config.budget ?? {});
+    this._redistributor = new TaskRedistributor();
     this.options = {
       pollIntervalMs: options.pollIntervalMs ?? 15_000,
       baseBranch: options.baseBranch ?? "main",
@@ -140,6 +174,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       maxLaneRetries: options.maxLaneRetries ?? 2,
       retryBaseDelayMs: options.retryBaseDelayMs ?? 2_000,
       retryMaxDelayMs: options.retryMaxDelayMs ?? 30_000,
+      councilConfig: this._config,
     };
 
     // Register all adapters in the ledger
@@ -251,6 +286,16 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   async assignLane(request: LaneAssignmentRequest) {
     this.assertStatus("running");
     if (!this.router) throw new Error("Router not initialized");
+
+    // Enforce maxNestingDepth: prevent runaway recursive sub-agent hierarchies.
+    const maxDepth = this._config.maxNestingDepth ?? Infinity;
+    const requestedDepth = request.nestingDepth ?? 0;
+    if (Number.isFinite(maxDepth) && requestedDepth >= maxDepth) {
+      throw new Error(
+        `Lane at depth ${requestedDepth} exceeds maxNestingDepth=${maxDepth}. ` +
+        `Increase CouncilConfig.maxNestingDepth or reduce sub-agent nesting.`,
+      );
+    }
 
     const result = await this.router.assignLane(request);
     if (result.accepted) {
@@ -438,6 +483,81 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   /** Returns the last persist error message, or null if the most recent write succeeded. */
   get lastPersistError(): string | null {
     return this._lastPersistError;
+  }
+
+  /**
+   * Verify the output patch for a specific lane using MergeConfidenceScorer.
+   * Returns a structured verdict with a 0-1 confidence score and human-readable findings.
+   *
+   * A lane passes when score >= the configured pdseThreshold (default 0.7).
+   * Returns { passed: false, score: 0 } when the lane has no patch or does not exist.
+   *
+   * This method is safe to call at any lifecycle stage.
+   */
+  async verifyLaneOutput(
+    laneId: string,
+  ): Promise<{ passed: boolean; score: number; findings: string[] }> {
+    const lane = this.runState?.agents.find((l) => l.laneId === laneId);
+    if (!lane) {
+      return { passed: false, score: 0, findings: ["Lane not found"] };
+    }
+
+    // Collect the patch from the adapter so we can score it
+    const adapter = this.adapters.get(lane.agentKind);
+    if (!adapter) {
+      return { passed: false, score: 0, findings: ["No adapter for agent kind"] };
+    }
+
+    const sessionId = lane.sessionId ?? lane.laneId;
+    const patch = await adapter.collectPatch(sessionId).catch(() => null);
+    if (!patch || !patch.unifiedDiff) {
+      return { passed: false, score: 0, findings: ["No patch available"] };
+    }
+
+    // Score the patch using MergeConfidenceScorer (same scorer used by MergeBrain)
+    const candidate = {
+      laneId,
+      unifiedDiff: patch.unifiedDiff,
+      changedFiles: patch.changedFiles,
+      sourceBranch: patch.sourceBranch ?? lane.branch,
+    };
+
+    // score() requires an array — provide a single-element array for solo verification
+    const result = this._scorer.score([candidate]);
+    // Normalize 0-100 score to 0-1 for a consistent API
+    const normalizedScore = result.score / 100;
+
+    const pdseThreshold = (this._config.pdseThreshold ?? 70) / 100;
+    const passed = normalizedScore >= pdseThreshold;
+    const findings: string[] = [];
+    if (!passed) {
+      findings.push(
+        `Confidence score ${(normalizedScore * 100).toFixed(1)} is below threshold ${(pdseThreshold * 100).toFixed(0)}`,
+      );
+    }
+    findings.push(`Bucket: ${result.bucket}`);
+    if (result.reasoning) findings.push(result.reasoning);
+
+    // Store verification result on the lane for observability
+    lane.pdseScore = normalizedScore * 100;
+    lane.verificationPassed = passed;
+
+    // Emit appropriate event so dashboard can update
+    if (passed) {
+      this.emit("lane:verified", { laneId, pdseScore: lane.pdseScore });
+    } else {
+      this.emit("lane:accepted-with-warning", { laneId, pdseScore: lane.pdseScore });
+    }
+
+    return { passed, score: normalizedScore, findings };
+  }
+
+  /**
+   * Get a snapshot of current fleet budget usage.
+   * Returns the FleetBudget report for external consumers (e.g. dashboard, tests).
+   */
+  getBudgetReport(): FleetBudgetReport {
+    return this._budget.report();
   }
 
   // --------------------------------------------------------------------------
@@ -628,6 +748,27 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       try {
         const status = await adapter.pollStatus(sessionId);
 
+        // ── FleetBudget: record usage reported by this poll response ──────
+        // Adapters report cumulative totals — FleetBudget.record() handles delta math.
+        if (status.tokensUsed !== undefined || status.costUsd !== undefined) {
+          const tokensForBudget = status.tokensUsed ?? 0;
+          const costForBudget = status.costUsd ?? 0;
+          // Mirror usage onto the session for dashboard/observability
+          session.tokensUsed = tokensForBudget;
+          session.costUsd = costForBudget;
+          this._budget.record(session.laneId, tokensForBudget, costForBudget);
+          // Emit warning exactly once when threshold is crossed
+          if (this._budget.isWarning() && !this._budgetWarnFired) {
+            this._budgetWarnFired = true;
+            this.emit("budget:warning", this._budget.report());
+          }
+          // Hard-stop: abort the entire run when budget is fully exhausted
+          if (this._budget.isExhausted()) {
+            await this.fail("Fleet budget exhausted");
+            return;
+          }
+        }
+
         if (status.status === "completed") {
           session.status = "completed";
           session.completedAt = new Date().toISOString();
@@ -638,6 +779,49 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             agentKind: session.agentKind as string,
             sessionId,
           });
+
+          // PDSE verification (auto, fail-closed — never crashes the poll loop)
+          void this.verifyLaneOutput(session.laneId).catch(() => {});
+
+          // ── TaskRedistributor: offer idle lanes additional work ──────────
+          // Best-effort — never crash the run on redistribution failure.
+          if (this.runState) {
+            const idleLanes = this.runState.agents.filter(
+              (l) => l.status === "idle" && l.laneId !== session.laneId,
+            );
+            if (idleLanes.length > 0) {
+              const busyLanes = this.runState.agents
+                .filter(
+                  (l) =>
+                    (l.status === "running" || l.status === "retry-pending") &&
+                    l.laneId !== session.laneId,
+                )
+                .map((l) => ({
+                  laneId: l.laneId,
+                  agentKind: l.agentKind as string,
+                  objective: l.objective,
+                  startedAt: l.startedAt ? new Date(l.startedAt).getTime() : Date.now(),
+                  ownedFiles: l.assignedFiles,
+                }));
+              const idleLane = idleLanes[0]!;
+              try {
+                const candidate = await this._redistributor.findRedistribution(
+                  idleLane.laneId,
+                  idleLane.agentKind as string,
+                  busyLanes,
+                );
+                if (candidate) {
+                  this.emit("redistribution", {
+                    fromLaneId: candidate.fromLaneId,
+                    toLaneId: candidate.toLaneId,
+                    subObjective: candidate.subObjective,
+                  });
+                }
+              } catch {
+                // Redistribution is best-effort
+              }
+            }
+          }
 
         } else if (status.status === "failed" || status.status === "aborted") {
           const maxRetries = this.options.maxLaneRetries;

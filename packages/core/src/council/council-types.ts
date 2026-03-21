@@ -188,6 +188,22 @@ export interface AgentSessionState {
    * retry-pending session it is waiting for. Cleared on unfreeze.
    */
   pausedForRetry?: string;
+  /**
+   * Nesting depth of this lane in a recursive sub-agent hierarchy.
+   * 0 = root lane spawned by the user. 1 = first sub-agent level, etc.
+   * Enforced against CouncilConfig.maxNestingDepth by assignLane().
+   */
+  nestingDepth?: number;
+  /**
+   * Cumulative token usage reported by the adapter for this lane.
+   * Updated on each poll cycle when the adapter reports usage.
+   */
+  tokensUsed?: number;
+  /**
+   * Cumulative cost in USD reported by the adapter for this lane.
+   * Updated on each poll cycle when the adapter reports cost.
+   */
+  costUsd?: number;
 }
 
 // ----------------------------------------------------------------------------

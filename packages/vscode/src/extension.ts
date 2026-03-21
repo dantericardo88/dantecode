@@ -139,6 +139,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Inline completion: cache invalidation + accept detection ──
   const docChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
     if (completionProvider === undefined) return;
+    // Update cursor position tracking so cache invalidation knows the current cursor line
+    const cursorLine = vscode.window.activeTextEditor?.selection.active.line ?? 0;
+    completionProvider.completionCache.updateCursorPosition(
+      event.document.uri.toString(),
+      cursorLine,
+    );
     // Cache invalidation: clear trie entries when edit is above cursor line
     for (const change of event.contentChanges) {
       completionProvider.completionCache.onDocumentChange(

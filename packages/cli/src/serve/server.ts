@@ -17,7 +17,7 @@ import { SessionEventEmitter } from "./session-emitter.js";
 import { createSSEStream } from "./sse-stream.js";
 import { checkAuth, unauthorizedResponse } from "./auth.js";
 import type { AuthConfig } from "./auth.js";
-import type { ServerContext } from "./routes.js";
+import type { ServerContext, AgentRunnerOpts } from "./routes.js";
 
 const VERSION = "1.0.0";
 
@@ -39,6 +39,11 @@ export interface ServeOptions {
   corsOrigins?: string[];
   /** Enable mDNS service discovery. Default: false. */
   enableMdns?: boolean;
+  /**
+   * Injected agent runner. When provided, sendMessage fires the AI agent loop.
+   * Injected by commands/serve.ts; omitted in tests to avoid needing an API key.
+   */
+  agentRunner?: (opts: AgentRunnerOpts) => void;
 }
 
 /** Handle returned by startServer. */
@@ -59,11 +64,22 @@ export interface DanteCodeServer {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const MAX_BODY_BYTES = 1_048_576; // 1 MB
+
 /** Collect all chunks from an IncomingMessage into a UTF-8 string. */
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let totalBytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        req.destroy();
+        reject(new Error("PAYLOAD_TOO_LARGE"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
@@ -74,6 +90,12 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
+
+/** Returns the CORS origin value for a given request origin. */
+function getAllowOrigin(requestOrigin: string | undefined, corsOrigins: string[]): string {
+  if (corsOrigins.length === 0) return "*";
+  return corsOrigins.includes(requestOrigin ?? "") ? (requestOrigin ?? "") : "";
+}
 
 /** Send a JSON response with the given status and optional extra headers. */
 function sendJSON(
@@ -130,6 +152,7 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
   const port = options.port ?? 3210;
   const host = options.host ?? "127.0.0.1";
   const startTime = Date.now();
+  const corsOrigins = options.corsOrigins ?? [];
 
   const authConfig: AuthConfig = {
     password: options.password,
@@ -145,6 +168,7 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
     sessions: new Map(),
     sessionEmitter,
     model: "claude-sonnet-4-6",
+    agentRunner: options.agentRunner,
   };
 
   // Build the router once — all routes except SSE streams (which need raw `res`)
@@ -174,10 +198,17 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
         headers[k.toLowerCase()] = Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
       }
 
+      // Compute dynamic CORS origin header based on the request's Origin
+      const requestOrigin = headers["origin"];
+      const corsOriginHeader = getAllowOrigin(requestOrigin, corsOrigins);
+      const corsOverride: Record<string, string> = corsOriginHeader
+        ? { "Access-Control-Allow-Origin": corsOriginHeader }
+        : {};
+
       // Auth check
       if (!checkAuth(headers, authConfig)) {
         const unauth = unauthorizedResponse();
-        sendJSON(res, unauth.status, unauth.body, unauth.headers);
+        sendJSON(res, unauth.status, unauth.body, { ...unauth.headers, ...corsOverride });
         return;
       }
 
@@ -189,17 +220,30 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
         const sessionId = sseMatch[1]!;
         const session = context.sessions.get(sessionId);
         if (!session) {
-          sendJSON(res, 404, { error: `Session not found: ${sessionId}` });
+          sendJSON(res, 404, { error: `Session not found: ${sessionId}` }, corsOverride);
           return;
         }
-        createSSEStream(res, sessionId, { sessionEmitter: context.sessionEmitter });
+        createSSEStream(res, sessionId, {
+          sessionEmitter: context.sessionEmitter,
+          corsOrigins,
+          requestOrigin,
+        });
         return;
       }
 
       // Parse JSON body for POST/PUT
       let body: unknown = undefined;
       if (method === "POST" || method === "PUT") {
-        const raw = await readBody(req).catch(() => "");
+        let raw = "";
+        try {
+          raw = await readBody(req);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "";
+          if (msg === "PAYLOAD_TOO_LARGE") {
+            sendJSON(res, 413, { error: "Payload too large (max 1 MB)" }, corsOverride);
+            return;
+          }
+        }
         if (raw) {
           try {
             body = JSON.parse(raw);
@@ -220,10 +264,10 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
           headers,
         });
 
-        sendJSON(res, result.status, result.body, result.headers);
+        sendJSON(res, result.status, result.body, { ...result.headers, ...corsOverride });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
-        sendJSON(res, 500, { error: "Internal server error", message });
+        sendJSON(res, 500, { error: "Internal server error", message }, corsOverride);
       }
     },
   );

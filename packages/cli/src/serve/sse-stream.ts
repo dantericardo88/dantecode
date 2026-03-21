@@ -11,6 +11,10 @@ import type { SessionEventEmitter, SSEEvent } from "./session-emitter.js";
 /** Context passed to createSSEStream. */
 export interface SSEContext {
   sessionEmitter: SessionEventEmitter;
+  /** Allowed CORS origins. Empty array means allow all ("*"). */
+  corsOrigins?: string[];
+  /** The request's Origin header value (used to compute CORS response header). */
+  requestOrigin?: string;
 }
 
 /**
@@ -42,11 +46,19 @@ export function createSSEStream(
   sessionId: string,
   context: SSEContext,
 ): void {
+  const corsOrigins = context.corsOrigins ?? [];
+  const allowOrigin =
+    corsOrigins.length === 0
+      ? "*"
+      : corsOrigins.includes(context.requestOrigin ?? "")
+        ? (context.requestOrigin ?? "")
+        : "";
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
+    ...(allowOrigin ? { "Access-Control-Allow-Origin": allowOrigin } : {}),
     "X-Accel-Buffering": "no", // Disable nginx buffering for SSE
   });
 

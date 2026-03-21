@@ -78,7 +78,9 @@ import {
   listScheduledGitTasks,
   stopScheduledGitTask,
   GitAutomationOrchestrator,
+  substitutePromptVars,
 } from "@dantecode/git-engine";
+import type { AgentBridgeConfig, AgentBridgeResult } from "@dantecode/git-engine";
 import type {
   Session,
   SessionMessage,
@@ -378,10 +380,75 @@ function getGitAutomationOrchestrator(state: ReplState): GitAutomationOrchestrat
       projectRoot: state.projectRoot,
       sessionId: state.session.id,
       modelId: `${state.session.model.provider}/${state.session.model.modelId}`,
+      runAgent: buildAutomationAgentRunner(state),
     });
   }
-
   return state._gitAutomationOrchestrator as GitAutomationOrchestrator;
+}
+
+function buildAutomationAgentRunner(
+  state: ReplState,
+): (config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult> {
+  return async (config: AgentBridgeConfig, ctx: Record<string, unknown>): Promise<AgentBridgeResult> => {
+    const taskId = randomUUID().slice(0, 12);
+    const prompt = substitutePromptVars(config.prompt, ctx);
+    const taskSession = cloneSessionForTask(state.session, config.projectRoot, taskId);
+    const startMs = Date.now();
+
+    try {
+      const completed = await runAgentLoop(prompt, taskSession, {
+        state: state.state,
+        verbose: false,
+        enableGit: state.enableGit,
+        enableSandbox: state.enableSandbox,
+        silent: true,
+        ...(state.sandboxBridge ? { sandboxBridge: state.sandboxBridge } : {}),
+      });
+
+      const output = getLastAssistantText(completed);
+      const filesChanged = collectTouchedFilesFromSession(completed, config.projectRoot);
+
+      // Run DanteForge verification if requested
+      let pdseScore: number | undefined;
+      if (config.verifyOutput !== false && filesChanged.length > 0) {
+        try {
+          const scores: number[] = [];
+          for (const file of filesChanged) {
+            const content = await readFile(file, "utf-8").catch(() => null);
+            if (content !== null) {
+              const score = runLocalPDSEScorer(content, config.projectRoot);
+              scores.push(score.overall > 1 ? score.overall : score.overall * 100);
+            }
+          }
+          if (scores.length > 0) {
+            pdseScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+          }
+        } catch {
+          // forge unavailable — skip scoring
+        }
+      }
+
+      return {
+        sessionId: `bg-${taskId}`,
+        success: true,
+        output,
+        tokensUsed: 0,
+        durationMs: Date.now() - startMs,
+        filesChanged,
+        ...(pdseScore !== undefined ? { pdseScore } : {}),
+      };
+    } catch (error: unknown) {
+      return {
+        sessionId: `bg-${taskId}`,
+        success: false,
+        output: "",
+        tokensUsed: 0,
+        durationMs: Date.now() - startMs,
+        filesChanged: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
 }
 
 async function loadJsonCommandInput(
@@ -3178,7 +3245,7 @@ async function autoPrCommand(args: string, state: ReplState): Promise<string> {
 }
 
 async function webhookListenCommand(args: string, state: ReplState): Promise<string> {
-  let trimmed = args.trim();
+  const trimmed = args.trim();
 
   if (!trimmed || trimmed === "list") {
     const listeners = await listWebhookListeners(state.projectRoot);
@@ -3768,7 +3835,12 @@ async function nameCommand(args: string, state: ReplState): Promise<string> {
   }
   state.session.name = name;
   const store = new SessionStore(state.projectRoot);
-  await store.save(sessionToFile(state.session));
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${YELLOW}Session renamed to: ${BOLD}${name}${RESET}\n${DIM}Warning: failed to persist rename — ${msg}${RESET}`;
+  }
   return `${GREEN}Session renamed to: ${BOLD}${name}${RESET}`;
 }
 
@@ -3783,53 +3855,58 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
   const outputPath = parts[1] ?? defaultName;
   const absPath = resolve(state.projectRoot, outputPath);
 
-  if (format === "json") {
-    const data = {
-      version: "1.0.0",
-      exportedAt: new Date().toISOString(),
-      session: {
-        id: state.session.id,
-        name: state.session.name,
-        createdAt: state.session.createdAt,
-        model: `${state.session.model.provider}/${state.session.model.modelId}`,
-        messageCount: state.session.messages.length,
-        messages: state.session.messages,
-        activeFiles: state.session.activeFiles,
-        todoList: state.session.todoList,
-      },
-      memoryStats: state.memoryOrchestrator
-        ? state.memoryOrchestrator.memoryVisualize()
-        : null,
-    };
-    await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
-  } else {
-    const lines: string[] = [
-      `# Session: ${state.session.name ?? state.session.id.slice(0, 8)}`,
-      "",
-      `- **Created:** ${state.session.createdAt}`,
-      `- **Model:** ${state.session.model.provider}/${state.session.model.modelId}`,
-      `- **Messages:** ${state.session.messages.length}`,
-      "",
-      "---",
-      "",
-    ];
-    for (const msg of state.session.messages) {
-      const role =
-        msg.role === "user"
-          ? "**You**"
-          : msg.role === "assistant"
-            ? "**DanteCode**"
-            : `*${msg.role}*`;
-      const ts = msg.timestamp ?? "";
-      lines.push(`### ${role} (${ts})`);
-      lines.push("");
-      const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-      lines.push(text.slice(0, 5000));
-      lines.push("");
-      lines.push("---");
-      lines.push("");
+  try {
+    if (format === "json") {
+      const data = {
+        version: "1.0.0",
+        exportedAt: new Date().toISOString(),
+        session: {
+          id: state.session.id,
+          name: state.session.name,
+          createdAt: state.session.createdAt,
+          model: `${state.session.model.provider}/${state.session.model.modelId}`,
+          messageCount: state.session.messages.length,
+          messages: state.session.messages,
+          activeFiles: state.session.activeFiles,
+          todoList: state.session.todoList,
+        },
+        memoryStats: state.memoryOrchestrator
+          ? state.memoryOrchestrator.memoryVisualize()
+          : null,
+      };
+      await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
+    } else {
+      const lines: string[] = [
+        `# Session: ${state.session.name ?? state.session.id.slice(0, 8)}`,
+        "",
+        `- **Created:** ${state.session.createdAt}`,
+        `- **Model:** ${state.session.model.provider}/${state.session.model.modelId}`,
+        `- **Messages:** ${state.session.messages.length}`,
+        "",
+        "---",
+        "",
+      ];
+      for (const msg of state.session.messages) {
+        const role =
+          msg.role === "user"
+            ? "**You**"
+            : msg.role === "assistant"
+              ? "**DanteCode**"
+              : `*${msg.role}*`;
+        const ts = msg.timestamp ?? "";
+        lines.push(`### ${role} (${ts})`);
+        lines.push("");
+        const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        lines.push(text.slice(0, 5000));
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+      }
+      await writeFile(absPath, lines.join("\n"), "utf8");
     }
-    await writeFile(absPath, lines.join("\n"), "utf8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to export session: ${msg}${RESET}`;
   }
 
   return `${GREEN}Session exported to: ${BOLD}${outputPath}${RESET} (${format})`;
@@ -3901,7 +3978,12 @@ async function branchCommand(args: string, state: ReplState): Promise<string> {
   const branchName = args.trim() || `branch-${Date.now()}`;
 
   const store = new SessionStore(state.projectRoot);
-  await store.save(sessionToFile(state.session));
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to save parent session before branching: ${msg}${RESET}`;
+  }
 
   let summary: string;
   if (state.memoryOrchestrator) {
@@ -3931,7 +4013,15 @@ async function branchCommand(args: string, state: ReplState): Promise<string> {
     ...recentMessages,
   ];
 
-  await store.save(sessionToFile(state.session));
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return (
+      `${GREEN}Session branched: ${BOLD}${oldName}${RESET} → ${BOLD}${branchName}${RESET}\n` +
+      `${YELLOW}Warning: new branch not persisted — ${msg}${RESET}`
+    );
+  }
 
   return (
     `${GREEN}Session branched: ${BOLD}${oldName}${RESET} → ${BOLD}${branchName}${RESET}\n` +
@@ -4606,12 +4696,11 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
     return lines.join("\n");
   }
 
-  if (!AVAILABLE_THEMES.includes(themeName)) {
+  if (!AVAILABLE_THEMES.includes(themeName as ThemeName)) {
     return RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET;
   }
 
   engine.setTheme(themeName as ThemeName);
-  state.theme = themeName as ThemeName;
 
   try {
     const stateYamlPath = join(state.projectRoot, ".dantecode", "STATE.yaml");
@@ -4620,8 +4709,9 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
       ? raw.replace(/^theme:.*$/m, "theme: " + themeName)
       : raw + "\ntheme: " + themeName + "\n";
     await writeFile(stateYamlPath, updated, "utf8");
+    state.theme = themeName as ThemeName;
   } catch {
-    // Non-fatal
+    // Non-fatal: state.theme not updated if disk write fails
   }
 
   const c = engine.resolve().colors;
@@ -4662,6 +4752,15 @@ async function costCommand(_args: string, state: ReplState): Promise<string> {
       byTool[tool].calls++;
       byTool[tool].tokens += t;
     }
+  }
+
+  // Also count tool calls tracked in recentToolCalls (stuck-loop detection array).
+  // These carry tool names without per-call token info, so we add call counts only,
+  // merging with any entry already populated from msg.toolUse above.
+  for (const toolName of state.recentToolCalls) {
+    if (!toolName) continue;
+    if (!byTool[toolName]) byTool[toolName] = { calls: 0, tokens: 0 };
+    byTool[toolName].calls++;
   }
 
   const modelId = state.state.model.default.provider + "/" + state.state.model.default.modelId;

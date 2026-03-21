@@ -21,15 +21,22 @@ import {
   listGitWatchers,
   stopGitWatcher,
   GitAutomationOrchestrator,
+  FilePatternWatcher,
   getTemplate,
   listTemplates,
   type AutomationDefinition,
+  type FileChangeEvent,
   type StoredWebhookListenerRecord,
   type StoredScheduledTaskRecord,
   type StoredGitWatcherRecord,
   type StoredAutomationExecutionRecord,
 } from "@dantecode/git-engine";
 import type { WebhookProvider } from "@dantecode/git-engine";
+
+// ─── Module-level watcher registry ───────────────────────────────────────────
+// Tracks active FilePatternWatchers by automation definition id so they can
+// be stopped when an automation is removed or the process exits.
+const _activeWatchers = new Map<string, FilePatternWatcher[]>();
 
 // ANSI color codes (local copies to avoid cross-file import)
 const CYAN = "\x1b[36m";
@@ -229,6 +236,15 @@ async function buildList(state: AutomateCommandState, typeFilter?: string): Prom
 // ─── Stop ────────────────────────────────────────────────────────────────────
 
 async function stopAutomation(id: string, projectRoot: string): Promise<string> {
+  // Stop any active FilePatternWatchers registered under this id
+  const activeWatcherList = _activeWatchers.get(id);
+  if (activeWatcherList && activeWatcherList.length > 0) {
+    for (const w of activeWatcherList) {
+      w.stop();
+    }
+    _activeWatchers.delete(id);
+  }
+
   // Try webhook first
   const webhookStopped = await stopWebhookListener(id, projectRoot).catch(() => false);
   if (webhookStopped) {
@@ -245,6 +261,11 @@ async function stopAutomation(id: string, projectRoot: string): Promise<string> 
   const watchStopped = await stopGitWatcher(id, projectRoot).catch(() => false);
   if (watchStopped) {
     return `${GREEN}Stopped git watcher ${id}.${RESET}`;
+  }
+
+  // If we stopped local FilePatternWatchers, report success even if nothing in persistence
+  if (activeWatcherList && activeWatcherList.length > 0) {
+    return `${GREEN}Stopped file pattern watcher ${id}.${RESET}`;
   }
 
   return `${RED}Automation not found: ${id}${RESET}`;
@@ -340,6 +361,35 @@ async function applyTemplate(
     });
     await listener.start();
 
+    const webhookOrchestrator = getOrCreateOrchestrator(state);
+    listener.on("any-event", (rawEvent: unknown) => {
+      const data = rawEvent as {
+        event: string;
+        provider: string;
+        payload: Record<string, unknown>;
+      };
+      void webhookOrchestrator
+        .runWorkflowInBackground({
+          workflowPath: def.workflowPath ?? "",
+          eventPayload: { ...data.payload, eventName: data.event },
+          trigger: {
+            kind: "webhook",
+            sourceId: listener.id,
+            label: `${data.provider}:${data.event}`,
+          },
+          ...(def.agentMode ? { agentMode: def.agentMode } : {}),
+        })
+        .then((queued) => {
+          process.stdout.write(
+            `${DIM}[automate:${def.name}] queued ${queued.executionId}${RESET}\n`,
+          );
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stdout.write(`${RED}[automate:${def.name}] ${msg}${RESET}\n`);
+        });
+    });
+
     return [
       "",
       `${GREEN}${BOLD}Template "${templateName}" activated${RESET}`,
@@ -349,6 +399,7 @@ async function applyTemplate(
       `  Port:     ${port}`,
       `  Path:     ${path}`,
       `  Workflow: ${def.workflowPath ?? "none"}`,
+      `  Agent:    ${def.agentMode ? `enabled (${def.agentMode.prompt.slice(0, 60)}...)` : "disabled"}`,
       "",
     ].join("\n");
   }
@@ -357,10 +408,25 @@ async function applyTemplate(
     const cron = typeof def.config["cron"] === "string" ? def.config["cron"] : "0 0 * * *";
     const taskName = def.name;
 
+    const schedOrchestrator = getOrCreateOrchestrator(state);
     const task = scheduleGitTask(
       cron,
       async () => {
-        process.stdout.write(`${DIM}[schedule:${task.id}] fired at ${new Date().toISOString()}${RESET}\n`);
+        void schedOrchestrator
+          .runWorkflowInBackground({
+            workflowPath: def.workflowPath ?? "",
+            trigger: { kind: "schedule", sourceId: task.id, label: taskName },
+            ...(def.agentMode ? { agentMode: def.agentMode } : {}),
+          })
+          .then((queued) => {
+            process.stdout.write(
+              `${DIM}[automate:${taskName}] queued ${queued.executionId}${RESET}\n`,
+            );
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            process.stdout.write(`${RED}[automate:${taskName}] ${msg}${RESET}\n`);
+          });
       },
       { cwd: state.projectRoot, taskName, runOnStart: false },
     );
@@ -373,21 +439,67 @@ async function applyTemplate(
       `  Schedule: ${cron}`,
       `  Task:     ${taskName}`,
       `  Workflow: ${def.workflowPath ?? "none"}`,
+      `  Agent:    ${def.agentMode ? `enabled (${def.agentMode.prompt.slice(0, 60)}...)` : "disabled"}`,
       "",
     ].join("\n");
   }
 
-  // watch type — report definition but note that full file-pattern watcher
-  // activation requires the FilePatternWatcher extension (not yet wired).
+  // watch type — activate a real FilePatternWatcher now so changes are detected
+  // immediately without requiring a separate /git-watch command.
+  const watchPattern =
+    typeof def.config["pattern"] === "string" ? def.config["pattern"] : "**/*";
+  const debounceMs =
+    typeof def.config["debounceMs"] === "number" ? def.config["debounceMs"] : 500;
+
+  const watcher = new FilePatternWatcher({
+    pattern: watchPattern,
+    projectRoot: state.projectRoot,
+    debounceMs,
+    watcherId: def.id,
+  });
+
+  watcher.on("change", (events: FileChangeEvent[]) => {
+    if (!def.agentMode) return;
+    const watchOrchestrator = getOrCreateOrchestrator(state);
+    for (const evt of events) {
+      void watchOrchestrator
+        .runWorkflowInBackground({
+          workflowPath: def.workflowPath ?? "",
+          eventPayload: { changedFile: evt.changedFile, changeType: evt.changeType },
+          trigger: {
+            kind: "watch",
+            sourceId: watcher.snapshot().watcherId,
+            label: watchPattern,
+          },
+          agentMode: def.agentMode,
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stdout.write(`${RED}[automate:${def.name}] ${msg}${RESET}\n`);
+        });
+    }
+  });
+
+  watcher.start();
+
+  // Register in module-level map for lifecycle management
+  const existing = _activeWatchers.get(def.id) ?? [];
+  existing.push(watcher);
+  _activeWatchers.set(def.id, existing);
+
+  // Clean up on process exit
+  process.once("SIGINT", () => watcher.stop());
+  process.once("SIGTERM", () => watcher.stop());
+
   return [
     "",
-    `${GREEN}${BOLD}Template "${templateName}" created${RESET}`,
-    `  ID:       ${def.id}`,
-    `  Type:     ${def.type}`,
-    `  Name:     ${def.name}`,
-    `  Workflow: ${def.workflowPath ?? "none"}`,
+    `${GREEN}${BOLD}Template "${templateName}" activated${RESET}`,
+    `  ID:      ${watcher.snapshot().watcherId}`,
+    `  Type:    watch`,
+    `  Pattern: ${watchPattern}`,
+    `  Debounce: ${debounceMs}ms`,
+    `  Agent:    ${def.agentMode ? `enabled (${def.agentMode.prompt.slice(0, 60)}...)` : "disabled"}`,
     "",
-    `${YELLOW}Note: watch-type automations require /git-watch to activate the file watcher.${RESET}`,
   ].join("\n");
 }
 
@@ -522,9 +634,41 @@ async function createAutomation(
   }
 
   if (type === "watch") {
+    const patternArg = parts[1];
+    if (!patternArg) {
+      return `${RED}Usage: /automate create watch <glob-pattern> [--debounce <ms>]${RESET}`;
+    }
+    const debounceStr = extractFlag(parts, "--debounce");
+    const watchDebounceMs = debounceStr ? Number(debounceStr) : 2000;
+
+    const createWatcher = new FilePatternWatcher({
+      pattern: patternArg,
+      debounceMs: watchDebounceMs,
+      projectRoot: state.projectRoot,
+    });
+
+    createWatcher.on("change", (events: FileChangeEvent[]) => {
+      for (const evt of events) {
+        process.stdout.write(
+          `${DIM}[watch:${createWatcher.snapshot().watcherId}] ${evt.changeType}: ${evt.changedFile}${RESET}\n`,
+        );
+      }
+    });
+
+    createWatcher.start();
+
+    // Register for lifecycle management
+    const createExisting = _activeWatchers.get(createWatcher.snapshot().watcherId) ?? [];
+    createExisting.push(createWatcher);
+    _activeWatchers.set(createWatcher.snapshot().watcherId, createExisting);
+
     return [
-      `${YELLOW}watch automations are managed via /git-watch.${RESET}`,
-      `${DIM}Example: /git-watch push [path] [--workflow path]${RESET}`,
+      "",
+      `${GREEN}${BOLD}File Watcher Started${RESET}`,
+      `  ID:      ${createWatcher.snapshot().watcherId}`,
+      `  Pattern: ${patternArg}`,
+      `  Debounce: ${watchDebounceMs}ms`,
+      "",
     ].join("\n");
   }
 

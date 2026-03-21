@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DanteCodeState, Session } from "@dantecode/config-types";
-import { DurableRunStore, globalVerificationRailRegistry } from "@dantecode/core";
+import { DurableRunStore, globalVerificationRailRegistry, ReasoningChain } from "@dantecode/core";
 import { GitAutomationStore } from "@dantecode/git-engine";
 import type { ReplState } from "./slash-commands.js";
 
@@ -598,5 +598,115 @@ describe("git automation slash commands", () => {
       state,
     );
     expect(stopListenerOutput).toContain("Stopped webhook listener");
+  });
+});
+
+// ============================================================================
+// /think command tests
+// ============================================================================
+
+describe("/think command", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-think-"));
+    state = makeState(projectRoot);
+  });
+
+  it("no args — shows current tier as auto and mode as automatic", async () => {
+    const output = await routeSlashCommand("/think", state);
+    expect(output).toContain("auto");
+    expect(output).toContain("automatic");
+  });
+
+  it("shows lastThinkingBudget when set", async () => {
+    state.lastThinkingBudget = 4096;
+    const output = await routeSlashCommand("/think", state);
+    expect(output).toContain("4,096");
+  });
+
+  it("quick — sets reasoningOverride to quick, single-prompt scope", async () => {
+    const output = await routeSlashCommand("/think quick", state);
+    expect(state.reasoningOverride).toBe("quick");
+    expect(state.reasoningOverrideSession).toBe(false);
+    expect(output).toContain("quick");
+  });
+
+  it("deep — sets reasoningOverride to deep", async () => {
+    await routeSlashCommand("/think deep", state);
+    expect(state.reasoningOverride).toBe("deep");
+  });
+
+  it("expert — sets override and includes high token usage hint", async () => {
+    const output = await routeSlashCommand("/think expert", state);
+    expect(state.reasoningOverride).toBe("expert");
+    expect(output).toContain("high token usage");
+  });
+
+  it("auto — clears reasoningOverride and reasoningOverrideSession", async () => {
+    state.reasoningOverride = "deep";
+    state.reasoningOverrideSession = true;
+    const output = await routeSlashCommand("/think auto", state);
+    expect(state.reasoningOverride).toBeUndefined();
+    expect(state.reasoningOverrideSession).toBe(false);
+    expect(output).toContain("automatic");
+  });
+
+  it("quick --session — sets override AND reasoningOverrideSession = true", async () => {
+    await routeSlashCommand("/think quick --session", state);
+    expect(state.reasoningOverride).toBe("quick");
+    expect(state.reasoningOverrideSession).toBe(true);
+  });
+
+  it("invalid tier — returns error message with valid options", async () => {
+    const output = await routeSlashCommand("/think turbo", state);
+    expect(output).toContain("turbo");
+    expect(output).toContain("quick");
+    expect(output).toContain("deep");
+    expect(output).toContain("expert");
+    expect(output).toContain("auto");
+  });
+
+  it("stats (no chain) — returns no active chain message", async () => {
+    const output = await routeSlashCommand("/think stats", state);
+    expect(output.toLowerCase()).toMatch(/no reasoning chain/i);
+  });
+
+  it("chain (no chain) — returns no active chain message", async () => {
+    const output = await routeSlashCommand("/think chain", state);
+    expect(output.toLowerCase()).toMatch(/no reasoning chain/i);
+  });
+
+  it("stats with a real chain — shows step count and tier distribution", async () => {
+    const chain = new ReasoningChain({ critiqueEveryNTurns: 5 });
+    const phase = chain.think("Fix auth bug", "test context", "deep");
+    chain.recordStep(phase);
+    state.reasoningChain = chain;
+    const output = await routeSlashCommand("/think stats", state);
+    expect(output).toContain("Total steps: 1");
+    expect(output).toMatch(/deep=1/);
+  });
+
+  it("chain 1 — shows last 1 step when chain has steps", async () => {
+    const chain = new ReasoningChain({ critiqueEveryNTurns: 5 });
+    const phase = chain.think("Redesign schema", "test", "expert");
+    chain.recordStep(phase);
+    state.reasoningChain = chain;
+    const output = await routeSlashCommand("/think chain 1", state);
+    expect(output).toContain("thinking");
+    expect(output).toContain("#1");
+  });
+
+  it("tier override does NOT persist beyond next prompt without --session", async () => {
+    await routeSlashCommand("/think expert", state);
+    expect(state.reasoningOverride).toBe("expert");
+    expect(state.reasoningOverrideSession).toBe(false);
+    // Simulate agent-loop clearing the override after one use
+    state.reasoningOverride = undefined;
+    // A second /think call should show auto
+    const output2 = await routeSlashCommand("/think", state);
+    expect(output2).toContain("automatic");
   });
 });

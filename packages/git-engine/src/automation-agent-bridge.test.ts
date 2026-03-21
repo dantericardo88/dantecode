@@ -1,9 +1,14 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   substitutePromptVars,
   runAutomationAgent,
   type AgentBridgeConfig,
 } from "./automation-agent-bridge.js";
+import { GitAutomationOrchestrator } from "./automation-orchestrator.js";
+import type { AgentBridgeResult } from "./automation-agent-bridge.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import os from "node:os";
 
 describe("substitutePromptVars", () => {
   it("substitutes known variables in the template", () => {
@@ -135,5 +140,133 @@ describe("runAutomationAgent", () => {
     expect(result.output).toBe("");
     expect(result.filesChanged).toEqual([]);
     expect(result.tokensUsed).toBe(0);
+  });
+
+  it("calls the injected agentRunner with the substituted prompt and projectRoot", async () => {
+    const mockRunner = vi.fn().mockResolvedValue({
+      output: "agent did real work",
+      filesChanged: ["src/foo.ts", "src/bar.ts"],
+      tokensUsed: 500,
+      success: true,
+    });
+
+    const config: AgentBridgeConfig = {
+      prompt: "Fix issue in ${filename}",
+      projectRoot: "/real/project",
+      agentRunner: mockRunner,
+    };
+
+    const result = await runAutomationAgent(config, { filename: "src/foo.ts" });
+
+    // The runner must have been called — not the stub
+    expect(mockRunner).toHaveBeenCalledOnce();
+    // Prompt is substituted before being passed to the runner
+    expect(mockRunner).toHaveBeenCalledWith("Fix issue in src/foo.ts", "/real/project", 30);
+    // Output and filesChanged come from the runner, not a stub
+    expect(result.output).toBe("agent did real work");
+    expect(result.filesChanged).toEqual(["src/foo.ts", "src/bar.ts"]);
+    expect(result.tokensUsed).toBe(500);
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("returns success=false when the injected agentRunner throws an error", async () => {
+    const failRunner = vi.fn().mockRejectedValue(new Error("LLM unavailable"));
+
+    const config: AgentBridgeConfig = {
+      prompt: "do work",
+      projectRoot: "/project",
+      agentRunner: failRunner,
+    };
+
+    const result = await runAutomationAgent(config, {});
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/LLM unavailable/);
+    expect(result.output).toBe("");
+    expect(result.filesChanged).toEqual([]);
+    expect(result.tokensUsed).toBe(0);
+  });
+});
+
+describe("GitAutomationOrchestrator agentMode integration", () => {
+  let tmpDir: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-bridge-test-"));
+  });
+
+  afterEach(() => {
+    if (tmpDir) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  it("orchestrator calls runAutomationAgent when workflow.agentMode is set", async () => {
+    const capturedCalls: Array<{ config: AgentBridgeConfig; ctx: Record<string, unknown> }> = [];
+
+    const mockRunAgent = vi
+      .fn()
+      .mockImplementation(
+        (config: AgentBridgeConfig, ctx: Record<string, unknown>): Promise<AgentBridgeResult> => {
+          capturedCalls.push({ config, ctx });
+          return Promise.resolve({
+            sessionId: "test-session-abc",
+            success: true,
+            output: "Agent completed the task",
+            filesChanged: ["src/fixed.ts"],
+            tokensUsed: 300,
+            durationMs: 1200,
+          });
+        },
+      );
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir!,
+      sessionId: "test-session",
+      modelId: "test-model",
+      waitTimeoutMs: 5000,
+      pollIntervalMs: 25,
+      runAgent: mockRunAgent,
+      // Provide lightweight stubs for gate evaluation
+      readStatus: vi.fn().mockReturnValue({ staged: [], unstaged: [], untracked: [], conflicted: [] }),
+      readFile: vi.fn().mockResolvedValue(""),
+      scoreContent: vi.fn().mockReturnValue({
+        overall: 95,
+        completeness: 95,
+        correctness: 95,
+        clarity: 95,
+        consistency: 95,
+        passedGate: true,
+        violations: [],
+        scoredAt: new Date().toISOString(),
+        scoredBy: "test",
+      }),
+      verifyRepo: vi.fn().mockReturnValue({ passed: true, failedSteps: [] }),
+      auditLogger: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const execution = await orchestrator.runWorkflow({
+      workflowPath: ".github/workflows/fix.yml",
+      agentMode: {
+        prompt: "Fix the failing tests in ${workflowPath}",
+        maxRounds: 5,
+        verifyOutput: false,
+      },
+      trigger: { kind: "manual", sourceId: "user", label: "test trigger" },
+    });
+
+    // The agent bridge must have been called — not a shell workflow
+    expect(mockRunAgent).toHaveBeenCalledOnce();
+    const [calledConfig] = mockRunAgent.mock.calls[0] as [AgentBridgeConfig, Record<string, unknown>];
+    expect(calledConfig.prompt).toBe("Fix the failing tests in ${workflowPath}");
+    expect(calledConfig.maxRounds).toBe(5);
+    expect(calledConfig.verifyOutput).toBe(false);
+
+    // Execution should be marked completed (not failed/blocked)
+    expect(execution.status).toBe("completed");
+    expect(execution.modifiedFiles).toEqual(["src/fixed.ts"]);
+    expect(capturedCalls.length).toBe(1);
   });
 });

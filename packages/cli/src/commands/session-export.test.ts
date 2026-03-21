@@ -145,6 +145,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     gaslight: null,
     memoryOrchestrator: null,
     reasoningOverrideSession: false,
+    theme: "default",
   };
 }
 
@@ -227,6 +228,13 @@ describe("/export command", () => {
     const raw = await readFile(join(tempDir, jsonFile), "utf8");
     const data = JSON.parse(raw);
     expect(data.memoryStats).toBeNull();
+  });
+
+  it("export returns error message when write fails (e.g. bad path)", async () => {
+    const state = makeState(tempDir);
+    // Use a path with a nonexistent subdirectory to force writeFile to fail
+    const result = await routeSlashCommand("/export json nonexistent-dir/out.json", state);
+    expect(result).toMatch(/failed to export|error/i);
   });
 });
 

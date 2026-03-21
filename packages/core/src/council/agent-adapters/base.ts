@@ -48,6 +48,18 @@ export interface AdapterStatus {
   status: AdapterStatusKind;
   lastOutputAt?: string;
   progressSummary?: string;
+  /**
+   * Cumulative tokens consumed by this session so far.
+   * Adapters should report running totals (not deltas).
+   * Omit when usage is not tracked.
+   */
+  tokensUsed?: number;
+  /**
+   * Cumulative cost in USD consumed by this session so far.
+   * Adapters should report running totals (not deltas).
+   * Omit when cost is not tracked.
+   */
+  costUsd?: number;
 }
 
 export interface AdapterArtifacts {

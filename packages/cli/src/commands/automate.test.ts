@@ -4,26 +4,61 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Storage for captured callbacks used by the new tests
+let _capturedListenerCallbacks: Map<string, ((rawEvent: unknown) => void)[]> = new Map();
+let _capturedScheduleCallback: (() => void) | null = null;
+let _mockWatcherStart: ReturnType<typeof vi.fn>;
+let _mockWatcherSnapshot: ReturnType<typeof vi.fn>;
+let _mockWatcherOn: ReturnType<typeof vi.fn>;
+
 vi.mock("@dantecode/git-engine", () => ({
   listWebhookListeners: vi.fn(),
   stopWebhookListener: vi.fn(),
-  WebhookListener: vi.fn().mockImplementation(() => ({
-    id: "wh-mock-id",
-    port: 3000,
-    on: vi.fn(),
-    start: vi.fn().mockResolvedValue(undefined),
-  })),
+  WebhookListener: vi.fn().mockImplementation(() => {
+    const callbacks: Map<string, ((rawEvent: unknown) => void)[]> = new Map();
+    return {
+      id: "wh-mock-id",
+      port: 3000,
+      on: vi.fn().mockImplementation((event: string, cb: (rawEvent: unknown) => void) => {
+        const existing = callbacks.get(event) ?? [];
+        existing.push(cb);
+        callbacks.set(event, existing);
+        // Also store in module-level map for test access
+        const mExisting = _capturedListenerCallbacks.get(event) ?? [];
+        mExisting.push(cb);
+        _capturedListenerCallbacks.set(event, mExisting);
+      }),
+      start: vi.fn().mockResolvedValue(undefined),
+      _getCallbacks: () => callbacks,
+    };
+  }),
   listScheduledGitTasks: vi.fn(),
   stopScheduledGitTask: vi.fn(),
-  scheduleGitTask: vi.fn().mockReturnValue({ id: "sched-mock-id", schedule: "0 9 * * *" }),
+  scheduleGitTask: vi.fn().mockImplementation((_schedule: unknown, cb: () => void) => {
+    _capturedScheduleCallback = cb;
+    return { id: "sched-mock-id", schedule: "0 9 * * *" };
+  }),
   listGitWatchers: vi.fn(),
   stopGitWatcher: vi.fn(),
   GitAutomationOrchestrator: vi.fn().mockImplementation(() => ({
     listExecutions: vi.fn().mockResolvedValue([]),
     runWorkflowInBackground: vi.fn().mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
   })),
+  FilePatternWatcher: vi.fn().mockImplementation(() => {
+    _mockWatcherStart = vi.fn();
+    _mockWatcherSnapshot = vi.fn().mockReturnValue({ watcherId: "fpw-mock-id" });
+    _mockWatcherOn = vi.fn();
+    return {
+      start: _mockWatcherStart,
+      stop: vi.fn(),
+      snapshot: _mockWatcherSnapshot,
+      on: _mockWatcherOn,
+    };
+  }),
   getTemplate: vi.fn(),
   listTemplates: vi.fn(),
+  runAutomationAgent: vi.fn().mockResolvedValue({ sessionId: "agent-1", success: true, output: "", tokensUsed: 0, durationMs: 0, filesChanged: [] }),
+  substitutePromptVars: vi.fn().mockImplementation((template: string) => template),
 }));
 
 import {
@@ -36,6 +71,7 @@ import {
   getTemplate,
   listTemplates,
   GitAutomationOrchestrator,
+  FilePatternWatcher,
 } from "@dantecode/git-engine";
 
 import { automateCommand } from "./automate.js";
@@ -49,6 +85,7 @@ const mockStopWatcher = vi.mocked(stopGitWatcher);
 const mockGetTemplate = vi.mocked(getTemplate);
 const mockListTemplates = vi.mocked(listTemplates);
 const MockOrchestrator = vi.mocked(GitAutomationOrchestrator);
+const MockFilePatternWatcher = vi.mocked(FilePatternWatcher);
 
 const mockState = {
   projectRoot: "/test/project",
@@ -57,6 +94,9 @@ const mockState = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Reset captured callbacks
+  _capturedListenerCallbacks = new Map();
+  _capturedScheduleCallback = null;
   // Default: no automations
   mockListWebhook.mockResolvedValue([]);
   mockListSchedules.mockResolvedValue([]);
@@ -64,7 +104,18 @@ beforeEach(() => {
   MockOrchestrator.mockImplementation(() => ({
     listExecutions: vi.fn().mockResolvedValue([]),
     runWorkflowInBackground: vi.fn().mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
-  }));
+  }) as unknown as GitAutomationOrchestrator);
+  MockFilePatternWatcher.mockImplementation((): FilePatternWatcher => {
+    _mockWatcherStart = vi.fn();
+    _mockWatcherSnapshot = vi.fn().mockReturnValue({ watcherId: "fpw-mock-id" });
+    _mockWatcherOn = vi.fn();
+    return {
+      start: _mockWatcherStart,
+      stop: vi.fn(),
+      snapshot: _mockWatcherSnapshot,
+      on: _mockWatcherOn,
+    } as unknown as FilePatternWatcher;
+  });
 });
 
 // ─── Test 1: Dashboard with no automations ────────────────────────────────
@@ -275,5 +326,168 @@ describe("/automate templates", () => {
     expect(result).toMatch(/daily-verify/);
     expect(result).toMatch(/\[webhook\]/);
     expect(result).toMatch(/\[schedule\]/);
+  });
+});
+
+// ─── Test 10: agentMode flows through template webhook activation ─────────
+
+describe("/automate template pr-review — agentMode webhook", () => {
+  it("agentMode flows through template webhook activation", async () => {
+    const agentMode = {
+      prompt: "Review this pull request for quality and correctness",
+      sandboxMode: "docker",
+      verifyOutput: true,
+    };
+
+    const fakeCreate = vi.fn().mockReturnValue({
+      id: "tmpl-webhook-001",
+      name: "pr-review",
+      type: "webhook",
+      config: { port: 3001, path: "/webhook/pr-review", provider: "github", secret: "" },
+      agentMode,
+      workflowPath: ".github/workflows/pr-review.yml",
+      createdAt: new Date().toISOString(),
+      status: "active",
+      runCount: 0,
+    });
+
+    mockGetTemplate.mockReturnValue({
+      name: "pr-review",
+      description: "Auto-review PRs",
+      type: "webhook",
+      create: fakeCreate,
+    });
+
+    // Create a fresh orchestrator mock instance to capture runWorkflowInBackground calls
+    const mockRunWorkflow = vi.fn().mockResolvedValue({ executionId: "exec-wh-1", backgroundTaskId: "bg-wh-1" });
+    MockOrchestrator.mockImplementation(() => ({
+      listExecutions: vi.fn().mockResolvedValue([]),
+      runWorkflowInBackground: mockRunWorkflow,
+    }) as unknown as GitAutomationOrchestrator);
+
+    // Reset state so a new orchestrator is created
+    const freshState = {
+      projectRoot: "/test/project",
+      session: { id: "test-session-wh", model: { provider: "anthropic", modelId: "claude-sonnet" } },
+    };
+
+    await automateCommand("template pr-review", freshState);
+
+    // Simulate an incoming webhook event by triggering the any-event callback
+    const anyEventCallbacks = _capturedListenerCallbacks.get("any-event") ?? [];
+    expect(anyEventCallbacks.length).toBeGreaterThan(0);
+
+    const fakeEvent = {
+      event: "pull_request",
+      provider: "github",
+      payload: { action: "opened", number: 42 },
+    };
+    anyEventCallbacks[0]!(fakeEvent);
+
+    // Allow async operations to settle
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockRunWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ agentMode }),
+    );
+  });
+});
+
+// ─── Test 11: agentMode flows through template schedule activation ────────
+
+describe("/automate template daily-verify — agentMode schedule", () => {
+  it("agentMode flows through template schedule activation", async () => {
+    const agentMode = {
+      prompt: "Run the full verification suite and report any regressions",
+      sandboxMode: "host",
+      verifyOutput: true,
+    };
+
+    const fakeCreate = vi.fn().mockReturnValue({
+      id: "tmpl-sched-001",
+      name: "daily-verify",
+      type: "schedule",
+      config: { cron: "0 9 * * *" },
+      agentMode,
+      workflowPath: ".github/workflows/daily-verify.yml",
+      createdAt: new Date().toISOString(),
+      status: "active",
+      runCount: 0,
+    });
+
+    mockGetTemplate.mockReturnValue({
+      name: "daily-verify",
+      description: "Daily codebase verification",
+      type: "schedule",
+      create: fakeCreate,
+    });
+
+    const mockRunWorkflow = vi.fn().mockResolvedValue({ executionId: "exec-sc-1", backgroundTaskId: "bg-sc-1" });
+    MockOrchestrator.mockImplementation(() => ({
+      listExecutions: vi.fn().mockResolvedValue([]),
+      runWorkflowInBackground: mockRunWorkflow,
+    }) as unknown as GitAutomationOrchestrator);
+
+    const freshState = {
+      projectRoot: "/test/project",
+      session: { id: "test-session-sc", model: { provider: "anthropic", modelId: "claude-sonnet" } },
+    };
+
+    await automateCommand("template daily-verify", freshState);
+
+    // Trigger the captured cron callback
+    expect(_capturedScheduleCallback).not.toBeNull();
+    await _capturedScheduleCallback!();
+
+    // Allow async operations to settle
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockRunWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ agentMode }),
+    );
+  });
+});
+
+// ─── Test 12: watch template starts FilePatternWatcher ───────────────────
+
+describe("/automate template test-on-change — watch", () => {
+  it("watch template starts FilePatternWatcher with correct pattern", async () => {
+    const fakeCreate = vi.fn().mockReturnValue({
+      id: "tmpl-watch-001",
+      name: "test-on-change",
+      type: "watch",
+      config: { pattern: "src/**/*.ts", debounceMs: 500 },
+      agentMode: {
+        prompt: "A source file changed: ${changedFile}. Run tests.",
+        sandboxMode: "host",
+        verifyOutput: false,
+      },
+      workflowPath: ".github/workflows/test-on-change.yml",
+      createdAt: new Date().toISOString(),
+      status: "active",
+      runCount: 0,
+    });
+
+    mockGetTemplate.mockReturnValue({
+      name: "test-on-change",
+      description: "Run tests on source change",
+      type: "watch",
+      create: fakeCreate,
+    });
+
+    const freshState = {
+      projectRoot: "/test/project",
+      session: { id: "test-session-w", model: { provider: "anthropic", modelId: "claude-sonnet" } },
+    };
+
+    await automateCommand("template test-on-change", freshState);
+
+    // Assert FilePatternWatcher constructor was called with pattern
+    expect(MockFilePatternWatcher).toHaveBeenCalledWith(
+      expect.objectContaining({ pattern: "src/**/*.ts" }),
+    );
+
+    // Assert .start() was called on the watcher instance
+    expect(_mockWatcherStart).toHaveBeenCalled();
   });
 });
