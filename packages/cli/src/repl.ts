@@ -14,6 +14,7 @@ import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { RichRenderer, ProgressOrchestrator } from "@dantecode/ux-polish";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -23,6 +24,14 @@ const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
+
+// ----------------------------------------------------------------------------
+// UX Polish: RichRenderer + ProgressOrchestrator singletons
+// These wire the @dantecode/ux-polish engine into the CLI surface.
+// ----------------------------------------------------------------------------
+
+const richRenderer = new RichRenderer({ defaultDensity: "normal" });
+const progressOrchestrator = new ProgressOrchestrator();
 
 // ----------------------------------------------------------------------------
 // Types
@@ -272,11 +281,32 @@ async function processInput(
   // Pause the readline while processing
   rl.pause();
 
+  // Use richRenderer and progressOrchestrator for structured UX output.
+  // For pipeline commands (/magic, /forge, /inferno, etc.) we track progress.
+  const isPipelineCommand = isSlashCommand(input) &&
+    /^\/(?:magic|forge|inferno|autoforge|blaze|ember|spark|party|ship|verify)\b/i.test(input.trim());
+  const progressId = isPipelineCommand ? `cmd-${Date.now()}` : null;
+
   try {
+    if (progressId) {
+      progressOrchestrator.startProgress(progressId, {
+        phase: input.trim().split(/\s+/)[0] ?? input.trim(),
+        message: "running",
+        initialProgress: 0,
+      });
+      if (!replState.silent) {
+        process.stdout.write(
+          richRenderer.render("cli", { kind: "status", content: `Starting ${input.trim()}` }).output + "\n",
+        );
+      }
+    }
+
     if (isSlashCommand(input)) {
       // Route to slash command handler
       const output = await routeSlashCommand(input, replState);
-      process.stdout.write(`${output}\n`);
+      // Render slash command output through the RichRenderer for structured formatting
+      const rendered = richRenderer.render("cli", { kind: "markdown", content: output });
+      process.stdout.write(`${rendered.rendered ? rendered.output : output}\n`);
 
       // Some slash commands (e.g. /oss) set a pending prompt to chain into the agent loop
       if (replState.pendingAgentPrompt) {
@@ -302,8 +332,23 @@ async function processInput(
       replState.pendingWorkflowContext = null;
       replState.activeAbortController = null;
     }
+
+    if (progressId) {
+      progressOrchestrator.completeProgress(progressId, "done");
+      if (!replState.silent) {
+        process.stdout.write(progressOrchestrator.renderOne(progressId) + "\n");
+      }
+      progressOrchestrator.remove(progressId);
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (progressId) {
+      progressOrchestrator.failProgress(progressId, message);
+      if (!replState.silent) {
+        process.stdout.write(progressOrchestrator.renderOne(progressId) + "\n");
+      }
+      progressOrchestrator.remove(progressId);
+    }
     process.stdout.write(`\n${RED}Error: ${message}${RESET}\n`);
   }
 
