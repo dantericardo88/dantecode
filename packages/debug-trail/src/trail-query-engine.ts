@@ -86,11 +86,17 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   const lower = nl.toLowerCase();
   const query: TrailQuery = { text: nl };
 
-  // Time range detection — relative expressions ("3 hours ago") then named periods
+  // Time range detection — two relative expression patterns, then named periods.
+  // Pattern A: "3 hours ago", "2 days ago"
   const relativeMatch = nl.match(/(\d+)\s*(hour|hr|minute|min|day|week)s?\s+ago/i);
-  if (relativeMatch) {
-    const amount = parseInt(relativeMatch[1]!, 10);
-    const unit = relativeMatch[2]!.toLowerCase();
+  // Pattern B: "in the last N hours", "over the past N days", "past N minutes"
+  const lastNMatch = !relativeMatch
+    ? nl.match(/(?:in\s+the\s+last|over\s+the\s+past|past)\s+(\d+)\s*(hour|hr|minute|min|day|week)s?/i)
+    : null;
+  const timeMatch = relativeMatch ?? lastNMatch;
+  if (timeMatch) {
+    const amount = parseInt(timeMatch[1]!, 10);
+    const unit = timeMatch[2]!.toLowerCase();
     const ms =
       unit === "week" ? amount * 7 * 86_400_000 :
       unit === "day"  ? amount * 86_400_000 :
@@ -138,10 +144,11 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
     query.kinds = ["file_write"];
   }
 
-  // Actor detection — multi-actor OR takes priority over single-actor match
-  const actorOrMatch = nl.match(/([A-Z][a-zA-Z]+)\s+or\s+([A-Z][a-zA-Z]+)/);
-  if (actorOrMatch?.[1] && actorOrMatch[2]) {
-    query.actors = [actorOrMatch[1], actorOrMatch[2]];
+  // Actor detection — multi-actor OR takes priority over single-actor match.
+  // Matches 2+ capitalized words joined by " or ": "Alice or Bob", "Alice or Bob or Carol"
+  const actorOrMatch = nl.match(/[A-Z][a-zA-Z]+(?:\s+or\s+[A-Z][a-zA-Z]+)+/);
+  if (actorOrMatch) {
+    query.actors = actorOrMatch[0].split(/\s+or\s+/i);
   } else {
     const actorMatch = nl.match(/(?:by|from|what did)\s+([A-Z][a-zA-Z]+)/);
     if (actorMatch?.[1]) query.actor = actorMatch[1];

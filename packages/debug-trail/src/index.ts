@@ -47,7 +47,7 @@ export { TombstoneRegistry } from "./state/tombstones.js";
 
 // --- Audit Logger ---
 export { AuditLogger, getGlobalLogger, resetGlobalLogger } from "./audit-logger.js";
-export type { AuditLoggerOptions } from "./audit-logger.js";
+export type { AuditLoggerOptions, FlushResult } from "./audit-logger.js";
 
 // --- File Snapshotter ---
 export { FileSnapshotter } from "./file-snapshotter.js";
@@ -66,8 +66,8 @@ export { RestoreEngine } from "./restore-engine.js";
 export type { RestoreOptions } from "./restore-engine.js";
 
 // --- Trail Query Engine ---
-export { TrailQueryEngine, parseNaturalLanguageQuery } from "./trail-query-engine.js";
-export type { TrailQuery } from "./trail-query-engine.js";
+export { TrailQueryEngine, parseNaturalLanguageQuery, TrailErrorCode } from "./trail-query-engine.js";
+export type { TrailQuery, TrailErrorCode as TrailErrorCodeType } from "./trail-query-engine.js";
 
 // --- Replay Orchestrator ---
 export { ReplayOrchestrator } from "./replay-orchestrator.js";
@@ -85,7 +85,7 @@ export { RetentionPolicy } from "./policies/retention-policy.js";
 export type { RetentionPolicyConfig } from "./policies/retention-policy.js";
 export { CompressionPolicy } from "./policies/compression-policy.js";
 export type { CompressionPolicyConfig, CompressionDecision } from "./policies/compression-policy.js";
-export { PrivacyPolicy } from "./policies/privacy-policy.js";
+export { PrivacyPolicy, StorageQuotaPolicy } from "./policies/privacy-policy.js";
 export type { PrivacyPolicyConfig } from "./policies/privacy-policy.js";
 
 // --- Integration Bridges ---

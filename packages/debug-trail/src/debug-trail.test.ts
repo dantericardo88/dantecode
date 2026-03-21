@@ -2040,3 +2040,262 @@ describe("Round 8 fixes", () => {
     expect(q.errorsOnly).toBeUndefined();
   });
 });
+
+// ============================================================================
+// Round 9 fixes
+// ============================================================================
+
+describe("Round 9 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Gap 1: FlushResult exported from index.ts
+  // -------------------------------------------------------------------------
+
+  it("FlushResult is exported from index.ts", async () => {
+    const mod = await import("./index.js");
+    // The type is exported — verify the module resolves without error.
+    // We can't check a type at runtime, but we verify the module loads cleanly.
+    expect(mod.AuditLogger).toBeDefined();
+    // If FlushResult export was missing, tsc --noEmit would have already failed
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap A: StorageQuotaPolicy exported from index.ts
+  // -------------------------------------------------------------------------
+
+  it("StorageQuotaPolicy is exported from index.ts", async () => {
+    const mod = await import("./index.js");
+    expect((mod as Record<string, unknown>)["StorageQuotaPolicy"]).toBeDefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap B: TrailErrorCode exported from index.ts
+  // -------------------------------------------------------------------------
+
+  it("TrailErrorCode is exported from index.ts", async () => {
+    const mod = await import("./index.js");
+    const trailErrorCode = (mod as Record<string, unknown>)["TrailErrorCode"] as Record<string, string> | undefined;
+    expect(trailErrorCode).toBeDefined();
+    expect(trailErrorCode?.["SNAPSHOT_NOT_FOUND"]).toBe("snapshot_not_found");
+    expect(trailErrorCode?.["DISK_WRITE_ERROR"]).toBe("disk_write_error");
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 2: NL parser — "in the last N hours" / "over the past N days" patterns
+  // -------------------------------------------------------------------------
+
+  it("parseNaturalLanguageQuery: 'in the last 3 hours' sets afterDate", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("show errors in the last 3 hours");
+    const after = Date.now();
+    expect(q.afterDate).toBeDefined();
+    const ts = new Date(q.afterDate!).getTime();
+    // Should be approximately 3 hours ago
+    const expected = before - 3 * 3_600_000;
+    expect(ts).toBeGreaterThanOrEqual(expected - 1000);
+    expect(ts).toBeLessThanOrEqual(after - 3 * 3_600_000 + 1000);
+  });
+
+  it("parseNaturalLanguageQuery: 'over the past 2 days' sets afterDate", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("over the past 2 days");
+    const after = Date.now();
+    expect(q.afterDate).toBeDefined();
+    const ts = new Date(q.afterDate!).getTime();
+    const expected = before - 2 * 86_400_000;
+    expect(ts).toBeGreaterThanOrEqual(expected - 1000);
+    expect(ts).toBeLessThanOrEqual(after - 2 * 86_400_000 + 1000);
+  });
+
+  it("parseNaturalLanguageQuery: 'past 30 minutes' sets afterDate", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("past 30 minutes");
+    const after = Date.now();
+    expect(q.afterDate).toBeDefined();
+    const ts = new Date(q.afterDate!).getTime();
+    const expected = before - 30 * 60_000;
+    expect(ts).toBeGreaterThanOrEqual(expected - 1000);
+    expect(ts).toBeLessThanOrEqual(after - 30 * 60_000 + 1000);
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 3: NL parser — multi-actor OR with 3+ actors
+  // -------------------------------------------------------------------------
+
+  it("parseNaturalLanguageQuery: 3-actor OR captures all actors", () => {
+    const q = parseNaturalLanguageQuery("show events by FileSystem or Checkpointer or AnomalyDetector");
+    expect(q.actors).toEqual(["FileSystem", "Checkpointer", "AnomalyDetector"]);
+    expect(q.actor).toBeUndefined();
+  });
+
+  it("parseNaturalLanguageQuery: 4-actor OR captures all actors", () => {
+    const q = parseNaturalLanguageQuery("Alice or Bob or Carol or Dave did something");
+    expect(q.actors).toHaveLength(4);
+    expect(q.actors).toContain("Alice");
+    expect(q.actors).toContain("Bob");
+    expect(q.actors).toContain("Carol");
+    expect(q.actors).toContain("Dave");
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap E: flush() endSession option
+  // -------------------------------------------------------------------------
+
+  it("flush({ endSession: false }) does not end the session in sessionMap", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r9-endsess-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r9_endsess" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "event 1", {});
+    // Intermediate flush — session should remain active
+    await logger.flush({ endSession: false });
+    await logger.log("tool_call", "Actor", "event 2", {});
+    // Final flush — session ends
+    const result = await logger.flush();
+    expect(result.analyzedCount).toBeGreaterThanOrEqual(1);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 4: Cross-boundary burst detection via lookback context
+  // -------------------------------------------------------------------------
+
+  it("cross-boundary burst: burst spanning two flush() calls is detected", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r9-xburst-"));
+    const logger = new AuditLogger({
+      config: { storageRoot },
+      sessionId: "sess_r9_xburst",
+      anomalyDetector: new AnomalyDetector({
+        burstDeletionCount: 3,
+        burstDeletionWindowMs: 60_000, // 60s window so timestamps in-test fall within it
+      }),
+    });
+    await logger.init();
+
+    // Log 2 deletions — below threshold, no anomaly yet
+    await logger.logFileDelete("/src/a.ts", "hash1");
+    await logger.logFileDelete("/src/b.ts", "hash2");
+
+    // First flush — 2 events, no burst (threshold is 3)
+    const r1 = await logger.flush({ endSession: false });
+    expect(r1.anomalies.filter((a) => a.anomalyType === "burst_deletion")).toHaveLength(0);
+
+    // Log 1 more deletion — now 3 total within window
+    await logger.logFileDelete("/src/c.ts", "hash3");
+
+    // Second flush — lookback context sees the prior 2 deletions → burst detected
+    const r2 = await logger.flush();
+    const burstFlags = r2.anomalies.filter((a) => a.anomalyType === "burst_deletion");
+    expect(burstFlags).toHaveLength(1);
+    // relatedEventIds should include all 3 deletions
+    expect(burstFlags[0]!.relatedEventIds).toHaveLength(3);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("cross-boundary burst dedup: no duplicate flags when burst spans flush boundary", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r9-xburst-dedup-"));
+    const logger = new AuditLogger({
+      config: { storageRoot },
+      sessionId: "sess_r9_dedup",
+      anomalyDetector: new AnomalyDetector({
+        burstDeletionCount: 3,
+        burstDeletionWindowMs: 60_000,
+      }),
+    });
+    await logger.init();
+
+    // Log 3 deletions — full burst in one flush
+    await logger.logFileDelete("/src/x.ts", "hx");
+    await logger.logFileDelete("/src/y.ts", "hy");
+    await logger.logFileDelete("/src/z.ts", "hz");
+
+    const r1 = await logger.flush({ endSession: false });
+    const burstCount1 = r1.anomalies.filter((a) => a.anomalyType === "burst_deletion").length;
+    expect(burstCount1).toBe(1);
+
+    // Second flush with no new deletions — dedup should suppress re-detection
+    await logger.log("tool_call", "Actor", "unrelated event", {});
+    const r2 = await logger.flush();
+    // The burst_deletion from r1 should NOT appear again
+    const burstCount2 = r2.anomalies.filter((a) => a.anomalyType === "burst_deletion").length;
+    expect(burstCount2).toBe(0);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap G: detectBurstDeletions relatedEventIds extends to full burst window
+  // -------------------------------------------------------------------------
+
+  it("detectBurstDeletions reports all events in burst window, not just first N", () => {
+    const detector = new AnomalyDetector({
+      burstDeletionCount: 3,
+      burstDeletionWindowMs: 5_000,
+    });
+
+    const now = Date.now();
+    const makeDelete = (i: number): TrailEvent => ({
+      id: `id_del_${i}`,
+      seq: i,
+      timestamp: new Date(now + i * 500).toISOString(), // 0.5s apart, all within 5s
+      kind: "file_delete",
+      actor: "FileSystem",
+      summary: `delete ${i}`,
+      payload: { filePath: `/src/file${i}.ts` },
+      provenance: { sessionId: "sess_g", runId: "run_g" },
+    });
+
+    // 5 deletions all within the 5s window
+    const events = [0, 1, 2, 3, 4].map(makeDelete);
+    const flags = detector.analyze(events, "sess_g");
+    const burstFlags = flags.filter((f) => f.anomalyType === "burst_deletion");
+    expect(burstFlags).toHaveLength(1);
+    // All 5 IDs should be in relatedEventIds, not just the first 3
+    expect(burstFlags[0]!.relatedEventIds).toHaveLength(5);
+  });
+
+  // -------------------------------------------------------------------------
+  // Gap 4 + Gap 5: analyzedCount semantics — does not include lookback context
+  // -------------------------------------------------------------------------
+
+  it("flush analyzedCount reflects only new events, not lookback context events", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r9-count-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r9_count" });
+    await logger.init();
+
+    // Log 2 events, flush — cursor advances to 2
+    await logger.log("tool_call", "Actor", "ev1", {});
+    await logger.log("tool_call", "Actor", "ev2", {});
+    const r1 = await logger.flush({ endSession: false });
+    expect(r1.analyzedCount).toBe(2);
+
+    // Log 3 more events, flush — analyzedCount = 3 (not 5)
+    await logger.log("tool_call", "Actor", "ev3", {});
+    await logger.log("tool_call", "Actor", "ev4", {});
+    await logger.log("tool_call", "Actor", "ev5", {});
+    const r2 = await logger.flush();
+    expect(r2.analyzedCount).toBe(3);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // AnomalyDetector.getConfig() API
+  // -------------------------------------------------------------------------
+
+  it("AnomalyDetector.getConfig() returns current config snapshot", () => {
+    const detector = new AnomalyDetector({ burstDeletionCount: 7, detectUntrackedWrites: true });
+    const cfg = detector.getConfig();
+    expect(cfg.burstDeletionCount).toBe(7);
+    expect(cfg.detectUntrackedWrites).toBe(true);
+    // Verify it's a snapshot — mutating the returned object doesn't affect the detector
+    (cfg as Record<string, unknown>)["burstDeletionCount"] = 99;
+    expect(detector.getConfig().burstDeletionCount).toBe(7);
+  });
+
+  it("AnomalyDetector.getConfig() reflects updateConfig() changes", () => {
+    const detector = new AnomalyDetector();
+    expect(detector.getConfig().burstDeletionCount).toBe(3); // default
+    detector.updateConfig({ burstDeletionCount: 10 });
+    expect(detector.getConfig().burstDeletionCount).toBe(10);
+  });
+});

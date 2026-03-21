@@ -74,6 +74,9 @@ export class AuditLogger {
   private detectionCursor = 0;
   // Set to true when sessionEvents hits sessionEventsBufferLimit — signals partial analysis.
   private bufferTruncated = false;
+  // Tracks event IDs already reported as anomalies to prevent duplicate flags across flush boundaries.
+  // A cross-boundary burst produces the same relatedEventIds each flush — dedup filters them.
+  private reportedAnomalyEventIds = new Set<string>();
   private onAnomalyDetected?: (result: FlushResult) => void;
 
   constructor(options: AuditLoggerOptions = {}) {
@@ -115,6 +118,7 @@ export class AuditLogger {
     this.initialized = true;
     this.detectionCursor = 0;
     this.bufferTruncated = false;
+    this.reportedAnomalyEventIds = new Set<string>();
   }
 
   // -------------------------------------------------------------------------
@@ -458,8 +462,42 @@ export class AuditLogger {
     await this.writeQueue;
   }
 
-  async flush(): Promise<FlushResult> {
+  /**
+   * Compute events from before the cursor that fall within the burst/loop detection windows.
+   * Prepended to the unanalyzed slice so cross-boundary bursts (spanning two flush() calls)
+   * are visible to the detector. Advisory only — lookback events are filtered out of final
+   * results via reportedAnomalyEventIds dedup.
+   */
+  private computeLookbackContext(unanalyzed: TrailEvent[]): TrailEvent[] {
+    if (this.detectionCursor === 0 || unanalyzed.length === 0) return [];
+    const earliestUnanalyzed = unanalyzed[0]!;
+    const anchorMs = new Date(earliestUnanalyzed.timestamp).getTime();
+    const detectorConfig = this.anomalyDetector.getConfig();
+    const lookbackWindowMs = Math.max(
+      detectorConfig.burstDeletionWindowMs,
+      detectorConfig.rapidLoopWindowMs,
+    );
+    return this.sessionEvents
+      .slice(0, this.detectionCursor)
+      .filter((e) => {
+        const ts = new Date(e.timestamp).getTime();
+        return ts >= anchorMs - lookbackWindowMs && e.kind !== "anomaly_flag";
+      });
+  }
+
+  /**
+   * Flush pending writes, run anomaly detection on new events, and optionally end the session.
+   *
+   * @param options.endSession - If false, skips `sessionMap.endSession()`. Useful for
+   *   intermediate lane flushes where the session continues after this call. Default: true.
+   *
+   * analyzedCount in the returned FlushResult = number of *new* (post-cursor) events analyzed.
+   * Lookback context events are prepended for detection accuracy but are NOT counted here —
+   * they were already counted in a prior flush's analyzedCount.
+   */
+  async flush(options?: { endSession?: boolean }): Promise<FlushResult> {
     await this.drain();
+    const shouldEndSession = options?.endSession ?? true;
 
     // Analyze only events since the last flush (cursor-based).
     // This supports multi-lane sessions: each flush() covers only that lane's new events,
@@ -472,17 +510,31 @@ export class AuditLogger {
     let analyzedCount = 0;
 
     if (unanalyzed.length > 0) {
+      // Compute lookback context BEFORE advancing the cursor — computeLookbackContext uses
+      // slice(0, cursor) to find prior events, so it must see the OLD cursor value.
+      const lookback = this.computeLookbackContext(unanalyzed);
+
       // Advance cursor BEFORE logging anomaly events so those events are not re-analyzed
       this.detectionCursor = this.sessionEvents.length;
       analyzedCount = unanalyzed.length;
 
       try {
-        const anomalies = this.anomalyDetector.analyze(unanalyzed, this.provenance.sessionId);
-        for (const anomaly of anomalies) {
+        // Prepend lookback context so bursts spanning two flush() calls are visible.
+        const windowForAnalysis = [...lookback, ...unanalyzed];
+        const anomalies = this.anomalyDetector.analyze(windowForAnalysis, this.provenance.sessionId);
+
+        // Dedup: skip anomalies whose relatedEventIds were ALL reported in a prior flush.
+        // This prevents duplicate flags when a cross-boundary burst is detected twice.
+        const newAnomalies = anomalies.filter(
+          (a) => !a.relatedEventIds.every((id) => this.reportedAnomalyEventIds.has(id)),
+        );
+
+        for (const anomaly of newAnomalies) {
+          for (const id of anomaly.relatedEventIds) this.reportedAnomalyEventIds.add(id);
           await this.logAnomaly(anomaly.anomalyType, anomaly.description, anomaly.relatedEventIds);
         }
-        if (anomalies.length > 0) await this.drain();
-        detectedAnomalies = anomalies;
+        if (newAnomalies.length > 0) await this.drain();
+        detectedAnomalies = newAnomalies;
       } catch {
         // advisory — never block shutdown
       }
@@ -496,7 +548,9 @@ export class AuditLogger {
     }
 
     await this.store.flush();
-    this.sessionMap.endSession(this.provenance.sessionId);
+    if (shouldEndSession) {
+      this.sessionMap.endSession(this.provenance.sessionId);
+    }
     return { anomalies: detectedAnomalies, bufferTruncated: this.bufferTruncated, analyzedCount };
   }
 }

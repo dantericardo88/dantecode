@@ -79,6 +79,11 @@ export class AnomalyDetector {
     this.config = { ...this.config, ...partial };
   }
 
+  /** Get a readonly snapshot of the current configuration. */
+  getConfig(): Readonly<AnomalyDetectorConfig> {
+    return { ...this.config };
+  }
+
   /**
    * Analyze a window of events and return detected anomalies.
    * Advisory only — results should be logged as anomaly_flag events.
@@ -113,13 +118,21 @@ export class AnomalyDetector {
       const start = new Date(deletions[i]!.timestamp).getTime();
       const end = new Date(deletions[i + this.config.burstDeletionCount - 1]!.timestamp).getTime();
       if (end - start <= window) {
-        const relatedEventIds = deletions
-          .slice(i, i + this.config.burstDeletionCount)
-          .map((e) => e.id);
+        // Extend to capture all deletions within the burst window (not just the first N)
+        let j = i + this.config.burstDeletionCount;
+        while (j < deletions.length) {
+          const extentMs = new Date(deletions[j]!.timestamp).getTime() - start;
+          if (extentMs <= window) {
+            j++;
+          } else {
+            break;
+          }
+        }
+        const relatedEventIds = deletions.slice(i, j).map((e) => e.id);
         flags.push({
           anomalyType: "burst_deletion",
           severity: "high",
-          description: `${this.config.burstDeletionCount} files deleted within ${window / 1000}s`,
+          description: `${relatedEventIds.length} files deleted within ${window / 1000}s`,
           relatedEventIds,
           detectedAt: new Date().toISOString(),
           sessionId: sessionId ?? deletions[i]!.provenance.sessionId,
