@@ -36,6 +36,8 @@ export class ReplayOrchestrator {
   private snapshotter: FileSnapshotter;
   /** In-memory replay sessions keyed by sessionId */
   private replaySessions = new Map<string, ReplaySession>();
+  // E1: cap in-memory replay sessions to prevent unbounded growth in long-running processes.
+  private static readonly MAX_REPLAY_SESSIONS = 50;
 
   constructor(
     config?: Partial<DebugTrailConfig>,
@@ -74,6 +76,7 @@ export class ReplayOrchestrator {
       fileStateAtStep: new Map(),
       currentStep: 0,
     };
+    this.evictIfNeeded();
     this.replaySessions.set(sessionId, session);
 
     return this.buildCursor(session);
@@ -220,6 +223,18 @@ export class ReplayOrchestrator {
   // Internal helpers
   // -------------------------------------------------------------------------
 
+  // E1: FIFO eviction — Map preserves insertion order so .keys().next() is the oldest.
+  private evictIfNeeded(): void {
+    while (this.replaySessions.size >= ReplayOrchestrator.MAX_REPLAY_SESSIONS) {
+      const oldest = this.replaySessions.keys().next().value;
+      if (oldest !== undefined) {
+        this.replaySessions.delete(oldest);
+      } else {
+        break;
+      }
+    }
+  }
+
   private applyEventToFileState(event: TrailEvent, fileState: Map<string, string>): void {
     const fp = event.payload["filePath"];
     if (typeof fp !== "string") return;
@@ -228,6 +243,13 @@ export class ReplayOrchestrator {
       fileState.set(fp, event.afterSnapshotId);
     } else if (event.kind === "file_delete") {
       fileState.delete(fp);
+    } else if (event.kind === "file_restore") {
+      // E2: when afterSnapshotId is absent (after-state capture failed), fall back to
+      // payload["snapshotId"] — the source snapshot used to restore the file.
+      const sourceSnapshotId = event.payload["snapshotId"];
+      if (typeof sourceSnapshotId === "string") {
+        fileState.set(fp, sourceSnapshotId);
+      }
     }
 
     // Handle file moves

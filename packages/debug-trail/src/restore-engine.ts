@@ -82,14 +82,22 @@ export class RestoreEngine {
 
     if (options.dryRun) {
       const targetExists = existsSync(targetPath);
-      const snapshotExists = await this.snapshotter.snapshotExists(snapshotId);
+      const snapshotExistsNow = await this.snapshotter.snapshotExists(snapshotId);
+      // A3: PRD rule — no restore without audit record; dry-run must also be logged.
+      const auditEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Dry-run restore: snapshot ${snapshotId} → ${targetPath}`,
+        { snapshotId, targetPath, dryRun: true, snapshotExists: snapshotExistsNow, targetExists },
+      );
       return {
         snapshotId,
         restored: false,
         targetPath,
+        auditEventId,
         error: "dry_run",
         dryRunDetails: {
-          snapshotExists,
+          snapshotExists: snapshotExistsNow,
           targetExists,
           wouldOverwrite: targetExists,
         },
@@ -136,6 +144,22 @@ export class RestoreEngine {
     // Verify content integrity: restored file hash must match snapshot record
     const snapRecords = await this.snapshotter.getSnapshotRecords();
     const snapRecord = snapRecords.find((r) => r.snapshotId === snapshotId);
+    // A1: explicit guard — if afterHash is null, verification is impossible; fail fast.
+    if (snapRecord && afterHash === null) {
+      const errEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Restore integrity check failed: file unreadable after restore to ${targetPath}`,
+        { snapshotId, targetPath, error: "post_restore_unreadable" },
+      );
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        auditEventId: errEventId,
+        error: "Cannot verify: file unreadable after restore",
+      };
+    }
     if (snapRecord && afterHash && afterHash !== snapRecord.contentHash) {
       const errEventId = await this.logger.log(
         "file_restore",
@@ -203,10 +227,11 @@ export class RestoreEngine {
   /**
    * List restorable snapshots for a file path.
    */
-  getRestorableSnapshots(filePath: string): Array<{ snapshotId: string; deletedAt: string; hasBeforeState: boolean }> {
+  // A2: snapshotId is null when no before-state was captured (tombstone ID is not a snapshot ID).
+  getRestorableSnapshots(filePath: string): Array<{ snapshotId: string | null; deletedAt: string; hasBeforeState: boolean }> {
     const tombstones = this.snapshotter.getTombstones().allForFile(filePath);
     return tombstones.map((t) => ({
-      snapshotId: t.lastSnapshotId ?? t.tombstoneId,
+      snapshotId: t.lastSnapshotId ?? null,
       deletedAt: t.deletedAt,
       hasBeforeState: t.beforeStateCaptured,
     }));

@@ -12,6 +12,7 @@ import type {
   AuditExportResult,
   DebugTrailConfig,
 } from "../types.js";
+import type { SessionInfo } from "../state/session-map.js";
 import { defaultConfig } from "../types.js";
 import { AuditLogger } from "../audit-logger.js";
 import { FileSnapshotter } from "../file-snapshotter.js";
@@ -144,6 +145,21 @@ export class CliBridge {
       lines.push(`[${e.seq}] ${e.kind} | ${e.actor} | ${e.summary}`);
     }
     return lines.join("\n");
+  }
+
+  /** List all in-memory sessions (newest first). */
+  getSessionList(): SessionInfo[] {
+    return this.logger.getSessionMap().all();
+  }
+
+  /** List all indexed file paths. */
+  getFileList(): string[] {
+    return this.logger.getIndex().getFiles();
+  }
+
+  /** Query recent events with a specific limit (correct alternative to debugTrail). */
+  async debugTrailRecent(limit: number): Promise<DebugTrailResult> {
+    return this.queryEngine.query({ limit, order: "desc" });
   }
 
   /** Run anomaly detection on a session and return detected flags. */

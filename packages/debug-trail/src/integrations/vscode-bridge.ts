@@ -116,10 +116,9 @@ export class VsCodeBridge {
   /** Get recent events for the sidebar's "Recent Activity" panel. */
   async getRecentEvents(limit = 20): Promise<VsCodeTrailMessage> {
     try {
-      const result = await this.cli.debugTrail(undefined);
-      // Take most recent N events
-      const recent = result.results.slice(0, limit);
-      return this.wrap("recent_events", { success: true, events: recent, totalMatches: result.totalMatches });
+      // B2: use debugTrailRecent so the limit is respected end-to-end (not capped at 20 then sliced).
+      const result = await this.cli.debugTrailRecent(limit);
+      return this.wrap("recent_events", { success: true, events: result.results, totalMatches: result.totalMatches });
     } catch (err) {
       return this.wrap("recent_events", {
         success: false,
@@ -129,6 +128,18 @@ export class VsCodeBridge {
         totalMatches: 0,
       });
     }
+  }
+
+  /** B1: List all in-memory sessions. */
+  handleSessionList(): VsCodeTrailMessage {
+    const sessions = this.cli.getSessionList();
+    return this.wrap("session_list", { success: true, sessions });
+  }
+
+  /** B1: List all indexed file paths. */
+  handleFileList(): VsCodeTrailMessage {
+    const files = this.cli.getFileList();
+    return this.wrap("file_list", { success: true, files });
   }
 
   // -------------------------------------------------------------------------
@@ -153,6 +164,10 @@ export class VsCodeBridge {
           return this.handleExport(args["sessionId"] as string);
         case "recent":
           return this.getRecentEvents(args["limit"] as number | undefined);
+        case "session_list":
+          return this.handleSessionList();
+        case "file_list":
+          return this.handleFileList();
         default:
           return this.wrap("trail_query_result", { success: false, error: `Unknown command: ${command}`, results: [], totalMatches: 0, latencyMs: 0 });
       }
@@ -185,6 +200,9 @@ export class VsCodeBridge {
       filePath: event.payload["filePath"] ?? null,
       hasSnapshot: !!(event.afterSnapshotId || event.beforeSnapshotId),
       trustScore: event.trustScore ?? null,
+      // B3: provenance fields needed by sidebar consumers to group/filter by session or lane.
+      sessionId: event.provenance.sessionId,
+      laneId: event.provenance.laneId ?? null,
     };
   }
 

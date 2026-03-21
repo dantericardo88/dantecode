@@ -62,8 +62,10 @@ export class PrivacyPolicy {
       ...(this.config.excludeCommonNoise ? COMMON_NOISE_PATTERNS : []),
       ...this.config.excludePathPatterns,
     ];
-    this.excludePatterns = allExclude.map(globToRegex);
-    this.redactPatterns = this.config.redactContentPatterns.map(globToRegex);
+    // D: normalize Windows backslashes in patterns before compiling to regex;
+    // shouldExcludePath() normalizes the input path, but patterns were not normalized.
+    this.excludePatterns = allExclude.map((g) => globToRegex(g.replace(/\\/g, "/")));
+    this.redactPatterns = this.config.redactContentPatterns.map((g) => globToRegex(g.replace(/\\/g, "/")));
   }
 
   /** Check if a file path should be excluded from snapshotting entirely. */

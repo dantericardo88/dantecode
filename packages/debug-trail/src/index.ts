@@ -21,7 +21,7 @@ export type {
   AuditExportResult,
   DebugTrailConfig,
 } from "./types.js";
-export { defaultConfig } from "./types.js";
+export { defaultConfig, DiskWriteError } from "./types.js";
 
 // --- Storage ---
 export { TrailStore, getTrailStore, getStorePaths } from "./sqlite-store.js";

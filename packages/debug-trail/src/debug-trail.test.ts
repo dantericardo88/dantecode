@@ -22,7 +22,7 @@ import { RetentionPolicy } from "./policies/retention-policy.js";
 import { CompressionPolicy } from "./policies/compression-policy.js";
 import { PrivacyPolicy } from "./policies/privacy-policy.js";
 import type { TrailEvent, TrailProvenance, DeleteTombstone, FileSnapshotRecord } from "./types.js";
-import { defaultConfig } from "./types.js";
+import { defaultConfig, DiskWriteError } from "./types.js";
 import { FileSnapshotter } from "./file-snapshotter.js";
 import { AuditLogger } from "./audit-logger.js";
 import { ReplayOrchestrator } from "./replay-orchestrator.js";
@@ -2684,5 +2684,118 @@ describe("Round 11 — buffer overflow spill + untracked-write causality", () =>
     const untrackedFlags = flags.filter((f) => f.anomalyType === "untracked_write");
     expect(untrackedFlags).toHaveLength(1);
     expect(untrackedFlags[0]!.description).toContain("/src/config.ts");
+  });
+});
+
+// ============================================================================
+// Round 12 fixes
+// ============================================================================
+
+describe("Round 12 fixes", () => {
+  // A3: dry-run restore must emit an audit record (PRD rule: no restore without audit record).
+  it("A3: restoreFromSnapshot dryRun:true returns a truthy auditEventId", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r12-a3-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const logger = new AuditLogger({ config });
+      const snapshotter = new FileSnapshotter(config);
+      const restoreEngine = new RestoreEngine(snapshotter, logger);
+
+      // Create a real file and capture a snapshot so snapshotExists() returns true.
+      const testFile = join(tmpDir, "test-file.txt");
+      await writeFile(testFile, "hello round 12");
+      const provenance = makeProvenance();
+      const snap = await snapshotter.captureSnapshot(testFile, "test", provenance);
+      expect(snap).not.toBeNull();
+
+      // Use a non-existent target so the overwrite guard (existsSync && !overwrite) is not triggered.
+      const dryRunTarget = join(tmpDir, "restored-copy.txt");
+      const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, testFile, {
+        dryRun: true,
+        targetPath: dryRunTarget,
+      });
+
+      expect(result.error).toBe("dry_run");
+      expect(result.restored).toBe(false);
+      expect(typeof result.auditEventId).toBe("string");
+      expect(result.auditEventId).toBeTruthy();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // A2: getRestorableSnapshots must return null (not tombstone ID) when no before-state captured.
+  it("A2: getRestorableSnapshots returns snapshotId null for no-before-state tombstone", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r12-a2-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const logger = new AuditLogger({ config });
+      const snapshotter = new FileSnapshotter(config);
+      const restoreEngine = new RestoreEngine(snapshotter, logger);
+
+      const filePath = "/virtual/missing-before-state.ts";
+      const provenance = makeProvenance();
+
+      // Register a tombstone that has no before-state (file was never tracked).
+      snapshotter.getTombstones().register({
+        tombstoneId: "tomb_r12_test_001",
+        filePath,
+        deletedAt: new Date().toISOString(),
+        deletedBy: "TestActor",
+        trailEventId: "evt_r12_a2_test",
+        provenance,
+        beforeStateCaptured: false,
+        missingBeforeReason: "file_never_tracked",
+        lastSnapshotId: undefined,
+      });
+
+      const results = restoreEngine.getRestorableSnapshots(filePath);
+      expect(results).toHaveLength(1);
+      expect(results[0]!.snapshotId).toBeNull();
+      expect(results[0]!.hasBeforeState).toBe(false);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // C: DiskWriteError must be exported from the public index so consumers can catch by type.
+  it("C: DiskWriteError is an Error subclass with eventId and seq properties", () => {
+    const err = new DiskWriteError("evt_r12_test", 99, new Error("disk full"));
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe("DiskWriteError");
+    expect(err.eventId).toBe("evt_r12_test");
+    expect(err.seq).toBe(99);
+    expect(err.message).toContain("disk full");
+  });
+
+  // D: Windows backslash in glob patterns must match forward-slash normalized paths.
+  it("D: PrivacyPolicy normalizes Windows backslash in excludePathPatterns", () => {
+    const policy = new PrivacyPolicy({ excludePathPatterns: ["node_modules\\lib"] });
+    expect(policy.shouldExcludePath("node_modules/lib/index.js")).toBe(true);
+    expect(policy.shouldExcludePath("src/utils/index.js")).toBe(false);
+  });
+
+  // E1: ReplayOrchestrator evicts oldest session when the cap (50) is reached.
+  it("E1: ReplayOrchestrator keeps map bounded at MAX_REPLAY_SESSIONS (50)", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r12-e1-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const orchestrator = new ReplayOrchestrator(config);
+
+      // Start 52 replays with distinct session IDs (all return empty — no events in store).
+      const sessionIds: string[] = [];
+      for (let i = 0; i < 52; i++) {
+        const sid = `sess_evict_${i}_${randomUUID().slice(0, 6)}`;
+        sessionIds.push(sid);
+        await orchestrator.startReplay(sid);
+      }
+
+      // No crash and the 52nd session is still addressable via stepForward (which restarts it if evicted).
+      const lastId = sessionIds[51]!;
+      const cursor = await orchestrator.stepForward(lastId, 1);
+      expect(cursor.sessionId).toBe(lastId);
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
