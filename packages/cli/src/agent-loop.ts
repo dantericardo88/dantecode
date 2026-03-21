@@ -31,6 +31,7 @@ import {
   ApproachMemory,
   formatApproachesForPrompt,
   ReasoningChain,
+  getCostMultiplier,
   AutonomyEngine,
   PersistentMemory,
   globalToolScheduler,
@@ -200,6 +201,16 @@ export interface AgentLoopConfig {
     /** Confidence threshold below which escalation fires. Default: 0.5 */
     threshold?: number;
   };
+  /**
+   * Reference to the REPL state for /think override and feedback loop wiring.
+   * When provided, per-round tier selection respects the reasoningOverride field,
+   * and tier outcomes are recorded back via recordTierOutcome.
+   */
+  replState?: import("./slash-commands.js").ReplState;
+  /** SSE emitter for serve mode. When set, stdout writes become SSE events. */
+  eventEmitter?: import("./serve/session-emitter.js").SessionEventEmitter;
+  /** Session ID routing key for eventEmitter. Required when eventEmitter is set. */
+  eventSessionId?: string;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -1617,6 +1628,23 @@ async function _runAgentLoopCore(
     }
   }
 
+  /**
+   * Output adapter for serve mode. In REPL mode (default), writes to stdout.
+   * In serve mode (eventEmitter set), routes output to SSE clients instead.
+   */
+  function emitOrWrite(output: string, type: import("./serve/session-emitter.js").SSEEventType = "status"): void {
+    if (config.eventEmitter && config.eventSessionId) {
+      config.eventEmitter.emitEvent(config.eventSessionId, {
+        type,
+        data: { content: output },
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      process.stdout.write(output);
+    }
+  }
+
+  const loopStartTime = Date.now();
   const durableRunStore = new DurableRunStore(session.projectRoot);
   let durablePrompt = prompt;
   let replayToolCalls: ExtractedToolCall[] = [];
@@ -1776,6 +1804,9 @@ async function _runAgentLoopCore(
   const router = new ModelRouterImpl(routerConfig, session.projectRoot, session.id);
   const lexicalComplexity = router.analyzeComplexity(durablePrompt);
   const thinkingBudget = deriveThinkingBudget(config.state.model.default, lexicalComplexity);
+  if (config.replState && thinkingBudget !== undefined) {
+    config.replState.lastThinkingBudget = thinkingBudget;
+  }
   let localSandboxBridge: SandboxBridge | null = null;
 
   // Build system prompt
@@ -1857,7 +1888,8 @@ async function _runAgentLoopCore(
 
   // ---- Feature: ReasoningChain (tiered Think→Critique→Act) ----
   // Provides structured per-round thinking phases and PDSE-gated self-critique.
-  const reasoningChain = new ReasoningChain({ critiqueEveryNTurns: 5 });
+  const reasoningChain = config.replState?.reasoningChain ?? new ReasoningChain({ critiqueEveryNTurns: 5 });
+  let currentRoundTier: import("@dantecode/core").ReasoningTier = "quick";
 
   // ---- Feature: AutonomyEngine (persistent goal tracking + meta-reasoning) ----
   // Tracks goals across sessions; periodically runs meta-reasoning passes.
@@ -2012,7 +2044,7 @@ async function _runAgentLoopCore(
         content: "Continue executing remaining steps. Do not summarize — keep working.",
       });
       if (!config.silent) {
-        process.stdout.write(
+        emitOrWrite(
           `\n${YELLOW}[auto-continue ${autoContinuations}/${MAX_AUTO_CONTINUATIONS}]${RESET} ${DIM}(rounds low mid-pipeline — refilling budget)${RESET}\n`,
         );
       }
@@ -2021,6 +2053,11 @@ async function _runAgentLoopCore(
     maxToolRounds--;
     roundCounter++;
     const _roundStartMs = Date.now();
+    // Record tier outcome for adaptive bias feedback loop
+    reasoningChain.recordTierOutcome(
+      currentRoundTier,
+      sameErrorCount === 0 ? 0.9 : sameErrorCount <= 2 ? 0.75 : 0.6,
+    );
 
     // Context compaction (opencode/OpenHands pattern): condense old messages
     // when approaching the context window limit
@@ -2028,7 +2065,7 @@ async function _runAgentLoopCore(
     if (compacted.length < messages.length) {
       messages.splice(0, messages.length, ...compacted);
       if (config.verbose) {
-        process.stdout.write(
+        emitOrWrite(
           `${DIM}[context compacted: ${messages.length} messages remaining]${RESET}\n`,
         );
       }
@@ -2042,15 +2079,15 @@ async function _runAgentLoopCore(
     );
     if (!config.silent) {
       if (utilization.tier === "green") {
-        process.stdout.write(
+        emitOrWrite(
           `${DIM}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens]${RESET}\n`,
         );
       } else if (utilization.tier === "yellow") {
-        process.stdout.write(
+        emitOrWrite(
           `${YELLOW}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens — older messages will be summarized soon]${RESET}\n`,
         );
       } else {
-        process.stdout.write(
+        emitOrWrite(
           `${RED}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens — use /compact or /new for fresh session]${RESET}\n`,
         );
       }
@@ -2077,14 +2114,62 @@ async function _runAgentLoopCore(
       }
     }
 
+    // ---- DanteMemory: auto-retain learnings from previous round ----
+    // Captures tool outcomes and decisions from the previous round.
+    // Runs at the start of round N to persist round N-1 context. Non-blocking.
+    if (memoryInitialized && roundCounter > 1) {
+      try {
+        const retainPayload: Record<string, unknown> = {
+          round: roundCounter - 1,
+          timestamp: new Date().toISOString(),
+          filesModifiedTotal: filesModified,
+        };
+        if (lastSuccessfulTool) {
+          retainPayload.lastTool = lastSuccessfulTool;
+        }
+        if (lastConfirmedStep) {
+          retainPayload.lastStep = lastConfirmedStep;
+        }
+        const lastAssistantMsg = messages.filter((m) => m.role === "assistant").at(-1);
+        if (lastAssistantMsg) {
+          const text =
+            typeof lastAssistantMsg.content === "string"
+              ? lastAssistantMsg.content.slice(0, 300)
+              : "";
+          if (text) retainPayload.assistantSummary = text;
+        }
+        const retainValue = JSON.stringify(retainPayload);
+        if (secretsScanner.scan(retainValue).clean) {
+          await memoryOrchestrator.memoryStore(
+            `round-${session.id}-${roundCounter - 1}`,
+            retainPayload,
+            "session",
+          );
+        }
+      } catch {
+        // Non-fatal: memory retention failure must never block the agent loop
+      }
+    }
+
     // ---- ReasoningChain: per-round thinking phase ----
     // Decide reasoning tier from current complexity + error state, generate a
     // thinking phase, record it, and inject the chain history into messages.
     {
-      const tier = reasoningChain.decideTier(lexicalComplexity, {
-        errorCount: sameErrorCount,
-        toolCalls: toolCallsThisTurn,
-      });
+      let tier: import("@dantecode/core").ReasoningTier;
+      if (config.replState?.reasoningOverride) {
+        tier = config.replState.reasoningOverride;
+        if (!config.replState.reasoningOverrideSession) {
+          config.replState.reasoningOverride = undefined;
+        }
+      } else {
+        tier = reasoningChain.decideTier(lexicalComplexity, {
+          errorCount: sameErrorCount,
+          toolCalls: toolCallsThisTurn,
+          costMultiplier: getCostMultiplier(config.state.model.default),
+        });
+      }
+      currentRoundTier = tier;
+      if (config.replState) config.replState.reasoningChain = reasoningChain;
       const thinkPhase = reasoningChain.think(durablePrompt, `round=${roundCounter}`, tier);
       reasoningChain.recordStep(thinkPhase);
       if (reasoningChain.shouldCritique()) {
@@ -2133,7 +2218,12 @@ async function _runAgentLoopCore(
         toolCalls = replayToolCalls;
         replayToolCalls = [];
       } else {
-      const renderer = new StreamRenderer(!!config.silent);
+      const renderer = new StreamRenderer({
+        silent: !!config.silent,
+        modelLabel: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+        reasoningTier: currentRoundTier,
+        thinkingBudget: thinkingBudget,
+      });
       renderer.printHeader();
       const useNativeTools = config.state.model.default.supportsToolCalls;
       let nativeSuccess = false;
@@ -2152,6 +2242,7 @@ async function _runAgentLoopCore(
             if (part.type === "text-delta") {
               renderer.write(part.textDelta);
               config.onToken?.(part.textDelta);
+              config.eventEmitter?.emitToken(config.eventSessionId ?? "", part.textDelta);
             } else if (part.type === "reasoning") {
               if (config.verbose) {
                 process.stdout.write(`${DIM}[reasoning] ${part.textDelta}${RESET}\n`);
@@ -2338,7 +2429,7 @@ async function _runAgentLoopCore(
 
     // Display the assistant's text response (suppressed in silent mode)
     if (cleanText.length > 0 && !config.silent) {
-      process.stdout.write(`${cleanText}\n`);
+      emitOrWrite(`${cleanText}\n`, "token");
     }
 
     // ---- Confidence-gated escalation ----
@@ -4096,6 +4187,12 @@ async function _runAgentLoopCore(
     await auditLogger.flush({ endSession: true });
   } catch {
     // Non-fatal
+  }
+
+  // Emit session-complete event for SSE clients in serve mode
+  if (config.eventEmitter && config.eventSessionId) {
+    const msgTokenEst = session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0);
+    config.eventEmitter.emitDone(config.eventSessionId, msgTokenEst, Date.now() - loopStartTime);
   }
 
   return session;

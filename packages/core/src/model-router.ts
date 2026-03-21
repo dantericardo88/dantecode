@@ -150,11 +150,30 @@ export class ModelRouterImpl {
   // Model-assisted complexity scoring cache
   private _modelRatedComplexity: number | null = null;
   private _firstTurnCompleted = false;
+  // Fallback state — set when primary model fails and a fallback succeeds
+  private _usingFallback = false;
+  private _fallbackModelId: string | undefined = undefined;
 
   constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
     this.projectRoot = projectRoot;
     this.sessionId = sessionId;
+  }
+
+  /** Returns true if the last model call used a fallback (primary was unavailable). */
+  isUsingFallback(): boolean {
+    return this._usingFallback;
+  }
+
+  /** Returns the model ID of the active fallback, or undefined when on the primary model. */
+  getFallbackModelId(): string | undefined {
+    return this._fallbackModelId;
+  }
+
+  /** Resets fallback state. Called automatically when primary model succeeds. */
+  resetFallbackState(): void {
+    this._usingFallback = false;
+    this._fallbackModelId = undefined;
   }
 
   /**
@@ -175,6 +194,7 @@ export class ModelRouterImpl {
     // Try the primary model first
     const primaryResult = await this.tryGenerate(modelConfig, messages, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.text;
     }
 
@@ -185,6 +205,8 @@ export class ModelRouterImpl {
       const fallbackResult = await this.tryGenerate(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.text;
       }
     }
@@ -214,6 +236,7 @@ export class ModelRouterImpl {
     // Try the primary model first
     const primaryResult = await this.tryStream(modelConfig, messages, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.stream;
     }
 
@@ -224,6 +247,8 @@ export class ModelRouterImpl {
       const fallbackResult = await this.tryStream(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.stream;
       }
     }
@@ -263,6 +288,7 @@ export class ModelRouterImpl {
     // Try the primary model
     const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.stream;
     }
 
@@ -277,6 +303,8 @@ export class ModelRouterImpl {
         options,
       );
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.stream;
       }
     }
@@ -864,6 +892,7 @@ export class ModelRouterImpl {
     this._consecutiveGstackFailures = 0;
     this._modelRatedComplexity = null;
     this._firstTurnCompleted = false;
+    this.resetFallbackState();
   }
 
   /**

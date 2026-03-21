@@ -137,7 +137,7 @@ export class GitAutomationOrchestrator {
     this.verifyRepoImpl =
       options.verifyRepo ?? ((projectRoot) => new RecoveryEngine().runRepoRootVerification(projectRoot));
     this.auditLoggerImpl = options.auditLogger ?? appendAuditEvent;
-    this.runner.setWorkFn(async (prompt, onProgress, context) =>
+    this.runner.setWorkFn(async (prompt: string, onProgress: (msg: string) => void, context: { task: { id: string } }) =>
       this.executeWorkItem(prompt, onProgress, context.task.id),
     );
   }

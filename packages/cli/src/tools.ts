@@ -37,6 +37,7 @@ import {
 } from "@dantecode/core";
 import type { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, toToolResult as sandboxToToolResult } from "@dantecode/dante-sandbox";
+import { renderBeforeAfter, getThemeEngine } from "@dantecode/ux-polish";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -204,12 +205,31 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
       }
     } catch { /* before-state is best-effort */ }
 
-    // Step 2: Actual write — always happens regardless of debug-trail state
+    // Step 2: Capture before content for diff rendering (best-effort)
+    let beforeContent: string | undefined;
+    try {
+      beforeContent = await readFile(resolved, "utf-8");
+    } catch { /* file may not exist yet */ }
+
+    // Step 3: Actual write — always happens regardless of debug-trail state
     await mkdir(dirname(resolved), { recursive: true });
     await writeFile(resolved, content, "utf-8");
     const lineCount = content.split("\n").length;
 
-    // Step 3: Capture after-state and log (fire-and-forget — never fails the tool)
+    // Step 4: Render diff to terminal (TTY only, fire-and-forget)
+    if (process.stdout.isTTY && beforeContent !== undefined) {
+      try {
+        const diffResult = renderBeforeAfter(resolved, beforeContent, content, {
+          maxLines: 40,
+          theme: getThemeEngine(),
+        });
+        if (diffResult.additions > 0 || diffResult.deletions > 0) {
+          process.stdout.write(diffResult.rendered);
+        }
+      } catch { /* diff rendering must never fail the tool */ }
+    }
+
+    // Step 5: Capture after-state and log (fire-and-forget — never fails the tool)
     if (trailLogger && trailSnapshotter) {
       void (async () => {
         try {
@@ -333,6 +353,20 @@ async function toolEdit(
     context?.editAttempts?.delete(attemptKey);
 
     const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
+
+    // Render diff to terminal (TTY only, compact mode for edits, fire-and-forget)
+    if (process.stdout.isTTY) {
+      try {
+        const diffResult = renderBeforeAfter(resolved, existing, updated, {
+          maxLines: 30,
+          compact: true,
+          theme: getThemeEngine(),
+        });
+        if (diffResult.additions > 0 || diffResult.deletions > 0) {
+          process.stdout.write(diffResult.rendered);
+        }
+      } catch { /* diff rendering must never fail the tool */ }
+    }
 
     // Step 3: Capture after-state and log (fire-and-forget — never fails the tool)
     if (editTrailLogger && editTrailSnapshotter) {

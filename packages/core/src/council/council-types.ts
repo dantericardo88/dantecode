@@ -174,6 +174,10 @@ export interface AgentSessionState {
   retryCount: number;
   handoffPacketId?: string;
   errorMessage?: string;
+  /** PDSE score from per-lane verification (0-100). Undefined if not yet verified. */
+  pdseScore?: number;
+  /** Whether per-lane verification passed. Undefined if not yet verified. */
+  verificationPassed?: boolean;
   /**
    * Unix timestamp (ms) after which this "retry-pending" session may be promoted
    * to "running". Undefined for sessions that are not pending.
@@ -270,6 +274,41 @@ export interface CouncilTaskPacket {
   contextFiles?: string[];
   /** Handoff packet to resume from, if applicable. */
   resumeFrom?: HandoffPacket;
+}
+
+// ----------------------------------------------------------------------------
+// Fleet configuration
+// ----------------------------------------------------------------------------
+
+/** Fleet-wide budget configuration (re-exported from fleet-budget). */
+export interface FleetBudgetConfig {
+  maxTotalTokens: number;
+  maxTokensPerAgent: number;
+  maxTotalCostUsd: number;
+  warningThreshold: number;
+}
+
+/**
+ * Fleet-level configuration for council runs.
+ * Controls nesting depth, lane retries, and resource budgets.
+ */
+export interface CouncilConfig {
+  /**
+   * Maximum nesting depth for agent spawning.
+   * Default: 1 (parent -> child only).
+   * 0 = no sub-agents. 2 = parent -> child -> grandchild.
+   */
+  maxNestingDepth?: number;
+  /** Maximum retries per lane on verification failure. Default: 1. */
+  maxLaneRetries?: number;
+  /** Fleet-wide resource budget. Omit or set limits to 0 for unlimited. */
+  budget?: Partial<FleetBudgetConfig>;
+  /**
+   * Minimum PDSE score (0-100) required for lane acceptance.
+   * Lanes below this score will be retried (up to maxLaneRetries times).
+   * Default: 70.
+   */
+  pdseThreshold?: number;
 }
 
 // ----------------------------------------------------------------------------

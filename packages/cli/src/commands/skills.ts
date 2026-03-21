@@ -17,8 +17,14 @@ import {
   importSkillBridgeBundle,
   listBridgeWarnings,
   validateBridgeSkill,
+  installSkill,
+  SkillCatalog,
+  bundleSkill,
+  detectSkillSources,
+  parseUniversalSkill,
+  SkillChain,
 } from "@dantecode/skill-adapter";
-import type { ImportSource, ParsedSkill } from "@dantecode/skill-adapter";
+import type { ImportSource, ParsedSkill, CatalogEntry } from "@dantecode/skill-adapter";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -69,6 +75,27 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
     case "remove":
       await skillsRemove(args.slice(1), projectRoot);
       break;
+    case "install":
+      await skillsInstall(args.slice(1), projectRoot);
+      break;
+    case "search":
+      await skillsSearch(args.slice(1), projectRoot);
+      break;
+    case "scan":
+      await skillsScan(args.slice(1), projectRoot);
+      break;
+    case "info":
+      await skillsShow(args.slice(1), projectRoot); // alias for show
+      break;
+    case "export":
+      await skillsExport(args.slice(1), projectRoot);
+      break;
+    case "import-all":
+      await skillsImportAll(args.slice(1), projectRoot);
+      break;
+    case "compose":
+      await skillsCompose(args.slice(1), projectRoot);
+      break;
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
@@ -81,8 +108,15 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       process.stdout.write(`  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`);
       process.stdout.write(`  dantecode skills wrap <name>                 Wrap an existing skill\n`);
       process.stdout.write(`  dantecode skills show <name>                 Show skill definition\n`);
+      process.stdout.write(`  dantecode skills info <name>                 Show skill definition (alias for show)\n`);
       process.stdout.write(`  dantecode skills validate <name>             Validate a skill\n`);
       process.stdout.write(`  dantecode skills remove <name>               Remove a skill\n`);
+      process.stdout.write(`  dantecode skills install <source>            Install skill from path/URL\n`);
+      process.stdout.write(`  dantecode skills search [query]              Search the skill catalog\n`);
+      process.stdout.write(`  dantecode skills scan [path]                 Scan directory for skill sources\n`);
+      process.stdout.write(`  dantecode skills export <name> [outdir]      Export/bundle a skill\n`);
+      process.stdout.write(`  dantecode skills import-all <path>           Import all detected skills from path\n`);
+      process.stdout.write(`  dantecode skills compose <chain-name>        Show/manage a skill chain\n`);
       break;
   }
 }
@@ -629,4 +663,346 @@ async function showBridgeDetails(skillName: string, projectRoot: string): Promis
   const valid = await validateBridgeSkill(skillName, projectRoot);
   const validIcon = valid ? `${GREEN}VALID${RESET}` : `${RED}INVALID${RESET}`;
   process.stdout.write(`\n  ${DIM}Bundle integrity: ${validIcon}\n${RESET}`);
+}
+
+// ----------------------------------------------------------------------------
+// New Sub-Commands (Lane 3)
+// ----------------------------------------------------------------------------
+
+/**
+ * Installs a skill from a local path, git URL, or HTTP URL.
+ * Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink] [--no-verify]
+ */
+async function skillsInstall(args: string[], projectRoot: string): Promise<void> {
+  // Parse args
+  const source = args.find((a) => !a.startsWith("--"));
+  if (!source) {
+    process.stdout.write(
+      `${RED}Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink] [--no-verify]${RESET}\n`,
+    );
+    return;
+  }
+
+  let tier: "guardian" | "sentinel" | "sovereign" = "guardian";
+  const tierIdx = args.indexOf("--tier");
+  if (tierIdx !== -1 && args[tierIdx + 1]) {
+    const t = args[tierIdx + 1] as string;
+    if (t === "guardian" || t === "sentinel" || t === "sovereign") {
+      tier = t;
+    }
+  }
+
+  const force = args.includes("--force");
+  const symlink = args.includes("--symlink");
+  const noVerify = args.includes("--no-verify");
+
+  process.stdout.write(`\n${DIM}Installing skill from: ${source}...${RESET}\n`);
+
+  const result = await installSkill(
+    { source, verify: !noVerify, tier, force, symlink },
+    projectRoot,
+  );
+
+  if (result.success) {
+    process.stdout.write(`\n${GREEN}Skill installed:${RESET} ${BOLD}${result.name}${RESET}\n`);
+    process.stdout.write(`  ${DIM}Installed path: ${result.installedPath}${RESET}\n`);
+    if (result.verification) {
+      process.stdout.write(
+        `  ${DIM}Verification score: ${result.verification.overallScore} (${result.verification.tier})${RESET}\n`,
+      );
+    }
+    process.stdout.write("\n");
+  } else {
+    process.stdout.write(`\n${RED}Install failed:${RESET} ${result.error ?? "Unknown error"}\n\n`);
+  }
+}
+
+/**
+ * Searches the skill catalog for matching entries.
+ * Usage: dantecode skills search [query] [--tag <tag>] [--source <format>] [--tier <tier>] [--verified-only]
+ */
+async function skillsSearch(args: string[], projectRoot: string): Promise<void> {
+  const query = args.find((a) => !a.startsWith("--")) ?? "";
+
+  const tagIdx = args.indexOf("--tag");
+  const tag = tagIdx !== -1 ? args[tagIdx + 1] : undefined;
+
+  const sourceIdx = args.indexOf("--source");
+  const sourceFilter = sourceIdx !== -1 ? args[sourceIdx + 1] : undefined;
+
+  const tierIdx = args.indexOf("--tier");
+  const tierFilter = tierIdx !== -1 ? args[tierIdx + 1] : undefined;
+
+  const verifiedOnly = args.includes("--verified-only");
+
+  const catalog = new SkillCatalog(projectRoot);
+  await catalog.load();
+
+  let entries = query ? catalog.search(query) : catalog.getAll();
+
+  if (tag) {
+    const tagLower = tag.toLowerCase();
+    entries = entries.filter((e: CatalogEntry) => e.tags.some((t: string) => t.toLowerCase() === tagLower));
+  }
+
+  if (sourceFilter) {
+    entries = entries.filter((e: CatalogEntry) => e.source === sourceFilter);
+  }
+
+  if (tierFilter) {
+    entries = entries.filter((e: CatalogEntry) => e.verificationTier === tierFilter);
+  }
+
+  if (verifiedOnly) {
+    entries = entries.filter((e: CatalogEntry) => e.verificationScore !== undefined);
+  }
+
+  if (entries.length === 0) {
+    process.stdout.write(`\n${DIM}No skills found matching your criteria.${RESET}\n\n`);
+    return;
+  }
+
+  process.stdout.write(`\n${BOLD}Skill Search Results (${entries.length}):${RESET}\n\n`);
+
+  const nameWidth = 24;
+  const sourceWidth = 12;
+  const tierWidth = 10;
+  const scoreWidth = 8;
+
+  process.stdout.write(
+    `  ${"Name".padEnd(nameWidth)} ${"Source".padEnd(sourceWidth)} ${"Tier".padEnd(tierWidth)} ${"Score".padEnd(scoreWidth)} Description\n`,
+  );
+  process.stdout.write(
+    `  ${"─".repeat(nameWidth)} ${"─".repeat(sourceWidth)} ${"─".repeat(tierWidth)} ${"─".repeat(scoreWidth)} ${"─".repeat(40)}\n`,
+  );
+
+  for (const entry of entries) {
+    const name = entry.name.slice(0, nameWidth).padEnd(nameWidth);
+    const src = entry.source.slice(0, sourceWidth).padEnd(sourceWidth);
+    const tier = (entry.verificationTier ?? "-").slice(0, tierWidth).padEnd(tierWidth);
+    const score =
+      entry.verificationScore !== undefined
+        ? String(entry.verificationScore).slice(0, scoreWidth).padEnd(scoreWidth)
+        : "-".padEnd(scoreWidth);
+    const desc = entry.description.slice(0, 60);
+
+    process.stdout.write(
+      `  ${YELLOW}${name}${RESET} ${DIM}${src}${RESET} ${DIM}${tier}${RESET} ${DIM}${score}${RESET} ${desc}\n`,
+    );
+  }
+
+  process.stdout.write("\n");
+}
+
+/**
+ * Scans a directory for skill source formats.
+ * Usage: dantecode skills scan [path]
+ */
+async function skillsScan(args: string[], projectRoot: string): Promise<void> {
+  const scanPath = args.find((a) => !a.startsWith("--")) ?? projectRoot;
+  const resolvedScanPath = resolve(projectRoot, scanPath);
+
+  process.stdout.write(`\n${DIM}Scanning: ${resolvedScanPath}${RESET}\n`);
+
+  const detections = await detectSkillSources(resolvedScanPath);
+
+  if (detections.length === 0) {
+    process.stdout.write(`\n${DIM}No skill sources detected.${RESET}\n\n`);
+    return;
+  }
+
+  process.stdout.write(`\n${BOLD}Found ${detections.length} skill source(s):${RESET}\n\n`);
+
+  for (const detection of detections) {
+    const pct = Math.round(detection.confidence * 100);
+    process.stdout.write(
+      `  ${YELLOW}${detection.format}${RESET} ${DIM}(${pct}% confidence)${RESET} — ${detection.paths.length} file(s) found\n`,
+    );
+    for (const p of detection.paths) {
+      process.stdout.write(`    ${DIM}${p}${RESET}\n`);
+    }
+  }
+
+  process.stdout.write("\n");
+}
+
+/**
+ * Exports/bundles a skill to a directory.
+ * Usage: dantecode skills export <name> [outputPath]
+ */
+async function skillsExport(args: string[], projectRoot: string): Promise<void> {
+  const skillName = args[0];
+  if (!skillName) {
+    process.stdout.write(`${RED}Usage: dantecode skills export <name> [outputPath]${RESET}\n`);
+    return;
+  }
+
+  const outputPath =
+    args[1] ?? join(projectRoot, "exported-skills", skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
+
+  process.stdout.write(`\n${DIM}Exporting skill: ${skillName}${RESET}\n`);
+
+  const result = await bundleSkill(
+    {
+      skillName,
+      outputPath: resolve(projectRoot, outputPath),
+      includeVerification: true,
+      includeScripts: true,
+    },
+    projectRoot,
+  );
+
+  if (result.success) {
+    process.stdout.write(`\n${GREEN}Skill exported:${RESET} ${BOLD}${skillName}${RESET}\n`);
+    process.stdout.write(`  ${DIM}Output path: ${result.outputPath}${RESET}\n`);
+    process.stdout.write(`  ${DIM}Files written: ${result.filesWritten}${RESET}\n\n`);
+  } else {
+    process.stdout.write(`\n${RED}Export failed:${RESET} ${result.error ?? "Unknown error"}\n\n`);
+  }
+}
+
+/**
+ * Imports all detected skills from a directory.
+ * Usage: dantecode skills import-all <path> [--force] [--no-verify] [--tier guardian|sentinel|sovereign]
+ */
+async function skillsImportAll(args: string[], projectRoot: string): Promise<void> {
+  const scanPath = args.find((a) => !a.startsWith("--"));
+  if (!scanPath) {
+    process.stdout.write(
+      `${RED}Usage: dantecode skills import-all <path> [--force] [--no-verify] [--tier guardian|sentinel|sovereign]${RESET}\n`,
+    );
+    return;
+  }
+
+  const force = args.includes("--force");
+  const noVerify = args.includes("--no-verify");
+
+  let tier: "guardian" | "sentinel" | "sovereign" = "guardian";
+  const tierIdx = args.indexOf("--tier");
+  if (tierIdx !== -1 && args[tierIdx + 1]) {
+    const t = args[tierIdx + 1] as string;
+    if (t === "guardian" || t === "sentinel" || t === "sovereign") {
+      tier = t;
+    }
+  }
+
+  const resolvedScanPath = resolve(projectRoot, scanPath);
+
+  process.stdout.write(`\n${DIM}Scanning: ${resolvedScanPath}${RESET}\n`);
+
+  const detections = await detectSkillSources(resolvedScanPath);
+
+  if (detections.length === 0) {
+    process.stdout.write(`${YELLOW}No skill sources detected at: ${resolvedScanPath}${RESET}\n`);
+    return;
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const detection of detections) {
+    for (const skillPath of detection.paths) {
+      let skillName = basename(skillPath)
+        .replace(/\.(md|mdc|toml)$/i, "")
+        .replace(/^SKILL[._-]?/i, "")
+        .toLowerCase() || "unknown";
+
+      try {
+        const parsed = await parseUniversalSkill(skillPath, detection.format);
+        skillName = parsed.name;
+
+        process.stdout.write(`  ${DIM}Installing ${skillName}...${RESET} `);
+
+        const result = await installSkill(
+          { source: skillPath, verify: !noVerify, tier, force },
+          projectRoot,
+        );
+
+        if (result.success) {
+          process.stdout.write(`${GREEN}[OK]${RESET}\n`);
+          imported++;
+        } else {
+          process.stdout.write(`${YELLOW}[SKIP] ${DIM}${result.error ?? ""}${RESET}\n`);
+          skipped++;
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        process.stdout.write(`${RED}[FAIL] ${DIM}${message}${RESET}\n`);
+        failed++;
+      }
+    }
+  }
+
+  process.stdout.write(
+    `\n${DIM}Imported: ${imported}, Skipped: ${skipped}, Failed: ${failed}${RESET}\n\n`,
+  );
+}
+
+/**
+ * Shows or initializes a skill chain definition.
+ * Usage: dantecode skills compose <chain-name>
+ */
+async function skillsCompose(args: string[], projectRoot: string): Promise<void> {
+  const chainName = args[0];
+  if (!chainName) {
+    process.stdout.write(`${RED}Usage: dantecode skills compose <name>${RESET}\n`);
+    return;
+  }
+
+  const chainFile = join(projectRoot, ".dantecode", "skill-chains", `${chainName}.yaml`);
+
+  let fileContent: string | null = null;
+  try {
+    const { readFile: readFileFs } = await import("node:fs/promises");
+    fileContent = await readFileFs(chainFile, "utf-8");
+  } catch {
+    // File doesn't exist yet
+  }
+
+  if (fileContent !== null) {
+    process.stdout.write(`\n${BOLD}Skill Chain: ${chainName}${RESET}\n`);
+    process.stdout.write(`${DIM}File: ${chainFile}${RESET}\n\n`);
+
+    try {
+      const chain = SkillChain.fromYAML(fileContent);
+      const steps = chain.getSteps();
+
+      process.stdout.write(`${BOLD}Steps (${steps.length}):${RESET}\n`);
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]!;
+        process.stdout.write(`  ${i + 1}. ${YELLOW}${step.skillName}${RESET}`);
+        if (step.gate) {
+          const gateDesc: string[] = [];
+          if (step.gate.minPdse !== undefined) {
+            gateDesc.push(`minPdse: ${step.gate.minPdse}`);
+          }
+          if (step.gate.onFail) {
+            gateDesc.push(`onFail: ${step.gate.onFail}`);
+          }
+          process.stdout.write(` ${DIM}[gate: ${gateDesc.join(", ")}]${RESET}`);
+        }
+        process.stdout.write("\n");
+      }
+      process.stdout.write("\n");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`${RED}Error parsing chain file: ${message}${RESET}\n`);
+      process.stdout.write(`${DIM}Raw content:\n${fileContent}${RESET}\n`);
+    }
+  } else {
+    process.stdout.write(`\n${BOLD}Chain '${chainName}' not found.${RESET}\n`);
+    process.stdout.write(`${DIM}To create it, write a YAML file at:${RESET}\n`);
+    process.stdout.write(`  ${chainFile}\n\n`);
+    process.stdout.write(`${BOLD}Template:${RESET}\n`);
+
+    const template = new SkillChain(chainName, "Describe your chain here");
+    template.add("skill-one", { input: "$input" });
+    template.addGate("skill-two", { minPdse: 80, onFail: "stop" }, { data: "$previous.output" });
+
+    process.stdout.write(`${DIM}${template.toYAML()}${RESET}`);
+    process.stdout.write(
+      `\n${DIM}Chain builder: add steps interactively using the /skill-chain API${RESET}\n\n`,
+    );
+  }
 }

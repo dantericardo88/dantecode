@@ -84,12 +84,12 @@ async function tryStructuralMergeIsolated(
       branch: `council-merge-${sessionId}`,
       baseBranch: targetBranch,
     });
-    worktreeDir = worktree.directory;
+    worktreeDir = worktree.directory as string;
 
     // Run merge in isolated worktree — never touches the main repo
     git(["merge", branchB, "--no-commit", "--no-ff"], worktreeDir, MERGE_TIMEOUT_MS);
 
-    const conflictedRaw = git(["diff", "--name-only", "--diff-filter=U"], worktreeDir);
+    const conflictedRaw = git(["diff", "--name-only", "--diff-filter=U"], worktreeDir) as string | undefined;
     const conflicts = conflictedRaw ? conflictedRaw.split("\n").filter(Boolean) : [];
 
     if (conflicts.length === 0) {

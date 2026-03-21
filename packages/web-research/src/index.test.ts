@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { DuckDuckGoProvider } from "./search/duckduckgo.js";
 import { WebFetcher } from "./fetch/fetcher.js";
 import { generateCacheKey } from "./cache/cache-key.js";

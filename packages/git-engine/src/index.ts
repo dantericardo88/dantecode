@@ -151,6 +151,21 @@ export type {
   MergeOptions,
 } from "./merge.js";
 
+// ─── Automation Templates ────────────────────────────────────────────────────
+
+export { getTemplate, listTemplates, BUILT_IN_TEMPLATES } from "./automation-templates.js";
+export type { AutomationDefinition, AutomationTemplate } from "./automation-templates.js";
+
+// ─── File Pattern Watcher ─────────────────────────────────────────────────────
+
+export { FilePatternWatcher, matchGlob } from "./file-pattern-watcher.js";
+export type { FilePatternWatcherOptions, FileChangeEvent } from "./file-pattern-watcher.js";
+
+// ─── Automation Agent Bridge ─────────────────────────────────────────────────
+
+export { runAutomationAgent, substitutePromptVars } from "./automation-agent-bridge.js";
+export type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
+
 // ─── Council Conflict Scanner ───────────────────────────────────────────────
 
 export {

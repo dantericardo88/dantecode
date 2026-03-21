@@ -487,6 +487,7 @@ export type {
   FinalSynthesisRecord,
   CouncilRunState,
   CouncilTaskPacket,
+  CouncilConfig,
 } from "./council/council-types.js";
 
 export {
@@ -559,6 +560,11 @@ export type {
   OrchestratorStartOptions,
 } from "./council/council-orchestrator.js";
 
+export { FleetBudget, DEFAULT_FLEET_BUDGET_CONFIG } from "./council/fleet-budget.js";
+export type { FleetBudgetConfig, FleetBudgetState, FleetBudgetReport, AgentBudgetEntry, AgentBudgetRemaining } from "./council/fleet-budget.js";
+export { TaskRedistributor } from "./council/task-redistributor.js";
+export type { RedistributionCandidate, RedistributionResult, BusyLaneInfo } from "./council/task-redistributor.js";
+
 export { DanteCodeAdapter } from "./council/agent-adapters/dantecode.js";
 export type { SelfLaneExecutor } from "./council/agent-adapters/dantecode.js";
 export { CodexAdapter } from "./council/agent-adapters/codex.js";
@@ -612,8 +618,8 @@ export type {
 
 // ─── Reasoning Chain ──────────────────────────────────────────────────────────
 
-export { ReasoningChain } from "./reasoning-chain.js";
-export type { ReasoningPhase, ReasoningTier, CritiqueResult } from "./reasoning-chain.js";
+export { ReasoningChain, getCostMultiplier } from "./reasoning-chain.js";
+export type { ReasoningPhase, ReasoningTier, CritiqueResult, ChainStep, ReasoningChainOptions, ReasoningVerificationResult } from "./reasoning-chain.js";
 
 // ─── Autonomy Engine ──────────────────────────────────────────────────────────
 
@@ -691,6 +697,11 @@ export type { VerificationHistoryKind } from "./verification-history-store.js";
 
 export { BridgeListener } from "./council/bridge-listener.js";
 export type { AgentCommandConfig, BridgeListenerOptions, SpawnFn } from "./council/bridge-listener.js";
+
+// ─── Contextual Suggestions ──────────────────────────────────────────────────
+
+export { ContextualSuggestions, contextualSuggestions } from "./contextual-suggestions.js";
+export type { SuggestionContext, ContextualSuggestionsOptions, Suggestion } from "./contextual-suggestions.js";
 
 // ─── GitHub Client ───────────────────────────────────────────────────────────
 

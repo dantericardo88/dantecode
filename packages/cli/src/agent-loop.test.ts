@@ -384,6 +384,9 @@ vi.mock("@dantecode/core", () => {
       shouldCritique() { return false; }
       selfCritique() { return { recommendation: "" }; }
       formatChainForPrompt() { return ""; }
+      recordTierOutcome() {}
+      getTierPerformance() { return {}; }
+      getAdaptiveBias() { return 0; }
     },
     // AutonomyEngine — Lane 1 wiring
     AutonomyEngine: class MockAutonomyEngine {
@@ -413,6 +416,8 @@ vi.mock("@dantecode/core", () => {
     },
     // synthesizeConfidence — Lane 4 wiring
     synthesizeConfidence: vi.fn(() => ({ decision: "pass", confidence: 1.0, rationale: "" })),
+    // getCostMultiplier — cost tracking
+    getCostMultiplier: vi.fn((_modelId: string) => 1.0),
   };
 });
 

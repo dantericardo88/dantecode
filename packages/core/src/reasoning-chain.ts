@@ -130,6 +130,11 @@ export class ReasoningChain {
   private stepCounter = 0;
   private currentTier: ReasoningTier = "quick";
   private readonly options: ReasoningChainOptions;
+  private tierOutcomes: Map<ReasoningTier, { totalPdse: number; count: number }> = new Map([
+    ["quick", { totalPdse: 0, count: 0 }],
+    ["deep", { totalPdse: 0, count: 0 }],
+    ["expert", { totalPdse: 0, count: 0 }],
+  ]);
 
   constructor(options?: Partial<ReasoningChainOptions>) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
@@ -148,13 +153,25 @@ export class ReasoningChain {
    */
   decideTier(
     taskComplexity: number,
-    context: { errorCount: number; toolCalls: number },
+    context: {
+      errorCount: number;
+      toolCalls: number;
+      costMultiplier?: number;
+      remainingBudget?: number;
+    },
   ): ReasoningTier {
-    if (taskComplexity < 0.3 || (context.errorCount === 0 && context.toolCalls < 5)) {
+    const costMult = context.costMultiplier ?? 1.0;
+    const budgetPressure = context.remainingBudget !== undefined && context.remainingBudget < 50000;
+    const costBias = costMult > 3.0 ? 0.15 : costMult > 1.5 ? 0.05 : 0;
+    const budgetBias = budgetPressure ? 0.1 : 0;
+    const adaptiveBias = this.getAdaptiveBias();
+    const adjustedComplexity = taskComplexity - costBias - budgetBias + adaptiveBias;
+
+    if (adjustedComplexity < 0.3 || (context.errorCount === 0 && context.toolCalls < 5)) {
       this.currentTier = "quick";
       return "quick";
     }
-    if (taskComplexity < 0.7 || context.errorCount < 3) {
+    if (adjustedComplexity < 0.7 || context.errorCount < 3) {
       this.currentTier = "deep";
       return "deep";
     }
@@ -443,6 +460,56 @@ export class ReasoningChain {
     this.history = [];
     this.stepCounter = 0;
     this.currentTier = "quick";
+    this.tierOutcomes = new Map([
+      ["quick", { totalPdse: 0, count: 0 }],
+      ["deep", { totalPdse: 0, count: 0 }],
+      ["expert", { totalPdse: 0, count: 0 }],
+    ]);
+  }
+
+  /**
+   * Record a PDSE outcome for a tier to feed the adaptive bias system.
+   */
+  recordTierOutcome(tier: ReasoningTier, pdseScore: number): void {
+    const entry = this.tierOutcomes.get(tier)!;
+    entry.totalPdse += pdseScore;
+    entry.count += 1;
+  }
+
+  /**
+   * Returns average PDSE per tier, or undefined if fewer than 3 samples.
+   */
+  getTierPerformance(): Partial<Record<ReasoningTier, number>> {
+    const result: Partial<Record<ReasoningTier, number>> = {};
+    for (const [tier, { totalPdse, count }] of this.tierOutcomes) {
+      if (count >= 3) {
+        result[tier] = totalPdse / count;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Compute adaptive bias from historical tier performance.
+   * Returns a negative value to reduce effective complexity (biases toward lower tier).
+   *
+   * - -0.1 when quick tier consistently exceeds 0.85 PDSE (quick is working well)
+   * - -0.05 when expert doesn't meaningfully outperform deep (> 0.05 margin)
+   * -  0   otherwise
+   */
+  getAdaptiveBias(): number {
+    const perf = this.getTierPerformance();
+    const quickAvg = perf.quick;
+    const deepAvg = perf.deep;
+    const expertAvg = perf.expert;
+
+    if (quickAvg !== undefined && quickAvg > 0.85) {
+      return -0.1;
+    }
+    if (expertAvg !== undefined && deepAvg !== undefined && expertAvg - deepAvg <= 0.05) {
+      return -0.05;
+    }
+    return 0;
   }
 
   private escalateTier(): ReasoningTier {
@@ -451,4 +518,20 @@ export class ReasoningChain {
     }
     return "expert";
   }
+}
+
+// ----------------------------------------------------------------------------
+// Module-level utility: cost multiplier heuristic
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns a cost multiplier for the given model to inform tier selection.
+ * Opus/o1-pro = 5.0, Sonnet/GPT-4/Grok-3 = 2.0, Haiku/mini/flash = 0.5, default = 1.0.
+ */
+export function getCostMultiplier(model: { provider: string; modelId: string }): number {
+  const id = model.modelId.toLowerCase();
+  if (id.includes("opus") || id.includes("o1-pro")) return 5.0;
+  if (id.includes("sonnet") || id.includes("gpt-4") || id.includes("grok-3")) return 2.0;
+  if (id.includes("haiku") || id.includes("mini") || id.includes("flash")) return 0.5;
+  return 1.0;
 }

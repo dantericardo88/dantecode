@@ -110,6 +110,12 @@ export interface CouncilAgentAdapter {
 
   /** Abort an in-progress task. */
   abortTask(sessionId: string): Promise<void>;
+
+  /**
+   * Optional: return token/cost usage for a session.
+   * Not all adapters track this — callers must check for its presence.
+   */
+  getUsage?(sessionId: string): Promise<{ tokensIn: number; tokensOut: number; costUsd: number } | null>;
 }
 
 // ----------------------------------------------------------------------------

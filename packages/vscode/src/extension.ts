@@ -136,6 +136,22 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(completionRegistration);
 
+  // ── Inline completion: cache invalidation + accept detection ──
+  const docChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (completionProvider === undefined) return;
+    // Cache invalidation: clear trie entries when edit is above cursor line
+    for (const change of event.contentChanges) {
+      completionProvider.completionCache.onDocumentChange(
+        event.document.uri.toString(),
+        change.range.start.line,
+        event.document.version,
+      );
+    }
+    // Accept detection for telemetry outcome update + prefetch trigger
+    completionProvider.handleDocumentChange(event);
+  });
+  context.subscriptions.push(docChangeDisposable);
+
   // ── Status bar ──
   statusBarState = createStatusBar(context);
   updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");

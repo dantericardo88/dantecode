@@ -22,6 +22,8 @@ import { runReviewCommand } from "./commands/review.js";
 import { runTriageCommand } from "./commands/triage.js";
 import { runAuditCommand } from "./commands/audit.js";
 import { runVaultCommand } from "./commands/vault.js";
+// serve command added below in switch statement
+import { runServeCommand } from "./commands/serve.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -99,7 +101,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     fearSetBlockOnNoGo: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset", "research", "audit", "vault", "review", "triage"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset", "research", "audit", "vault", "review", "triage", "serve"]);
   let i = 0;
   let foundCommand = false;
 
@@ -370,6 +372,9 @@ async function main(): Promise<void> {
         return;
       case "triage":
         await runTriageCommand(parsed.subArgs, projectRoot);
+        return;
+      case "serve":
+        await runServeCommand(parsed.subArgs);
         return;
     }
   }

@@ -15,7 +15,15 @@ import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
-import { RichRenderer, ProgressOrchestrator } from "@dantecode/ux-polish";
+import {
+  RichRenderer,
+  ProgressOrchestrator,
+  StatusBar,
+  buildPrompt,
+  renderTokenDashboard,
+  getThemeEngine,
+} from "@dantecode/ux-polish";
+import type { StatusBarState, PromptBuilderState, TokenUsageData } from "@dantecode/ux-polish";
 import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
@@ -27,7 +35,6 @@ import { createMemoryOrchestrator } from "@dantecode/memory-engine";
 // ANSI Colors
 // ----------------------------------------------------------------------------
 
-const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -65,6 +72,8 @@ export interface ReplOptions {
   resumeFromLastSession?: boolean;
   /** --fearset-block-on-nogo: block and prompt when FearSet returns no-go. */
   fearSetBlockOnNoGo?: boolean;
+  /** --name <n>: human-readable name for this session. */
+  sessionName?: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -124,6 +133,8 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
     : undefined;
   // Fix 3: sync the live gaslight integration so /gaslight on/off affect the agent loop
   agentConfig.gaslight = replState.gaslight ?? undefined;
+  // Wire replState for /think override and reasoning feedback loop
+  agentConfig.replState = replState;
 }
 
 // ----------------------------------------------------------------------------
@@ -192,6 +203,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     waveState: null,
     gaslight: null, // populated immediately after agentConfig.gaslight is created below
     memoryOrchestrator: null, // populated after DanteSandbox.setup() below
+    reasoningOverrideSession: false,
+    theme: "default",
   };
 
   // Agent loop config
@@ -202,6 +215,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableSandbox: options.enableSandbox,
     silent: options.silent,
     fearSetBlockOnNoGo: options.fearSetBlockOnNoGo === true,
+    replState: replState,
   };
 
   // DanteGaslight: wire the closed Gaslight→Skillbook→Gaslight feedback loop.
@@ -304,11 +318,41 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     }
   }
 
+  // Initialize TUI components
+  const sessionStartMs = Date.now();
+  const themeEngine = getThemeEngine();
+
+  // Status bar (non-TTY: render() returns "" and draw() is a no-op)
+  const modelLabel = `${state.model.default.provider}/${state.model.default.modelId}`;
+  const sandboxMode = options.enableSandbox ? "workspace-write" : "full-access";
+  const initialStatusBarState: StatusBarState = {
+    modelLabel,
+    tokensUsed: 0,
+    sandboxMode,
+    sessionName: options.sessionName ?? session.id.slice(0, 8),
+  };
+  const statusBar = new StatusBar(initialStatusBarState, themeEngine);
+
+  // Context-aware prompt builder
+  const modelShort = state.model.default.modelId.split("-").slice(0, 2).join("-");
+  const buildCurrentPrompt = (roundCount = 0, lastPdse?: number): string =>
+    buildPrompt({
+      sessionName: options.sessionName ?? session.id.slice(0, 8),
+      modelShort,
+      sandboxMode,
+      roundCount,
+      lastPdse,
+      theme: themeEngine,
+    } satisfies PromptBuilderState);
+
+  let currentRoundCount = 0;
+  let currentPdseScore: number | undefined;
+
   // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${CYAN}>${RESET} `,
+    prompt: buildCurrentPrompt(),
     terminal: true,
   });
 
@@ -335,6 +379,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Multi-line input support: track whether we are collecting multi-line input
   let multiLineBuffer: string[] | null = null;
 
+  // Draw status bar then show initial prompt
+  statusBar.draw();
   rl.prompt();
 
   rl.on("line", async (rawLine: string) => {
@@ -351,7 +397,13 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         multiLineBuffer = null;
 
         if (fullInput.trim().length > 0) {
-          await processInput(fullInput, replState, agentConfig, rl);
+          await processInput(fullInput, replState, agentConfig, rl, () => {
+            currentRoundCount++;
+            const totalTokens = replState.session.messages.reduce((s, m) => s + (m.tokensUsed ?? 0), 0);
+            statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+            rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
+            statusBar.draw();
+          });
         } else {
           rl.prompt();
         }
@@ -374,7 +426,13 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       return;
     }
 
-    await processInput(line, replState, agentConfig, rl);
+    await processInput(line, replState, agentConfig, rl, () => {
+      currentRoundCount++;
+      const totalTokens = replState.session.messages.reduce((s, m) => s + (m.tokensUsed ?? 0), 0);
+      statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+      rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
+      statusBar.draw();
+    });
   });
 
   rl.on("close", async () => {
@@ -388,6 +446,27 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
     }
+
+    // Clear status bar, then show token dashboard at session end
+    statusBar.clear();
+    if (!options.silent && currentRoundCount > 0) {
+      const sessionMessages = replState.session.messages;
+      const totalTokens = sessionMessages.reduce((sum, m) => sum + (m.tokensUsed ?? 0), 0);
+      if (totalTokens > 0) {
+        const tokenData: TokenUsageData = {
+          totalTokens,
+          inputTokens: Math.round(totalTokens * 0.66),
+          outputTokens: Math.round(totalTokens * 0.34),
+          byTool: {},
+          modelId: state.model.default.modelId,
+          contextWindow: 131072,
+          contextUtilization: Math.min(1, totalTokens / 131072),
+          sessionDurationMs: Date.now() - sessionStartMs,
+        };
+        process.stdout.write(renderTokenDashboard(tokenData, themeEngine));
+      }
+    }
+
     process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
     process.exit(0);
   });
@@ -401,6 +480,7 @@ async function processInput(
   replState: ReplState,
   agentConfig: AgentLoopConfig,
   rl: readline.Interface,
+  onBeforePrompt?: () => void,
 ): Promise<void> {
   // Pause the readline while processing
   rl.pause();
@@ -476,6 +556,8 @@ async function processInput(
     process.stdout.write(`\n${RED}Error: ${message}${RESET}\n`);
   }
 
+  // Invoke UI hook (status bar update + prompt update) before resuming
+  onBeforePrompt?.();
   // Resume readline and prompt
   rl.resume();
   rl.prompt();

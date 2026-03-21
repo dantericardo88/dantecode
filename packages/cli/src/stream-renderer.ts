@@ -22,6 +22,10 @@ export interface StreamRendererOptions {
   colors?: boolean;
   /** Model label shown in header (e.g. "grok/grok-3"). */
   modelLabel?: string;
+  /** Reasoning tier to display in header (quick/deep/expert). */
+  reasoningTier?: string;
+  /** Thinking token budget to display in header. */
+  thinkingBudget?: number;
 }
 
 export interface FinishOptions {
@@ -52,6 +56,8 @@ export class StreamRenderer {
   private readonly colors: boolean;
   private readonly modelLabel: string;
   private readonly ux: UXEngine;
+  private readonly reasoningTier: string | undefined;
+  private readonly thinkingBudget: number | undefined;
 
   constructor(options: StreamRendererOptions | boolean = false) {
     // Backward compat: `new StreamRenderer(true)` = silent
@@ -61,12 +67,16 @@ export class StreamRenderer {
       this.colors = true;
       this.modelLabel = "DanteCode";
       this.ux = new UXEngine();
+      this.reasoningTier = undefined;
+      this.thinkingBudget = undefined;
     } else {
       this.silent = options.silent ?? false;
       this.richMode = options.richMode ?? false;
       this.colors = options.colors ?? true;
       this.modelLabel = options.modelLabel ?? "DanteCode";
       this.ux = new UXEngine({ theme: options.theme ?? "default", colors: this.colors });
+      this.reasoningTier = options.reasoningTier;
+      this.thinkingBudget = options.thinkingBudget;
     }
   }
 
@@ -87,7 +97,26 @@ export class StreamRenderer {
     const RESET = this.colors ? "\x1b[0m" : "";
 
     const label = this.modelLabel !== "DanteCode" ? ` ${DIM}(${this.modelLabel})${RESET}` : "";
-    process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET}${label}\n\n`);
+
+    let tierSuffix = "";
+    if (this.reasoningTier) {
+      const YELLOW = this.colors ? "\x1b[33m" : "";
+      const RED = this.colors ? "\x1b[31m" : "";
+      const tierLabel =
+        this.reasoningTier === "quick"
+          ? `${CYAN}quick${RESET}`
+          : this.reasoningTier === "deep"
+            ? `${YELLOW}deep${RESET}`
+            : this.reasoningTier === "expert"
+              ? `${RED}expert${RESET}`
+              : this.reasoningTier;
+      tierSuffix = ` [${tierLabel}]`;
+      if (this.thinkingBudget !== undefined) {
+        tierSuffix += ` ${DIM}(${this.thinkingBudget.toLocaleString()} thinking tokens)${RESET}`;
+      }
+    }
+
+    process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET}${label}${tierSuffix}\n\n`);
   }
 
   /**

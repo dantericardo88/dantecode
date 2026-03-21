@@ -47,6 +47,8 @@ import type {
 import type { ContentBlock, Session, DanteCodeState } from "@dantecode/config-types";
 import { runAgentLoop } from "../agent-loop.js";
 import type { AgentLoopConfig } from "../agent-loop.js";
+import { FleetDashboard } from "../fleet-dashboard.js";
+import type { FleetLaneDisplay } from "../fleet-dashboard.js";
 
 // ANSI colors
 const BOLD = "\x1b[1m";
@@ -1085,14 +1087,62 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   }
 
   console.log(``);
+  const startTime = Date.now();
+  const dashboard = new FleetDashboard({
+    objective,
+    runId,
+    lanes: selectedManifests.map((m): FleetLaneDisplay => ({
+      laneId: "",
+      agentName: m.name,
+      agentKind: manifestToAgentKind(m) as string,
+      status: "pending",
+      tokensUsed: 0,
+      elapsedMs: 0,
+    })),
+    totalTokens: 0,
+    elapsedMs: 0,
+    status: "running",
+  });
+  dashboard.draw();
+
+  const progressTimer = setInterval(() => {
+    dashboard.updateFleet({ elapsedMs: Date.now() - startTime });
+    dashboard.draw();
+  }, 2_000);
+
+  orchestrator.on("lane:assigned", ({ laneId, agentKind }) => {
+    dashboard.updateLane(laneId, { status: "running", agentKind: agentKind as string });
+    dashboard.draw();
+  });
   orchestrator.on("lane:completed", ({ laneId, agentKind }) => {
-    console.log(`[fleet] Lane ${laneId} (${agentKind as string}) completed`);
+    dashboard.updateLane(laneId, { status: "completed" });
+    dashboard.updateFleet({ status: "running" });
+    dashboard.draw();
+    void agentKind;
+  });
+  orchestrator.on("lane:verified", ({ laneId, pdseScore }) => {
+    dashboard.updateLane(laneId, { status: "verifying", pdseScore });
+    dashboard.draw();
+  });
+  orchestrator.on("lane:accepted-with-warning", ({ laneId, pdseScore }) => {
+    dashboard.updateLane(laneId, { status: "completed", pdseScore });
+    dashboard.draw();
+  });
+  orchestrator.on("redistribution", ({ fromLaneId, subObjective }) => {
+    dashboard.updateLane(fromLaneId, { progressHint: `redistributed: ${subObjective.slice(0, 20)}` });
+    dashboard.draw();
+  });
+  orchestrator.on("budget:warning", (report) => {
+    dashboard.updateFleet({ budgetRemaining: report.budgetRemaining });
+    dashboard.draw();
   });
   orchestrator.on("merge:complete", (r) => {
-    console.log(`[fleet] Merge: ${r.synthesis.decision}`);
+    dashboard.updateFleet({ status: `merge:${r.synthesis.decision}` });
+    dashboard.draw();
   });
-  orchestrator.on("state:transition", ({ from, to }) => {
-    console.log(`[fleet] ${from} → ${to}`);
+  orchestrator.on("state:transition", ({ to }) => {
+    dashboard.updateFleet({ status: to });
+    dashboard.draw();
   });
 
   const onSIGINT = (): void => {
@@ -1106,6 +1156,8 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   try {
     await orchestrator.watchUntilComplete(timeoutMs !== undefined ? { timeoutMs } : undefined);
   } finally {
+    clearInterval(progressTimer);
+    dashboard.clear();
     for (const wt of createdWorktrees) {
       try { removeWorktree(wt); } catch { /* non-fatal */ }
     }

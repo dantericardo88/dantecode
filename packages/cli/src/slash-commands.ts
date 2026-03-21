@@ -43,6 +43,8 @@ import type {
   WaveOrchestratorState,
   WorkflowExecutionContext,
   ConfidenceSynthesisResult,
+  ReasoningTier,
+  ReasoningChain,
 } from "@dantecode/core";
 import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
 import {
@@ -55,7 +57,7 @@ import {
   runAutoforgeIAL,
   formatBladeProgressLine,
 } from "@dantecode/danteforge";
-import { listSkills, getSkill } from "@dantecode/skill-adapter";
+import { listSkills, getSkill, SkillCatalog, installSkill, verifySkill } from "@dantecode/skill-adapter";
 import { getFeaturesByMaturity } from "./lib/feature-flags.js";
 import {
   getStatus,
@@ -80,18 +82,25 @@ import {
 import type {
   Session,
   SessionMessage,
+  ChatSessionFile,
   DanteCodeState,
   ModelConfig,
   ModelRouterConfig,
 } from "@dantecode/config-types";
 import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
 import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import {
+  getThemeEngine,
+  renderTokenDashboard,
+} from "@dantecode/ux-polish";
+import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
 import { researchSlashHandler } from "./commands/research.js";
+import { automateCommand } from "./commands/automate.js";
 import {
   loadSlashCommandRegistry,
   type NativeSlashCommandDefinition,
@@ -167,6 +176,20 @@ export interface ReplState {
   gaslight: DanteGaslightIntegration | null;
   /** DanteMemory orchestrator — wired from repl.ts. Null if init failed. */
   memoryOrchestrator: import("@dantecode/memory-engine").MemoryOrchestrator | null;
+  /**
+   * Manual reasoning tier override set by /think command.
+   * When set, the agent loop uses this tier instead of calling decideTier.
+   * Cleared after each prompt unless reasoningOverrideSession is true.
+   */
+  reasoningOverride?: ReasoningTier;
+  /** When true, reasoningOverride persists for the entire session. Default: false. */
+  reasoningOverrideSession?: boolean;
+  /** Last thinking budget used (tokens). Displayed by /think. */
+  lastThinkingBudget?: number;
+  /** Active ReasoningChain instance — shared between agent-loop and /think stats. */
+  reasoningChain?: ReasoningChain;
+  /** Active TUI theme name. Defaults to "default". Persisted via /theme command. */
+  theme: ThemeName;
 }
 
 /** A single slash command handler. */
@@ -1514,6 +1537,101 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
   return `${GREEN}Activated skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n${DIM}${skill.frontmatter.description}${RESET}${waveInfo}`;
 }
 
+async function skillsListCommand(_args: string, state: ReplState): Promise<string> {
+  const catalog = new SkillCatalog(state.projectRoot);
+  await catalog.load();
+  const entries = catalog.getAll();
+
+  const registry = await listSkills(state.projectRoot);
+  if (entries.length === 0 && registry.length === 0) {
+    return `${DIM}No skills installed. Use '/skill-install <source>' or 'dantecode skills install <source>'.${RESET}`;
+  }
+
+  const lines = [`${BOLD}Installed Skills (${entries.length} catalog + ${registry.length} registry):${RESET}`, ""];
+
+  if (entries.length > 0) {
+    lines.push(`${BOLD}Catalog Skills:${RESET}`);
+    for (const entry of entries) {
+      const scoreStr = entry.verificationScore !== undefined
+        ? ` ${entry.verificationScore >= 85 ? GREEN : entry.verificationScore >= 70 ? YELLOW : RED}[score:${entry.verificationScore}]${RESET}`
+        : "";
+      const tierStr = entry.verificationTier ? ` ${DIM}[${entry.verificationTier}]${RESET}` : "";
+      lines.push(`  ${YELLOW}${entry.name.padEnd(24)}${RESET} ${DIM}${entry.source}${RESET}${tierStr}${scoreStr} ${entry.description.slice(0, 50)}`);
+    }
+    lines.push("");
+  }
+
+  if (registry.length > 0) {
+    lines.push(`${BOLD}Registry Skills:${RESET}`);
+    for (const skill of registry) {
+      lines.push(`  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${DIM}${skill.importSource}${RESET} ${skill.description.slice(0, 60)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function skillInstallCommand(args: string, state: ReplState): Promise<string> {
+  const source = args.trim();
+  if (!source) {
+    return `${RED}Usage: /skill-install <source>${RESET}\n${DIM}source can be a local path, git URL, or HTTP URL${RESET}`;
+  }
+
+  const lines = [`${DIM}Installing skill from: ${source}...${RESET}`];
+  const result = await installSkill({ source, verify: true, tier: "guardian" }, state.projectRoot);
+
+  if (!result.success) {
+    return lines.concat([`${RED}Install failed: ${result.error ?? "unknown error"}${RESET}`]).join("\n");
+  }
+
+  lines.push(`${GREEN}Installed:${RESET} ${BOLD}${result.name}${RESET}`);
+  lines.push(`  ${DIM}Format: ${result.format}${RESET}`);
+  lines.push(`  ${DIM}Path: ${result.installedPath}${RESET}`);
+  if (result.verification) {
+    const tierColor = result.verification.tier === "sovereign" ? GREEN
+      : result.verification.tier === "sentinel" ? YELLOW : DIM;
+    lines.push(`  ${DIM}Verification: ${tierColor}${result.verification.tier}${RESET} ${DIM}(score: ${result.verification.overallScore})${RESET}`);
+  }
+  return lines.join("\n");
+}
+
+async function skillVerifyCommand(args: string, state: ReplState): Promise<string> {
+  const skillName = args.trim();
+  if (!skillName) {
+    return `${RED}Usage: /skill-verify <name>${RESET}`;
+  }
+
+  const skill = await getSkill(skillName, state.projectRoot);
+  if (!skill) {
+    return `${RED}Skill not found: ${skillName}${RESET}`;
+  }
+
+  const universalSkill = {
+    name: skill.frontmatter.name,
+    description: skill.frontmatter.description,
+    instructions: skill.instructions,
+    source: "claude" as const,
+    sourcePath: skill.sourcePath,
+  };
+
+  const result = await verifySkill(universalSkill, { tier: "guardian" });
+  const lines = [`${BOLD}Verification: ${skill.frontmatter.name}${RESET}`, ""];
+
+  const overallColor = result.tier === "sovereign" ? GREEN : result.tier === "sentinel" ? YELLOW : RED;
+  lines.push(`  Score:  ${overallColor}${result.overallScore}/100${RESET}`);
+  lines.push(`  Tier:   ${overallColor}${result.tier}${RESET}`);
+  lines.push(`  Passed: ${result.passed ? `${GREEN}YES${RESET}` : `${RED}NO${RESET}`}`);
+
+  if (result.findings.length > 0) {
+    lines.push("", `${BOLD}Findings (${result.findings.length}):${RESET}`);
+    for (const f of result.findings) {
+      const icon = f.severity === "critical" ? RED + "CRIT" : f.severity === "warning" ? YELLOW + "WARN" : DIM + "INFO";
+      lines.push(`  ${icon}${RESET} [${f.category}] ${f.message}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 async function agentsCommand(_args: string, state: ReplState): Promise<string> {
   const agentsDir = join(state.projectRoot, ".dantecode", "agents");
 
@@ -1743,6 +1861,40 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
       return `${YELLOW}Memory "${key}" flagged for low-priority. Run /memory prune to clean up low-value entries.${RESET}`;
     }
 
+    case "export": {
+      const exportPath =
+        parts[1] ?? `dantecode-memory-${new Date().toISOString().slice(0, 10)}.json`;
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const recallAll = await state.memoryOrchestrator.memoryRecall("*", 1000);
+        const exportData = {
+          version: "1.0.0",
+          exportedAt: new Date().toISOString(),
+          projectRoot: state.projectRoot,
+          stats: {
+            nodeCount: (viz.nodes ?? []).length,
+            edgeCount: (viz.edges ?? []).length,
+          },
+          memories: recallAll.results.map((r) => ({
+            key: r.key,
+            scope: r.scope,
+            value: r.value,
+            summary: r.summary,
+            score: r.score,
+            recallCount: r.recallCount,
+          })),
+        };
+        await writeFile(
+          resolve(state.projectRoot, exportPath),
+          JSON.stringify(exportData, null, 2),
+          "utf8",
+        );
+        return `${GREEN}Memory exported to: ${BOLD}${exportPath}${RESET} (${exportData.memories.length} memories)`;
+      } catch (e) {
+        return `${RED}Error exporting memory: ${String(e)}${RESET}`;
+      }
+    }
+
     case "cross-session": {
       const goal = parts.slice(1).join(" ") || undefined;
       try {
@@ -1770,6 +1922,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
         `  stats           — node/edge counts`,
         `  forget <key>    — mark a memory for low-priority pruning`,
         `  cross-session   — find memories across past sessions`,
+        `  export [path]   — export all memories to JSON backup`,
       ].join("\n");
   }
 }
@@ -3580,6 +3733,213 @@ async function searchCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// Session Utilities
+// ----------------------------------------------------------------------------
+
+/**
+ * Converts the live Session object to the ChatSessionFile format used by SessionStore.
+ */
+function sessionToFile(session: Session): ChatSessionFile {
+  const now = new Date().toISOString();
+  return {
+    id: session.id,
+    title: session.name ?? session.id.slice(0, 8),
+    createdAt: session.createdAt,
+    updatedAt: now,
+    model: `${session.model.provider}/${session.model.modelId}`,
+    messages: session.messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      timestamp: m.timestamp ?? now,
+    })),
+    contextFiles: session.activeFiles,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// /name Command
+// ----------------------------------------------------------------------------
+
+async function nameCommand(args: string, state: ReplState): Promise<string> {
+  const name = args.trim();
+  if (!name) {
+    const current = state.session.name ?? state.session.id.slice(0, 8);
+    return `Current session: ${BOLD}${current}${RESET}\nUsage: /name <new-name>`;
+  }
+  state.session.name = name;
+  const store = new SessionStore(state.projectRoot);
+  await store.save(sessionToFile(state.session));
+  return `${GREEN}Session renamed to: ${BOLD}${name}${RESET}`;
+}
+
+// ----------------------------------------------------------------------------
+// /export Command
+// ----------------------------------------------------------------------------
+
+async function exportCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/);
+  const format = parts[0] === "md" || parts[0] === "markdown" ? "md" : "json";
+  const defaultName = `session-${state.session.name ?? state.session.id.slice(0, 8)}.${format}`;
+  const outputPath = parts[1] ?? defaultName;
+  const absPath = resolve(state.projectRoot, outputPath);
+
+  if (format === "json") {
+    const data = {
+      version: "1.0.0",
+      exportedAt: new Date().toISOString(),
+      session: {
+        id: state.session.id,
+        name: state.session.name,
+        createdAt: state.session.createdAt,
+        model: `${state.session.model.provider}/${state.session.model.modelId}`,
+        messageCount: state.session.messages.length,
+        messages: state.session.messages,
+        activeFiles: state.session.activeFiles,
+        todoList: state.session.todoList,
+      },
+      memoryStats: state.memoryOrchestrator
+        ? state.memoryOrchestrator.memoryVisualize()
+        : null,
+    };
+    await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
+  } else {
+    const lines: string[] = [
+      `# Session: ${state.session.name ?? state.session.id.slice(0, 8)}`,
+      "",
+      `- **Created:** ${state.session.createdAt}`,
+      `- **Model:** ${state.session.model.provider}/${state.session.model.modelId}`,
+      `- **Messages:** ${state.session.messages.length}`,
+      "",
+      "---",
+      "",
+    ];
+    for (const msg of state.session.messages) {
+      const role =
+        msg.role === "user"
+          ? "**You**"
+          : msg.role === "assistant"
+            ? "**DanteCode**"
+            : `*${msg.role}*`;
+      const ts = msg.timestamp ?? "";
+      lines.push(`### ${role} (${ts})`);
+      lines.push("");
+      const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+      lines.push(text.slice(0, 5000));
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+    }
+    await writeFile(absPath, lines.join("\n"), "utf8");
+  }
+
+  return `${GREEN}Session exported to: ${BOLD}${outputPath}${RESET} (${format})`;
+}
+
+// ----------------------------------------------------------------------------
+// /import Command
+// ----------------------------------------------------------------------------
+
+async function importSessionCommand(args: string, state: ReplState): Promise<string> {
+  const filePath = args.trim();
+  if (!filePath) return `${RED}Usage: /import <path-to-session.json>${RESET}`;
+
+  try {
+    const content = await readFile(resolve(state.projectRoot, filePath), "utf8");
+    const data = JSON.parse(content) as Record<string, unknown>;
+
+    const sessionData = data["session"] as Record<string, unknown> | undefined;
+    if (!sessionData || !Array.isArray(sessionData["messages"])) {
+      return `${RED}Invalid session file: missing messages array${RESET}`;
+    }
+
+    const version = typeof data["version"] === "string" ? data["version"] : "0.0.0";
+    if (!version.startsWith("1.")) {
+      state.session.messages.push({
+        id: randomUUID(),
+        role: "system",
+        content: `WARN: session file version ${version} may not be fully compatible`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const importedMessages = sessionData["messages"] as Array<Record<string, unknown>>;
+    const imported = importedMessages.length;
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: `## Imported Session Context\nImported ${imported} messages from ${String(sessionData["name"] ?? sessionData["id"] ?? "unknown")} (${String(sessionData["createdAt"] ?? "unknown date")}).\nOriginal model: ${String(sessionData["model"] ?? "unknown")}.`,
+      timestamp: new Date().toISOString(),
+    });
+
+    const contextSummary = importedMessages
+      .filter((m) => m["role"] === "user" || m["role"] === "assistant")
+      .slice(-20)
+      .map((m) => `[${String(m["role"])}]: ${String(m["content"] ?? "").slice(0, 500)}`)
+      .join("\n\n");
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: `## Previous Session Context\n${contextSummary}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    const sessionName = String(sessionData["name"] ?? sessionData["id"] ?? "unknown").slice(0, 8);
+    return `${GREEN}Imported session: ${BOLD}${sessionName}${RESET} (${imported} messages → context summary injected)`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to import session: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// /branch Command
+// ----------------------------------------------------------------------------
+
+async function branchCommand(args: string, state: ReplState): Promise<string> {
+  const branchName = args.trim() || `branch-${Date.now()}`;
+
+  const store = new SessionStore(state.projectRoot);
+  await store.save(sessionToFile(state.session));
+
+  let summary: string;
+  if (state.memoryOrchestrator) {
+    try {
+      const sumResult = await state.memoryOrchestrator.memorySummarize(state.session.id);
+      summary = sumResult.summary ?? `Session with ${state.session.messages.length} messages`;
+    } catch {
+      summary = `Session with ${state.session.messages.length} messages`;
+    }
+  } else {
+    summary = `Session with ${state.session.messages.length} messages`;
+  }
+
+  const oldName = state.session.name ?? state.session.id.slice(0, 8);
+  const recentMessages = state.session.messages.slice(-5);
+
+  state.session.id = randomUUID();
+  state.session.name = branchName;
+  state.session.createdAt = new Date().toISOString();
+  state.session.messages = [
+    {
+      id: randomUUID(),
+      role: "system",
+      content: `## Branched from: ${oldName}\n\n${summary}\n\n---\n*This is a new branch. The parent session is preserved.*`,
+      timestamp: new Date().toISOString(),
+    },
+    ...recentMessages,
+  ];
+
+  await store.save(sessionToFile(state.session));
+
+  return (
+    `${GREEN}Session branched: ${BOLD}${oldName}${RESET} → ${BOLD}${branchName}${RESET}\n` +
+    `${DIM}Parent session preserved. ${state.session.messages.length} messages in new branch (summary + recent).${RESET}`
+  );
+}
+
+// ----------------------------------------------------------------------------
 // History Command
 // ----------------------------------------------------------------------------
 
@@ -3689,6 +4049,142 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
   lines.push("");
 
   return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// /think — reasoning effort control
+// ----------------------------------------------------------------------------
+
+function formatThinkTier(tier: string): string {
+  switch (tier) {
+    case "quick": return `${CYAN}quick${RESET} (fast, minimal reasoning)`;
+    case "deep": return `${YELLOW}deep${RESET} (step-by-step analysis)`;
+    case "expert": return `${RED}expert${RESET} (full decomposition + verification)`;
+    case "auto": return `${GREEN}auto${RESET} (complexity-driven)`;
+    default: return tier;
+  }
+}
+
+function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | undefined): string {
+  if (!chain) return `${DIM}No reasoning chain active.${RESET}`;
+
+  const steps = chain.getHistory();
+  const tiers = { quick: 0, deep: 0, expert: 0 };
+  let totalCritiques = 0;
+  let escalations = 0;
+  let avgPdse = 0;
+  let pdseCount = 0;
+
+  for (const step of steps) {
+    const content = step.phase.content;
+    if (content.startsWith("Consider the most direct")) tiers.quick++;
+    else if (content.startsWith("Analyze step-by-step")) tiers.deep++;
+    else if (content.startsWith("Deep analysis required")) tiers.expert++;
+    if (step.phase.type === "critique") totalCritiques++;
+    if (step.escalated) escalations++;
+    if (step.phase.pdseScore !== undefined) {
+      avgPdse += step.phase.pdseScore;
+      pdseCount++;
+    }
+  }
+
+  const avg = pdseCount > 0 ? (avgPdse / pdseCount * 100).toFixed(0) : "N/A";
+  const tierPerf = chain.getTierPerformance();
+  const perfLines: string[] = [];
+  for (const [t, v] of Object.entries(tierPerf)) {
+    if (v !== undefined) {
+      perfLines.push(`    ${t}: avg PDSE ${(v * 100).toFixed(0)}`);
+    }
+  }
+
+  return [
+    `${BOLD}Reasoning Statistics${RESET}`,
+    `  Total steps: ${steps.length}`,
+    `  Tier distribution: quick=${tiers.quick} deep=${tiers.deep} expert=${tiers.expert}`,
+    `  Critiques: ${totalCritiques}`,
+    `  Auto-escalations: ${escalations}`,
+    `  Average PDSE: ${avg}`,
+    perfLines.length > 0 ? `  Tier performance (>=3 samples):\n${perfLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function formatThinkChain(
+  chain: import("@dantecode/core").ReasoningChain | undefined,
+  limit: number,
+): string {
+  if (!chain) return `${DIM}No reasoning chain active.${RESET}`;
+
+  const steps = chain.getHistory().slice(-limit);
+  if (steps.length === 0) return `${DIM}Reasoning chain is empty.${RESET}`;
+
+  const lines = [`${BOLD}Reasoning Chain (last ${steps.length} steps)${RESET}`, ""];
+  for (const step of steps) {
+    const icon =
+      step.phase.type === "thinking" ? ">"
+      : step.phase.type === "critique" ? "?"
+      : step.phase.type === "action" ? "!"
+      : "~";
+    const pdse =
+      step.phase.pdseScore !== undefined
+        ? ` P:${(step.phase.pdseScore * 100).toFixed(0)}`
+        : "";
+    const esc = step.escalated ? ` ${YELLOW}^escalated${RESET}` : "";
+    lines.push(`  ${icon} #${step.stepNumber} [${step.phase.type}]${pdse}${esc}`);
+    lines.push(`    ${DIM}${step.phase.content.slice(0, 120)}${RESET}`);
+    if (step.rootCause) lines.push(`    ${RED}Root cause: ${step.rootCause}${RESET}`);
+    if (step.playbookBullets?.length) {
+      lines.push(`    ${GREEN}Playbook: ${step.playbookBullets[0]}${RESET}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+async function thinkCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+  const isSession = parts.includes("--session");
+
+  if (!sub) {
+    const current = state.reasoningOverride ?? "auto";
+    const budget = state.lastThinkingBudget;
+    const chain = state.reasoningChain;
+    return [
+      `${BOLD}Reasoning Effort${RESET}`,
+      `  Current tier: ${formatThinkTier(current)}`,
+      `  Mode: ${state.reasoningOverride ? "manual override" : "automatic (decideTier)"}`,
+      `  Scope: ${state.reasoningOverrideSession ? "session" : "next prompt only"}`,
+      budget !== undefined ? `  Last thinking budget: ${budget.toLocaleString()} tokens` : "",
+      `  Chain depth: ${chain?.getHistory().length ?? 0} steps`,
+      "",
+      `  ${DIM}Usage: /think [quick|deep|expert|auto] [--session]${RESET}`,
+    ].filter(Boolean).join("\n");
+  }
+
+  if (sub === "stats") return formatThinkStats(state.reasoningChain);
+  if (sub === "chain") {
+    const limit = Math.max(1, parseInt(parts[1] ?? "10", 10) || 10);
+    return formatThinkChain(state.reasoningChain, limit);
+  }
+
+  const validTiers = ["quick", "deep", "expert", "auto"];
+  if (!validTiers.includes(sub)) {
+    return `${RED}Invalid tier: ${sub}. Options: ${validTiers.join(", ")}${RESET}`;
+  }
+
+  if (sub === "auto") {
+    state.reasoningOverride = undefined;
+    state.reasoningOverrideSession = false;
+    return `${GREEN}Reasoning: automatic tier selection restored${RESET}`;
+  }
+
+  state.reasoningOverride = sub as ReasoningTier;
+  state.reasoningOverrideSession = isSession;
+  const scope = isSession ? "session" : "next prompt";
+  const hint =
+    sub === "expert" ? " (high token usage)"
+    : sub === "quick" ? " (minimal tokens)"
+    : "";
+  return `${GREEN}Reasoning set to ${BOLD}${sub}${RESET}${GREEN} for ${scope}${hint}${RESET}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -4083,6 +4579,109 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
   return lines.join("\n");
 }
 
+
+// ----------------------------------------------------------------------------
+// /theme — Switch terminal theme with live preview
+// ----------------------------------------------------------------------------
+
+const AVAILABLE_THEMES: ThemeName[] = ["default", "minimal", "rich", "matrix", "ocean"];
+
+async function themeCommand(args: string, state: ReplState): Promise<string> {
+  const engine = getThemeEngine();
+  const themeName = args.trim().toLowerCase();
+
+  if (!themeName) {
+    const current = state.theme;
+    const lines = ["Available themes (current: " + BOLD + current + RESET + "):", ""];
+    for (const name of AVAILABLE_THEMES) {
+      engine.setTheme(name as ThemeName);
+      const c = engine.resolve().colors;
+      const indicator = name === current ? (GREEN + "*" + RESET) : " ";
+      const preview = "  " + c.success + "ok" + c.reset + " " + c.error + "err" + c.reset + " " + c.warning + "warn" + c.reset + " " + c.info + "info" + c.reset + " " + c.muted + "muted" + c.reset;
+      lines.push("  " + indicator + " " + BOLD + name.padEnd(10) + RESET + " " + preview);
+    }
+    engine.setTheme(current);
+    lines.push("");
+    lines.push(DIM + "Usage: /theme <name>" + RESET);
+    return lines.join("\n");
+  }
+
+  if (!AVAILABLE_THEMES.includes(themeName)) {
+    return RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET;
+  }
+
+  engine.setTheme(themeName as ThemeName);
+  state.theme = themeName as ThemeName;
+
+  try {
+    const stateYamlPath = join(state.projectRoot, ".dantecode", "STATE.yaml");
+    const raw = await readFile(stateYamlPath, "utf8").catch(() => "");
+    const updated = raw.includes("theme:")
+      ? raw.replace(/^theme:.*$/m, "theme: " + themeName)
+      : raw + "\ntheme: " + themeName + "\n";
+    await writeFile(stateYamlPath, updated, "utf8");
+  } catch {
+    // Non-fatal
+  }
+
+  const c = engine.resolve().colors;
+  return [
+    GREEN + "Theme set to " + BOLD + themeName + RESET,
+    "",
+    "Preview with " + BOLD + themeName + RESET + ":",
+    "  " + c.success + "verification passed" + c.reset,
+    "  " + c.error + "anti-stub violation" + c.reset,
+    "  " + c.warning + "PDSE score: 78 (below threshold)" + c.reset,
+    "  " + c.info + "model: grok/grok-3" + c.reset,
+    "  " + c.muted + "session: my-session | tokens: 12,450" + c.reset,
+  ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// /cost — Show token usage dashboard
+// ----------------------------------------------------------------------------
+
+async function costCommand(_args: string, state: ReplState): Promise<string> {
+  const messages = state.session.messages;
+  let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  const byTool: Record<string, { calls: number; tokens: number }> = {};
+
+  for (const msg of messages) {
+    const t = msg.tokensUsed ?? 0;
+    totalTokens += t;
+    if (msg.role === "user" || msg.role === "tool") {
+      inputTokens += t;
+    } else if (msg.role === "assistant") {
+      outputTokens += t;
+    }
+    if (msg.toolUse && msg.toolUse.name) {
+      const tool = msg.toolUse.name;
+      if (!byTool[tool]) byTool[tool] = { calls: 0, tokens: 0 };
+      byTool[tool].calls++;
+      byTool[tool].tokens += t;
+    }
+  }
+
+  const modelId = state.state.model.default.provider + "/" + state.state.model.default.modelId;
+  const sessionStart = new Date(state.session.createdAt).getTime();
+  const sessionDurationMs = Date.now() - sessionStart;
+
+  const data = {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    byTool,
+    modelId,
+    contextWindow: 131072,
+    contextUtilization: Math.min(1, totalTokens / 131072),
+    sessionDurationMs,
+  };
+
+  return renderTokenDashboard(data, getThemeEngine());
+}
+
 // ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
@@ -4209,6 +4808,24 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: skillCommand,
   },
   {
+    name: "skills",
+    description: "List all installed skills with verification scores",
+    usage: "/skills",
+    handler: skillsListCommand,
+  },
+  {
+    name: "skill-install",
+    description: "Quick install a skill from a path, git URL, or HTTP URL",
+    usage: "/skill-install <source>",
+    handler: skillInstallCommand,
+  },
+  {
+    name: "skill-verify",
+    description: "Run DanteForge verification on an installed skill",
+    usage: "/skill-verify <name>",
+    handler: skillVerifyCommand,
+  },
+  {
     name: "agents",
     description: "List available agents",
     usage: "/agents",
@@ -4229,8 +4846,32 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "memory",
     description: "Browse, search, and manage persistent memories",
-    usage: "/memory [list|search <q>|stats|forget <key>|cross-session]",
+    usage: "/memory [list|search <q>|stats|forget <key>|cross-session|export [path]]",
     handler: memoryCommand,
+  },
+  {
+    name: "name",
+    description: "Name or rename the current session",
+    usage: "/name <session-name>",
+    handler: nameCommand,
+  },
+  {
+    name: "export",
+    description: "Export current session to JSON or Markdown",
+    usage: "/export [json|md] [path]",
+    handler: exportCommand,
+  },
+  {
+    name: "import",
+    description: "Import a session from JSON file",
+    usage: "/import <path>",
+    handler: importSessionCommand,
+  },
+  {
+    name: "branch",
+    description: "Fork current session into a new context (preserves history)",
+    usage: "/branch [name]",
+    handler: branchCommand,
   },
   {
     name: "architect",
@@ -4311,6 +4952,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: autoPrCommand,
   },
   {
+    name: "automate",
+    description: "Unified automation management: dashboard, templates, create, stop, logs",
+    usage: "/automate [dashboard | list | create <type> | template <name> | templates | stop <id> | logs <id>]",
+    handler: automateCommand,
+  },
+  {
     name: "webhook-listen",
     description: "Start, list, or stop local webhook listeners",
     usage: "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
@@ -4345,6 +4992,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Search code index for relevant code",
     usage: "/search <query>",
     handler: searchCommand,
+  },
+  {
+    name: "think",
+    description: "Control reasoning effort tier for next prompt or entire session",
+    usage: "/think [quick|deep|expert|auto] [--session] | stats | chain [N]",
+    handler: thinkCommand,
   },
   {
     name: "gaslight",
@@ -4405,6 +5058,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run an autonomous task loop until condition met. Usage: /loop [--max=N] <task>",
     usage: "/loop [--max=N] <task>",
     handler: loopCommand,
+  },
+  {
+    name: "theme",
+    description: "Switch terminal theme with live preview",
+    usage: "/theme [name]",
+    handler: themeCommand,
+  },
+  {
+    name: "cost",
+    description: "Show token usage and cost estimate for this session",
+    usage: "/cost",
+    handler: costCommand,
   },
 ];
 

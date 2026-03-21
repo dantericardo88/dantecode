@@ -19,7 +19,7 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
-import { ThemeEngine, UXPreferences } from "@dantecode/ux-polish";
+import { UXPreferences } from "@dantecode/ux-polish";
 import {
   DEFAULT_MODEL_ID,
   MODEL_CATALOG,
@@ -247,11 +247,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private pendingRequiredRounds = 0;
   /** Currently active skill name. Enables universal pipeline continuation for all skills. */
   private activeSkill: string | null = null;
-  /** UX theme engine — applies user-selected theme from preferences. */
-  private readonly themeEngine: ThemeEngine;
-  /** UX preferences — persists theme, density, accessibility, and onboarding state. */
-  private readonly uxPreferences: UXPreferences;
-
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly secrets: vscode.SecretStorage,
@@ -268,11 +263,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     if (savedConfig) {
       this.agentConfig = { ...DEFAULT_AGENT_CONFIG, ...savedConfig };
     }
-
-    // Wire UX preferences and theme engine
-    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    this.uxPreferences = new UXPreferences({ projectRoot });
-    this.themeEngine = new ThemeEngine({ theme: this.uxPreferences.getTheme() });
 
     // Register virtual document provider for diff "before" content
     vscode.workspace.registerTextDocumentContentProvider("dantecode-diff", {
@@ -4762,7 +4752,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           case 'self_modification_blocked':
             if (currentAssistantEl) {
               var modPath = message.payload.filePath || 'unknown';
-              streamBuffer += '\\n\\n> **Self-modification blocked:** \\x60' + modPath + '\\x60 — This file is protected.\\n';
+              streamBuffer += '\\n\\n> **Self-modification attempt detected and blocked:** \\x60' + modPath + '\\x60 — This file is protected.\\n';
               currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }

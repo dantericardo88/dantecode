@@ -27,7 +27,6 @@ import {
   classifyRisk,
   classifyRiskWithLlm,
   parseLlmClassification,
-  FEARSET_CLASSIFY_RUBRIC,
   buildFearSetTrigger,
 } from "./risk-classifier.js";
 import {
@@ -206,6 +205,8 @@ function makePassedResult(overrides: Partial<FearSetResult> = {}): FearSetResult
         benefits: [],
         inactionCosts: [],
         completedAt: now,
+        stoppedByBudget: false,
+        validationWarnings: [],
       },
       {
         name: "prevent",
@@ -224,6 +225,8 @@ function makePassedResult(overrides: Partial<FearSetResult> = {}): FearSetResult
         benefits: [],
         inactionCosts: [],
         completedAt: now,
+        stoppedByBudget: false,
+        validationWarnings: [],
       },
       {
         name: "repair",
@@ -242,6 +245,8 @@ function makePassedResult(overrides: Partial<FearSetResult> = {}): FearSetResult
         benefits: [],
         inactionCosts: [],
         completedAt: now,
+        stoppedByBudget: false,
+        validationWarnings: [],
       },
       {
         name: "benefits",
@@ -252,6 +257,8 @@ function makePassedResult(overrides: Partial<FearSetResult> = {}): FearSetResult
         benefits: ["More engagement"],
         inactionCosts: [],
         completedAt: now,
+        stoppedByBudget: false,
+        validationWarnings: [],
       },
       {
         name: "inaction",
@@ -264,6 +271,8 @@ function makePassedResult(overrides: Partial<FearSetResult> = {}): FearSetResult
           { description: "Competitors ship first", timeHorizon: "3 months", severity: "high" },
         ],
         completedAt: now,
+        stoppedByBudget: false,
+        validationWarnings: [],
       },
     ],
     robustnessScore: {
@@ -1855,7 +1864,7 @@ describe("GF-04: distillFearSetLessons writes FearSet-tagged section proposals",
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { FearSetResultStore } from "./fearset-result-store.js";
-import { existsSync, writeFileSync, mkdirSync as _mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync as _mkdirSync } from "node:fs";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FearSetResultStore — unit tests

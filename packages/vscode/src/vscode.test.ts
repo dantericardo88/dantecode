@@ -229,6 +229,7 @@ vi.mock("vscode", () => {
         update: vi.fn(),
       })),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       workspaceFolders: [{ uri: { fsPath: "/test/project" } }],
       onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
       createFileSystemWatcher: vi.fn(() => ({

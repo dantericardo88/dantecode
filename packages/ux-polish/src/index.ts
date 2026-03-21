@@ -239,3 +239,26 @@ export type {
   MemoryOrchestratorLike,
   MemoryEnginePreferencesOptions,
 } from "./integrations/memory-engine-bridge.js";
+
+// ---------------------------------------------------------------------------
+// DanteTUI surfaces (G20-G23)
+// ---------------------------------------------------------------------------
+
+export { StatusBar } from "./surfaces/status-bar.js";
+export type { StatusBarState } from "./surfaces/status-bar.js";
+
+export {
+  renderDiff,
+  renderBeforeAfter,
+  highlightLine,
+} from "./surfaces/diff-renderer.js";
+export type {
+  DiffRenderOptions,
+  DiffRenderResult,
+} from "./surfaces/diff-renderer.js";
+
+export { renderTokenDashboard } from "./surfaces/token-dashboard.js";
+export type { TokenUsageData } from "./surfaces/token-dashboard.js";
+
+export { buildPrompt } from "./surfaces/prompt-builder.js";
+export type { PromptBuilderState } from "./surfaces/prompt-builder.js";
