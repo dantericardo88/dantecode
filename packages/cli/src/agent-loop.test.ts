@@ -449,6 +449,77 @@ const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>
 const mockParseVerificationErrors = _parseVerificationErrors as unknown as ReturnType<typeof vi.fn>;
 const mockComputeErrorSignature = _computeErrorSignature as unknown as ReturnType<typeof vi.fn>;
 
+// Mock confirm-flow so FearSet enforcement gate tests don't need a TTY.
+// vi.hoisted ensures the mock variable is available before vi.mock's factory runs.
+const { mockConfirmDestructive } = vi.hoisted(() => ({
+  mockConfirmDestructive: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+}));
+vi.mock("./confirm-flow.js", () => ({
+  confirmDestructive: mockConfirmDestructive,
+  confirm: vi.fn().mockResolvedValue(true),
+  select: vi.fn().mockResolvedValue(""),
+}));
+
+// DanteMemory mocks — hoisted so the factories below can reference them
+const {
+  mockMemoryRecall,
+  mockMemoryStore,
+  mockMemorySummarize,
+  mockMemoryPrune,
+  mockMemoryInitialize,
+  mockAuditLoggerFlush,
+} = vi.hoisted(() => ({
+  mockMemoryRecall: vi.fn().mockResolvedValue({
+    query: "",
+    scope: "all",
+    results: [],
+    latencyMs: 0,
+  }),
+  mockMemoryStore: vi.fn().mockResolvedValue({ stored: true }),
+  mockMemorySummarize: vi.fn().mockResolvedValue({
+    sessionId: "test-session",
+    summary: "",
+    compressed: false,
+    tokensSaved: 0,
+  }),
+  mockMemoryPrune: vi.fn().mockResolvedValue({
+    prunedCount: 0,
+    retainedCount: 0,
+    policy: "default",
+  }),
+  mockMemoryInitialize: vi.fn().mockResolvedValue(undefined),
+  mockAuditLoggerFlush: vi.fn().mockResolvedValue({
+    anomalies: [],
+    analyzedCount: 0,
+    bufferTruncated: false,
+    detection: { analyzedCount: 0, truncated: false },
+  }),
+}));
+
+vi.mock("@dantecode/memory-engine", () => ({
+  createMemoryOrchestrator: vi.fn(() => ({
+    initialize: mockMemoryInitialize,
+    memoryRecall: mockMemoryRecall,
+    memoryStore: mockMemoryStore,
+    memorySummarize: mockMemorySummarize,
+    memoryPrune: mockMemoryPrune,
+  })),
+}));
+
+vi.mock("@dantecode/debug-trail", () => ({
+  getGlobalLogger: vi.fn().mockReturnValue({
+    flush: mockAuditLoggerFlush,
+    log: vi.fn().mockResolvedValue(""),
+    getProvenance: vi.fn().mockReturnValue({ sessionId: "test", runId: "run" }),
+  }),
+  AuditLogger: vi.fn(),
+  FileSnapshotter: vi.fn().mockImplementation(() => ({
+    captureBeforeState: vi.fn().mockResolvedValue({ beforeSnapshotId: "snap1", beforeHash: "abc" }),
+    captureAfterState: vi.fn().mockResolvedValue({ afterSnapshotId: "snap2", afterHash: "def" }),
+    init: vi.fn().mockResolvedValue(undefined),
+  })),
+}));
+
 // Core mocked functions are available via vi.mock above; import only if needed.
 
 vi.mock("@dantecode/git-engine", () => ({
@@ -590,6 +661,13 @@ describe("runAgentLoop smoke tests", () => {
     mockLoadPendingToolCalls.mockReset();
     mockLoadPendingToolCalls.mockResolvedValue([]);
     mockClearPendingToolCalls.mockReset();
+    // DanteMemory mock resets
+    mockMemoryInitialize.mockResolvedValue(undefined);
+    mockMemoryRecall.mockResolvedValue({ query: "", scope: "all", results: [], latencyMs: 0 });
+    mockMemoryStore.mockResolvedValue({ stored: true });
+    mockMemorySummarize.mockResolvedValue({ sessionId: "test-session", summary: "", compressed: false, tokensSaved: 0 });
+    mockMemoryPrune.mockResolvedValue({ prunedCount: 0, retainedCount: 0, policy: "default" });
+    mockAuditLoggerFlush.mockResolvedValue({ anomalies: [], analyzedCount: 0, bufferTruncated: false, detection: { analyzedCount: 0, truncated: false } });
     mockSchedulerExecuteBatch.mockReset();
     mockSchedulerExecuteBatch.mockImplementation(async (toolCalls, options) => {
       const results = [];
@@ -2902,10 +2980,10 @@ describe("DanteGaslight integration hook", () => {
 
     expect(capturedGate).toBeDefined();
 
-    // Pre-load the LLM gate response (score 0.9 → pass)
+    // Pre-load the comparative gate response (PASS → decision "pass")
     mockGenerateText.mockResolvedValueOnce({
-      text: '{"score": 0.9}',
-      usage: { totalTokens: 10 },
+      text: "PASS The rewrite substantively addresses all critique points.",
+      usage: { totalTokens: 15 },
     });
 
     const callsBefore = mockGenerateText.mock.calls.length;
@@ -2984,5 +3062,616 @@ describe("DanteGaslight integration hook", () => {
     expect(result.decision).toBe("fail");
     expect(result.score).toBe(0.2);
     expect(callsAfter).toBe(callsBefore);
+  });
+
+  it("comparative gate parses PASS response correctly (decision: pass, score: 0.9)", async () => {
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    // Pre-load comparative gate returning PASS
+    mockGenerateText.mockResolvedValueOnce({
+      text: "PASS The rewrite substantively addresses all critique concerns.",
+      usage: { totalTokens: 15 },
+    });
+
+    const differentRewrite =
+      "This comprehensive analysis examines multiple perspectives and provides detailed evidence supporting each conclusion.";
+    const result = await capturedGate!(differentRewrite);
+
+    expect(result.decision).toBe("pass");
+    expect(result.score).toBe(0.9);
+  });
+
+  it("comparative gate parses FAIL response correctly (decision: fail, score: 0.2)", async () => {
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    // Pre-load comparative gate returning FAIL
+    mockGenerateText.mockResolvedValueOnce({
+      text: "FAIL The rewrite only superficially mentions keywords without addressing structural issues.",
+      usage: { totalTokens: 18 },
+    });
+
+    const differentRewrite =
+      "This comprehensive analysis examines multiple perspectives and provides detailed evidence supporting each conclusion.";
+    const result = await capturedGate!(differentRewrite);
+
+    expect(result.decision).toBe("fail");
+    expect(result.score).toBe(0.2);
+  });
+
+  it("adaptive threshold tighter for high-severity critiques (3 high → threshold 0.80)", async () => {
+    let capturedCritique:
+      | ((sys: string, user: string) => Promise<string | null>)
+      | undefined;
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onCritique?: (s: string, u: string) => Promise<string | null>;
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedCritique = opts.callbacks?.onCritique;
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    // Longer original draft enables precise Jaccard control.
+    const originalText =
+      "Authentication validation ensures security by checking user tokens before authorizing access to protected resources and endpoints.";
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: originalText,
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedCritique).toBeDefined();
+    expect(capturedGate).toBeDefined();
+
+    // Seed 3 high-severity critique points → adaptiveJaccardThreshold(3, 0) = 0.80.
+    mockGenerateText.mockResolvedValueOnce({
+      text: JSON.stringify({
+        summary: "Critical authentication flaws",
+        points: [
+          { severity: "high", description: "Missing token expiry validation" },
+          { severity: "high", description: "Authorization bypass through header manipulation" },
+          { severity: "high", description: "Insufficient privilege escalation checks" },
+        ],
+      }),
+      usage: { totalTokens: 60 },
+    });
+    await capturedCritique!("sys", "user"); // populates lastCritiqueHighCount = 3
+
+    // Single-word swap: "endpoints" → "operations".
+    // Jaccard overlap ≈ 12/14 ≈ 0.857 — above 0.80 (high-severity threshold) but below 0.93 (no-severity default).
+    // Without high-severity seeded this rewrite would pass the Jaccard check; with 3 high-severity it fails.
+    const slightlyDifferentRewrite =
+      "Authentication validation ensures security by checking user tokens before authorizing access to protected resources and operations.";
+
+    const callsBefore = mockGenerateText.mock.calls.length;
+    const result = await capturedGate!(slightlyDifferentRewrite);
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    // Structural gate must fail: overlap 0.857 > adaptive threshold 0.80.
+    expect(result.decision).toBe("fail");
+    expect(result.score).toBe(0.2);
+    // No LLM gate call (structural short-circuit)
+    expect(callsAfter).toBe(callsBefore);
+  });
+
+  it("adaptive threshold counterfactual — 0 severity seeded → same rewrite reaches LLM gate", async () => {
+    // Companion to the previous test. Same original text and same slightly-different rewrite
+    // (~0.857 Jaccard overlap), but NO critique seeded.
+    // adaptiveJaccardThreshold(0, 0, 0) = 0.93. 0.857 < 0.93 → Jaccard passes.
+    // new-vocab-ratio with no high-severity: minRatio=0.05; ratio≈0.077 → passes.
+    // No descriptions → bigram checks skipped. All structural checks pass → LLM gate called.
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    const originalText =
+      "Authentication validation ensures security by checking user tokens before authorizing access to protected resources and endpoints.";
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: originalText,
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    // Pre-load PASS for the LLM gate that will be reached (structural checks all pass).
+    mockGenerateText.mockResolvedValueOnce({
+      text: "PASS The rewrite shows substantive restructuring beyond a single word change.",
+      usage: { totalTokens: 15 },
+    });
+
+    const slightlyDifferentRewrite =
+      "Authentication validation ensures security by checking user tokens before authorizing access to protected resources and operations.";
+
+    const callsBefore = mockGenerateText.mock.calls.length;
+    const result = await capturedGate!(slightlyDifferentRewrite);
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    // Structural checks pass (threshold 0.93, overlap 0.857) → LLM gate was called.
+    expect(callsAfter).toBeGreaterThan(callsBefore);
+    expect(result.decision).toBe("pass");
+    expect(result.score).toBe(0.9);
+  });
+
+  it("repeated structural fails are stateless — each call independently returns fail with no LLM calls", async () => {
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    // Call the gate 3 times with the same text as the original draft.
+    // Each call reads the closure independently — overlap=1.0 → structural fail every time.
+    // Verifies no state accumulation, memoization side-effects, or counter drift between calls.
+    const callsBefore = mockGenerateText.mock.calls.length;
+    const r1 = await capturedGate!("Response text.");
+    const r2 = await capturedGate!("Response text.");
+    const r3 = await capturedGate!("Response text.");
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    expect(r1).toEqual({ decision: "fail", score: 0.2 });
+    expect(r2).toEqual({ decision: "fail", score: 0.2 });
+    expect(r3).toEqual({ decision: "fail", score: 0.2 });
+    // Zero LLM gate calls across all three (structural short-circuit each time)
+    expect(callsAfter).toBe(callsBefore);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FearSet enforcement gate — fearSetBlockOnNoGo
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("FearSet enforcement gate — fearSetBlockOnNoGo", () => {
+  // Shared no-go FearSet result factory
+  function makeNoGoFearSetResult() {
+    return {
+      id: "fs-nogo-1",
+      context: "Deploy the new payment service",
+      trigger: { channel: "explicit-user" as const, rationale: "test", at: new Date().toISOString() },
+      mode: "llm" as const,
+      columns: [],
+      passed: false,
+      startedAt: new Date().toISOString(),
+      robustnessScore: {
+        overall: 0.25,
+        hasSimulationEvidence: false,
+        gateDecision: "fail" as const,
+        justification: "Too many unmitigated risks.",
+        scoredAt: new Date().toISOString(),
+      },
+      synthesizedRecommendation: {
+        decision: "no-go" as const,
+        reasoning: "The blast radius is too wide and no prevention actions have been verified.",
+        conditions: [],
+      },
+      stopReason: "completed" as const,
+    };
+  }
+
+  // Minimal gaslight mock with maybeFearSet returning a no-go result
+  function makeNoGoGaslightMock() {
+    return {
+      maybeGaslight: async () => null,
+      getConfig: () => ({ enabled: false }),
+      getFearSetConfig: () => ({ enabled: true }),
+      maybeFearSet: async () => makeNoGoFearSetResult(),
+    };
+  }
+
+  beforeEach(() => {
+    mockConfirmDestructive.mockReset();
+    mockConfirmDestructive.mockResolvedValue(false); // Default: user declines
+  });
+
+  it("fearSetBlockOnNoGo=true + no-go result + user declines → session returned early", async () => {
+    const textCallCount = { n: 0 };
+    mockGenerateText.mockImplementation(async () => {
+      textCallCount.n++;
+      if (textCallCount.n === 1) {
+        return {
+          text: 'Let me help.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+          usage: { totalTokens: 30 },
+        };
+      }
+      return { text: "Final answer.", usage: { totalTokens: 20 } };
+    });
+    mockConfirmDestructive.mockResolvedValue(false); // user declines
+
+    const result = await runAgentLoop(
+      "deploy the service",
+      makeSession(),
+      makeConfig({
+        gaslight: makeNoGoGaslightMock() as unknown as AgentLoopConfig["gaslight"],
+        fearSetBlockOnNoGo: true,
+        silent: true,
+      }),
+    );
+
+    // confirmDestructive must have been called
+    expect(mockConfirmDestructive).toHaveBeenCalledOnce();
+    // Session is returned (not null/undefined)
+    expect(result).toBeDefined();
+  });
+
+  it("fearSetBlockOnNoGo=true + no-go result + user confirms → confirmDestructive called, proceeds", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Acting.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { totalTokens: 20 },
+    });
+    mockConfirmDestructive.mockResolvedValue(true); // user confirms
+
+    const result = await runAgentLoop(
+      "deploy the service",
+      makeSession(),
+      makeConfig({
+        gaslight: makeNoGoGaslightMock() as unknown as AgentLoopConfig["gaslight"],
+        fearSetBlockOnNoGo: true,
+        silent: true,
+      }),
+    );
+
+    // confirmDestructive was called once
+    expect(mockConfirmDestructive).toHaveBeenCalledOnce();
+    // Session is returned
+    expect(result).toBeDefined();
+  });
+
+  it("fearSetBlockOnNoGo=false (default) + no-go result → confirmDestructive never called", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Acting.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop(
+      "deploy the service",
+      makeSession(),
+      makeConfig({
+        gaslight: makeNoGoGaslightMock() as unknown as AgentLoopConfig["gaslight"],
+        // fearSetBlockOnNoGo not set — defaults to false (advisory mode)
+        silent: true,
+      }),
+    );
+
+    // Fire-and-forget: confirmDestructive must never be called when flag is off
+    expect(mockConfirmDestructive).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // DanteMemory (Lane B) tests
+  // ---------------------------------------------------------------------------
+
+  it("injects DanteMemory (Semantic Recall) system message when memories exist", async () => {
+    // Arrange: recall returns one past memory result
+    mockMemoryRecall.mockResolvedValueOnce({
+      query: "fix typescript",
+      scope: "all",
+      latencyMs: 5,
+      results: [
+        {
+          key: "past-fix",
+          value: "Updated tsconfig.json to fix the compilation error",
+          scope: "project",
+          layer: "semantic",
+          createdAt: new Date().toISOString(),
+          lastAccessedAt: new Date().toISOString(),
+          score: 0.85,
+          recallCount: 2,
+          summary: "Updated tsconfig to fix TypeScript error",
+          meta: {},
+        },
+      ],
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will fix the TypeScript error.\n[COMPLEXITY: 0.2]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("fix the typescript compilation error", session, makeConfig());
+
+    // memoryRecall was called (semantic recall injection)
+    expect(mockMemoryRecall).toHaveBeenCalledWith("fix the typescript compilation error", 10);
+    // auditLogger.flush was called (session-end audit)
+    expect(mockAuditLoggerFlush).toHaveBeenCalledWith({ endSession: true });
+    // memoryStore was called for session-end persist
+    expect(mockMemoryStore).toHaveBeenCalledWith(
+      expect.stringContaining("session::"),
+      expect.any(String),
+      "project",
+      expect.objectContaining({ tags: ["session-summary"] }),
+    );
+    // memoryPrune was called at session end
+    expect(mockMemoryPrune).toHaveBeenCalled();
+    // DanteMemory recall system message is injected into the LLM-API messages[] array,
+    // not into session.messages (which tracks assistant/tool/user turns).
+    // Verify that recall was attempted and the pipeline completed normally.
+    expect(session.messages.length).toBeGreaterThanOrEqual(1);
+    // The absence of the message in session.messages is expected — DanteMemory
+    // injects into the LLM-API messages[] array (not session.messages[]).
+    // Confirm memoryInitialize was called to set up the orchestrator.
+    expect(mockMemoryInitialize).toHaveBeenCalled();
+  });
+
+  it("memoryStore is called fire-and-forget per round when tools are executed", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading the file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done reading.",
+      usage: { promptTokens: 60, completionTokens: 20, totalTokens: 80 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("read src/index.ts", session, makeConfig());
+
+    // Per-round memoryStore fire-and-forget: called with "session" scope
+    const storeCallsWithSessionScope = mockMemoryStore.mock.calls.filter(
+      (call: unknown[]) => call[2] === "session",
+    );
+    expect(storeCallsWithSessionScope.length).toBeGreaterThanOrEqual(1);
+    const firstCall = storeCallsWithSessionScope[0] as unknown[];
+    expect(firstCall?.[0]).toContain("round-");
+    expect(firstCall?.[0]).toContain("test-session");
+  });
+
+  it("auditLogger.flush is called with endSession:true at session end", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All done.\n[COMPLEXITY: 0.1]",
+      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+    });
+
+    await runAgentLoop("do something simple", makeSession(), makeConfig());
+
+    expect(mockAuditLoggerFlush).toHaveBeenCalledWith({ endSession: true });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verificationScore retry-derived fallback formula
+// Formula: Math.max(0, 0.5 - verifyRetries * 0.15)
+//   retries=0 → undefined (no quality signal)
+//   retries=1 → 0.35
+//   retries=2 → 0.20
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("verificationScore retry-derived fallback", () => {
+  // Spy factory: captures verificationScore arg passed to maybeFearSet
+  function makeFearSetSpy() {
+    const maybeFearSetSpy = vi.fn().mockResolvedValue(null);
+    return {
+      spy: maybeFearSetSpy,
+      gaslight: {
+        maybeGaslight: vi.fn().mockResolvedValue(null),
+        getConfig: vi.fn().mockReturnValue({ enabled: false }),
+        getFearSetConfig: vi.fn().mockReturnValue({ enabled: true }),
+        maybeFearSet: maybeFearSetSpy,
+      },
+    };
+  }
+
+  // Config with testCommand so the verification loop fires when wroteCode=true
+  function makeVerifyConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
+    return makeConfig({
+      state: {
+        ...makeConfig().state,
+        project: { name: "test", language: "typescript", testCommand: "npm test" },
+      } as unknown as DanteCodeState,
+      silent: true,
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    mockExecuteTool.mockReset();
+    mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
+    mockParseVerificationErrors.mockReset();
+    mockParseVerificationErrors.mockReturnValue([]);
+  });
+
+  it("verifyRetries === 0 → verificationScore is undefined (no code writes, no retries)", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Nothing to change.",
+      usage: { totalTokens: 20 },
+    });
+    const { spy, gaslight } = makeFearSetSpy();
+    await runAgentLoop(
+      "describe the system",
+      makeSession(),
+      makeVerifyConfig({ gaslight: gaslight as unknown as AgentLoopConfig["gaslight"] }),
+    );
+    const callArg = spy.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(callArg?.verificationScore).toBeUndefined();
+  });
+
+  it("verifyRetries === 1 → verificationScore === 0.35 (0.5 - 1*0.15)", async () => {
+    // Round 1: Write tool → Bash verify fails → verifyRetries=1 → retry message
+    // Round 2: final text (no tools) → loop exits
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: 'Writing.\n<tool_use>\n{"name":"Write","input":{"file_path":"a.ts","content":"x"}}\n</tool_use>',
+        usage: { totalTokens: 30 },
+      })
+      .mockResolvedValueOnce({
+        text: "Fixed.",
+        usage: { totalTokens: 20 },
+      });
+    // Bash calls fail (verify step), all other tool calls succeed
+    mockExecuteTool.mockImplementation((toolName: string) => {
+      if (toolName === "Bash") return Promise.resolve({ content: "FAIL", isError: true });
+      return Promise.resolve({ content: "ok", isError: false });
+    });
+
+    const { spy, gaslight } = makeFearSetSpy();
+    await runAgentLoop(
+      "write a file",
+      makeSession(),
+      makeVerifyConfig({ gaslight: gaslight as unknown as AgentLoopConfig["gaslight"] }),
+    );
+    const callArg = spy.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(callArg?.verificationScore).toBeCloseTo(0.35);
+  });
+
+  it("verifyRetries === 2 → verificationScore === 0.20 (0.5 - 2*0.15)", async () => {
+    // Round 1: Write → verify fails → verifyRetries=1
+    // Round 2: Write → verify fails → verifyRetries=2
+    // Round 3: final text → loop exits
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: 'First write.\n<tool_use>\n{"name":"Write","input":{"file_path":"a.ts","content":"x"}}\n</tool_use>',
+        usage: { totalTokens: 30 },
+      })
+      .mockResolvedValueOnce({
+        text: 'Second write.\n<tool_use>\n{"name":"Write","input":{"file_path":"b.ts","content":"y"}}\n</tool_use>',
+        usage: { totalTokens: 30 },
+      })
+      .mockResolvedValueOnce({
+        text: "All done.",
+        usage: { totalTokens: 20 },
+      });
+    mockExecuteTool.mockImplementation((toolName: string) => {
+      if (toolName === "Bash") return Promise.resolve({ content: "FAIL", isError: true });
+      return Promise.resolve({ content: "ok", isError: false });
+    });
+
+    const { spy, gaslight } = makeFearSetSpy();
+    await runAgentLoop(
+      "write two files",
+      makeSession(),
+      makeVerifyConfig({ gaslight: gaslight as unknown as AgentLoopConfig["gaslight"] }),
+    );
+    const callArg = spy.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(callArg?.verificationScore).toBeCloseTo(0.20);
   });
 });

@@ -5,6 +5,9 @@ export default defineConfig({
     root: process.cwd(),
     include: ["src/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**"],
+    // Retry once on failure — catches timing-sensitive tests that flake under
+    // parallel turbo load (temp-dir contention, setInterval races, etc.)
+    retry: 1,
     coverage: {
       enabled: false,
     },

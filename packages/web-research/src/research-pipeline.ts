@@ -7,10 +7,21 @@ import { SessionResearchCache } from "./cache/session-cache.js";
 import { PersistentResearchCache } from "./cache/persistent-cache.js";
 import { WebFetcher } from "./fetch/fetcher.js";
 
+/** Duck-type interface — avoids a hard dep on @dantecode/web-extractor. */
+interface WebExtractorLike {
+  fetch(
+    url: string,
+    options?: { cleanLevel?: string },
+  ): Promise<{ markdown: string; verificationWarnings?: string[] }>;
+}
+
 export interface ResearchPipelineOptions {
   projectRoot?: string;
   maxResults?: number;
   fetchTopN?: number;
+  authorityOverrides?: Record<string, number>;
+  /** Pass a WebExtractor instance for full markdown extraction (step 5). */
+  webExtractor?: WebExtractorLike;
 }
 
 export interface ResearchResult {
@@ -18,6 +29,8 @@ export interface ResearchResult {
   cacheHit: boolean;
   resultCount: number;
   fetchedCount: number;
+  /** Injection or content-safety warnings from fetched pages. */
+  verificationWarnings?: string[];
 }
 
 /**
@@ -28,10 +41,13 @@ export interface ResearchResult {
  *   2. Persistent cache check (7-day disk)
  *   3. Native DuckDuckGo search with retry/backoff
  *   4. BM25 relevance ranking
- *   5. Fetch + clean top-N results
+ *   5. Fetch + clean top-N results (WebExtractor when provided, else raw fetcher)
  *   6. Semantic deduplication
  *   7. Aggregate into EvidenceBundle
  *   8. Write-back to caches
+ *
+ * Authority overrides and WebExtractor are passed in via options — the pipeline
+ * itself does no file I/O beyond its own cache layer.
  */
 export class ResearchPipeline {
   private ddg: DuckDuckGoProvider;
@@ -39,10 +55,12 @@ export class ResearchPipeline {
   private deduper: SemanticDeduper;
   private aggregator: EvidenceAggregator;
   private fetcher: WebFetcher;
+  private webExtractor: WebExtractorLike | undefined;
   private sessionCache: SessionResearchCache;
   private persistentCache: PersistentResearchCache | null;
   private maxResults: number;
   private fetchTopN: number;
+  private authorityOverrides: Record<string, number> | undefined;
 
   constructor(options: ResearchPipelineOptions = {}) {
     this.ddg = new DuckDuckGoProvider();
@@ -56,6 +74,8 @@ export class ResearchPipeline {
       : null;
     this.maxResults = options.maxResults ?? 10;
     this.fetchTopN = options.fetchTopN ?? 3;
+    this.authorityOverrides = options.authorityOverrides;
+    this.webExtractor = options.webExtractor;
   }
 
   async run(objective: string): Promise<ResearchResult> {
@@ -89,18 +109,29 @@ export class ResearchPipeline {
     // 3. Native DDG search
     const rawResults = await this.ddg.search(objective, { limit: this.maxResults });
 
-    // 4. BM25 ranking
-    const ranked = this.ranker.rank(rawResults, objective);
+    // 4. BM25 + authority ranking
+    const ranked = this.ranker.rank(rawResults, objective, { authorityOverrides: this.authorityOverrides });
 
     // 5. Fetch + clean top-N
     const topN = ranked.slice(0, this.fetchTopN);
     const fetchedChunks: string[] = [];
+    const allWarnings: string[] = [];
 
     for (const result of topN) {
       try {
-        const fetched = await this.fetcher.fetch(result.url, { timeoutMs: 8000 });
-        if (fetched.content.length > 50) {
-          fetchedChunks.push(fetched.content.slice(0, 3000));
+        if (this.webExtractor) {
+          const wxResult = await this.webExtractor.fetch(result.url, { cleanLevel: "standard" });
+          if (wxResult.markdown.length > 50) {
+            fetchedChunks.push(wxResult.markdown.slice(0, 3000));
+          }
+          if (wxResult.verificationWarnings?.length) {
+            allWarnings.push(...wxResult.verificationWarnings);
+          }
+        } else {
+          const fetched = await this.fetcher.fetch(result.url, { timeoutMs: 8000 });
+          if (fetched.content.length > 50) {
+            fetchedChunks.push(fetched.content.slice(0, 3000));
+          }
         }
       } catch {
         // Non-fatal: use snippet as fallback
@@ -134,6 +165,7 @@ export class ResearchPipeline {
       cacheHit: false,
       resultCount: ranked.length,
       fetchedCount: topN.length,
+      verificationWarnings: allWarnings.length ? allWarnings : undefined,
     };
   }
 }

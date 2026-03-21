@@ -13,6 +13,8 @@ import type {
 import { defaultConfig } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { FileSnapshotter } from "./file-snapshotter.js";
+import { sha256 } from "@dantecode/evidence-chain";
+import { readFile } from "node:fs/promises";
 
 // ---------------------------------------------------------------------------
 // Replay session state
@@ -24,6 +26,18 @@ interface ReplaySession {
   /** filePath → current snapshotId at the cursor position */
   fileStateAtStep: Map<string, string>;
   currentStep: number;
+}
+
+// ---------------------------------------------------------------------------
+// Replay Verification
+// ---------------------------------------------------------------------------
+
+export interface ReplayVerification {
+  eventId: string;
+  action: string;
+  originalHash: string;
+  replayHash: string;
+  matched: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +231,66 @@ export class ReplayOrchestrator {
     await this.store.init();
     const all = await this.store.readAllEvents();
     return all.filter((e) => e.provenance.checkpointId === checkpointId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Replay Determinism Verification
+  // -------------------------------------------------------------------------
+
+  /**
+   * Verify replay determinism by comparing current file hashes to stored afterHash values.
+   * Ported from DanteLiteV2/core/replay_engine.py pattern.
+   */
+  async verifyReplayDeterminism(sessionId: string): Promise<{
+    total: number;
+    matched: number;
+    diverged: number;
+    determinismRate: number;
+    results: ReplayVerification[];
+  }> {
+    await this.store.init();
+    const events = await this.store.queryBySession(sessionId);
+    const fileWriteEvents = events.filter(
+      (e) => e.kind === "file_write" && e.afterHash,
+    );
+
+    const results: ReplayVerification[] = [];
+    let matched = 0;
+    let diverged = 0;
+
+    for (const event of fileWriteEvents) {
+      const filePath = event.payload["filePath"];
+      if (typeof filePath !== "string" || !event.afterHash) continue;
+
+      let currentHash: string;
+      try {
+        const content = await readFile(filePath, "utf8");
+        currentHash = sha256(content);
+      } catch {
+        currentHash = "file_missing";
+      }
+
+      const isMatch = currentHash === event.afterHash;
+      results.push({
+        eventId: event.id,
+        action: `file_write:${filePath}`,
+        originalHash: event.afterHash,
+        replayHash: currentHash,
+        matched: isMatch,
+      });
+
+      if (isMatch) matched++;
+      else diverged++;
+    }
+
+    const total = matched + diverged;
+    return {
+      total,
+      matched,
+      diverged,
+      determinismRate: total > 0 ? matched / total : 1.0,
+      results,
+    };
   }
 
   // -------------------------------------------------------------------------

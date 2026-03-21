@@ -101,6 +101,12 @@ export { CliBridge } from "./integrations/cli-bridge.js";
 export { VsCodeBridge } from "./integrations/vscode-bridge.js";
 export type { VsCodeTrailMessage, VsCodeTrailMessageKind } from "./integrations/vscode-bridge.js";
 
+// --- Evidence Chain Integration (Soul Seal) ---
+export { EvidenceBridge } from "./integrations/evidence-bridge.js";
+export type { CertificationSeal, EvidenceBundleData, Receipt, MerkleProofStep } from "@dantecode/evidence-chain";
+export { EvidenceType } from "@dantecode/evidence-chain";
+export type { ReplayVerification } from "./replay-orchestrator.js";
+
 // ============================================================================
 // Top-level convenience functions (debugTrail / debugSnapshot / debugRestore /
 // debugReplay / auditExport) — match the PRD's public API surface exactly.

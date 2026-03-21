@@ -9,8 +9,6 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   CouncilOrchestrator,
@@ -30,6 +28,20 @@ import type {
 // candidate short-circuit path returns success: true instead of "blocked".
 // ---------------------------------------------------------------------------
 const STUB_DIFF = `--- a/src/stub.ts\n+++ b/src/stub.ts\n@@ -1,3 +1,3 @@\n-const x = 1;\n+const x = 2;\n export {};\n`;
+
+// ---------------------------------------------------------------------------
+// StubDanteCodeAdapter — overrides collectPatch() to return STUB_DIFF directly,
+// removing the git-diff dependency from the E2E smoke test.
+// ---------------------------------------------------------------------------
+class StubDanteCodeAdapter extends DanteCodeAdapter {
+  override async collectPatch(sessionId: string): Promise<AdapterPatch | null> {
+    return {
+      sessionId,
+      unifiedDiff: STUB_DIFF,
+      changedFiles: ["src/stub.ts"],
+    };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Stub adapter factory
@@ -251,28 +263,20 @@ describe("CouncilOrchestrator integration", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Test 5: E2E smoke — real git repo + DanteCodeAdapter with mock executor
-  //         verifies the full pipeline: submitTask → pollStatus → merge → complete
+  // Test 5: E2E smoke — StubDanteCodeAdapter + mock executor reaches 'completed'
+  //         verifies the full pipeline without any git dependency:
+  //         submitTask → executor → pollStatus → collectPatch(STUB_DIFF) → merge → complete
   // -------------------------------------------------------------------------
   it("E2E smoke: DanteCodeAdapter with mock executor reaches 'completed'", async () => {
-    // Set up a minimal git repo so DanteCodeAdapter.collectPatch() can run git diff
-    execSync("git init", { cwd: testDir, stdio: "pipe" });
-    execSync("git config user.email \"test@example.com\"", { cwd: testDir, stdio: "pipe" });
-    execSync("git config user.name \"Test\"", { cwd: testDir, stdio: "pipe" });
-    execSync("git commit --allow-empty -m \"init\"", { cwd: testDir, stdio: "pipe" });
-
-    // Stage a file so git diff HEAD returns a non-empty diff (truthy unifiedDiff)
-    writeFileSync(join(testDir, "smoke.ts"), "export const x = 1;\n");
-    execSync("git add smoke.ts", { cwd: testDir, stdio: "pipe" });
-
-    // Mock executor — completes instantly, reports one touched file
+    // StubDanteCodeAdapter.collectPatch() returns STUB_DIFF directly — no git dependency.
+    // This exercises the real executor lifecycle + state machine + MergeBrain synthesis.
     const mockExecutor: SelfLaneExecutor = async () => ({
       output: "smoke test done",
-      touchedFiles: ["smoke.ts"],
+      touchedFiles: ["src/stub.ts"],
       success: true,
     });
 
-    const dcAdapter = new DanteCodeAdapter({ executor: mockExecutor });
+    const dcAdapter = new StubDanteCodeAdapter({ executor: mockExecutor });
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", dcAdapter]]);
     orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 5 });
     orchestrator.on("error", () => {});
@@ -283,11 +287,10 @@ describe("CouncilOrchestrator integration", () => {
       repoRoot: testDir,
     });
 
-    // Register watcher BEFORE assigning lane to prevent the race where the fast
-    // mock executor finishes before watchUntilComplete registers its listener.
+    // Register watcher BEFORE assigning lane — prevents race where the fast mock
+    // executor completes before watchUntilComplete registers its listener.
     const watchPromise = orchestrator.watchUntilComplete({ timeoutMs: 5_000 });
 
-    // assignLane() submits the task to DanteCodeAdapter — executor runs in background
     const laneResult = await orchestrator.assignLane(
       makeAssignLaneRequest(testDir, {
         objective: "E2E lane",
@@ -296,8 +299,7 @@ describe("CouncilOrchestrator integration", () => {
     );
     expect(laneResult.accepted).toBe(true);
 
-    // watchUntilComplete: polls every 5ms → executor finishes → "completed" lane →
-    // MergeBrain gets non-empty diff from git diff HEAD → success → complete()
+    // executor finishes → pollStatus "completed" → MergeBrain (1 candidate, STUB_DIFF) → success → complete()
     await watchPromise;
     expect(orchestrator.currentStatus).toBe("completed");
   }, 8_000);

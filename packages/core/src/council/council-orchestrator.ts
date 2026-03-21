@@ -46,7 +46,7 @@ const VALID_TRANSITIONS: Record<CouncilLifecycleStatus, CouncilLifecycleStatus[]
   running: ["blocked", "merging", "failed"],
   blocked: ["running", "merging", "failed"],
   merging: ["verifying", "failed"],
-  verifying: ["completed", "failed"],
+  verifying: ["completed", "failed", "blocked"],
   completed: [],
   failed: [],
 };
@@ -89,6 +89,12 @@ type OrchestratorEvents = {
   "lanes:all-terminal": [];
   "overlap:detected": [{ laneA: string; laneB: string; level: number }];
   "merge:complete": [MergeBrainResult];
+  /** Emitted when a retry session enters backoff — waiting for delay to elapse. */
+  "lane:retry-pending": [{ laneId: string; agentKind: string; retryCount: number; retryAfterTs: number }];
+  /** Emitted when a running lane is paused because an overlapping retry is in progress. */
+  "lane:paused": [{ laneId: string; agentKind: string; pausedForRetry: string }];
+  /** Emitted when a paused lane resumes because its coordinating retry finished or was promoted. */
+  "lane:resumed": [{ laneId: string; agentKind: string }];
   "error": [{ message: string; context?: string }];
 };
 
@@ -113,6 +119,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
   private _allTerminalFired = false;
+  /** Serializes all persistRunState() calls — prevents concurrent writes to state.json (Windows EBUSY). */
+  private _pendingWrite: Promise<void> = Promise.resolve();
+  /** Last persist error for observability; null means the most recent write succeeded. */
+  private _lastPersistError: string | null = null;
 
   constructor(
     adapters: Map<AgentKind, CouncilAgentAdapter>,
@@ -381,6 +391,30 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     await setRunStatus(this.runState.repoRoot, this.runState.runId, "failed");
   }
 
+  /**
+   * Transition to "blocked" — merge found conflicts that require manual resolution.
+   * Unlike fail(), this preserves all lane state and patches for human review.
+   * Recovery: resolve conflicts manually, then call resume() to restart from blocked → running.
+   */
+  async block(reason: string): Promise<void> {
+    if (!this.runState) return;
+    this.stopPolling();
+    this.observer?.stop();
+    try {
+      this.transition("blocked");
+    } catch {
+      const prev = this.status;
+      this.status = "blocked";
+      this.emit("state:transition", {
+        from: prev,
+        to: "blocked",
+        runId: this.runState?.runId ?? "unknown",
+      });
+    }
+    this.emitError(reason, "merge-blocked");
+    await setRunStatus(this.runState.repoRoot, this.runState.runId, "blocked");
+  }
+
   // --------------------------------------------------------------------------
   // Observers / state
   // --------------------------------------------------------------------------
@@ -399,6 +433,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
   getLedger(): UsageLedger {
     return this.ledger;
+  }
+
+  /** Returns the last persist error message, or null if the most recent write succeeded. */
+  get lastPersistError(): string | null {
+    return this._lastPersistError;
   }
 
   // --------------------------------------------------------------------------
@@ -437,6 +476,27 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (base === 0) return 0;
     const raw = base * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
     return Math.min(raw, this.options.retryMaxDelayMs);
+  }
+
+  /**
+   * Unpause all lanes waiting on retryLaneId completing.
+   * Covers the zero-backoff path where sessions never enter "retry-pending"
+   * and therefore bypass the promotion block's unpause scan.
+   * Must be called BEFORE persistRunState() so on-disk state is never left
+   * with lanes permanently paused after a crash.
+   */
+  private _unpauseWaiters(retryLaneId: string): void {
+    if (!this.runState) return;
+    for (const other of this.runState.agents) {
+      if (other.pausedForRetry === retryLaneId && other.status === "paused") {
+        other.status = "running";
+        other.pausedForRetry = undefined;
+        this.emit("lane:resumed", {
+          laneId: other.laneId,
+          agentKind: other.agentKind as string,
+        });
+      }
+    }
   }
 
   /** Start the adapter completion polling loop. Called automatically by start()/resume(). */
@@ -495,7 +555,16 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             if (mergeResult.success) {
               return this.complete();
             }
-            return this.fail(`Merge unsuccessful: ${mergeResult.error ?? "unknown"}`);
+            // Candidates exist but couldn't be auto-merged → blocked (recoverable by human)
+            const hasCandidates =
+              (mergeResult.synthesis.candidateLanes?.length ?? 0) > 0;
+            if (hasCandidates) {
+              return this.block(
+                mergeResult.error ?? "Merge blocked: conflicts require manual resolution",
+              );
+            }
+            // Zero candidates — all lanes failed, nothing to merge → permanent failure
+            return this.fail("All lanes failed — no viable patches to merge");
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
@@ -508,7 +577,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       this.on("lanes:all-terminal", onAllTerminal);
 
       const onTransition = ({ to }: { from: CouncilLifecycleStatus; to: CouncilLifecycleStatus; runId: string }) => {
-        if (to === "completed" || to === "failed") {
+        if (to === "completed" || to === "failed" || to === "blocked") {
           cleanup();
           resolve();
         }
@@ -536,6 +605,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             if (other.pausedForRetry === session.laneId && other.status === "paused") {
               other.status = "running";
               other.pausedForRetry = undefined;
+              this.emit("lane:resumed", {
+                laneId: other.laneId,
+                agentKind: other.agentKind as string,
+              });
             }
           }
           // Fall through — session is now "running", will be polled below
@@ -558,6 +631,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
         if (status.status === "completed") {
           session.status = "completed";
           session.completedAt = new Date().toISOString();
+          this._unpauseWaiters(session.laneId);
           await this.persistRunState();
           this.emit("lane:completed", {
             laneId: session.laneId,
@@ -598,6 +672,12 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
                 if (backoffMs > 0) {
                   newSession.status = "retry-pending";
                   newSession.retryAfterTs = Date.now() + backoffMs;
+                  this.emit("lane:retry-pending", {
+                    laneId: newSession.laneId,
+                    agentKind: newSession.agentKind as string,
+                    retryCount: newSession.retryCount,
+                    retryAfterTs: newSession.retryAfterTs,
+                  });
                 }
 
                 this.observer?.register(
@@ -606,16 +686,36 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
                   newSession.worktreePath,
                 );
 
-                // P6: Freeze overlapping running lanes during retry
-                if (newSession.assignedFiles.length > 0) {
-                  const retryFiles = new Set(newSession.assignedFiles);
+                // P6: Freeze overlapping running lanes during retry.
+                // Include touchedFiles (actual writes from failing session carried via handoff)
+                // so agents that drifted outside their mandate also trigger the freeze.
+                const retryFiles = new Set([
+                  ...newSession.assignedFiles,
+                  ...(newSession.touchedFiles ?? []),
+                ]);
+                if (retryFiles.size > 0) {
                   for (const other of this.runState.agents) {
                     if (other.laneId === newSession.laneId) continue;
                     if (other.status !== "running") continue;
                     if (other.assignedFiles.some((f) => retryFiles.has(f))) {
                       other.status = "paused";
                       other.pausedForRetry = newSession.laneId;
+                      this.emit("lane:paused", {
+                        laneId: other.laneId,
+                        agentKind: other.agentKind as string,
+                        pausedForRetry: newSession.laneId,
+                      });
                     }
+                  }
+                }
+
+                // Transfer pausedForRetry from current failing session to new retry session.
+                // Without this, lanes paused during an N-deep retry chain (maxLaneRetries ≥ 2)
+                // stay permanently paused — _unpauseWaiters is never called for the old laneId
+                // because the !retried branch is skipped when retried = true.
+                for (const other of this.runState.agents) {
+                  if (other.pausedForRetry === session.laneId && other.status === "paused") {
+                    other.pausedForRetry = newSession.laneId;
                   }
                 }
               }
@@ -633,6 +733,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           if (!retried) {
             session.status = status.status === "aborted" ? "aborted" : "failed";
             if (status.progressSummary) session.errorMessage = status.progressSummary;
+            this._unpauseWaiters(session.laneId);
             await this.persistRunState();
           }
 
@@ -662,18 +763,22 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
   }
 
-  private async persistRunState(): Promise<void> {
+  private persistRunState(): Promise<void> {
+    // Chain writes through the mutex — serializes all FS writes so concurrent poll
+    // cycles never call saveCouncilRun simultaneously (eliminates Windows EBUSY races).
+    this._pendingWrite = this._pendingWrite.then(() => this._doWrite()).catch(() => {});
+    return this._pendingWrite;
+  }
+
+  private async _doWrite(): Promise<void> {
     if (!this.runState) return;
     try {
       await saveCouncilRun(this.runState);
-    } catch {
-      // Retry once — handles transient FS contention (Windows EBUSY, NFS locks)
-      try {
-        await saveCouncilRun(this.runState);
-      } catch (secondErr: unknown) {
-        const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
-        this.emitError(`Failed to persist run state: ${msg}`, "state-store");
-      }
+      this._lastPersistError = null;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this._lastPersistError = msg;
+      this.emitError(`Failed to persist run state: ${msg}`, "state-store");
     }
   }
 }

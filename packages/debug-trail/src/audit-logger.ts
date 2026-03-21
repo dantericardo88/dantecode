@@ -13,6 +13,12 @@ import { SessionMap } from "./state/session-map.js";
 import { makeTrailEventId } from "./hash-engine.js";
 import { AnomalyDetector } from "./anomaly-detector.js";
 import type { AnomalyFlag } from "./anomaly-detector.js";
+import {
+  HashChain, MerkleTree, ReceiptChain, createReceipt,
+  createEvidenceBundle, EvidenceSealer,
+  EvidenceType,
+} from "@dantecode/evidence-chain";
+import type { EvidenceBundleData, CertificationSeal, Receipt } from "@dantecode/evidence-chain";
 
 // ---------------------------------------------------------------------------
 // Flush result
@@ -21,13 +27,18 @@ import type { AnomalyFlag } from "./anomaly-detector.js";
 export interface FlushResult {
   /** Anomalies detected in this flush. Empty array if none found. */
   anomalies: AnomalyFlag[];
+  /** Number of events analyzed in this flush call. 0 if nothing new since last flush. */
+  analyzedCount: number;
   /**
    * True when the session events buffer hit `sessionEventsBufferLimit` before flush.
    * Events beyond the limit were persisted to disk but NOT analyzed for anomalies.
    */
   bufferTruncated: boolean;
-  /** Number of events analyzed in this flush call (0 if nothing new since last flush). */
-  analyzedCount: number;
+  /** Analysis metadata — nested alias for analyzedCount/bufferTruncated. */
+  detection: {
+    analyzedCount: number;
+    truncated: boolean;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +83,9 @@ export class AuditLogger {
   // Cursor into sessionEvents: events[0..detectionCursor) have already been analyzed.
   // Using a cursor (not a boolean) supports multi-lane: each flush() analyzes only new events.
   private detectionCursor = 0;
+  // True only after at least one event was REJECTED by the push guard — not when buffer is merely full.
+  // Prevents false-positive disk read + bufferTruncated:true for sessions with exactly bufferLimit events.
+  private overflowed = false;
   // Tracks event IDs already reported as anomalies to prevent duplicate flags across flush boundaries.
   // A cross-boundary burst produces the same relatedEventIds each flush — dedup filters them.
   private reportedAnomalyEventIds = new Set<string>();
@@ -80,6 +94,12 @@ export class AuditLogger {
   // that are not already in sessionEvents. Prevents re-analysis on subsequent flush() calls.
   private diskEventCursor = -1;
   private onAnomalyDetected?: (result: FlushResult) => void;
+  // Soul Seal — Evidence Chain (null until init())
+  private evidenceChain: HashChain<EvidenceBundleData> | null = null;
+  private receiptChain: ReceiptChain | null = null;
+  private sessionMerkle: MerkleTree | null = null;
+  private evidenceSeq = 0;
+  private lastBundleHash = "0".repeat(64);
 
   constructor(options: AuditLoggerOptions = {}) {
     this.config = { ...defaultConfig(), ...options.config };
@@ -119,8 +139,24 @@ export class AuditLogger {
     this.seqCounter = lastSeq + 1;
     this.initialized = true;
     this.detectionCursor = 0;
+    this.overflowed = false;
     this.reportedAnomalyEventIds = new Set<string>();
     this.diskEventCursor = -1;
+    // ---- Evidence Chain Init (Soul Seal) ----
+    this.evidenceChain = new HashChain<EvidenceBundleData>(
+      createEvidenceBundle({
+        runId: this.provenance.runId,
+        seq: 0,
+        organ: "audit-logger",
+        eventType: EvidenceType.SESSION_STARTED,
+        evidence: { sessionId: this.provenance.sessionId, startedAt: new Date().toISOString() },
+        prevHash: "0".repeat(64),
+      }),
+      { type: "dantecode_session", version: "1.0.0" },
+    );
+    this.lastBundleHash = this.evidenceChain.headHash;
+    this.receiptChain = new ReceiptChain();
+    this.sessionMerkle = new MerkleTree();
   }
 
   // -------------------------------------------------------------------------
@@ -144,6 +180,38 @@ export class AuditLogger {
     const id = makeTrailEventId(seq, this.provenance.sessionId);
     const now = new Date().toISOString();
 
+    // ---- Evidence Chain: pre-compute bundle + receipt BEFORE event creation ----
+    // Must be pre-computed so bundleId/receiptId are in the event when written to SQLite.
+    let precomputedBundleId: string | undefined;
+    let precomputedReceiptId: string | undefined;
+    let pendingBundle: EvidenceBundleData | undefined;
+    let pendingReceipt: Receipt | undefined;
+
+    if (this.evidenceChain) {
+      this.evidenceSeq++;
+      pendingBundle = createEvidenceBundle({
+        runId: this.provenance.runId,
+        seq: this.evidenceSeq,
+        organ: actor,
+        eventType: this.mapKindToEvidenceType(kind),
+        evidence: { kind, actor, summary, ...payload },
+        prevHash: this.lastBundleHash,
+        metadata: extras?.provenance ? { provenance: extras.provenance as Record<string, unknown> } : undefined,
+      });
+      precomputedBundleId = pendingBundle.bundleId;
+
+      if (this.isStateChanging(kind) && extras?.beforeHash && extras?.afterHash) {
+        pendingReceipt = createReceipt({
+          correlationId: this.provenance.sessionId,
+          actor,
+          action: `${kind}:${summary.slice(0, 100)}`,
+          beforeState: extras.beforeHash,
+          afterState: extras.afterHash,
+        });
+        precomputedReceiptId = pendingReceipt.receiptId;
+      }
+    }
+
     const mergedProvenance: TrailProvenance = {
       ...this.provenance,
       ...extras?.provenance,
@@ -163,6 +231,8 @@ export class AuditLogger {
       beforeSnapshotId: extras?.beforeSnapshotId,
       afterSnapshotId: extras?.afterSnapshotId,
       trustScore: extras?.trustScore,
+      evidenceBundleId: precomputedBundleId,
+      receiptId: precomputedReceiptId,
     };
 
     // Gap 4: chain write onto the queue — maintains sequential write order even
@@ -189,11 +259,23 @@ export class AuditLogger {
       throw new DiskWriteError(id, seq, cause);
     }
 
+    // ---- Evidence Chain: append to chain structures post-write ----
+    if (pendingBundle && this.evidenceChain) {
+      this.evidenceChain.append(pendingBundle);
+      this.lastBundleHash = this.evidenceChain.headHash;
+      this.sessionMerkle!.addLeaf(pendingBundle.hash);
+      if (pendingReceipt) {
+        this.receiptChain!.append(pendingReceipt);
+      }
+    }
+
     // Index synchronously so in-process queries see the event immediately
     this.index.index(event);
     // Buffer for anomaly detection on flush — bounded to avoid unbounded memory growth.
     if (this.sessionEvents.length < this.config.sessionEventsBufferLimit) {
       this.sessionEvents.push(event);
+    } else {
+      this.overflowed = true; // first actual drop — set only when a push is rejected
     }
 
     // Gap 5: notify registered listener (e.g. TrailQueryEngine.invalidateCache)
@@ -498,6 +580,30 @@ export class AuditLogger {
    */
   async flush(options?: { endSession?: boolean }): Promise<FlushResult> {
     await this.drain();
+    // ---- Evidence Chain: verify integrity on flush ----
+    if (this.evidenceChain) {
+      const chainIntact = this.evidenceChain.verifyIntegrity();
+      const integrityBundle = createEvidenceBundle({
+        runId: this.provenance.runId,
+        seq: ++this.evidenceSeq,
+        organ: "evidence-system",
+        eventType: EvidenceType.CHAIN_INTEGRITY_CHECK,
+        evidence: {
+          chainLength: this.evidenceChain.length,
+          merkleRoot: this.sessionMerkle!.root,
+          receiptCount: this.receiptChain!.size,
+          integrityVerified: chainIntact,
+        },
+        prevHash: this.lastBundleHash,
+      });
+      this.evidenceChain.append(integrityBundle);
+      this.lastBundleHash = this.evidenceChain.headHash;
+      if (!chainIntact) {
+        await this.log("anomaly_flag", "evidence-system",
+          "CRITICAL: Evidence chain integrity verification FAILED — chain may be tampered",
+          { chainLength: this.evidenceChain.length, headHash: this.evidenceChain.headHash });
+      }
+    }
     const shouldEndSession = options?.endSession ?? true;
 
     // Analyze only events since the last flush (cursor-based).
@@ -511,7 +617,7 @@ export class AuditLogger {
     // exceed the buffer limit. This prevents silent detection blind spots on large sessions
     // without paying disk-read costs for normal (non-truncated) sessions.
     let overflowUnanalyzed: TrailEvent[] = [];
-    if (this.sessionEvents.length >= this.config.sessionEventsBufferLimit) {
+    if (this.overflowed) {
       const bufferedIds = new Set(this.sessionEvents.map((e) => e.id));
       try {
         const diskEvents = await this.store.queryBySession(this.provenance.sessionId);
@@ -562,8 +668,9 @@ export class AuditLogger {
 
       const result: FlushResult = {
         anomalies: detectedAnomalies,
-        bufferTruncated: this.sessionEvents.length >= this.config.sessionEventsBufferLimit,
         analyzedCount,
+        bufferTruncated: this.overflowed,
+        detection: { analyzedCount, truncated: this.overflowed },
       };
       this.onAnomalyDetected?.(result);
     }
@@ -572,7 +679,100 @@ export class AuditLogger {
     if (shouldEndSession) {
       this.sessionMap.endSession(this.provenance.sessionId);
     }
-    return { anomalies: detectedAnomalies, bufferTruncated: this.sessionEvents.length >= this.config.sessionEventsBufferLimit, analyzedCount };
+    return {
+      anomalies: detectedAnomalies,
+      analyzedCount,
+      bufferTruncated: this.overflowed,
+      detection: { analyzedCount, truncated: this.overflowed },
+    };
+  }
+  // -------------------------------------------------------------------------
+  // Evidence Chain API (Soul Seal)
+  // -------------------------------------------------------------------------
+
+  /** Get current session evidence chain statistics. */
+  getChainStats(): {
+    chainLength: number;
+    merkleRoot: string;
+    receiptCount: number;
+    headHash: string;
+    integrityVerified: boolean;
+  } | null {
+    if (!this.evidenceChain) return null;
+    return {
+      chainLength: this.evidenceChain.length,
+      merkleRoot: this.sessionMerkle!.root,
+      receiptCount: this.receiptChain!.size,
+      headHash: this.evidenceChain.headHash,
+      integrityVerified: this.evidenceChain.verifyIntegrity(),
+    };
+  }
+
+  /** Seal the current session with a CertificationSeal. */
+  sealSession(
+    config: Record<string, unknown>,
+    metrics: Record<string, unknown>[],
+  ): CertificationSeal | null {
+    if (!this.evidenceChain || !this.sessionMerkle) return null;
+    const sealer = new EvidenceSealer();
+    const seal = sealer.createSeal({
+      sessionId: this.provenance.sessionId,
+      evidenceRootHash: this.sessionMerkle.root,
+      config,
+      metrics,
+      eventCount: this.evidenceChain.length,
+    });
+    this.evidenceSeq++;
+    const sealBundle = createEvidenceBundle({
+      runId: this.provenance.runId,
+      seq: this.evidenceSeq,
+      organ: "evidence-sealer",
+      eventType: EvidenceType.SESSION_SEAL_CREATED,
+      evidence: { sealId: seal.sealId, sealHash: seal.sealHash },
+      prevHash: this.lastBundleHash,
+    });
+    this.evidenceChain.append(sealBundle);
+    this.lastBundleHash = this.evidenceChain.headHash;
+    return seal;
+  }
+
+  /** Export the evidence chain for external verification. */
+  exportEvidenceChain(): {
+    chain: ReturnType<HashChain<EvidenceBundleData>["exportToJSON"]>;
+    receipts: ReturnType<ReceiptChain["exportToJSON"]>;
+    merkleRoot: string;
+  } | null {
+    if (!this.evidenceChain) return null;
+    return {
+      chain: this.evidenceChain.exportToJSON(),
+      receipts: this.receiptChain!.exportToJSON(),
+      merkleRoot: this.sessionMerkle!.root,
+    };
+  }
+
+  /** Map TrailEventKind to EvidenceType. */
+  private mapKindToEvidenceType(kind: TrailEventKind): EvidenceType {
+    const map: Partial<Record<TrailEventKind, EvidenceType>> = {
+      tool_call: EvidenceType.TOOL_CALL,
+      tool_result: EvidenceType.TOOL_RESULT,
+      model_decision: EvidenceType.MODEL_DECISION,
+      file_write: EvidenceType.FILE_WRITE,
+      file_delete: EvidenceType.FILE_DELETE,
+      file_move: EvidenceType.FILE_MOVE,
+      file_restore: EvidenceType.FILE_RESTORE,
+      verification: EvidenceType.VERIFICATION_STARTED,
+      checkpoint_transition: EvidenceType.CHECKPOINT_CREATED,
+      anomaly_flag: EvidenceType.ANOMALY_DETECTED,
+      lane_start: EvidenceType.LANE_START,
+      lane_end: EvidenceType.LANE_END,
+      error: EvidenceType.TOOL_ERROR,
+    };
+    return map[kind] ?? EvidenceType.TOOL_CALL;
+  }
+
+  /** Determine if a kind is state-changing (deserves a receipt). */
+  private isStateChanging(kind: TrailEventKind): boolean {
+    return (["file_write", "file_delete", "file_move", "tool_call"] as TrailEventKind[]).includes(kind);
   }
 }
 

@@ -23,7 +23,7 @@ import {
   type FearSetCallbacks,
   type FearSetEngineOptions,
 } from "./fearset-engine.js";
-import { classifyRisk, buildFearSetTrigger } from "./risk-classifier.js";
+import { classifyRiskWithLlm, buildFearSetTrigger } from "./risk-classifier.js";
 import { computeFearSetStats, formatFearSetStats } from "./fearset-stats.js";
 import { distillFearSetLesson } from "./lesson-distiller.js";
 import { FearSetResultStore } from "./fearset-result-store.js";
@@ -282,12 +282,19 @@ export class DanteGaslightIntegration {
     priorLessons?: string[];
     callbacks?: FearSetCallbacks;
   }): Promise<FearSetResult | null> {
-    const classification = classifyRisk(opts.message, {
-      taskClass: opts.taskClass,
-      verificationScore: opts.verificationScore,
-      priorFailureCount: opts.priorFailureCount,
-      config: this.fearSetConfig,
-    });
+    // Two-tier hybrid classification:
+    // Tier 1 (sync regex) runs first — zero latency fast path.
+    // Tier 2 (LLM semantic) only fires when Tier 1 misses AND onClassify is provided.
+    const classification = await classifyRiskWithLlm(
+      opts.message,
+      {
+        taskClass: opts.taskClass,
+        verificationScore: opts.verificationScore,
+        priorFailureCount: opts.priorFailureCount,
+        config: this.fearSetConfig,
+      },
+      opts.callbacks?.onClassify,
+    );
 
     if (!classification.shouldTrigger) return null;
 

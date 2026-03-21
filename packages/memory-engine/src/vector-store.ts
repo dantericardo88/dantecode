@@ -21,6 +21,8 @@ export interface VectorEntry {
   text: string;
   /** Snapshot of the MemoryItem at time of indexing. */
   snapshot: MemoryItem;
+  /** Optional dense embedding vector (set when an embedding provider is wired). */
+  embedding?: number[];
 }
 
 /** A search result from the vector store. */
@@ -81,13 +83,24 @@ export class VectorStore {
       this.evictLRU();
     }
 
-    this.entries.set(scopedKey, {
+    const entry: VectorEntry = {
       key: item.key,
       scope: item.scope,
       tokens,
       text,
       snapshot: { ...item },
-    });
+    };
+
+    // Generate dense embedding if provider is wired
+    if (this.embeddingProvider) {
+      try {
+        entry.embedding = await this.embeddingProvider(text);
+      } catch {
+        /* non-fatal — fall back to Jaccard */
+      }
+    }
+
+    this.entries.set(scopedKey, entry);
 
     // Persist to disk
     await this.localStore.put({ ...item, layer: "semantic" });
@@ -123,6 +136,45 @@ export class VectorStore {
       if (scope && entry.scope !== scope) continue;
 
       const similarity = jaccardSimilarity(queryTokens, entry.tokens);
+      if (similarity >= minSimilarity) {
+        results.push({ item: entry.snapshot, similarity });
+      }
+    }
+
+    return results.sort((a, b) => b.similarity - a.similarity).slice(0, limit);
+  }
+
+  /**
+   * Async search that uses dense cosine similarity when embeddings are available,
+   * falling back to Jaccard token similarity otherwise.
+   *
+   * Use this in preference to `search()` when an embedding provider is wired.
+   */
+  async searchAsync(
+    query: string,
+    limit = 10,
+    scope?: MemoryScope,
+    minSimilarity = this.threshold,
+  ): Promise<VectorSearchResult[]> {
+    // Embed the query if provider exists
+    let queryEmbedding: number[] | undefined;
+    if (this.embeddingProvider) {
+      try {
+        queryEmbedding = await this.embeddingProvider(query);
+      } catch {
+        /* fallback to Jaccard */
+      }
+    }
+
+    const queryTokens = tokenize(query);
+    const results: VectorSearchResult[] = [];
+
+    for (const [, entry] of this.entries) {
+      if (scope && entry.scope !== scope) continue;
+      const similarity =
+        queryEmbedding && entry.embedding
+          ? cosineSimilarity(queryEmbedding, entry.embedding)
+          : jaccardSimilarity(queryTokens, entry.tokens);
       if (similarity >= minSimilarity) {
         results.push({ item: entry.snapshot, similarity });
       }

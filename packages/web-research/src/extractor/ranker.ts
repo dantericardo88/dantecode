@@ -1,5 +1,41 @@
 import type { SearchResult } from "../types.js";
 
+const AUTHORITY_TIERS: Record<string, number> = {
+  // Tier 1: Official sources (10 points)
+  "github.com": 10,
+  "docs.github.com": 10,
+  "developer.mozilla.org": 10,
+  "nodejs.org": 10,
+  "typescriptlang.org": 10,
+  "reactjs.org": 10,
+  "npmjs.com": 9,
+  "docs.npmjs.com": 9,
+  // Tier 2: Curated platforms (8 points)
+  "stackoverflow.com": 8,
+  "arxiv.org": 8,
+  "jsr.io": 8,
+  // Tier 3: Quality blogs/tutorials (5-6 points)
+  "medium.com": 6,
+  "dev.to": 5,
+  "hashnode.dev": 5,
+  "css-tricks.com": 6,
+  "smashingmagazine.com": 6,
+  // Tier 4: Forums (3 points)
+  "reddit.com": 3,
+  "news.ycombinator.com": 3,
+  "quora.com": 2,
+};
+
+function getAuthorityScore(url: string, overrides?: Record<string, number>): number {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    if (overrides?.[hostname] !== undefined) return overrides[hostname];
+    return AUTHORITY_TIERS[hostname] ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * BM25-based relevance ranker for search results.
  *
@@ -17,7 +53,7 @@ export class RelevanceRanker {
     this.b = b;
   }
 
-  rank(results: SearchResult[], query: string): SearchResult[] {
+  rank(results: SearchResult[], query: string, opts?: { authorityOverrides?: Record<string, number> }): SearchResult[] {
     if (results.length === 0) return results;
 
     const queryTerms = this.tokenize(query);
@@ -32,11 +68,12 @@ export class RelevanceRanker {
     // Compute IDF for each query term over the corpus
     const idf = this.computeIdf(queryTerms, docs);
 
-    // Score each document
+    // Score each document: BM25 relevance + authority bonus
     const scored = results.map((result, idx) => {
       const doc = docs[idx] ?? [];
-      const score = this.bm25Score(queryTerms, doc, avgDocLen, idf);
-      return { result, score };
+      const bm25 = this.bm25Score(queryTerms, doc, avgDocLen, idf);
+      const authority = getAuthorityScore(result.url, opts?.authorityOverrides) * 0.5;
+      return { result, score: bm25 + authority };
     });
 
     return scored

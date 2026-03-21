@@ -4,12 +4,12 @@
  * CLI command: dantecode fearset <subcommand>
  *
  * Subcommands:
- *   on                   Enable DanteFearSet auto-trigger
- *   off                  Disable DanteFearSet
- *   stats                Show run statistics from disk
- *   review [resultId]    Review last result or a specific result by ID
- *   bridge [resultId]    Distill passed FearSet result(s) → write to DanteSkillbook
- *   run "<context>"      Run a one-shot FearSet on a decision context (offline, no LLM)
+ *   on                        Enable DanteFearSet auto-trigger
+ *   off                       Disable DanteFearSet
+ *   stats                     Show run statistics from disk
+ *   review [resultId]         Review last result or a specific result by ID
+ *   bridge [resultId]         Distill passed FearSet result(s) → write to DanteSkillbook
+ *   run "<context>" [--offline]  Run fear-setting analysis (LLM by default)
  */
 
 import type { FearSetResult } from "@dantecode/runtime-spine";
@@ -17,9 +17,11 @@ import { DEFAULT_FEARSET_CONFIG } from "@dantecode/runtime-spine";
 import {
   FearSetResultStore,
   distillFearSetLesson,
+  type FearSetCallbacks,
 } from "@dantecode/dante-gaslight";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import { runFearSetEngine } from "@dantecode/dante-gaslight";
+import { createFearSetLLMCallbacks } from "../fearset-callbacks.js";
 
 // ────────────────────────────────────────────────────────
 // ANSI helpers
@@ -229,24 +231,49 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
 }
 
 async function cmdRun(args: string[], projectRoot: string): Promise<void> {
-  const context = args.join(" ").trim();
+  // Parse --offline flag before joining context
+  const offlineIdx = args.indexOf("--offline");
+  const offline = offlineIdx !== -1;
+  const contextArgs = offline ? args.filter((_, i) => i !== offlineIdx) : args;
+  const context = contextArgs.join(" ").trim();
+
   if (!context) {
-    console.log(`${RED}Usage: dantecode fearset run "<decision context>"${RESET}`);
+    console.log(`${RED}Usage: dantecode fearset run "<decision context>" [--offline]${RESET}`);
     console.log(`${DIM}Example: dantecode fearset run "Should we migrate to PostgreSQL?"${RESET}`);
+    console.log(`${DIM}         dantecode fearset run "Should we sunset the v1 API?" --offline${RESET}`);
     return;
   }
 
   console.log(`\n${BOLD}DanteFearSet — Fear-Setting Analysis${RESET}`);
   console.log(`${DIM}Context: ${context.slice(0, 100)}${RESET}`);
-  console.log(`${DIM}Running offline (no LLM) — full analysis requires agent integration.${RESET}\n`);
 
-  const trigger = { channel: "explicit-user" as const, rationale: "CLI run command", at: new Date().toISOString() };
-  const result = await runFearSetEngine(context, trigger, {
+  // Build callbacks — LLM by default, structural-only fallback with --offline
+  let callbacks: FearSetCallbacks = {};
+  if (offline) {
+    console.log(`${DIM}Running offline (structural only — no LLM analysis).${RESET}\n`);
+  } else {
+    try {
+      callbacks = await createFearSetLLMCallbacks(projectRoot);
+      console.log(`${DIM}Running with LLM analysis (use --offline for structural only).${RESET}\n`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`${YELLOW}LLM setup failed (${msg}) — falling back to structural-only mode.${RESET}\n`);
+    }
+  }
+
+  // Attach column progress reporter (works in both modes)
+  callbacks = {
+    ...callbacks,
     onColumnComplete: (col, _column, warnings) => {
       const indicator = warnings.length ? `${YELLOW}⚠${RESET}` : `${GREEN}✓${RESET}`;
       console.log(`  ${indicator} ${CYAN}${col}${RESET} — ${DIM}${warnings.length ? warnings.join("; ") : "ready"}${RESET}`);
     },
-  }, { config: { ...DEFAULT_FEARSET_CONFIG, enabled: true } });
+  };
+
+  const trigger = { channel: "explicit-user" as const, rationale: "CLI run command", at: new Date().toISOString() };
+  const result = await runFearSetEngine(context, trigger, callbacks, {
+    config: { ...DEFAULT_FEARSET_CONFIG, enabled: true },
+  });
 
   const store = new FearSetResultStore({ cwd: projectRoot });
   store.save(result);
@@ -285,7 +312,7 @@ ${BOLD}Subcommands:${RESET}
   ${CYAN}stats${RESET}                  Show aggregated run statistics from disk
   ${CYAN}review [resultId]${RESET}      Show details of the last run (or a specific result)
   ${CYAN}bridge [resultId]${RESET}      Distill passed result(s) -> write to DanteSkillbook
-  ${CYAN}run "<context>"${RESET}        Run offline fear-setting on a decision context
+  ${CYAN}run "<context>" [--offline]${RESET}  Run fear-setting (LLM by default; --offline for structural only)
 
 ${BOLD}Fear-Setting columns:${RESET}
   Define   • What is the realistic worst case?

@@ -37,6 +37,9 @@ export { SessionMemory } from "./session-memory.js";
 export { VectorStore, tokenize, jaccardSimilarity, cosineSimilarity } from "./vector-store.js";
 export type { VectorEntry, VectorSearchResult } from "./vector-store.js";
 
+// --- Embedding provider ---
+export { LocalEmbeddingProvider } from "./embedding-provider.js";
+
 // --- Recall engine ---
 export { SemanticRecall } from "./semantic-recall.js";
 export type { RecallCandidate, RecallOptions } from "./semantic-recall.js";

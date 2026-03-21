@@ -1000,3 +1000,75 @@ describe("MemoryVisualizer", () => {
     expect(summary).toContain("Memory State Summary");
   });
 });
+
+// ============================================================================
+// 16. LocalEmbeddingProvider
+// ============================================================================
+
+describe("LocalEmbeddingProvider", () => {
+  it("embed() returns a 256-dim L2-normalized vector", async () => {
+    const { LocalEmbeddingProvider } = await import("./embedding-provider.js");
+    const provider = new LocalEmbeddingProvider();
+    const vec = await provider.embed("semantic memory retrieval system");
+    expect(vec).toHaveLength(256);
+    const norm = Math.sqrt(vec.reduce((s: number, v: number) => s + v * v, 0));
+    expect(norm).toBeCloseTo(1.0, 3);
+  });
+
+  it("two related strings have cosine similarity > 0.25", async () => {
+    // TF-IDF without corpus training: similarity proportional to shared-token ratio.
+    // Strings sharing 4 of 5 unique tokens yield cosine ≈ 0.8; threshold is 0.25.
+    const { LocalEmbeddingProvider } = await import("./embedding-provider.js");
+    const { cosineSimilarity } = await import("./vector-store.js");
+    const provider = new LocalEmbeddingProvider();
+    const v1 = await provider.embed("typescript error compilation module agent");
+    const v2 = await provider.embed("typescript error compilation module loop");
+    const sim = cosineSimilarity(v1, v2);
+    expect(sim).toBeGreaterThan(0.25);
+  });
+
+  it("embed() returns zero-safe vector for short/empty input", async () => {
+    const { LocalEmbeddingProvider } = await import("./embedding-provider.js");
+    const provider = new LocalEmbeddingProvider();
+    // empty string → all-zeros is fine; norm guard prevents div-by-zero
+    const vec = await provider.embed("");
+    expect(vec).toHaveLength(256);
+  });
+
+  it("updateCorpus() completes without error and adjusts weights", async () => {
+    const { LocalEmbeddingProvider } = await import("./embedding-provider.js");
+    const provider = new LocalEmbeddingProvider();
+    const corpus = [
+      "semantic memory retrieval system module",
+      "agent loop tool execution result",
+      "typescript compilation error resolution",
+    ];
+    expect(() => provider.updateCorpus(corpus)).not.toThrow();
+    const vec = await provider.embed("semantic memory retrieval");
+    expect(vec).toHaveLength(256);
+  });
+
+  it("VectorStore.searchAsync() uses cosine similarity when embeddings are present", async () => {
+    const { VectorStore } = await import("./vector-store.js");
+    const { LocalEmbeddingProvider } = await import("./embedding-provider.js");
+    const { LocalStore } = await import("./storage/local-store.js");
+    const io = makeInMemoryFS();
+    const localStore = new LocalStore("/test-embed", io);
+    const vectorStore = new VectorStore(localStore, 100, 0.0);
+    const provider = new LocalEmbeddingProvider();
+    vectorStore.setEmbeddingProvider((text) => provider.embed(text));
+
+    await vectorStore.add(makeItem({
+      key: "auth-item",
+      scope: "project",
+      summary: "JWT authentication token management security",
+      layer: "semantic",
+    }));
+
+    const results = await vectorStore.searchAsync("authentication token security", 5, "project");
+    expect(Array.isArray(results)).toBe(true);
+    // Should find the item (cosine path)
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]!.item.key).toBe("auth-item");
+  });
+});

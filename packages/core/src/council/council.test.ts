@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
+import { execSync } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -3043,6 +3044,7 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
   it("D3: retry fires in NEXT poll cycle, not the same one (backoff path exercised)", async () => {
     const FAIL_SESSION = "backoff-fail";
     const pollLog: string[] = [];
+    const retryPendingEvents: Array<{ laneId: string; retryCount: number; retryAfterTs: number }> = [];
 
     const backoffAdapter: CouncilAgentAdapter = {
       id: "dantecode",
@@ -3063,14 +3065,16 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     };
 
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", backoffAdapter]]);
-    // retryBaseDelayMs: 50 — non-zero but short enough that the test finishes fast
+    // retryBaseDelayMs: 100 at pollIntervalMs: 10 → 5–10:1 min ratio.
+    // Structurally impossible for backoff to elapse before the first post-creation poll cycle fires.
     const orchestrator = new CouncilOrchestrator(adapters, {
-      pollIntervalMs: 20,
+      pollIntervalMs: 10,
       maxLaneRetries: 1,
-      retryBaseDelayMs: 50,
+      retryBaseDelayMs: 100,
     });
     activeOrchestratorsF.push(orchestrator);
     orchestrator.on("error", () => {});
+    orchestrator.on("lane:retry-pending", (evt) => retryPendingEvents.push(evt));
 
     await orchestrator.start({ objective: "backoff test", agents: ["dantecode"], repoRoot: testDirF });
 
@@ -3104,10 +3108,146 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
 
     expect(orchestrator.currentStatus).toBe("completed");
-    // FAIL_SESSION should only have been polled ONCE — the retry session has a different sessionId
+    // FAIL_SESSION polled exactly once — retry has different sessionId (P1 snapshot fix)
     expect(pollLog.filter((s) => s === FAIL_SESSION).length).toBe(1);
     const retried = state.agents.find((s) => s.retryCount === 1);
     expect(retried).toBeDefined();
+    // Proves the backoff mechanism actually fired — not just that retry eventually ran
+    expect(retryPendingEvents.length).toBe(1);
+    expect(retryPendingEvents[0]!.retryCount).toBe(1);
+    expect(retryPendingEvents[0]!.retryAfterTs).toBeGreaterThan(Date.now() - 5000);
+  });
+
+  it("D6: P6 cross-lane freeze — paused lane resumes after retry completes (zero-backoff)", async () => {
+    // Lane A (assignedFiles: [SHARED_FILE]) fails → retry issued.
+    // Lane B (assignedFiles: [SHARED_FILE]) should be paused via P6 freeze.
+    // retryBaseDelayMs: 0 → retry session starts as "running" immediately,
+    // so unpausing MUST come from _unpauseWaiters in "completed" branch (not promotion block).
+    // Without the Gap 2 fix, this test deadlocks and times out at 5000ms.
+    const LANE_A_SESSION = "lane-a-fail";
+    const SHARED_FILE = "src/shared.ts";
+
+    const pauseEvents: Array<{ laneId: string; pausedForRetry: string }> = [];
+    const resumeEvents: Array<{ laneId: string }> = [];
+
+    const overlapAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "P6-overlap mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => {
+        if (sessionId === LANE_A_SESSION) return { sessionId, status: "failed" as const };
+        return { sessionId, status: "completed" as const };
+      },
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: [SHARED_FILE] }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", overlapAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 1,
+      retryBaseDelayMs: 0, // zero-backoff — tests the deadlock fix path specifically
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:paused", (evt) => pauseEvents.push(evt));
+    orchestrator.on("lane:resumed", (evt) => resumeEvents.push(evt));
+
+    await orchestrator.start({ objective: "P6 overlap test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as {
+      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+    }).runState!;
+
+    // Lane A: will fail → retry issued with same assignedFiles
+    state.agents.push({
+      laneId: "dantecode-lane-a",
+      agentKind: "dantecode",
+      sessionId: LANE_A_SESSION,
+      status: "running",
+      assignedFiles: [SHARED_FILE],
+      objective: "P6 overlap test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/lane-a",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+
+    // Lane B: running, overlaps Lane A via SHARED_FILE — triggers P6 freeze
+    state.agents.push({
+      laneId: "dantecode-lane-b",
+      agentKind: "dantecode",
+      sessionId: "lane-b-session",
+      status: "running",
+      assignedFiles: [SHARED_FILE],
+      objective: "P6 overlap test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/lane-b",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+
+    state.mandates.push(
+      {
+        laneId: "dantecode-lane-a",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+      {
+        laneId: "dantecode-lane-b",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+    );
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // Run must complete — not deadlock (zero-backoff deadlock fix verified)
+    expect(orchestrator.currentStatus).toBe("completed");
+
+    // Lane B was paused by the P6 freeze
+    const laneBPaused = pauseEvents.find((e) => e.laneId === "dantecode-lane-b");
+    expect(laneBPaused).toBeDefined();
+    expect(laneBPaused!.pausedForRetry).toMatch(/^dantecode-/);
+
+    // Lane B was resumed (critical: proves _unpauseWaiters ran via "completed" branch)
+    const laneBResumed = resumeEvents.find((e) => e.laneId === "dantecode-lane-b");
+    expect(laneBResumed).toBeDefined();
+
+    // Lane A-retry exists with retryCount === 1
+    const retrySession = state.agents.find((s) => s.retryCount === 1);
+    expect(retrySession).toBeDefined();
+
+    // No lanes stuck in non-terminal state (the deadlock regression test)
+    const nonTerminal = state.agents.filter(
+      (s) =>
+        s.status !== "completed" &&
+        s.status !== "failed" &&
+        s.status !== "handed-off" &&
+        s.status !== "aborted",
+    );
+    expect(nonTerminal).toHaveLength(0);
   });
 
   it("D4: concurrent multi-lane failure — both lanes fail, run transitions to failed", async () => {
@@ -3241,6 +3381,222 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     expect(retried).toBeDefined();
     expect(retried?.agentKind).toBe("dantecode");
   });
+
+  it("D7: N-deep retry chain — Lane B transfers pausedForRetry from Retry 1 to Retry 2", async () => {
+    // Retry 1 fails → Retry 2 created. Lane B (shared file) must transfer its
+    // pausedForRetry pointer from Retry 1 to Retry 2 so _unpauseWaiters runs
+    // for the correct laneId when Retry 2 completes.
+    // Without Fix 2 this test deadlocks and times out at 5000ms.
+    const LANE_A_SESSION = "lane-a-fail";
+    const SHARED_FILE = "src/deep-chain.ts";
+    let submitCount = 0;
+    const resumeEvents: Array<{ laneId: string }> = [];
+
+    const chainAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Chain mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => {
+        submitCount++;
+        // Submit 1 = Retry 1 (fails), Submit 2 = Retry 2 (succeeds)
+        const sessionId = submitCount === 1 ? "retry-1-fail" : "retry-2-ok";
+        return { sessionId, accepted: true };
+      },
+      pollStatus: async (sessionId: string) => {
+        if (sessionId === LANE_A_SESSION || sessionId === "retry-1-fail") {
+          return { sessionId, status: "failed" as const };
+        }
+        return { sessionId, status: "completed" as const };
+      },
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s) => ({
+        sessionId: s,
+        unifiedDiff: "diff --git a/x b/x\n+line",
+        changedFiles: [SHARED_FILE],
+      }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", chainAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 2, // N-deep: allows retry of a retry
+      retryBaseDelayMs: 0,
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:resumed", (evt) => resumeEvents.push(evt));
+
+    await orchestrator.start({ objective: "chain test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as {
+      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+    }).runState!;
+
+    state.agents.push({
+      laneId: "dantecode-lane-a",
+      agentKind: "dantecode",
+      sessionId: LANE_A_SESSION,
+      status: "running",
+      assignedFiles: [SHARED_FILE],
+      objective: "chain test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/lane-a",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+
+    state.agents.push({
+      laneId: "dantecode-lane-b",
+      agentKind: "dantecode",
+      sessionId: "lane-b-session",
+      status: "running",
+      assignedFiles: [SHARED_FILE],
+      objective: "chain test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/lane-b",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+
+    state.mandates.push(
+      {
+        laneId: "dantecode-lane-a",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+      {
+        laneId: "dantecode-lane-b",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+    );
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // Run must complete — not deadlock (N-deep retry chain fix verified)
+    expect(orchestrator.currentStatus).toBe("completed");
+
+    // Lane B was resumed (proves _unpauseWaiters eventually ran for the final retry)
+    const laneBResumed = resumeEvents.find((e) => e.laneId === "dantecode-lane-b");
+    expect(laneBResumed).toBeDefined();
+
+    // Two retry sessions were created (Retry 1 + Retry 2)
+    const retryChain = state.agents.filter((s) => s.retryCount > 0);
+    expect(retryChain.length).toBeGreaterThanOrEqual(2);
+
+    // No lanes stuck in non-terminal state (the deadlock regression check)
+    const nonTerminal = state.agents.filter(
+      (s) =>
+        s.status !== "completed" &&
+        s.status !== "failed" &&
+        s.status !== "handed-off" &&
+        s.status !== "aborted",
+    );
+    expect(nonTerminal).toHaveLength(0);
+  });
+
+  it("S1: both lanes fail in same poll cycle → both terminal → watchUntilComplete resolves → status 'failed'", async () => {
+    const adapter = makeInlineAdapter(async (sessionId: string) => ({
+      sessionId,
+      status: "failed" as const,
+      progressSummary: "simulated failure",
+    }));
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 0,
+      retryBaseDelayMs: 0,
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({
+      objective: "dual fail test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
+
+    const state = (orchestrator as unknown as {
+      runState: { agents: AgentSessionState[] };
+    }).runState!;
+
+    state.agents.push(
+      {
+        laneId: "dantecode-lane-a",
+        agentKind: "dantecode",
+        sessionId: "fail-session-a",
+        status: "running",
+        assignedFiles: ["src/foo.ts"],
+        objective: "dual fail test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirF,
+        branch: "feature/lane-a",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+      {
+        laneId: "dantecode-lane-b",
+        agentKind: "dantecode",
+        sessionId: "fail-session-b",
+        status: "running",
+        assignedFiles: ["src/bar.ts"],
+        objective: "dual fail test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirF,
+        branch: "feature/lane-b",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+    );
+
+    // watchUntilComplete must resolve (not hang) — no retry, zero candidates
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // Zero candidates → permanent failure (not "blocked")
+    expect(orchestrator.currentStatus).toBe("failed");
+
+    const sessions = orchestrator.currentRunState?.agents ?? [];
+    const failedSessions = sessions.filter((s) => s.status === "failed");
+    expect(failedSessions.length).toBeGreaterThanOrEqual(2);
+
+    // No lanes stuck in non-terminal state
+    const nonTerminalS1 = sessions.filter(
+      (s) =>
+        s.status !== "completed" &&
+        s.status !== "failed" &&
+        s.status !== "handed-off" &&
+        s.status !== "aborted",
+    );
+    expect(nonTerminalS1).toHaveLength(0);
+  });
 });
 
 // ============================================================================
@@ -3344,5 +3700,433 @@ describe("DanteCodeAdapter edge cases", () => {
     adapter.markFailed(sessionId);
     const afterFail = await adapter.pollStatus(sessionId);
     expect(afterFail.status).toBe("failed");
+  });
+});
+
+// ============================================================================
+// Lane G — Integration: real SelfLaneExecutor + real git repo
+// ============================================================================
+
+describe("Lane G — Integration: real executor + real git", () => {
+  let testDirG: string;
+  const activeOrchestratorsG: CouncilOrchestrator[] = [];
+
+  beforeEach(async () => {
+    testDirG = join(
+      tmpdir(),
+      `council-integration-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await mkdir(testDirG, { recursive: true });
+    // Init a real git repo with an initial commit — needed for git diff HEAD to have a base
+    execSync("git init", { cwd: testDirG, stdio: "pipe" });
+    execSync("git config user.email 'test@test.com'", { cwd: testDirG, stdio: "pipe" });
+    execSync("git config user.name 'Test'", { cwd: testDirG, stdio: "pipe" });
+    execSync("git commit --allow-empty -m 'init'", { cwd: testDirG, stdio: "pipe" });
+  });
+
+  afterEach(async () => {
+    for (const o of activeOrchestratorsG) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown };
+      if (oc.pollTimer) clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+    }
+    activeOrchestratorsG.length = 0;
+    await rm(testDirG, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("I1: real SelfLaneExecutor writes file → collectPatch returns actual git diff → run completes", async () => {
+    // A real executor that writes a file and stages it for git diff HEAD
+    const realExecutor: SelfLaneExecutor = async (_prompt, worktreePath) => {
+      await writeFile(join(worktreePath, "generated.ts"), "export const result = 42;\n");
+      // Stage the file: git diff HEAD shows staged changes vs the initial empty commit
+      execSync("git add generated.ts", { cwd: worktreePath, stdio: "pipe" });
+      return { output: "", success: true, touchedFiles: ["generated.ts"] };
+    };
+
+    const adapter = new DanteCodeAdapter({ executor: realExecutor });
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 20,
+      maxLaneRetries: 0,
+    });
+    activeOrchestratorsG.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({
+      objective: "Write generated.ts",
+      agents: ["dantecode"],
+      repoRoot: testDirG,
+    });
+
+    const assignResult = await orchestrator.assignLane({
+      objective: "Write generated.ts",
+      taskCategory: "coding",
+      ownedFiles: ["generated.ts"],
+      worktreePath: testDirG,
+      branch: "main",
+      baseBranch: "main",
+    });
+    expect(assignResult.accepted).toBe(true);
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 10_000 });
+
+    expect(orchestrator.currentStatus).toBe("completed");
+
+    // MergeBrain ran and produced a synthesis record from the real diff
+    const finalSynthesis = orchestrator.currentRunState?.finalSynthesis;
+    expect(finalSynthesis).toBeDefined();
+    // Single-candidate merge: decision is never "blocked" → success: true
+    expect(finalSynthesis?.mergedPatch).toContain("generated.ts");
+
+    // DanteCodeAdapter.collectPatch() returns the real git diff
+    const completedSession = orchestrator.currentRunState?.agents.find(
+      (s) => s.status === "completed",
+    );
+    expect(completedSession).toBeDefined();
+    const patch = await adapter.collectPatch(completedSession!.sessionId);
+    expect(patch).not.toBeNull();
+    expect(patch!.unifiedDiff).toContain("generated.ts");
+    expect(patch!.changedFiles).toContain("generated.ts");
+  });
+});
+
+// ============================================================================
+// Lane H — Merge Blocked Path
+// Two lanes write conflicting patches to the same file at the same line range.
+// MergeConfidenceScorer returns "blocked" (structural safety = 0, score < 50).
+// Proves: orchestrator transitions to "blocked" (NOT "failed"), preserving patches.
+// ============================================================================
+
+describe("Lane H — Merge Blocked Path", () => {
+  let testDirH: string;
+  const activeOrchestratorsH: CouncilOrchestrator[] = [];
+
+  beforeEach(async () => {
+    testDirH = join(
+      tmpdir(),
+      `council-blocked-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await mkdir(testDirH, { recursive: true });
+  });
+
+  afterEach(async () => {
+    for (const o of activeOrchestratorsH) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown };
+      if (oc.pollTimer) clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+    }
+    activeOrchestratorsH.length = 0;
+    await rm(testDirH, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("B1: conflicting patches → merge blocked → orchestrator transitions to 'blocked' not 'failed'", async () => {
+    const SHARED_FILE = "src/conflict.ts";
+
+    // Both patches touch src/conflict.ts at lines 5-7 — 100% hunk overlap.
+    // MergeConfidenceScorer: structural safety = 0 → score = 0*40 + 1*25 + 0*20 + 1*15 = 40 < 50
+    // → decision: "blocked". No sourceBranch = no tryStructuralMergeIsolated git ops.
+    const patchA = [
+      "diff --git a/src/conflict.ts b/src/conflict.ts",
+      "--- a/src/conflict.ts",
+      "+++ b/src/conflict.ts",
+      "@@ -5,3 +5,3 @@",
+      " context",
+      "-original line",
+      "+lane-a change",
+      " context",
+    ].join("\n");
+
+    const patchB = [
+      "diff --git a/src/conflict.ts b/src/conflict.ts",
+      "--- a/src/conflict.ts",
+      "+++ b/src/conflict.ts",
+      "@@ -5,3 +5,3 @@",
+      " context",
+      "-original line",
+      "+lane-b change",
+      " context",
+    ].join("\n");
+
+    const errorEvents: Array<{ message: string; context?: string }> = [];
+    const transitions: Array<{ from: string; to: string }> = [];
+
+    const blockedAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "blocked-mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: `${randomUUID().slice(0, 8)}`, accepted: true }),
+      pollStatus: async (sessionId: string) => ({ sessionId, status: "completed" as const }),
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s: string) => ({
+        sessionId: s,
+        // Route by sessionId suffix: lane-b-session returns patchB, everything else patchA
+        unifiedDiff: s === "dantecode-lane-b-session" ? patchB : patchA,
+        changedFiles: [SHARED_FILE],
+        // No sourceBranch — avoids tryStructuralMergeIsolated real git operations
+      }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", blockedAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 0,
+    });
+    activeOrchestratorsH.push(orchestrator);
+    orchestrator.on("error", (e) => errorEvents.push(e));
+    orchestrator.on("state:transition", (t) =>
+      transitions.push({ from: t.from, to: t.to }),
+    );
+
+    await orchestrator.start({
+      objective: "conflict test",
+      agents: ["dantecode"],
+      repoRoot: testDirH,
+    });
+
+    const state = (orchestrator as unknown as {
+      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+    }).runState!;
+
+    state.agents.push(
+      {
+        laneId: "dantecode-lane-a",
+        agentKind: "dantecode",
+        sessionId: "dantecode-lane-a-session",
+        status: "running",
+        assignedFiles: [SHARED_FILE],
+        objective: "conflict test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirH,
+        branch: "feature/lane-a",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+      {
+        laneId: "dantecode-lane-b",
+        agentKind: "dantecode",
+        sessionId: "dantecode-lane-b-session",
+        status: "running",
+        assignedFiles: [SHARED_FILE],
+        objective: "conflict test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirH,
+        branch: "feature/lane-b",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+    );
+
+    state.mandates.push(
+      {
+        laneId: "dantecode-lane-a",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+      {
+        laneId: "dantecode-lane-b",
+        ownedFiles: [SHARED_FILE],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+    );
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // Core assertion: blocked (recoverable), NOT failed (permanent destruction)
+    expect(orchestrator.currentStatus).toBe("blocked");
+
+    // Synthesis preserved — patches not destroyed, candidates available for human review
+    const synthesis = orchestrator.currentRunState?.finalSynthesis;
+    expect(synthesis).toBeDefined();
+    expect(synthesis!.candidateLanes.length).toBe(2);
+    expect(synthesis!.decision).toBe("blocked");
+
+    // Error event emitted with merge-blocked context
+    const blockedErr = errorEvents.find((e) => e.context === "merge-blocked");
+    expect(blockedErr).toBeDefined();
+    expect(blockedErr!.message.toLowerCase()).toContain("block");
+
+    // State machine transition: verifying → blocked
+    const toBlocked = transitions.find((t) => t.to === "blocked");
+    expect(toBlocked).toBeDefined();
+    expect(toBlocked!.from).toBe("verifying");
+  });
+});
+
+// ============================================================================
+// Lane I — Multi-Lane Integration
+// Two mock lanes complete with non-overlapping patches (different files).
+// Proves: orchestrator coordinates two lanes end-to-end, merge succeeds,
+// finalSynthesis.candidateLanes.length === 2.
+// ============================================================================
+
+describe("Lane I — Multi-Lane Integration", () => {
+  let testDirI: string;
+  const activeOrchestratorsI: CouncilOrchestrator[] = [];
+
+  beforeEach(async () => {
+    testDirI = join(
+      tmpdir(),
+      `council-multilane-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await mkdir(testDirI, { recursive: true });
+  });
+
+  afterEach(async () => {
+    for (const o of activeOrchestratorsI) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown };
+      if (oc.pollTimer) clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+    }
+    activeOrchestratorsI.length = 0;
+    await rm(testDirI, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("I2: two lanes complete with non-overlapping patches → candidateLanes.length === 2 → status 'completed'", async () => {
+    // Lane A: new file src/lane-a.ts. Lane B: new file src/lane-b.ts. No shared lines.
+    // MergeConfidenceScorer: structural safety = 1.0, no conflicts → score = 100 → auto-merge.
+    const patchA = [
+      "diff --git a/src/lane-a.ts b/src/lane-a.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/src/lane-a.ts",
+      "@@ -0,0 +1,1 @@",
+      "+export const a = 1;",
+    ].join("\n");
+
+    const patchB = [
+      "diff --git a/src/lane-b.ts b/src/lane-b.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/src/lane-b.ts",
+      "@@ -0,0 +1,1 @@",
+      "+export const b = 2;",
+    ].join("\n");
+
+    const multiAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "multi-lane mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => ({ sessionId, status: "completed" as const }),
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s: string) => ({
+        sessionId: s,
+        unifiedDiff: s.includes("lane-a") ? patchA : patchB,
+        changedFiles: s.includes("lane-a") ? ["src/lane-a.ts"] : ["src/lane-b.ts"],
+      }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", multiAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 0,
+    });
+    activeOrchestratorsI.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({
+      objective: "multi-lane test",
+      agents: ["dantecode"],
+      repoRoot: testDirI,
+    });
+
+    const state = (orchestrator as unknown as {
+      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+    }).runState!;
+
+    state.agents.push(
+      {
+        laneId: "dantecode-lane-a",
+        agentKind: "dantecode",
+        sessionId: "lane-a-session",
+        status: "running",
+        assignedFiles: ["src/lane-a.ts"],
+        objective: "multi-lane test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirI,
+        branch: "feature/lane-a",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+      {
+        laneId: "dantecode-lane-b",
+        agentKind: "dantecode",
+        sessionId: "lane-b-session",
+        status: "running",
+        assignedFiles: ["src/lane-b.ts"],
+        objective: "multi-lane test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirI,
+        branch: "feature/lane-b",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState,
+    );
+
+    state.mandates.push(
+      {
+        laneId: "dantecode-lane-a",
+        ownedFiles: ["src/lane-a.ts"],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+      {
+        laneId: "dantecode-lane-b",
+        ownedFiles: ["src/lane-b.ts"],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      },
+    );
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("completed");
+
+    const synthesis = orchestrator.currentRunState?.finalSynthesis;
+    expect(synthesis).toBeDefined();
+
+    // Both lanes contributed to the merge
+    expect(synthesis!.candidateLanes.length).toBe(2);
+
+    // Non-conflicting patches → not blocked
+    expect(synthesis!.decision).not.toBe("blocked");
+
+    // Merged result references both lane files
+    expect(synthesis!.mergedPatch).toContain("lane-a");
+    expect(synthesis!.mergedPatch).toContain("lane-b");
   });
 });

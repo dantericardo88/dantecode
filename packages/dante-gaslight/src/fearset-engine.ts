@@ -58,6 +58,15 @@ export interface FearSetCallbacks {
   /** Called to synthesize a final recommendation from columns. Returns text or null. */
   onSynthesize?: (columnsMarkdown: string) => Promise<string | null>;
 
+  /**
+   * LLM semantic classifier — Tier 2 of the two-tier hybrid risk classifier.
+   * Called only when Tier 1 regex returns shouldTrigger=false (in maybeFearSet).
+   * Receives the user message and a structured 4-question rubric prompt.
+   * Must return a JSON string matching LlmClassificationResult, or null.
+   * If null or unparseable, falls back to no-trigger (backward compatible).
+   */
+  onClassify?: (message: string, rubricPrompt: string) => Promise<string | null>;
+
   /** Called when a Prevent/Repair action is simulatable. Returns evidence or null. */
   onSandboxSimulate?: (action: string, kind: "prevent" | "repair") => Promise<string | null>;
 

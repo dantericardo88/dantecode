@@ -87,6 +87,10 @@ export interface TrailEvent {
   afterSnapshotId?: string;
   /** Trust/completeness score (0-1). */
   trustScore?: number;
+  /** Evidence bundle ID (from @dantecode/evidence-chain). Added by Soul Seal integration. */
+  evidenceBundleId?: string;
+  /** Receipt ID for state-changing events (from @dantecode/evidence-chain). Added by Soul Seal integration. */
+  receiptId?: string;
 }
 
 // ---------------------------------------------------------------------------

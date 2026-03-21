@@ -21,6 +21,7 @@ import type {
 import { ShortTermStore } from "./short-term-store.js";
 import { SessionMemory } from "./session-memory.js";
 import { VectorStore } from "./vector-store.js";
+import { LocalEmbeddingProvider } from "./embedding-provider.js";
 import { EntityExtractor } from "./entity-extractor.js";
 import { Summarizer } from "./summarizer.js";
 import { PruningEngine } from "./pruning-engine.js";
@@ -86,6 +87,9 @@ export class MemoryOrchestrator {
   private readonly enableSemanticRecall: boolean;
   private readonly enableEntityExtraction: boolean;
 
+  // Local embedding provider (TF-IDF, zero deps)
+  private _localEmbedder: LocalEmbeddingProvider;
+
   constructor(options: MemoryOrchestratorOptions) {
     const {
       projectRoot,
@@ -110,6 +114,8 @@ export class MemoryOrchestrator {
     this.localStore = new LocalStore(projectRoot, ioOptions);
     this.sessionMemory = new SessionMemory(this.localStore);
     this.vectorStore = new VectorStore(this.localStore, longTermCapacity);
+    this._localEmbedder = new LocalEmbeddingProvider();
+    this.vectorStore.setEmbeddingProvider((text) => this._localEmbedder.embed(text));
     this.snapshotStore = new SnapshotStore(projectRoot, ioOptions);
 
     // Organ C — Recall
@@ -156,6 +162,15 @@ export class MemoryOrchestrator {
    */
   async initialize(): Promise<void> {
     await this.vectorStore.loadFromDisk();
+
+    // Warm up IDF weights from loaded corpus
+    const allEntries = this.vectorStore.listAll();
+    const allTexts = allEntries.map((item) =>
+      item.summary ?? (typeof item.value === "string" ? item.value : JSON.stringify(item.value)),
+    );
+    if (allTexts.length > 0) {
+      this._localEmbedder.updateCorpus(allTexts);
+    }
 
     if (this.mem0) await this.mem0.initialize();
     if (this.zep) await this.zep.initialize();

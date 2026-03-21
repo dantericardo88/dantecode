@@ -23,7 +23,13 @@ import { tmpdir } from "node:os";
 
 // ─── Subjects ────────────────────────────────────────────────────────────────
 
-import { classifyRisk, buildFearSetTrigger } from "./risk-classifier.js";
+import {
+  classifyRisk,
+  classifyRiskWithLlm,
+  parseLlmClassification,
+  FEARSET_CLASSIFY_RUBRIC,
+  buildFearSetTrigger,
+} from "./risk-classifier.js";
 import {
   buildFearSetColumnPrompt,
   parseFearSetColumnOutput,
@@ -2496,5 +2502,825 @@ describe("DanteGaslightIntegration.getFearSetResults — disk merge", () => {
     const ids = all.map((r) => r.id);
     const uniqueIds = new Set(ids);
     expect(ids.length).toBe(uniqueIds.size);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave 5 — Two-Tier Hybrid Classifier
+// classifyRiskWithLlm + parseLlmClassification + onClassify integration
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── parseLlmClassification unit tests ───────────────────────────────────────
+
+describe("parseLlmClassification", () => {
+  it("parses valid shouldTrigger=true response", () => {
+    const raw = '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"API retirement involves irreversible data loss."}';
+    const result = parseLlmClassification(raw);
+    expect(result).not.toBeNull();
+    expect(result!.shouldTrigger).toBe(true);
+    expect(result!.channel).toBe("destructive");
+    expect(result!.confidence).toBe(0.9);
+  });
+
+  it("parses shouldTrigger=false response", () => {
+    const raw = '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals detected."}';
+    const result = parseLlmClassification(raw);
+    expect(result).not.toBeNull();
+    expect(result!.shouldTrigger).toBe(false);
+  });
+
+  it("clamps confidence above 1 to 1", () => {
+    const raw = '{"shouldTrigger":true,"channel":"long-horizon","confidence":1.5,"rationale":"Over-confident."}';
+    const result = parseLlmClassification(raw);
+    expect(result!.confidence).toBe(1);
+  });
+
+  it("clamps negative confidence to 0", () => {
+    const raw = '{"shouldTrigger":true,"channel":"long-horizon","confidence":-0.3,"rationale":"test"}';
+    const result = parseLlmClassification(raw);
+    expect(result!.confidence).toBe(0);
+  });
+
+  it("returns null for invalid channel", () => {
+    const raw = '{"shouldTrigger":true,"channel":"unknown-channel","confidence":0.8,"rationale":"test"}';
+    expect(parseLlmClassification(raw)).toBeNull();
+  });
+
+  it("returns null for non-JSON input", () => {
+    expect(parseLlmClassification("not json at all")).toBeNull();
+  });
+
+  it("returns null when shouldTrigger is not boolean", () => {
+    const raw = '{"shouldTrigger":"yes","channel":"destructive","confidence":0.8,"rationale":"test"}';
+    expect(parseLlmClassification(raw)).toBeNull();
+  });
+
+  it("extracts JSON embedded in surrounding text", () => {
+    const raw = 'Sure! Here is my classification:\n{"shouldTrigger":true,"channel":"destructive","confidence":0.85,"rationale":"API sunset is irreversible."}\nLet me know if you need more.';
+    const result = parseLlmClassification(raw);
+    expect(result).not.toBeNull();
+    expect(result!.shouldTrigger).toBe(true);
+  });
+
+  it("defaults confidence to 0.7 when confidence field is missing", () => {
+    const raw = '{"shouldTrigger":true,"channel":"long-horizon","rationale":"multi-phase"}';
+    const result = parseLlmClassification(raw);
+    expect(result!.confidence).toBe(0.7);
+  });
+});
+
+// ─── classifyRiskWithLlm ──────────────────────────────────────────────────────
+
+describe("classifyRiskWithLlm", () => {
+  const ENABLED_OPTS = { config: { ...ENABLED_FEARSET_CONFIG } };
+
+  it("TC-CL-01: no callback → same result as classifyRisk() (backward compat)", async () => {
+    const sync = classifyRisk("what is the weather like?", ENABLED_OPTS);
+    const async_ = await classifyRiskWithLlm("what is the weather like?", ENABLED_OPTS);
+    expect(async_.shouldTrigger).toBe(sync.shouldTrigger);
+  });
+
+  it("TC-CL-02: onClassify returns null → no trigger (backward compat)", async () => {
+    const result = await classifyRiskWithLlm(
+      "can you help me think through whether we should sunset the old API?",
+      ENABLED_OPTS,
+      async () => null,
+    );
+    expect(result.shouldTrigger).toBe(false);
+  });
+
+  it("TC-CL-03: LLM triggers nuanced 'sunset old API' → shouldTrigger=true, channel=destructive", async () => {
+    const result = await classifyRiskWithLlm(
+      "can you help me think through whether we should sunset the old API?",
+      ENABLED_OPTS,
+      async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.87,"rationale":"API retirement is irreversible system change."}',
+    );
+    expect(result.shouldTrigger).toBe(true);
+    expect(result.channel).toBe("destructive");
+    expect(result.confidence).toBe(0.87);
+  });
+
+  it("TC-CL-04: LLM triggers 'refactor auth getting complex' → long-horizon", async () => {
+    const result = await classifyRiskWithLlm(
+      "I want to refactor auth — it's getting complex",
+      ENABLED_OPTS,
+      async () => '{"shouldTrigger":true,"channel":"long-horizon","confidence":0.82,"rationale":"Multi-phase auth refactor spans several weeks."}',
+    );
+    expect(result.shouldTrigger).toBe(true);
+    expect(result.channel).toBe("long-horizon");
+  });
+
+  it("TC-CL-05: Tier 1 fast path — regex match bypasses LLM entirely", async () => {
+    const onClassify = vi.fn(async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}');
+    const result = await classifyRiskWithLlm(
+      "drop table users",  // hits DESTRUCTIVE_PATTERNS
+      ENABLED_OPTS,
+      onClassify,
+    );
+    expect(result.shouldTrigger).toBe(true);
+    expect(onClassify).not.toHaveBeenCalled();
+  });
+
+  it("TC-CL-06: LLM parse error (non-JSON) → graceful no-trigger", async () => {
+    const result = await classifyRiskWithLlm(
+      "refactor the auth layer",
+      ENABLED_OPTS,
+      async () => "Sorry, I cannot help with that.",
+    );
+    expect(result.shouldTrigger).toBe(false);
+  });
+
+  it("TC-CL-07: onClassify throws → graceful no-trigger (non-fatal)", async () => {
+    const result = await classifyRiskWithLlm(
+      "should we sunset the API?",
+      ENABLED_OPTS,
+      async () => { throw new Error("network error"); },
+    );
+    expect(result.shouldTrigger).toBe(false);
+  });
+
+  it("TC-CL-08: LLM returns shouldTrigger=false → no trigger", async () => {
+    const result = await classifyRiskWithLlm(
+      "add a dark mode toggle",
+      ENABLED_OPTS,
+      async () => '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals."}',
+    );
+    expect(result.shouldTrigger).toBe(false);
+  });
+
+  it("TC-CL-09: confidence clamped from LLM → result.confidence in [0,1]", async () => {
+    const result = await classifyRiskWithLlm(
+      "should we retire the billing service?",
+      ENABLED_OPTS,
+      async () => '{"shouldTrigger":true,"channel":"destructive","confidence":2.5,"rationale":"Very confident."}',
+    );
+    expect(result.shouldTrigger).toBe(true);
+    expect(result.confidence).toBeLessThanOrEqual(1);
+    expect(result.confidence).toBeGreaterThanOrEqual(0);
+  });
+
+  it("TC-CL-10: invalid channel in LLM response → no trigger (parse fail)", async () => {
+    const result = await classifyRiskWithLlm(
+      "should we sunset the v1 API?",
+      ENABLED_OPTS,
+      async () => '{"shouldTrigger":true,"channel":"totally-made-up","confidence":0.9,"rationale":"test"}',
+    );
+    expect(result.shouldTrigger).toBe(false);
+  });
+
+  it("TC-CL-11: rubric prompt passed to onClassify contains key rubric text", async () => {
+    let capturedRubric = "";
+    await classifyRiskWithLlm(
+      "thinking through whether to sunset the v1 API",
+      ENABLED_OPTS,
+      async (_msg, rubric) => {
+        capturedRubric = rubric;
+        return '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"none"}';
+      },
+    );
+    expect(capturedRubric).toContain("irreversible changes");
+    expect(capturedRubric).toContain("sunsetting");
+  });
+
+  it("TC-CL-12: original message passed to onClassify unchanged", async () => {
+    const msg = "should we sunset the v1 API and migrate users?";
+    let capturedMsg = "";
+    await classifyRiskWithLlm(
+      msg,
+      ENABLED_OPTS,
+      async (message, _rubric) => {
+        capturedMsg = message;
+        return '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"none"}';
+      },
+    );
+    expect(capturedMsg).toBe(msg);
+  });
+
+  it("TC-CL-13: config.enabled=false → no trigger, onClassify never called", async () => {
+    const onClassify = vi.fn(async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}');
+    const result = await classifyRiskWithLlm(
+      "sunset the old API",
+      { config: { ...ENABLED_FEARSET_CONFIG, enabled: false } },
+      onClassify,
+    );
+    expect(result.shouldTrigger).toBe(false);
+    expect(onClassify).not.toHaveBeenCalled();
+  });
+});
+
+// ─── DanteGaslightIntegration.maybeFearSet — onClassify integration ───────────
+
+describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integration", () => {
+  let testDir: string;
+  beforeEach(() => { testDir = makeTestDir(); });
+  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+
+  it("TC-INT-01: onClassify called when Tier 1 misses nuanced message", async () => {
+    const onClassify = vi.fn(async () =>
+      '{"shouldTrigger":true,"channel":"destructive","confidence":0.88,"rationale":"API retirement."}',
+    );
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    const result = await engine.maybeFearSet({
+      message: "can you help me think through whether we should sunset the old v1 API?",
+      callbacks: { ...makeMockCallbacks(), onClassify },
+    });
+    expect(onClassify).toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result!.trigger.channel).toBe("destructive");
+  });
+
+  it("TC-INT-02: onClassify NOT called when Tier 1 regex hits", async () => {
+    const onClassify = vi.fn(async () =>
+      '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}',
+    );
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    await engine.maybeFearSet({
+      message: "rm -rf /prod/data — nuke everything",  // Tier 1 hit
+      callbacks: { ...makeMockCallbacks(), onClassify },
+    });
+    expect(onClassify).not.toHaveBeenCalled();
+  });
+
+  it("TC-INT-03: returns null when onClassify says shouldTrigger=false", async () => {
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    const result = await engine.maybeFearSet({
+      message: "add a dark mode toggle to the settings page",
+      callbacks: {
+        ...makeMockCallbacks(),
+        onClassify: async () =>
+          '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk."}',
+      },
+    });
+    expect(result).toBeNull();
+  });
+
+  it("TC-INT-04: returns null when onClassify throws (non-fatal)", async () => {
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    const result = await engine.maybeFearSet({
+      message: "should we sunset the old billing API?",
+      callbacks: {
+        ...makeMockCallbacks(),
+        onClassify: async () => { throw new Error("LLM unavailable"); },
+      },
+    });
+    // LLM error → falls back to Tier 1 (no trigger for this nuanced message)
+    expect(result).toBeNull();
+  });
+
+  it("TC-INT-05: LLM-detected long-horizon channel appears in result.trigger.channel", async () => {
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    const result = await engine.maybeFearSet({
+      message: "help me think through a 6-month migration plan for our auth system",
+      callbacks: {
+        ...makeMockCallbacks(),
+        onClassify: async () =>
+          '{"shouldTrigger":true,"channel":"long-horizon","confidence":0.85,"rationale":"6-month migration is long-horizon."}',
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result!.trigger.channel).toBe("long-horizon");
+  });
+
+  it("TC-INT-06: rubric string passed to onClassify contains key rubric question text", async () => {
+    let receivedRubric = "";
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
+      ...ENABLED_FEARSET_CONFIG,
+      enabled: true,
+    });
+    await engine.maybeFearSet({
+      message: "I am wondering if we should sunset the v1 API",
+      callbacks: {
+        ...makeMockCallbacks(),
+        onClassify: async (_msg, rubric) => {
+          receivedRubric = rubric;
+          return '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"none"}';
+        },
+      },
+    });
+    // The rubric must contain the key questions we want the LLM to evaluate
+    expect(receivedRubric).toContain("irreversible changes");
+    expect(receivedRubric).toContain("sunsetting");
+    expect(receivedRubric).toContain("shouldTrigger");
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LLM callback content pipeline — semantic richness
+// Verifies that specific values returned by LLM callbacks flow correctly
+// through parse/apply/store into result fields.
+// All tests use runFearSetEngine directly for precision (no integration layer).
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("LLM callback content pipeline — semantic richness", () => {
+  // ── Test 1: onColumn define → result.columns[0].worstCases ──────────────
+  it("onColumn define: specific worst-cases appear in result.columns worstCases", async () => {
+    const specificCases = ["Database corruption", "Total data loss", "Auth token leak"];
+    const result = await runFearSetEngine(
+      "Should we migrate the auth service?",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "define") return makeDefineJson(specificCases);
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const defineCol = result.columns.find((c) => c.name === "define");
+    expect(defineCol).toBeDefined();
+    expect(defineCol!.worstCases).toContain("Database corruption");
+    expect(defineCol!.worstCases).toContain("Total data loss");
+    expect(defineCol!.worstCases).toContain("Auth token leak");
+    expect(defineCol!.worstCases).toHaveLength(3);
+  });
+
+  // ── Test 2: onColumn prevent → preventionActions[0].mechanism ───────────
+  it("onColumn prevent: specific mechanism text flows into preventionActions[0].mechanism", async () => {
+    const specificMechanism = "Blue-green deployment with automated health checks every 30s";
+    const customPrevent = JSON.stringify({
+      preventionActions: [{
+        id: "pa-custom",
+        description: "Blue-green switch",
+        mechanism: specificMechanism,
+        riskReduction: 0.8,
+        simulationStatus: "non-simulatable",
+      }],
+    });
+    const result = await runFearSetEngine(
+      "Deploy the new service",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "prevent") return customPrevent;
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const preventCol = result.columns.find((c) => c.name === "prevent");
+    expect(preventCol).toBeDefined();
+    expect(preventCol!.preventionActions[0]!.mechanism).toBe(specificMechanism);
+  });
+
+  // ── Test 3: onColumn repair → repairPlans[0].steps equals sent array ────
+  it("onColumn repair: specific steps array is preserved in repairPlans[0].steps", async () => {
+    const specificSteps = [
+      "Page on-call engineer",
+      "Roll back via git revert HEAD~1",
+      "Run smoke tests",
+      "Confirm in Datadog dashboard",
+    ];
+    const customRepair = JSON.stringify({
+      repairPlans: [{
+        id: "rp-custom",
+        description: "Emergency rollback",
+        steps: specificSteps,
+        estimatedRecovery: "15 minutes",
+        simulationStatus: "non-simulatable",
+      }],
+    });
+    const result = await runFearSetEngine(
+      "Deploy the new service",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "repair") return customRepair;
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const repairCol = result.columns.find((c) => c.name === "repair");
+    expect(repairCol).toBeDefined();
+    expect(repairCol!.repairPlans[0]!.steps).toEqual(specificSteps);
+  });
+
+  // ── Test 4: onColumn benefits → benefits[0] equals sent string ──────────
+  it("onColumn benefits: specific benefit string appears in benefits array", async () => {
+    const specificBenefit = "30% reduction in API latency for all customers";
+    const customBenefits = JSON.stringify({
+      benefits: [specificBenefit, "Improved SLA compliance to 99.99%"],
+    });
+    const result = await runFearSetEngine(
+      "Migrate to new CDN",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "benefits") return customBenefits;
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const benefitsCol = result.columns.find((c) => c.name === "benefits");
+    expect(benefitsCol).toBeDefined();
+    expect(benefitsCol!.benefits[0]).toBe(specificBenefit);
+  });
+
+  // ── Test 5: onColumn inaction → inactionCosts[0].severity === "critical" ─
+  it("onColumn inaction: severity 'critical' is preserved in inactionCosts[0].severity", async () => {
+    const customInaction = JSON.stringify({
+      inactionCosts: [{
+        description: "Irreversible market share loss to competitor",
+        timeHorizon: "6 weeks",
+        severity: "critical",
+      }],
+    });
+    const result = await runFearSetEngine(
+      "Should we sunset the v1 API?",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "inaction") return customInaction;
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const inactionCol = result.columns.find((c) => c.name === "inaction");
+    expect(inactionCol).toBeDefined();
+    expect(inactionCol!.inactionCosts[0]!.severity).toBe("critical");
+  });
+
+  // ── Test 6: onGate byColumn.define: 0.92 flows through ──────────────────
+  it("onGate byColumn.define=0.92 flows through to robustnessScore.byColumn.define", async () => {
+    const customGate = JSON.stringify({
+      overall: 0.88,
+      byColumn: { define: 0.92, prevent: 0.85, repair: 0.82, benefits: 0.78, inaction: 0.76 },
+      hasSimulationEvidence: false,
+      estimatedRiskReduction: 0.65,
+      gateDecision: "pass",
+      justification: "Strong across all columns.",
+    });
+    const result = await runFearSetEngine(
+      "Should we sunset the v1 API?",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onGate: async () => customGate }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.robustnessScore?.byColumn?.define).toBeCloseTo(0.92);
+  });
+
+  // ── Test 7: onGate justification text flows through ──────────────────────
+  it("onGate justification text appears in robustnessScore.justification", async () => {
+    const specificJustification = "Define column extremely detailed; repair plan has sandbox evidence.";
+    const customGate = JSON.stringify({
+      overall: 0.9,
+      hasSimulationEvidence: true,
+      estimatedRiskReduction: 0.7,
+      gateDecision: "pass",
+      justification: specificJustification,
+    });
+    const result = await runFearSetEngine(
+      "Deploy the payment service rewrite",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onGate: async () => customGate }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.robustnessScore?.justification).toContain(specificJustification);
+  });
+
+  // ── Test 8: onGate hasSimulationEvidence: true ───────────────────────────
+  it("onGate hasSimulationEvidence=true flows through to robustnessScore.hasSimulationEvidence", async () => {
+    const customGate = JSON.stringify({
+      overall: 0.88,
+      hasSimulationEvidence: true,
+      estimatedRiskReduction: 0.72,
+      gateDecision: "pass",
+      justification: "Sandbox evidence confirmed.",
+    });
+    const result = await runFearSetEngine(
+      "Run migration on prod",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onGate: async () => customGate }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.robustnessScore?.hasSimulationEvidence).toBe(true);
+  });
+
+  // ── Test 9: onGate estimatedRiskReduction: 0.78 flows through ───────────
+  it("onGate estimatedRiskReduction=0.78 flows through to robustnessScore", async () => {
+    const customGate = JSON.stringify({
+      overall: 0.87,
+      hasSimulationEvidence: false,
+      estimatedRiskReduction: 0.78,
+      gateDecision: "pass",
+      justification: "High risk reduction.",
+    });
+    const result = await runFearSetEngine(
+      "Archive old user data",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onGate: async () => customGate }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.robustnessScore?.estimatedRiskReduction).toBeCloseTo(0.78);
+  });
+
+  // ── Test 10: onSynthesize decision "conditional" flows through ───────────
+  it("onSynthesize decision='conditional' appears in synthesizedRecommendation.decision", async () => {
+    const synthResponse = JSON.stringify({
+      decision: "conditional",
+      reasoning: "Plan is solid but requires sign-off from the data team.",
+      conditions: ["Get DBA sign-off", "Run in staging for 48h first"],
+    });
+    const result = await runFearSetEngine(
+      "Should we sunset the v1 API?",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onSynthesize: async () => synthResponse }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.decision).toBe("conditional");
+  });
+
+  // ── Test 11: onSynthesize conditions array flows through ─────────────────
+  it("onSynthesize conditions array flows through to synthesizedRecommendation.conditions", async () => {
+    const specificConditions = [
+      "Confirm rollback plan has been tested in staging",
+      "Get written approval from VP of Engineering",
+      "Schedule during low-traffic window (Tue 2-4am UTC)",
+    ];
+    const synthResponse = JSON.stringify({
+      decision: "conditional",
+      reasoning: "Requires gated conditions before proceeding.",
+      conditions: specificConditions,
+    });
+    const result = await runFearSetEngine(
+      "Should we sunset the v1 API?",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onSynthesize: async () => synthResponse }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.conditions).toEqual(specificConditions);
+  });
+
+  // ── Test 12: onSynthesize reasoning text flows through ───────────────────
+  it("onSynthesize reasoning text appears in synthesizedRecommendation.reasoning", async () => {
+    const specificReasoning = "The plan has adequate coverage across all five columns and sandbox verification was completed.";
+    const synthResponse = JSON.stringify({
+      decision: "go",
+      reasoning: specificReasoning,
+      conditions: [],
+    });
+    const result = await runFearSetEngine(
+      "Launch the feature",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onSynthesize: async () => synthResponse }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.reasoning).toContain(specificReasoning);
+  });
+
+  // ── Test 13: Integrity — simulationStatus "simulated" without evidence → downgraded ─
+  it("prevention action with simulationStatus='simulated' but no evidence is downgraded to 'partially-simulatable'", async () => {
+    const integrityViolation = JSON.stringify({
+      preventionActions: [{
+        id: "pa-integrity",
+        description: "Run DB migration in a transaction",
+        mechanism: "Wrap in BEGIN/COMMIT with savepoint",
+        riskReduction: 0.75,
+        simulationStatus: "simulated",  // claims simulated...
+        simulationEvidence: "",          // ...but provides no evidence
+      }],
+    });
+    const result = await runFearSetEngine(
+      "Run the database migration",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({
+        onColumn: async (_sys, _user, column) => {
+          if (column === "prevent") return integrityViolation;
+          return makeMockCallbacks().onColumn!(_sys, _user, column);
+        },
+      }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const preventCol = result.columns.find((c) => c.name === "prevent");
+    expect(preventCol).toBeDefined();
+    // Integrity guard: "simulated" without evidence must be downgraded
+    expect(preventCol!.preventionActions[0]!.simulationStatus).toBe("partially-simulatable");
+    expect(preventCol!.preventionActions[0]!.simulationStatus).not.toBe("simulated");
+  });
+
+  // ── Test 14: E2E narrative — "Should we sunset the v1 API?" ─────────────
+  it("E2E narrative: 'Should we sunset the v1 API?' — all 5 callbacks return rich content, result is populated and passed", async () => {
+    const apiSunsetCases = [
+      "Client integrations break silently",
+      "Revenue drop from enterprise customers",
+      "Support escalations surge",
+    ];
+    const result = await runFearSetEngine(
+      "Should we sunset the v1 API?",
+      { channel: "explicit-user", rationale: "User asked /fearset", at: new Date().toISOString() },
+      {
+        onColumn: async (_sys, _user, column) => {
+          switch (column) {
+            case "define":   return makeDefineJson(apiSunsetCases);
+            case "prevent":  return makePreventJson();
+            case "repair":   return makeRepairJson();
+            case "benefits": return makeBenefitsJson();
+            case "inaction": return makeInactionJson();
+            default:         return "{}";
+          }
+        },
+        onGate: async () => makeGatePassJson(),
+        onSynthesize: async () => JSON.stringify({
+          decision: "conditional",
+          reasoning: "The sunset is viable but requires a 6-month deprecation notice and migration guides.",
+          conditions: [
+            "Publish migration guide 6 months before sunset date",
+            "Send email to all API key holders",
+            "Maintain v1 in read-only mode for 3 months post-deprecation",
+          ],
+        }),
+      },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+
+    // All 5 columns populated
+    expect(result.columns).toHaveLength(5);
+    const defineCol = result.columns.find((c) => c.name === "define");
+    expect(defineCol!.worstCases).toHaveLength(3);
+    expect(defineCol!.worstCases).toContain("Client integrations break silently");
+
+    const preventCol = result.columns.find((c) => c.name === "prevent");
+    expect(preventCol!.preventionActions.length).toBeGreaterThan(0);
+
+    const repairCol = result.columns.find((c) => c.name === "repair");
+    expect(repairCol!.repairPlans.length).toBeGreaterThan(0);
+
+    const benefitsCol = result.columns.find((c) => c.name === "benefits");
+    expect(benefitsCol!.benefits.length).toBeGreaterThan(0);
+
+    const inactionCol = result.columns.find((c) => c.name === "inaction");
+    expect(inactionCol!.inactionCosts.length).toBeGreaterThan(0);
+
+    // Gate passed
+    expect(result.passed).toBe(true);
+    expect(result.robustnessScore?.gateDecision).toBe("pass");
+
+    // Synthesized recommendation populated from onSynthesize callback
+    expect(result.synthesizedRecommendation?.decision).toBe("conditional");
+    expect(result.synthesizedRecommendation?.conditions).toHaveLength(3);
+    expect(result.synthesizedRecommendation?.reasoning).toContain("deprecation notice");
+  });
+
+  // ── Test 15: onSynthesize null → heuristic fires (not undefined) ─────────
+  it("onSynthesize returning null falls back to heuristic recommendation (not undefined)", async () => {
+    const result = await runFearSetEngine(
+      "Archive the old analytics data",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks({ onSynthesize: async () => null }),
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    // synthesizedRecommendation must be defined even when onSynthesize returns null
+    expect(result.synthesizedRecommendation).toBeDefined();
+    // Heuristic fires — decision is one of the three valid decisions
+    expect(["go", "no-go", "conditional"]).toContain(result.synthesizedRecommendation!.decision);
+    // Heuristic reasoning is non-empty
+    expect(result.synthesizedRecommendation!.reasoning.length).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Heuristic recommendation quality — all decision paths
+// ─────────────────────────────────────────────────────────────────────────────
+// All tests use onSynthesize: undefined to force the heuristic path and
+// a carefully crafted onGate JSON to exercise each branch of
+// heuristicRecommendation(). No LLM inference required — fully deterministic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("heuristic recommendation quality — all decision paths", () => {
+  /** onGate JSON that sets gateDecision, hasSimulationEvidence, estimatedRiskReduction. */
+  function makeGateJson(
+    gateDecision: "pass" | "fail" | "review-required",
+    estimatedRiskReduction: number,
+    hasSimulationEvidence: boolean,
+  ): string {
+    return JSON.stringify({
+      overall: gateDecision === "fail" ? 0.3 : gateDecision === "review-required" ? 0.6 : 0.85,
+      byColumn: { define: 0.8, prevent: 0.8, repair: 0.8, benefits: 0.7, inaction: 0.7 },
+      hasSimulationEvidence,
+      estimatedRiskReduction,
+      gateDecision,
+      justification: "test",
+    });
+  }
+
+  const CB_BASE = makeMockCallbacks({ onSynthesize: undefined });
+
+  // ── Test HR-01: gate fail → decision no-go ──────────────────────────────
+  it("HR-01: gate 'fail' → synthesizedRecommendation.decision === 'no-go'", async () => {
+    const result = await runFearSetEngine(
+      "Drop the production database",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("fail", 0.1, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.decision).toBe("no-go");
+  });
+
+  // ── Test HR-02: gate fail → conditions empty ─────────────────────────────
+  it("HR-02: gate 'fail' → conditions is empty array", async () => {
+    const result = await runFearSetEngine(
+      "Drop the production database",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("fail", 0.1, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.conditions).toEqual([]);
+  });
+
+  // ── Test HR-03: gate review-required → decision conditional ─────────────
+  it("HR-03: gate 'review-required' → synthesizedRecommendation.decision === 'conditional'", async () => {
+    const result = await runFearSetEngine(
+      "Migrate auth provider",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("review-required", 0.4, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.decision).toBe("conditional");
+  });
+
+  // ── Test HR-04: gate review-required → conditions non-empty ─────────────
+  it("HR-04: gate 'review-required' → conditions.length >= 1", async () => {
+    const result = await runFearSetEngine(
+      "Migrate auth provider",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("review-required", 0.4, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect((result.synthesizedRecommendation?.conditions ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  // ── Test HR-05: pass + high reduction + simulation → go ─────────────────
+  it("HR-05: gate 'pass' + riskReduction 0.7 + hasSimulation → decision 'go'", async () => {
+    const result = await runFearSetEngine(
+      "Deploy with feature flags",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.7, true) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.decision).toBe("go");
+  });
+
+  // ── Test HR-06: pass + high reduction + simulation → conditions empty ────
+  it("HR-06: gate 'pass' + riskReduction 0.7 + hasSimulation → conditions === []", async () => {
+    const result = await runFearSetEngine(
+      "Deploy with feature flags",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.7, true) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.conditions).toEqual([]);
+  });
+
+  // ── Test HR-07: pass + medium reduction + no simulation → sandbox-test condition ─
+  it("HR-07: gate 'pass' + riskReduction 0.4 + no simulation → conditions includes 'Sandbox-test'", async () => {
+    const result = await runFearSetEngine(
+      "Gradual infrastructure migration",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.4, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    const conditions = result.synthesizedRecommendation?.conditions ?? [];
+    expect(conditions.some((c) => c.includes("Sandbox-test"))).toBe(true);
+  });
+
+  // ── Test HR-08: pass + medium reduction + simulation → monitor-only condition ─
+  it("HR-08: gate 'pass' + riskReduction 0.4 + hasSimulation → conditions === ['Monitor closely during execution']", async () => {
+    const result = await runFearSetEngine(
+      "Gradual infrastructure migration",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.4, true) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.conditions).toEqual(["Monitor closely during execution"]);
+  });
+
+  // ── Test HR-09: pass + low reduction → logging + rollback conditions ─────
+  it("HR-09: gate 'pass' + riskReduction 0.1 → decision 'conditional', conditions include 'Enable detailed logging'", async () => {
+    const result = await runFearSetEngine(
+      "Tentative schema change",
+      EXPLICIT_TRIGGER,
+      { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.1, false) },
+      { config: ENABLED_FEARSET_CONFIG },
+    );
+    expect(result.synthesizedRecommendation?.decision).toBe("conditional");
+    const conditions = result.synthesizedRecommendation?.conditions ?? [];
+    expect(conditions.some((c) => c.includes("Enable detailed logging"))).toBe(true);
   });
 });

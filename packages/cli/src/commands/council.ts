@@ -13,13 +13,14 @@
 //   dantecode council verify
 //   dantecode council push
 //   dantecode council resume <run-id>
+//   dantecode council fleet "<objective>" [--agents=builder,reviewer,tester]
 // ============================================================================
 
 import { join } from "node:path";
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { createWorktree, removeWorktree } from "@dantecode/git-engine";
 
@@ -292,6 +293,9 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   const bridgeDir = args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length);
   // --background for fire-and-forget; default is foreground
   const background = args.includes("--background");
+  // --no-worktree: explicitly disable NOMA isolation and share the main repo.
+  // Without this flag, worktree creation failure is a hard error (not a silent fallback).
+  const noWorktree = args.includes("--no-worktree");
 
   const timeoutSecs = parseInt(
     args.find((a) => a.startsWith("--timeout="))?.slice("--timeout=".length) ?? "0",
@@ -338,11 +342,24 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
       try { execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 }); } catch { /* non-fatal */ }
-      console.error(
-        `${RED}[council] Worktree creation failed for ${agentKind}: ${wtMsg}` +
-        ` — NOMA isolation disabled, agents share main repo (conflict risk)${RESET}`,
-      );
-      worktreePath = projectRoot;
+      if (noWorktree) {
+        console.warn(
+          `${YELLOW}[council] Worktree creation failed for ${agentKind}: ${wtMsg}.` +
+          ` --no-worktree active — falling back to shared repo (NOMA isolation disabled).${RESET}`,
+        );
+        worktreePath = projectRoot;
+      } else {
+        console.error(
+          `${RED}[council] Worktree creation failed for ${agentKind}: ${wtMsg}${RESET}\n` +
+          `  NOMA isolation requires an isolated worktree. Re-run with --no-worktree to explicitly disable it (conflict risk).`,
+        );
+        // Clean up any worktrees already created during earlier loop iterations.
+        for (const wt of createdWorktrees) {
+          try { removeWorktree(wt); } catch { /* non-fatal */ }
+        }
+        await orchestrator.fail("worktree creation failed");
+        return;
+      }
     }
 
     const req: LaneAssignmentRequest = {
@@ -828,6 +845,280 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
 }
 
 // ----------------------------------------------------------------------------
+// Fleet subcommand — declarative agent manifest runner
+// ----------------------------------------------------------------------------
+
+/** Agent manifest loaded from .dantecode/agents/<name>.yaml */
+interface AgentManifest {
+  name: string;
+  description?: string;
+  model?: string;
+  sandbox_mode?: string;
+  system_prompt?: string;
+  tool_permissions?: string[];
+  [key: string]: unknown;
+}
+
+/**
+ * Reads .dantecode/agents/*.yaml manifests from the project root.
+ * Returns an array of parsed manifests. Non-fatal: skips unreadable files.
+ */
+async function loadAgentManifests(projectRoot: string): Promise<AgentManifest[]> {
+  const agentsDir = join(projectRoot, ".dantecode", "agents");
+  let files: string[];
+  try {
+    files = readdirSync(agentsDir).filter(
+      (f) => f.endsWith(".yaml") || f.endsWith(".yml"),
+    );
+  } catch {
+    return [];
+  }
+
+  const manifests: AgentManifest[] = [];
+  for (const file of files) {
+    try {
+      const raw = await readFile(join(agentsDir, file), "utf-8");
+      // Minimal YAML key-value parser — handles string/list values.
+      // We avoid pulling in a YAML dependency; the manifest format is simple.
+      const manifest: AgentManifest = { name: file.replace(/\.(yaml|yml)$/, "") };
+      let currentListKey: string | null = null;
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) {
+          currentListKey = null;
+          continue;
+        }
+        // List item continuation
+        if (trimmed.startsWith("- ") && currentListKey) {
+          const listVal = trimmed.slice(2).trim();
+          const existing = (manifest as Record<string, unknown>)[currentListKey];
+          if (Array.isArray(existing)) {
+            existing.push(listVal);
+          } else {
+            (manifest as Record<string, unknown>)[currentListKey] = [listVal];
+          }
+          continue;
+        }
+        // Key: value
+        const colonIdx = trimmed.indexOf(":");
+        if (colonIdx === -1) { currentListKey = null; continue; }
+        const key = trimmed.slice(0, colonIdx).trim();
+        const value = trimmed.slice(colonIdx + 1).trim();
+        currentListKey = null;
+        if (value === "" || value === "|") {
+          // Multi-line or list — start tracking
+          currentListKey = key;
+          (manifest as Record<string, unknown>)[key] = value === "|" ? "" : [];
+        } else {
+          (manifest as Record<string, unknown>)[key] = value;
+        }
+      }
+      manifests.push(manifest);
+    } catch {
+      // Skip unreadable manifests — non-fatal
+    }
+  }
+  return manifests;
+}
+
+/**
+ * Maps an agent manifest name to a CouncilOrchestrator AgentKind.
+ * Known names (builder/planner/reviewer/tester) map to "dantecode" (in-process executor).
+ * Unknown names also default to "dantecode" for extensibility.
+ */
+function manifestToAgentKind(_manifest: AgentManifest): AgentKind {
+  return "dantecode";
+}
+
+async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
+  const objectiveIdx = args.findIndex((a) => !a.startsWith("--"));
+  const objective = args.slice(objectiveIdx).filter((a) => !a.startsWith("--")).join(" ").trim();
+
+  if (!objective) {
+    console.error(
+      `${RED}Usage: dantecode council fleet "<objective>" [--agents=builder,reviewer,tester] [--no-worktree]${RESET}`,
+    );
+    process.exit(1);
+  }
+
+  const agentsFlag = args.find((a) => a.startsWith("--agents="))?.slice("--agents=".length);
+  const noWorktree = args.includes("--no-worktree");
+  const timeoutSecs = parseInt(
+    args.find((a) => a.startsWith("--timeout="))?.slice("--timeout=".length) ?? "0",
+    10,
+  );
+  const timeoutMs = timeoutSecs > 0 ? timeoutSecs * 1000 : undefined;
+
+  // Load agent manifests from .dantecode/agents/
+  const allManifests = await loadAgentManifests(projectRoot);
+
+  let selectedManifests: AgentManifest[];
+  if (agentsFlag) {
+    const requested = agentsFlag.split(",").map((s) => s.trim());
+    selectedManifests = requested
+      .map((name) => allManifests.find((m) => m.name === name))
+      .filter((m): m is AgentManifest => m !== undefined);
+    if (selectedManifests.length === 0) {
+      // Fall back to defaults when no manifests found
+      selectedManifests = requested.map((name) => ({ name }));
+    }
+  } else if (allManifests.length > 0) {
+    // Use all loaded manifests — skip planner (read-only) in active execution
+    selectedManifests = allManifests.filter((m) => m.name !== "planner");
+    if (selectedManifests.length === 0) selectedManifests = allManifests;
+  } else {
+    // No manifests found — use default fleet
+    selectedManifests = [
+      { name: "builder", sandbox_mode: "workspace-write" },
+      { name: "reviewer", sandbox_mode: "read-only" },
+      { name: "tester", sandbox_mode: "workspace-write" },
+    ];
+  }
+
+  const agentKinds: AgentKind[] = selectedManifests.map(manifestToAgentKind);
+
+  console.log(`${GREEN}${BOLD}Council Fleet${RESET}`);
+  console.log(`  Objective: ${objective}`);
+  console.log(`  Manifest dir: ${join(projectRoot, ".dantecode", "agents")}`);
+  console.log(`  Agents loaded: ${selectedManifests.map((m) => m.name).join(", ")}`);
+  console.log(``);
+
+  if (allManifests.length === 0) {
+    console.log(
+      `${YELLOW}No manifests found in .dantecode/agents/ — using default fleet (builder, reviewer, tester).${RESET}`,
+    );
+    console.log(
+      `${DIM}Create YAML manifests in .dantecode/agents/ to customize agent roles and models.${RESET}`,
+    );
+    console.log(``);
+  } else {
+    for (const m of selectedManifests) {
+      console.log(
+        `  ${CYAN}${m.name}${RESET}  ${DIM}${m.description ?? "(no description)"}${RESET}  model: ${m.model ?? "default"}`,
+      );
+    }
+    console.log(``);
+  }
+
+  // Delegate to cmdStart with the resolved agents
+  const startArgs = [
+    `"${objective}"`,
+    `--agents=${agentKinds.join(",")}`,
+    ...(noWorktree ? ["--no-worktree"] : []),
+    ...(timeoutSecs > 0 ? [`--timeout=${timeoutSecs}`] : []),
+  ];
+
+  const adapters = buildAdapters(agentKinds, { projectRoot });
+  const orchestrator = new CouncilOrchestrator(adapters);
+
+  orchestrator.on("error", ({ message, context }) => {
+    console.error(`${RED}[fleet] ${context ?? "error"}: ${message}${RESET}`);
+  });
+
+  const auditLogPath = join(projectRoot, ".dantecode", "council", "audit.jsonl");
+  const runId = await orchestrator.start({
+    objective,
+    agents: agentKinds,
+    repoRoot: projectRoot,
+    auditLogPath,
+  });
+
+  console.log(`${GREEN}Fleet run started${RESET}`);
+  console.log(`  Run ID:  ${CYAN}${runId}${RESET}`);
+  console.log(``);
+
+  const createdWorktrees: string[] = [];
+
+  for (const manifest of selectedManifests) {
+    const agentKind = manifestToAgentKind(manifest);
+    const wtTimestamp = Date.now();
+    const sessionId = `${runId.slice(-8)}-${manifest.name}-${wtTimestamp}`;
+    const branch = `fleet-${runId.slice(-8)}-${manifest.name}-${wtTimestamp}`;
+    let worktreePath: string;
+
+    try {
+      const result = createWorktree({
+        branch,
+        baseBranch: "HEAD",
+        sessionId,
+        directory: projectRoot,
+      });
+      worktreePath = result.directory;
+      createdWorktrees.push(worktreePath);
+      console.log(`${DIM}  Worktree [${manifest.name}]: ${worktreePath}${RESET}`);
+    } catch (wtErr: unknown) {
+      const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
+      try { execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 }); } catch { /* non-fatal */ }
+      if (noWorktree) {
+        console.warn(
+          `${YELLOW}[fleet] Worktree creation failed for ${manifest.name}: ${wtMsg}. Using shared repo.${RESET}`,
+        );
+        worktreePath = projectRoot;
+      } else {
+        console.error(
+          `${RED}[fleet] Worktree creation failed for ${manifest.name}: ${wtMsg}${RESET}\n` +
+          `  Re-run with --no-worktree to disable NOMA isolation.`,
+        );
+        for (const wt of createdWorktrees) {
+          try { removeWorktree(wt); } catch { /* non-fatal */ }
+        }
+        await orchestrator.fail("worktree creation failed");
+        return;
+      }
+    }
+
+    const laneResult = await orchestrator.assignLane({
+      preferredAgent: agentKind,
+      objective: `[${manifest.name}] ${objective}`,
+      worktreePath,
+      branch,
+      baseBranch: "main",
+      taskCategory: manifest.name === "tester" ? "testing" : "coding",
+      ownedFiles: [],
+    });
+
+    if (laneResult.accepted) {
+      console.log(`${GREEN}  Lane: ${laneResult.laneId} [${manifest.name}]${RESET}`);
+    } else {
+      console.warn(`${YELLOW}  Lane rejected for ${manifest.name}: ${laneResult.reason ?? "unknown"}${RESET}`);
+    }
+  }
+
+  console.log(``);
+  orchestrator.on("lane:completed", ({ laneId, agentKind }) => {
+    console.log(`[fleet] Lane ${laneId} (${agentKind as string}) completed`);
+  });
+  orchestrator.on("merge:complete", (r) => {
+    console.log(`[fleet] Merge: ${r.synthesis.decision}`);
+  });
+  orchestrator.on("state:transition", ({ from, to }) => {
+    console.log(`[fleet] ${from} → ${to}`);
+  });
+
+  const onSIGINT = (): void => {
+    console.log(`\n[fleet] Detaching — resume with: dantecode council resume ${runId}`);
+    for (const wt of createdWorktrees) {
+      try { removeWorktree(wt); } catch { /* non-fatal */ }
+    }
+    process.exit(0);
+  };
+  process.once("SIGINT", onSIGINT);
+  try {
+    await orchestrator.watchUntilComplete(timeoutMs !== undefined ? { timeoutMs } : undefined);
+  } finally {
+    for (const wt of createdWorktrees) {
+      try { removeWorktree(wt); } catch { /* non-fatal */ }
+    }
+  }
+  process.off("SIGINT", onSIGINT);
+  console.log(`\n[fleet] Run ${runId} finished: ${orchestrator.currentStatus}`);
+
+  // Silence the unused variable warning — startArgs is intentionally unused after we
+  // chose to inline the orchestration logic here rather than forwarding to cmdStart.
+  void startArgs;
+}
+
+// ----------------------------------------------------------------------------
 // Main command router
 // ----------------------------------------------------------------------------
 
@@ -874,6 +1165,9 @@ export async function runCouncilCommand(
     case "bridge-listen":
       await cmdBridgeListen(rest, projectRoot);
       break;
+    case "fleet":
+      await cmdFleet(rest, projectRoot);
+      break;
     default:
       printHelp();
   }
@@ -898,4 +1192,8 @@ function printHelp(): void {
   console.log(`  ${CYAN}push${RESET}`);
   console.log(`  ${CYAN}resume${RESET} <run-id>`);
   console.log(`  ${CYAN}bridge-listen${RESET} [run-id] [--timeout=<secs>]`);
+  console.log(
+    `  ${CYAN}fleet${RESET} "<objective>" [--agents=builder,reviewer,tester] [--no-worktree]`,
+  );
+  console.log(`         Reads .dantecode/agents/*.yaml manifests and launches parallel lanes.`);
 }

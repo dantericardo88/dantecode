@@ -114,15 +114,17 @@ export class AnomalyDetector {
 
     const flags: AnomalyFlag[] = [];
     const window = this.config.burstDeletionWindowMs;
+    // Pre-compute timestamps once to avoid repeated Date construction in the inner loop
+    const deletionTimestamps = deletions.map((e) => new Date(e.timestamp).getTime());
 
     for (let i = 0; i <= deletions.length - this.config.burstDeletionCount; i++) {
-      const start = new Date(deletions[i]!.timestamp).getTime();
-      const end = new Date(deletions[i + this.config.burstDeletionCount - 1]!.timestamp).getTime();
+      const start = deletionTimestamps[i]!;
+      const end = deletionTimestamps[i + this.config.burstDeletionCount - 1]!;
       if (end - start <= window) {
         // Extend to capture all deletions within the burst window (not just the first N)
         let j = i + this.config.burstDeletionCount;
         while (j < deletions.length) {
-          const extentMs = new Date(deletions[j]!.timestamp).getTime() - start;
+          const extentMs = deletionTimestamps[j]! - start;
           if (extentMs <= window) {
             j++;
           } else {
@@ -153,6 +155,8 @@ export class AnomalyDetector {
 
     const flags: AnomalyFlag[] = [];
     const window = this.config.rapidLoopWindowMs;
+    // Pre-compute timestamps once to avoid repeated Date construction in the window check
+    const eventTimestamps = events.map((e) => new Date(e.timestamp).getTime());
 
     // Fingerprint includes operation target — different files/summaries are NOT a loop
     const fingerprints = events.map(
@@ -166,8 +170,8 @@ export class AnomalyDetector {
         .every((f) => f === fp);
       if (!isLoop) continue;
 
-      const start = new Date(events[i]!.timestamp).getTime();
-      const end = new Date(events[i + this.config.rapidLoopCount - 1]!.timestamp).getTime();
+      const start = eventTimestamps[i]!;
+      const end = eventTimestamps[i + this.config.rapidLoopCount - 1]!;
       if (end - start <= window) {
         const relatedEventIds = events.slice(i, i + this.config.rapidLoopCount).map((e) => e.id);
         flags.push({

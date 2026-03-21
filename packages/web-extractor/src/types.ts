@@ -30,6 +30,7 @@ export interface WebFetchResult {
     title?: string;
     snippet?: string;
   }>;
+  verificationWarnings?: string[];
 }
 
 export interface ExtractionGoal {

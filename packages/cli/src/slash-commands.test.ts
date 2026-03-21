@@ -133,6 +133,7 @@ function makeState(projectRoot: string): ReplState {
     activeSkill: null,
     waveState: null,
     gaslight: null,
+    memoryOrchestrator: null,
   };
 }
 

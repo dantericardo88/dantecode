@@ -41,7 +41,8 @@
   },
   "dependencies": {
     "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0"
+    "@dantecode/core": "1.0.0",
+    "@dantecode/evidence-chain": "1.0.0"
   },
   "publishConfig": {
     "access": "public"

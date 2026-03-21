@@ -186,6 +186,7 @@ function makeReplState(overrides?: Record<string, unknown>) {
     activeSkill: null,
     waveState: null,
     gaslight: null,
+    memoryOrchestrator: null,
     ...overrides,
   };
 }

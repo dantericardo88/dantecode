@@ -68,6 +68,8 @@ export class TrailStore {
     lastSeq: 0,
   };
   private sessions: Record<string, SessionRecord> = {};
+  /** In-memory event cache — populated on init, kept in sync on appendEvent/rebuildIndex. */
+  private eventMap = new Map<string, TrailEvent>();
   private ready = false;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -85,7 +87,31 @@ export class TrailStore {
     await mkdir(this.paths.snapshotsDir, { recursive: true });
     await this.loadIndex();
     await this.loadSessions();
+    await this.loadEvents();
+    // Rebuild index from events if index.json was entirely absent — events.jsonl is authoritative.
+    // Only triggers when the file does not exist (not when it exists but is corrupted).
+    // Handles cross-instance reads where appendEvent() was called before flush() persisted
+    // the index (e.g. TrailStore A appends events without flush(); TrailStore B reads them).
+    if (
+      this.eventMap.size > 0 &&
+      Object.keys(this.index.bySession).length === 0 &&
+      !existsSync(this.paths.indexFile)
+    ) {
+      for (const event of this.eventMap.values()) {
+        this.indexSingleEvent(event);
+      }
+    }
     this.ready = true;
+  }
+
+  private async loadEvents(): Promise<void> {
+    const events = await this.readJsonlFile<TrailEvent>(
+      this.paths.eventsLog,
+      this.paths.eventsLog + ".corrupt",
+    );
+    for (const e of events) {
+      this.eventMap.set(e.id, e);
+    }
   }
 
   private async loadIndex(): Promise<void> {
@@ -133,15 +159,37 @@ export class TrailStore {
   }
 
   // -------------------------------------------------------------------------
-  // Append event (hot path — <5ms target)
+  // Generic JSONL reader — shared by readAllEvents, readAllTombstones, readAllSnapshotRecords
   // -------------------------------------------------------------------------
 
-  async appendEvent(event: TrailEvent): Promise<void> {
-    await this.ensureReady();
-    const line = JSON.stringify(event) + "\n";
-    await appendFile(this.paths.eventsLog, line, "utf8");
+  private async readJsonlFile<T>(jsonlPath: string, corruptPath: string): Promise<T[]> {
+    if (!existsSync(jsonlPath)) return [];
+    const raw = await readFile(jsonlPath, "utf8");
+    const results: T[] = [];
+    let byteOffset = 0;
+    for (const line of raw.split("\n")) {
+      if (line.trim()) {
+        try {
+          results.push(JSON.parse(line) as T);
+        } catch {
+          void appendFile(
+            corruptPath,
+            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
+            "utf8",
+          ).catch(() => {});
+        }
+      }
+      byteOffset += line.length + 1;
+    }
+    return results;
+  }
 
-    // Update in-memory index
+  // -------------------------------------------------------------------------
+  // Single-event index update — shared by appendEvent and rebuildIndex
+  // Note: does NOT update session records (only appendEvent does that).
+  // -------------------------------------------------------------------------
+
+  private indexSingleEvent(event: TrailEvent): void {
     const sid = event.provenance.sessionId;
     if (!this.index.bySession[sid]) this.index.bySession[sid] = [];
     this.index.bySession[sid]!.push(event.id);
@@ -157,8 +205,23 @@ export class TrailStore {
 
     this.index.seqByEvent[event.id] = event.seq;
     this.index.lastSeq = Math.max(this.index.lastSeq, event.seq);
+  }
+
+  // -------------------------------------------------------------------------
+  // Append event (hot path — <5ms target)
+  // -------------------------------------------------------------------------
+
+  async appendEvent(event: TrailEvent): Promise<void> {
+    await this.ensureReady();
+    const line = JSON.stringify(event) + "\n";
+    await appendFile(this.paths.eventsLog, line, "utf8");
+
+    // Update in-memory index and event cache
+    this.indexSingleEvent(event);
+    this.eventMap.set(event.id, event);
 
     // Update session record
+    const sid = event.provenance.sessionId;
     const now = event.timestamp;
     if (!this.sessions[sid]) {
       this.sessions[sid] = {
@@ -205,84 +268,64 @@ export class TrailStore {
   /** Read all events from the JSONL log. */
   async readAllEvents(): Promise<TrailEvent[]> {
     await this.ensureReady();
-    if (!existsSync(this.paths.eventsLog)) return [];
-    const raw = await readFile(this.paths.eventsLog, "utf8");
+    return this.readJsonlFile<TrailEvent>(this.paths.eventsLog, this.paths.eventsLog + ".corrupt");
+  }
+
+  /** Query events by session ID. O(k) via in-memory index + event cache. */
+  async queryBySession(sessionId: string): Promise<TrailEvent[]> {
+    await this.ensureReady();
+    const ids = this.index.bySession[sessionId] ?? [];
+    return ids.flatMap((id) => {
+      const e = this.eventMap.get(id);
+      return e ? [e] : [];
+    });
+  }
+
+  /** Query events by file path (exact or prefix match). O(files + k) via index + event cache. */
+  async queryByFile(filePath: string): Promise<TrailEvent[]> {
+    await this.ensureReady();
+    const seen = new Set<string>();
     const results: TrailEvent[] = [];
-    let byteOffset = 0;
-    for (const line of raw.split("\n")) {
-      if (line.trim()) {
-        try {
-          results.push(JSON.parse(line) as TrailEvent);
-        } catch {
-          // Append to corrupt log with byte offset for manual recovery
-          void appendFile(
-            this.paths.eventsLog + ".corrupt",
-            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
-            "utf8",
-          ).catch(() => {});
+    for (const [fp, ids] of Object.entries(this.index.byFile)) {
+      if (fp === filePath || fp.startsWith(filePath)) {
+        for (const id of ids) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            const e = this.eventMap.get(id);
+            if (e) results.push(e);
+          }
         }
       }
-      byteOffset += line.length + 1; // +1 for the \n
     }
     return results;
   }
 
-  /** Query events by session ID. */
-  async queryBySession(sessionId: string): Promise<TrailEvent[]> {
-    const all = await this.readAllEvents();
-    return all.filter((e) => e.provenance.sessionId === sessionId);
-  }
-
-  /** Query events by file path (exact or prefix match). */
-  async queryByFile(filePath: string): Promise<TrailEvent[]> {
-    const all = await this.readAllEvents();
-    return all.filter((e) => {
-      const fp = e.payload["filePath"];
-      return typeof fp === "string" && (fp === filePath || fp.startsWith(filePath));
+  /** Query events by kind. O(k) via in-memory index + event cache. */
+  async queryByKind(kind: string): Promise<TrailEvent[]> {
+    await this.ensureReady();
+    const ids = this.index.byKind[kind] ?? [];
+    return ids.flatMap((id) => {
+      const e = this.eventMap.get(id);
+      return e ? [e] : [];
     });
   }
 
-  /** Query events by kind. */
-  async queryByKind(kind: string): Promise<TrailEvent[]> {
-    const all = await this.readAllEvents();
-    return all.filter((e) => e.kind === kind);
-  }
-
-  /** Query events matching a text search (actor, summary, payload). */
+  /** Query events matching a text search (actor, summary, payload). O(n) in-memory scan. */
   async queryByText(search: string): Promise<TrailEvent[]> {
+    await this.ensureReady();
     const lower = search.toLowerCase();
-    const all = await this.readAllEvents();
-    return all.filter((e) => {
-      return (
+    return Array.from(this.eventMap.values()).filter(
+      (e) =>
         e.actor.toLowerCase().includes(lower) ||
         e.summary.toLowerCase().includes(lower) ||
-        JSON.stringify(e.payload).toLowerCase().includes(lower)
-      );
-    });
+        JSON.stringify(e.payload).toLowerCase().includes(lower),
+    );
   }
 
   /** Read all tombstones. */
   async readAllTombstones(): Promise<DeleteTombstone[]> {
     await this.ensureReady();
-    if (!existsSync(this.paths.tombstonesLog)) return [];
-    const raw = await readFile(this.paths.tombstonesLog, "utf8");
-    const results: DeleteTombstone[] = [];
-    let byteOffset = 0;
-    for (const line of raw.split("\n")) {
-      if (line.trim()) {
-        try {
-          results.push(JSON.parse(line) as DeleteTombstone);
-        } catch {
-          void appendFile(
-            this.paths.tombstonesLog + ".corrupt",
-            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
-            "utf8",
-          ).catch(() => {});
-        }
-      }
-      byteOffset += line.length + 1;
-    }
-    return results;
+    return this.readJsonlFile<DeleteTombstone>(this.paths.tombstonesLog, this.paths.tombstonesLog + ".corrupt");
   }
 
   // -------------------------------------------------------------------------
@@ -299,25 +342,7 @@ export class TrailStore {
   /** Read all snapshot records from the manifest log. */
   async readAllSnapshotRecords(): Promise<FileSnapshotRecord[]> {
     await this.ensureReady();
-    if (!existsSync(this.paths.snapshotManifestLog)) return [];
-    const raw = await readFile(this.paths.snapshotManifestLog, "utf8");
-    const results: FileSnapshotRecord[] = [];
-    let byteOffset = 0;
-    for (const line of raw.split("\n")) {
-      if (line.trim()) {
-        try {
-          results.push(JSON.parse(line) as FileSnapshotRecord);
-        } catch {
-          void appendFile(
-            this.paths.snapshotManifestLog + ".corrupt",
-            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
-            "utf8",
-          ).catch(() => {});
-        }
-      }
-      byteOffset += line.length + 1;
-    }
-    return results;
+    return this.readJsonlFile<FileSnapshotRecord>(this.paths.snapshotManifestLog, this.paths.snapshotManifestLog + ".corrupt");
   }
 
   /** Get session records. */
@@ -330,25 +355,15 @@ export class TrailStore {
     return this.index.lastSeq;
   }
 
-  /** Rebuild the in-memory index by re-reading the entire events JSONL. */
+  /** Rebuild the in-memory index and event cache by re-reading the entire events JSONL. */
   async rebuildIndex(): Promise<void> {
     await this.ensureReady();
     const events = await this.readAllEvents();
-    // Reset index
     this.index = { bySession: {}, byFile: {}, byKind: {}, seqByEvent: {}, lastSeq: 0 };
+    this.eventMap.clear();
     for (const event of events) {
-      const sid = event.provenance.sessionId;
-      if (!this.index.bySession[sid]) this.index.bySession[sid] = [];
-      this.index.bySession[sid]!.push(event.id);
-      if (event.payload["filePath"] && typeof event.payload["filePath"] === "string") {
-        const fp = event.payload["filePath"] as string;
-        if (!this.index.byFile[fp]) this.index.byFile[fp] = [];
-        this.index.byFile[fp]!.push(event.id);
-      }
-      if (!this.index.byKind[event.kind]) this.index.byKind[event.kind] = [];
-      this.index.byKind[event.kind]!.push(event.id);
-      this.index.seqByEvent[event.id] = event.seq;
-      this.index.lastSeq = Math.max(this.index.lastSeq, event.seq);
+      this.indexSingleEvent(event);
+      this.eventMap.set(event.id, event);
     }
     await this.persistIndex();
   }

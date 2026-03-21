@@ -91,7 +91,7 @@ function gitStatus(projectRoot: string): void {
 
     // Current branch
     try {
-      const branch = gitExec("rev-parse --abbrev-ref HEAD", projectRoot);
+      const branch = gitExec(["rev-parse", "--abbrev-ref", "HEAD"], projectRoot);
       process.stdout.write(`  ${DIM}Branch:${RESET} ${BOLD}${branch}${RESET}\n`);
     } catch {
       // Not a git repo or no commits
@@ -99,8 +99,8 @@ function gitStatus(projectRoot: string): void {
 
     // Remote tracking info
     try {
-      const upstream = gitExec("rev-parse --abbrev-ref @{upstream}", projectRoot);
-      const aheadBehind = gitExec("rev-list --left-right --count @{upstream}...HEAD", projectRoot);
+      const upstream = gitExec(["rev-parse", "--abbrev-ref", "@{upstream}"], projectRoot);
+      const aheadBehind = gitExec(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], projectRoot);
       const [behind, ahead] = aheadBehind.split("\t").map(Number);
       if (ahead && ahead > 0) {
         process.stdout.write(`  ${GREEN}Ahead ${ahead} commit(s)${RESET}`);
@@ -180,7 +180,7 @@ function gitLog(args: string[], projectRoot: string): void {
   const count = args[0] || "15";
 
   try {
-    const log = gitExec(`log --oneline --graph --decorate --color=always -${count}`, projectRoot);
+    const log = gitExec(["log", "--oneline", "--graph", "--decorate", "--color=always", `-${count}`], projectRoot);
 
     process.stdout.write(`\n${BOLD}Commit History (last ${count}):${RESET}\n\n`);
     process.stdout.write(log);

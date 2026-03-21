@@ -11,3 +11,4 @@ export * from "./cache/persistent-cache.js";
 export * from "./providers/basic-fetch.js";
 export * from "./providers/stagehand-provider.js";
 export * from "./providers/crawlee-provider.js";
+export { detectInjection } from "./injection-detector.js";
