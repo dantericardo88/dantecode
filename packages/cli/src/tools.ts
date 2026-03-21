@@ -35,6 +35,7 @@ import {
   synthesizeResults,
   formatSynthesizedResult,
 } from "@dantecode/core";
+import type { SandboxBridge } from "./sandbox-bridge.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -80,6 +81,12 @@ export interface CliToolExecutionContext {
   editAttempts?: Map<string, number>;
   /** Injected by the agent loop to enable sub-agent spawning. */
   subAgentExecutor?: SubAgentExecutor;
+  /**
+   * When set, Bash tool commands are routed through this bridge instead of
+   * using execSync directly. Routes to Docker when available, falls back to
+   * LocalExecutor when Docker is not present.
+   */
+  sandboxBridge?: SandboxBridge;
 }
 
 /** Supported tool names. */
@@ -282,8 +289,16 @@ async function toolEdit(
 
 /**
  * Bash tool: executes a shell command and returns stdout/stderr.
+ * When context.sandboxBridge is set, routes the command through the sandbox
+ * (Docker container when available, LocalExecutor fallback otherwise) instead
+ * of calling execSync directly on the host. The non-sandbox execSync path is
+ * preserved as the fallback when sandboxBridge is NOT present.
  */
-async function toolBash(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolBash(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
   const command = input["command"] as string | undefined;
   if (!command) {
     return { content: "Error: command parameter is required", isError: true };
@@ -291,6 +306,14 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
 
   const timeoutMs = typeof input["timeout"] === "number" ? input["timeout"] : 120000;
 
+  // Route through sandbox bridge when enabled — real isolation via Docker or LocalExecutor.
+  // This is the critical fix: when enableSandbox=true, commands are no longer executed
+  // directly on the host via execSync; they go through the sandboxed executor.
+  if (context?.sandboxBridge) {
+    return context.sandboxBridge.runInSandbox(command, timeoutMs);
+  }
+
+  // Non-sandbox fallback: direct host execution via execSync.
   try {
     const result = execSync(command, {
       cwd: projectRoot,
@@ -1604,7 +1627,7 @@ export async function executeTool(
       result = await toolEdit(input, projectRoot, context);
       break;
     case "Bash":
-      result = await toolBash(input, projectRoot);
+      result = await toolBash(input, projectRoot, context);
       break;
     case "Glob":
       result = await toolGlob(input, projectRoot);
@@ -1722,6 +1745,7 @@ function normalizeExecutionContext(
     readTracker: sessionOrContext.readTracker ?? new Map(),
     editAttempts: sessionOrContext.editAttempts ?? new Map(),
     subAgentExecutor: sessionOrContext.subAgentExecutor,
+    sandboxBridge: sessionOrContext.sandboxBridge,
   };
 }
 
