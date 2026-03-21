@@ -139,8 +139,10 @@ export class SessionHealthProvider implements vscode.WebviewViewProvider {
     const nonce = _nonce();
     const snap = this._snapshot;
 
-    const ctxColor = snap.contextPercent > 75 ? "#f97316" : snap.contextPercent > 50 ? "#eab308" : "#22c55e";
-    const roundPct = snap.roundBudget > 0 ? Math.round((snap.roundsUsed / snap.roundBudget) * 100) : 0;
+    const ctxColor =
+      snap.contextPercent > 75 ? "#f97316" : snap.contextPercent > 50 ? "#eab308" : "#22c55e";
+    const roundPct =
+      snap.roundBudget > 0 ? Math.round((snap.roundsUsed / snap.roundBudget) * 100) : 0;
     const roundColor = roundPct > 80 ? "#f97316" : roundPct > 60 ? "#eab308" : "#22c55e";
     const pdseColor =
       snap.pdseScore === undefined
@@ -150,7 +152,8 @@ export class SessionHealthProvider implements vscode.WebviewViewProvider {
           : snap.pdseScore >= 0.7
             ? "#eab308"
             : "#ef4444";
-    const pdseDisplay = snap.pdseScore !== undefined ? (snap.pdseScore * 100).toFixed(0) + "%" : "—";
+    const pdseDisplay =
+      snap.pdseScore !== undefined ? (snap.pdseScore * 100).toFixed(0) + "%" : "—";
 
     const stateIcon: Record<string, string> = {
       idle: "⬤",
@@ -168,8 +171,11 @@ export class SessionHealthProvider implements vscode.WebviewViewProvider {
     const toolRows = snap.recentTools
       .map((t) => {
         const icon = t.state === "success" ? "✓" : t.state === "blocked" ? "✗" : "!";
-        const color = t.state === "success" ? "#22c55e" : t.state === "blocked" ? "#ef4444" : "#f97316";
-        const detail = t.detail ? ` <span class="detail">${_escHtml(t.detail.slice(0, 40))}</span>` : "";
+        const color =
+          t.state === "success" ? "#22c55e" : t.state === "blocked" ? "#ef4444" : "#f97316";
+        const detail = t.detail
+          ? ` <span class="detail">${_escHtml(t.detail.slice(0, 40))}</span>`
+          : "";
         return `<div class="tool-row"><span style="color:${color}">${icon}</span> ${_escHtml(t.name)}${detail}</div>`;
       })
       .join("");
@@ -293,7 +299,11 @@ function _nonce(): string {
 }
 
 function _escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function _timeAgo(ts: number): string {

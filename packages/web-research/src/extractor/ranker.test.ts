@@ -13,7 +13,12 @@ describe("RelevanceRanker", () => {
     it("ranks more relevant results higher", () => {
       const results = [
         makeResult("https://example.com/irrelevant", "Something Unrelated", "cats and dogs", 1),
-        makeResult("https://example.com/relevant", "TypeScript Guide", "typescript monorepo workspace packages", 2),
+        makeResult(
+          "https://example.com/relevant",
+          "TypeScript Guide",
+          "typescript monorepo workspace packages",
+          2,
+        ),
       ];
       const ranked = ranker.rank(results, "typescript monorepo");
       expect(ranked[0]!.url).toBe("https://example.com/relevant");
@@ -74,8 +79,18 @@ describe("RelevanceRanker", () => {
     it("respects authorityOverrides from opts", () => {
       const query = "internal documentation";
       const results = [
-        makeResult("https://docs.internal.company.com/api", "Internal API Docs", "internal documentation api reference", 1),
-        makeResult("https://github.com/internal/repo", "GitHub Internal", "internal documentation github", 2),
+        makeResult(
+          "https://docs.internal.company.com/api",
+          "Internal API Docs",
+          "internal documentation api reference",
+          1,
+        ),
+        makeResult(
+          "https://github.com/internal/repo",
+          "GitHub Internal",
+          "internal documentation github",
+          2,
+        ),
       ];
       const ranked = ranker.rank(results, query, {
         authorityOverrides: { "docs.internal.company.com": 15 }, // Higher than github's 10
@@ -91,9 +106,7 @@ describe("RelevanceRanker", () => {
     });
 
     it("handles invalid URL without throwing", () => {
-      const results = [
-        makeResult("not-a-url", "Bad URL", "some content", 1),
-      ];
+      const results = [makeResult("not-a-url", "Bad URL", "some content", 1)];
       expect(() => ranker.rank(results, "content")).not.toThrow();
     });
   });

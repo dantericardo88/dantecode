@@ -115,7 +115,10 @@ describe("AcquireUrl integration", () => {
             });
           }
 
-          const content = await readFile(join(projectRoot, String(request.input["file_path"])), "utf-8");
+          const content = await readFile(
+            join(projectRoot, String(request.input["file_path"])),
+            "utf-8",
+          );
           return {
             content,
             isError: false,

@@ -36,7 +36,9 @@ describe("matchGlob", () => {
   });
 
   it("matches **/node_modules/** ignore pattern", () => {
-    expect(matchGlob("**/node_modules/**", "packages/core/node_modules/lodash/index.js")).toBe(true);
+    expect(matchGlob("**/node_modules/**", "packages/core/node_modules/lodash/index.js")).toBe(
+      true,
+    );
   });
 
   it("does not match **/node_modules/** against src/index.ts", () => {
@@ -91,7 +93,11 @@ describe("FilePatternWatcher", () => {
     };
 
     mockWatchFn.mockImplementation(
-      (_path: string, _opts: unknown, callback: (event: string, filename: string | null) => void) => {
+      (
+        _path: string,
+        _opts: unknown,
+        callback: (event: string, filename: string | null) => void,
+      ) => {
         capturedCallback = callback;
         return mockWatcher;
       },

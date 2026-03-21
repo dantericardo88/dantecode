@@ -8,7 +8,12 @@ import { PdseBridge, getPdseBridge, resetPdseBridge } from "./pdse-bridge.js";
 import type { PdseState } from "./pdse-bridge.js";
 import { ThemeEngine } from "../theme-engine.js";
 
-const trusted: PdseState = { overall: 0.9, label: "High confidence", verified: true, pipeline: "forge" };
+const trusted: PdseState = {
+  overall: 0.9,
+  label: "High confidence",
+  verified: true,
+  pipeline: "forge",
+};
 const caution: PdseState = { overall: 0.6, metrics: { Preciseness: 0.5, Depth: 0.7 } };
 const blocked: PdseState = { overall: 0.3, verified: false };
 
@@ -79,7 +84,11 @@ describe("PdseBridge", () => {
     it("gives proceed guidance for trusted score", () => {
       const steps = bridge.getNextStepGuidance(trusted, "forge");
       expect(steps.length).toBeGreaterThan(0);
-      expect(steps.some((s) => s.includes("proceed") || s.includes("safe") || s.includes("high-confidence"))).toBe(true);
+      expect(
+        steps.some(
+          (s) => s.includes("proceed") || s.includes("safe") || s.includes("high-confidence"),
+        ),
+      ).toBe(true);
     });
 
     it("recommends review for caution score", () => {
@@ -89,7 +98,11 @@ describe("PdseBridge", () => {
 
     it("recommends not shipping for blocked score", () => {
       const steps = bridge.getNextStepGuidance(blocked);
-      expect(steps.some((s) => s.toLowerCase().includes("not ship") || s.toLowerCase().includes("do not"))).toBe(true);
+      expect(
+        steps.some(
+          (s) => s.toLowerCase().includes("not ship") || s.toLowerCase().includes("do not"),
+        ),
+      ).toBe(true);
     });
 
     it("mentions low-scoring dimensions for caution", () => {

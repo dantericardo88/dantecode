@@ -68,7 +68,9 @@ export class AutomationPanelProvider implements vscode.WebviewViewProvider {
       ]);
       const taskById = new Map(backgroundTasks.map((task) => [task.id, task]));
       const sorted = [...executions]
-        .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+        .sort(
+          (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+        )
         .slice(0, MAX_EXECUTIONS);
 
       const counts = {
@@ -94,7 +96,7 @@ export class AutomationPanelProvider implements vscode.WebviewViewProvider {
             pdseScore: entry.pdseScore,
             summary: entry.summary ?? "",
             backgroundStatus: entry.backgroundTaskId
-              ? taskById.get(entry.backgroundTaskId)?.status ?? null
+              ? (taskById.get(entry.backgroundTaskId)?.status ?? null)
               : null,
             formattedTime: formatTimestamp(entry.updatedAt),
           })),

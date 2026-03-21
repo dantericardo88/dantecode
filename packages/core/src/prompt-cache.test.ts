@@ -56,7 +56,7 @@ describe("toCacheControlBlocks", () => {
   it("sets type to 'text' for all blocks", () => {
     const sections = buildCacheablePrompt("sys", "tools", "dyn");
     const blocks = toCacheControlBlocks(sections);
-    expect(blocks.every(b => b.type === "text")).toBe(true);
+    expect(blocks.every((b) => b.type === "text")).toBe(true);
   });
 });
 
@@ -70,16 +70,14 @@ describe("estimateCacheSavings", () => {
   });
 
   it("returns 0 when nothing is cacheable", () => {
-    const sections = [
-      { content: "aaaa", cacheable: false },
-    ];
+    const sections = [{ content: "aaaa", cacheable: false }];
     expect(estimateCacheSavings(sections)).toBe(0);
   });
 
   it("returns correct ratio for mixed sections", () => {
     const sections = [
-      { content: "aaaa", cacheable: true },  // 4 chars
-      { content: "bb", cacheable: false },   // 2 chars
+      { content: "aaaa", cacheable: true }, // 4 chars
+      { content: "bb", cacheable: false }, // 2 chars
     ];
     // 4/6 = 0.666...
     expect(estimateCacheSavings(sections)).toBeCloseTo(0.667, 2);

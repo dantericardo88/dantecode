@@ -139,7 +139,7 @@ export class FleetBudget {
     if (tokens < existing.tokens || costUsd < existing.cost) {
       console.warn(
         `[FleetBudget] cumulative regression for ${agentId}: ` +
-        `tokens ${existing.tokens}→${tokens}, cost ${existing.cost}→${costUsd}`,
+          `tokens ${existing.tokens}→${tokens}, cost ${existing.cost}→${costUsd}`,
       );
     }
 
@@ -159,11 +159,9 @@ export class FleetBudget {
 
     // Check exhaustion
     const tokenExhausted =
-      this.config.maxTotalTokens > 0 &&
-      this.state.totalTokensUsed >= this.config.maxTotalTokens;
+      this.config.maxTotalTokens > 0 && this.state.totalTokensUsed >= this.config.maxTotalTokens;
     const costExhausted =
-      this.config.maxTotalCostUsd > 0 &&
-      this.state.totalCostUsd >= this.config.maxTotalCostUsd;
+      this.config.maxTotalCostUsd > 0 && this.state.totalCostUsd >= this.config.maxTotalCostUsd;
     const perAgentExhausted =
       this.config.maxTokensPerAgent > 0 && tokens >= this.config.maxTokensPerAgent;
 

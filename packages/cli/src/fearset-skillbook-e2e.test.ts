@@ -76,15 +76,43 @@ function makePassGateJson(): string {
 function makeColumnJson(column: string): string {
   switch (column) {
     case "define":
-      return JSON.stringify({ worstCases: ["Downstream API consumers break"], blastRadius: "API consumers", reversible: false });
+      return JSON.stringify({
+        worstCases: ["Downstream API consumers break"],
+        blastRadius: "API consumers",
+        reversible: false,
+      });
     case "prevent":
-      return JSON.stringify({ preventionActions: [{ id: "pa-1", description: "Deprecation notice", mechanism: "Email + docs", riskReduction: 0.7, simulationStatus: "non-simulatable" }] });
+      return JSON.stringify({
+        preventionActions: [
+          {
+            id: "pa-1",
+            description: "Deprecation notice",
+            mechanism: "Email + docs",
+            riskReduction: 0.7,
+            simulationStatus: "non-simulatable",
+          },
+        ],
+      });
     case "repair":
-      return JSON.stringify({ repairPlans: [{ id: "rp-1", description: "Restore v1 endpoint", steps: ["Revert deploy"], estimatedRecovery: "1 hour", simulationStatus: "non-simulatable" }] });
+      return JSON.stringify({
+        repairPlans: [
+          {
+            id: "rp-1",
+            description: "Restore v1 endpoint",
+            steps: ["Revert deploy"],
+            estimatedRecovery: "1 hour",
+            simulationStatus: "non-simulatable",
+          },
+        ],
+      });
     case "benefits":
       return JSON.stringify({ benefits: ["Reduced maintenance burden", "Faster iteration on v2"] });
     case "inaction":
-      return JSON.stringify({ inactionCosts: [{ description: "Technical debt compounds", timeHorizon: "6 months", severity: "high" }] });
+      return JSON.stringify({
+        inactionCosts: [
+          { description: "Technical debt compounds", timeHorizon: "6 months", severity: "high" },
+        ],
+      });
     default:
       return JSON.stringify({ rawOutput: "fallback" });
   }
@@ -158,9 +186,7 @@ describe("Skillbook → FearSet prior-lessons E2E loop", () => {
 
     // Step 6 — Every captured prompt must reference a prior lesson
     expect(capturedPrompts.length).toBeGreaterThan(0);
-    const hasPriorLessonHeader = capturedPrompts.some((p) =>
-      p.includes("Prior Skillbook Lessons"),
-    );
+    const hasPriorLessonHeader = capturedPrompts.some((p) => p.includes("Prior Skillbook Lessons"));
     expect(hasPriorLessonHeader).toBe(true);
 
     // And at least one lesson title appears verbatim in one of the prompts

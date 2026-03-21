@@ -221,11 +221,7 @@ export class EventEngine {
    *
    * @returns The newly created {@link DanteEvent}.
    */
-  enqueue(
-    type: DanteEventType,
-    payload: Record<string, unknown>,
-    source = "unknown",
-  ): DanteEvent {
+  enqueue(type: DanteEventType, payload: Record<string, unknown>, source = "unknown"): DanteEvent {
     const event = this.createEvent(type, payload, source);
 
     if (this.queue.length < this.options.maxQueueSize) {
@@ -255,9 +251,7 @@ export class EventEngine {
     for (const workflow of this.workflows.values()) {
       if (!workflow.enabled) continue;
 
-      const triggers = Array.isArray(workflow.trigger)
-        ? workflow.trigger
-        : [workflow.trigger];
+      const triggers = Array.isArray(workflow.trigger) ? workflow.trigger : [workflow.trigger];
 
       if (!triggers.includes(event.type)) continue;
 
@@ -275,10 +269,7 @@ export class EventEngine {
    * @param event      The event to test.
    * @param conditions Conditions to evaluate. `undefined` / empty = always true.
    */
-  matchesConditions(
-    event: DanteEvent,
-    conditions: WorkflowDefinition["conditions"],
-  ): boolean {
+  matchesConditions(event: DanteEvent, conditions: WorkflowDefinition["conditions"]): boolean {
     if (!conditions || conditions.length === 0) return true;
 
     for (const condition of conditions) {

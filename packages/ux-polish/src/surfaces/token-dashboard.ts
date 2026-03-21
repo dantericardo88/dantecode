@@ -64,7 +64,11 @@ function findPricing(modelId: string): { input: number; output: number } | undef
   return undefined;
 }
 
-function estimateCost(modelId: string, inputTokens: number, outputTokens: number): number | undefined {
+function estimateCost(
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number,
+): number | undefined {
   const pricing = findPricing(modelId);
   if (!pricing) return undefined;
   return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
@@ -116,7 +120,9 @@ export function renderTokenDashboard(data: TokenUsageData, theme?: ThemeEngine):
   const empty = barWidth - filled;
   const barColor = pct >= 80 ? c.error : pct >= 60 ? c.warning : c.progress;
   const bar = `${barColor}${"█".repeat(filled)}${c.muted}${"░".repeat(empty)}${c.reset}`;
-  lines.push(row("Context:", `${bar} ${c.muted}${pct}% of ${formatNumber(data.contextWindow)}${c.reset}`));
+  lines.push(
+    row("Context:", `${bar} ${c.muted}${pct}% of ${formatNumber(data.contextWindow)}${c.reset}`),
+  );
 
   // By-tool breakdown
   const toolEntries = Object.entries(data.byTool)
@@ -125,15 +131,20 @@ export function renderTokenDashboard(data: TokenUsageData, theme?: ThemeEngine):
 
   if (toolEntries.length > 0) {
     lines.push(`${c.info}│${c.reset}${" ".repeat(BOX_WIDTH + 2)}${c.info}│${c.reset}`);
-    lines.push(`${c.info}│${c.reset} ${c.muted}By Tool:${c.reset}${" ".repeat(BOX_WIDTH - 7)}${c.info}│${c.reset}`);
+    lines.push(
+      `${c.info}│${c.reset} ${c.muted}By Tool:${c.reset}${" ".repeat(BOX_WIDTH - 7)}${c.info}│${c.reset}`,
+    );
     for (const [tool, { calls, tokens }] of toolEntries) {
       const label = `  ${tool.padEnd(10)} ${String(calls).padStart(3)} calls   ${formatNumber(tokens)} tokens`;
-      lines.push(`${c.info}│${c.reset} ${c.muted}${label}${c.reset}${" ".repeat(Math.max(0, BOX_WIDTH - label.length + 1))}${c.info}│${c.reset}`);
+      lines.push(
+        `${c.info}│${c.reset} ${c.muted}${label}${c.reset}${" ".repeat(Math.max(0, BOX_WIDTH - label.length + 1))}${c.info}│${c.reset}`,
+      );
     }
   }
 
   // Cost estimate
-  const cost = data.estimatedCost ?? estimateCost(data.modelId, data.inputTokens, data.outputTokens);
+  const cost =
+    data.estimatedCost ?? estimateCost(data.modelId, data.inputTokens, data.outputTokens);
   if (cost !== undefined) {
     lines.push(`${c.info}│${c.reset}${" ".repeat(BOX_WIDTH + 2)}${c.info}│${c.reset}`);
     lines.push(row("Est. Cost:", `${c.success}~$${cost.toFixed(4)}${c.reset}`));

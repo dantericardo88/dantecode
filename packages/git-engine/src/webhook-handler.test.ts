@@ -4,10 +4,7 @@ import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
 import os from "node:os";
-import {
-  WebhookListener,
-  listWebhookListeners,
-} from "./webhook-handler.js";
+import { WebhookListener, listWebhookListeners } from "./webhook-handler.js";
 
 describe("WebhookListener", () => {
   let listener: WebhookListener | undefined;

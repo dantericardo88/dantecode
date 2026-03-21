@@ -20,12 +20,7 @@ import type { ParsedError } from "./error-parser.js";
 // ---------------------------------------------------------------------------
 
 /** Supported verification stages, ordered by typical execution sequence. */
-export type VerificationStage =
-  | "typecheck"
-  | "lint"
-  | "unit"
-  | "integration"
-  | "smoke";
+export type VerificationStage = "typecheck" | "lint" | "unit" | "integration" | "smoke";
 
 /** Result of running a single verification stage. */
 export interface VerificationStageResult {
@@ -89,10 +84,7 @@ const STAGE_WEIGHTS: Record<VerificationStage, number> = {
 };
 
 /** Stages that block subsequent stages when they fail. */
-const CRITICAL_STAGES: Set<VerificationStage> = new Set([
-  "typecheck",
-  "lint",
-]);
+const CRITICAL_STAGES: Set<VerificationStage> = new Set(["typecheck", "lint"]);
 
 // ---------------------------------------------------------------------------
 // Default options
@@ -124,10 +116,7 @@ export class VerificationEngine {
   private readonly options: Required<VerificationEngineOptions>;
   private readonly exec: typeof execSync;
 
-  constructor(
-    projectRoot: string,
-    options?: Partial<VerificationEngineOptions>,
-  ) {
+  constructor(projectRoot: string, options?: Partial<VerificationEngineOptions>) {
     this.projectRoot = projectRoot;
     this.options = {
       ...DEFAULT_OPTIONS,
@@ -150,8 +139,7 @@ export class VerificationEngine {
    *   → go.mod → Cargo.toml → unknown
    */
   detectTestRunner(): TestRunnerInfo {
-    const check = (file: string): boolean =>
-      existsSync(join(this.projectRoot, file));
+    const check = (file: string): boolean => existsSync(join(this.projectRoot, file));
 
     // Vitest
     if (check("vitest.config.ts")) {
@@ -243,8 +231,7 @@ export class VerificationEngine {
    * (e.g., typecheck without tsconfig.json).
    */
   getStageCommand(stage: VerificationStage): string {
-    const check = (file: string): boolean =>
-      existsSync(join(this.projectRoot, file));
+    const check = (file: string): boolean => existsSync(join(this.projectRoot, file));
 
     switch (stage) {
       case "typecheck": {
@@ -416,10 +403,7 @@ export class VerificationEngine {
 
     const pdseScore = this.computePDSEScore(stageResults);
     const overallPassed = stageResults.every((r) => r.passed);
-    const totalDurationMs = stageResults.reduce(
-      (sum, r) => sum + r.durationMs,
-      0,
-    );
+    const totalDurationMs = stageResults.reduce((sum, r) => sum + r.durationMs, 0);
 
     // Generate fix suggestions from failed stages
     const fixSuggestions: string[] = [];
@@ -547,17 +531,11 @@ export class VerificationEngine {
         "Fix these TypeScript type errors. Do not add `any` casts — resolve the types correctly.",
       lint: "Fix these linting violations. Follow the project's ESLint rules strictly.",
       unit: "Fix these failing unit tests. Ensure the implementation matches the test expectations.",
-      integration:
-        "Fix these integration test failures. Check API contracts and data flow.",
-      smoke:
-        "Fix these smoke test failures. Verify the basic happy-path works end-to-end.",
+      integration: "Fix these integration test failures. Check API contracts and data flow.",
+      smoke: "Fix these smoke test failures. Verify the basic happy-path works end-to-end.",
     };
 
-    return [
-      stageContext[result.stage],
-      "",
-      errorBlock,
-    ].join("\n");
+    return [stageContext[result.stage], "", errorBlock].join("\n");
   }
 
   // -------------------------------------------------------------------------

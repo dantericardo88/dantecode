@@ -26,7 +26,14 @@ export interface ReflectionLoopResult {
  */
 export function isMeaningfulTask(taskResult: TaskResult): boolean {
   if (taskResult.outcome === "failure") return true; // failures always merit reflection
-  const meaningfulTypes = ["code-generation", "long-research", "plan", "patch-synthesis", "debug", "refactor"];
+  const meaningfulTypes = [
+    "code-generation",
+    "long-research",
+    "plan",
+    "patch-synthesis",
+    "debug",
+    "refactor",
+  ];
   return meaningfulTypes.includes(taskResult.taskType);
 }
 
@@ -45,7 +52,9 @@ export function runLiteReflection(taskResult: TaskResult): string {
     lines.push(`Evidence: ${taskResult.evidence.join("; ")}`);
   }
   if (taskResult.outcome === "failure") {
-    lines.push("This task failed. Consider what went wrong and what strategy would prevent recurrence.");
+    lines.push(
+      "This task failed. Consider what went wrong and what strategy would prevent recurrence.",
+    );
   } else {
     lines.push("What strategy from this task is worth preserving for future runs?");
   }
@@ -85,9 +94,15 @@ export async function runReflectionLoop(
   const reflectionOutput = await llmCall(reflectorRole.systemPrompt, reflectorRole.userPrompt);
 
   // SkillManager pass
-  const existingSkillIds = existingSkills.map(s => s.id);
-  const skillManagerRole = buildSkillManagerRole({ reflectionText: reflectionOutput, existingSkillIds });
-  const skillManagerOutput = await llmCall(skillManagerRole.systemPrompt, skillManagerRole.userPrompt);
+  const existingSkillIds = existingSkills.map((s) => s.id);
+  const skillManagerRole = buildSkillManagerRole({
+    reflectionText: reflectionOutput,
+    existingSkillIds,
+  });
+  const skillManagerOutput = await llmCall(
+    skillManagerRole.systemPrompt,
+    skillManagerRole.userPrompt,
+  );
 
   const proposedUpdates = parseSkillManagerOutput(skillManagerOutput);
 

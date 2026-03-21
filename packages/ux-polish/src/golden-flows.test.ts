@@ -334,7 +334,9 @@ describe("GF-06: PDSE/trust hint rendering", () => {
     expect(hint.band).toBe("trusted");
     expect(hint.nextSteps.length).toBeGreaterThan(0);
     expect(
-      hint.nextSteps.some((s) => s.includes("proceed") || s.includes("safe") || s.includes("high-confidence")),
+      hint.nextSteps.some(
+        (s) => s.includes("proceed") || s.includes("safe") || s.includes("high-confidence"),
+      ),
     ).toBe(true);
   });
 
@@ -356,7 +358,9 @@ describe("GF-06: PDSE/trust hint rendering", () => {
     expect(hint.band).toBe("blocked");
     expect(hint.inline).toContain("✗");
     expect(
-      hint.nextSteps.some((s) => s.toLowerCase().includes("not ship") || s.toLowerCase().includes("do not")),
+      hint.nextSteps.some(
+        (s) => s.toLowerCase().includes("not ship") || s.toLowerCase().includes("do not"),
+      ),
     ).toBe(true);
   });
 

@@ -39,7 +39,13 @@ import {
 
 // ─── Column execution order ───────────────────────────────────────────────────
 
-const STANDARD_COLUMNS: FearSetColumnName[] = ["define", "prevent", "repair", "benefits", "inaction"];
+const STANDARD_COLUMNS: FearSetColumnName[] = [
+  "define",
+  "prevent",
+  "repair",
+  "benefits",
+  "inaction",
+];
 const LITE_COLUMNS: FearSetColumnName[] = ["define", "prevent", "repair"];
 
 // ─── Callbacks ────────────────────────────────────────────────────────────────
@@ -130,7 +136,8 @@ function validateColumn(col: FearColumn): string[] {
   const warnings: string[] = [];
   switch (col.name) {
     case "define":
-      if (col.worstCases.length === 0) warnings.push("no worst-cases extracted — define column may be too shallow");
+      if (col.worstCases.length === 0)
+        warnings.push("no worst-cases extracted — define column may be too shallow");
       break;
     case "prevent":
       if (col.preventionActions.length === 0) warnings.push("no prevention actions extracted");
@@ -173,31 +180,45 @@ function buildFallbackColumn(column: FearSetColumnName, context: string): FearCo
 
 function parseDefineColumn(parsed: Record<string, unknown>): Pick<FearColumn, "worstCases"> {
   const wc = parsed["worstCases"];
-  return { worstCases: Array.isArray(wc) ? (wc as string[]).filter((s) => typeof s === "string") : [] };
+  return {
+    worstCases: Array.isArray(wc) ? (wc as string[]).filter((s) => typeof s === "string") : [],
+  };
 }
 
-function parsePreventColumn(parsed: Record<string, unknown>): Pick<FearColumn, "preventionActions"> {
+function parsePreventColumn(
+  parsed: Record<string, unknown>,
+): Pick<FearColumn, "preventionActions"> {
   const actions = parsed["preventionActions"];
   if (!Array.isArray(actions)) return { preventionActions: [] };
   return {
     preventionActions: (actions as unknown[]).map((a) => {
       const r = a as Record<string, unknown>;
       const rawStatus = r["simulationStatus"] as string;
-      const VALID = new Set(["simulatable", "partially-simulatable", "non-simulatable", "simulated", "simulation-failed"]);
+      const VALID = new Set([
+        "simulatable",
+        "partially-simulatable",
+        "non-simulatable",
+        "simulated",
+        "simulation-failed",
+      ]);
       const simStatus: PreventionAction["simulationStatus"] = VALID.has(rawStatus)
-        ? rawStatus as PreventionAction["simulationStatus"]
+        ? (rawStatus as PreventionAction["simulationStatus"])
         : "non-simulatable";
       // Integrity: can't claim "simulated" without evidence
-      const evidence = typeof r["simulationEvidence"] === "string" && r["simulationEvidence"].trim() !== ""
-        ? r["simulationEvidence"]
-        : undefined;
+      const evidence =
+        typeof r["simulationEvidence"] === "string" && r["simulationEvidence"].trim() !== ""
+          ? r["simulationEvidence"]
+          : undefined;
       const enforcedStatus: PreventionAction["simulationStatus"] =
         simStatus === "simulated" && !evidence ? "partially-simulatable" : simStatus;
       return {
         id: typeof r["id"] === "string" ? r["id"] : randomUUID(),
         description: typeof r["description"] === "string" ? r["description"] : "",
         mechanism: typeof r["mechanism"] === "string" ? r["mechanism"] : "",
-        riskReduction: typeof r["riskReduction"] === "number" ? Math.min(1, Math.max(0, r["riskReduction"])) : undefined,
+        riskReduction:
+          typeof r["riskReduction"] === "number"
+            ? Math.min(1, Math.max(0, r["riskReduction"]))
+            : undefined,
         simulationStatus: enforcedStatus,
         simulationEvidence: evidence,
       };
@@ -212,20 +233,28 @@ function parseRepairColumn(parsed: Record<string, unknown>): Pick<FearColumn, "r
     repairPlans: (plans as unknown[]).map((p) => {
       const r = p as Record<string, unknown>;
       const rawStatus = r["simulationStatus"] as string;
-      const VALID = new Set(["simulatable", "partially-simulatable", "non-simulatable", "simulated", "simulation-failed"]);
+      const VALID = new Set([
+        "simulatable",
+        "partially-simulatable",
+        "non-simulatable",
+        "simulated",
+        "simulation-failed",
+      ]);
       const simStatus: RepairPlan["simulationStatus"] = VALID.has(rawStatus)
-        ? rawStatus as RepairPlan["simulationStatus"]
+        ? (rawStatus as RepairPlan["simulationStatus"])
         : "non-simulatable";
-      const evidence = typeof r["simulationEvidence"] === "string" && r["simulationEvidence"].trim() !== ""
-        ? r["simulationEvidence"]
-        : undefined;
+      const evidence =
+        typeof r["simulationEvidence"] === "string" && r["simulationEvidence"].trim() !== ""
+          ? r["simulationEvidence"]
+          : undefined;
       const enforcedStatus: RepairPlan["simulationStatus"] =
         simStatus === "simulated" && !evidence ? "partially-simulatable" : simStatus;
       return {
         id: typeof r["id"] === "string" ? r["id"] : randomUUID(),
         description: typeof r["description"] === "string" ? r["description"] : "",
         steps: Array.isArray(r["steps"]) ? (r["steps"] as string[]) : [],
-        estimatedRecovery: typeof r["estimatedRecovery"] === "string" ? r["estimatedRecovery"] : undefined,
+        estimatedRecovery:
+          typeof r["estimatedRecovery"] === "string" ? r["estimatedRecovery"] : undefined,
         simulationStatus: enforcedStatus,
         simulationEvidence: evidence,
       };
@@ -258,18 +287,28 @@ function parseInactionColumn(parsed: Record<string, unknown>): Pick<FearColumn, 
 
 function applyParsedToColumn(column: FearColumn, parsed: Record<string, unknown>): FearColumn {
   switch (column.name) {
-    case "define":  return { ...column, ...parseDefineColumn(parsed) };
-    case "prevent": return { ...column, ...parsePreventColumn(parsed) };
-    case "repair":  return { ...column, ...parseRepairColumn(parsed) };
-    case "benefits":return { ...column, ...parseBenefitsColumn(parsed) };
-    case "inaction":return { ...column, ...parseInactionColumn(parsed) };
+    case "define":
+      return { ...column, ...parseDefineColumn(parsed) };
+    case "prevent":
+      return { ...column, ...parsePreventColumn(parsed) };
+    case "repair":
+      return { ...column, ...parseRepairColumn(parsed) };
+    case "benefits":
+      return { ...column, ...parseBenefitsColumn(parsed) };
+    case "inaction":
+      return { ...column, ...parseInactionColumn(parsed) };
   }
 }
 
 // ─── Heuristic robustness gate ────────────────────────────────────────────────
 
-function heuristicRobustnessScore(columns: FearColumn[], config: FearSetConfig): FearSetRobustnessScore {
-  const byName = Object.fromEntries(columns.map((c) => [c.name, c])) as Partial<Record<FearSetColumnName, FearColumn>>;
+function heuristicRobustnessScore(
+  columns: FearColumn[],
+  config: FearSetConfig,
+): FearSetRobustnessScore {
+  const byName = Object.fromEntries(columns.map((c) => [c.name, c])) as Partial<
+    Record<FearSetColumnName, FearColumn>
+  >;
 
   const defineScore = (byName.define?.worstCases.length ?? 0) > 0 ? 0.85 : 0.25;
   const preventScore = (byName.prevent?.preventionActions.length ?? 0) > 0 ? 0.8 : 0.25;
@@ -283,22 +322,26 @@ function heuristicRobustnessScore(columns: FearColumn[], config: FearSetConfig):
     ),
   );
 
-  const avgRiskReduction =
-    (byName.prevent?.preventionActions ?? [])
-      .map((a) => a.riskReduction ?? 0)
-      .reduce((sum, v, _, arr) => (arr.length ? sum + v / arr.length : sum), 0);
+  const avgRiskReduction = (byName.prevent?.preventionActions ?? [])
+    .map((a) => a.riskReduction ?? 0)
+    .reduce((sum, v, _, arr) => (arr.length ? sum + v / arr.length : sum), 0);
 
   const columnsPresent = columns.length;
-  const weightedAvg = columnsPresent >= 3
-    ? (defineScore * 0.3 + preventScore * 0.3 + repairScore * 0.2 + benefitsScore * 0.1 + inactionScore * 0.1)
-    : (defineScore + preventScore + repairScore) / 3;
+  const weightedAvg =
+    columnsPresent >= 3
+      ? defineScore * 0.3 +
+        preventScore * 0.3 +
+        repairScore * 0.2 +
+        benefitsScore * 0.1 +
+        inactionScore * 0.1
+      : (defineScore + preventScore + repairScore) / 3;
 
   const gateDecision: FearSetRobustnessScore["gateDecision"] =
     weightedAvg >= config.robustnessPassThreshold && avgRiskReduction >= config.minRiskReduction
       ? "pass"
       : weightedAvg >= config.robustnessPassThreshold * 0.75
-      ? "review-required"
-      : "fail";
+        ? "review-required"
+        : "fail";
 
   return {
     overall: weightedAvg,
@@ -316,8 +359,8 @@ function heuristicRobustnessScore(columns: FearColumn[], config: FearSetConfig):
       gateDecision === "pass"
         ? `Heuristic: define(${defineScore.toFixed(2)}) prevent(${preventScore.toFixed(2)}) repair(${repairScore.toFixed(2)}) — plan has concrete content.`
         : gateDecision === "review-required"
-        ? `Heuristic: one or more columns are thin (overall ${weightedAvg.toFixed(2)} < threshold ${config.robustnessPassThreshold}) — review required.`
-        : `Heuristic: columns too shallow or risk reduction (${(avgRiskReduction * 100).toFixed(0)}%) below minimum — plan fails gate.`,
+          ? `Heuristic: one or more columns are thin (overall ${weightedAvg.toFixed(2)} < threshold ${config.robustnessPassThreshold}) — review required.`
+          : `Heuristic: columns too shallow or risk reduction (${(avgRiskReduction * 100).toFixed(0)}%) below minimum — plan fails gate.`,
     scoredAt: new Date().toISOString(),
   };
 }
@@ -333,15 +376,18 @@ function parseRobustnessScore(raw: string): FearSetRobustnessScore | null {
       : "fail";
     return {
       overall: typeof p["overall"] === "number" ? Math.min(1, Math.max(0, p["overall"])) : 0,
-      byColumn: typeof p["byColumn"] === "object" && p["byColumn"] !== null
-        ? (p["byColumn"] as FearSetRobustnessScore["byColumn"])
-        : undefined,
+      byColumn:
+        typeof p["byColumn"] === "object" && p["byColumn"] !== null
+          ? (p["byColumn"] as FearSetRobustnessScore["byColumn"])
+          : undefined,
       hasSimulationEvidence: p["hasSimulationEvidence"] === true,
-      estimatedRiskReduction: typeof p["estimatedRiskReduction"] === "number"
-        ? Math.min(1, Math.max(0, p["estimatedRiskReduction"]))
-        : undefined,
+      estimatedRiskReduction:
+        typeof p["estimatedRiskReduction"] === "number"
+          ? Math.min(1, Math.max(0, p["estimatedRiskReduction"]))
+          : undefined,
       gateDecision: decision,
-      justification: typeof p["justification"] === "string" ? p["justification"] : "Gate scored by LLM.",
+      justification:
+        typeof p["justification"] === "string" ? p["justification"] : "Gate scored by LLM.",
       scoredAt: new Date().toISOString(),
     };
   } catch {
@@ -358,15 +404,20 @@ function heuristicRecommendation(robustness: FearSetRobustnessScore): FearSetRec
   if (robustness.gateDecision === "fail") {
     return {
       decision: "no-go",
-      reasoning: "The fear-set plan did not pass the DanteForge robustness gate. Too many risks are unmitigated or unrepaired.",
+      reasoning:
+        "The fear-set plan did not pass the DanteForge robustness gate. Too many risks are unmitigated or unrepaired.",
       conditions: [],
     };
   }
   if (robustness.gateDecision === "review-required") {
     return {
       decision: "conditional",
-      reasoning: "Plan passes minimum threshold but has gaps requiring human review before committing.",
-      conditions: ["Human review of all highlighted warnings", "Confirm prevention actions with domain expert"],
+      reasoning:
+        "Plan passes minimum threshold but has gaps requiring human review before committing.",
+      conditions: [
+        "Human review of all highlighted warnings",
+        "Confirm prevention actions with domain expert",
+      ],
     };
   }
   // pass
@@ -381,13 +432,23 @@ function heuristicRecommendation(robustness: FearSetRobustnessScore): FearSetRec
     return {
       decision: "conditional",
       reasoning: `Reasonable risk reduction (${(riskReduction * 100).toFixed(0)}%) but some prevention/repair steps are unverified.`,
-      conditions: hasSimulation ? ["Monitor closely during execution"] : ["Sandbox-test key prevention actions before proceeding", "Monitor closely during execution"],
+      conditions: hasSimulation
+        ? ["Monitor closely during execution"]
+        : [
+            "Sandbox-test key prevention actions before proceeding",
+            "Monitor closely during execution",
+          ],
     };
   }
   return {
     decision: "conditional",
-    reasoning: "Gate passed but estimated risk reduction is low. Proceed cautiously with monitoring.",
-    conditions: ["Enable detailed logging", "Set up automated rollback triggers", "Limit blast radius (feature flags, staged rollout)"],
+    reasoning:
+      "Gate passed but estimated risk reduction is low. Proceed cautiously with monitoring.",
+    conditions: [
+      "Enable detailed logging",
+      "Set up automated rollback triggers",
+      "Limit blast radius (feature flags, staged rollout)",
+    ],
   };
 }
 
@@ -419,10 +480,17 @@ async function simulateColumn(
 
   const updatedPreventionActions = await Promise.all(
     column.preventionActions.map(async (action) => {
-      if (action.simulationStatus !== "simulatable" && action.simulationStatus !== "partially-simulatable") return action;
+      if (
+        action.simulationStatus !== "simulatable" &&
+        action.simulationStatus !== "partially-simulatable"
+      )
+        return action;
       const evidence = await callbacks.onSandboxSimulate!(action.description, "prevent");
       if (evidence && evidence.trim()) {
-        emitEvent(callbacks, "fearset.sandbox.simulated", resultId, { kind: "prevent", description: action.description });
+        emitEvent(callbacks, "fearset.sandbox.simulated", resultId, {
+          kind: "prevent",
+          description: action.description,
+        });
         return { ...action, simulationStatus: "simulated" as const, simulationEvidence: evidence };
       }
       return { ...action, simulationStatus: "simulation-failed" as const };
@@ -431,17 +499,28 @@ async function simulateColumn(
 
   const updatedRepairPlans = await Promise.all(
     column.repairPlans.map(async (plan) => {
-      if (plan.simulationStatus !== "simulatable" && plan.simulationStatus !== "partially-simulatable") return plan;
+      if (
+        plan.simulationStatus !== "simulatable" &&
+        plan.simulationStatus !== "partially-simulatable"
+      )
+        return plan;
       const evidence = await callbacks.onSandboxSimulate!(plan.steps.join("; "), "repair");
       if (evidence && evidence.trim()) {
-        emitEvent(callbacks, "fearset.sandbox.simulated", resultId, { kind: "repair", description: plan.description });
+        emitEvent(callbacks, "fearset.sandbox.simulated", resultId, {
+          kind: "repair",
+          description: plan.description,
+        });
         return { ...plan, simulationStatus: "simulated" as const, simulationEvidence: evidence };
       }
       return { ...plan, simulationStatus: "simulation-failed" as const };
     }),
   );
 
-  return { ...column, preventionActions: updatedPreventionActions, repairPlans: updatedRepairPlans };
+  return {
+    ...column,
+    preventionActions: updatedPreventionActions,
+    repairPlans: updatedRepairPlans,
+  };
 }
 
 // ─── Main engine ──────────────────────────────────────────────────────────────
@@ -475,7 +554,10 @@ export async function runFearSetEngine(
   const columnOrder = config.mode === "lite" ? LITE_COLUMNS : STANDARD_COLUMNS;
   const priorColumnOutputs: Partial<Record<FearSetColumnName, string>> = {};
 
-  emitEvent(callbacks, "fearset.triggered", resultId, { channel: trigger.channel, context: context.slice(0, 80) });
+  emitEvent(callbacks, "fearset.triggered", resultId, {
+    channel: trigger.channel,
+    context: context.slice(0, 80),
+  });
 
   const result: FearSetResult = {
     id: resultId,
@@ -493,7 +575,10 @@ export async function runFearSetEngine(
     if (callbacks.isStopped?.()) {
       result.stopReason = "user-stop";
       result.stoppedAt = new Date().toISOString();
-      emitEvent(callbacks, "fearset.stopped", resultId, { reason: "user-stop", column: columnName });
+      emitEvent(callbacks, "fearset.stopped", resultId, {
+        reason: "user-stop",
+        column: columnName,
+      });
       break;
     }
 
@@ -555,7 +640,10 @@ export async function runFearSetEngine(
 
     emitEvent(callbacks, "fearset.column.completed", resultId, {
       column: columnName,
-      hasContent: column.worstCases.length > 0 || column.preventionActions.length > 0 || column.repairPlans.length > 0,
+      hasContent:
+        column.worstCases.length > 0 ||
+        column.preventionActions.length > 0 ||
+        column.repairPlans.length > 0,
       warnings,
       stoppedByBudget,
     });
@@ -600,7 +688,9 @@ export async function runFearSetEngine(
 
   // ── Synthesized recommendation ─────────────────────────────────────────────
   if (callbacks.onSynthesize && columns.length > 0) {
-    const md = columns.map((c) => `### ${c.name.toUpperCase()}\n${c.rawOutput}`).join("\n\n---\n\n");
+    const md = columns
+      .map((c) => `### ${c.name.toUpperCase()}\n${c.rawOutput}`)
+      .join("\n\n---\n\n");
     const synthRaw = await callbacks.onSynthesize(md);
     result.synthesizedRecommendation = synthRaw
       ? (parseSynthesizedRecommendation(synthRaw) ?? heuristicRecommendation(robustnessScore))

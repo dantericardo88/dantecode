@@ -118,7 +118,11 @@ export class VsCodeBridge {
     try {
       // B2: use debugTrailRecent so the limit is respected end-to-end (not capped at 20 then sliced).
       const result = await this.cli.debugTrailRecent(limit);
-      return this.wrap("recent_events", { success: true, events: result.results, totalMatches: result.totalMatches });
+      return this.wrap("recent_events", {
+        success: true,
+        events: result.results,
+        totalMatches: result.totalMatches,
+      });
     } catch (err) {
       return this.wrap("recent_events", {
         success: false,
@@ -156,10 +160,7 @@ export class VsCodeBridge {
         case "restore":
           return this.handleRestore(args["id"] as string);
         case "replay":
-          return this.handleReplay(
-            args["sessionId"] as string,
-            args["step"] as number | undefined,
-          );
+          return this.handleReplay(args["sessionId"] as string, args["step"] as number | undefined);
         case "export":
           return this.handleExport(args["sessionId"] as string);
         case "recent":
@@ -169,7 +170,13 @@ export class VsCodeBridge {
         case "file_list":
           return this.handleFileList();
         default:
-          return this.wrap("trail_query_result", { success: false, error: `Unknown command: ${command}`, results: [], totalMatches: 0, latencyMs: 0 });
+          return this.wrap("trail_query_result", {
+            success: false,
+            error: `Unknown command: ${command}`,
+            results: [],
+            totalMatches: 0,
+            latencyMs: 0,
+          });
       }
     } catch (err) {
       return this.wrap("trail_query_result", {
@@ -206,7 +213,11 @@ export class VsCodeBridge {
     };
   }
 
-  private wrap(kind: VsCodeTrailMessageKind, data: unknown, sessionId?: string): VsCodeTrailMessage {
+  private wrap(
+    kind: VsCodeTrailMessageKind,
+    data: unknown,
+    sessionId?: string,
+  ): VsCodeTrailMessage {
     return {
       kind,
       sessionId,

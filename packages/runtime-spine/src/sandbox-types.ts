@@ -12,21 +12,21 @@ import { z } from "zod";
 
 /** The configured sandbox operating mode. */
 export const SandboxModeSchema = z.enum([
-  "off",          // legacy compat only — no enforcement
-  "auto",         // Docker preferred, worktree fallback (recommended default)
-  "docker",       // force Docker isolation
-  "worktree",     // force git-worktree isolation
-  "host-escape",  // explicit governed host execution (audit + warning required)
+  "off", // legacy compat only — no enforcement
+  "auto", // Docker preferred, worktree fallback (recommended default)
+  "docker", // force Docker isolation
+  "worktree", // force git-worktree isolation
+  "host-escape", // explicit governed host execution (audit + warning required)
 ]);
 export type SandboxMode = z.infer<typeof SandboxModeSchema>;
 
 /** The concrete isolation strategy selected for a specific execution. */
 export const IsolationStrategySchema = z.enum([
-  "native",    // OS-native sandbox (macOS Seatbelt / Linux bwrap)
-  "docker",    // Docker container
-  "worktree",  // git worktree isolation
-  "host",      // host execution (escape path — must be audited)
-  "mock",      // dry-run / test mode
+  "native", // OS-native sandbox (macOS Seatbelt / Linux bwrap)
+  "docker", // Docker container
+  "worktree", // git worktree isolation
+  "host", // host execution (escape path — must be audited)
+  "mock", // dry-run / test mode
 ]);
 export type IsolationStrategy = z.infer<typeof IsolationStrategySchema>;
 
@@ -116,7 +116,10 @@ export const SandboxDecisionSchema = z.object({
   /** DanteForge safety score [0..1] if computed. */
   gateScore: z.number().min(0).max(1).optional(),
   /** ISO-8601 decision timestamp. */
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type SandboxDecision = z.infer<typeof SandboxDecisionSchema>;
 
@@ -130,7 +133,10 @@ export const SandboxViolationSchema = z.object({
   riskLevel: RiskLevelSchema,
   /** Whether execution was blocked (false = warn-only). */
   blocked: z.boolean(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type SandboxViolation = z.infer<typeof SandboxViolationSchema>;
 
@@ -151,7 +157,10 @@ export const SandboxAuditRecordSchema = z.object({
   /** True when host escape was used. */
   hostEscape: z.boolean().default(false),
   /** ISO-8601 record timestamp. */
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
   /** Parent session ID. */
   sessionId: z.string().optional(),
   /** Parent checkpoint ID for trail linkage. */
@@ -177,7 +186,10 @@ export const SandboxAuditRefSchema = z.object({
   /** IDs of SandboxAuditRecord entries linked from this checkpoint. */
   auditRecordIds: z.array(z.string().uuid()).default([]),
   /** ISO-8601 timestamp. */
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type SandboxAuditRef = z.infer<typeof SandboxAuditRefSchema>;
 

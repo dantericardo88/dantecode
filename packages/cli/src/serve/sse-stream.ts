@@ -41,11 +41,7 @@ function writeSSEEvent(res: ServerResponse, event: SSEEvent): void {
  * The response stays open indefinitely until the client disconnects or
  * the agent emits a "done" event.
  */
-export function createSSEStream(
-  res: ServerResponse,
-  sessionId: string,
-  context: SSEContext,
-): void {
+export function createSSEStream(res: ServerResponse, sessionId: string, context: SSEContext): void {
   const corsOrigins = context.corsOrigins ?? [];
   const allowOrigin =
     corsOrigins.length === 0

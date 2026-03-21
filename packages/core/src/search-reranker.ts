@@ -140,9 +140,8 @@ export function rerankResults(
     const queryRelevance = jaccardSimilarity(queryTokens, resultTokens);
 
     // Factor 2: Context relevance
-    const contextRelevance = contextTokens.size > 0
-      ? jaccardSimilarity(contextTokens, resultTokens)
-      : 0.5; // neutral if no context
+    const contextRelevance =
+      contextTokens.size > 0 ? jaccardSimilarity(contextTokens, resultTokens) : 0.5; // neutral if no context
 
     // Factor 3: Snippet quality
     const snippetQuality = scoreSnippetQuality(result.snippet);

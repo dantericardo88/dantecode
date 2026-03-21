@@ -88,11 +88,7 @@ export class PlaybookMemory {
   async save(): Promise<void> {
     try {
       await mkdir(dirname(this.filePath), { recursive: true });
-      await writeFile(
-        this.filePath,
-        JSON.stringify(this.entries, null, 2),
-        "utf-8",
-      );
+      await writeFile(this.filePath, JSON.stringify(this.entries, null, 2), "utf-8");
     } catch {
       // Non-fatal: inability to persist shouldn't break the agent
     }
@@ -103,9 +99,7 @@ export class PlaybookMemory {
    * Auto-generates id (randomUUID) and timestamp.
    * Triggers load if not yet loaded, then auto-saves.
    */
-  async addEntry(
-    entry: Omit<PlaybookEntry, "id" | "timestamp">,
-  ): Promise<void> {
+  async addEntry(entry: Omit<PlaybookEntry, "id" | "timestamp">): Promise<void> {
     await this.load();
 
     this.entries.push({
@@ -134,10 +128,7 @@ export class PlaybookMemory {
     return this.entries
       .map((entry) => ({
         entry,
-        similarity: jaccardSimilarity(
-          queryTokens,
-          tokenize(entry.taskSignature),
-        ),
+        similarity: jaccardSimilarity(queryTokens, tokenize(entry.taskSignature)),
       }))
       .filter((r) => r.similarity > MIN_SIMILARITY)
       .sort((a, b) => b.similarity - a.similarity)

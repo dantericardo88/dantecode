@@ -11,7 +11,14 @@ import { pruneSkills } from "./pruning.js";
 import { getRelevantSkills } from "./retrieval.js";
 import { runReflectionLoop, isMeaningfulTask } from "./reflection-loop.js";
 import { ReviewQueue } from "./review-queue.js";
-import type { Skill, TaskResult, TaskContext, ReflectionOptions, UpdateOperation, SkillbookGateDecision } from "./types.js";
+import type {
+  Skill,
+  TaskResult,
+  TaskContext,
+  ReflectionOptions,
+  UpdateOperation,
+  SkillbookGateDecision,
+} from "./types.js";
 
 export interface IntegrationOptions {
   skillbookPath?: string;
@@ -59,7 +66,12 @@ export class DanteSkillbookIntegration {
     llmCall?: (sys: string, user: string) => Promise<string>,
   ) {
     if (!isMeaningfulTask(taskResult)) {
-      return { proposedUpdates: [], reflectionText: "", mode: options.mode ?? "standard", skipped: true };
+      return {
+        proposedUpdates: [],
+        reflectionText: "",
+        mode: options.mode ?? "standard",
+        skipped: true,
+      };
     }
     const result = await runReflectionLoop(taskResult, this.book.getSkills(), options, llmCall);
     return { ...result, skipped: false };
@@ -109,7 +121,7 @@ export class DanteSkillbookIntegration {
    */
   applyReviewItem(queueId: string): boolean {
     const pending = this.reviewQueue.getPending();
-    const item = pending.find(i => i.id === queueId);
+    const item = pending.find((i) => i.id === queueId);
     if (!item) return false;
     const ok = this.book.applyUpdate(item.proposal, "pass");
     if (ok) {

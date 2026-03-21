@@ -27,7 +27,7 @@ export interface ConfidenceThresholds {
 
 export const DEFAULT_CONFIDENCE_THRESHOLDS: ConfidenceThresholds = {
   passGate: 0.85,
-  softPassGate: 0.70,
+  softPassGate: 0.7,
   reviewGate: 0.45,
 };
 
@@ -58,9 +58,7 @@ export interface ConfidenceSynthesisResult {
  * Combines PDSE score, rail findings, critique stages, and critic debate
  * into a structured confidence decision.
  */
-export function synthesizeConfidence(
-  input: ConfidenceSynthesisInput,
-): ConfidenceSynthesisResult {
+export function synthesizeConfidence(input: ConfidenceSynthesisInput): ConfidenceSynthesisResult {
   const thresholds: ConfidenceThresholds = {
     ...DEFAULT_CONFIDENCE_THRESHOLDS,
     ...input.thresholds,
@@ -79,9 +77,7 @@ export function synthesizeConfidence(
 
   if (hardRailFailures.length > 0) {
     for (const failure of hardRailFailures) {
-      reasons.push(
-        `Hard rail blocked: ${failure.railName} — ${failure.violations.join("; ")}`,
-      );
+      reasons.push(`Hard rail blocked: ${failure.railName} — ${failure.violations.join("; ")}`);
     }
   }
 
@@ -96,11 +92,11 @@ export function synthesizeConfidence(
   }
 
   // Weak metric dimensions
-  const weakMetrics = input.metrics.filter(
-    (metric) => !metric.passed,
-  );
+  const weakMetrics = input.metrics.filter((metric) => !metric.passed);
   for (const metric of weakMetrics) {
-    reasons.push(`Metric below threshold: ${metric.name} (${metric.score.toFixed(2)}) — ${metric.reason}`);
+    reasons.push(
+      `Metric below threshold: ${metric.name} (${metric.score.toFixed(2)}) — ${metric.reason}`,
+    );
   }
 
   // Critic debate signals
@@ -113,7 +109,9 @@ export function synthesizeConfidence(
       );
     } else if (input.debate.consensus === "warn") {
       debateSignal = "review-required";
-      softWarnings.push(`Critic consensus: warn (confidence ${input.debate.averageConfidence.toFixed(2)})`);
+      softWarnings.push(
+        `Critic consensus: warn (confidence ${input.debate.averageConfidence.toFixed(2)})`,
+      );
     }
   }
 
@@ -126,7 +124,11 @@ export function synthesizeConfidence(
   let decision: ConfidenceDecision;
   if (hardBlocked) {
     decision = "block";
-  } else if (debateSignal === "review-required" || softRailFailures.length > 0 || failedStages.length > 0) {
+  } else if (
+    debateSignal === "review-required" ||
+    softRailFailures.length > 0 ||
+    failedStages.length > 0
+  ) {
     decision = "review-required";
   } else if (input.pdseScore >= thresholds.passGate) {
     decision = "pass";

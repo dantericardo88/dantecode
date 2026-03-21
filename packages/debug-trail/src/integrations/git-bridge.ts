@@ -67,7 +67,14 @@ export class GitBridge {
 
       return { branch, commitHash, worktreePath: cwd, isDirty, modifiedFiles, stagedFiles };
     } catch {
-      return { branch: null, commitHash: null, worktreePath: cwd, isDirty: false, modifiedFiles: [], stagedFiles: [] };
+      return {
+        branch: null,
+        commitHash: null,
+        worktreePath: cwd,
+        isDirty: false,
+        modifiedFiles: [],
+        stagedFiles: [],
+      };
     }
   }
 
@@ -104,10 +111,7 @@ export class GitBridge {
   async createSafePoint(message: string): Promise<string | null> {
     const cwd = this.cwd ?? process.cwd();
     try {
-      const { stdout } = await execAsync(
-        `git stash create "debug-trail: ${message}"`,
-        { cwd },
-      );
+      const { stdout } = await execAsync(`git stash create "debug-trail: ${message}"`, { cwd });
       const ref = stdout.trim();
       if (ref) {
         await this.logger.log(
@@ -127,10 +131,7 @@ export class GitBridge {
   /**
    * Map a set of trail events to their associated git commits/refs.
    */
-  async enrichTrailEvent(
-    _filePath: string,
-    _eventId: string,
-  ): Promise<Partial<TrailProvenance>> {
+  async enrichTrailEvent(_filePath: string, _eventId: string): Promise<Partial<TrailProvenance>> {
     const ctx = await this.readContext();
     return {
       worktreePath: ctx.worktreePath ?? undefined,
@@ -141,7 +142,10 @@ export class GitBridge {
   /**
    * Get recent git log entries for a file.
    */
-  async fileLog(filePath: string, limit = 5): Promise<Array<{ hash: string; message: string; date: string }>> {
+  async fileLog(
+    filePath: string,
+    limit = 5,
+  ): Promise<Array<{ hash: string; message: string; date: string }>> {
     const cwd = this.cwd ?? process.cwd();
     try {
       const { stdout } = await execAsync(

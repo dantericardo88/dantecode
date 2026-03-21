@@ -84,7 +84,7 @@ function formatEvidenceOutput(topic: string, result: ResearchResult): string {
   const warnings = result.verificationWarnings ?? [];
   if (warnings.length) {
     lines.push("", "### Security Warnings");
-    warnings.forEach(w => lines.push(`- ${w}`));
+    warnings.forEach((w) => lines.push(`- ${w}`));
   }
 
   return lines.join("\n");
@@ -121,10 +121,10 @@ function buildRichOutput(
     }
 
     // --- Unified Sources: pipeline first (full metadata), then synthesis-only ---
-    const pipelineUrls = new Set(bundle.citations.map(c => c.url));
+    const pipelineUrls = new Set(bundle.citations.map((c) => c.url));
     const synthOnly =
       synthesisResult.status === "fulfilled"
-        ? synthesisResult.value.results.filter(r => !pipelineUrls.has(r.url))
+        ? synthesisResult.value.results.filter((r) => !pipelineUrls.has(r.url))
         : [];
     const totalSources = bundle.citations.length + synthOnly.length;
 
@@ -153,7 +153,7 @@ function buildRichOutput(
     const warnings = result.verificationWarnings ?? [];
     if (warnings.length) {
       lines.push("", "### Security Warnings");
-      warnings.forEach(w => lines.push(`- ${w}`));
+      warnings.forEach((w) => lines.push(`- ${w}`));
     }
   } else if (synthesisResult.status === "rejected") {
     // Both failed
@@ -204,5 +204,9 @@ export async function executeResearch(
     getResearchEngine().searchWithCitations(topic, { maxResults: fetchTopN * 2 }),
   ]);
 
-  return buildRichOutput(topic, pipelineResult, synthesisResult as PromiseSettledResult<SynthesisResult>);
+  return buildRichOutput(
+    topic,
+    pipelineResult,
+    synthesisResult as PromiseSettledResult<SynthesisResult>,
+  );
 }

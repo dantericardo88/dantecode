@@ -101,16 +101,15 @@ export function synthesizeResults(
       const keyPoints = extractKeyPoints(result.rawContent!, 3);
       if (keyPoints.length > 0) {
         const citationIdx = results.indexOf(result) + 1;
-        summaryParts.push(
-          keyPoints.map((p) => `- ${p} [${citationIdx}]`).join("\n"),
-        );
+        summaryParts.push(keyPoints.map((p) => `- ${p} [${citationIdx}]`).join("\n"));
       }
     }
   }
 
-  const summary = summaryParts.length > 0
-    ? summaryParts.join("\n\n")
-    : `Found ${results.length} results for "${query}". Top result: ${results[0]!.title} [1]`;
+  const summary =
+    summaryParts.length > 0
+      ? summaryParts.join("\n\n")
+      : `Found ${results.length} results for "${query}". Top result: ${results[0]!.title} [1]`;
 
   // Calculate confidence based on result quality
   const confidence = calculateConfidence(results, query);
@@ -169,8 +168,7 @@ export function formatCitationBlock(citations: Citation[]): string {
   if (citations.length === 0) return "";
 
   return (
-    "\n\n---\nSources:\n" +
-    citations.map((c) => `[${c.index}] ${c.title} — ${c.url}`).join("\n")
+    "\n\n---\nSources:\n" + citations.map((c) => `[${c.index}] ${c.title} — ${c.url}`).join("\n")
   );
 }
 
@@ -209,7 +207,10 @@ function calculateConfidence(results: SearchResult[], query: string): number {
   if (results.length === 0) return 0;
 
   const queryTokens = new Set(
-    query.toLowerCase().split(/\s+/).filter((t) => t.length > 2),
+    query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 2),
   );
 
   // Factor 1: Result count
@@ -242,10 +243,5 @@ function calculateConfidence(results: SearchResult[], query: string): number {
   const substantive = results.filter((r) => r.snippet.length > 50).length;
   const snippetScore = substantive / results.length;
 
-  return (
-    countScore * 0.2 +
-    relevanceScore * 0.3 +
-    avgProviderScore * 0.25 +
-    snippetScore * 0.25
-  );
+  return countScore * 0.2 + relevanceScore * 0.3 + avgProviderScore * 0.25 + snippetScore * 0.25;
 }

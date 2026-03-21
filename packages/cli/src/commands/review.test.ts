@@ -17,9 +17,9 @@ vi.mock("@dantecode/core", () => ({
   })),
 }));
 
-const mockParseDiffHunks = vi.fn().mockReturnValue([
-  { oldStart: 5, newStart: 5, oldCount: 3, newCount: 3, lines: [] },
-]);
+const mockParseDiffHunks = vi
+  .fn()
+  .mockReturnValue([{ oldStart: 5, newStart: 5, oldCount: 3, newCount: 3, lines: [] }]);
 
 vi.mock("@dantecode/git-engine", () => ({
   parseDiffHunks: mockParseDiffHunks,
@@ -71,7 +71,10 @@ describe("reviewPR", () => {
 
   it("score=90 and approve when all files pass", async () => {
     mockListPRFiles.mockResolvedValue([makeFile("src/foo.ts", PATCH_ADDED)]);
-    mockRunDanteForge.mockResolvedValue({ passed: true, summary: "Anti-stub scan: PASSED\nConstitution check: PASSED" });
+    mockRunDanteForge.mockResolvedValue({
+      passed: true,
+      summary: "Anti-stub scan: PASSED\nConstitution check: PASSED",
+    });
     const { reviewPR } = await import("./review.js");
     const result = await reviewPR(2, "/proj", {});
     expect(result.overallScore).toBe(90);
@@ -130,10 +133,7 @@ describe("reviewPR", () => {
     mockRunDanteForge.mockResolvedValue({ passed: true, summary: "Anti-stub scan: PASSED" });
     const { reviewPR } = await import("./review.js");
     const result = await reviewPR(6, "/proj", { postComments: true });
-    expect(mockCreateReview).toHaveBeenCalledWith(
-      6,
-      expect.objectContaining({ event: "APPROVE" }),
-    );
+    expect(mockCreateReview).toHaveBeenCalledWith(6, expect.objectContaining({ event: "APPROVE" }));
     expect(result.recommendation).toBe("approve");
   });
 
@@ -179,7 +179,13 @@ describe("reviewPR", () => {
       summary: "Anti-stub scan: FAILED\nConstitution check: FAILED\nSomething else: FAILED",
     });
     mockListPRFiles.mockResolvedValue([
-      { filename: "src/foo.ts", status: "modified", additions: 5, deletions: 0, patch: "+new code here" },
+      {
+        filename: "src/foo.ts",
+        status: "modified",
+        additions: 5,
+        deletions: 0,
+        patch: "+new code here",
+      },
     ]);
     const { reviewPR } = await import("./review.js");
     const result = await reviewPR(1, "/proj", { useLLM: false } as ReviewOptions);
@@ -230,7 +236,13 @@ describe("reviewPR", () => {
   it("newStart used for review comment line (not oldStart)", async () => {
     mockRunDanteForge.mockResolvedValue({ passed: false, summary: "Anti-stub scan: FAILED" });
     mockListPRFiles.mockResolvedValue([
-      { filename: "src/foo.ts", status: "modified", additions: 5, deletions: 0, patch: "@@ -10,5 +20,6 @@ context\n+new line" },
+      {
+        filename: "src/foo.ts",
+        status: "modified",
+        additions: 5,
+        deletions: 0,
+        patch: "@@ -10,5 +20,6 @@ context\n+new line",
+      },
     ]);
     // parseDiffHunks will return newStart=20 for this patch
     mockParseDiffHunks.mockReturnValueOnce([
@@ -267,8 +279,14 @@ describe("formatReviewOutput", () => {
   it("includes posted message when postedToGitHub=true", async () => {
     const { formatReviewOutput } = await import("./review.js");
     const output = formatReviewOutput({
-      prNumber: 1, overallScore: 100, fileReviews: [], bugs: [], stubViolations: 0,
-      summary: "", recommendation: "approve", postedToGitHub: true,
+      prNumber: 1,
+      overallScore: 100,
+      fileReviews: [],
+      bugs: [],
+      stubViolations: 0,
+      summary: "",
+      recommendation: "approve",
+      postedToGitHub: true,
     });
     const clean = output.replace(/\x1b\[[0-9;]*m/g, "");
     expect(clean).toContain("posted to GitHub");

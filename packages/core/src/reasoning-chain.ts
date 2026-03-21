@@ -6,7 +6,11 @@
 // ============================================================================
 
 import { tokenize, jaccardSimilarity } from "./approach-memory.js";
-import { verifyOutput, type OutputVerificationReport, type VerificationCriteria } from "./qa-harness.js";
+import {
+  verifyOutput,
+  type OutputVerificationReport,
+  type VerificationCriteria,
+} from "./qa-harness.js";
 import type { VerificationRail } from "./rails-enforcer.js";
 
 // ----------------------------------------------------------------------------
@@ -103,8 +107,14 @@ const DEFAULT_OPTIONS: ReasoningChainOptions = {
 
 const ROOT_CAUSE_PATTERNS: Array<{ pattern: RegExp; cause: string }> = [
   { pattern: /\b(missing|lack|no)\b.*\b(context|information|data)\b/i, cause: "missing context" },
-  { pattern: /\b(incomplete|partial|half)\b.*\b(analysis|review|check)\b/i, cause: "incomplete analysis" },
-  { pattern: /\b(wrong|incorrect|bad)\b.*\b(approach|method|strategy)\b/i, cause: "wrong approach" },
+  {
+    pattern: /\b(incomplete|partial|half)\b.*\b(analysis|review|check)\b/i,
+    cause: "incomplete analysis",
+  },
+  {
+    pattern: /\b(wrong|incorrect|bad)\b.*\b(approach|method|strategy)\b/i,
+    cause: "wrong approach",
+  },
 ];
 
 // ----------------------------------------------------------------------------
@@ -372,7 +382,8 @@ export class ReasoningChain {
             prefix = "[Think]";
             break;
           case "critique":
-            prefix = phase.pdseScore !== undefined ? `[Critique PDSE=${phase.pdseScore}]` : "[Critique]";
+            prefix =
+              phase.pdseScore !== undefined ? `[Critique PDSE=${phase.pdseScore}]` : "[Critique]";
             break;
           case "action":
             prefix = "[Act]";
@@ -424,11 +435,7 @@ export class ReasoningChain {
       ...phase,
       pdseScore: report.pdseScore,
     };
-    const critique = this.selfCritique(
-      scoredPhase,
-      report.pdseScore,
-      report.warnings.join(" "),
-    );
+    const critique = this.selfCritique(scoredPhase, report.pdseScore, report.warnings.join(" "));
 
     if (critique.shouldEscalate) {
       this.currentTier = this.escalateTier();

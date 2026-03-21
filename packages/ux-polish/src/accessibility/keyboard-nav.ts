@@ -46,15 +46,15 @@ export type KeyHandler = (key: NavKey | string, state: NavState) => NavState | n
 
 /** Standard keyboard shortcuts for CLI interactive flows. */
 export const STANDARD_BINDINGS: KeyBinding[] = [
-  { key: "up",        description: "Move selection up",        action: "move_up" },
-  { key: "down",      description: "Move selection down",      action: "move_down" },
-  { key: "enter",     description: "Confirm selection",        action: "confirm" },
-  { key: "escape",    description: "Cancel / go back",         action: "cancel" },
-  { key: "tab",       description: "Move to next field",       action: "next_field" },
-  { key: "shift+tab", description: "Move to previous field",   action: "prev_field" },
-  { key: "space",     description: "Toggle selection",         action: "toggle" },
-  { key: "ctrl+c",    description: "Exit immediately",         action: "exit" },
-  { key: "ctrl+z",    description: "Undo last action",         action: "undo" },
+  { key: "up", description: "Move selection up", action: "move_up" },
+  { key: "down", description: "Move selection down", action: "move_down" },
+  { key: "enter", description: "Confirm selection", action: "confirm" },
+  { key: "escape", description: "Cancel / go back", action: "cancel" },
+  { key: "tab", description: "Move to next field", action: "next_field" },
+  { key: "shift+tab", description: "Move to previous field", action: "prev_field" },
+  { key: "space", description: "Toggle selection", action: "toggle" },
+  { key: "ctrl+c", description: "Exit immediately", action: "exit" },
+  { key: "ctrl+z", description: "Undo last action", action: "undo" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -142,17 +142,14 @@ export class NavController {
     switch (key) {
       case "up": {
         const idx = this._state.focusIndex - 1;
-        const next = idx < 0
-          ? (this._wrap ? this._state.totalItems - 1 : 0)
-          : idx;
+        const next = idx < 0 ? (this._wrap ? this._state.totalItems - 1 : 0) : idx;
         this._state = { ...this._state, focusIndex: next };
         return { ...this._state };
       }
       case "down": {
         const idx = this._state.focusIndex + 1;
-        const next = idx >= this._state.totalItems
-          ? (this._wrap ? 0 : this._state.totalItems - 1)
-          : idx;
+        const next =
+          idx >= this._state.totalItems ? (this._wrap ? 0 : this._state.totalItems - 1) : idx;
         this._state = { ...this._state, focusIndex: next };
         return { ...this._state };
       }
@@ -196,8 +193,6 @@ export class NavController {
    * Format a key binding help line.
    */
   static formatBindings(bindings: KeyBinding[] = STANDARD_BINDINGS): string {
-    return bindings
-      .map((b) => `  ${b.key.padEnd(12)} ${b.description}`)
-      .join("\n");
+    return bindings.map((b) => `  ${b.key.padEnd(12)} ${b.description}`).join("\n");
   }
 }

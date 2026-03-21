@@ -110,9 +110,17 @@ export class CodexAdapter extends BaseCouncilAdapter {
       const patchStat = await stat(patchPath);
       const elapsed = Date.now() - patchStat.mtimeMs;
       if (elapsed > STALL_THRESHOLD_MS) {
-        return { sessionId, status: "stalled", lastOutputAt: new Date(patchStat.mtimeMs).toISOString() };
+        return {
+          sessionId,
+          status: "stalled",
+          lastOutputAt: new Date(patchStat.mtimeMs).toISOString(),
+        };
       }
-      return { sessionId, status: "running", lastOutputAt: new Date(patchStat.mtimeMs).toISOString() };
+      return {
+        sessionId,
+        status: "running",
+        lastOutputAt: new Date(patchStat.mtimeMs).toISOString(),
+      };
     } catch {
       const elapsed = Date.now() - session.startedAt;
       if (elapsed > STALL_THRESHOLD_MS) {

@@ -72,7 +72,11 @@ export class SkillChain {
    *   1. addGate(skillName, gate, params?) — step with gate
    *   2. addGate(gate)                     — gate-only sentinel step (skillName = "")
    */
-  addGate(gateOrSkillName: GateCondition | string, gate?: GateCondition, params: Record<string, string> = {}): this {
+  addGate(
+    gateOrSkillName: GateCondition | string,
+    gate?: GateCondition,
+    params: Record<string, string> = {},
+  ): this {
     if (typeof gateOrSkillName === "string") {
       this._steps.push({ skillName: gateOrSkillName, params, gate });
     } else {
@@ -191,7 +195,7 @@ export interface StepCallbackResult {
   status?: "success" | "failed" | "skipped";
   output: string;
   verified?: boolean;
-  pdseScore?: number;  // Optional quality score returned by executor
+  pdseScore?: number; // Optional quality score returned by executor
 }
 
 // Legacy context shape (backwards-compatible): takes (skillName, input, params)
@@ -338,7 +342,12 @@ export async function executeChain(
     const resolvedParams = resolveParams(step.params, initialInput, previousOutput);
     const resolvedInput = resolvedParams["input"] ?? previousOutput ?? initialInput;
 
-    const runStep = async (): Promise<{ output: string; durationMs: number; verified?: boolean; pdseScore?: number }> => {
+    const runStep = async (): Promise<{
+      output: string;
+      durationMs: number;
+      verified?: boolean;
+      pdseScore?: number;
+    }> => {
       const start = Date.now();
 
       if (!context.executeStep) {
@@ -358,14 +367,27 @@ export async function executeChain(
       }
 
       // New-style executor
-      const raw = await (context as NewExecutionContext).executeStep!(step.skillName, resolvedParams);
+      const raw = await (context as NewExecutionContext).executeStep!(
+        step.skillName,
+        resolvedParams,
+      );
       if (typeof raw === "string") {
         return { output: raw, durationMs: Date.now() - start };
       }
-      return { output: raw.output, durationMs: Date.now() - start, verified: raw.verified, pdseScore: raw.pdseScore };
+      return {
+        output: raw.output,
+        durationMs: Date.now() - start,
+        verified: raw.verified,
+        pdseScore: raw.pdseScore,
+      };
     };
 
-    const { output, durationMs, verified: stepVerified, pdseScore: stepPdseScore } = await runStep();
+    const {
+      output,
+      durationMs,
+      verified: stepVerified,
+      pdseScore: stepPdseScore,
+    } = await runStep();
 
     // ------------------------------------------------------------------
     // Gate evaluation for this step
@@ -425,8 +447,7 @@ export async function executeChain(
     i++;
   }
 
-  const finalOutput =
-    results.length > 0 ? (results[results.length - 1]?.output ?? "") : "";
+  const finalOutput = results.length > 0 ? (results[results.length - 1]?.output ?? "") : "";
 
   return {
     chainName,

@@ -186,8 +186,7 @@ export function parseCursorRule(content: string, sourcePath: string): ParsedCurs
 
   const fallbackName = basename(sourcePath, ".mdc").replace(/[._]/g, "-").toLowerCase();
 
-  const name =
-    typeof rawFrontmatter["name"] === "string" ? rawFrontmatter["name"] : fallbackName;
+  const name = typeof rawFrontmatter["name"] === "string" ? rawFrontmatter["name"] : fallbackName;
 
   // Auto-extract description from body if not in frontmatter
   const descriptionFromFrontmatter =
@@ -199,16 +198,16 @@ export function parseCursorRule(content: string, sourcePath: string): ParsedCurs
     typeof alwaysApplyRaw === "boolean"
       ? alwaysApplyRaw
       : typeof alwaysApplyRaw === "string"
-      ? alwaysApplyRaw.toLowerCase() === "true"
-      : false;
+        ? alwaysApplyRaw.toLowerCase() === "true"
+        : false;
 
   const rawGlobs = rawFrontmatter["globs"];
   const globs: string | string[] | undefined =
     typeof rawGlobs === "string"
       ? rawGlobs
       : Array.isArray(rawGlobs)
-      ? (rawGlobs as unknown[]).filter((g): g is string => typeof g === "string")
-      : undefined;
+        ? (rawGlobs as unknown[]).filter((g): g is string => typeof g === "string")
+        : undefined;
 
   const frontmatter: SkillFrontmatter = {
     name,

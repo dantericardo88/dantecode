@@ -65,8 +65,7 @@ export class ThemePreferences {
 
   constructor(options: ThemePreferencesOptions = {}) {
     const root = options.projectRoot ?? process.cwd();
-    this.filePath =
-      options.prefsFilePath ?? path.join(root, ".dantecode", "preferences.json");
+    this.filePath = options.prefsFilePath ?? path.join(root, ".dantecode", "preferences.json");
     this._prefs = { ...DEFAULTS };
     this._load();
   }
@@ -174,7 +173,8 @@ export class ThemePreferences {
     if (typeof raw.richMode === "boolean") out.richMode = raw.richMode;
     if (typeof raw.showPdseInline === "boolean") out.showPdseInline = raw.showPdseInline;
     if (typeof raw.showSuggestions === "boolean") out.showSuggestions = raw.showSuggestions;
-    if (typeof raw.showToolAnnotations === "boolean") out.showToolAnnotations = raw.showToolAnnotations;
+    if (typeof raw.showToolAnnotations === "boolean")
+      out.showToolAnnotations = raw.showToolAnnotations;
     return out;
   }
 }

@@ -48,8 +48,7 @@ export class RetentionPolicy {
   /** Evaluate a single MemoryItem. */
   evaluate(item: MemoryItem): RetentionEvaluation {
     const now = Date.now();
-    const ageDays =
-      (now - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    const ageDays = (now - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24);
 
     // Rule 1: Verified = always keep
     if (this.config.keepVerified && item.verified) {
@@ -115,7 +114,12 @@ export class RetentionPolicy {
     compress: RetentionEvaluation[];
     archive: RetentionEvaluation[];
   } {
-    const result = { keep: [] as RetentionEvaluation[], prune: [] as RetentionEvaluation[], compress: [] as RetentionEvaluation[], archive: [] as RetentionEvaluation[] };
+    const result = {
+      keep: [] as RetentionEvaluation[],
+      prune: [] as RetentionEvaluation[],
+      compress: [] as RetentionEvaluation[],
+      archive: [] as RetentionEvaluation[],
+    };
 
     for (const item of items) {
       const ev = this.evaluate(item);

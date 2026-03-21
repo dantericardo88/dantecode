@@ -7,14 +7,14 @@
  * 3. Return VerificationResult so the scheduler can block or retry
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type {
   ArtifactKind,
   VerificationCheck,
   VerificationCheckOutcome,
   VerificationResult,
-} from './tool-call-types.js';
+} from "./tool-call-types.js";
 
 // ─── Pattern Detectors ────────────────────────────────────────────────────────
 
@@ -25,21 +25,21 @@ import type {
  */
 export function detectGitCloneTarget(command: string): string | null {
   // Normalize whitespace
-  const cmd = command.replace(/\s+/g, ' ').trim();
+  const cmd = command.replace(/\s+/g, " ").trim();
 
   // Must start with git clone
   if (!/^git\s+clone\b/.test(cmd)) return null;
 
   // Strip flags: --, --depth N, --branch X, --single-branch, --no-tags, --shallow, --quiet, -q
   const stripped = cmd
-    .replace(/git\s+clone\s+/, '')
-    .replace(/--depth\s+\d+\s*/g, '')
-    .replace(/--branch\s+\S+\s*/g, '')
-    .replace(/--single-branch\s*/g, '')
-    .replace(/--no-tags\s*/g, '')
-    .replace(/--shallow-since\s+\S+\s*/g, '')
-    .replace(/--quiet\s*/g, '')
-    .replace(/-q\s*/g, '')
+    .replace(/git\s+clone\s+/, "")
+    .replace(/--depth\s+\d+\s*/g, "")
+    .replace(/--branch\s+\S+\s*/g, "")
+    .replace(/--single-branch\s*/g, "")
+    .replace(/--no-tags\s*/g, "")
+    .replace(/--shallow-since\s+\S+\s*/g, "")
+    .replace(/--quiet\s*/g, "")
+    .replace(/-q\s*/g, "")
     .trim();
 
   const parts = stripped.split(/\s+/);
@@ -53,8 +53,8 @@ export function detectGitCloneTarget(command: string): string | null {
 
   // Only URL provided — infer dir from last path segment (strip .git suffix)
   const url = parts[0]!;
-  const lastSegment = url.split('/').pop() ?? '';
-  return lastSegment.replace(/\.git$/, '') || null;
+  const lastSegment = url.split("/").pop() ?? "";
+  return lastSegment.replace(/\.git$/, "") || null;
 }
 
 /**
@@ -105,13 +105,11 @@ async function runSingleCheck(
   check: VerificationCheck,
   projectRoot: string,
 ): Promise<VerificationCheckOutcome> {
-  const absPath = path.isAbsolute(check.path)
-    ? check.path
-    : path.join(projectRoot, check.path);
+  const absPath = path.isAbsolute(check.path) ? check.path : path.join(projectRoot, check.path);
 
   try {
     switch (check.kind) {
-      case 'directory_exists': {
+      case "directory_exists": {
         const stat = fs.statSync(absPath);
         const exists = stat.isDirectory();
         return {
@@ -122,7 +120,7 @@ async function runSingleCheck(
         };
       }
 
-      case 'file_exists': {
+      case "file_exists": {
         const stat = fs.statSync(absPath);
         const exists = stat.isFile();
         return {
@@ -133,7 +131,7 @@ async function runSingleCheck(
         };
       }
 
-      case 'file_size_nonzero': {
+      case "file_size_nonzero": {
         const stat = fs.statSync(absPath);
         const size = stat.size;
         const minSize = check.minSizeBytes ?? 1;
@@ -146,8 +144,8 @@ async function runSingleCheck(
         };
       }
 
-      case 'git_repo_valid': {
-        const gitDir = path.join(absPath, '.git');
+      case "git_repo_valid": {
+        const gitDir = path.join(absPath, ".git");
         let passed = false;
         try {
           const stat = fs.statSync(gitDir);
@@ -163,7 +161,7 @@ async function runSingleCheck(
         };
       }
 
-      case 'archive_extracted': {
+      case "archive_extracted": {
         // Verify the directory exists and has at least one file
         let fileCount = 0;
         try {
@@ -177,7 +175,9 @@ async function runSingleCheck(
           check,
           passed,
           actualValue: fileCount,
-          errorMessage: passed ? undefined : `Archive extraction target empty or missing: ${absPath}`,
+          errorMessage: passed
+            ? undefined
+            : `Archive extraction target empty or missing: ${absPath}`,
         };
       }
 
@@ -208,8 +208,8 @@ async function runSingleCheck(
  */
 export function buildGitCloneChecks(targetDir: string): VerificationCheck[] {
   return [
-    { kind: 'directory_exists', path: targetDir },
-    { kind: 'git_repo_valid', path: targetDir },
+    { kind: "directory_exists", path: targetDir },
+    { kind: "git_repo_valid", path: targetDir },
   ];
 }
 
@@ -219,8 +219,8 @@ export function buildGitCloneChecks(targetDir: string): VerificationCheck[] {
  */
 export function buildFileWriteChecks(filePath: string): VerificationCheck[] {
   return [
-    { kind: 'file_exists', path: filePath },
-    { kind: 'file_size_nonzero', path: filePath },
+    { kind: "file_exists", path: filePath },
+    { kind: "file_size_nonzero", path: filePath },
   ];
 }
 
@@ -230,8 +230,8 @@ export function buildFileWriteChecks(filePath: string): VerificationCheck[] {
  */
 export function buildDownloadChecks(filePath: string): VerificationCheck[] {
   return [
-    { kind: 'file_exists', path: filePath },
-    { kind: 'file_size_nonzero', path: filePath, minSizeBytes: 64 },
+    { kind: "file_exists", path: filePath },
+    { kind: "file_size_nonzero", path: filePath, minSizeBytes: 64 },
   ];
 }
 
@@ -240,7 +240,7 @@ export function buildDownloadChecks(filePath: string): VerificationCheck[] {
  * Returns checks for: directory_exists
  */
 export function buildMkdirChecks(dirPath: string): VerificationCheck[] {
-  return [{ kind: 'directory_exists', path: dirPath }];
+  return [{ kind: "directory_exists", path: dirPath }];
 }
 
 // ─── Auto-Detect + Build ──────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ export function inferVerificationChecks(
     const cloneTarget = detectGitCloneTarget(cmd);
     if (cloneTarget) {
       results.push({
-        artifact: 'git_clone',
+        artifact: "git_clone",
         target: cloneTarget,
         checks: buildGitCloneChecks(cloneTarget),
       });
@@ -275,7 +275,7 @@ export function inferVerificationChecks(
     const downloadTarget = detectDownloadTarget(cmd);
     if (downloadTarget) {
       results.push({
-        artifact: 'download',
+        artifact: "download",
         target: downloadTarget,
         checks: buildDownloadChecks(downloadTarget),
       });
@@ -285,7 +285,7 @@ export function inferVerificationChecks(
     const mkdirTarget = detectMkdirTarget(cmd);
     if (mkdirTarget) {
       results.push({
-        artifact: 'directory_create',
+        artifact: "directory_create",
         target: mkdirTarget,
         checks: buildMkdirChecks(mkdirTarget),
       });
@@ -296,18 +296,15 @@ export function inferVerificationChecks(
 }
 
 /** Format a VerificationResult as a human-readable message for the model */
-export function formatVerificationMessage(
-  result: VerificationResult,
-  command: string,
-): string {
+export function formatVerificationMessage(result: VerificationResult, command: string): string {
   if (result.passed) {
-    const paths = result.checks.map((o) => o.check.path).join(', ');
+    const paths = result.checks.map((o) => o.check.path).join(", ");
     return `[DTR-VERIFY] ✓ All checks passed for: ${paths}`;
   }
 
   const failures = result.failedChecks
-    .map((o) => `  • ${o.check.kind} → ${o.errorMessage ?? 'failed'}`)
-    .join('\n');
+    .map((o) => `  • ${o.check.kind} → ${o.errorMessage ?? "failed"}`)
+    .join("\n");
 
   return (
     `[DTR-VERIFY] VERIFICATION FAILED after: ${command.slice(0, 120)}\n` +

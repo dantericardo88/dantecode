@@ -47,7 +47,14 @@ export { ThemeEngine, getThemeEngine, resetThemeEngine } from "./theme-engine.js
 export type { ThemeEngineOptions } from "./theme-engine.js";
 
 export { COLOR_TOKENS, NO_COLORS, resolveColors, supportsColor } from "./tokens/color-tokens.js";
-export { INDENT, COLUMN_WIDTH, V_PAD, indent, padOrTruncate, hRule } from "./tokens/spacing-tokens.js";
+export {
+  INDENT,
+  COLUMN_WIDTH,
+  V_PAD,
+  indent,
+  padOrTruncate,
+  hRule,
+} from "./tokens/spacing-tokens.js";
 export { ICONS_RICH, ICONS_ASCII, resolveIcons, spinnerFrame } from "./tokens/icon-tokens.js";
 export type { IconSet } from "./tokens/icon-tokens.js";
 
@@ -137,10 +144,7 @@ export {
   detectScreenReaderMode,
   detectReducedMotion,
 } from "./accessibility/screen-reader.js";
-export type {
-  ScreenReaderOptions,
-  AccessibleAnnouncement,
-} from "./accessibility/screen-reader.js";
+export type { ScreenReaderOptions, AccessibleAnnouncement } from "./accessibility/screen-reader.js";
 
 export { ContrastValidator } from "./accessibility/contrast-rules.js";
 export type {
@@ -170,16 +174,8 @@ export type {
   EnrichedSuggestion,
 } from "./integrations/model-router-bridge.js";
 
-export {
-  PdseBridge,
-  getPdseBridge,
-  resetPdseBridge,
-} from "./integrations/pdse-bridge.js";
-export type {
-  TrustBand,
-  PdseState,
-  PdseTrustHint,
-} from "./integrations/pdse-bridge.js";
+export { PdseBridge, getPdseBridge, resetPdseBridge } from "./integrations/pdse-bridge.js";
+export type { TrustBand, PdseState, PdseTrustHint } from "./integrations/pdse-bridge.js";
 
 export { CheckpointedProgress } from "./integrations/checkpointer-bridge.js";
 export type {
@@ -247,15 +243,8 @@ export type {
 export { StatusBar } from "./surfaces/status-bar.js";
 export type { StatusBarState } from "./surfaces/status-bar.js";
 
-export {
-  renderDiff,
-  renderBeforeAfter,
-  highlightLine,
-} from "./surfaces/diff-renderer.js";
-export type {
-  DiffRenderOptions,
-  DiffRenderResult,
-} from "./surfaces/diff-renderer.js";
+export { renderDiff, renderBeforeAfter, highlightLine } from "./surfaces/diff-renderer.js";
+export type { DiffRenderOptions, DiffRenderResult } from "./surfaces/diff-renderer.js";
 
 export { renderTokenDashboard } from "./surfaces/token-dashboard.js";
 export type { TokenUsageData } from "./surfaces/token-dashboard.js";

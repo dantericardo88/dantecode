@@ -53,12 +53,7 @@ export type { AuditLoggerOptions, FlushResult } from "./audit-logger.js";
 export { FileSnapshotter } from "./file-snapshotter.js";
 
 // --- Diff Engine ---
-export {
-  diffText,
-  diffBuffers,
-  formatUnifiedDiff,
-  isBinaryContent,
-} from "./diff-engine.js";
+export { diffText, diffBuffers, formatUnifiedDiff, isBinaryContent } from "./diff-engine.js";
 export type { FileDiff, DiffHunk, DiffLine } from "./diff-engine.js";
 
 // --- Restore Engine ---
@@ -66,7 +61,11 @@ export { RestoreEngine } from "./restore-engine.js";
 export type { RestoreOptions } from "./restore-engine.js";
 
 // --- Trail Query Engine ---
-export { TrailQueryEngine, parseNaturalLanguageQuery, TrailErrorCode } from "./trail-query-engine.js";
+export {
+  TrailQueryEngine,
+  parseNaturalLanguageQuery,
+  TrailErrorCode,
+} from "./trail-query-engine.js";
 export type { TrailQuery, TrailErrorCode as TrailErrorCodeType } from "./trail-query-engine.js";
 
 // --- Replay Orchestrator ---
@@ -84,7 +83,10 @@ export type { ExportOptions, ExportFormat } from "./export-engine.js";
 export { RetentionPolicy } from "./policies/retention-policy.js";
 export type { RetentionPolicyConfig } from "./policies/retention-policy.js";
 export { CompressionPolicy } from "./policies/compression-policy.js";
-export type { CompressionPolicyConfig, CompressionDecision } from "./policies/compression-policy.js";
+export type {
+  CompressionPolicyConfig,
+  CompressionDecision,
+} from "./policies/compression-policy.js";
 export { PrivacyPolicy, StorageQuotaPolicy } from "./policies/privacy-policy.js";
 export type { PrivacyPolicyConfig } from "./policies/privacy-policy.js";
 
@@ -103,7 +105,12 @@ export type { VsCodeTrailMessage, VsCodeTrailMessageKind } from "./integrations/
 
 // --- Evidence Chain Integration (Soul Seal) ---
 export { EvidenceBridge } from "./integrations/evidence-bridge.js";
-export type { CertificationSeal, EvidenceBundleData, Receipt, MerkleProofStep } from "@dantecode/evidence-chain";
+export type {
+  CertificationSeal,
+  EvidenceBundleData,
+  Receipt,
+  MerkleProofStep,
+} from "@dantecode/evidence-chain";
 export { EvidenceType } from "@dantecode/evidence-chain";
 export type { ReplayVerification } from "./replay-orchestrator.js";
 

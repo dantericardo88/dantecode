@@ -46,13 +46,18 @@ describe("MultiAgent", () => {
     mockGenerate.mockResolvedValue('[{"role":"planner","task":"done"}]');
     // First iteration: delegation + agent executions
     mockGenerate
-      .mockResolvedValueOnce('[{"role":"planner","task":"plan subtask"},{"role":"coder","task":"code subtask"}]')
+      .mockResolvedValueOnce(
+        '[{"role":"planner","task":"plan subtask"},{"role":"coder","task":"code subtask"}]',
+      )
       .mockResolvedValueOnce("Plan output with function export async")
       .mockResolvedValueOnce("Code output with function export async await");
 
     const result = await agent.coordinate("Implement login");
 
-    expect(result.plan).toEqual([{ role: "planner", task: "plan subtask" }, { role: "coder", task: "code subtask" }]);
+    expect(result.plan).toEqual([
+      { role: "planner", task: "plan subtask" },
+      { role: "coder", task: "code subtask" },
+    ]);
     expect(result.iterations).toBeGreaterThanOrEqual(1);
     expect(mockGenerate).toHaveBeenCalled();
   });
@@ -125,9 +130,9 @@ describe("MultiAgent", () => {
 
     const result = await agent.coordinate("Implement login");
 
-    expect(result.plan.some(p => p.role === "planner")).toBe(true);
-    expect(result.plan.some(p => p.role === "coder")).toBe(true);
-    expect(result.plan.some(p => p.role === "reviewer")).toBe(true);
+    expect(result.plan.some((p) => p.role === "planner")).toBe(true);
+    expect(result.plan.some((p) => p.role === "coder")).toBe(true);
+    expect(result.plan.some((p) => p.role === "reviewer")).toBe(true);
     expect(result.outputs).toHaveLength(3);
     expect(result.outputs.every((o) => o.pdseScore > 0)).toBe(true);
     expect(result.compositePdse).toBeGreaterThan(0);
@@ -152,7 +157,9 @@ describe("MultiAgent", () => {
 
   it("handles agent lane failure gracefully via onProgress", async () => {
     // Delegation: 2 lanes
-    mockGenerate.mockResolvedValueOnce('[{"role":"planner","task":"plan it"},{"role":"coder","task":"code it"}]');
+    mockGenerate.mockResolvedValueOnce(
+      '[{"role":"planner","task":"plan it"},{"role":"coder","task":"code it"}]',
+    );
     // Planner succeeds
     mockGenerate.mockResolvedValueOnce(
       "Plan: step 1, step 2\n```ts\nexport async function plan() { await work(); }\n```",

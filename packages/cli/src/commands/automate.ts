@@ -32,6 +32,7 @@ import {
   type StoredAutomationExecutionRecord,
 } from "@dantecode/git-engine";
 import type { WebhookProvider } from "@dantecode/git-engine";
+import { randomBytes } from "node:crypto";
 
 // ─── Module-level watcher registry ───────────────────────────────────────────
 // Tracks active FilePatternWatchers by automation definition id so they can
@@ -49,12 +50,23 @@ function ensureGlobalWatcherCleanup(): void {
   const cleanup = () => {
     for (const [, watchers] of _activeWatchers) {
       for (const w of watchers) {
-        try { w.stop(); } catch { /* ignore */ }
+        try {
+          w.stop();
+        } catch {
+          /* ignore */
+        }
       }
     }
   };
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
+}
+
+/** @internal — resets module state between test runs. Do not call in production. */
+export function _resetForTesting(): void {
+  _cleanupRegistered = false;
+  _activeWatchers.clear();
+  _watcherRunning.clear();
 }
 
 // ANSI color codes (local copies to avoid cross-file import)
@@ -71,7 +83,6 @@ const TYPE_ICONS: Record<string, string> = {
   webhook: "[webhook]",
   schedule: "[schedule]",
   watch: "[watch]",
-  loop: "[loop]",
 };
 
 // Minimal interface matching the ReplState fields we need.
@@ -96,7 +107,9 @@ function getOrCreateOrchestrator(state: AutomateCommandState): GitAutomationOrch
 // ─── Time Helpers ────────────────────────────────────────────────────────────
 
 function formatAge(isoDate: string): string {
-  const diffMs = Math.max(0, Date.now() - new Date(isoDate).getTime());
+  const parsed = new Date(isoDate).getTime();
+  if (isNaN(parsed)) return "unknown";
+  const diffMs = Math.max(0, Date.now() - parsed);
   const diffSec = Math.floor(diffMs / 1000);
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
@@ -113,7 +126,9 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
     listWebhookListeners(state.projectRoot).catch((): StoredWebhookListenerRecord[] => []),
     listScheduledGitTasks(state.projectRoot).catch((): StoredScheduledTaskRecord[] => []),
     listGitWatchers(state.projectRoot).catch((): StoredGitWatcherRecord[] => []),
-    getOrCreateOrchestrator(state).listExecutions().catch((): StoredAutomationExecutionRecord[] => []),
+    getOrCreateOrchestrator(state)
+      .listExecutions()
+      .catch((): StoredAutomationExecutionRecord[] => []),
   ]);
 
   const activeWebhooks: StoredWebhookListenerRecord[] = [];
@@ -150,7 +165,9 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
       const label = `${icon} ${webhook.id}`;
       const detail = `${webhook.receivedCount} events, last: ${age}`;
       lines.push(`${DIM}│${RESET}  ${GREEN}${label.padEnd(28)}${RESET} ${DIM}${detail}${RESET}`);
-      lines.push(`${DIM}│${RESET}    ${DIM}${webhook.provider}:${webhook.path} port=${webhook.port}${RESET}`);
+      lines.push(
+        `${DIM}│${RESET}    ${DIM}${webhook.provider}:${webhook.path} port=${webhook.port}${RESET}`,
+      );
       lines.push(`${DIM}│${RESET}`);
     }
 
@@ -170,7 +187,9 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
       const label = `${icon} ${watcher.id}`;
       const detail = `${watcher.eventCount} events, last: ${age}`;
       lines.push(`${DIM}│${RESET}  ${GREEN}${label.padEnd(28)}${RESET} ${DIM}${detail}${RESET}`);
-      lines.push(`${DIM}│${RESET}    ${DIM}${watcher.eventType}${watcher.targetPath ? ` → ${watcher.targetPath}` : ""}${RESET}`);
+      lines.push(
+        `${DIM}│${RESET}    ${DIM}${watcher.eventType}${watcher.targetPath ? ` → ${watcher.targetPath}` : ""}${RESET}`,
+      );
       lines.push(`${DIM}│${RESET}`);
     }
   }
@@ -183,7 +202,8 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
     lines.push("");
     lines.push(`${BOLD}Recent Executions${RESET}`);
     for (const exec of recentExecs) {
-      const statusColor = exec.status === "completed" ? GREEN : exec.status === "failed" ? RED : DIM;
+      const statusColor =
+        exec.status === "completed" ? GREEN : exec.status === "failed" ? RED : DIM;
       const age = formatAge(exec.createdAt);
       lines.push(
         `  ${statusColor}${exec.status.padEnd(10)}${RESET} ${exec.id} ${DIM}${exec.trigger?.label ?? exec.kind} ${age}${RESET}`,
@@ -249,7 +269,9 @@ async function buildList(state: AutomateCommandState, typeFilter?: string): Prom
   }
 
   if (count === 0) {
-    lines.push(`  ${DIM}No automations found${typeFilter ? ` for type "${typeFilter}"` : ""}.${RESET}`);
+    lines.push(
+      `  ${DIM}No automations found${typeFilter ? ` for type "${typeFilter}"` : ""}.${RESET}`,
+    );
     lines.push(`  ${DIM}Start one with /automate create <webhook|schedule|watch>${RESET}`);
   }
 
@@ -321,7 +343,9 @@ async function buildLogs(id: string, state: AutomateCommandState): Promise<strin
       `  ${statusColor}${exec.status.padEnd(10)}${RESET} ${DIM}${exec.id}${RESET}  ${exec.createdAt}`,
     );
     if (exec.trigger) {
-      lines.push(`    ${DIM}trigger: ${exec.trigger.kind} / ${exec.trigger.label ?? "unnamed"}${RESET}`);
+      lines.push(
+        `    ${DIM}trigger: ${exec.trigger.kind} / ${exec.trigger.label ?? "unnamed"}${RESET}`,
+      );
     }
     if (exec.summary) {
       lines.push(`    ${DIM}${exec.summary}${RESET}`);
@@ -370,10 +394,8 @@ async function applyTemplate(
   if (def.type === "webhook") {
     const port = typeof def.config["port"] === "number" ? def.config["port"] : 3000;
     const path = typeof def.config["path"] === "string" ? def.config["path"] : "/webhook";
-    const provider =
-      typeof def.config["provider"] === "string" ? def.config["provider"] : "github";
-    const secret =
-      typeof def.config["secret"] === "string" ? def.config["secret"] : undefined;
+    const provider = typeof def.config["provider"] === "string" ? def.config["provider"] : "github";
+    const secret = typeof def.config["secret"] === "string" ? def.config["secret"] : undefined;
 
     const listener = new WebhookListener({
       cwd: state.projectRoot,
@@ -469,10 +491,8 @@ async function applyTemplate(
 
   // watch type — activate a real FilePatternWatcher now so changes are detected
   // immediately without requiring a separate /git-watch command.
-  const watchPattern =
-    typeof def.config["pattern"] === "string" ? def.config["pattern"] : "**/*";
-  const debounceMs =
-    typeof def.config["debounceMs"] === "number" ? def.config["debounceMs"] : 500;
+  const watchPattern = typeof def.config["pattern"] === "string" ? def.config["pattern"] : "**/*";
+  const debounceMs = typeof def.config["debounceMs"] === "number" ? def.config["debounceMs"] : 500;
 
   const watcher = new FilePatternWatcher({
     pattern: watchPattern,
@@ -480,6 +500,7 @@ async function applyTemplate(
     debounceMs,
     watcherId: def.id,
   });
+  const watcherId = watcher.snapshot().watcherId;
 
   watcher.on("change", (events: FileChangeEvent[]) => {
     if (!def.agentMode) return;
@@ -494,7 +515,7 @@ async function applyTemplate(
           eventPayload: { changedFile: evt.changedFile, changeType: evt.changeType },
           trigger: {
             kind: "watch",
-            sourceId: watcher.snapshot().watcherId,
+            sourceId: watcherId,
             label: watchPattern,
           },
           agentMode: def.agentMode,
@@ -522,7 +543,7 @@ async function applyTemplate(
   return [
     "",
     `${GREEN}${BOLD}Template "${templateName}" activated${RESET}`,
-    `  ID:      ${watcher.snapshot().watcherId}`,
+    `  ID:      ${watcherId}`,
     `  Type:    watch`,
     `  Pattern: ${watchPattern}`,
     `  Debounce: ${debounceMs}ms`,
@@ -533,10 +554,7 @@ async function applyTemplate(
 
 // ─── Create ──────────────────────────────────────────────────────────────────
 
-async function createAutomation(
-  typeAndArgs: string,
-  state: AutomateCommandState,
-): Promise<string> {
+async function createAutomation(typeAndArgs: string, state: AutomateCommandState): Promise<string> {
   const parts = typeAndArgs.trim().split(/\s+/).filter(Boolean);
   const type = parts[0]?.toLowerCase();
 
@@ -557,13 +575,11 @@ async function createAutomation(
     const portStr = extractFlag(parts, "--port");
     const pathStr = extractFlag(parts, "--path");
     const workflowStr = extractFlag(parts, "--workflow");
-    const remaining = parts.slice(1).filter(
-      (p) => !p.startsWith("--") && p !== portStr && p !== pathStr && p !== workflowStr,
-    );
+    const remaining = parts
+      .slice(1)
+      .filter((p) => !p.startsWith("--") && p !== portStr && p !== pathStr && p !== workflowStr);
     const provider =
-      remaining[0] === "gitlab" || remaining[0] === "custom"
-        ? remaining[0]
-        : "github";
+      remaining[0] === "gitlab" || remaining[0] === "custom" ? remaining[0] : "github";
     const port = portStr ? Number(portStr) : 3000;
     const webhookPath = pathStr ?? "/webhook";
     const secret =
@@ -585,12 +601,20 @@ async function createAutomation(
     if (workflowStr) {
       const orchestrator = getOrCreateOrchestrator(state);
       listener.on("any-event", (rawEvent: unknown) => {
-        const data = rawEvent as { event: string; provider: string; payload: Record<string, unknown> };
+        const data = rawEvent as {
+          event: string;
+          provider: string;
+          payload: Record<string, unknown>;
+        };
         void orchestrator
           .runWorkflowInBackground({
             workflowPath: workflowStr,
             eventPayload: { ...data.payload, eventName: data.event },
-            trigger: { kind: "webhook", sourceId: listener.id, label: `${data.provider}:${data.event}` },
+            trigger: {
+              kind: "webhook",
+              sourceId: listener.id,
+              label: `${data.provider}:${data.event}`,
+            },
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
@@ -626,7 +650,10 @@ async function createAutomation(
     if (/^\d+$/.test(remaining[0] ?? "")) {
       scheduleValue = Number(remaining[0]);
       taskName = remaining.slice(1).join(" ") || `interval-${scheduleValue}ms`;
-    } else if (remaining.length >= 6 && remaining.slice(0, 5).every((t) => /^[\d*/,\-]+$/.test(t))) {
+    } else if (
+      remaining.length >= 6 &&
+      remaining.slice(0, 5).every((t) => /^[\d*/,\-]+$/.test(t))
+    ) {
       scheduleValue = remaining.slice(0, 5).join(" ");
       taskName = remaining.slice(5).join(" ") || `cron-${scheduleValue}`;
     } else {
@@ -645,7 +672,9 @@ async function createAutomation(
           });
           return;
         }
-        process.stdout.write(`${DIM}[schedule:${taskName}] fired at ${new Date().toISOString()}${RESET}\n`);
+        process.stdout.write(
+          `${DIM}[schedule:${taskName}] fired at ${new Date().toISOString()}${RESET}\n`,
+        );
       },
       { cwd: state.projectRoot, taskName, runOnStart: false },
     );
@@ -673,12 +702,14 @@ async function createAutomation(
       pattern: patternArg,
       debounceMs: watchDebounceMs,
       projectRoot: state.projectRoot,
+      watcherId: `watch-${randomBytes(4).toString("hex")}`,
     });
+    const createWatcherId = createWatcher.snapshot().watcherId;
 
     createWatcher.on("change", (events: FileChangeEvent[]) => {
       for (const evt of events) {
         process.stdout.write(
-          `${DIM}[watch:${createWatcher.snapshot().watcherId}] ${evt.changeType}: ${evt.changedFile}${RESET}\n`,
+          `${DIM}[watch:${createWatcherId}] ${evt.changeType}: ${evt.changedFile}${RESET}\n`,
         );
       }
     });
@@ -686,15 +717,15 @@ async function createAutomation(
     createWatcher.start();
 
     // Register for lifecycle management
-    const createExisting = _activeWatchers.get(createWatcher.snapshot().watcherId) ?? [];
+    const createExisting = _activeWatchers.get(createWatcherId) ?? [];
     createExisting.push(createWatcher);
-    _activeWatchers.set(createWatcher.snapshot().watcherId, createExisting);
+    _activeWatchers.set(createWatcherId, createExisting);
     ensureGlobalWatcherCleanup();
 
     return [
       "",
       `${GREEN}${BOLD}File Watcher Started${RESET}`,
-      `  ID:      ${createWatcher.snapshot().watcherId}`,
+      `  ID:      ${createWatcherId}`,
       `  Pattern: ${patternArg}`,
       `  Debounce: ${watchDebounceMs}ms`,
       "",

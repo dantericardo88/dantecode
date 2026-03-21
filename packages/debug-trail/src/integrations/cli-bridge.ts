@@ -72,12 +72,22 @@ export class CliBridge {
     }
 
     // Assume it's a file path
-    const snap = await this.snapshotter.captureSnapshot(fileOrSession, "cli-manual-snapshot", provenance);
+    const snap = await this.snapshotter.captureSnapshot(
+      fileOrSession,
+      "cli-manual-snapshot",
+      provenance,
+    );
     if (!snap) {
       return { snapshotId: "", target: fileOrSession, created: false };
     }
 
-    await this.logger.logFileWrite(fileOrSession, undefined, snap.contentHash, undefined, snap.snapshotId);
+    await this.logger.logFileWrite(
+      fileOrSession,
+      undefined,
+      snap.contentHash,
+      undefined,
+      snap.snapshotId,
+    );
 
     return {
       snapshotId: snap.snapshotId,
@@ -106,9 +116,7 @@ export class CliBridge {
 
     // 3. Try as direct snapshot ID — look up original file path from events
     const events = await getTrailStore(this.config.storageRoot).readAllEvents();
-    const matchEvent = events.find(
-      (e) => e.afterSnapshotId === id || e.beforeSnapshotId === id,
-    );
+    const matchEvent = events.find((e) => e.afterSnapshotId === id || e.beforeSnapshotId === id);
     const filePath =
       matchEvent && typeof matchEvent.payload["filePath"] === "string"
         ? matchEvent.payload["filePath"]
@@ -172,12 +180,18 @@ export class CliBridge {
       // and in-memory session buffer — zero disk reads.
       const detector = this.logger.getAnomalyDetector();
       const events = this.logger.getSessionEvents();
-      return detector.analyze(events.filter((e) => e.kind !== "anomaly_flag"), sid);
+      return detector.analyze(
+        events.filter((e) => e.kind !== "anomaly_flag"),
+        sid,
+      );
     }
 
     // Different session: use a fresh detector with default config to avoid config bleed
     // from the current session's detector (which may have been mutated via updateConfig()).
     const events = (await this.queryEngine.querySession(sid, 1000)).results;
-    return new AnomalyDetector().analyze(events.filter((e) => e.kind !== "anomaly_flag"), sid);
+    return new AnomalyDetector().analyze(
+      events.filter((e) => e.kind !== "anomaly_flag"),
+      sid,
+    );
   }
 }

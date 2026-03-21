@@ -16,10 +16,7 @@ export interface CriticDebateResult {
   summary: string;
 }
 
-export function criticDebate(
-  opinions: CriticOpinion[],
-  output?: string,
-): CriticDebateResult {
+export function criticDebate(opinions: CriticOpinion[], output?: string): CriticDebateResult {
   void output;
   const verdictCounts: Record<CriticVerdict, number> = {
     pass: 0,

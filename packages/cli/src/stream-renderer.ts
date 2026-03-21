@@ -172,7 +172,11 @@ export class StreamRenderer {
       process.stdout.write("\n");
     }
 
-    if (options.pdseScore !== undefined || options.elapsedMs !== undefined || options.tokens !== undefined) {
+    if (
+      options.pdseScore !== undefined ||
+      options.elapsedMs !== undefined ||
+      options.tokens !== undefined
+    ) {
       this._renderFooter(options);
     }
   }
@@ -248,7 +252,7 @@ export class StreamRenderer {
 
   private _flushLines(): void {
     // Find all complete lines (ending with \n) in _richLineBuffer + new additions
-    const combined = this._richLineBuffer + (this.buffer.slice(-(this.buffer.length)));
+    const combined = this._richLineBuffer + this.buffer.slice(-this.buffer.length);
     // We track incrementally — only process what was added to buffer
     const tail = this.buffer;
     const nlIdx = tail.lastIndexOf("\n");

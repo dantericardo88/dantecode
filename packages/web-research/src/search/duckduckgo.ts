@@ -1,8 +1,4 @@
-import {
-  SearchResult,
-  SearchOptions,
-  SearchProvider
-} from "../types.js";
+import { SearchResult, SearchOptions, SearchProvider } from "../types.js";
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -15,14 +11,17 @@ function randomUserAgent(): string {
 }
 
 async function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * Lightweight HTML parser for DDG search results.
  * Uses regex to avoid cheerio ESM/type dependency issues.
  */
-function parseResults(html: string, limit: number): Array<{ title: string; url: string; snippet: string }> {
+function parseResults(
+  html: string,
+  limit: number,
+): Array<{ title: string; url: string; snippet: string }> {
   const results: Array<{ title: string; url: string; snippet: string }> = [];
 
   // Match DDG result blocks
@@ -102,7 +101,7 @@ export class DuckDuckGoProvider implements SearchProvider {
           response = await fetch(url, {
             headers: {
               "User-Agent": randomUserAgent(),
-              "Accept": "text/html,application/xhtml+xml",
+              Accept: "text/html,application/xhtml+xml",
               "Accept-Language": "en-US,en;q=0.9",
             },
             signal: controller.signal,

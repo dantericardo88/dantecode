@@ -161,21 +161,27 @@ describe("NativeSandbox — execute() via executeFallback", () => {
     const sandbox = new NativeSandbox(process.cwd());
     const req = makeRequest({ command: "echo hello", requestedMode: "off" });
     // Force fallback by using executeFallback directly
-    const result: ExecutionResult = await (sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }).executeFallback(req);
+    const result: ExecutionResult = await (
+      sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }
+    ).executeFallback(req);
     expect(result.stdout).toContain("hello");
   });
 
   it("executeFallback returns exitCode 0 on success", async () => {
     const sandbox = new NativeSandbox(process.cwd());
     const req = makeRequest({ command: process.platform === "win32" ? "exit 0" : "true" });
-    const result: ExecutionResult = await (sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }).executeFallback(req);
+    const result: ExecutionResult = await (
+      sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }
+    ).executeFallback(req);
     expect(result.exitCode).toBe(0);
   });
 
   it("executeFallback returns non-zero exitCode on failure", async () => {
     const sandbox = new NativeSandbox(process.cwd());
     const req = makeRequest({ command: "exit 42" });
-    const result: ExecutionResult = await (sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }).executeFallback(req);
+    const result: ExecutionResult = await (
+      sandbox as unknown as { executeFallback(r: ExecutionRequest): Promise<ExecutionResult> }
+    ).executeFallback(req);
     expect(result.exitCode).not.toBe(0);
   });
 

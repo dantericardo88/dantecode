@@ -95,9 +95,10 @@ export class ConsistencyAudit {
       },
     });
     const vscodeMsg = vscode.render(payload);
-    const directOut = typeof (vscodeMsg.payload as Record<string, unknown>)?.["output"] === "string"
-      ? (vscodeMsg.payload as Record<string, unknown>)["output"] as string
-      : JSON.stringify(vscodeMsg.payload);
+    const directOut =
+      typeof (vscodeMsg.payload as Record<string, unknown>)?.["output"] === "string"
+        ? ((vscodeMsg.payload as Record<string, unknown>)["output"] as string)
+        : JSON.stringify(vscodeMsg.payload);
     const vscodeOut = vscodeMessages.join("\n") || directOut;
 
     // Also get direct renderer output for comparison
@@ -198,7 +199,11 @@ export class ConsistencyAudit {
     if (theme.colorsEnabled) {
       for (const key of colorKeys) {
         if (resolved.colors[key] === "") {
-          results.push({ theme: resolved.name, token: key, issue: "empty string in color-enabled theme" });
+          results.push({
+            theme: resolved.name,
+            token: key,
+            issue: "empty string in color-enabled theme",
+          });
         }
       }
     }

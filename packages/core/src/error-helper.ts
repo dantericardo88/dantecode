@@ -68,7 +68,8 @@ const ERROR_PATTERNS: ErrorPattern[] = [
       "Check imports — a missing type export is the most common cause.",
       "Use `// @ts-expect-error` as a last resort if this is intentional.",
     ],
-    pdseHint: "TypeScript errors block the PDSE quality gate. Fix all TS errors before running /verify.",
+    pdseHint:
+      "TypeScript errors block the PDSE quality gate. Fix all TS errors before running /verify.",
     transient: false,
   },
   {
@@ -222,9 +223,7 @@ export class ErrorHelper {
   format(messageOrAnalysis: string | ErrorAnalysis, opts: FormatOptions = {}): string {
     const colors = opts.colors ?? this.useColors;
     const analysis =
-      typeof messageOrAnalysis === "string"
-        ? this.classify(messageOrAnalysis)
-        : messageOrAnalysis;
+      typeof messageOrAnalysis === "string" ? this.classify(messageOrAnalysis) : messageOrAnalysis;
 
     const RED = colors ? "\x1b[31m" : "";
     const YELLOW = colors ? "\x1b[33m" : "";

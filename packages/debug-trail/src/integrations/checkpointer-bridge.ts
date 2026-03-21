@@ -58,13 +58,21 @@ export class CheckpointerBridge {
     }
 
     // Log linkage to trail for persistence across restarts
-    void this.logger.log(
-      "checkpoint_transition",
-      "CheckpointerBridge",
-      `Checkpoint linkage: ${checkpointId} → ${[eventId].length} events`,
-      { checkpointLinkage: { checkpointId, eventIds: [eventId], createdAt: new Date().toISOString() } },
-      { provenance: { checkpointId } },
-    ).catch(() => {});
+    void this.logger
+      .log(
+        "checkpoint_transition",
+        "CheckpointerBridge",
+        `Checkpoint linkage: ${checkpointId} → ${[eventId].length} events`,
+        {
+          checkpointLinkage: {
+            checkpointId,
+            eventIds: [eventId],
+            createdAt: new Date().toISOString(),
+          },
+        },
+        { provenance: { checkpointId } },
+      )
+      .catch(() => {});
 
     return eventId;
   }
@@ -135,7 +143,10 @@ export class CheckpointerBridge {
         (e) => e.kind === "checkpoint_transition" && e.payload["checkpointLinkage"],
       );
       for (const event of linkageEvents) {
-        const linkage = event.payload["checkpointLinkage"] as { checkpointId: string; eventIds: string[] };
+        const linkage = event.payload["checkpointLinkage"] as {
+          checkpointId: string;
+          eventIds: string[];
+        };
         if (linkage?.checkpointId && Array.isArray(linkage?.eventIds)) {
           // Only add if not already present (dedup by checkpointId)
           const exists = this.linkages.some((l) => l.checkpointId === linkage.checkpointId);
@@ -143,7 +154,8 @@ export class CheckpointerBridge {
             this.linkages.push({
               checkpointId: linkage.checkpointId,
               sessionId: event.provenance.sessionId,
-              step: typeof event.payload["step"] === "number" ? (event.payload["step"] as number) : -1,
+              step:
+                typeof event.payload["step"] === "number" ? (event.payload["step"] as number) : -1,
               trailEventIds: linkage.eventIds,
               timestamp: event.timestamp,
             });

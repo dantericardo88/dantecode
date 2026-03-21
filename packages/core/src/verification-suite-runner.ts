@@ -5,9 +5,17 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
-import { verifyOutput, type OutputVerificationReport, type VerificationCriteria } from "./qa-harness.js";
+import {
+  verifyOutput,
+  type OutputVerificationReport,
+  type VerificationCriteria,
+} from "./qa-harness.js";
 import type { VerificationRail } from "./rails-enforcer.js";
-import { synthesizeConfidence, type ConfidenceThresholds, type ConfidenceSynthesisResult } from "./confidence-synthesizer.js";
+import {
+  synthesizeConfidence,
+  type ConfidenceThresholds,
+  type ConfidenceSynthesisResult,
+} from "./confidence-synthesizer.js";
 
 // ---------------------------------------------------------------------------
 // Test case types
@@ -34,7 +42,7 @@ export interface TestCaseResult {
   report: OutputVerificationReport;
   synthesis: ConfidenceSynthesisResult;
   passed: boolean;
-  assertionMet: boolean;   // true if no expectedDecision, or decision matched
+  assertionMet: boolean; // true if no expectedDecision, or decision matched
   durationMs: number;
 }
 

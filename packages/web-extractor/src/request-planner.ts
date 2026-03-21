@@ -24,12 +24,17 @@ export class RequestPlanner {
 
   private isJsHeavy(url: string): boolean {
     const jsHeavyDomains = [
-      "twitter.com", "x.com", "instagram.com", "facebook.com",
-      "reactjs.org", "vuejs.org", "nextjs.org"
+      "twitter.com",
+      "x.com",
+      "instagram.com",
+      "facebook.com",
+      "reactjs.org",
+      "vuejs.org",
+      "nextjs.org",
     ];
     try {
       const hostname = new URL(url).hostname.toLowerCase();
-      return jsHeavyDomains.some(domain => hostname.includes(domain));
+      return jsHeavyDomains.some((domain) => hostname.includes(domain));
     } catch {
       return false;
     }

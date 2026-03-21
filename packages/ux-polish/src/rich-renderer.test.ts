@@ -33,7 +33,7 @@ describe("RichRenderer", () => {
   it("renders info payload differently for vscode surface", () => {
     const r = new RichRenderer({ theme: noColorEngine });
     const vscResult = r.render("vscode", { kind: "info", content: "info msg" });
-    const cliResult = r.render("cli",    { kind: "info", content: "info msg" });
+    const cliResult = r.render("cli", { kind: "info", content: "info msg" });
     // VS Code just returns plain text; CLI prepends an icon
     expect(vscResult.output).toBe("info msg");
     expect(cliResult.output).toContain("info msg");
@@ -58,7 +58,10 @@ describe("RichRenderer", () => {
       content: "",
       data: {
         headers: ["Name", "Score"],
-        rows: [["alice", "9.0"], ["bob", "8.5"]],
+        rows: [
+          ["alice", "9.0"],
+          ["bob", "8.5"],
+        ],
       },
     };
     const r = new RichRenderer({ theme: noColorEngine });

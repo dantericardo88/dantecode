@@ -160,4 +160,3 @@ describe("OnboardingWizard", () => {
     expect(wizard.isComplete()).toBe(false);
   });
 });
-

@@ -81,11 +81,7 @@ export class MerkleTree {
    * Verify a proof against a root hash.
    * Static — works offline without the tree.
    */
-  static verifyProof(
-    leafHash: string,
-    proof: MerkleProofStep[],
-    expectedRoot: string,
-  ): boolean {
+  static verifyProof(leafHash: string, proof: MerkleProofStep[], expectedRoot: string): boolean {
     let current = leafHash;
     for (const step of proof) {
       if (step.direction === "right") {

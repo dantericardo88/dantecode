@@ -51,7 +51,13 @@ describe("TavilyProvider", () => {
     const mockResponse = {
       results: [
         { title: "Result 1", url: "https://example.com/1", content: "Snippet 1", score: 0.95 },
-        { title: "Result 2", url: "https://example.com/2", content: "Snippet 2", raw_content: "Full text", score: 0.8 },
+        {
+          title: "Result 2",
+          url: "https://example.com/2",
+          content: "Snippet 2",
+          raw_content: "Full text",
+          score: 0.8,
+        },
       ],
     };
 
@@ -110,7 +116,13 @@ describe("ExaProvider", () => {
   it("parses Exa API response", async () => {
     const mockResponse = {
       results: [
-        { title: "Neural Search Result", url: "https://exa.ai/result", text: "Full content", score: 0.9, publishedDate: "2025-01-15" },
+        {
+          title: "Neural Search Result",
+          url: "https://exa.ai/result",
+          text: "Full content",
+          score: 0.9,
+          publishedDate: "2025-01-15",
+        },
       ],
     };
 
@@ -146,7 +158,12 @@ describe("SerperProvider", () => {
   it("parses Serper response (Google results)", async () => {
     const mockResponse = {
       organic: [
-        { title: "Google Result", link: "https://google-result.com", snippet: "Snippet from Google", date: "2025-03-01" },
+        {
+          title: "Google Result",
+          link: "https://google-result.com",
+          snippet: "Snippet from Google",
+          date: "2025-03-01",
+        },
       ],
     };
 
@@ -192,9 +209,7 @@ describe("GoogleCSEProvider", () => {
 
   it("parses Google CSE response", async () => {
     const mockResponse = {
-      items: [
-        { title: "CSE Result", link: "https://cse.com/page", snippet: "CSE snippet" },
-      ],
+      items: [{ title: "CSE Result", link: "https://cse.com/page", snippet: "CSE snippet" }],
     };
 
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({

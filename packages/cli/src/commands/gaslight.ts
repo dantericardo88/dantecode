@@ -119,8 +119,7 @@ function cmdReview(args: string[], projectRoot: string): void {
     console.log(`\n${BOLD}Iteration Summary:${RESET}`);
     for (const iter of session.iterations) {
       const gate = iter.gateDecision ? ` -> gate: ${iter.gateDecision}` : "";
-      const score =
-        iter.gateScore !== undefined ? ` (${(iter.gateScore * 100).toFixed(0)}%)` : "";
+      const score = iter.gateScore !== undefined ? ` (${(iter.gateScore * 100).toFixed(0)}%)` : "";
       console.log(
         `  [${iter.iteration}] ${DIM}draft ${iter.draft.length} chars${RESET}${gate}${score}`,
       );
@@ -146,10 +145,14 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
       throw new Error(`Session not found: ${sessionIdArg}`);
     }
     if (!session.lessonEligible) {
-      throw new Error(`Session ${sessionIdArg} is not lesson-eligible. Only PASS sessions qualify.`);
+      throw new Error(
+        `Session ${sessionIdArg} is not lesson-eligible. Only PASS sessions qualify.`,
+      );
     }
     if (session.distilledAt) {
-      throw new Error(`Session ${sessionIdArg} was already distilled at ${session.distilledAt}. Distilling twice creates duplicates.`);
+      throw new Error(
+        `Session ${sessionIdArg} was already distilled at ${session.distilledAt}. Distilling twice creates duplicates.`,
+      );
     }
   } else {
     const all = store.list();

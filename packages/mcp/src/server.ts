@@ -126,7 +126,10 @@ const DANTEFORGE_TOOLS = [
       properties: {
         task: { type: "string", description: "Task or requirement being verified" },
         output: { type: "string", description: "Output text to verify" },
-        criteria: { type: "object", description: "Optional verification criteria and metric overrides" },
+        criteria: {
+          type: "object",
+          description: "Optional verification criteria and metric overrides",
+        },
         rails: {
           type: "array",
           items: { type: "object" as const },
@@ -143,7 +146,10 @@ const DANTEFORGE_TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        planId: { type: "string", description: "Identifier for the plan or batch under evaluation" },
+        planId: {
+          type: "string",
+          description: "Identifier for the plan or batch under evaluation",
+        },
         outputs: {
           type: "array",
           items: { type: "object" as const },
@@ -211,8 +217,7 @@ const DANTEFORGE_TOOLS = [
   },
   {
     name: "smart_extract",
-    description:
-      "Intelligently extract specific information from a webpage based on a goal.",
+    description: "Intelligently extract specific information from a webpage based on a goal.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -224,8 +229,7 @@ const DANTEFORGE_TOOLS = [
   },
   {
     name: "batch_fetch",
-    description:
-      "Fetch multiple URLs concurrently with common extraction instructions.",
+    description: "Fetch multiple URLs concurrently with common extraction instructions.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -234,7 +238,10 @@ const DANTEFORGE_TOOLS = [
           items: { type: "string" },
           description: "List of URLs to fetch",
         },
-        commonInstructions: { type: "string", description: "Common extraction instructions for all URLs" },
+        commonInstructions: {
+          type: "string",
+          description: "Common extraction instructions for all URLs",
+        },
       },
       required: ["urls"],
     },
@@ -260,11 +267,23 @@ const DANTEFORGE_TOOLS = [
       type: "object" as const,
       properties: {
         action: { type: "string", description: "start, list, or stop" },
-        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
-        eventType: { type: "string", description: "Event type to watch (post-commit, pre-push, file-change, branch-update)" },
+        projectRoot: {
+          type: "string",
+          description: "Project root used for persistence and relative paths",
+        },
+        eventType: {
+          type: "string",
+          description: "Event type to watch (post-commit, pre-push, file-change, branch-update)",
+        },
         path: { type: "string", description: "Optional specific file or folder path to watch" },
-        workflowPath: { type: "string", description: "Optional workflow file to queue when a matching event fires" },
-        eventPayload: { type: "object", description: "Optional base payload merged into queued workflow runs" },
+        workflowPath: {
+          type: "string",
+          description: "Optional workflow file to queue when a matching event fires",
+        },
+        eventPayload: {
+          type: "object",
+          description: "Optional base payload merged into queued workflow runs",
+        },
         options: { type: "object", description: "Optional options such as debounceMs or cwd" },
         watchId: { type: "string", description: "Watcher ID to stop when action=stop" },
       },
@@ -278,11 +297,23 @@ const DANTEFORGE_TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        projectRoot: { type: "string", description: "Project root used as the default workflow cwd" },
+        projectRoot: {
+          type: "string",
+          description: "Project root used as the default workflow cwd",
+        },
         workflowPath: { type: "string", description: "Path to the workflow file" },
-        eventPayload: { type: "object", description: "Optional payload simulating Github event injection" },
-        background: { type: "boolean", description: "When true, queues the workflow as a durable background automation run" },
-        options: { type: "object", description: "Optional execution options like working directory" },
+        eventPayload: {
+          type: "object",
+          description: "Optional payload simulating Github event injection",
+        },
+        background: {
+          type: "boolean",
+          description: "When true, queues the workflow as a durable background automation run",
+        },
+        options: {
+          type: "object",
+          description: "Optional execution options like working directory",
+        },
       },
       required: ["workflowPath"],
     },
@@ -294,15 +325,29 @@ const DANTEFORGE_TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        projectRoot: { type: "string", description: "Project root where gh and optional changeset generation should run" },
+        projectRoot: {
+          type: "string",
+          description: "Project root where gh and optional changeset generation should run",
+        },
         title: { type: "string", description: "Title of the PR" },
         body: { type: "string", description: "Body of the PR" },
         base: { type: "string", description: "Base branch for the PR" },
         draft: { type: "boolean", description: "Whether to create a draft PR" },
-        background: { type: "boolean", description: "When true, queues PR creation as a durable background automation run" },
+        background: {
+          type: "boolean",
+          description: "When true, queues PR creation as a durable background automation run",
+        },
         generateChangeset: { type: "boolean", description: "Whether to generate a changeset" },
-        bumpType: { type: "string", enum: ["patch", "minor", "major"], description: "Type of version bump if changeset generated" },
-        packages: { type: "array", items: { type: "string" }, description: "Packages to include in the changeset" },
+        bumpType: {
+          type: "string",
+          enum: ["patch", "minor", "major"],
+          description: "Type of version bump if changeset generated",
+        },
+        packages: {
+          type: "array",
+          items: { type: "string" },
+          description: "Packages to include in the changeset",
+        },
       },
       required: ["title"],
     },
@@ -315,12 +360,18 @@ const DANTEFORGE_TOOLS = [
       type: "object" as const,
       properties: {
         action: { type: "string", description: "start, list, or stop" },
-        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
+        projectRoot: {
+          type: "string",
+          description: "Project root used for persistence and relative paths",
+        },
         provider: { type: "string", description: "github, gitlab, or custom" },
         port: { type: "number", description: "Port to listen on (default 3000)" },
         path: { type: "string", description: "HTTP path to bind, defaults to /webhook" },
         secret: { type: "string", description: "Optional webhook secret for signature validation" },
-        workflowPath: { type: "string", description: "Optional workflow file to queue for each received webhook event" },
+        workflowPath: {
+          type: "string",
+          description: "Optional workflow file to queue for each received webhook event",
+        },
         listenerId: { type: "string", description: "Listener ID to stop when action=stop" },
       },
       required: [],
@@ -334,12 +385,24 @@ const DANTEFORGE_TOOLS = [
       type: "object" as const,
       properties: {
         action: { type: "string", description: "start, list, or stop" },
-        projectRoot: { type: "string", description: "Project root used for persistence and relative paths" },
+        projectRoot: {
+          type: "string",
+          description: "Project root used for persistence and relative paths",
+        },
         taskName: { type: "string", description: "Description or name of the task" },
         intervalMs: { type: "number", description: "Interval in milliseconds" },
-        cron: { type: "string", description: "Optional cron expression in minute/hour/day/month/weekday form" },
-        workflowPath: { type: "string", description: "Optional workflow file to run on each schedule" },
-        eventPayload: { type: "object", description: "Optional workflow event payload passed on each run" },
+        cron: {
+          type: "string",
+          description: "Optional cron expression in minute/hour/day/month/weekday form",
+        },
+        workflowPath: {
+          type: "string",
+          description: "Optional workflow file to run on each schedule",
+        },
+        eventPayload: {
+          type: "object",
+          description: "Optional workflow event payload passed on each run",
+        },
         taskId: { type: "string", description: "Task ID to stop when action=stop" },
       },
       required: [],
@@ -355,7 +418,10 @@ const DANTEFORGE_TOOLS = [
         key: { type: "string", description: "Summary key or tag for the memory" },
         value: { type: "string", description: "The content to store" },
         scope: { type: "string", description: "Optional session ID scope" },
-        category: { type: "string", description: "Optional category (fact, decision, error, strategy, context)" },
+        category: {
+          type: "string",
+          description: "Optional category (fact, decision, error, strategy, context)",
+        },
       },
       required: ["projectRoot", "key", "value"],
     },

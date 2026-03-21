@@ -23,47 +23,85 @@ const cfg: GaslightConfig = {
 
 describe("evaluateStopConditions", () => {
   it("returns user-stop immediately", () => {
-    const reason = evaluateStopConditions(makeSession(), { tokensUsed: 0, elapsedMs: 0, iterations: 0, userStopped: true }, cfg);
+    const reason = evaluateStopConditions(
+      makeSession(),
+      { tokensUsed: 0, elapsedMs: 0, iterations: 0, userStopped: true },
+      cfg,
+    );
     expect(reason).toBe("user-stop");
   });
 
   it("returns pass when last gate passed", () => {
     const session = makeSession({
-      iterations: [{ iteration: 1, draft: "x", gateDecision: "pass", at: new Date().toISOString() }],
+      iterations: [
+        { iteration: 1, draft: "x", gateDecision: "pass", at: new Date().toISOString() },
+      ],
     });
-    const reason = evaluateStopConditions(session, { tokensUsed: 0, elapsedMs: 0, iterations: 1, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 0, elapsedMs: 0, iterations: 1, userStopped: false },
+      cfg,
+    );
     expect(reason).toBe("pass");
   });
 
   it("returns confidence when score >= threshold", () => {
     const session = makeSession({
-      iterations: [{ iteration: 1, draft: "x", gateDecision: "fail", gateScore: 0.95, at: new Date().toISOString() }],
+      iterations: [
+        {
+          iteration: 1,
+          draft: "x",
+          gateDecision: "fail",
+          gateScore: 0.95,
+          at: new Date().toISOString(),
+        },
+      ],
     });
-    const reason = evaluateStopConditions(session, { tokensUsed: 0, elapsedMs: 0, iterations: 1, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 0, elapsedMs: 0, iterations: 1, userStopped: false },
+      cfg,
+    );
     expect(reason).toBe("confidence");
   });
 
   it("returns budget-tokens when exhausted", () => {
     const session = makeSession();
-    const reason = evaluateStopConditions(session, { tokensUsed: 1001, elapsedMs: 0, iterations: 0, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 1001, elapsedMs: 0, iterations: 0, userStopped: false },
+      cfg,
+    );
     expect(reason).toBe("budget-tokens");
   });
 
   it("returns budget-time when elapsed exceeds limit", () => {
     const session = makeSession();
-    const reason = evaluateStopConditions(session, { tokensUsed: 0, elapsedMs: 61_000, iterations: 0, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 0, elapsedMs: 61_000, iterations: 0, userStopped: false },
+      cfg,
+    );
     expect(reason).toBe("budget-time");
   });
 
   it("returns budget-iterations when max hit", () => {
     const session = makeSession();
-    const reason = evaluateStopConditions(session, { tokensUsed: 0, elapsedMs: 0, iterations: 3, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 0, elapsedMs: 0, iterations: 3, userStopped: false },
+      cfg,
+    );
     expect(reason).toBe("budget-iterations");
   });
 
   it("returns null when no condition met", () => {
     const session = makeSession();
-    const reason = evaluateStopConditions(session, { tokensUsed: 100, elapsedMs: 1000, iterations: 1, userStopped: false }, cfg);
+    const reason = evaluateStopConditions(
+      session,
+      { tokensUsed: 100, elapsedMs: 1000, iterations: 1, userStopped: false },
+      cfg,
+    );
     expect(reason).toBeNull();
   });
 });

@@ -58,8 +58,12 @@ const enabledPassConfig = {
 describe("E2E: Gaslight → Skillbook closed loop (programmatic)", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("full loop: trigger → session → disk → distillLesson → skill in skillbook", async () => {
     // 1. Run a gaslight session that triggers and passes the gate
@@ -265,8 +269,12 @@ describe("E2E: CLI bridge command full loop", () => {
 describe("E2E: priorLessonProvider wiring", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("priorLessonProvider is called with the draft and taskClass", async () => {
     let capturedDraft: string | undefined;
@@ -364,8 +372,12 @@ describe("E2E: priorLessonProvider wiring", () => {
 describe("E2E: maxSessions cleanup enforcement", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("sessions capped at maxSessions after multiple runs", async () => {
     const engine = new DanteGaslightIntegration(

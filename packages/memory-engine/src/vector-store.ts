@@ -219,7 +219,13 @@ export class VectorStore {
         const text = this.toText(item);
         const tokens = tokenize(text);
         const scopedKey = this.scopedKey(item.key, item.scope);
-        this.entries.set(scopedKey, { key: item.key, scope: item.scope, tokens, text, snapshot: item });
+        this.entries.set(scopedKey, {
+          key: item.key,
+          scope: item.scope,
+          tokens,
+          text,
+          snapshot: item,
+        });
         count++;
       }
     }

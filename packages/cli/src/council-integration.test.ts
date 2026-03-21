@@ -10,11 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import {
-  CouncilOrchestrator,
-  tryLoadCouncilRun,
-  DanteCodeAdapter,
-} from "@dantecode/core";
+import { CouncilOrchestrator, tryLoadCouncilRun, DanteCodeAdapter } from "@dantecode/core";
 import type {
   CouncilAgentAdapter,
   AgentKind,
@@ -115,10 +111,7 @@ describe("CouncilOrchestrator integration", () => {
   let orchestrator: CouncilOrchestrator;
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `council-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    testDir = join(tmpdir(), `council-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(testDir, { recursive: true });
   });
 
@@ -126,13 +119,12 @@ describe("CouncilOrchestrator integration", () => {
     if (orchestrator) {
       try {
         orchestrator.on("error", () => {});
-        if (
-          orchestrator.currentStatus !== "completed" &&
-          orchestrator.currentStatus !== "failed"
-        ) {
+        if (orchestrator.currentStatus !== "completed" && orchestrator.currentStatus !== "failed") {
           await orchestrator.fail("test cleanup");
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     // maxRetries/retryDelay handles Windows EBUSY from recently-released file locks
     await rm(testDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -244,9 +236,7 @@ describe("CouncilOrchestrator integration", () => {
     ]);
     orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
     orchestrator.on("error", () => {});
-    orchestrator.on("state:transition", ({ from, to }) =>
-      transitions.push({ from, to }),
-    );
+    orchestrator.on("state:transition", ({ from, to }) => transitions.push({ from, to }));
 
     expect(orchestrator.currentStatus).toBe("idle");
 

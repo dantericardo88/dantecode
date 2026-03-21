@@ -50,9 +50,7 @@ export function formatSkillsBlock(skills: Skill[]): string {
  */
 export function buildAgentPrompt(task: string, relevantSkills: Skill[]): string {
   const skillsBlock = formatSkillsBlock(relevantSkills);
-  return skillsBlock
-    ? `${skillsBlock}\n---\n\n## Task\n\n${task}`
-    : `## Task\n\n${task}`;
+  return skillsBlock ? `${skillsBlock}\n---\n\n## Task\n\n${task}` : `## Task\n\n${task}`;
 }
 
 /**
@@ -66,7 +64,7 @@ export function buildReflectorPrompt(opts: {
 }): string {
   const { task, outcome, summary, evidence } = opts;
   const evidenceBlock = evidence?.length
-    ? `\n## Evidence\n\n${evidence.map(e => `- ${e}`).join("\n")}`
+    ? `\n## Evidence\n\n${evidence.map((e) => `- ${e}`).join("\n")}`
     : "";
   return `## Task\n\n${task}\n\n## Outcome\n\n${outcome}\n\n## Summary\n\n${summary}${evidenceBlock}\n\n---\n\nPlease reflect on this task execution. What worked, what failed, what strategy is reusable?`;
 }

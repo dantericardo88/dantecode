@@ -41,10 +41,7 @@ export async function isWorktreeAvailable(): Promise<boolean> {
 
 /** Returns the ordered list of available isolation strategies (preferred first). */
 export async function detectAvailableStrategies(): Promise<IsolationStrategy[]> {
-  const [docker, worktree] = await Promise.all([
-    isDockerAvailable(),
-    isWorktreeAvailable(),
-  ]);
+  const [docker, worktree] = await Promise.all([isDockerAvailable(), isWorktreeAvailable()]);
   const available: IsolationStrategy[] = [];
   if (docker) available.push("docker");
   if (worktree) available.push("worktree");
@@ -56,10 +53,7 @@ export async function detectAvailableStrategies(): Promise<IsolationStrategy[]> 
 export async function selectStrategy(
   preferDocker: boolean,
 ): Promise<"docker" | "worktree" | "host"> {
-  const [docker, worktree] = await Promise.all([
-    isDockerAvailable(),
-    isWorktreeAvailable(),
-  ]);
+  const [docker, worktree] = await Promise.all([isDockerAvailable(), isWorktreeAvailable()]);
   if (preferDocker && docker) return "docker";
   if (worktree) return "worktree";
   if (docker) return "docker";

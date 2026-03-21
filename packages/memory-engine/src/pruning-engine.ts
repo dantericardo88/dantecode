@@ -112,10 +112,7 @@ export class PruningEngine {
     const vectorItems = this.vectorStore.listAll();
     const config = this.retentionPolicy.getConfig();
     if (vectorItems.length > config.maxSemanticItems) {
-      const toRemove = this.retentionPolicy.selectForPruning(
-        vectorItems,
-        config.maxSemanticItems,
-      );
+      const toRemove = this.retentionPolicy.selectForPruning(vectorItems, config.maxSemanticItems);
       if (!dryRun) {
         for (const key of toRemove) {
           // Find scope from vector store
@@ -198,10 +195,9 @@ export class PruningEngine {
 
       for (const ev of decisions.compress) {
         if (!dryRun && this.compressBeforePrune) {
-          const compressed_item = this.summarizer.compress(
-            ev.item.source ?? ev.item.key,
-            [ev.item],
-          );
+          const compressed_item = this.summarizer.compress(ev.item.source ?? ev.item.key, [
+            ev.item,
+          ]);
           // Replace with compressed version
           await this.localStore.delete(ev.item.key, scope, layer);
           await this.localStore.put({ ...compressed_item, scope, layer });

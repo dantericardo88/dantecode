@@ -57,7 +57,13 @@ import {
   runAutoforgeIAL,
   formatBladeProgressLine,
 } from "@dantecode/danteforge";
-import { listSkills, getSkill, SkillCatalog, installSkill, verifySkill } from "@dantecode/skill-adapter";
+import {
+  listSkills,
+  getSkill,
+  SkillCatalog,
+  installSkill,
+  verifySkill,
+} from "@dantecode/skill-adapter";
 import { getFeaturesByMaturity } from "./lib/feature-flags.js";
 import {
   getStatus,
@@ -91,10 +97,7 @@ import type {
 } from "@dantecode/config-types";
 import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
 import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
-import {
-  getThemeEngine,
-  renderTokenDashboard,
-} from "@dantecode/ux-polish";
+import { getThemeEngine, renderTokenDashboard } from "@dantecode/ux-polish";
 import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
@@ -103,10 +106,7 @@ import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
 import { researchSlashHandler } from "./commands/research.js";
 import { automateCommand } from "./commands/automate.js";
-import {
-  loadSlashCommandRegistry,
-  type NativeSlashCommandDefinition,
-} from "./command-registry.js";
+import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -328,7 +328,9 @@ function readOptionalNumber(record: Record<string, unknown>, key: string): numbe
 }
 
 function readStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function shorten(value: string, max = 96): string {
@@ -368,7 +370,10 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function loadJsonFile(relativeFilePath: string, state: ReplState): Promise<Record<string, unknown>> {
+async function loadJsonFile(
+  relativeFilePath: string,
+  state: ReplState,
+): Promise<Record<string, unknown>> {
   const resolved = resolve(state.projectRoot, relativeFilePath.replace(/^['"]|['"]$/g, ""));
   const raw = await readFile(resolved, "utf-8");
   return JSON.parse(raw) as Record<string, unknown>;
@@ -389,7 +394,10 @@ function getGitAutomationOrchestrator(state: ReplState): GitAutomationOrchestrat
 function buildAutomationAgentRunner(
   state: ReplState,
 ): (config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult> {
-  return async (config: AgentBridgeConfig, ctx: Record<string, unknown>): Promise<AgentBridgeResult> => {
+  return async (
+    config: AgentBridgeConfig,
+    ctx: Record<string, unknown>,
+  ): Promise<AgentBridgeResult> => {
     const taskId = randomUUID().slice(0, 12);
     const prompt = substitutePromptVars(config.prompt, ctx);
     const taskSession = cloneSessionForTask(state.session, config.projectRoot, taskId);
@@ -468,7 +476,9 @@ async function loadJsonCommandInput(
     return JSON.parse(raw) as unknown;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Could not load JSON input from ${relative(state.projectRoot, resolved)}: ${message}`);
+    throw new Error(
+      `Could not load JSON input from ${relative(state.projectRoot, resolved)}: ${message}`,
+    );
   }
 }
 
@@ -483,7 +493,9 @@ function parseVerificationRailRecord(
   return {
     id: readRequiredString(record, "id", context),
     name: readRequiredString(record, "name", context),
-    ...(readOptionalString(record, "description") ? { description: readOptionalString(record, "description") } : {}),
+    ...(readOptionalString(record, "description")
+      ? { description: readOptionalString(record, "description") }
+      : {}),
     ...(mode ? { mode } : {}),
     ...(requiredSubstrings.length > 0 ? { requiredSubstrings } : {}),
     ...(forbiddenPatterns.length > 0 ? { forbiddenPatterns } : {}),
@@ -496,9 +508,7 @@ function parseVerificationRailRecord(
   };
 }
 
-function parseVerificationCriteria(
-  value: unknown,
-): VerifyOutputInput["criteria"] {
+function parseVerificationCriteria(value: unknown): VerifyOutputInput["criteria"] {
   if (!isRecord(value)) {
     return undefined;
   }
@@ -557,14 +567,18 @@ function parseVerifyOutputInput(payload: unknown): VerifyOutputInput {
   return {
     task: readRequiredString(payload, "task", "verify-output input"),
     output: readRequiredString(payload, "output", "verify-output input"),
-    ...(parseVerificationCriteria(payload["criteria"]) ? { criteria: parseVerificationCriteria(payload["criteria"]) } : {}),
+    ...(parseVerificationCriteria(payload["criteria"])
+      ? { criteria: parseVerificationCriteria(payload["criteria"]) }
+      : {}),
     ...(rails && rails.length > 0 ? { rails } : {}),
   };
 }
 
-function parseQaSuiteInput(
-  payload: unknown,
-): { planId: string; benchmarkId?: string; outputs: QaSuiteOutputInput[] } {
+function parseQaSuiteInput(payload: unknown): {
+  planId: string;
+  benchmarkId?: string;
+  outputs: QaSuiteOutputInput[];
+} {
   if (!isRecord(payload)) {
     throw new Error("qa-suite input must be a JSON object.");
   }
@@ -581,9 +595,7 @@ function parseQaSuiteInput(
 
     const parsed = parseVerifyOutputInput(entry);
     return {
-      id:
-        readOptionalString(entry, "id") ??
-        `output-${index + 1}`,
+      id: readOptionalString(entry, "id") ?? `output-${index + 1}`,
       ...parsed,
     };
   });
@@ -627,19 +639,24 @@ function parseCriticDebateInput(payload: unknown): { opinions: CriticOpinion[]; 
       verdict,
       ...(confidence !== undefined ? { confidence } : {}),
       ...(findings.length > 0 ? { findings } : {}),
-      ...(readOptionalString(entry, "critique") ? { critique: readOptionalString(entry, "critique") } : {}),
+      ...(readOptionalString(entry, "critique")
+        ? { critique: readOptionalString(entry, "critique") }
+        : {}),
     } satisfies CriticOpinion;
   });
 
   return {
     opinions,
-    ...(readOptionalString(payload, "output") ? { output: readOptionalString(payload, "output") } : {}),
+    ...(readOptionalString(payload, "output")
+      ? { output: readOptionalString(payload, "output") }
+      : {}),
   };
 }
 
-function parseVerificationHistoryArgs(
-  args: string,
-): { limit: number; kind?: VerificationHistoryKind } {
+function parseVerificationHistoryArgs(args: string): {
+  limit: number;
+  kind?: VerificationHistoryKind;
+} {
   const trimmed = args.trim();
   if (!trimmed) {
     return { limit: 10 };
@@ -683,7 +700,9 @@ async function persistVerificationTelemetry(
       sessionId: state.session.id,
       ...(input.passed !== undefined ? { passed: input.passed } : {}),
       ...(input.pdseScore !== undefined ? { pdseScore: input.pdseScore } : {}),
-      ...(input.averageConfidence !== undefined ? { averageConfidence: input.averageConfidence } : {}),
+      ...(input.averageConfidence !== undefined
+        ? { averageConfidence: input.averageConfidence }
+        : {}),
       payload: input.payload,
     });
   } catch (err: unknown) {
@@ -1155,9 +1174,7 @@ async function verifyOutputCommand(args: string, state: ReplState): Promise<stri
       if (primaryResult) {
         const synthesis: ConfidenceSynthesisResult = primaryResult.synthesis;
         const decisionColor =
-          synthesis.decision === "pass" ? GREEN
-          : synthesis.decision === "soft-pass" ? YELLOW
-          : RED;
+          synthesis.decision === "pass" ? GREEN : synthesis.decision === "soft-pass" ? YELLOW : RED;
         lines.push("");
         lines.push(`  ${BOLD}Confidence Decision${RESET}`);
         lines.push(
@@ -1371,7 +1388,9 @@ async function verificationHistoryCommand(args: string, state: ReplState): Promi
           new Date(entry.recordedAt).toLocaleString(),
           entry.kind,
           entry.passed === undefined ? undefined : entry.passed ? "pass" : "fail",
-          typeof entry.pdseScore === "number" ? `pdse=${formatFraction(entry.pdseScore)}` : undefined,
+          typeof entry.pdseScore === "number"
+            ? `pdse=${formatFraction(entry.pdseScore)}`
+            : undefined,
           typeof entry.averageConfidence === "number"
             ? `confidence=${formatFraction(entry.averageConfidence)}`
             : undefined,
@@ -1575,7 +1594,7 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
       "2. Then execute each step ONE AT A TIME with real tool calls.",
       "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
       "4. After each step, verify your work (Read the file, run a check, etc.).",
-      "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+      '5. For GitHub search: `gh search repos "query" --limit 10 --json name,url,description,stargazersCount`',
       "6. For web content: `curl -sL 'url' | head -200`",
       "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
       "8. Mark each TodoWrite step completed as you finish it.",
@@ -1614,16 +1633,22 @@ async function skillsListCommand(_args: string, state: ReplState): Promise<strin
     return `${DIM}No skills installed. Use '/skill-install <source>' or 'dantecode skills install <source>'.${RESET}`;
   }
 
-  const lines = [`${BOLD}Installed Skills (${entries.length} catalog + ${registry.length} registry):${RESET}`, ""];
+  const lines = [
+    `${BOLD}Installed Skills (${entries.length} catalog + ${registry.length} registry):${RESET}`,
+    "",
+  ];
 
   if (entries.length > 0) {
     lines.push(`${BOLD}Catalog Skills:${RESET}`);
     for (const entry of entries) {
-      const scoreStr = entry.verificationScore !== undefined
-        ? ` ${entry.verificationScore >= 85 ? GREEN : entry.verificationScore >= 70 ? YELLOW : RED}[score:${entry.verificationScore}]${RESET}`
-        : "";
+      const scoreStr =
+        entry.verificationScore !== undefined
+          ? ` ${entry.verificationScore >= 85 ? GREEN : entry.verificationScore >= 70 ? YELLOW : RED}[score:${entry.verificationScore}]${RESET}`
+          : "";
       const tierStr = entry.verificationTier ? ` ${DIM}[${entry.verificationTier}]${RESET}` : "";
-      lines.push(`  ${YELLOW}${entry.name.padEnd(24)}${RESET} ${DIM}${entry.source}${RESET}${tierStr}${scoreStr} ${entry.description.slice(0, 50)}`);
+      lines.push(
+        `  ${YELLOW}${entry.name.padEnd(24)}${RESET} ${DIM}${entry.source}${RESET}${tierStr}${scoreStr} ${entry.description.slice(0, 50)}`,
+      );
     }
     lines.push("");
   }
@@ -1631,7 +1656,9 @@ async function skillsListCommand(_args: string, state: ReplState): Promise<strin
   if (registry.length > 0) {
     lines.push(`${BOLD}Registry Skills:${RESET}`);
     for (const skill of registry) {
-      lines.push(`  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${DIM}${skill.importSource}${RESET} ${skill.description.slice(0, 60)}`);
+      lines.push(
+        `  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${DIM}${skill.importSource}${RESET} ${skill.description.slice(0, 60)}`,
+      );
     }
   }
 
@@ -1648,16 +1675,24 @@ async function skillInstallCommand(args: string, state: ReplState): Promise<stri
   const result = await installSkill({ source, verify: true, tier: "guardian" }, state.projectRoot);
 
   if (!result.success) {
-    return lines.concat([`${RED}Install failed: ${result.error ?? "unknown error"}${RESET}`]).join("\n");
+    return lines
+      .concat([`${RED}Install failed: ${result.error ?? "unknown error"}${RESET}`])
+      .join("\n");
   }
 
   lines.push(`${GREEN}Installed:${RESET} ${BOLD}${result.name}${RESET}`);
   lines.push(`  ${DIM}Format: ${result.format}${RESET}`);
   lines.push(`  ${DIM}Path: ${result.installedPath}${RESET}`);
   if (result.verification) {
-    const tierColor = result.verification.tier === "sovereign" ? GREEN
-      : result.verification.tier === "sentinel" ? YELLOW : DIM;
-    lines.push(`  ${DIM}Verification: ${tierColor}${result.verification.tier}${RESET} ${DIM}(score: ${result.verification.overallScore})${RESET}`);
+    const tierColor =
+      result.verification.tier === "sovereign"
+        ? GREEN
+        : result.verification.tier === "sentinel"
+          ? YELLOW
+          : DIM;
+    lines.push(
+      `  ${DIM}Verification: ${tierColor}${result.verification.tier}${RESET} ${DIM}(score: ${result.verification.overallScore})${RESET}`,
+    );
   }
   return lines.join("\n");
 }
@@ -1684,7 +1719,8 @@ async function skillVerifyCommand(args: string, state: ReplState): Promise<strin
   const result = await verifySkill(universalSkill, { tier: "guardian" });
   const lines = [`${BOLD}Verification: ${skill.frontmatter.name}${RESET}`, ""];
 
-  const overallColor = result.tier === "sovereign" ? GREEN : result.tier === "sentinel" ? YELLOW : RED;
+  const overallColor =
+    result.tier === "sovereign" ? GREEN : result.tier === "sentinel" ? YELLOW : RED;
   lines.push(`  Score:  ${overallColor}${result.overallScore}/100${RESET}`);
   lines.push(`  Tier:   ${overallColor}${result.tier}${RESET}`);
   lines.push(`  Passed: ${result.passed ? `${GREEN}YES${RESET}` : `${RED}NO${RESET}`}`);
@@ -1692,7 +1728,12 @@ async function skillVerifyCommand(args: string, state: ReplState): Promise<strin
   if (result.findings.length > 0) {
     lines.push("", `${BOLD}Findings (${result.findings.length}):${RESET}`);
     for (const f of result.findings) {
-      const icon = f.severity === "critical" ? RED + "CRIT" : f.severity === "warning" ? YELLOW + "WARN" : DIM + "INFO";
+      const icon =
+        f.severity === "critical"
+          ? RED + "CRIT"
+          : f.severity === "warning"
+            ? YELLOW + "WARN"
+            : DIM + "INFO";
       lines.push(`  ${icon}${RESET} [${f.category}] ${f.message}`);
     }
   }
@@ -1810,9 +1851,7 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
   // When DanteMemory is available, use semantic summarization
   if (state.memoryOrchestrator) {
     try {
-      const sumResult = await state.memoryOrchestrator.memorySummarize(
-        state.session.id,
-      );
+      const sumResult = await state.memoryOrchestrator.memorySummarize(state.session.id);
       if (sumResult.compressed && sumResult.summary) {
         const KEEP_RECENT = 10;
         const first = state.session.messages[0]!;
@@ -1825,9 +1864,7 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
           timestamp: new Date().toISOString(),
         };
         state.session.messages = [first, summaryMsg, ...recent];
-        const savedNote = sumResult.tokensSaved
-          ? ` (~${sumResult.tokensSaved} tokens saved)`
-          : "";
+        const savedNote = sumResult.tokensSaved ? ` (~${sumResult.tokensSaved} tokens saved)` : "";
         return `${GREEN}Compacted (DanteMemory):${RESET} ${before} → ${state.session.messages.length} messages (${removed} removed)${savedNote}`;
       }
     } catch {
@@ -1971,8 +2008,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
         }
         const lines = [`${BOLD}Cross-session Recall${RESET}\n`];
         for (const item of result.results) {
-          const summary =
-            item.summary ?? String(item.value).slice(0, 100);
+          const summary = item.summary ?? String(item.value).slice(0, 100);
           lines.push(`  [${item.scope}] ${item.key}: ${DIM}${summary}${RESET}`);
         }
         return lines.join("\n");
@@ -2085,7 +2121,9 @@ async function sandboxCommand(args: string, state: ReplState): Promise<string> {
     const status = await DanteSandbox.status();
     const modeColor = status.enforced ? GREEN : RED;
     const dockerStr = status.dockerReady ? `${GREEN}ready${RESET}` : `${RED}unavailable${RESET}`;
-    const worktreeStr = status.worktreeReady ? `${GREEN}ready${RESET}` : `${RED}unavailable${RESET}`;
+    const worktreeStr = status.worktreeReady
+      ? `${GREEN}ready${RESET}`
+      : `${RED}unavailable${RESET}`;
     return [
       `${BOLD}DanteSandbox Status${RESET}`,
       `  Enforced:    ${modeColor}${status.enforced ? "YES" : "NO"}${RESET}`,
@@ -2997,9 +3035,7 @@ async function gitWatchCommand(args: string, state: ReplState): Promise<string> 
       lines.push(
         `  ${GREEN}${watcher.id}${RESET} ${DIM}${watcher.status}${RESET} ${watcher.eventType} ${watcher.targetPath ?? "."}`,
       );
-      lines.push(
-        `    ${DIM}events=${watcher.eventCount} updated=${watcher.updatedAt}${RESET}`,
-      );
+      lines.push(`    ${DIM}events=${watcher.eventCount} updated=${watcher.updatedAt}${RESET}`);
     }
     return lines.join("\n");
   }
@@ -3167,12 +3203,13 @@ async function autoPrCommand(args: string, state: ReplState): Promise<string> {
     return `${RED}A PR title is required.${RESET}`;
   }
 
-  const body = bodyFile
-    ? await readFile(resolve(state.projectRoot, bodyFile), "utf-8")
-    : "";
+  const body = bodyFile ? await readFile(resolve(state.projectRoot, bodyFile), "utf-8") : "";
 
   if (changesetMatch?.[1] && changesetMatch[2]) {
-    const packages = changesetMatch[2].split(",").map((entry) => entry.trim()).filter(Boolean);
+    const packages = changesetMatch[2]
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
     const changeset = await addChangeset(
       changesetMatch[1] as "patch" | "minor" | "major",
       packages,
@@ -3327,9 +3364,7 @@ async function webhookListenCommand(args: string, state: ReplState): Promise<str
       return;
     }
 
-    process.stdout.write(
-      `${DIM}[webhook ${listener.id}] ${data.provider}:${data.event}${RESET}\n`,
-    );
+    process.stdout.write(`${DIM}[webhook ${listener.id}] ${data.provider}:${data.event}${RESET}\n`);
   });
 
   return [
@@ -3358,9 +3393,7 @@ async function scheduleGitTaskCommand(args: string, state: ReplState): Promise<s
       lines.push(
         `  ${GREEN}${task.id}${RESET} ${DIM}${task.status}${RESET} ${task.schedule} ${task.taskName}`,
       );
-      lines.push(
-        `    ${DIM}runs=${task.runCount} next=${task.nextRunAt ?? "unknown"}${RESET}`,
-      );
+      lines.push(`    ${DIM}runs=${task.runCount} next=${task.nextRunAt ?? "unknown"}${RESET}`);
     }
     return lines.join("\n");
   }
@@ -3389,7 +3422,10 @@ async function scheduleGitTaskCommand(args: string, state: ReplState): Promise<s
   if (/^\d+$/.test(tokens[0]!)) {
     scheduleValue = Number(tokens[0]);
     taskName = tokens.slice(1).join(" ");
-  } else if (tokens.length >= 6 && tokens.slice(0, 5).every((token) => /^[\d*/,\-]+$/.test(token))) {
+  } else if (
+    tokens.length >= 6 &&
+    tokens.slice(0, 5).every((token) => /^[\d*/,\-]+$/.test(token))
+  ) {
     scheduleValue = tokens.slice(0, 5).join(" ");
     taskName = tokens.slice(5).join(" ");
   } else {
@@ -3870,9 +3906,7 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
           activeFiles: state.session.activeFiles,
           todoList: state.session.todoList,
         },
-        memoryStats: state.memoryOrchestrator
-          ? state.memoryOrchestrator.memoryVisualize()
-          : null,
+        memoryStats: state.memoryOrchestrator ? state.memoryOrchestrator.memoryVisualize() : null,
       };
       await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
     } else {
@@ -4007,6 +4041,7 @@ async function branchCommand(args: string, state: ReplState): Promise<string> {
   state.session.id = randomUUID();
   state.session.name = branchName;
   state.session.createdAt = new Date().toISOString();
+  state.session.updatedAt = new Date().toISOString();
   state.session.messages = [
     {
       id: randomUUID(),
@@ -4151,11 +4186,16 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 
 function formatThinkTier(tier: string): string {
   switch (tier) {
-    case "quick": return `${CYAN}quick${RESET} (fast, minimal reasoning)`;
-    case "deep": return `${YELLOW}deep${RESET} (step-by-step analysis)`;
-    case "expert": return `${RED}expert${RESET} (full decomposition + verification)`;
-    case "auto": return `${GREEN}auto${RESET} (complexity-driven)`;
-    default: return tier;
+    case "quick":
+      return `${CYAN}quick${RESET} (fast, minimal reasoning)`;
+    case "deep":
+      return `${YELLOW}deep${RESET} (step-by-step analysis)`;
+    case "expert":
+      return `${RED}expert${RESET} (full decomposition + verification)`;
+    case "auto":
+      return `${GREEN}auto${RESET} (complexity-driven)`;
+    default:
+      return tier;
   }
 }
 
@@ -4182,7 +4222,7 @@ function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | unde
     }
   }
 
-  const avg = pdseCount > 0 ? (avgPdse / pdseCount * 100).toFixed(0) : "N/A";
+  const avg = pdseCount > 0 ? ((avgPdse / pdseCount) * 100).toFixed(0) : "N/A";
   const tierPerf = chain.getTierPerformance();
   const perfLines: string[] = [];
   for (const [t, v] of Object.entries(tierPerf)) {
@@ -4207,7 +4247,9 @@ function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | unde
     `  Average PDSE: ${avg}`,
     perfLines.length > 0 ? `  Tier performance (>=3 samples):\n${perfLines.join("\n")}` : "",
     playbookSection,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function formatThinkChain(
@@ -4222,14 +4264,15 @@ function formatThinkChain(
   const lines = [`${BOLD}Reasoning Chain (last ${steps.length} steps)${RESET}`, ""];
   for (const step of steps) {
     const icon =
-      step.phase.type === "thinking" ? "💭"
-      : step.phase.type === "critique" ? "🔍"
-      : step.phase.type === "action" ? "⚡"
-      : "👁";
+      step.phase.type === "thinking"
+        ? "💭"
+        : step.phase.type === "critique"
+          ? "🔍"
+          : step.phase.type === "action"
+            ? "⚡"
+            : "👁";
     const pdse =
-      step.phase.pdseScore !== undefined
-        ? ` P:${(step.phase.pdseScore * 100).toFixed(0)}`
-        : "";
+      step.phase.pdseScore !== undefined ? ` P:${(step.phase.pdseScore * 100).toFixed(0)}` : "";
     const esc = step.escalated ? ` ${YELLOW}↑escalated${RESET}` : "";
     lines.push(`  ${icon} #${step.stepNumber} [${step.phase.type}]${pdse}${esc}`);
     lines.push(`    ${DIM}${step.phase.content.slice(0, 120)}${RESET}`);
@@ -4259,7 +4302,9 @@ async function thinkCommand(args: string, state: ReplState): Promise<string> {
       `  Chain depth: ${chain?.getHistory().length ?? 0} steps`,
       "",
       `  ${DIM}Usage: /think [quick|deep|expert|auto] [--session]${RESET}`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
   }
 
   if (sub === "stats") return formatThinkStats(state.reasoningChain);
@@ -4283,9 +4328,7 @@ async function thinkCommand(args: string, state: ReplState): Promise<string> {
   state.reasoningOverrideSession = isSession;
   const scope = isSession ? "session" : "next prompt";
   const hint =
-    sub === "expert" ? " (high token usage)"
-    : sub === "quick" ? " (minimal tokens)"
-    : "";
+    sub === "expert" ? " (high token usage)" : sub === "quick" ? " (minimal tokens)" : "";
   return `${GREEN}Reasoning set to ${BOLD}${sub}${RESET}${GREEN} for ${scope}${hint}${RESET}`;
 }
 
@@ -4302,10 +4345,14 @@ async function gaslightCommand(args: string, state: ReplState): Promise<string> 
   }
 
   switch (sub) {
-    case "on":     return state.gaslight.cmdOn();
-    case "off":    return state.gaslight.cmdOff();
-    case "stats":  return state.gaslight.cmdStats();
-    case "review": return state.gaslight.cmdReview();
+    case "on":
+      return state.gaslight.cmdOn();
+    case "off":
+      return state.gaslight.cmdOff();
+    case "stats":
+      return state.gaslight.cmdStats();
+    case "review":
+      return state.gaslight.cmdReview();
     case "bridge": {
       // Bridge is disk-based and async — delegate to the CLI command handler.
       // Must catch: cmdBridge() throws on error (after Fix A1); process.exit was removed
@@ -4344,10 +4391,14 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
   }
 
   switch (sub) {
-    case "on":     return state.gaslight.cmdFearSetOn();
-    case "off":    return state.gaslight.cmdFearSetOff();
-    case "stats":  return state.gaslight.cmdFearSetStats();
-    case "review": return state.gaslight.cmdFearSetReview();
+    case "on":
+      return state.gaslight.cmdFearSetOn();
+    case "off":
+      return state.gaslight.cmdFearSetOff();
+    case "stats":
+      return state.gaslight.cmdFearSetStats();
+    case "review":
+      return state.gaslight.cmdFearSetReview();
     case "bridge": {
       try {
         await runFearsetCommand(["bridge", ...parts.slice(1)], state.projectRoot);
@@ -4364,8 +4415,12 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
       }
       try {
         const result = await state.gaslight.runFearSet(context);
-        const decColor = result.synthesizedRecommendation?.decision === "go" ? GREEN
-          : result.synthesizedRecommendation?.decision === "no-go" ? RED : YELLOW;
+        const decColor =
+          result.synthesizedRecommendation?.decision === "go"
+            ? GREEN
+            : result.synthesizedRecommendation?.decision === "no-go"
+              ? RED
+              : YELLOW;
         const lines = [
           `${BOLD}FearSet complete${RESET}  ${result.passed ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`}`,
           `  ID:         ${CYAN}${result.id}${RESET}`,
@@ -4373,7 +4428,9 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
           `  Columns:    ${result.columns.map((c) => c.name).join(", ")}`,
         ];
         if (result.synthesizedRecommendation) {
-          lines.push(`  Decision:   ${decColor}${BOLD}${result.synthesizedRecommendation.decision.toUpperCase()}${RESET}`);
+          lines.push(
+            `  Decision:   ${decColor}${BOLD}${result.synthesizedRecommendation.decision.toUpperCase()}${RESET}`,
+          );
           lines.push(`  ${result.synthesizedRecommendation.reasoning.slice(0, 120)}`);
         }
         if (result.passed) {
@@ -4455,10 +4512,7 @@ async function reviewCommand(args: string, state: ReplState): Promise<string> {
 
   const postComments = parts.includes("--post");
   const severityArg = parts.find((p) => p.startsWith("--severity="));
-  const severity = (severityArg?.split("=")[1] ?? "normal") as
-    | "strict"
-    | "normal"
-    | "lenient";
+  const severity = (severityArg?.split("=")[1] ?? "normal") as "strict" | "normal" | "lenient";
 
   try {
     const { reviewPR, formatReviewOutput } = await import("./commands/review.js");
@@ -4552,9 +4606,7 @@ async function fleetCommand(args: string, state: ReplState): Promise<string> {
   const manifests = await listAgentManifests(state.projectRoot);
 
   const agentList =
-    manifests.length > 0
-      ? manifests.join(", ")
-      : "builder, reviewer, tester (default)";
+    manifests.length > 0 ? manifests.join(", ") : "builder, reviewer, tester (default)";
 
   // Wire up the fleet by queueing a council start via pendingAgentPrompt.
   // This triggers the agent loop to invoke the council orchestrator with the
@@ -4666,10 +4718,14 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
     `${BOLD}Features${RESET}`,
     "",
     `${GREEN}Stable${RESET}`,
-    ...stable.map((f) => `  ${GREEN}[ok]${RESET} ${f.name.padEnd(20)} ${DIM}${f.description}${RESET}`),
+    ...stable.map(
+      (f) => `  ${GREEN}[ok]${RESET} ${f.name.padEnd(20)} ${DIM}${f.description}${RESET}`,
+    ),
     "",
     `${YELLOW}Beta${RESET}`,
-    ...beta.map((f) => `  ${YELLOW}[beta]${RESET} ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`),
+    ...beta.map(
+      (f) => `  ${YELLOW}[beta]${RESET} ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
+    ),
     "",
     `${DIM}Experimental (opt-in)${RESET}`,
     ...experimental.map(
@@ -4680,7 +4736,6 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
 
   return lines.join("\n");
 }
-
 
 // ----------------------------------------------------------------------------
 // /theme — Switch terminal theme with live preview
@@ -4698,8 +4753,28 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
     for (const name of AVAILABLE_THEMES) {
       engine.setTheme(name as ThemeName);
       const c = engine.resolve().colors;
-      const indicator = name === current ? (GREEN + "*" + RESET) : " ";
-      const preview = "  " + c.success + "ok" + c.reset + " " + c.error + "err" + c.reset + " " + c.warning + "warn" + c.reset + " " + c.info + "info" + c.reset + " " + c.muted + "muted" + c.reset;
+      const indicator = name === current ? GREEN + "*" + RESET : " ";
+      const preview =
+        "  " +
+        c.success +
+        "ok" +
+        c.reset +
+        " " +
+        c.error +
+        "err" +
+        c.reset +
+        " " +
+        c.warning +
+        "warn" +
+        c.reset +
+        " " +
+        c.info +
+        "info" +
+        c.reset +
+        " " +
+        c.muted +
+        "muted" +
+        c.reset;
       lines.push("  " + indicator + " " + BOLD + name.padEnd(10) + RESET + " " + preview);
     }
     engine.setTheme(current);
@@ -4709,9 +4784,17 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
   }
 
   if (!AVAILABLE_THEMES.includes(themeName as ThemeName)) {
-    return RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET;
+    return (
+      RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET
+    );
   }
 
+  // Always apply visual + in-memory change unconditionally so the user
+  // sees the new theme immediately regardless of disk state.
+  engine.setTheme(themeName as ThemeName);
+  state.theme = themeName as ThemeName;
+
+  let persistNote = "";
   try {
     const stateYamlPath = join(state.projectRoot, ".dantecode", "STATE.yaml");
     const raw = await readFile(stateYamlPath, "utf8").catch(() => "");
@@ -4719,15 +4802,13 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
       ? raw.replace(/^theme:.*$/m, "theme: " + themeName)
       : raw + "\ntheme: " + themeName + "\n";
     await writeFile(stateYamlPath, updated, "utf8");
-    engine.setTheme(themeName as ThemeName);
-    state.theme = themeName as ThemeName;
   } catch {
-    // Non-fatal: engine and state.theme unchanged if disk write fails
+    persistNote = " " + RED + "(not saved — check .dantecode/ permissions)" + RESET;
   }
 
   const c = engine.resolve().colors;
   return [
-    GREEN + "Theme set to " + BOLD + themeName + RESET,
+    GREEN + "Theme set to " + BOLD + themeName + RESET + persistNote,
     "",
     "Preview with " + BOLD + themeName + RESET + ":",
     "  " + c.success + "verification passed" + c.reset,
@@ -4883,7 +4964,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "verification-history",
     description: "Show recent verification reports and benchmark entries",
-    usage: "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
+    usage:
+      "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
     handler: verificationHistoryCommand,
   },
   {
@@ -4997,7 +5079,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "sandbox",
-    description: "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
+    description:
+      "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
     usage: "/sandbox [status|force-docker|force-worktree|force-host|on|off]",
     handler: sandboxCommand,
   },
@@ -5046,7 +5129,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "git-watch",
     description: "Start, list, or stop durable Git event watchers",
-    usage: "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
+    usage:
+      "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
     handler: gitWatchCommand,
   },
   {
@@ -5058,13 +5142,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "auto-pr",
     description: "Create a PR with optional changeset generation",
-    usage: "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
+    usage:
+      "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
     handler: autoPrCommand,
   },
   {
     name: "automate",
     description: "Unified automation management: dashboard, templates, create, stop, logs",
-    usage: "/automate [dashboard | list | create <type> | template <name> | templates | stop <id> | logs <id>]",
+    usage:
+      "/automate [dashboard | list | create <type> | template <name> | templates | stop <id> | logs <id>]",
     handler: async (args: string, state: ReplState) => {
       getGitAutomationOrchestrator(state); // pre-populate with buildAutomationAgentRunner DI
       return automateCommand(args, state);
@@ -5073,13 +5159,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "webhook-listen",
     description: "Start, list, or stop local webhook listeners",
-    usage: "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
+    usage:
+      "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
     handler: webhookListenCommand,
   },
   {
     name: "schedule-git-task",
     description: "Start, list, or stop durable scheduled git tasks",
-    usage: "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
+    usage:
+      "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
     handler: scheduleGitTaskCommand,
   },
   {
@@ -5126,7 +5214,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "research",
-    description: "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
+    description:
+      "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
     usage: "/research <topic or question>",
     handler: researchSlashHandler,
   },

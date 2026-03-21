@@ -151,6 +151,21 @@ describe("DanteCode HTTP Server", () => {
     expect(getRes.body["id"]).toBe(id);
     expect(getRes.body["name"]).toBe("integration-test");
   });
+
+  // T-01: Malformed JSON body must return 400
+  it("POST with malformed JSON body returns 400 with error", async () => {
+    const res = await httpRequest(port, "POST", "/api/sessions", "{ not valid json }");
+    expect(res.status).toBe(400);
+    expect(res.body["error"]).toMatch(/invalid json/i);
+  });
+
+  // T-02: OPTIONS preflight must return dynamic Access-Control-Allow-Origin
+  it("OPTIONS preflight returns Access-Control-Allow-Origin header", async () => {
+    const res = await httpRequest(port, "OPTIONS", "/api/health");
+    expect(res.status).toBe(204);
+    // No corsOrigins configured → getAllowOrigin returns "*"
+    expect(res.headers["access-control-allow-origin"]).toBe("*");
+  });
 });
 
 // ---------------------------------------------------------------------------

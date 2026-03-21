@@ -1,7 +1,4 @@
-import { 
-  createWorktree, 
-  removeWorktree
-} from "@dantecode/git-engine";
+import { createWorktree, removeWorktree } from "@dantecode/git-engine";
 import type { WorktreeSpec } from "@dantecode/config-types";
 
 export interface WorktreeInstance {
@@ -25,15 +22,15 @@ export class WorktreeHook {
       directory: this.projectRoot,
       sessionId: taskId,
       branch: branch,
-      baseBranch: "main" // default to main
+      baseBranch: "main", // default to main
     };
-    
+
     // git-engine methods are synchronous
     const result = createWorktree(spec);
-    
+
     return {
       directory: result.directory,
-      branch: result.branch
+      branch: result.branch,
     };
   }
 

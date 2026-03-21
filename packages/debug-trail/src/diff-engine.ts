@@ -209,10 +209,7 @@ export function formatUnifiedDiff(diff: FileDiff): string {
   if (diff.isBinary) {
     return `Binary file changed: ${diff.filePath}\n`;
   }
-  const lines: string[] = [
-    `--- a/${diff.filePath}`,
-    `+++ b/${diff.filePath}`,
-  ];
+  const lines: string[] = [`--- a/${diff.filePath}`, `+++ b/${diff.filePath}`];
   for (const hunk of diff.hunks) {
     lines.push(`@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`);
     for (const line of hunk.lines) {

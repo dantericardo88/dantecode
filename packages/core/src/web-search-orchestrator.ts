@@ -96,7 +96,11 @@ export class WebSearchOrchestrator {
   private totalSessionCost = 0;
   private persistentCache: SemanticSearchCache | null = null;
 
-  constructor(config?: Partial<SearchProviderConfig>, providers?: SearchProvider[], projectRoot?: string) {
+  constructor(
+    config?: Partial<SearchProviderConfig>,
+    providers?: SearchProvider[],
+    projectRoot?: string,
+  ) {
     this.config = { ...loadSearchConfig(), ...config };
     this.providers = providers ?? createSearchProviders(this.config);
     if (projectRoot || process.cwd()) {
@@ -179,7 +183,8 @@ export class WebSearchOrchestrator {
           };
           this.totalSessionCost += provider.costPerQuery;
           setCache(cacheKey, orchestrated);
-          if (this.persistentCache) await this.persistentCache.put(query, orchestrated.results, [provider.name]);
+          if (this.persistentCache)
+            await this.persistentCache.put(query, orchestrated.results, [provider.name]);
           return orchestrated;
         } catch {
           // Fall through to multi-provider search
@@ -261,7 +266,8 @@ export class WebSearchOrchestrator {
         };
         this.totalSessionCost += ddg.costPerQuery;
         setCache(cacheKey, orchestrated);
-        if (this.persistentCache) await this.persistentCache.put(query, orchestrated.results, [ddg.name]);
+        if (this.persistentCache)
+          await this.persistentCache.put(query, orchestrated.results, [ddg.name]);
         return orchestrated;
       } catch {
         return {
@@ -288,7 +294,8 @@ export class WebSearchOrchestrator {
       query,
     };
     setCache(cacheKey, orchestrated);
-    if (this.persistentCache) await this.persistentCache.put(query, orchestrated.results, providersUsed);
+    if (this.persistentCache)
+      await this.persistentCache.put(query, orchestrated.results, providersUsed);
     return orchestrated;
   }
 
@@ -472,7 +479,10 @@ export class WebSearchOrchestrator {
     if (results.length === 0) return 0;
 
     const queryTokens = new Set(
-      query.toLowerCase().split(/\s+/).filter((t) => t.length > 2),
+      query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
     );
 
     // Factor 1: Result count (more results = higher confidence)
@@ -505,7 +515,11 @@ export class WebSearchOrchestrator {
   }
 
   /** Generate a follow-up query when initial results are insufficient. */
-  generateFollowUpQuery(originalQuery: string, currentResults: SearchResult[], iteration: number): string {
+  generateFollowUpQuery(
+    originalQuery: string,
+    currentResults: SearchResult[],
+    iteration: number,
+  ): string {
     if (currentResults.length === 0) {
       return `${originalQuery} tutorial guide`;
     }

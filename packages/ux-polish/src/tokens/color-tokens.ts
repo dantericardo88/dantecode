@@ -27,11 +27,11 @@ const DIM = A("2");
 /** Full ANSI color map per theme. */
 export const COLOR_TOKENS: Record<ThemeName, SemanticColors> = {
   default: {
-    success: A("32"),          // green
-    error: A("31"),            // red
-    warning: A("33"),          // yellow
-    info: A("36"),             // cyan
-    progress: A("34"),         // blue
+    success: A("32"), // green
+    error: A("31"), // red
+    warning: A("33"), // yellow
+    info: A("36"), // cyan
+    progress: A("34"), // blue
     muted: DIM,
     reset: RESET,
   },
@@ -45,29 +45,29 @@ export const COLOR_TOKENS: Record<ThemeName, SemanticColors> = {
     reset: "",
   },
   rich: {
-    success: BOLD + A("32"),   // bold green
-    error: BOLD + A("31"),     // bold red
-    warning: BOLD + A("33"),   // bold yellow
-    info: BOLD + A("36"),      // bold cyan
-    progress: BOLD + A("34"),  // bold blue
+    success: BOLD + A("32"), // bold green
+    error: BOLD + A("31"), // bold red
+    warning: BOLD + A("33"), // bold yellow
+    info: BOLD + A("36"), // bold cyan
+    progress: BOLD + A("34"), // bold blue
     muted: DIM,
     reset: RESET,
   },
   matrix: {
-    success: A("32"),          // classic matrix green
-    error: A("91"),            // bright red
-    warning: A("93"),          // bright yellow
-    info: A("92"),             // bright green
-    progress: A("32"),         // matrix green
+    success: A("32"), // classic matrix green
+    error: A("91"), // bright red
+    warning: A("93"), // bright yellow
+    info: A("92"), // bright green
+    progress: A("32"), // matrix green
     muted: DIM,
     reset: RESET,
   },
   ocean: {
-    success: A("96"),          // bright cyan
-    error: A("35"),            // magenta
-    warning: A("94"),          // bright blue
-    info: A("96"),             // bright cyan
-    progress: A("94"),         // bright blue
+    success: A("96"), // bright cyan
+    error: A("35"), // magenta
+    warning: A("94"), // bright blue
+    info: A("96"), // bright cyan
+    progress: A("94"), // bright blue
     muted: DIM,
     reset: RESET,
   },
@@ -88,10 +88,7 @@ export const NO_COLORS: SemanticColors = {
  * Resolve color tokens for a given theme.
  * When useColors is false, returns the no-color set.
  */
-export function resolveColors(
-  theme: ThemeName,
-  useColors: boolean,
-): SemanticColors {
+export function resolveColors(theme: ThemeName, useColors: boolean): SemanticColors {
   return useColors ? (COLOR_TOKENS[theme] ?? COLOR_TOKENS.default) : NO_COLORS;
 }
 

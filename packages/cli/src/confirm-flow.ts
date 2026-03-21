@@ -80,18 +80,13 @@ const makeColors = (enabled: boolean) => ({
  * Ask a yes/no question in a non-TTY safe way.
  * Returns the default answer immediately when not in a TTY.
  */
-export async function confirm(
-  question: string,
-  options: ConfirmOptions = {},
-): Promise<boolean> {
+export async function confirm(question: string, options: ConfirmOptions = {}): Promise<boolean> {
   const { defaultYes = false, colors = true, timeoutMs = 0 } = options;
   const c = makeColors(colors);
 
   if (!process.stdin.isTTY) return defaultYes;
 
-  const hint = defaultYes
-    ? `${c.DIM}[Y/n]${c.RESET}`
-    : `${c.DIM}[y/N]${c.RESET}`;
+  const hint = defaultYes ? `${c.DIM}[Y/n]${c.RESET}` : `${c.DIM}[y/N]${c.RESET}`;
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -108,7 +103,9 @@ export async function confirm(
     // Optional timeout
     if (timeoutMs > 0) {
       setTimeout(() => {
-        process.stdout.write(`\n${c.DIM}(timed out — using default: ${defaultYes ? "yes" : "no"})${c.RESET}\n`);
+        process.stdout.write(
+          `\n${c.DIM}(timed out — using default: ${defaultYes ? "yes" : "no"})${c.RESET}\n`,
+        );
         done(defaultYes);
       }, timeoutMs);
     }
@@ -132,9 +129,7 @@ export async function confirmDestructive(
   const { colors = true, operation = "this operation", detail } = options;
   const c = makeColors(colors);
 
-  process.stdout.write(
-    `\n${c.RED}${c.BOLD}⚠  WARNING: ${operation}${c.RESET}\n`,
-  );
+  process.stdout.write(`\n${c.RED}${c.BOLD}⚠  WARNING: ${operation}${c.RESET}\n`);
   if (detail) {
     process.stdout.write(`${c.DIM}   ${detail}${c.RESET}\n`);
   }
@@ -234,17 +229,11 @@ export async function runMultiStepFlow(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-async function _askYN(
-  prompt: string,
-  requireExplicit: boolean,
-  colors: boolean,
-): Promise<boolean> {
+async function _askYN(prompt: string, requireExplicit: boolean, colors: boolean): Promise<boolean> {
   const c = makeColors(colors);
   if (!process.stdin.isTTY) return false;
 
-  const hint = requireExplicit
-    ? `${c.DIM}[yes/no]${c.RESET}`
-    : `${c.DIM}[y/N]${c.RESET}`;
+  const hint = requireExplicit ? `${c.DIM}[yes/no]${c.RESET}` : `${c.DIM}[y/N]${c.RESET}`;
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
@@ -257,11 +246,7 @@ async function _askYN(
   });
 }
 
-async function _askText(
-  prompt: string,
-  defaultValue: string,
-  colors: boolean,
-): Promise<string> {
+async function _askText(prompt: string, defaultValue: string, colors: boolean): Promise<string> {
   const c = makeColors(colors);
   if (!process.stdin.isTTY) return defaultValue;
 

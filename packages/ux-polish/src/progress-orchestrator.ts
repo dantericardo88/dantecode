@@ -56,10 +56,10 @@ export class ProgressOrchestrator {
    */
   updateProgress(id: string, patch: ProgressPatch): ProgressState {
     const state = this._require(id);
-    if (patch.phase   !== undefined) state.phase    = patch.phase;
+    if (patch.phase !== undefined) state.phase = patch.phase;
     if (patch.progress !== undefined) state.progress = Math.min(100, Math.max(0, patch.progress));
-    if (patch.status  !== undefined) state.status   = patch.status;
-    if (patch.message !== undefined) state.message  = patch.message;
+    if (patch.status !== undefined) state.status = patch.status;
+    if (patch.message !== undefined) state.message = patch.message;
     return { ...state };
   }
 
@@ -180,8 +180,8 @@ export class ProgressOrchestrator {
     lines.push(
       this._engine.muted(
         `\n  Progress: ${done}/${total} done` +
-        (s.failed > 0 ? ` — ${s.failed} failed` : "") +
-        (s.running > 0 ? ` — ${s.running} running` : ""),
+          (s.failed > 0 ? ` — ${s.failed} failed` : "") +
+          (s.running > 0 ? ` — ${s.running} running` : ""),
       ),
     );
     return lines.join("\n");

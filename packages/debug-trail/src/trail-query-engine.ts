@@ -4,12 +4,7 @@
 // PRD target: <200ms complex query latency on representative fixture sets.
 // ============================================================================
 
-import type {
-  TrailEvent,
-  TrailEventKind,
-  DebugTrailResult,
-  DebugTrailConfig,
-} from "./types.js";
+import type { TrailEvent, TrailEventKind, DebugTrailResult, DebugTrailConfig } from "./types.js";
 import { defaultConfig, FILE_EVENT_KINDS } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TrailEventIndex } from "./state/trail-index.js";
@@ -91,17 +86,22 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   const relativeMatch = nl.match(/(\d+)\s*(hour|hr|minute|min|day|week)s?\s+ago/i);
   // Pattern B: "in the last N hours", "over the past N days", "past N minutes"
   const lastNMatch = !relativeMatch
-    ? nl.match(/(?:in\s+the\s+last|over\s+the\s+past|past)\s+(\d+)\s*(hour|hr|minute|min|day|week)s?/i)
+    ? nl.match(
+        /(?:in\s+the\s+last|over\s+the\s+past|past)\s+(\d+)\s*(hour|hr|minute|min|day|week)s?/i,
+      )
     : null;
   const timeMatch = relativeMatch ?? lastNMatch;
   if (timeMatch) {
     const amount = parseInt(timeMatch[1]!, 10);
     const unit = timeMatch[2]!.toLowerCase();
     const ms =
-      unit === "week" ? amount * 7 * 86_400_000 :
-      unit === "day"  ? amount * 86_400_000 :
-      unit === "hour" || unit === "hr" ? amount * 3_600_000 :
-      amount * 60_000; // minute / min
+      unit === "week"
+        ? amount * 7 * 86_400_000
+        : unit === "day"
+          ? amount * 86_400_000
+          : unit === "hour" || unit === "hr"
+            ? amount * 3_600_000
+            : amount * 60_000; // minute / min
     query.afterDate = new Date(Date.now() - ms).toISOString();
   } else if (lower.includes("yesterday")) {
     const yesterday = new Date();
@@ -127,7 +127,8 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
 
   // Negation detection — specific "except/excluding/without/not <term>" patterns.
   // These take priority over positive detection to avoid conflicting filters.
-  const negatedErrors = /\b(?:except|excluding|without|not)\s+(?:error|fail|failed|exception|crash)\w*/i.test(nl);
+  const negatedErrors =
+    /\b(?:except|excluding|without|not)\s+(?:error|fail|failed|exception|crash)\w*/i.test(nl);
   const negatedDeletes = /\b(?:except|excluding|without|not)\s+(?:delet|remov|erase)\w*/i.test(nl);
   if (negatedErrors) query.excludeKinds = [...(query.excludeKinds ?? []), "error", "retry"];
   if (negatedDeletes) query.excludeKinds = [...(query.excludeKinds ?? []), "file_delete"];
@@ -160,7 +161,9 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   }
 
   // File path extraction — file with extension (expanded list)
-  const fileMatch = nl.match(/[\w\-./]+\.(ts|js|json|md|tsx|jsx|py|sh|yaml|yml|env|css|html|rs|go|java|rb|php|c|cpp|h)\b/i);
+  const fileMatch = nl.match(
+    /[\w\-./]+\.(ts|js|json|md|tsx|jsx|py|sh|yaml|yml|env|css|html|rs|go|java|rb|php|c|cpp|h)\b/i,
+  );
   if (fileMatch?.[0]) {
     query.text = fileMatch[0];
   } else {
@@ -170,7 +173,13 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
     if (dirMatch?.[2] && !dirMatch[2].includes("http")) {
       query.filePathPrefix = (dirMatch[1] ?? "") + dirMatch[2];
       delete query.text;
-    } else if (query.kinds || query.errorsOnly || query.actor || query.actors || query.excludeKinds) {
+    } else if (
+      query.kinds ||
+      query.errorsOnly ||
+      query.actor ||
+      query.actors ||
+      query.excludeKinds
+    ) {
       // Positive/negative filters already narrow results — drop raw NL text to avoid no-matches
       delete query.text;
     }
@@ -224,9 +233,8 @@ export class TrailQueryEngine {
     await this.ensureReady();
     const start = Date.now();
 
-    const q: TrailQuery = typeof queryOrText === "string"
-      ? parseNaturalLanguageQuery(queryOrText)
-      : queryOrText;
+    const q: TrailQuery =
+      typeof queryOrText === "string" ? parseNaturalLanguageQuery(queryOrText) : queryOrText;
 
     const limit = q.limit ?? 50;
     const offset = q.offset ?? 0;

@@ -4,10 +4,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  NavController,
-  STANDARD_BINDINGS,
-} from "./accessibility/keyboard-nav.js";
+import { NavController, STANDARD_BINDINGS } from "./accessibility/keyboard-nav.js";
 import {
   ScreenReaderSupport,
   detectScreenReaderMode,

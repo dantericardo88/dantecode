@@ -147,7 +147,8 @@ describe("VerificationCriticRunner", () => {
     runner.register(RELEVANCE_CRITIC);
     const result = await runner.run({
       task: "describe deployment rollback plan",
-      output: "Deployment:\n1. Build artifact.\n2. Deploy to staging.\n3. Rollback: revert artifact on health check failure.",
+      output:
+        "Deployment:\n1. Build artifact.\n2. Deploy to staging.\n3. Rollback: revert artifact on health check failure.",
     });
     expect(result.criticResults).toHaveLength(3);
     expect(["pass", "warn"]).toContain(result.overallVerdict);

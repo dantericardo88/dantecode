@@ -40,9 +40,7 @@ export class MemoryVisualizer {
     const edges: Array<Record<string, unknown>> = [];
 
     // Add scope overview nodes
-    const scopes: MemoryScope[] = scope
-      ? [scope]
-      : ["session", "project", "user", "global"];
+    const scopes: MemoryScope[] = scope ? [scope] : ["session", "project", "user", "global"];
 
     for (const s of scopes) {
       const stItems = this.shortTerm.listByScope(s);
@@ -83,7 +81,8 @@ export class MemoryVisualizer {
     }
 
     // Add top short-term items as nodes
-    const topST = this.shortTerm.listAll()
+    const topST = this.shortTerm
+      .listAll()
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
 
@@ -108,7 +107,8 @@ export class MemoryVisualizer {
     }
 
     // Add top semantic items
-    const topVec = this.vectorStore.listAll()
+    const topVec = this.vectorStore
+      .listAll()
       .sort((a, b) => b.score - a.score)
       .slice(0, 20);
 
@@ -148,9 +148,13 @@ export class MemoryVisualizer {
     // Scopes
     for (const node of result.nodes) {
       if (node["type"] === "scope") {
-        lines.push(`  ${node["id"]}["${node["label"]} (ST:${node["shortTermCount"]} SEM:${node["semanticCount"]})"]`);
+        lines.push(
+          `  ${node["id"]}["${node["label"]} (ST:${node["shortTermCount"]} SEM:${node["semanticCount"]})"]`,
+        );
       } else if (node["type"] === "entity") {
-        lines.push(`  ${String(node["id"]).replace(/[^a-zA-Z0-9_]/g, "_")}["${node["label"]} (${node["entityType"]})"]`);
+        lines.push(
+          `  ${String(node["id"]).replace(/[^a-zA-Z0-9_]/g, "_")}["${node["label"]} (${node["entityType"]})"]`,
+        );
       }
     }
 

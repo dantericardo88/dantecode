@@ -50,10 +50,7 @@ export interface GaslightIntegrationOptions {
    *       .getRelevantSkills({ summary: draft, taskClass })
    *       .map(s => s.title)
    */
-  priorLessonProvider?: (
-    draft: string,
-    taskClass?: string,
-  ) => Promise<string[]> | string[];
+  priorLessonProvider?: (draft: string, taskClass?: string) => Promise<string[]> | string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,15 +300,10 @@ export class DanteGaslightIntegration {
     });
     if (!trigger) return null;
 
-    const result = await runFearSetEngine(
-      opts.message,
-      trigger,
-      opts.callbacks ?? {},
-      {
-        config: this.fearSetConfig,
-        priorLessons: opts.priorLessons,
-      },
-    );
+    const result = await runFearSetEngine(opts.message, trigger, opts.callbacks ?? {}, {
+      config: this.fearSetConfig,
+      priorLessons: opts.priorLessons,
+    });
     this.fearSetResults.push(result);
     this.resultStore.save(result);
     if (this.fearSetConfig.maxResults > 0) {
@@ -389,7 +381,11 @@ export class DanteGaslightIntegration {
       `  Robustness: ${last.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${last.robustnessScore?.gateDecision ?? "pending"})`,
       `  Passed: ${last.passed}`,
       ...(last.stopReason ? [`  Stop reason: ${last.stopReason}`] : []),
-      ...(last.synthesizedRecommendation ? [`  Recommendation: ${last.synthesizedRecommendation.decision.toUpperCase()} — ${last.synthesizedRecommendation.reasoning.slice(0, 80)}`] : []),
+      ...(last.synthesizedRecommendation
+        ? [
+            `  Recommendation: ${last.synthesizedRecommendation.decision.toUpperCase()} — ${last.synthesizedRecommendation.reasoning.slice(0, 80)}`,
+          ]
+        : []),
       ...(last.distilledAt ? [`  Distilled at: ${last.distilledAt}`] : []),
     ].join("\n");
   }

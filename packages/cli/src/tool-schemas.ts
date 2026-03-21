@@ -144,7 +144,9 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         provider: z
           .enum(["auto", "tavily", "exa", "serper", "google", "brave", "duckduckgo"])
           .optional()
-          .describe("Preferred search provider (default: auto — uses best available with cost-aware fallback)"),
+          .describe(
+            "Preferred search provider (default: auto — uses best available with cost-aware fallback)",
+          ),
         search_depth: z
           .enum(["basic", "advanced"])
           .optional()
@@ -160,11 +162,10 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         include_raw_content: z
           .boolean()
           .optional()
-          .describe("Include raw page content from supported providers like Tavily/Exa (default: false)"),
-        topic: z
-          .enum(["general", "news"])
-          .optional()
-          .describe("Topic filter (default: general)"),
+          .describe(
+            "Include raw page content from supported providers like Tavily/Exa (default: false)",
+          ),
+        topic: z.enum(["general", "news"]).optional().describe("Topic filter (default: general)"),
       }),
     },
 
@@ -173,10 +174,7 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         "Fetch content from a URL. HTML is converted to readable text. JSON and plain text are returned as-is. Results are cached for 15 minutes.",
       parameters: z.object({
         url: z.string().describe("The URL to fetch (must be HTTP or HTTPS)"),
-        max_chars: z
-          .number()
-          .optional()
-          .describe("Maximum characters to return (default: 20000)"),
+        max_chars: z.number().optional().describe("Maximum characters to return (default: 20000)"),
         selector: z
           .string()
           .optional()
@@ -196,10 +194,7 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
           .enum(["repos", "code", "issues", "prs"])
           .optional()
           .describe("What to search: repos, code, issues, or prs (default: repos)"),
-        limit: z
-          .number()
-          .optional()
-          .describe("Maximum number of results (default: 10, max: 50)"),
+        limit: z.number().optional().describe("Maximum number of results (default: 10, max: 50)"),
       }),
     },
 
@@ -209,15 +204,29 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       parameters: z.object({
         action: z
           .enum([
-            "search_repos", "search_code", "search_issues", "search_prs",
-            "create_pr", "view_pr", "review_pr", "merge_pr", "list_prs",
-            "create_issue", "comment_issue", "close_issue", "list_issues",
-            "trigger_workflow", "view_run",
+            "search_repos",
+            "search_code",
+            "search_issues",
+            "search_prs",
+            "create_pr",
+            "view_pr",
+            "review_pr",
+            "merge_pr",
+            "list_prs",
+            "create_issue",
+            "comment_issue",
+            "close_issue",
+            "list_issues",
+            "trigger_workflow",
+            "view_run",
           ])
           .describe("The operation to perform"),
         query: z.string().optional().describe("Search query (for search_* actions)"),
         title: z.string().optional().describe("Title (for create_pr, create_issue)"),
-        body: z.string().optional().describe("Body text (for create_pr, create_issue, comment_issue, review_pr)"),
+        body: z
+          .string()
+          .optional()
+          .describe("Body text (for create_pr, create_issue, comment_issue, review_pr)"),
         number: z.number().optional().describe("PR or issue number"),
         base: z.string().optional().describe("Base branch for PR (for create_pr)"),
         draft: z.boolean().optional().describe("Create as draft PR (for create_pr)"),
@@ -243,7 +252,11 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       description:
         "Spawn a sub-agent to handle a specific task. The sub-agent runs the same agent loop with its own context and returns the result. Supports worktree isolation for parallel agents and background execution.",
       parameters: z.object({
-        prompt: z.string().describe("The task description for the sub-agent to execute, or 'status <taskId>' to check a background task"),
+        prompt: z
+          .string()
+          .describe(
+            "The task description for the sub-agent to execute, or 'status <taskId>' to check a background task",
+          ),
         max_rounds: z
           .number()
           .optional()
@@ -255,7 +268,9 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         worktree_isolation: z
           .boolean()
           .optional()
-          .describe("Run in an isolated git worktree to prevent file conflicts with other agents (default: false)"),
+          .describe(
+            "Run in an isolated git worktree to prevent file conflicts with other agents (default: false)",
+          ),
       }),
     },
 
@@ -264,9 +279,7 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         "Download a file from a URL to a local path. Verifies the download (size check, SHA-256 hash), registers it as a tracked artifact, and returns the local path. Use instead of `curl` or `wget` in Bash for reliable, verified downloads.",
       parameters: z.object({
         url: z.string().describe("The URL to download (must be HTTP or HTTPS)"),
-        dest: z
-          .string()
-          .describe("Destination file path (absolute or relative to project root)"),
+        dest: z.string().describe("Destination file path (absolute or relative to project root)"),
         min_size_bytes: z
           .number()
           .optional()
@@ -293,7 +306,9 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
         strip_components: z
           .number()
           .optional()
-          .describe("Number of leading path components to strip during extraction (default: 0). Use 1 to skip the top-level folder inside the archive."),
+          .describe(
+            "Number of leading path components to strip during extraction (default: 0). Use 1 to skip the top-level folder inside the archive.",
+          ),
         overwrite: z
           .boolean()
           .optional()

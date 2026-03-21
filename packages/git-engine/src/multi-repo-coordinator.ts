@@ -101,9 +101,7 @@ export class MultiRepoCoordinator {
     this.ensureRegistered(normalized);
 
     if (!this.canRun(normalized)) {
-      throw new Error(
-        `Cannot start workflow: concurrency limit reached for ${repoRoot}`,
-      );
+      throw new Error(`Cannot start workflow: concurrency limit reached for ${repoRoot}`);
     }
 
     const workflowId = randomUUID().slice(0, 12);
@@ -156,9 +154,7 @@ export class MultiRepoCoordinator {
         activeWorkflows: activeSet.size,
         queuedEvents: this.queuedEvents.get(repoRoot) ?? 0,
         maxConcurrent: this.repoConcurrencyOverride.get(repoRoot) ?? this.maxConcurrentPerRepo,
-        ...(this.lastEventAt.has(repoRoot)
-          ? { lastEventAt: this.lastEventAt.get(repoRoot) }
-          : {}),
+        ...(this.lastEventAt.has(repoRoot) ? { lastEventAt: this.lastEventAt.get(repoRoot) } : {}),
       });
     }
     return entries;

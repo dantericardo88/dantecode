@@ -74,11 +74,7 @@ export class MetricsCollector {
    * @param value  - Amount to increment by. Defaults to 1.
    * @param labels - Optional label key/value pairs for the sample record.
    */
-  increment(
-    name: string,
-    value: number = 1,
-    labels: Record<string, string> = {},
-  ): void {
+  increment(name: string, value: number = 1, labels: Record<string, string> = {}): void {
     const current = this.counters.get(name) ?? 0;
     this.counters.set(name, current + value);
     this.samples.push({
@@ -96,11 +92,7 @@ export class MetricsCollector {
    * @param value  - New gauge value.
    * @param labels - Optional label key/value pairs for the sample record.
    */
-  record(
-    name: string,
-    value: number,
-    labels: Record<string, string> = {},
-  ): void {
+  record(name: string, value: number, labels: Record<string, string> = {}): void {
     this.gauges.set(name, value);
     this.samples.push({ name, value, labels, timestamp: Date.now() });
   }

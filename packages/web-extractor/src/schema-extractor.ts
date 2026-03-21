@@ -9,7 +9,10 @@ export class SchemaExtractor {
     this.router = router;
   }
 
-  async extract(markdown: string, options: WebFetchOptions): Promise<Record<string, unknown> | undefined> {
+  async extract(
+    markdown: string,
+    options: WebFetchOptions,
+  ): Promise<Record<string, unknown> | undefined> {
     if (!options.schema && !options.instructions) {
       return undefined;
     }
@@ -31,7 +34,7 @@ Reply ONLY with valid JSON. No markdown blocks, just raw JSON.`;
       });
 
       const parsed = JSON.parse(response);
-      
+
       if (options.schema) {
         if (options.schema instanceof z.ZodType) {
           return options.schema.parse(parsed);
@@ -39,7 +42,7 @@ Reply ONLY with valid JSON. No markdown blocks, just raw JSON.`;
         // If it's a raw object, we just return it as is or attempt a loose match
         return parsed;
       }
-      
+
       return parsed;
     } catch (err) {
       console.error(`Schema extraction failed: ${err}`);

@@ -46,7 +46,9 @@ afterEach(async () => {
   for (const dir of testDirs.splice(0)) {
     try {
       await rm(dir, { recursive: true, force: true });
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 });
 
@@ -66,11 +68,17 @@ describe("FileBridgeAdapter", () => {
     expect(submission.sessionId).toBeTruthy();
     expect(typeof submission.sessionId).toBe("string");
 
-    const taskMd = await readFile(join(bridgeDir, "inbox", submission.sessionId, "task.md"), "utf-8");
+    const taskMd = await readFile(
+      join(bridgeDir, "inbox", submission.sessionId, "task.md"),
+      "utf-8",
+    );
     expect(typeof taskMd).toBe("string");
     expect(taskMd.length).toBeGreaterThan(0);
 
-    const rawPacket = await readFile(join(bridgeDir, "inbox", submission.sessionId, "packet.json"), "utf-8");
+    const rawPacket = await readFile(
+      join(bridgeDir, "inbox", submission.sessionId, "packet.json"),
+      "utf-8",
+    );
     const written = JSON.parse(rawPacket) as CouncilTaskPacket;
 
     expect(written.runId).toBe(packet.runId);
@@ -99,7 +107,11 @@ describe("FileBridgeAdapter", () => {
     const submission = await adapter.submitTask(packet);
     const sessionDir = join(bridgeDir, "outbox", submission.sessionId);
     await mkdir(sessionDir, { recursive: true });
-    await writeFile(join(sessionDir, "done.json"), JSON.stringify({ success: true, exitCode: 0, completedAt: new Date().toISOString() }), "utf-8");
+    await writeFile(
+      join(sessionDir, "done.json"),
+      JSON.stringify({ success: true, exitCode: 0, completedAt: new Date().toISOString() }),
+      "utf-8",
+    );
 
     const status = await adapter.pollStatus(submission.sessionId);
 

@@ -216,7 +216,13 @@ describe("UXEngine", () => {
   // 26. formatTable includes headers and rows
   it("formatTable() renders headers and data rows", () => {
     const ux = new UXEngine({ colors: false });
-    const out = ux.formatTable(["Name", "Score"], [["Alice", "0.92"], ["Bob", "0.75"]]);
+    const out = ux.formatTable(
+      ["Name", "Score"],
+      [
+        ["Alice", "0.92"],
+        ["Bob", "0.75"],
+      ],
+    );
     expect(out).toContain("Name");
     expect(out).toContain("Score");
     expect(out).toContain("Alice");

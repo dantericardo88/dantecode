@@ -5,10 +5,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi } from "vitest";
-import {
-  SandboxEngine,
-  type SandboxEngineOptions,
-} from "./sandbox-engine.js";
+import { SandboxEngine, type SandboxEngineOptions } from "./sandbox-engine.js";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────
 
@@ -74,7 +71,7 @@ describe("SandboxEngine — exec()", () => {
     engine.exec(instance.id, "echo hello");
     expect(mockExec).toHaveBeenCalledWith(
       "echo hello",
-      expect.objectContaining({ encoding: "buffer" })
+      expect.objectContaining({ encoding: "buffer" }),
     );
   });
 
@@ -114,9 +111,7 @@ describe("SandboxEngine — exec()", () => {
   it("8. blocks commands in the blockedCommands list", () => {
     const { engine } = makeEngine();
     const instance = engine.create();
-    expect(() => engine.exec(instance.id, "rm -rf /")).toThrow(
-      /policy violation/i
-    );
+    expect(() => engine.exec(instance.id, "rm -rf /")).toThrow(/policy violation/i);
   });
 
   it("9. truncates output over maxOutputBytes", () => {
@@ -126,16 +121,12 @@ describe("SandboxEngine — exec()", () => {
     const instance = engine.create("process", { maxOutputBytes: 100 });
     const result = engine.exec(instance.id, "echo lots");
     expect(result.truncated).toBe(true);
-    expect(result.stdout.length + result.stderr.length).toBeLessThanOrEqual(
-      100
-    );
+    expect(result.stdout.length + result.stderr.length).toBeLessThanOrEqual(100);
   });
 
   it("10. throws for unknown instance ID", () => {
     const { engine } = makeEngine();
-    expect(() => engine.exec("nonexistent-id", "echo hi")).toThrow(
-      /not found/i
-    );
+    expect(() => engine.exec("nonexistent-id", "echo hi")).toThrow(/not found/i);
   });
 
   it("11. throws for destroyed instance", () => {
@@ -298,7 +289,7 @@ describe("SandboxEngine — Network policy", () => {
     const { engine } = makeEngine();
     const instance = engine.create("process", { allowNetwork: false });
     expect(() => engine.exec(instance.id, "curl https://example.com")).toThrow(
-      /network access is disabled/i
+      /network access is disabled/i,
     );
   });
 });
@@ -309,14 +300,12 @@ describe("SandboxEngine — Custom policy", () => {
     const instance = engine.create("process", {
       blockedCommands: ["forbidden-tool"],
     });
-    expect(() =>
-      engine.exec(instance.id, "forbidden-tool --do-evil")
-    ).toThrow(/policy violation/i);
+    expect(() => engine.exec(instance.id, "forbidden-tool --do-evil")).toThrow(/policy violation/i);
     // Verify a default blocked command is NOT blocked (custom list replaces defaults)
     // The custom blockedCommands replaces the default list entirely
     const result = engine.applyPolicies(
       engine.create("process", { blockedCommands: ["forbidden-tool"] }),
-      "shutdown now"
+      "shutdown now",
     );
     // With the custom policy "shutdown" is no longer blocked
     expect(result).toBeNull();

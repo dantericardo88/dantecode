@@ -13,13 +13,22 @@ describe("BUILTIN_TOOL_POLICIES", () => {
   it("has policies for all 16 standard tools", () => {
     const tools = new Set(BUILTIN_TOOL_POLICIES.map((p) => p.tool));
     const expected = [
-      "Read", "Glob", "Grep",
-      "Write", "Edit", "TodoWrite",
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "TodoWrite",
       "Bash",
-      "WebSearch", "WebFetch",
-      "AcquireUrl", "AcquireArchive",
-      "GitCommit", "GitPush",
-      "SubAgent", "GitHubSearch", "GitHubOps",
+      "WebSearch",
+      "WebFetch",
+      "AcquireUrl",
+      "AcquireArchive",
+      "GitCommit",
+      "GitPush",
+      "SubAgent",
+      "GitHubSearch",
+      "GitHubOps",
     ];
     for (const t of expected) {
       expect(tools.has(t), `Missing policy for ${t}`).toBe(true);

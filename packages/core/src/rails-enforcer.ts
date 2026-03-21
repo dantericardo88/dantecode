@@ -45,7 +45,11 @@ export class VerificationRailRegistry {
     this.rails.clear();
   }
 
-  evaluate(task: string, output: string, rails: VerificationRail[] = this.listRails()): VerificationRailFinding[] {
+  evaluate(
+    task: string,
+    output: string,
+    rails: VerificationRail[] = this.listRails(),
+  ): VerificationRailFinding[] {
     void task;
     return rails.map((rail) => evaluateRail(rail, output));
   }

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { EventSourcedCheckpointer } from "./checkpointer.js";
 import { criticDebate, type CriticDebateResult, type CriticOpinion } from "./critic-debater.js";
-import { verifyOutput, type OutputVerificationReport, type VerifyOutputInput } from "./qa-harness.js";
+import {
+  verifyOutput,
+  type OutputVerificationReport,
+  type VerifyOutputInput,
+} from "./qa-harness.js";
 
 export interface VerificationGraphInput extends VerifyOutputInput {
   traceId?: string;
@@ -42,8 +46,7 @@ export class VerificationGraph {
   private readonly baseDir: string;
 
   constructor(projectRoot: string, baseDir?: string) {
-    this.baseDir =
-      baseDir ?? join(projectRoot, ".danteforge", "reports", "verification-graphs");
+    this.baseDir = baseDir ?? join(projectRoot, ".danteforge", "reports", "verification-graphs");
     this.projectRoot = projectRoot;
   }
 
@@ -175,5 +178,9 @@ function buildSummary(
 }
 
 function isVerificationGraphTrace(value: unknown): value is VerificationGraphTrace {
-  return typeof value === "object" && value !== null && Array.isArray((value as { nodes?: unknown }).nodes);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { nodes?: unknown }).nodes)
+  );
 }

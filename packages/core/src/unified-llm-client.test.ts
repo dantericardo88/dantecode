@@ -89,9 +89,7 @@ describe("UnifiedLLMClient", () => {
   // 3. call() retries on failure
   it("3. call() retries after a transient failure", async () => {
     const ok = makeResult();
-    mockExecutor
-      .mockRejectedValueOnce(new Error("transient"))
-      .mockResolvedValueOnce(ok);
+    mockExecutor.mockRejectedValueOnce(new Error("transient")).mockResolvedValueOnce(ok);
     const result = await runWithTimers(() => client.call(makeOptions()));
     expect(result).toEqual(ok);
     expect(mockExecutor).toHaveBeenCalledTimes(2);
@@ -100,9 +98,7 @@ describe("UnifiedLLMClient", () => {
   // 4. call() exhausts retries, throws
   it("4. call() throws after exhausting all retries", async () => {
     mockExecutor.mockRejectedValue(new Error("always fails"));
-    await expect(
-      runWithTimers(() => client.call(makeOptions())),
-    ).rejects.toThrow("always fails");
+    await expect(runWithTimers(() => client.call(makeOptions()))).rejects.toThrow("always fails");
     // 1 initial + 2 retries = 3 total calls
     expect(mockExecutor).toHaveBeenCalledTimes(3);
   });
@@ -131,9 +127,7 @@ describe("UnifiedLLMClient", () => {
       models: ["gpt-4o", "claude-haiku-4-5"],
       strategy: "first-success",
     });
-    expect(mockExecutor).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "gpt-4o" }),
-    );
+    expect(mockExecutor).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-4o" }));
     expect(result.model).toBe("gpt-4o");
   });
 
@@ -188,9 +182,7 @@ describe("UnifiedLLMClient", () => {
   it("12. stream() passes stream=true to the executor", async () => {
     mockExecutor.mockResolvedValueOnce(makeResult({ content: "streamed" }));
     await client.stream(makeOptions(), () => {});
-    expect(mockExecutor).toHaveBeenCalledWith(
-      expect.objectContaining({ stream: true }),
-    );
+    expect(mockExecutor).toHaveBeenCalledWith(expect.objectContaining({ stream: true }));
   });
 
   // 13. stream() invokes onChunk with content
@@ -211,7 +203,9 @@ describe("UnifiedLLMClient", () => {
 
   // 15. getTelemetry() returns accumulated stats
   it("15. getTelemetry() reflects calls across multiple invocations", async () => {
-    mockExecutor.mockResolvedValue(makeResult({ inputTokens: 10, outputTokens: 5, latencyMs: 100 }));
+    mockExecutor.mockResolvedValue(
+      makeResult({ inputTokens: 10, outputTokens: 5, latencyMs: 100 }),
+    );
     await client.call(makeOptions());
     await client.call(makeOptions());
     const t = client.getTelemetry();
@@ -337,12 +331,14 @@ describe("UnifiedLLMClient", () => {
       .mockResolvedValueOnce(makeResult());
 
     // Spy on setTimeout to capture delay values without blocking
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((fn: (...args: unknown[]) => unknown, ms?: number) => {
-      delays.push(ms ?? 0);
-      // Execute immediately so we don't block
-      fn();
-      return 0 as unknown as ReturnType<typeof setTimeout>;
-    });
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      (fn: (...args: unknown[]) => unknown, ms?: number) => {
+        delays.push(ms ?? 0);
+        // Execute immediately so we don't block
+        fn();
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      },
+    );
 
     await client.call(makeOptions());
 

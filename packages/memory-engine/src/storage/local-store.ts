@@ -159,11 +159,7 @@ export class LocalStore {
   }
 
   /** Delete multiple items by key list. */
-  async deleteBatch(
-    keys: string[],
-    scope: MemoryScope,
-    layer: MemoryLayer,
-  ): Promise<number> {
+  async deleteBatch(keys: string[], scope: MemoryScope, layer: MemoryLayer): Promise<number> {
     let count = 0;
     for (const key of keys) {
       const deleted = await this.delete(key, scope, layer);

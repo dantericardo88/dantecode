@@ -55,12 +55,19 @@ export class UXPreferences {
 
   constructor(options: UXPreferencesOptions = {}) {
     const root = options.projectRoot ?? process.cwd();
-    this._filePath =
-      options.prefsFilePath ?? path.join(root, ".dantecode", "preferences.json");
+    this._filePath = options.prefsFilePath ?? path.join(root, ".dantecode", "preferences.json");
     this._write = options.writeFn ?? ((p, d) => fs.writeFileSync(p, d));
-    this._read  = options.readFn  ?? ((p) => { try { return fs.readFileSync(p, "utf-8"); } catch { return null; } });
+    this._read =
+      options.readFn ??
+      ((p) => {
+        try {
+          return fs.readFileSync(p, "utf-8");
+        } catch {
+          return null;
+        }
+      });
     this._exists = options.existsFn ?? ((p) => fs.existsSync(p));
-    this._mkdir  = options.mkdirFn  ?? ((p) => fs.mkdirSync(p, { recursive: true }));
+    this._mkdir = options.mkdirFn ?? ((p) => fs.mkdirSync(p, { recursive: true }));
     this._prefs = { ...PREFERENCE_DEFAULTS };
     this._load();
   }
@@ -104,10 +111,7 @@ export class UXPreferences {
   // -------------------------------------------------------------------------
 
   /** Set a single preference and persist. */
-  set<K extends keyof UXPreferenceRecord>(
-    key: K,
-    value: UXPreferenceRecord[K],
-  ): void {
+  set<K extends keyof UXPreferenceRecord>(key: K, value: UXPreferenceRecord[K]): void {
     this._prefs[key] = value;
     this._save();
   }
@@ -188,12 +192,15 @@ export class UXPreferences {
     const out: Partial<UXPreferenceRecord> = {};
     if (typeof raw.theme === "string" && this.isValidTheme(raw.theme)) out.theme = raw.theme;
     if (typeof raw.colors === "boolean") out.colors = raw.colors;
-    if (typeof raw.density === "string" && this.isValidDensity(raw.density)) out.density = raw.density;
+    if (typeof raw.density === "string" && this.isValidDensity(raw.density))
+      out.density = raw.density;
     if (typeof raw.richMode === "boolean") out.richMode = raw.richMode;
     if (typeof raw.showPdseInline === "boolean") out.showPdseInline = raw.showPdseInline;
     if (typeof raw.showSuggestions === "boolean") out.showSuggestions = raw.showSuggestions;
-    if (typeof raw.showToolAnnotations === "boolean") out.showToolAnnotations = raw.showToolAnnotations;
-    if (typeof raw.onboardingComplete === "boolean") out.onboardingComplete = raw.onboardingComplete;
+    if (typeof raw.showToolAnnotations === "boolean")
+      out.showToolAnnotations = raw.showToolAnnotations;
+    if (typeof raw.onboardingComplete === "boolean")
+      out.onboardingComplete = raw.onboardingComplete;
     if (typeof raw.accessibilityMode === "boolean") out.accessibilityMode = raw.accessibilityMode;
     return out;
   }

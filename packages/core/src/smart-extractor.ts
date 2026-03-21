@@ -10,11 +10,11 @@ import { ModelRouterImpl } from "./model-router.js";
 import { type z } from "zod";
 
 export interface ExtractorConfig {
-  useBrowser?: boolean;      // Force playwright even if not strictly needed
-  instructions?: string;     // Natural language extraction instructions
-  schema?: z.ZodType<any>;   // Zod schema for structured output
-  blockAds?: boolean;        // Remove common ad/noise selectors
-  cssSelector?: string;      // Extract only from matching selector
+  useBrowser?: boolean; // Force playwright even if not strictly needed
+  instructions?: string; // Natural language extraction instructions
+  schema?: z.ZodType<any>; // Zod schema for structured output
+  blockAds?: boolean; // Remove common ad/noise selectors
+  cssSelector?: string; // Extract only from matching selector
 }
 
 export interface ExtractedData<T = any> {
@@ -46,7 +46,7 @@ export class SmartExtractor {
   async extract<T = any>(url: string, config: ExtractorConfig = {}): Promise<ExtractedData<T>> {
     let rawHtml = "";
     let fetchedVia: "fetch" | "browser" = "fetch";
-    
+
     // 1. Fetching logic (Fallback to browser if JS-heavy/blocked)
     if (config.useBrowser) {
       rawHtml = await this.fetchViaBrowser(url);
@@ -89,7 +89,7 @@ export class SmartExtractor {
         title: this.fetchEngine.extractTitle(rawHtml),
         wordCount: cleanMarkdown.split(/\s+/).length,
         fetchedVia,
-      }
+      },
     };
   }
 
@@ -101,17 +101,20 @@ export class SmartExtractor {
     if (!navResult.success) {
       throw new Error(`Browser fetch failed: ${navResult.error}`);
     }
-    
+
     // Simulate Stagehand "wait and observe" - basic implicit wait for content
     await new Promise((r) => setTimeout(r, 2000));
-    
+
     // Extract full HTML via DevTools evaluation
     const tree = await this.browserAgent.getAccessibilityTree();
     // Fallback: we just use accessibility tree text as markdown if standard HTML eval isn't strictly attached
     return tree.data || "";
   }
 
-  private async refineWithModel<T>(content: string, config: ExtractorConfig): Promise<T | undefined> {
+  private async refineWithModel<T>(
+    content: string,
+    config: ExtractorConfig,
+  ): Promise<T | undefined> {
     let systemPrompt = `You are a Smart Extractor mimicking Firecrawl. 
 Extract structured information from the provided markdown content according to instructions. 
 Reply ONLY with valid JSON matching the format/schema requested. No markdown blocks, just raw JSON.`;

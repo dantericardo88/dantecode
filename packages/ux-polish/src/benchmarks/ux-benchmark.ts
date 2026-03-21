@@ -92,8 +92,15 @@ export class UXBenchmark {
       if (!passed) {
         observations.push(`SLOW: exceeded threshold by ${elapsed - thresholdMs}ms.`);
       }
-      const score = Math.max(0, Math.round(100 - ((elapsed / thresholdMs) - 1) * 50));
-      return { name, passed, durationMs: elapsed, thresholdMs, observations, score: Math.min(100, score) };
+      const score = Math.max(0, Math.round(100 - (elapsed / thresholdMs - 1) * 50));
+      return {
+        name,
+        passed,
+        durationMs: elapsed,
+        thresholdMs,
+        observations,
+        score: Math.min(100, score),
+      };
     } catch (err) {
       const elapsed = Date.now() - start;
       observations.push(`FAILED with error: ${err instanceof Error ? err.message : String(err)}`);
@@ -139,7 +146,13 @@ export class UXBenchmark {
     const score = passed ? Math.round(100 - elapsed / 100) : 30;
 
     observations.push(`${phaseCount}/${phases.length} phases completed.`);
-    return { name, passed, durationMs: elapsed, observations, score: Math.max(0, Math.min(100, score)) };
+    return {
+      name,
+      passed,
+      durationMs: elapsed,
+      observations,
+      score: Math.max(0, Math.min(100, score)),
+    };
   }
 
   /**
@@ -161,7 +174,9 @@ export class UXBenchmark {
           observations.push(`DEAD-END: "${err.message}" produced no next steps.`);
           deadEnds++;
         } else {
-          observations.push(`"${err.message}" → ${result.length > 0 ? classified.nextSteps.length : 0} next step(s).`);
+          observations.push(
+            `"${err.message}" → ${result.length > 0 ? classified.nextSteps.length : 0} next step(s).`,
+          );
         }
       } else {
         observations.push(`Error "${err.message}" simulated (no helper provided).`);
@@ -170,7 +185,8 @@ export class UXBenchmark {
 
     const elapsed = Date.now() - start;
     const passed = deadEnds === 0 && errors.length > 0;
-    const score = errors.length > 0 ? Math.round(((errors.length - deadEnds) / errors.length) * 100) : 100;
+    const score =
+      errors.length > 0 ? Math.round(((errors.length - deadEnds) / errors.length) * 100) : 100;
 
     if (deadEnds > 0) {
       observations.push(`${deadEnds}/${errors.length} errors produced dead-end output.`);
@@ -189,14 +205,16 @@ export class UXBenchmark {
    *   recovery     — do errors lead to recovery?
    *   completeness — are all flows complete?
    */
-  previewFeelRubric(opts: {
-    immediacyMs?: number;
-    allFlowsComplete?: boolean;
-    noDeadEndErrors?: boolean;
-    surfacesConsistent?: boolean;
-    messagesAmbiguous?: number;
-    totalMessages?: number;
-  } = {}): PreviewFeelScore {
+  previewFeelRubric(
+    opts: {
+      immediacyMs?: number;
+      allFlowsComplete?: boolean;
+      noDeadEndErrors?: boolean;
+      surfacesConsistent?: boolean;
+      messagesAmbiguous?: number;
+      totalMessages?: number;
+    } = {},
+  ): PreviewFeelScore {
     const {
       immediacyMs = 0,
       allFlowsComplete = true,
@@ -207,7 +225,7 @@ export class UXBenchmark {
     } = opts;
 
     // Immediacy: 100 if < 100ms, degrades linearly to 0 at 3000ms
-    const immediacy = Math.max(0, Math.round(100 - (immediacyMs / 30)));
+    const immediacy = Math.max(0, Math.round(100 - immediacyMs / 30));
 
     // Clarity: 100 - (ambiguous/total * 100)
     const clarity = Math.round(100 - (messagesAmbiguous / Math.max(1, totalMessages)) * 100);
@@ -225,8 +243,10 @@ export class UXBenchmark {
     const feelsPreview = overall < 70;
 
     const observations: string[] = [];
-    if (immediacy < 70) observations.push(`Immediacy low (${immediacy}/100): feedback takes > ${immediacyMs}ms.`);
-    if (clarity < 80) observations.push(`Clarity low (${clarity}/100): ${messagesAmbiguous} ambiguous messages.`);
+    if (immediacy < 70)
+      observations.push(`Immediacy low (${immediacy}/100): feedback takes > ${immediacyMs}ms.`);
+    if (clarity < 80)
+      observations.push(`Clarity low (${clarity}/100): ${messagesAmbiguous} ambiguous messages.`);
     if (!surfacesConsistent) observations.push("Consistency: surface drift detected.");
     if (!noDeadEndErrors) observations.push("Recovery: dead-end errors detected — add next steps.");
     if (!allFlowsComplete) observations.push("Completeness: some flows are incomplete.");

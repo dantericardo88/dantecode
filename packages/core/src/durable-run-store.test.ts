@@ -109,9 +109,9 @@ describe("DurableRunStore", () => {
     expect(JSON.parse(await readFile(runPath, "utf-8")).id).toBe(run.id);
     expect(JSON.parse(await readFile(resumePath, "utf-8")).runId).toBe(run.id);
     expect(JSON.parse(await readFile(evidencePath, "utf-8"))).toHaveLength(1);
-    expect(JSON.parse(await readFile(eventBaseState, "utf-8")).checkpoint.channelValues.status).toBe(
-      "waiting_user",
-    );
+    expect(
+      JSON.parse(await readFile(eventBaseState, "utf-8")).checkpoint.channelValues.status,
+    ).toBe("waiting_user");
   });
 
   it("lists durable runs alongside legacy autoforge checkpoints and paused background tasks", async () => {

@@ -13,15 +13,15 @@
 // ---------------------------------------------------------------------------
 
 export type SuggestionTrigger =
-  | "low_pdse"          // PDSE score < 0.7
-  | "test_failure"      // test suite failing
-  | "typecheck_error"   // TypeScript errors present
-  | "pipeline_idle"     // no active pipeline, user is typing
+  | "low_pdse" // PDSE score < 0.7
+  | "test_failure" // test suite failing
+  | "typecheck_error" // TypeScript errors present
+  | "pipeline_idle" // no active pipeline, user is typing
   | "pipeline_complete" // a forge/magic run just finished
-  | "high_context"      // context window > 75%
-  | "first_message"     // user's first message in session
-  | "file_edited"       // user just saved a file
-  | "git_dirty";        // uncommitted changes detected
+  | "high_context" // context window > 75%
+  | "first_message" // user's first message in session
+  | "file_edited" // user just saved a file
+  | "git_dirty"; // uncommitted changes detected
 
 export interface SuggestionContext {
   pdseScore?: number;
@@ -70,8 +70,7 @@ const SUGGESTION_RULES: SuggestionRule[] = [
     label: "Run verification",
     reason: "TypeScript errors detected — verify the full error set before fixing.",
     priority: "high",
-    applies: (ctx) =>
-      !!ctx.activeErrors?.some((e) => /TS\d{4}|tsc|typecheck/i.test(e)),
+    applies: (ctx) => !!ctx.activeErrors?.some((e) => /TS\d{4}|tsc|typecheck/i.test(e)),
   },
   {
     trigger: "test_failure",
@@ -79,8 +78,7 @@ const SUGGESTION_RULES: SuggestionRule[] = [
     label: "Start systematic debug",
     reason: "Test failures present — use /debug to root-cause before patching.",
     priority: "high",
-    applies: (ctx) =>
-      !!ctx.activeErrors?.some((e) => /AssertionError|vitest|test.*fail/i.test(e)),
+    applies: (ctx) => !!ctx.activeErrors?.some((e) => /AssertionError|vitest|test.*fail/i.test(e)),
   },
   {
     trigger: "low_pdse",
@@ -162,8 +160,7 @@ const SUGGESTION_RULES: SuggestionRule[] = [
     label: "Verify after edit",
     reason: "Files were recently edited — run /verify to confirm no regressions.",
     priority: "medium",
-    applies: (ctx) =>
-      !!ctx.editedFilePaths?.length && ctx.pipelineState !== "running",
+    applies: (ctx) => !!ctx.editedFilePaths?.length && ctx.pipelineState !== "running",
   },
   {
     trigger: "file_edited",
@@ -172,8 +169,7 @@ const SUGGESTION_RULES: SuggestionRule[] = [
     reason: "Check PDSE quality score on the recently edited file.",
     priority: "low",
     applies: (ctx) =>
-      !!ctx.editedFilePaths?.length &&
-      ctx.editedFilePaths.some((f) => /\.(ts|js|py)$/.test(f)),
+      !!ctx.editedFilePaths?.length && ctx.editedFilePaths.some((f) => /\.(ts|js|py)$/.test(f)),
   },
 ];
 

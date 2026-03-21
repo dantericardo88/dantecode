@@ -59,7 +59,7 @@ export class MarkdownCleaner {
     // 8. Final Cleanup: Whitespace and newlines
     content = content
       .split("\n")
-      .map(line => line.trim().replace(/[^\S\n]+/g, " "))
+      .map((line) => line.trim().replace(/[^\S\n]+/g, " "))
       .join("\n")
       .replace(/\n{3,}/g, "\n\n") // Max 2 newlines
       .trim();
@@ -74,7 +74,7 @@ export class MarkdownCleaner {
       "&gt;": ">",
       "&quot;": '"',
       "&apos;": "'",
-      "&nbsp;": " "
+      "&nbsp;": " ",
     };
     return text.replace(/&[a-z0-9]+;/gi, (match) => entities[match.toLowerCase()] || match);
   }

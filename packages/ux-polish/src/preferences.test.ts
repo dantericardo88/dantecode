@@ -18,10 +18,14 @@ describe("UXPreferences", () => {
     store = new Map<string, string>();
     prefs = new UXPreferences({
       prefsFilePath: "/fake/preferences.json",
-      writeFn: (p, d) => { store.set(p, d); },
-      readFn:  (p) => store.get(p) ?? null,
+      writeFn: (p, d) => {
+        store.set(p, d);
+      },
+      readFn: (p) => store.get(p) ?? null,
       existsFn: (p) => store.has(p),
-      mkdirFn: () => { /* no-op */ },
+      mkdirFn: () => {
+        /* no-op */
+      },
     });
   });
 
@@ -78,10 +82,14 @@ describe("UXPreferences", () => {
     // Create new instance pointing to same store
     const prefs2 = new UXPreferences({
       prefsFilePath: "/fake/preferences.json",
-      writeFn: (p, d) => { store.set(p, d); },
-      readFn:  (p) => store.get(p) ?? null,
+      writeFn: (p, d) => {
+        store.set(p, d);
+      },
+      readFn: (p) => store.get(p) ?? null,
       existsFn: (p) => store.has(p),
-      mkdirFn: () => { /* no-op */ },
+      mkdirFn: () => {
+        /* no-op */
+      },
     });
     expect(prefs2.getTheme()).toBe("matrix");
     expect(prefs2.isOnboardingComplete()).toBe(true);
@@ -106,10 +114,14 @@ describe("UXPreferences", () => {
     store.set("/fake/preferences.json", JSON.stringify({ theme: "neon", colors: false }));
     const prefs3 = new UXPreferences({
       prefsFilePath: "/fake/preferences.json",
-      writeFn: (p, d) => { store.set(p, d); },
-      readFn:  (p) => store.get(p) ?? null,
+      writeFn: (p, d) => {
+        store.set(p, d);
+      },
+      readFn: (p) => store.get(p) ?? null,
       existsFn: (p) => store.has(p),
-      mkdirFn: () => { /* no-op */ },
+      mkdirFn: () => {
+        /* no-op */
+      },
     });
     // "neon" is not valid so defaults to "default"
     expect(prefs3.getTheme()).toBe("default");
@@ -121,10 +133,14 @@ describe("UXPreferences", () => {
     store.set("/fake/preferences.json", "{ corrupt json ::::");
     const prefs4 = new UXPreferences({
       prefsFilePath: "/fake/preferences.json",
-      writeFn: (p, d) => { store.set(p, d); },
-      readFn:  (p) => store.get(p) ?? null,
+      writeFn: (p, d) => {
+        store.set(p, d);
+      },
+      readFn: (p) => store.get(p) ?? null,
       existsFn: (p) => store.has(p),
-      mkdirFn: () => { /* no-op */ },
+      mkdirFn: () => {
+        /* no-op */
+      },
     });
     // Should fall back to defaults
     expect(prefs4.getTheme()).toBe("default");

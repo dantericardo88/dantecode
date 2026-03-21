@@ -247,9 +247,7 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
   readonly languageDebounceOverrides: Map<string, number> = new Map();
 
   /** Last shown completion reference for accept-detection. */
-  private lastShownCompletion:
-    | { text: string; document: vscode.TextDocument }
-    | undefined;
+  private lastShownCompletion: { text: string; document: vscode.TextDocument } | undefined;
 
   /** Index into telemetry.getRecent() for the last recorded event. */
   private lastEventIndex = -1;

@@ -1,8 +1,4 @@
-import type { 
-  RuntimeEvent, 
-  RuntimeTaskPacket, 
-  Checkpoint 
-} from "@dantecode/runtime-spine";
+import type { RuntimeEvent, RuntimeTaskPacket, Checkpoint } from "@dantecode/runtime-spine";
 
 export interface HandoffSignal {
   fromId: string;
@@ -23,8 +19,8 @@ export class HandoffEngine {
       payload: {
         toRole: signal.toRole,
         reason: signal.reason,
-        context: signal.context
-      }
+        context: signal.context,
+      },
     };
 
     // logic to persist handoff in checkpoint
@@ -41,8 +37,8 @@ export class HandoffEngine {
       role: checkpoint.handoff.toRole,
       context: {
         ...checkpoint.task.context,
-        handoffReason: checkpoint.handoff.reason
-      }
+        handoffReason: checkpoint.handoff.reason,
+      },
     };
   }
 }

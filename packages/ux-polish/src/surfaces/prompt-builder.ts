@@ -74,9 +74,7 @@ export function buildPrompt(state: PromptBuilderState): string {
 
   // PDSE score (if available)
   if (state.lastPdse !== undefined) {
-    const pdseColor = state.lastPdse >= 85 ? c.success
-      : state.lastPdse >= 70 ? c.warning
-      : c.error;
+    const pdseColor = state.lastPdse >= 85 ? c.success : state.lastPdse >= 70 ? c.warning : c.error;
     parts.push(`${pdseColor}P:${state.lastPdse}${c.reset}`);
   }
 

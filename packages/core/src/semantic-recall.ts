@@ -11,7 +11,7 @@ import type { ModelRouterImpl } from "./model-router.js";
 export class SemanticRecall {
   constructor(
     private readonly memory: PersistentMemory,
-    private readonly router: ModelRouterImpl
+    private readonly router: ModelRouterImpl,
   ) {}
 
   /**
@@ -24,18 +24,18 @@ export class SemanticRecall {
     const results = this.memory.search(query, { limit: limit * 2 }); // Over-fetch for filtering
 
     if (!strictGate || results.length === 0) {
-      return results.slice(0, limit).map(r => r.entry);
+      return results.slice(0, limit).map((r) => r.entry);
     }
 
     // Strict Gate: Verification Pass
     const verifiedEntries: MemoryEntry[] = [];
-    
+
     for (const { entry } of results) {
-       const passed = await this.verifyMemoryCoherence(query, entry.content);
-       if (passed) {
-         verifiedEntries.push(entry);
-         if (verifiedEntries.length >= limit) break;
-       }
+      const passed = await this.verifyMemoryCoherence(query, entry.content);
+      if (passed) {
+        verifiedEntries.push(entry);
+        if (verifiedEntries.length >= limit) break;
+      }
     }
 
     return verifiedEntries;
@@ -50,10 +50,10 @@ Return ONLY "true" or "false".
 UserQuery: ${query}
 MemoryContext: ${context}
 `;
-    
+
     try {
       const response = await this.router.generate([{ role: "user", content: prompt }], {
-        system: "You are a boolean truth gate. Output true or false."
+        system: "You are a boolean truth gate. Output true or false.",
       });
       return response.trim().toLowerCase() === "true";
     } catch {

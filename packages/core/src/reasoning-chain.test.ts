@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  ReasoningChain,
-  type ReasoningPhase,
-  type ChainStep,
-} from "./reasoning-chain.js";
+import { ReasoningChain, type ReasoningPhase, type ChainStep } from "./reasoning-chain.js";
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -207,9 +203,21 @@ describe("ReasoningChain", () => {
   describe("distillPlaybook", () => {
     it("extracts bullets from successful steps (pdseScore >= 0.85)", () => {
       const steps: ChainStep[] = [
-        { stepNumber: 1, phase: makePhase("thinking", "used AST parser for code analysis", 0.90), escalated: false },
-        { stepNumber: 2, phase: makePhase("thinking", "tried regex matching", 0.60), escalated: false },
-        { stepNumber: 3, phase: makePhase("thinking", "applied semantic search for file discovery", 0.88), escalated: false },
+        {
+          stepNumber: 1,
+          phase: makePhase("thinking", "used AST parser for code analysis", 0.9),
+          escalated: false,
+        },
+        {
+          stepNumber: 2,
+          phase: makePhase("thinking", "tried regex matching", 0.6),
+          escalated: false,
+        },
+        {
+          stepNumber: 3,
+          phase: makePhase("thinking", "applied semantic search for file discovery", 0.88),
+          escalated: false,
+        },
       ];
       const bullets = chain.distillPlaybook(steps);
       expect(bullets).toHaveLength(2);
@@ -223,9 +231,33 @@ describe("ReasoningChain", () => {
       // Intersection: 7, Union: 9, Jaccard: 7/9 ≈ 0.78 — too low. Need more overlap.
       // So we use entries with 10 tokens sharing 9:
       const steps: ChainStep[] = [
-        { stepNumber: 1, phase: makePhase("thinking", "used the advanced AST parser for deep code analysis review and module structure scanning", 0.90), escalated: false },
-        { stepNumber: 2, phase: makePhase("thinking", "used the advanced AST parser for deep code analysis review and module layout scanning", 0.92), escalated: false },
-        { stepNumber: 3, phase: makePhase("thinking", "completely different strategy with docker containers deployed production", 0.95), escalated: false },
+        {
+          stepNumber: 1,
+          phase: makePhase(
+            "thinking",
+            "used the advanced AST parser for deep code analysis review and module structure scanning",
+            0.9,
+          ),
+          escalated: false,
+        },
+        {
+          stepNumber: 2,
+          phase: makePhase(
+            "thinking",
+            "used the advanced AST parser for deep code analysis review and module layout scanning",
+            0.92,
+          ),
+          escalated: false,
+        },
+        {
+          stepNumber: 3,
+          phase: makePhase(
+            "thinking",
+            "completely different strategy with docker containers deployed production",
+            0.95,
+          ),
+          escalated: false,
+        },
       ];
       // Entry 1 tokens: used, the, advanced, ast, parser, for, deep, code, analysis, review, and, module, structure, scanning (14 tokens, but "the" is 3 chars so kept, "for" 3 chars kept, "and" 3 chars kept, "ast" 3 chars kept)
       // Entry 2 tokens: same except "layout" instead of "structure" → 13 shared / 15 union ≈ 0.87 > 0.8
@@ -250,7 +282,7 @@ describe("ReasoningChain", () => {
       ];
       const steps: ChainStep[] = phrases.map((phrase, i) => ({
         stepNumber: i + 1,
-        phase: makePhase("thinking", phrase, 0.90),
+        phase: makePhase("thinking", phrase, 0.9),
         escalated: false,
       }));
       const bullets = chain.distillPlaybook(steps);
@@ -260,8 +292,8 @@ describe("ReasoningChain", () => {
 
     it("returns empty array when no steps meet threshold", () => {
       const steps: ChainStep[] = [
-        { stepNumber: 1, phase: makePhase("thinking", "bad plan", 0.40), escalated: false },
-        { stepNumber: 2, phase: makePhase("thinking", "another bad plan", 0.50), escalated: false },
+        { stepNumber: 1, phase: makePhase("thinking", "bad plan", 0.4), escalated: false },
+        { stepNumber: 2, phase: makePhase("thinking", "another bad plan", 0.5), escalated: false },
       ];
       const bullets = chain.distillPlaybook(steps);
       expect(bullets).toHaveLength(0);
@@ -310,7 +342,12 @@ describe("ReasoningChain", () => {
   describe("formatChainForPrompt", () => {
     it("formats phases with type prefixes", () => {
       chain.recordStep(makePhase("thinking", "analyze the problem"));
-      chain.recordStep({ type: "critique", content: "needs more depth", pdseScore: 0.85, timestamp: new Date().toISOString() });
+      chain.recordStep({
+        type: "critique",
+        content: "needs more depth",
+        pdseScore: 0.85,
+        timestamp: new Date().toISOString(),
+      });
       chain.recordStep(makePhase("action", "edit file.ts"));
       chain.recordStep(makePhase("observe", "tests pass"));
 

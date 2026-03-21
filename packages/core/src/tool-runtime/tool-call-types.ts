@@ -12,35 +12,35 @@
  * Lifecycle: created → validating → (awaiting_approval) → scheduled → executing → verifying → success | error | cancelled | timed_out
  */
 export type ToolCallStatus =
-  | 'created'
-  | 'validating'
-  | 'awaiting_approval'
-  | 'scheduled'
-  | 'executing'
-  | 'verifying'
-  | 'success'
-  | 'error'
-  | 'blocked_by_dependency'
-  | 'cancelled'
-  | 'timed_out';
+  | "created"
+  | "validating"
+  | "awaiting_approval"
+  | "scheduled"
+  | "executing"
+  | "verifying"
+  | "success"
+  | "error"
+  | "blocked_by_dependency"
+  | "cancelled"
+  | "timed_out";
 
 /** Terminal states — once reached, no further transitions allowed */
 export const TERMINAL_STATES: ReadonlySet<ToolCallStatus> = new Set([
-  'success',
-  'error',
-  'blocked_by_dependency',
-  'cancelled',
-  'timed_out',
+  "success",
+  "error",
+  "blocked_by_dependency",
+  "cancelled",
+  "timed_out",
 ]);
 
 /** Valid state transitions */
 export const VALID_TRANSITIONS: Readonly<Record<ToolCallStatus, ReadonlyArray<ToolCallStatus>>> = {
-  created: ['validating', 'cancelled'],
-  validating: ['awaiting_approval', 'scheduled', 'error', 'blocked_by_dependency', 'cancelled'],
-  awaiting_approval: ['scheduled', 'cancelled'],
-  scheduled: ['executing', 'cancelled'],
-  executing: ['verifying', 'success', 'error', 'timed_out', 'cancelled'],
-  verifying: ['success', 'error'],
+  created: ["validating", "cancelled"],
+  validating: ["awaiting_approval", "scheduled", "error", "blocked_by_dependency", "cancelled"],
+  awaiting_approval: ["scheduled", "cancelled"],
+  scheduled: ["executing", "cancelled"],
+  executing: ["verifying", "success", "error", "timed_out", "cancelled"],
+  verifying: ["success", "error"],
   success: [],
   error: [],
   blocked_by_dependency: [],
@@ -99,7 +99,12 @@ export interface ToolExecutionEvidence {
 
 // ─── Artifact Record ──────────────────────────────────────────────────────────
 
-export type ArtifactKind = 'git_clone' | 'file_write' | 'download' | 'archive_extract' | 'directory_create';
+export type ArtifactKind =
+  | "git_clone"
+  | "file_write"
+  | "download"
+  | "archive_extract"
+  | "directory_create";
 
 /** Tracks any artifact created by tool execution (for verification + durable store) */
 export interface ArtifactRecord {
@@ -123,11 +128,11 @@ export interface ArtifactRecord {
 // ─── Verification ─────────────────────────────────────────────────────────────
 
 export type VerificationCheckKind =
-  | 'directory_exists'
-  | 'file_exists'
-  | 'file_size_nonzero'
-  | 'git_repo_valid'
-  | 'archive_extracted';
+  | "directory_exists"
+  | "file_exists"
+  | "file_size_nonzero"
+  | "git_repo_valid"
+  | "archive_extracted";
 
 export interface VerificationCheck {
   readonly kind: VerificationCheckKind;

@@ -7,12 +7,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type {
-  Skill,
-  UpdateOperation,
-  SkillbookStats,
-  SkillbookGateDecision,
-} from "./types.js";
+import type { Skill, UpdateOperation, SkillbookStats, SkillbookGateDecision } from "./types.js";
 
 export interface SkillbookData {
   version: string;
@@ -83,7 +78,7 @@ export class DanteSkillbook {
       }
       case "refine": {
         if (!op.targetSkillId || !op.candidateSkill) return false;
-        const idx = this.data.skills.findIndex(s => s.id === op.targetSkillId);
+        const idx = this.data.skills.findIndex((s) => s.id === op.targetSkillId);
         if (idx < 0) return false;
         this.data.skills[idx] = {
           ...this.data.skills[idx],
@@ -95,13 +90,13 @@ export class DanteSkillbook {
       }
       case "remove": {
         if (!op.targetSkillId) return false;
-        this.data.skills = this.data.skills.filter(s => s.id !== op.targetSkillId);
+        this.data.skills = this.data.skills.filter((s) => s.id !== op.targetSkillId);
         break;
       }
       case "merge": {
         // Merge: refine target with candidate content, mark updatedAt
         if (!op.targetSkillId || !op.candidateSkill) return false;
-        const idx = this.data.skills.findIndex(s => s.id === op.targetSkillId);
+        const idx = this.data.skills.findIndex((s) => s.id === op.targetSkillId);
         if (idx < 0) return false;
         const existing = this.data.skills[idx]!;
         this.data.skills[idx] = {
@@ -124,7 +119,7 @@ export class DanteSkillbook {
    * Find a skill by ID.
    */
   findById(id: string): Skill | undefined {
-    return this.data.skills.find(s => s.id === id);
+    return this.data.skills.find((s) => s.id === id);
   }
 
   /**

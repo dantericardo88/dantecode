@@ -9,7 +9,9 @@ export class AdvancedContentCleaner {
     const $ = cheerio.load(html);
 
     // Remove non-content elements
-    $("script, style, iframe, noscript, footer, header, nav, aside, .ads, .sidebar, .menu").remove();
+    $(
+      "script, style, iframe, noscript, footer, header, nav, aside, .ads, .sidebar, .menu",
+    ).remove();
 
     // Strategy 1: Look for common article containers
     const article = $("article, .post, .article, .content, #main, #content").first();

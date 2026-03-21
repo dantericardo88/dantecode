@@ -37,25 +37,25 @@ export interface ContrastReport {
  */
 const ANSI_LUMINANCE: Record<string, number> = {
   // Standard colors (L1 = 0.0, white = 1.0)
-  "0":  0.0,  // black
-  "30": 0.0,  // dark black (fg)
+  "0": 0.0, // black
+  "30": 0.0, // dark black (fg)
   "31": 0.07, // red
   "32": 0.15, // green
-  "33": 0.30, // yellow
+  "33": 0.3, // yellow
   "34": 0.04, // blue
   "35": 0.11, // magenta
   "36": 0.25, // cyan
   "37": 0.75, // light gray
   "90": 0.12, // dark gray
   "91": 0.25, // bright red
-  "92": 0.40, // bright green
+  "92": 0.4, // bright green
   "93": 0.67, // bright yellow
-  "94": 0.20, // bright blue
+  "94": 0.2, // bright blue
   "95": 0.35, // bright magenta
   "96": 0.55, // bright cyan
-  "97": 1.0,  // white
-  "1":  0.8,  // bold (usually white/bright)
-  "2":  0.35, // dim
+  "97": 1.0, // white
+  "1": 0.8, // bold (usually white/bright)
+  "2": 0.35, // dim
 };
 
 /** Terminal background assumed luminance (dark terminal default). */
@@ -76,7 +76,7 @@ function contrastRatio(l1: number, l2: number): number {
 
 /** Classify contrast ratio to WCAG level. */
 function wcagLevel(ratio: number): "AA" | "AAA" | "fail" {
-  if (ratio >= 7)   return "AAA";
+  if (ratio >= 7) return "AAA";
   if (ratio >= 4.5) return "AA";
   return "fail";
 }
@@ -122,10 +122,7 @@ export class ContrastValidator {
   /**
    * Validate a set of named ANSI color tokens.
    */
-  validateTokens(
-    themeName: string,
-    tokens: Record<string, string>,
-  ): ContrastReport {
+  validateTokens(themeName: string, tokens: Record<string, string>): ContrastReport {
     const checks = Object.entries(tokens)
       .filter(([, v]) => v.includes("\x1b["))
       .map(([role, seq]) => this.check(role, seq));
@@ -146,9 +143,7 @@ export class ContrastValidator {
     const lines: string[] = [`Contrast report — theme: ${report.theme}`];
     for (const c of report.checks) {
       const badge = c.passes ? "✓" : "✗";
-      lines.push(
-        `  ${badge} ${c.role.padEnd(12)} ratio:${c.ratio.toFixed(2)} [${c.level}]`,
-      );
+      lines.push(`  ${badge} ${c.role.padEnd(12)} ratio:${c.ratio.toFixed(2)} [${c.level}]`);
     }
     lines.push(
       report.allPass

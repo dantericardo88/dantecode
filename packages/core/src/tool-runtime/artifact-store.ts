@@ -6,7 +6,7 @@
  * they still exist across tool calls.
  */
 
-import type { ArtifactKind, ArtifactRecord } from './tool-call-types.js';
+import type { ArtifactKind, ArtifactRecord } from "./tool-call-types.js";
 
 let _nextId = 1;
 function nextId(): string {
@@ -17,7 +17,7 @@ export class ArtifactStore {
   private readonly _artifacts = new Map<string, ArtifactRecord>();
 
   /** Record a new artifact. Returns the ArtifactRecord (with generated id). */
-  record(artifact: Omit<ArtifactRecord, 'id' | 'createdAt' | 'verified'>): ArtifactRecord {
+  record(artifact: Omit<ArtifactRecord, "id" | "createdAt" | "verified">): ArtifactRecord {
     const record: ArtifactRecord = {
       ...artifact,
       id: nextId(),

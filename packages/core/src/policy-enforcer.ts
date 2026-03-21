@@ -16,13 +16,7 @@ import { randomUUID } from "node:crypto";
 export type PolicyEffect = "allow" | "deny" | "warn" | "audit";
 
 /** Category of resource that a policy rule guards. */
-export type PolicyResourceType =
-  | "file"
-  | "command"
-  | "network"
-  | "tool"
-  | "memory"
-  | "agent";
+export type PolicyResourceType = "file" | "command" | "network" | "tool" | "memory" | "agent";
 
 /**
  * A single predicate that must be satisfied for a rule to match.
@@ -33,13 +27,7 @@ export interface PolicyCondition {
   /** The field to inspect: "resource" | "action" | metadata key. */
   field: string;
   /** Comparison operator applied to the resolved field value. */
-  operator:
-    | "equals"
-    | "contains"
-    | "startsWith"
-    | "endsWith"
-    | "matches"
-    | "exists";
+  operator: "equals" | "contains" | "startsWith" | "endsWith" | "matches" | "exists";
   /** The reference value (not required for "exists"). */
   value?: string;
 }
@@ -314,18 +302,14 @@ export class PolicyEnforcer {
     const timestamp = new Date().toISOString();
 
     const candidates = this.rules
-      .filter(
-        (r) => r.resourceType === request.resourceType && r.enabled,
-      )
+      .filter((r) => r.resourceType === request.resourceType && r.enabled)
       .sort((a, b) => b.priority - a.priority);
 
     const matchedRules: PolicyRule[] = [];
     const reasons: string[] = [];
 
     for (const rule of candidates) {
-      const allMatch = rule.conditions.every((c) =>
-        this.evaluateCondition(c, request),
-      );
+      const allMatch = rule.conditions.every((c) => this.evaluateCondition(c, request));
       if (!allMatch) continue;
 
       matchedRules.push(rule);
@@ -511,25 +495,13 @@ export class PolicyEnforcer {
         return fieldValue !== undefined && fieldValue === value;
 
       case "contains":
-        return (
-          fieldValue !== undefined &&
-          value !== undefined &&
-          fieldValue.includes(value)
-        );
+        return fieldValue !== undefined && value !== undefined && fieldValue.includes(value);
 
       case "startsWith":
-        return (
-          fieldValue !== undefined &&
-          value !== undefined &&
-          fieldValue.startsWith(value)
-        );
+        return fieldValue !== undefined && value !== undefined && fieldValue.startsWith(value);
 
       case "endsWith":
-        return (
-          fieldValue !== undefined &&
-          value !== undefined &&
-          fieldValue.endsWith(value)
-        );
+        return fieldValue !== undefined && value !== undefined && fieldValue.endsWith(value);
 
       case "matches": {
         if (fieldValue === undefined || value === undefined) return false;

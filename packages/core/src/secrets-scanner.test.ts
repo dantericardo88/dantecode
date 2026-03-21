@@ -55,9 +55,7 @@ describe("SecretsScanner", () => {
     const content = `token: ${token}`;
     const result = scanner.scan(content);
     expect(result.clean).toBe(false);
-    const match = result.matches.find(
-      (m) => m.type === "github_fine_grained",
-    );
+    const match = result.matches.find((m) => m.type === "github_fine_grained");
     expect(match).toBeDefined();
     expect(match!.value).toBe(token);
     expect(match!.confidence).toBe("high");
@@ -68,8 +66,7 @@ describe("SecretsScanner", () => {
   // -------------------------------------------------------------------------
   it("should detect JWT token", () => {
     const scanner = new SecretsScanner();
-    const jwt =
-      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123DEF456_-ghi789";
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123DEF456_-ghi789";
     const content = `Authorization: Bearer ${jwt}`;
     const result = scanner.scan(content);
     expect(result.clean).toBe(false);
@@ -382,10 +379,7 @@ describe("SecretsScanner", () => {
     expect(cleanResult.summary).toContain("No secrets detected");
 
     // File with secret
-    const dirtyResult = scanner.scanFile(
-      "key=AKIAIOSFODNN7EXAMPLE",
-      "/config/.env",
-    );
+    const dirtyResult = scanner.scanFile("key=AKIAIOSFODNN7EXAMPLE", "/config/.env");
     expect(dirtyResult.summary).toContain("/config/.env");
     expect(dirtyResult.clean).toBe(false);
     expect(dirtyResult.summary).toContain("aws_access_key");

@@ -8,7 +8,7 @@
  * The adapter layer does NOT replace executeTool(); it only post-processes results.
  */
 
-import type { ToolExecutionEvidence, ToolExecutionResult } from './tool-call-types.js';
+import type { ToolExecutionEvidence, ToolExecutionResult } from "./tool-call-types.js";
 
 // ─── Raw tool result (matches existing executeTool return type) ───────────────
 
@@ -138,10 +138,7 @@ function inferBashTransferBytes(raw: RawToolResult): number | undefined {
 
 // ─── WebSearch / WebFetch Adapter ─────────────────────────────────────────────
 
-export function adaptWebResult(
-  raw: RawToolResult,
-  startMs: number,
-): ToolExecutionResult {
+export function adaptWebResult(raw: RawToolResult, startMs: number): ToolExecutionResult {
   return {
     content: raw.content,
     isError: raw.isError,
@@ -154,10 +151,7 @@ export function adaptWebResult(
 
 // ─── SubAgent Adapter ─────────────────────────────────────────────────────────
 
-export function adaptSubAgentResult(
-  raw: RawToolResult,
-  startMs: number,
-): ToolExecutionResult {
+export function adaptSubAgentResult(raw: RawToolResult, startMs: number): ToolExecutionResult {
   return {
     content: raw.content,
     isError: raw.isError,
@@ -180,23 +174,23 @@ export function adaptToolResult(
   startMs: number,
 ): ToolExecutionResult {
   switch (toolName) {
-    case 'Read':
-    case 'Glob':
-    case 'Grep':
-      return adaptReadResult(raw, String(input['file_path'] ?? input['pattern'] ?? ''), startMs);
+    case "Read":
+    case "Glob":
+    case "Grep":
+      return adaptReadResult(raw, String(input["file_path"] ?? input["pattern"] ?? ""), startMs);
 
-    case 'Write':
-    case 'Edit':
-      return adaptWriteResult(raw, String(input['file_path'] ?? ''), startMs);
+    case "Write":
+    case "Edit":
+      return adaptWriteResult(raw, String(input["file_path"] ?? ""), startMs);
 
-    case 'Bash':
-      return adaptBashResult(raw, String(input['command'] ?? ''), startMs);
+    case "Bash":
+      return adaptBashResult(raw, String(input["command"] ?? ""), startMs);
 
-    case 'WebSearch':
-    case 'WebFetch':
+    case "WebSearch":
+    case "WebFetch":
       return adaptWebResult(raw, startMs);
 
-    case 'SubAgent':
+    case "SubAgent":
       return adaptSubAgentResult(raw, startMs);
 
     default:
@@ -206,9 +200,7 @@ export function adaptToolResult(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildEvidence(
-  partial: Partial<ToolExecutionEvidence>,
-): ToolExecutionEvidence {
+function buildEvidence(partial: Partial<ToolExecutionEvidence>): ToolExecutionEvidence {
   return {
     exitCode: partial.exitCode,
     filesWritten: partial.filesWritten,
@@ -226,17 +218,14 @@ function buildEvidence(
  */
 export function formatEvidenceSummary(result: ToolExecutionResult): string {
   const e = result.evidence;
-  if (!e) return '';
+  if (!e) return "";
 
   const parts: string[] = [];
   if (e.durationMs !== undefined) parts.push(`${e.durationMs}ms`);
   if (e.exitCode !== undefined) parts.push(`exit=${e.exitCode}`);
-  if (e.filesWritten && e.filesWritten.length > 0)
-    parts.push(`wrote=${e.filesWritten.length}`);
-  if (e.filesRead && e.filesRead.length > 0)
-    parts.push(`read=${e.filesRead.length}`);
-  if (e.bytesTransferred !== undefined)
-    parts.push(`bytes=${e.bytesTransferred}`);
+  if (e.filesWritten && e.filesWritten.length > 0) parts.push(`wrote=${e.filesWritten.length}`);
+  if (e.filesRead && e.filesRead.length > 0) parts.push(`read=${e.filesRead.length}`);
+  if (e.bytesTransferred !== undefined) parts.push(`bytes=${e.bytesTransferred}`);
 
-  return parts.length ? `[${parts.join(' ')}]` : '';
+  return parts.length ? `[${parts.join(" ")}]` : "";
 }

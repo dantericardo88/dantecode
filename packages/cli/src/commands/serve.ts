@@ -53,7 +53,6 @@ export async function runServeCommand(args: string[]): Promise<void> {
   const port = parsePort(args) ?? 3210;
   const host = parseHost(args) ?? "127.0.0.1";
   const openBrowser = args.includes("--open");
-  const enableMdns = args.includes("--mdns");
   const projectRoot = process.cwd();
   const password = process.env["DANTECODE_SERVER_PASSWORD"];
 
@@ -84,14 +83,25 @@ export async function runServeCommand(args: string[]): Promise<void> {
       }
 
       // Build the minimal Session object required by runAgentLoop
+      // V-01: Seed history (all messages except the current user prompt at end)
+      const historyWithoutCurrentPrompt = opts.history.slice(0, -1);
       const now = new Date().toISOString();
       const loopSession: import("@dantecode/config-types").Session = {
         id: opts.sessionId,
         projectRoot: opts.projectRoot,
-        messages: [],
+        messages: historyWithoutCurrentPrompt.map((m, i) => ({
+          id: `msg-${i}`,
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          timestamp: now,
+        })),
         activeFiles: [],
         readOnlyFiles: [],
-        model: state.model.default,
+        // V-03: Respect session-level model override
+        model:
+          opts.model && opts.model !== state.model.default.modelId
+            ? { ...state.model.default, modelId: opts.model }
+            : state.model.default,
         createdAt: now,
         updatedAt: now,
         agentStack: [],
@@ -112,22 +122,34 @@ export async function runServeCommand(args: string[]): Promise<void> {
       const startMs = Date.now();
       try {
         const resultSession = await runAgentLoop(opts.prompt, loopSession, agentConfig);
-        // Extract assistant reply from the last message in the result session
-        const lastMsg = resultSession.messages[resultSession.messages.length - 1];
-        const assistantContent =
-          lastMsg && lastMsg.role === "assistant"
-            ? typeof lastMsg.content === "string"
-              ? lastMsg.content
-              : ""
-            : "";
+        // V-02: Sync new assistant messages back to the session record
+        const newMessages = resultSession.messages.slice(opts.history.length);
+        const ts = new Date().toISOString();
+        const sessionRecord = serverHandle.sessions.get(opts.sessionId);
+        if (sessionRecord) {
+          for (const msg of newMessages) {
+            if (msg.role === "assistant") {
+              const content =
+                typeof msg.content === "string"
+                  ? msg.content
+                  : Array.isArray(msg.content)
+                    ? msg.content
+                        .map((b) =>
+                          typeof b === "object" && b !== null && "text" in b
+                            ? String((b as { text: unknown }).text)
+                            : "",
+                        )
+                        .join("")
+                    : "";
+              if (content) {
+                sessionRecord.messages.push({ role: "assistant", content, ts });
+                sessionRecord.messageCount++;
+              }
+            }
+          }
+        }
         // Emit done so SSE clients can close their stream
         serverHandle.sessionEmitter.emitDone(opts.sessionId, 0, Date.now() - startMs);
-        if (assistantContent) {
-          serverHandle.sessionEmitter.emitStatus(
-            opts.sessionId,
-            `[assistant:reply] ${assistantContent.slice(0, 200)}`,
-          );
-        }
       } catch (err: unknown) {
         serverHandle.sessionEmitter.emitError(
           opts.sessionId,
@@ -143,7 +165,7 @@ export async function runServeCommand(args: string[]): Promise<void> {
 
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
-    server = await startServer({ port, host, projectRoot, password, enableMdns, agentRunner });
+    server = await startServer({ port, host, projectRoot, password, agentRunner });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${"\x1b[31m"}Failed to start server: ${message}${RESET}\n`);
@@ -178,21 +200,25 @@ export async function runServeCommand(args: string[]): Promise<void> {
   if (openBrowser) {
     try {
       const { execFile } = await import("node:child_process");
-      const openCmd =
+      // V-04: `start` is a cmd.exe built-in on Windows — must use shell wrapper
+      const [openCmd, ...openArgs] =
         process.platform === "darwin"
-          ? "open"
+          ? (["open", server.url] as string[])
           : process.platform === "win32"
-            ? "start"
-            : "xdg-open";
-      execFile(openCmd, [server.url]);
+            ? (["cmd", "/c", "start", "", server.url] as string[])
+            : (["xdg-open", server.url] as string[]);
+      execFile(openCmd!, openArgs);
     } catch {
       // Non-fatal — browser open failure should not crash the server
     }
   }
 
-  // Keep process alive until Ctrl+C
+  // V-05: Keep process alive until Ctrl+C or SIGTERM; guard against double shutdown
   await new Promise<void>((resolve) => {
-    process.on("SIGINT", async () => {
+    let shutdownCalled = false;
+    const shutdown = async (): Promise<void> => {
+      if (shutdownCalled) return;
+      shutdownCalled = true;
       process.stdout.write(`\n${DIM}Shutting down DanteCode server...${RESET}\n`);
       try {
         await server.stop();
@@ -200,6 +226,8 @@ export async function runServeCommand(args: string[]): Promise<void> {
         // Non-fatal
       }
       resolve();
-    });
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
   });
 }

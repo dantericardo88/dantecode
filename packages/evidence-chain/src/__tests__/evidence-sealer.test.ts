@@ -85,7 +85,7 @@ describe("EvidenceSealer", () => {
     expect(() =>
       sealer.createSeal({
         sessionId: "session-bad2",
-        evidenceRootHash: "abc123",  // too short
+        evidenceRootHash: "abc123", // too short
         config,
         metrics,
         eventCount: 1,
@@ -94,7 +94,7 @@ describe("EvidenceSealer", () => {
     expect(() =>
       sealer.createSeal({
         sessionId: "session-bad3",
-        evidenceRootHash: "",        // empty
+        evidenceRootHash: "", // empty
         config,
         metrics,
         eventCount: 1,

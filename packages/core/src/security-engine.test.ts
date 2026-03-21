@@ -7,11 +7,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SecurityEngine } from "./security-engine.js";
-import type {
-  SecurityAction,
-  SecurityRule,
-  SecurityCheckResult,
-} from "./security-engine.js";
+import type { SecurityAction, SecurityRule, SecurityCheckResult } from "./security-engine.js";
 
 describe("SecurityEngine", () => {
   let engine: SecurityEngine;
@@ -131,9 +127,7 @@ describe("SecurityEngine", () => {
       const result = engine.checkAction(action);
       expect(result.decision).toBe("block");
       expect(result.riskLevel).toBe("high");
-      expect(result.reasons.some((r) => r.includes("Path traversal"))).toBe(
-        true,
-      );
+      expect(result.reasons.some((r) => r.includes("Path traversal"))).toBe(true);
     });
 
     // 9. Records action in history
@@ -606,21 +600,12 @@ describe("SecurityEngine", () => {
       };
 
       // Add two entries and resolve the first
-      const id1 = smallEngine.quarantineAction(
-        { layer: "tool", command: "cmd_1" },
-        mockResult,
-      );
-      smallEngine.quarantineAction(
-        { layer: "tool", command: "cmd_2" },
-        mockResult,
-      );
+      const id1 = smallEngine.quarantineAction({ layer: "tool", command: "cmd_1" }, mockResult);
+      smallEngine.quarantineAction({ layer: "tool", command: "cmd_2" }, mockResult);
       smallEngine.resolveQuarantine(id1);
 
       // Add a third — should evict the resolved one
-      smallEngine.quarantineAction(
-        { layer: "tool", command: "cmd_3" },
-        mockResult,
-      );
+      smallEngine.quarantineAction({ layer: "tool", command: "cmd_3" }, mockResult);
 
       const entries = smallEngine.getQuarantine();
       expect(entries).toHaveLength(2);

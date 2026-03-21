@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { 
-  RuntimeTaskPacket 
-} from "@dantecode/runtime-spine";
+import type { RuntimeTaskPacket } from "@dantecode/runtime-spine";
 
 export interface SpawnerOptions {
   maxConcurrency?: number;
@@ -33,14 +31,14 @@ export class SubAgentSpawner {
       objective,
       role,
       context,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     const instance: SubAgentInstance = {
       id,
       role,
       task,
-      status: "idle"
+      status: "idle",
     };
 
     this.instances.set(id, instance);

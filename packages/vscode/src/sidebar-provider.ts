@@ -559,10 +559,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
       "",
       "JSON TOOL CALL FORMAT — malformed JSON causes silent drops (file never written, command never ran):",
-      "- Double quotes inside string values MUST be escaped: \\\"",
+      '- Double quotes inside string values MUST be escaped: \\"',
       "- Backslashes MUST be escaped: \\\\",
       "- Real newlines inside string values MUST be \\n (not a literal newline character)",
-      "- Test JSON mentally: every { must close with }, every \" must be paired.",
+      '- Test JSON mentally: every { must close with }, every " must be paired.',
       "",
       "## Response Formatting",
       "Format every response for maximum readability in the VS Code sidebar:",
@@ -657,7 +657,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       );
       systemParts.push("```");
       systemParts.push(
-        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+        'To search code: `gh search code "pattern" --limit 10 --json path,repository`',
       );
       systemParts.push("");
       systemParts.push("### Fetching Web Content");
@@ -1142,7 +1142,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Pipeline detection: used by both no-tool-calls handling and tool execution guards
         const isPipelineWorkflow =
           this.activeSkill !== null ||
-          /\/(?:magic|autoforge|party|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest)\b/i.test(text);
+          /\/(?:magic|autoforge|party|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest)\b/i.test(
+            text,
+          );
         const PREMATURE_SUMMARY_RE =
           /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete|git\s+status|verification\s+results?|changes?\s+made|next\s+steps?|recommendations?)/i;
         // Grok-specific confabulation: fake verification tables, fake git status, fake PDSE scores.
@@ -1246,8 +1248,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           //    both the GROK_CONFAB_RE detector and the round-count fallback.
           const isGrokConfab = GROK_CONFAB_RE.test(fullResponse);
           const isClassicConfab = PREMATURE_SUMMARY_RE.test(fullResponse) || isGrokConfab;
-          const isReadsOnlyConfab =
-            executedToolsThisTurn > 0 && (isGrokConfab || roundNumber >= 3);
+          const isReadsOnlyConfab = executedToolsThisTurn > 0 && (isGrokConfab || roundNumber >= 3);
           if (
             isPipelineWorkflow &&
             touchedFiles.length === 0 &&
@@ -1307,7 +1308,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             .join("\n");
           toolResultParts.push(
             `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n` +
-            `Fix JSON escaping and re-emit those tool calls in your next response.`,
+              `Fix JSON escaping and re-emit those tool calls in your next response.`,
           );
         }
 
@@ -1369,8 +1370,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 });
                 toolResultParts.push(
                   `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
-                  `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
-                  `Break your changes into multiple small Edit calls targeting specific sections.`,
+                    `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+                    `Break your changes into multiple small Edit calls targeting specific sections.`,
                 );
                 continue;
               }
@@ -1400,8 +1401,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             toolResultParts.push(
               `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
-              `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
-              `then commit. Do NOT claim you already made changes — only tool results count.`,
+                `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+                `then commit. Do NOT claim you already made changes — only tool results count.`,
             );
             continue;
           }
@@ -1429,13 +1430,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             toolResultParts.push(
               `[PIPELINE GUARD] Destructive git command BLOCKED: \`${blockedCmd}\`\n` +
-              `This command would undo all in-progress work. During a pipeline/workflow you MUST NOT run:\n` +
-              `  - git clean (removes untracked files)\n` +
-              `  - git checkout -- . (discards unstaged changes)\n` +
-              `  - git reset --hard / --merge (discards ALL changes)\n` +
-              `  - git stash --include-untracked (stashes new files out of existence)\n` +
-              `Instead: use Edit/Write/Read tools to make file changes. ` +
-              `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
+                `This command would undo all in-progress work. During a pipeline/workflow you MUST NOT run:\n` +
+                `  - git clean (removes untracked files)\n` +
+                `  - git checkout -- . (discards unstaged changes)\n` +
+                `  - git reset --hard / --merge (discards ALL changes)\n` +
+                `  - git stash --include-untracked (stashes new files out of existence)\n` +
+                `Instead: use Edit/Write/Read tools to make file changes. ` +
+                `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
             );
             continue;
           }
@@ -1460,9 +1461,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             toolResultParts.push(
               `[PIPELINE GUARD] Destructive rm BLOCKED: \`${blockedCmd}\`\n` +
-              `Deleting package/source directories during a pipeline destroys all in-progress work.\n` +
-              `Instead: fix the TypeScript errors in the new package using Edit. ` +
-              `Read the failing file, then Edit to correct the type issues.`,
+                `Deleting package/source directories during a pipeline destroys all in-progress work.\n` +
+                `Instead: fix the TypeScript errors in the new package using Edit. ` +
+                `Read the failing file, then Edit to correct the type issues.`,
             );
             continue;
           }

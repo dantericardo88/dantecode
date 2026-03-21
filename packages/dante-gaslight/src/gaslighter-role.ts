@@ -53,8 +53,13 @@ export function parseGaslighterOutput(raw: string, iteration: number): GaslightC
     };
 
     const VALID_ASPECTS = new Set([
-      "shallow-reasoning", "unsupported-claim", "missing-structure",
-      "missing-evidence", "missing-tool", "failure-pattern", "other",
+      "shallow-reasoning",
+      "unsupported-claim",
+      "missing-structure",
+      "missing-evidence",
+      "missing-tool",
+      "failure-pattern",
+      "other",
     ]);
     const VALID_SEVERITIES = new Set(["low", "medium", "high"]);
 
@@ -70,7 +75,7 @@ export function parseGaslighterOutput(raw: string, iteration: number): GaslightC
           VALID_SEVERITIES.has(rec["severity"] as string)
         );
       })
-      .map(p => ({
+      .map((p) => ({
         aspect: p["aspect"] as CritiquePoint["aspect"],
         description: p["description"] as string,
         severity: p["severity"] as CritiquePoint["severity"],
@@ -79,7 +84,8 @@ export function parseGaslighterOutput(raw: string, iteration: number): GaslightC
     return {
       iteration,
       points,
-      summary: typeof parsed.summary === "string" ? parsed.summary : "Critique summary unavailable.",
+      summary:
+        typeof parsed.summary === "string" ? parsed.summary : "Critique summary unavailable.",
       needsEvidenceEscalation: parsed.needsEvidenceEscalation === true,
       at: new Date().toISOString(),
     };
@@ -176,9 +182,7 @@ export function buildFearSetColumnPrompt(
   priorColumnOutputs: Partial<Record<FearSetColumnName, string>> = {},
   priorLessons: string[] = [],
 ): string {
-  const parts: string[] = [
-    `## Decision / Task Context\n\n${context}`,
-  ];
+  const parts: string[] = [`## Decision / Task Context\n\n${context}`];
 
   if (Object.keys(priorColumnOutputs).length > 0) {
     const priorBlock = Object.entries(priorColumnOutputs)
@@ -276,7 +280,10 @@ export function buildFallbackCritique(draft: string, iteration: number): Gasligh
   return {
     iteration,
     points,
-    summary: points.length > 0 ? "Output may be too shallow." : "No obvious weaknesses detected (fallback mode).",
+    summary:
+      points.length > 0
+        ? "Output may be too shallow."
+        : "No obvious weaknesses detected (fallback mode).",
     needsEvidenceEscalation: false,
     at: new Date().toISOString(),
   };

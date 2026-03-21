@@ -10,10 +10,7 @@ import {
 } from "./approval-engine.js";
 import type { ApprovalRequest } from "./approval-engine.js";
 
-function makeReq(
-  riskLevel: ApprovalRequest["riskLevel"],
-  command?: string,
-): ApprovalRequest {
+function makeReq(riskLevel: ApprovalRequest["riskLevel"], command?: string): ApprovalRequest {
   return {
     toolName: "Bash",
     command,

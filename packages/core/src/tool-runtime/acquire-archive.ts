@@ -6,12 +6,12 @@
  * ArtifactRecords for both the archive and the extracted directory.
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 
-import { acquireUrl } from './acquire-url.js';
-import { globalArtifactStore } from './artifact-store.js';
+import { acquireUrl } from "./acquire-url.js";
+import { globalArtifactStore } from "./artifact-store.js";
 
 export interface AcquireArchiveOptions {
   /** URL of the archive to download */
@@ -47,14 +47,10 @@ export interface AcquireArchiveResult {
 /**
  * Download an archive from URL, extract it, verify contents, and register artifacts.
  */
-export async function acquireArchive(options: AcquireArchiveOptions): Promise<AcquireArchiveResult> {
-  const {
-    url,
-    projectRoot,
-    stripComponents = 0,
-    overwrite = false,
-    timeoutMs = 120_000,
-  } = options;
+export async function acquireArchive(
+  options: AcquireArchiveOptions,
+): Promise<AcquireArchiveResult> {
+  const { url, projectRoot, stripComponents = 0, overwrite = false, timeoutMs = 120_000 } = options;
 
   const extractTo = path.isAbsolute(options.extractTo)
     ? options.extractTo
@@ -64,7 +60,7 @@ export async function acquireArchive(options: AcquireArchiveOptions): Promise<Ac
   if (!overwrite && fs.existsSync(extractTo)) {
     return err(
       `Extraction target already exists: ${extractTo}\n` +
-      `Pass overwrite: true or choose a different extractTo path.`,
+        `Pass overwrite: true or choose a different extractTo path.`,
     );
   }
 
@@ -73,11 +69,11 @@ export async function acquireArchive(options: AcquireArchiveOptions): Promise<Ac
   if (!archiveFilename) {
     return err(
       `Could not determine archive type from URL: ${url}\n` +
-      `Supported: .tar.gz, .tgz, .tar.bz2, .tar.xz, .zip`,
+        `Supported: .tar.gz, .tgz, .tar.bz2, .tar.xz, .zip`,
     );
   }
 
-  const archivePath = path.join(projectRoot, '.dantecode', 'downloads', archiveFilename);
+  const archivePath = path.join(projectRoot, ".dantecode", "downloads", archiveFilename);
 
   // Download the archive
   const dlResult = await acquireUrl({
@@ -119,15 +115,15 @@ export async function acquireArchive(options: AcquireArchiveOptions): Promise<Ac
   if (fileCount === 0) {
     return err(
       `Archive was downloaded but extraction produced no files in: ${extractTo}\n` +
-      `The archive may be corrupt, empty, or require a different strip-components value.`,
+        `The archive may be corrupt, empty, or require a different strip-components value.`,
     );
   }
 
   // Register extracted directory as artifact
   const rec = globalArtifactStore.record({
-    kind: 'archive_extract',
+    kind: "archive_extract",
     path: extractTo,
-    toolCallId: 'acquire-archive',
+    toolCallId: "acquire-archive",
     sourceUrl: url,
   });
   globalArtifactStore.markVerified(rec.id);
@@ -152,14 +148,19 @@ export async function acquireArchive(options: AcquireArchiveOptions): Promise<Ac
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 function err(message: string): AcquireArchiveResult {
-  return { success: false, errorMessage: message, content: `[AcquireArchive] ERROR: ${message}`, isError: true };
+  return {
+    success: false,
+    errorMessage: message,
+    content: `[AcquireArchive] ERROR: ${message}`,
+    isError: true,
+  };
 }
 
 function detectArchiveFilename(url: string): string | null {
   const urlPath = new URL(url).pathname;
   const basename = path.basename(urlPath);
 
-  const supported = ['.tar.gz', '.tgz', '.tar.bz2', '.tar.xz', '.zip', '.tar'];
+  const supported = [".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip", ".tar"];
   for (const ext of supported) {
     if (basename.endsWith(ext)) return basename;
   }
@@ -172,28 +173,32 @@ function extractArchive(
   filename: string,
   stripComponents: number,
 ): void {
-  if (filename.endsWith('.zip')) {
+  if (filename.endsWith(".zip")) {
     // Try unzip first, fall back to python — both use array args (no shell injection)
     try {
       execFileSync("unzip", ["-q", archivePath, "-d", extractTo], { timeout: 120_000 });
       return;
     } catch {
       // python3 -c receives archivePath + extractTo as sys.argv, not shell-expanded
-      execFileSync("python3", [
-        "-c",
-        "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
-        archivePath,
-        extractTo,
-      ], { timeout: 120_000 });
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
+          archivePath,
+          extractTo,
+        ],
+        { timeout: 120_000 },
+      );
       return;
     }
   }
 
   // tar-based: .tar.gz, .tgz, .tar.bz2, .tar.xz, .tar
-  let flag = '';
-  if (filename.endsWith('.tar.gz') || filename.endsWith('.tgz')) flag = 'z';
-  else if (filename.endsWith('.tar.bz2')) flag = 'j';
-  else if (filename.endsWith('.tar.xz')) flag = 'J';
+  let flag = "";
+  if (filename.endsWith(".tar.gz") || filename.endsWith(".tgz")) flag = "z";
+  else if (filename.endsWith(".tar.bz2")) flag = "j";
+  else if (filename.endsWith(".tar.xz")) flag = "J";
 
   const tarArgs = [flag ? `-x${flag}f` : "-xf", archivePath, "-C", extractTo];
   if (stripComponents > 0) tarArgs.push(`--strip-components=${stripComponents}`);
@@ -208,7 +213,9 @@ function countFiles(dir: string): number {
     if (entry.isDirectory()) {
       try {
         count += countFiles(path.join(dir, entry.name));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
   return count;

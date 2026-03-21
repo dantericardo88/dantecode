@@ -111,13 +111,7 @@ const BUILT_IN_FINGERPRINTS: ModelCapabilities[] = [
     costPer1kInputTokens: 0.00025,
     costPer1kOutputTokens: 0.00125,
     maxOutputTokens: 4096,
-    strengths: [
-      "speed",
-      "cost-effective",
-      "simple tasks",
-      "summarization",
-      "classification",
-    ],
+    strengths: ["speed", "cost-effective", "simple tasks", "summarization", "classification"],
     weaknesses: ["complex reasoning", "long outputs"],
     lastUpdated: "2026-03-01",
   },
@@ -156,13 +150,7 @@ const BUILT_IN_FINGERPRINTS: ModelCapabilities[] = [
     costPer1kInputTokens: 0.00015,
     costPer1kOutputTokens: 0.0006,
     maxOutputTokens: 4096,
-    strengths: [
-      "cost-effective",
-      "speed",
-      "simple tasks",
-      "classification",
-      "extraction",
-    ],
+    strengths: ["cost-effective", "speed", "simple tasks", "classification", "extraction"],
     weaknesses: ["complex reasoning", "large context performance"],
     lastUpdated: "2026-03-01",
   },
@@ -200,13 +188,7 @@ const BUILT_IN_FINGERPRINTS: ModelCapabilities[] = [
     costPer1kInputTokens: 0.0009,
     costPer1kOutputTokens: 0.0009,
     maxOutputTokens: 4096,
-    strengths: [
-      "open-weight",
-      "cost-effective",
-      "code",
-      "multilingual",
-      "reasoning",
-    ],
+    strengths: ["open-weight", "cost-effective", "code", "multilingual", "reasoning"],
     weaknesses: ["vision", "requires self-hosting or API provider"],
     lastUpdated: "2026-03-01",
   },
@@ -326,30 +308,20 @@ export class CapabilityFingerprint {
    *
    * Preferred providers receive a +0.2 bonus.
    */
-  findBestModel(
-    criteria: ModelSelectionCriteria,
-  ): ModelCapabilities | undefined {
+  findBestModel(criteria: ModelSelectionCriteria): ModelCapabilities | undefined {
     const taskTokens = tokenSet(criteria.task);
 
     const candidates = [...this.capabilities.values()].filter((m) => {
       if (criteria.requiresVision && !m.supportsVision) return false;
-      if (criteria.requiresFunctionCalling && !m.supportsFunctionCalling)
-        return false;
+      if (criteria.requiresFunctionCalling && !m.supportsFunctionCalling) return false;
       if (
         criteria.maxCostPer1kTokens !== undefined &&
-        (m.costPer1kInputTokens + m.costPer1kOutputTokens) / 2 >
-          criteria.maxCostPer1kTokens
+        (m.costPer1kInputTokens + m.costPer1kOutputTokens) / 2 > criteria.maxCostPer1kTokens
       )
         return false;
-      if (
-        criteria.maxLatencyMs !== undefined &&
-        m.averageLatencyMs > criteria.maxLatencyMs
-      )
+      if (criteria.maxLatencyMs !== undefined && m.averageLatencyMs > criteria.maxLatencyMs)
         return false;
-      if (
-        criteria.minContextWindow !== undefined &&
-        m.contextWindow < criteria.minContextWindow
-      )
+      if (criteria.minContextWindow !== undefined && m.contextWindow < criteria.minContextWindow)
         return false;
       return true;
     });
@@ -360,19 +332,13 @@ export class CapabilityFingerprint {
       const strengthTokens = tokenSet(m.strengths.join(" "));
       const taskScore = jaccard(taskTokens, strengthTokens);
 
-      const avgCost =
-        (m.costPer1kInputTokens + m.costPer1kOutputTokens) / 2;
+      const avgCost = (m.costPer1kInputTokens + m.costPer1kOutputTokens) / 2;
       const costScore = 1 / (avgCost + 1e-6);
       const latencyScore = 1 / (m.averageLatencyMs / 1000 + 1e-3);
 
-      const providerBonus =
-        criteria.preferredProviders?.includes(m.provider) ? 0.2 : 0;
+      const providerBonus = criteria.preferredProviders?.includes(m.provider) ? 0.2 : 0;
 
-      const total =
-        taskScore * 3 +
-        costScore * 0.0001 +
-        latencyScore * 0.01 +
-        providerBonus;
+      const total = taskScore * 3 + costScore * 0.0001 + latencyScore * 0.01 + providerBonus;
 
       return { model: m, score: total };
     });
@@ -386,10 +352,7 @@ export class CapabilityFingerprint {
   /**
    * Apply partial updates to an existing capability entry and persist.
    */
-  async updateCapability(
-    modelId: string,
-    updates: Partial<ModelCapabilities>,
-  ): Promise<void> {
+  async updateCapability(modelId: string, updates: Partial<ModelCapabilities>): Promise<void> {
     const existing = this.capabilities.get(modelId);
     if (!existing) {
       throw new Error(`Unknown modelId: ${modelId}`);
@@ -436,11 +399,7 @@ export class CapabilityFingerprint {
    * @param inputTokens  Number of prompt tokens
    * @param outputTokens Number of completion tokens
    */
-  estimateCost(
-    modelId: string,
-    inputTokens: number,
-    outputTokens: number,
-  ): number {
+  estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
     const m = this.capabilities.get(modelId);
     if (!m) return 0;
     return (

@@ -98,14 +98,26 @@ describe("MetricSuiteRegistry", () => {
   });
 
   it("returns overallScore as average of metric scores", () => {
-    registry.register({ id: "a", name: "A", compute: () => ({ id: "a", name: "A", score: 0.6, passed: true, reason: "" }) });
-    registry.register({ id: "b", name: "B", compute: () => ({ id: "b", name: "B", score: 0.8, passed: true, reason: "" }) });
+    registry.register({
+      id: "a",
+      name: "A",
+      compute: () => ({ id: "a", name: "A", score: 0.6, passed: true, reason: "" }),
+    });
+    registry.register({
+      id: "b",
+      name: "B",
+      compute: () => ({ id: "b", name: "B", score: 0.8, passed: true, reason: "" }),
+    });
     const result = registry.compute({ task: "t", output: "o" });
     expect(result.overallScore).toBeCloseTo(0.7);
   });
 
   it("clears registry", () => {
-    registry.register({ id: "x", name: "X", compute: () => ({ id: "x", name: "X", score: 1, passed: true, reason: "" }) });
+    registry.register({
+      id: "x",
+      name: "X",
+      compute: () => ({ id: "x", name: "X", score: 1, passed: true, reason: "" }),
+    });
     registry.clear();
     expect(registry.listIds()).toHaveLength(0);
   });
@@ -152,7 +164,10 @@ describe("globalMetricSuiteRegistry (standard PDSE metrics)", () => {
 
 describe("toVerificationMetricScores", () => {
   it("converts MetricResult array to VerificationMetricScore array", () => {
-    const results = globalMetricSuiteRegistry.compute({ task: "test", output: GOOD_OUTPUT }).metrics;
+    const results = globalMetricSuiteRegistry.compute({
+      task: "test",
+      output: GOOD_OUTPUT,
+    }).metrics;
     const converted = toVerificationMetricScores(results);
     expect(converted.every((m) => typeof m.score === "number")).toBe(true);
     expect(converted.every((m) => typeof m.passed === "boolean")).toBe(true);

@@ -73,7 +73,14 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   {
     kind: "api",
     title: "API / LLM Error",
-    match: [/401.*Unauthorized/, /403.*Forbidden/, /429.*rate.?limit/i, /API key/i, /invalid_api_key/, /insufficient_quota/],
+    match: [
+      /401.*Unauthorized/,
+      /403.*Forbidden/,
+      /429.*rate.?limit/i,
+      /API key/i,
+      /invalid_api_key/,
+      /insufficient_quota/,
+    ],
     nextSteps: [
       "Check your API key is set correctly (ANTHROPIC_API_KEY, XAI_API_KEY, etc.).",
       "If you hit rate limits, wait 60s or switch models with /model.",
@@ -84,7 +91,13 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   {
     kind: "git",
     title: "Git Error",
-    match: [/fatal: not a git repository/, /nothing to commit/, /merge conflict/i, /rejected.*remote/, /CONFLICT/],
+    match: [
+      /fatal: not a git repository/,
+      /nothing to commit/,
+      /merge conflict/i,
+      /rejected.*remote/,
+      /CONFLICT/,
+    ],
     nextSteps: [
       "Run `git status` to inspect your working tree.",
       "For merge conflicts: resolve manually, then `git add` + `git commit`.",
@@ -175,7 +188,8 @@ function _buildConfidenceHint(base?: string, ctx?: ErrorContext): string | undef
   if (ctx?.pdseScore !== undefined) {
     const score = ctx.pdseScore;
     if (score < 0.5) parts.push(`PDSE score ${score.toFixed(2)} — critical quality gate failure.`);
-    else if (score < 0.8) parts.push(`PDSE score ${score.toFixed(2)} — improvement needed before /ship.`);
+    else if (score < 0.8)
+      parts.push(`PDSE score ${score.toFixed(2)} — improvement needed before /ship.`);
   }
   return parts.length ? parts.join(" ") : undefined;
 }
@@ -207,9 +221,7 @@ export class ErrorHelper {
   format(result: ErrorHelpResult): string {
     const e = this._engine;
     const icons = e.icons();
-    const transientBadge = result.transient
-      ? ` ${e.warning("[transient — retry may help]")}`
-      : "";
+    const transientBadge = result.transient ? ` ${e.warning("[transient — retry may help]")}` : "";
 
     const lines: string[] = [
       `${e.error(`${icons.error} ${result.title}`)}${transientBadge}`,
@@ -241,10 +253,7 @@ const _helper = new ErrorHelper();
 /**
  * Format an error message into a structured, rich ErrorHelpResult string.
  */
-export function formatHelpfulError(
-  error: string | Error,
-  context?: ErrorContext,
-): string {
+export function formatHelpfulError(error: string | Error, context?: ErrorContext): string {
   const msg = error instanceof Error ? error.message : error;
   return _helper.formatError(msg, context);
 }

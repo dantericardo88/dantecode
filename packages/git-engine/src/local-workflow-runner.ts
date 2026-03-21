@@ -3,10 +3,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import {
-  GitAutomationStore,
-  type StoredWorkflowRunRecord,
-} from "./automation-store.js";
+import { GitAutomationStore, type StoredWorkflowRunRecord } from "./automation-store.js";
 
 export interface WorkflowOptions {
   cwd?: string;
@@ -409,37 +406,36 @@ async function runShellCommand(
   });
 }
 
-function expandMatrix(
-  matrix: Record<string, unknown> | undefined,
-): Array<Record<string, string>> {
+function expandMatrix(matrix: Record<string, unknown> | undefined): Array<Record<string, string>> {
   if (!matrix || Object.keys(matrix).length === 0) {
     return [];
   }
 
-  return Object.entries(matrix).reduce<Array<Record<string, string>>>((accumulator, [key, value]) => {
-    const values = Array.isArray(value)
-      ? value.map((entry) => String(entry))
-      : value !== undefined
-        ? [String(value)]
-        : [];
+  return Object.entries(matrix).reduce<Array<Record<string, string>>>(
+    (accumulator, [key, value]) => {
+      const values = Array.isArray(value)
+        ? value.map((entry) => String(entry))
+        : value !== undefined
+          ? [String(value)]
+          : [];
 
-    if (accumulator.length === 0) {
-      return values.map((entry) => ({ [key]: entry }));
-    }
-
-    const next: Array<Record<string, string>> = [];
-    for (const existing of accumulator) {
-      for (const entry of values) {
-        next.push({ ...existing, [key]: entry });
+      if (accumulator.length === 0) {
+        return values.map((entry) => ({ [key]: entry }));
       }
-    }
-    return next;
-  }, []);
+
+      const next: Array<Record<string, string>> = [];
+      for (const existing of accumulator) {
+        for (const entry of values) {
+          next.push({ ...existing, [key]: entry });
+        }
+      }
+      return next;
+    },
+    [],
+  );
 }
 
-function normalizeEnv(
-  value: Record<string, unknown> | undefined,
-): Record<string, string> {
+function normalizeEnv(value: Record<string, unknown> | undefined): Record<string, string> {
   if (!value) {
     return {};
   }
@@ -483,8 +479,7 @@ function resolveWorkingDirectory(
   defaults: ParsedWorkflowDefaults | undefined,
   step: ParsedWorkflowStep,
 ): string {
-  const configured =
-    step["working-directory"] ?? defaults?.run?.["working-directory"];
+  const configured = step["working-directory"] ?? defaults?.run?.["working-directory"];
   return configured ? path.resolve(cwd, configured) : cwd;
 }
 

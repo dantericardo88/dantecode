@@ -175,15 +175,11 @@ describe("Tamper Detection — End-to-End", () => {
       eventCount: 20,
     });
 
-    expect(
-      sealer.verifySeal(seal, { run: "e2e5" }, [{ step: "all", pass: true }]),
-    ).toBe(true);
+    expect(sealer.verifySeal(seal, { run: "e2e5" }, [{ step: "all", pass: true }])).toBe(true);
 
     // MerkleTree proof for leaf 10
     const proof = tree.getProof(10);
-    const leaf10Hash = sha256(
-      JSON.stringify({ seq: 10, organ: "pipeline" }),
-    );
+    const leaf10Hash = sha256(JSON.stringify({ seq: 10, organ: "pipeline" }));
     // Just verify the tree itself is consistent (proof roundtrip)
     const bundles10Hash = (() => {
       const b = createEvidenceBundle({

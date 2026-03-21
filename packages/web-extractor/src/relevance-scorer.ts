@@ -14,8 +14,18 @@ export class RelevanceScorer {
   async score(content: string, goal: string): Promise<number> {
     if (!goal || !content) return 0;
 
-    const goalTerms = new Set(goal.toLowerCase().split(/\W+/).filter(t => t.length > 3));
-    const contentTerms = new Set(content.toLowerCase().split(/\W+/).filter(t => t.length > 3));
+    const goalTerms = new Set(
+      goal
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((t) => t.length > 3),
+    );
+    const contentTerms = new Set(
+      content
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((t) => t.length > 3),
+    );
 
     let matches = 0;
     for (const term of goalTerms) {
@@ -29,13 +39,19 @@ export class RelevanceScorer {
     // If model router is available, we can use it for a more precise score
     if (this.router && content.length > 0) {
       try {
-        const response = await this.router.generate([
-          { role: "user", content: `Goal: ${goal}\n\nContent Preview: ${content.slice(0, 2000)}\n\nRate the relevance of this content to the goal on a scale of 0.0 to 1.0. Reply ONLY with the number.` }
-        ], { system: "You are a relevance scoring assistant." });
-        
+        const response = await this.router.generate(
+          [
+            {
+              role: "user",
+              content: `Goal: ${goal}\n\nContent Preview: ${content.slice(0, 2000)}\n\nRate the relevance of this content to the goal on a scale of 0.0 to 1.0. Reply ONLY with the number.`,
+            },
+          ],
+          { system: "You are a relevance scoring assistant." },
+        );
+
         const modelScore = parseFloat(response);
         if (!isNaN(modelScore)) {
-          return (heuristicScore * 0.3) + (modelScore * 0.7);
+          return heuristicScore * 0.3 + modelScore * 0.7;
         }
       } catch {
         // Fallback to heuristic

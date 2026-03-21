@@ -40,19 +40,16 @@ export interface DistilledLesson {
 
 export const CHANNEL_TO_SECTION: Record<TriggerChannel, string> = {
   "explicit-user": "refinement",
-  "verification": "quality-gates",
-  "policy": "task-patterns",
-  "audit": "general",
+  verification: "quality-gates",
+  policy: "task-patterns",
+  audit: "general",
 };
 
 /**
  * Derive a Skillbook section from the trigger channel.
  * For policy triggers, prefers the task class name if provided.
  */
-export function deriveSectionFromTrigger(
-  channel: TriggerChannel,
-  taskClass?: string,
-): string {
+export function deriveSectionFromTrigger(channel: TriggerChannel, taskClass?: string): string {
   if (channel === "policy" && taskClass) return taskClass;
   return CHANNEL_TO_SECTION[channel];
 }
@@ -64,10 +61,7 @@ export function deriveSectionFromTrigger(
 /**
  * Extract unique high-severity critique descriptions from all iterations.
  */
-export function extractHighSeverityInsights(
-  session: GaslightSession,
-  max = 5,
-): string[] {
+export function extractHighSeverityInsights(session: GaslightSession, max = 5): string[] {
   const seen = new Set<string>();
   const results: string[] = [];
 
@@ -177,7 +171,10 @@ export function distillFearSetLesson(
   }
 
   const lessons: DistilledLesson[] = [];
-  const baseScore = Math.max(0.5, Math.min(1, opts.trustScore ?? result.robustnessScore?.overall ?? 0.75));
+  const baseScore = Math.max(
+    0.5,
+    Math.min(1, opts.trustScore ?? result.robustnessScore?.overall ?? 0.75),
+  );
   const now = new Date().toISOString();
 
   // ── One skill per substantive column ──
@@ -191,9 +188,10 @@ export function distillFearSetLesson(
     switch (column.name) {
       case "define": {
         section = opts.section ?? "FearSet-Define";
-        const cases = column.worstCases.length > 0
-          ? `\n\nWorst cases identified:\n${column.worstCases.map((c) => `- ${c}`).join("\n")}`
-          : "";
+        const cases =
+          column.worstCases.length > 0
+            ? `\n\nWorst cases identified:\n${column.worstCases.map((c) => `- ${c}`).join("\n")}`
+            : "";
         title = opts.title ?? `FearSet: Worst-case definition — ${result.context.slice(0, 60)}`;
         content = `${column.rawOutput}${cases}`;
         break;

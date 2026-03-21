@@ -19,11 +19,7 @@ export interface FileChangeEvent {
   timestamp: string;
 }
 
-const DEFAULT_IGNORE_PATTERNS = [
-  "**/node_modules/**",
-  "**/.git/**",
-  "**/dist/**",
-];
+const DEFAULT_IGNORE_PATTERNS = ["**/node_modules/**", "**/.git/**", "**/dist/**"];
 
 // Self-contained glob matcher (NO external deps)
 // Supports: *, **, ?, character classes [abc]

@@ -7,7 +7,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import type { AgentSessionState, AgentKind } from "./council-types.js";
 import type { CouncilAgentAdapter } from "./agent-adapters/base.js";
@@ -117,12 +117,17 @@ function stopPoll(orchestrator: CouncilOrchestrator): void {
 // Shared active-orchestrator tracking for cleanup
 const activeOrchestrators: CouncilOrchestrator[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const o of activeOrchestrators) {
     o.on("error", () => {});
     stopPoll(o);
   }
   activeOrchestrators.length = 0;
+  // Clean up temp directories to avoid leaving debris on disk
+  if (testDir) {
+    await rm(testDir, { recursive: true, force: true }).catch(() => {});
+    testDir = "";
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -856,7 +861,12 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
       pollIntervalMs: 999_999,
       maxLaneRetries: 0,
       councilConfig: {
-        budget: { maxTotalTokens: 10_000, maxTotalCostUsd: 0, maxTokensPerAgent: 50, warningThreshold: 0.99 },
+        budget: {
+          maxTotalTokens: 10_000,
+          maxTotalCostUsd: 0,
+          maxTokensPerAgent: 50,
+          warningThreshold: 0.99,
+        },
       },
     });
     activeOrchestrators.push(orchestrator);
@@ -866,16 +876,22 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     await orchestrator.start({ objective: "cap dedup", agents: ["dantecode"], repoRoot: testDir });
     injectSession(orchestrator, "cap-s1", { laneId: "dantecode-cap-s1" });
 
+    // Spy on abortTask to verify the lane is actually signalled to stop
+    const abortSpy = vi.spyOn(adapter, "abortTask");
+
     const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
-    // Three poll cycles — event should fire only once
+    // Three poll cycles — event should fire only once; abort should be called exactly once
     await poll.pollAllLanes();
     await poll.pollAllLanes();
     await poll.pollAllLanes();
 
     expect(agentLimitEvents).toHaveLength(1);
     expect(agentLimitEvents[0]!.agentId).toBe("dantecode-cap-s1");
+    // abortTask must have been called exactly once (on first breach, not on subsequent polls)
+    expect(abortSpy).toHaveBeenCalledTimes(1);
     // Lane should have been stopped on first breach
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
     const lane = state!.agents.find((a) => a.laneId === "dantecode-cap-s1");
     expect(lane?.status).toBe("failed");
   });
@@ -883,7 +899,11 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
   it("redistribution: completing lane triggers new lane spawn (no idle injection needed)", async () => {
     testDir = await makeTestDir();
 
-    const redistributionEvents: Array<{ fromLaneId: string; toLaneId: string; subObjective: string }> = [];
+    const redistributionEvents: Array<{
+      fromLaneId: string;
+      toLaneId: string;
+      subObjective: string;
+    }> = [];
 
     // completing adapter (dantecode) → returns "completed"
     // running adapter (codex) → stays "running" with decomposable objective
@@ -926,9 +946,14 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     orchestrator.on("error", () => {});
     orchestrator.on("redistribution", (e) => redistributionEvents.push(e));
 
-    await orchestrator.start({ objective: "redistribution new-lane test", agents: ["dantecode", "codex"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "redistribution new-lane test",
+      agents: ["dantecode", "codex"],
+      repoRoot: testDir,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
     const initialCount = state!.agents.length;
 
     // Inject completing lane and a busy lane with decomposable objective
@@ -998,10 +1023,10 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
       "+}",
     ].join("\n");
 
-    const adapter = makeSequencedAdapter(
-      [{ status: "completed" }],
-      { unifiedDiff: DIFF_SOURCE_ONLY, changedFiles: ["src/auth.ts"] },
-    );
+    const adapter = makeSequencedAdapter([{ status: "completed" }], {
+      unifiedDiff: DIFF_SOURCE_ONLY,
+      changedFiles: ["src/auth.ts"],
+    });
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, {
       pollIntervalMs: 999_999,
@@ -1010,14 +1035,19 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     activeOrchestrators.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "await pdse verify", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "await pdse verify",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
     injectSession(orchestrator, "pdse-s1", { laneId: "dantecode-pdse-s1" });
 
     const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
     await poll.pollAllLanes(); // completes → verifyLaneOutput awaited → pdseScore set
 
     // Verify results are present immediately (no timeout needed — verifyLaneOutput is awaited)
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
     const lane = state!.agents.find((a) => a.laneId === "dantecode-pdse-s1");
 
     expect(lane?.pdseScore).toBe(55);
@@ -1037,7 +1067,11 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     activeOrchestrators.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "infinite poll test", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "infinite poll test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
     injectSession(orchestrator, "infinite-s1");
 
     // Bypass 10_000 actual iterations by pre-setting _pollCount to 9_999.
@@ -1054,7 +1088,11 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
   it("maxNestingDepth: redistribution of sublane blocked when depth >= maxNestingDepth", async () => {
     testDir = await makeTestDir();
 
-    const redistributionEvents: Array<{ fromLaneId: string; toLaneId: string; subObjective: string }> = [];
+    const redistributionEvents: Array<{
+      fromLaneId: string;
+      toLaneId: string;
+      subObjective: string;
+    }> = [];
 
     // maxNestingDepth=1 means: only depth=0 lanes allowed; sublanes (depth=1) must be blocked.
     // When the completing lane (nestingDepth=0) triggers redistribution, it tries to spawn
@@ -1105,7 +1143,8 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
       repoRoot: testDir,
     });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
     // Completing lane at depth=0 (root)
     state!.agents.push({
       laneId: "dantecode-completing-nest",
@@ -1149,9 +1188,161 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     await poll.pollAllLanes();
 
     // Redistribution tried nestingDepth=1 → maxNestingDepth=1 guard blocked it (1>=1)
-    // → assignLane throws → redistribution catch swallows → no event fired
+    // → assignLane throws → catch emits error + returns null → no redistribution event fired
     expect(redistributionEvents).toHaveLength(0);
     // Orchestrator should still be running (the best-effort failure is not fatal)
     expect(orchestrator.currentStatus).toBe("running");
+  });
+
+  it("budget:exhausted fires exactly once even across multiple polls (_budgetExhaustFired guard)", async () => {
+    testDir = await makeTestDir();
+
+    const exhaustedEvents: FleetBudgetReport[] = [];
+
+    // Fleet cap: 50 tokens. Adapter always reports 100 tokens — exceeds limit on first poll.
+    const adapter = makeSequencedAdapter([
+      { status: "running", tokensUsed: 100, costUsd: 0 },
+      { status: "running", tokensUsed: 100, costUsd: 0 },
+      { status: "running", tokensUsed: 100, costUsd: 0 },
+    ]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+      councilConfig: {
+        budget: {
+          maxTotalTokens: 50,
+          maxTotalCostUsd: 0,
+          maxTokensPerAgent: 0,
+          warningThreshold: 0.99,
+        },
+      },
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("budget:exhausted", (r) => exhaustedEvents.push(r));
+
+    await orchestrator.start({
+      objective: "exhaust dedup",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
+    injectSession(orchestrator, "exhaust-s1", { laneId: "dantecode-exhaust-s1" });
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    // First poll exhausts the fleet budget and triggers fail()
+    await poll.pollAllLanes();
+    // Subsequent polls must NOT re-emit budget:exhausted (_budgetExhaustFired guards this)
+    await poll.pollAllLanes();
+    await poll.pollAllLanes();
+
+    expect(exhaustedEvents).toHaveLength(1);
+    // fail() was called on first exhaustion — orchestrator is now in "failed" state
+    expect(orchestrator.currentStatus).toBe("failed");
+  });
+
+  it("verifyLaneOutput: score=0 when changedFiles includes a forbiddenFile (NOMA pre-merge gate)", async () => {
+    testDir = await makeTestDir();
+
+    const verifyFailedEvents: Array<{ laneId: string; score: number; findings: string[] }> = [];
+
+    // Adapter returns a patch touching one legitimate file and one forbidden file
+    const adapter = makeSequencedAdapter([{ status: "completed" }], {
+      unifiedDiff: [
+        "diff --git a/src/auth.ts b/src/auth.ts",
+        "--- /dev/null",
+        "+++ b/src/auth.ts",
+        "@@ -0,0 +1 @@",
+        "+export const token = 'x';",
+      ].join("\n"),
+      changedFiles: ["src/secrets.ts", "src/auth.ts"],
+    });
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:verify-failed", (e) => verifyFailedEvents.push(e));
+
+    await orchestrator.start({ objective: "noma test", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "noma-s1", { laneId: "dantecode-noma-s1" });
+
+    // Inject a NOMA mandate: src/secrets.ts is a forbidden file for this lane
+    type MandateShape = {
+      laneId: string;
+      ownedFiles: string[];
+      readOnlyFiles: string[];
+      forbiddenFiles: string[];
+      contractDependencies: string[];
+      overlapPolicy: string;
+    };
+    const runState = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: MandateShape[] };
+      }
+    ).runState;
+    runState!.mandates.push({
+      laneId: "dantecode-noma-s1",
+      ownedFiles: ["src/auth.ts"],
+      readOnlyFiles: [],
+      forbiddenFiles: ["src/secrets.ts"],
+      contractDependencies: [],
+      overlapPolicy: "freeze",
+    });
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+
+    const lane = runState!.agents.find((a) => a.laneId === "dantecode-noma-s1");
+    // Lane must score 0 — NOMA violation overrides all scoring heuristics
+    expect(lane?.pdseScore).toBe(0);
+    expect(lane?.verificationPassed).toBe(false);
+    // lane:verify-failed event must be emitted with NOMA-specific findings
+    expect(verifyFailedEvents).toHaveLength(1);
+    expect(verifyFailedEvents[0]!.laneId).toBe("dantecode-noma-s1");
+    expect(verifyFailedEvents[0]!.findings.some((f) => f.includes("NOMA violation"))).toBe(true);
+    expect(verifyFailedEvents[0]!.findings.some((f) => f.includes("src/secrets.ts"))).toBe(true);
+  });
+
+  it("verifyLaneOutput: score=0 and no TypeError when unifiedDiff is non-string (type guard)", async () => {
+    testDir = await makeTestDir();
+
+    const verifyFailedEvents: Array<{ laneId: string; score: number; findings: string[] }> = [];
+
+    // Adapter returns a truthy non-string unifiedDiff — simulates a badly-typed adapter response
+    const badDiff = Buffer.from("fake diff content") as unknown as string;
+    const adapter = makeSequencedAdapter([{ status: "completed" }], {
+      unifiedDiff: badDiff,
+      changedFiles: ["src/x.ts"],
+    });
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:verify-failed", (e) => verifyFailedEvents.push(e));
+
+    await orchestrator.start({
+      objective: "type guard test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
+    injectSession(orchestrator, "tg-s1", { laneId: "dantecode-tg-s1" });
+
+    // Must not throw TypeError despite non-string unifiedDiff — the type guard catches it
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
+    const lane = state!.agents.find((a) => a.laneId === "dantecode-tg-s1");
+    // pdseScore must be 0 (not undefined) — proves type guard fired and set the score
+    expect(lane?.pdseScore).toBe(0);
+    expect(lane?.verificationPassed).toBe(false);
+    expect(verifyFailedEvents).toHaveLength(1);
   });
 });

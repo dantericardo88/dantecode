@@ -119,11 +119,7 @@ export class MemoryOrchestrator {
     this.snapshotStore = new SnapshotStore(projectRoot, ioOptions);
 
     // Organ C — Recall
-    this.semanticRecall = new SemanticRecall(
-      this.shortTerm,
-      this.sessionMemory,
-      this.vectorStore,
-    );
+    this.semanticRecall = new SemanticRecall(this.shortTerm, this.sessionMemory, this.vectorStore);
 
     // Organ D — Efficiency
     this.summarizer = new Summarizer();
@@ -135,11 +131,7 @@ export class MemoryOrchestrator {
 
     // Graph + visualization
     this.graphMemory = new GraphMemory();
-    this.visualizer = new MemoryVisualizer(
-      this.graphMemory,
-      this.shortTerm,
-      this.vectorStore,
-    );
+    this.visualizer = new MemoryVisualizer(this.graphMemory, this.shortTerm, this.vectorStore);
 
     // Entity extraction
     this.entityExtractor = new EntityExtractor();
@@ -165,8 +157,9 @@ export class MemoryOrchestrator {
 
     // Warm up IDF weights from loaded corpus
     const allEntries = this.vectorStore.listAll();
-    const allTexts = allEntries.map((item) =>
-      item.summary ?? (typeof item.value === "string" ? item.value : JSON.stringify(item.value)),
+    const allTexts = allEntries.map(
+      (item) =>
+        item.summary ?? (typeof item.value === "string" ? item.value : JSON.stringify(item.value)),
     );
     if (allTexts.length > 0) {
       this._localEmbedder.updateCorpus(allTexts);
@@ -240,7 +233,11 @@ export class MemoryOrchestrator {
 
     if (
       this.enableSemanticRecall &&
-      (requestedLayer === "semantic" || hasSummary || isLongValue || scope === "project" || scope === "global")
+      (requestedLayer === "semantic" ||
+        hasSummary ||
+        isLongValue ||
+        scope === "project" ||
+        scope === "global")
     ) {
       // Layer 3: Semantic layer for indexable content
       const semanticItem: MemoryItem = { ...scored, layer: "semantic" };
@@ -273,11 +270,7 @@ export class MemoryOrchestrator {
    *
    * GF-02: semantic recall with ranking and scope handling.
    */
-  async memoryRecall(
-    query: string,
-    limit = 10,
-    scope?: MemoryScope,
-  ): Promise<MemoryRecallResult> {
+  async memoryRecall(query: string, limit = 10, scope?: MemoryScope): Promise<MemoryRecallResult> {
     if (this.enableSemanticRecall) {
       return this.semanticRecall.recall(query, { limit, scope });
     }
@@ -300,9 +293,7 @@ export class MemoryOrchestrator {
    */
   async memorySummarize(sessionId: string): Promise<MemorySummarizeResult> {
     // Gather all items related to this session
-    const stItems = this.shortTerm.listByScope("session").filter(
-      (i) => i.source === sessionId,
-    );
+    const stItems = this.shortTerm.listByScope("session").filter((i) => i.source === sessionId);
     const cpItems = await this.sessionMemory.loadAll("session");
     const filtered = cpItems.filter((i) => i.source === sessionId);
     const allItems = [...stItems, ...filtered];

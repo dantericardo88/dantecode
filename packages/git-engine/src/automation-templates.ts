@@ -109,10 +109,9 @@ export const BUILT_IN_TEMPLATES: AutomationTemplate[] = [
         config: {
           pattern: typeof options?.pattern === "string" ? options.pattern : "src/**/*.ts",
           debounceMs: typeof options?.debounceMs === "number" ? options.debounceMs : 500,
-          ignorePatterns:
-            Array.isArray(options?.ignorePatterns)
-              ? options.ignorePatterns
-              : ["**/*.test.ts", "**/*.spec.ts"],
+          ignorePatterns: Array.isArray(options?.ignorePatterns)
+            ? options.ignorePatterns
+            : ["**/*.test.ts", "**/*.spec.ts"],
           runOnStartup: options?.runOnStartup === true,
         },
         agentMode: {
@@ -144,8 +143,7 @@ export const BUILT_IN_TEMPLATES: AutomationTemplate[] = [
         config: {
           cron: typeof options?.cron === "string" ? options.cron : "0 2 * * *",
           timezone: typeof options?.timezone === "string" ? options.timezone : "UTC",
-          severity:
-            typeof options?.severity === "string" ? options.severity : "high",
+          severity: typeof options?.severity === "string" ? options.severity : "high",
           failOnVulnerability: options?.failOnVulnerability !== false,
           createIssueOnFinding: options?.createIssueOnFinding !== false,
         },

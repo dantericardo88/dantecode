@@ -11,7 +11,8 @@ const MOCK_RESULTS: SearchResult[] = [
   {
     title: "TypeScript Handbook",
     url: "https://typescriptlang.org/docs",
-    snippet: "TypeScript is a strongly typed programming language that builds on JavaScript, giving you better tooling at any scale.",
+    snippet:
+      "TypeScript is a strongly typed programming language that builds on JavaScript, giving you better tooling at any scale.",
     source: "tavily",
     rank: 1,
     relevanceScore: 0.95,
@@ -26,10 +27,12 @@ const MOCK_RESULTS: SearchResult[] = [
   {
     title: "TypeScript Deep Dive",
     url: "https://basarat.gitbook.io/typescript",
-    snippet: "A comprehensive guide to TypeScript covering advanced patterns, configuration, and best practices for production applications.",
+    snippet:
+      "A comprehensive guide to TypeScript covering advanced patterns, configuration, and best practices for production applications.",
     source: "exa",
     rank: 3,
-    rawContent: "TypeScript is a superset of JavaScript. It adds optional types, classes, and modules. TypeScript compiles to plain JavaScript. It supports every browser, host, or OS.",
+    rawContent:
+      "TypeScript is a superset of JavaScript. It adds optional types, classes, and modules. TypeScript compiles to plain JavaScript. It supports every browser, host, or OS.",
     relevanceScore: 0.85,
   },
 ];

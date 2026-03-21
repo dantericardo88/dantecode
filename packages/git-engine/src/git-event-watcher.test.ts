@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import os from "node:os";
-import {
-  GitEventWatcher,
-  listGitWatchers,
-} from "./git-event-watcher.js";
+import { GitEventWatcher, listGitWatchers } from "./git-event-watcher.js";
 
 describe("GitEventWatcher", () => {
   let tmpDir: string | undefined;
@@ -57,11 +54,13 @@ describe("GitEventWatcher", () => {
     watcher = new GitEventWatcher({ cwd: tmpDir, debounceMs: 25 });
     watcher.watch("file-change", "src");
 
-    const eventPromise = new Promise<{ data: { file: string; relativePath: string } }>((resolve) => {
-      watcher?.once("event", (event) => {
-        resolve(event as { data: { file: string; relativePath: string } });
-      });
-    });
+    const eventPromise = new Promise<{ data: { file: string; relativePath: string } }>(
+      (resolve) => {
+        watcher?.once("event", (event) => {
+          resolve(event as { data: { file: string; relativePath: string } });
+        });
+      },
+    );
 
     fs.writeFileSync(testFile, "export const value = 2;\n", "utf-8");
 

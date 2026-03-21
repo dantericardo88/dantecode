@@ -144,7 +144,14 @@ describe("ConsistencyAudit", () => {
       const audit = new ConsistencyAudit(noColorTheme);
       const report = {
         payloadCount: 1,
-        drifts: [{ type: "missing-token" as const, description: "vscode empty", severity: 3 as const, surfaces: ["vscode" as UXSurface] }],
+        drifts: [
+          {
+            type: "missing-token" as const,
+            description: "vscode empty",
+            severity: 3 as const,
+            surfaces: ["vscode" as UXSurface],
+          },
+        ],
         hasCritical: true,
         tokenDrifts: [],
         summary: "DRIFT: 1 critical",

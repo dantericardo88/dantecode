@@ -64,11 +64,7 @@ const VALID_MANIFEST = {
 // Helpers
 // ----------------------------------------------------------------------------
 
-async function createBundleDir(
-  dir: string,
-  manifest: unknown,
-  hasDcTarget = false,
-): Promise<void> {
+async function createBundleDir(dir: string, manifest: unknown, hasDcTarget = false): Promise<void> {
   await writeFile(join(dir, "skillbridge.json"), JSON.stringify(manifest, null, 2), "utf-8");
   if (hasDcTarget) {
     const dcDir = join(dir, "targets", "dantecode");

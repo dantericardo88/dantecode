@@ -6,7 +6,9 @@ describe("ErrorHelper", () => {
 
   // 1. TypeScript error classification
   it("classifies TS errors by TS code pattern", () => {
-    const a = helper.classify("TS2345: Argument of type 'string' is not assignable to type 'number'");
+    const a = helper.classify(
+      "TS2345: Argument of type 'string' is not assignable to type 'number'",
+    );
     expect(a.kind).toBe("typescript");
     expect(a.title).toBe("TypeScript Error");
     expect(a.transient).toBe(false);

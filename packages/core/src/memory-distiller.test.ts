@@ -181,17 +181,24 @@ describe("distillEntries", () => {
 describe("extractPlaybook", () => {
   it("returns entries with category 'strategy' sorted by relevanceScore desc", () => {
     const entries = [
-      makeEntry({ id: "s1", content: "Use incremental migration", category: "strategy", relevanceScore: 0.6 }),
-      makeEntry({ id: "s2", content: "Prefer composition over inheritance", category: "strategy", relevanceScore: 0.9 }),
+      makeEntry({
+        id: "s1",
+        content: "Use incremental migration",
+        category: "strategy",
+        relevanceScore: 0.6,
+      }),
+      makeEntry({
+        id: "s2",
+        content: "Prefer composition over inheritance",
+        category: "strategy",
+        relevanceScore: 0.9,
+      }),
       makeEntry({ id: "g1", content: "General note", category: "general", relevanceScore: 1.0 }),
     ];
 
     const playbook = extractPlaybook(entries);
 
-    expect(playbook).toEqual([
-      "Prefer composition over inheritance",
-      "Use incremental migration",
-    ]);
+    expect(playbook).toEqual(["Prefer composition over inheritance", "Use incremental migration"]);
   });
 
   it("includes entries with 'playbook' tag regardless of category", () => {
@@ -286,7 +293,7 @@ describe("scoreRelevance", () => {
     const tagScore = scoreRelevance(entryWithTags, "database optimization query");
 
     // Both tags match tokens in the query → +0.10
-    expect(tagScore).toBeCloseTo(noTagScore + 0.10, 5);
+    expect(tagScore).toBeCloseTo(noTagScore + 0.1, 5);
   });
 });
 

@@ -11,7 +11,7 @@ export interface ConsensusVote {
   agentId: string;
   verdict: ConsensusVerdict;
   confidence?: number;
-  weight?: number;   // default 1.0
+  weight?: number; // default 1.0
   findings?: string[];
 }
 

@@ -3,12 +3,16 @@ import { ToolScheduler } from "./tool-scheduler.js";
 
 describe("Background SubAgent prerequisites", () => {
   it("does not satisfy downstream dependencies while the sub-agent is still running in background mode", async () => {
-    const scheduler = new ToolScheduler(undefined, { verifyAfterExecution: false }, {
-      policies: [
-        { tool: "SubAgent", executionClass: "agent" },
-        { tool: "Write", executionClass: "file_write", dependsOn: ["SubAgent"] },
-      ],
-    });
+    const scheduler = new ToolScheduler(
+      undefined,
+      { verifyAfterExecution: false },
+      {
+        policies: [
+          { tool: "SubAgent", executionClass: "agent" },
+          { tool: "Write", executionClass: "file_write", dependsOn: ["SubAgent"] },
+        ],
+      },
+    );
     const executed: string[] = [];
 
     const results = await scheduler.executeBatch(
@@ -40,17 +44,24 @@ describe("Background SubAgent prerequisites", () => {
     );
 
     expect(executed).toEqual(["SubAgent"]);
-    expect(results.map((result) => result.record.status)).toEqual(["success", "blocked_by_dependency"]);
+    expect(results.map((result) => result.record.status)).toEqual([
+      "success",
+      "blocked_by_dependency",
+    ]);
     expect(results[1]!.blockedReason).toContain("SubAgent");
   });
 
   it("allows downstream dependencies after a synchronous sub-agent completes", async () => {
-    const scheduler = new ToolScheduler(undefined, { verifyAfterExecution: false }, {
-      policies: [
-        { tool: "SubAgent", executionClass: "agent" },
-        { tool: "Write", executionClass: "file_write", dependsOn: ["SubAgent"] },
-      ],
-    });
+    const scheduler = new ToolScheduler(
+      undefined,
+      { verifyAfterExecution: false },
+      {
+        policies: [
+          { tool: "SubAgent", executionClass: "agent" },
+          { tool: "Write", executionClass: "file_write", dependsOn: ["SubAgent"] },
+        ],
+      },
+    );
     const executed: string[] = [];
 
     const results = await scheduler.executeBatch(

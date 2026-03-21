@@ -63,5 +63,9 @@ export type {
 } from "./types.js";
 
 // ── Approval Engine ───────────────────────────────────────────────────────────
-export { ApprovalEngine, globalApprovalEngine, getGlobalApprovalEngine } from './approval-engine.js';
-export type { ApprovalPolicy, ApprovalRequest } from './approval-engine.js';
+export {
+  ApprovalEngine,
+  globalApprovalEngine,
+  getGlobalApprovalEngine,
+} from "./approval-engine.js";
+export type { ApprovalPolicy, ApprovalRequest } from "./approval-engine.js";

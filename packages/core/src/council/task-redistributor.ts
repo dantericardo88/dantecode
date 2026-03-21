@@ -66,8 +66,8 @@ const TOO_CLOSE_TO_COMPLETE_THRESHOLD = 0.8;
 const SPLIT_PATTERNS = [
   /\b(and then|and also|then|followed by)\b/gi,
   /\band\b/gi,
-  /^\d+\.\s*/gm,   // Numbered steps: "1. do x"
-  /[;]/g,           // Semicolons
+  /^\d+\.\s*/gm, // Numbered steps: "1. do x"
+  /[;]/g, // Semicolons
 ];
 
 /** Rough token estimate per sub-task (conservative). */
@@ -168,7 +168,10 @@ export class TaskRedistributor {
       for (const part of parts) {
         // Reset lastIndex for global regex reuse.
         pattern.lastIndex = 0;
-        const split = part.split(pattern).map((s) => s.trim()).filter(Boolean);
+        const split = part
+          .split(pattern)
+          .map((s) => s.trim())
+          .filter(Boolean);
         if (split.length > 1) {
           nextParts.push(...split);
         } else {

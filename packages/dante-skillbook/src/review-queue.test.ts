@@ -2,10 +2,18 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { ReviewQueue } from "./review-queue.js";
 import type { UpdateOperation } from "./types.js";
 
-const op: UpdateOperation = { action: "add", rationale: "useful", candidateSkill: {
-  id: "s1", title: "T", content: "C", section: "coding",
-  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-}};
+const op: UpdateOperation = {
+  action: "add",
+  rationale: "useful",
+  candidateSkill: {
+    id: "s1",
+    title: "T",
+    content: "C",
+    section: "coding",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+};
 
 describe("ReviewQueue", () => {
   let queue: ReviewQueue;

@@ -6,7 +6,8 @@ const EXAMPLES: LabeledExample[] = [
   {
     id: "ex-1",
     task: "Provide deployment steps and rollback guidance",
-    output: "Steps:\n1. Build release.\n2. Deploy to staging.\n3. Deploy to production.\nRollback: revert artifact if health checks fail.",
+    output:
+      "Steps:\n1. Build release.\n2. Deploy to staging.\n3. Deploy to production.\nRollback: revert artifact if health checks fail.",
     expectedDecision: "pass",
   },
   {
@@ -18,7 +19,8 @@ const EXAMPLES: LabeledExample[] = [
   {
     id: "ex-3",
     task: "Summarize migration plan",
-    output: "Migration:\n1. Take backup.\n2. Apply schema migration.\n3. Verify row counts.\n4. Rollback if errors.",
+    output:
+      "Migration:\n1. Take backup.\n2. Apply schema migration.\n3. Verify row counts.\n4. Rollback if errors.",
     expectedDecision: "pass",
   },
   {
@@ -75,7 +77,9 @@ describe("VerificationBootstrapper", () => {
     const result = bootstrapper.calibrate({ maxIterations: 2 });
     expect(result.decisionBreakdown.pass).toBeDefined();
     expect(result.decisionBreakdown.block).toBeDefined();
-    expect(result.decisionBreakdown.pass.total + result.decisionBreakdown.block.total).toBeLessThanOrEqual(4);
+    expect(
+      result.decisionBreakdown.pass.total + result.decisionBreakdown.block.total,
+    ).toBeLessThanOrEqual(4);
   });
 
   it("respects maxIterations", () => {
@@ -99,7 +103,11 @@ describe("VerificationBootstrapper", () => {
 describe("VerificationTuner", () => {
   let tuner: VerificationTuner;
 
-  function makeOutcome(id: string, decision: VerifierOutcome["decision"], pdseScore = 0.8): Omit<VerifierOutcome, "recordedAt"> {
+  function makeOutcome(
+    id: string,
+    decision: VerifierOutcome["decision"],
+    pdseScore = 0.8,
+  ): Omit<VerifierOutcome, "recordedAt"> {
     return { id, task: "task", decision, pdseScore };
   }
 
@@ -162,7 +170,7 @@ describe("VerificationTuner", () => {
   it("applySuggestion returns new values without mutating input", () => {
     const current = {
       passGate: 0.85,
-      softPassGate: 0.70,
+      softPassGate: 0.7,
       reviewGate: 0.45,
     };
     const suggestion = {
@@ -173,7 +181,7 @@ describe("VerificationTuner", () => {
       reason: "Too strict",
     };
     const updated = tuner.applySuggestion(suggestion, current);
-    expect(updated.passGate).toBeCloseTo(0.80);
+    expect(updated.passGate).toBeCloseTo(0.8);
     expect(current.passGate).toBe(0.85); // original not mutated
   });
 

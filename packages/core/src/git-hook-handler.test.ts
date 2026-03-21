@@ -131,10 +131,7 @@ describe("GitHookHandler", () => {
   it("installHooks() creates the hooks directory via mkdir", async () => {
     await handler.installHooks(["post-commit"]);
     expect(mockedMkdir).toHaveBeenCalledTimes(1);
-    expect(mockedMkdir).toHaveBeenCalledWith(
-      expect.stringContaining("hooks"),
-      { recursive: true },
-    );
+    expect(mockedMkdir).toHaveBeenCalledWith(expect.stringContaining("hooks"), { recursive: true });
   });
 
   // 12

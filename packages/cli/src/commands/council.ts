@@ -86,10 +86,11 @@ let _activeLaneCount = 0;
 function probePidAlive(pid: number): boolean {
   if (process.platform === "win32") {
     try {
-      const out = execSync(
-        `tasklist /FI "PID eq ${pid}" /NH /FO CSV`,
-        { timeout: 3_000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
-      );
+      const out = execSync(`tasklist /FI "PID eq ${pid}" /NH /FO CSV`, {
+        timeout: 3_000,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
       return out.includes(String(pid));
     } catch {
       return true; // conservative: assume alive on exec error
@@ -231,7 +232,9 @@ function createSelfExecutor(projectRoot: string): SelfLaneExecutor {
       try {
         const { stdout } = await execAsync("git diff HEAD --name-only", { cwd, timeout: 10_000 });
         touchedFiles = stdout.split("\n").filter(Boolean);
-      } catch { /* non-fatal */ }
+      } catch {
+        /* non-fatal */
+      }
       return {
         output: extractLastAssistantText(session.messages),
         touchedFiles,
@@ -255,9 +258,12 @@ function buildAdapters(
   for (const kind of agentKinds) {
     switch (kind) {
       case "dantecode":
-        map.set(kind, new DanteCodeAdapter({
-          executor: options.projectRoot ? createSelfExecutor(options.projectRoot) : undefined,
-        }));
+        map.set(
+          kind,
+          new DanteCodeAdapter({
+            executor: options.projectRoot ? createSelfExecutor(options.projectRoot) : undefined,
+          }),
+        );
         break;
       case "claude-code":
         if (options.bridgeDir) {
@@ -286,8 +292,7 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   const objectiveIdx = args.findIndex((a) => !a.startsWith("--"));
   const objective = args[objectiveIdx] ?? "Council orchestration run";
 
-  const agentsFlag =
-    args.find((a) => a.startsWith("--agents="))?.slice("--agents=".length) ?? "";
+  const agentsFlag = args.find((a) => a.startsWith("--agents="))?.slice("--agents=".length) ?? "";
   const agentKinds: AgentKind[] = agentsFlag
     ? (agentsFlag.split(",").map((a) => a.trim()) as AgentKind[])
     : ["dantecode"];
@@ -313,7 +318,12 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   });
 
   const auditLogPath = join(projectRoot, ".dantecode", "council", "audit.jsonl");
-  const runId = await orchestrator.start({ objective, agents: agentKinds, repoRoot: projectRoot, auditLogPath });
+  const runId = await orchestrator.start({
+    objective,
+    agents: agentKinds,
+    repoRoot: projectRoot,
+    auditLogPath,
+  });
 
   console.log(`${GREEN}${BOLD}Council run started${RESET}`);
   console.log(`  Run ID:    ${CYAN}${runId}${RESET}`);
@@ -343,21 +353,29 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
       console.log(`${DIM}  Worktree: ${worktreePath}${RESET}`);
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
-      try { execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 }); } catch { /* non-fatal */ }
+      try {
+        execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+      } catch {
+        /* non-fatal */
+      }
       if (noWorktree) {
         console.warn(
           `${YELLOW}[council] Worktree creation failed for ${agentKind}: ${wtMsg}.` +
-          ` --no-worktree active — falling back to shared repo (NOMA isolation disabled).${RESET}`,
+            ` --no-worktree active — falling back to shared repo (NOMA isolation disabled).${RESET}`,
         );
         worktreePath = projectRoot;
       } else {
         console.error(
           `${RED}[council] Worktree creation failed for ${agentKind}: ${wtMsg}${RESET}\n` +
-          `  NOMA isolation requires an isolated worktree. Re-run with --no-worktree to explicitly disable it (conflict risk).`,
+            `  NOMA isolation requires an isolated worktree. Re-run with --no-worktree to explicitly disable it (conflict risk).`,
         );
         // Clean up any worktrees already created during earlier loop iterations.
         for (const wt of createdWorktrees) {
-          try { removeWorktree(wt); } catch { /* non-fatal */ }
+          try {
+            removeWorktree(wt);
+          } catch {
+            /* non-fatal */
+          }
         }
         await orchestrator.fail("worktree creation failed");
         return;
@@ -378,7 +396,9 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     if (laneResult.accepted) {
       console.log(`${GREEN}  Lane: ${laneResult.laneId} (${agentKind})${RESET}`);
     } else {
-      console.warn(`${YELLOW}  Lane rejected for ${agentKind}: ${laneResult.reason ?? "unknown"}${RESET}`);
+      console.warn(
+        `${YELLOW}  Lane rejected for ${agentKind}: ${laneResult.reason ?? "unknown"}${RESET}`,
+      );
     }
   }
 
@@ -411,7 +431,11 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     const onSIGINT = (): void => {
       console.log(`\n[council] Detaching — resume with: dantecode council resume ${runId}`);
       for (const wt of createdWorktrees) {
-        try { removeWorktree(wt); } catch { /* non-fatal */ }
+        try {
+          removeWorktree(wt);
+        } catch {
+          /* non-fatal */
+        }
       }
       process.exit(0);
     };
@@ -420,7 +444,11 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
       await orchestrator.watchUntilComplete(timeoutMs !== undefined ? { timeoutMs } : undefined);
     } finally {
       for (const wt of createdWorktrees) {
-        try { removeWorktree(wt); } catch { /* non-fatal */ }
+        try {
+          removeWorktree(wt);
+        } catch {
+          /* non-fatal */
+        }
       }
     }
     process.off("SIGINT", onSIGINT);
@@ -445,11 +473,10 @@ function printBgPidStatus(repoRoot: string, runId: string): void {
     const tag = alive
       ? `${CYAN}running (pid: ${data.pid})${RESET}`
       : `${DIM}dead/exited (pid: ${data.pid})${RESET}`;
-    console.log(
-      `  Background: ${tag}` +
-        (data.startedAt ? `  started ${data.startedAt}` : ""),
-    );
-  } catch { /* non-fatal */ }
+    console.log(`  Background: ${tag}` + (data.startedAt ? `  started ${data.startedAt}` : ""));
+  } catch {
+    /* non-fatal */
+  }
 }
 
 async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
@@ -487,7 +514,9 @@ async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
             const alive = probePidAlive(pidData.pid);
             bgTag = alive ? `  ${CYAN}[bg:alive]${RESET}` : `  ${DIM}[bg:exited]${RESET}`;
           }
-        } catch { /* non-fatal */ }
+        } catch {
+          /* non-fatal */
+        }
       }
       console.log(
         `  ${CYAN}${id}${RESET}  ${sc}${state.status}${RESET}  ${DIM}${state.objective.slice(0, 60)}${RESET}${bgTag}`,
@@ -520,8 +549,7 @@ async function cmdLanes(args: string[], projectRoot: string): Promise<void> {
   for (const lane of state.agents) {
     const sc = statusColor(lane.status);
     const filesPreview =
-      lane.assignedFiles.slice(0, 3).join(", ") +
-      (lane.assignedFiles.length > 3 ? "..." : "");
+      lane.assignedFiles.slice(0, 3).join(", ") + (lane.assignedFiles.length > 3 ? "..." : "");
     console.log(`  ${CYAN}${lane.laneId}${RESET}`);
     console.log(`    Agent:   ${lane.agentKind}`);
     console.log(`    Status:  ${sc}${lane.status}${RESET}`);
@@ -643,7 +671,10 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   console.log(`  Completed lanes: ${completedLanes.map((l) => l.laneId).join(", ")}`);
   console.log(`  Mode: ${autoFlag ? GREEN + "auto" : YELLOW + "manual"}${RESET}`);
 
-  const adapters = buildAdapters(state.agents.map((a) => a.agentKind), { bridgeDir, projectRoot });
+  const adapters = buildAdapters(
+    state.agents.map((a) => a.agentKind),
+    { bridgeDir, projectRoot },
+  );
   const orchestrator = new CouncilOrchestrator(adapters, {
     allowAutoMerge: autoFlag,
   });
@@ -657,7 +688,9 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
         `${YELLOW}[council] Orchestrator is in '${orchestrator.currentStatus}' state — merge requires 'running'.${RESET}`,
       );
       if (state.finalSynthesis) {
-        console.log(`  Last synthesis: ${state.finalSynthesis.decision} (confidence: ${state.finalSynthesis.confidence})`);
+        console.log(
+          `  Last synthesis: ${state.finalSynthesis.decision} (confidence: ${state.finalSynthesis.confidence})`,
+        );
       }
       return;
     }
@@ -691,13 +724,16 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
 
   const commandMap: Record<string, string> = {
     "claude-code": "claude",
-    "codex": "codex",
-    "antigravity": "antigravity",
+    codex: "codex",
+    antigravity: "antigravity",
   };
 
   const agentsFlag = args.find((a) => a.startsWith("--agents="))?.slice("--agents=".length);
   const requestedKinds = agentsFlag
-    ? agentsFlag.split(",").map((k) => k.trim()).filter(Boolean)
+    ? agentsFlag
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean)
     : Object.keys(commandMap);
 
   const agentConfigs: AgentCommandConfig[] = requestedKinds
@@ -739,7 +775,9 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
       process.off("SIGTERM", shutdown as NodeJS.SignalsListener);
     }, timeoutMs);
   } else {
-    await new Promise<void>(() => {/* run forever until signal */});
+    await new Promise<void>(() => {
+      /* run forever until signal */
+    });
   }
 }
 
@@ -754,7 +792,7 @@ async function cmdVerify(_args: string[], projectRoot: string): Promise<void> {
 
   const gates = [
     { name: "typecheck", cmd: "npm run typecheck" },
-    { name: "test",      cmd: "npm run test" },
+    { name: "test", cmd: "npm run test" },
   ];
 
   let allPassed = true;
@@ -774,7 +812,9 @@ async function cmdVerify(_args: string[], projectRoot: string): Promise<void> {
     await saveCouncilRun(state);
     console.log(`\n${GREEN}${BOLD}All verification gates passed.${RESET}`);
   } else if (allPassed) {
-    console.log(`\n${YELLOW}Gates passed but no synthesis found. Run 'council merge' first.${RESET}`);
+    console.log(
+      `\n${YELLOW}Gates passed but no synthesis found. Run 'council merge' first.${RESET}`,
+    );
   } else {
     console.error(`\n${RED}${BOLD}Verification failed. Fix issues before pushing.${RESET}`);
     process.exit(1);
@@ -830,7 +870,10 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     return;
   }
 
-  const adapters = buildAdapters(state.agents.map((a) => a.agentKind), { bridgeDir, projectRoot });
+  const adapters = buildAdapters(
+    state.agents.map((a) => a.agentKind),
+    { bridgeDir, projectRoot },
+  );
   const orchestrator = new CouncilOrchestrator(adapters);
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
 
@@ -838,7 +881,9 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     await orchestrator.resume(projectRoot, runId);
     console.log(`${GREEN}${BOLD}Resumed council run${RESET}`);
     printRun({ ...state, status: "running" });
-    console.log(`${DIM}Orchestrator is active. Assign lanes and use 'council merge' when done.${RESET}`);
+    console.log(
+      `${DIM}Orchestrator is active. Assign lanes and use 'council merge' when done.${RESET}`,
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`${RED}Resume failed: ${msg}${RESET}`);
@@ -869,9 +914,7 @@ async function loadAgentManifests(projectRoot: string): Promise<AgentManifest[]>
   const agentsDir = join(projectRoot, ".dantecode", "agents");
   let files: string[];
   try {
-    files = readdirSync(agentsDir).filter(
-      (f) => f.endsWith(".yaml") || f.endsWith(".yml"),
-    );
+    files = readdirSync(agentsDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"));
   } catch {
     return [];
   }
@@ -903,7 +946,10 @@ async function loadAgentManifests(projectRoot: string): Promise<AgentManifest[]>
         }
         // Key: value
         const colonIdx = trimmed.indexOf(":");
-        if (colonIdx === -1) { currentListKey = null; continue; }
+        if (colonIdx === -1) {
+          currentListKey = null;
+          continue;
+        }
         const key = trimmed.slice(0, colonIdx).trim();
         const value = trimmed.slice(colonIdx + 1).trim();
         currentListKey = null;
@@ -934,7 +980,11 @@ function manifestToAgentKind(_manifest: AgentManifest): AgentKind {
 
 async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   const objectiveIdx = args.findIndex((a) => !a.startsWith("--"));
-  const objective = args.slice(objectiveIdx).filter((a) => !a.startsWith("--")).join(" ").trim();
+  const objective = args
+    .slice(objectiveIdx)
+    .filter((a) => !a.startsWith("--"))
+    .join(" ")
+    .trim();
 
   if (!objective) {
     console.error(
@@ -1050,7 +1100,11 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
       console.log(`${DIM}  Worktree [${manifest.name}]: ${worktreePath}${RESET}`);
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
-      try { execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 }); } catch { /* non-fatal */ }
+      try {
+        execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+      } catch {
+        /* non-fatal */
+      }
       if (noWorktree) {
         console.warn(
           `${YELLOW}[fleet] Worktree creation failed for ${manifest.name}: ${wtMsg}. Using shared repo.${RESET}`,
@@ -1059,10 +1113,14 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
       } else {
         console.error(
           `${RED}[fleet] Worktree creation failed for ${manifest.name}: ${wtMsg}${RESET}\n` +
-          `  Re-run with --no-worktree to disable NOMA isolation.`,
+            `  Re-run with --no-worktree to disable NOMA isolation.`,
         );
         for (const wt of createdWorktrees) {
-          try { removeWorktree(wt); } catch { /* non-fatal */ }
+          try {
+            removeWorktree(wt);
+          } catch {
+            /* non-fatal */
+          }
         }
         await orchestrator.fail("worktree creation failed");
         return;
@@ -1082,7 +1140,9 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     if (laneResult.accepted) {
       console.log(`${GREEN}  Lane: ${laneResult.laneId} [${manifest.name}]${RESET}`);
     } else {
-      console.warn(`${YELLOW}  Lane rejected for ${manifest.name}: ${laneResult.reason ?? "unknown"}${RESET}`);
+      console.warn(
+        `${YELLOW}  Lane rejected for ${manifest.name}: ${laneResult.reason ?? "unknown"}${RESET}`,
+      );
     }
   }
 
@@ -1091,14 +1151,16 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   const dashboard = new FleetDashboard({
     objective,
     runId,
-    lanes: selectedManifests.map((m): FleetLaneDisplay => ({
-      laneId: "",
-      agentName: m.name,
-      agentKind: manifestToAgentKind(m) as string,
-      status: "pending",
-      tokensUsed: 0,
-      elapsedMs: 0,
-    })),
+    lanes: selectedManifests.map(
+      (m): FleetLaneDisplay => ({
+        laneId: "",
+        agentName: m.name,
+        agentKind: manifestToAgentKind(m) as string,
+        status: "pending",
+        tokensUsed: 0,
+        elapsedMs: 0,
+      }),
+    ),
     totalTokens: 0,
     elapsedMs: 0,
     status: "running",
@@ -1129,7 +1191,9 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     dashboard.draw();
   });
   orchestrator.on("redistribution", ({ fromLaneId, subObjective }) => {
-    dashboard.updateLane(fromLaneId, { progressHint: `redistributed: ${subObjective.slice(0, 20)}` });
+    dashboard.updateLane(fromLaneId, {
+      progressHint: `redistributed: ${subObjective.slice(0, 20)}`,
+    });
     dashboard.draw();
   });
   orchestrator.on("budget:warning", (report) => {
@@ -1173,7 +1237,11 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   const onSIGINT = (): void => {
     console.log(`\n[fleet] Detaching — resume with: dantecode council resume ${runId}`);
     for (const wt of createdWorktrees) {
-      try { removeWorktree(wt); } catch { /* non-fatal */ }
+      try {
+        removeWorktree(wt);
+      } catch {
+        /* non-fatal */
+      }
     }
     process.exit(0);
   };
@@ -1184,7 +1252,11 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     clearInterval(progressTimer);
     dashboard.clear();
     for (const wt of createdWorktrees) {
-      try { removeWorktree(wt); } catch { /* non-fatal */ }
+      try {
+        removeWorktree(wt);
+      } catch {
+        /* non-fatal */
+      }
     }
   }
   process.off("SIGINT", onSIGINT);
@@ -1202,10 +1274,7 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
 /**
  * Entry point for `dantecode council <subcommand> [args]`.
  */
-export async function runCouncilCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runCouncilCommand(args: string[], projectRoot: string): Promise<void> {
   const [subcommand, ...rest] = args;
 
   switch (subcommand) {
@@ -1254,16 +1323,12 @@ function printHelp(): void {
   console.log(`${BOLD}dantecode council${RESET} — Usage-Aware Multi-Agent Git Conductor`);
   console.log(``);
   console.log(`Sub-commands:`);
-  console.log(
-    `  ${CYAN}start${RESET} "<objective>" [--agents=codex,claude,dante] [--worktrees]`,
-  );
+  console.log(`  ${CYAN}start${RESET} "<objective>" [--agents=codex,claude,dante] [--worktrees]`);
   console.log(`  ${CYAN}status${RESET} [run-id]`);
   console.log(`  ${CYAN}lanes${RESET} [run-id]`);
   console.log(`  ${CYAN}freeze${RESET} <file>`);
   console.log(`  ${CYAN}thaw${RESET} <file>`);
-  console.log(
-    `  ${CYAN}reassign${RESET} --from=<agent> [--to=<agent>] [--reason=<reason>]`,
-  );
+  console.log(`  ${CYAN}reassign${RESET} --from=<agent> [--to=<agent>] [--reason=<reason>]`);
   console.log(`  ${CYAN}merge${RESET} [--auto]`);
   console.log(`  ${CYAN}verify${RESET}`);
   console.log(`  ${CYAN}push${RESET}`);

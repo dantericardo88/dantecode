@@ -88,6 +88,9 @@ export function highlightLine(line: string, fileExtension: string, theme: ThemeE
   // Only highlight languages we know
   if (!KEYWORD_PATTERNS[lang]) return line;
 
+  // Guard: null bytes corrupt the placeholder lookup — return line as-is
+  if (line.includes("\x00")) return line;
+
   let result = line;
   const commentPlaceholders: string[] = [];
 
@@ -95,14 +98,11 @@ export function highlightLine(line: string, fileExtension: string, theme: ThemeE
   // inside comments are not double-colored.
   const commentPattern = COMMENT_PATTERNS[lang];
   if (commentPattern) {
-    result = result.replace(
-      new RegExp(commentPattern.source, commentPattern.flags),
-      (m) => {
-        const idx = commentPlaceholders.length;
-        commentPlaceholders.push(`${c.muted}${m}${c.reset}`);
-        return `\x00C${idx}\x00`;
-      },
-    );
+    result = result.replace(new RegExp(commentPattern.source, commentPattern.flags), (m) => {
+      const idx = commentPlaceholders.length;
+      commentPlaceholders.push(`${c.muted}${m}${c.reset}`);
+      return `\x00C${idx}\x00`;
+    });
   }
 
   // Step 2: Strings (only outside comment regions)
@@ -135,10 +135,7 @@ export function highlightLine(line: string, fileExtension: string, theme: ThemeE
 /**
  * Render a unified diff string to themed ANSI output.
  */
-export function renderDiff(
-  unifiedDiff: string,
-  options: DiffRenderOptions = {},
-): DiffRenderResult {
+export function renderDiff(unifiedDiff: string, options: DiffRenderOptions = {}): DiffRenderResult {
   const maxLines = options.maxLines ?? 50;
   const showLineNumbers = options.lineNumbers ?? true;
   const doHighlight = options.syntaxHighlight ?? true;
@@ -241,9 +238,7 @@ export function renderDiff(
     if (line.startsWith(" ") || line === "") {
       if (!compact) {
         const content = line.startsWith(" ") ? line.slice(1) : "";
-        const gutter = showLineNumbers
-          ? `${c.muted}${padLine(rightLine)}${c.reset}`
-          : "";
+        const gutter = showLineNumbers ? `${c.muted}${padLine(rightLine)}${c.reset}` : "";
         outputLines.push(`${c.muted} ${gutter} ${content}${c.reset}`);
         linesWritten++;
       }
@@ -323,16 +318,13 @@ export function renderBeforeAfter(
 // ---------------------------------------------------------------------------
 
 function generateUnifiedDiff(filePath: string, before: string, after: string): string {
-  const beforeLines = before.split("\n");
-  const afterLines = after.split("\n");
+  const beforeLines = before === "" ? [] : before.split("\n");
+  const afterLines = after === "" ? [] : after.split("\n");
   const hunks = computeHunks(beforeLines, afterLines);
 
   if (hunks.length === 0) return "";
 
-  const lines: string[] = [
-    `--- a/${filePath}`,
-    `+++ b/${filePath}`,
-  ];
+  const lines: string[] = [`--- a/${filePath}`, `+++ b/${filePath}`];
 
   for (const hunk of hunks) {
     lines.push(hunk.header);
@@ -428,7 +420,10 @@ function computeEdits(before: string[], after: string[]): Edit[] {
 
   while (li < lcs.length) {
     const pair = lcs[li];
-    if (!pair) { li++; continue; }
+    if (!pair) {
+      li++;
+      continue;
+    }
     const [bIdx, aIdx] = pair;
     while (bi < bIdx) {
       edits.push({ kind: "delete", text: before[bi++] ?? "" });

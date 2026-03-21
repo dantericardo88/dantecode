@@ -64,8 +64,7 @@ export class ScoringPolicy {
 
   /** Recency score: 1.0 if just accessed, decays over 90 days. */
   recencyScore(item: MemoryItem): number {
-    const ageDays =
-      (Date.now() - new Date(item.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
+    const ageDays = (Date.now() - new Date(item.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
     // Exponential decay: half-life ~14 days
     return Math.exp(-ageDays / 14);
   }

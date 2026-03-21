@@ -10,7 +10,7 @@ import type { Skill, TaskContext } from "./types.js";
 /** Simple Jaccard similarity between two token sets. */
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 0;
-  const intersection = [...a].filter(x => b.has(x)).length;
+  const intersection = [...a].filter((x) => b.has(x)).length;
   const union = new Set([...a, ...b]).size;
   return union === 0 ? 0 : intersection / union;
 }
@@ -20,7 +20,7 @@ function tokenize(text: string): Set<string> {
     text
       .toLowerCase()
       .split(/\W+/)
-      .filter(t => t.length >= 2),
+      .filter((t) => t.length >= 2),
   );
 }
 
@@ -53,22 +53,15 @@ export function scoreSkill(skill: Skill, context: TaskContext, keywords: string[
 /**
  * Retrieve the top-K most relevant skills for a task context.
  */
-export function getRelevantSkills(
-  skills: Skill[],
-  context: TaskContext,
-  limit = 5,
-): Skill[] {
-  const keywords = [
-    ...(context.keywords ?? []),
-    context.taskType ?? "",
-  ].filter(Boolean);
+export function getRelevantSkills(skills: Skill[], context: TaskContext, limit = 5): Skill[] {
+  const keywords = [...(context.keywords ?? []), context.taskType ?? ""].filter(Boolean);
 
   if (keywords.length === 0) {
     // No context — return most recent skills up to limit
     return [...skills].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
   }
 
-  const scored: ScoredSkill[] = skills.map(skill => ({
+  const scored: ScoredSkill[] = skills.map((skill) => ({
     skill,
     score: scoreSkill(skill, context, keywords),
   }));
@@ -78,7 +71,5 @@ export function getRelevantSkills(
   // If the best score is zero, no skill is relevant — return empty.
   if (sorted.length === 0 || (sorted[0]?.score ?? 0) === 0) return [];
 
-  return sorted
-    .slice(0, limit)
-    .map(s => s.skill);
+  return sorted.slice(0, limit).map((s) => s.skill);
 }

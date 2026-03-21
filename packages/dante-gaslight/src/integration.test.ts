@@ -19,8 +19,12 @@ const makeTestDir = () => {
 describe("DanteGaslightIntegration", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("starts disabled by default", () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir });
@@ -135,8 +139,12 @@ describe("DanteGaslightIntegration", () => {
 describe("DanteGaslightIntegration — store persistence", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("runSession persists session to disk automatically", async () => {
     const engine = new DanteGaslightIntegration(enabledConfig, { cwd: testDir });
@@ -217,8 +225,12 @@ describe("DanteGaslightIntegration — store persistence", () => {
 describe("DanteGaslightIntegration — maxSessions cleanup", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("cleanup is triggered after runSession when maxSessions is set", async () => {
     const engine = new DanteGaslightIntegration(
@@ -250,15 +262,24 @@ describe("DanteGaslightIntegration — maxSessions cleanup", () => {
 describe("DanteGaslightIntegration — priorLessonProvider", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("priorLessonProvider is called on maybeGaslight", async () => {
     let called = false;
     const engine = new DanteGaslightIntegration(
       enabledConfig,
       { cwd: testDir },
-      { priorLessonProvider: () => { called = true; return []; } },
+      {
+        priorLessonProvider: () => {
+          called = true;
+          return [];
+        },
+      },
     );
     await engine.maybeGaslight({ message: "go deeper", draft: "draft" });
     expect(called).toBe(true);
@@ -288,7 +309,12 @@ describe("DanteGaslightIntegration — priorLessonProvider", () => {
     const engine = new DanteGaslightIntegration(
       enabledConfig,
       { cwd: testDir },
-      { priorLessonProvider: () => { providerCalled = true; return []; } },
+      {
+        priorLessonProvider: () => {
+          providerCalled = true;
+          return [];
+        },
+      },
     );
     await engine.maybeGaslight({
       message: "go deeper",

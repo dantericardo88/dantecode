@@ -2,7 +2,7 @@ import { sha256, stableJSON, hashDict } from "./types.js";
 
 export interface CertificationSeal {
   sealId: string;
-  timestamp: string;          // ISO-8601; was "sealedAt" — renamed to match PRD spec
+  timestamp: string; // ISO-8601; was "sealedAt" — renamed to match PRD spec
   sessionId: string;
   evidenceRootHash: string;
   configHash: string;

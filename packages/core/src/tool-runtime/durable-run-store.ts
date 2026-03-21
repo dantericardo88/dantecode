@@ -6,9 +6,9 @@
  * where the CLI and public core API already depend on it.
  */
 
-export { DurableRunStore } from '../durable-run-store.js';
+export { DurableRunStore } from "../durable-run-store.js";
 
-import { DurableRunStore } from '../durable-run-store.js';
+import { DurableRunStore } from "../durable-run-store.js";
 
 let globalDurableStore: DurableRunStore | undefined;
 

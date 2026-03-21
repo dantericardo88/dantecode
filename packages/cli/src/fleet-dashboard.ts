@@ -73,25 +73,39 @@ function stripAnsi(s: string): string {
 
 function colorStatus(status: string): string {
   switch (status) {
-    case "completed": return `${GREEN}${status}${RESET}`;
-    case "failed": return `${RED}${status}${RESET}`;
-    case "running": return `${CYAN}${status}${RESET}`;
-    case "verifying": return `${CYAN}${status}${RESET}`;
-    case "retrying": return `${YELLOW}${status}${RESET}`;
-    case "pending": return `${DIM}${status}${RESET}`;
-    default: return status;
+    case "completed":
+      return `${GREEN}${status}${RESET}`;
+    case "failed":
+      return `${RED}${status}${RESET}`;
+    case "running":
+      return `${CYAN}${status}${RESET}`;
+    case "verifying":
+      return `${CYAN}${status}${RESET}`;
+    case "retrying":
+      return `${YELLOW}${status}${RESET}`;
+    case "pending":
+      return `${DIM}${status}${RESET}`;
+    default:
+      return status;
   }
 }
 
 function getStatusIcon(status: FleetLaneDisplay["status"]): string {
   switch (status) {
-    case "pending": return "[~]";
-    case "running": return "[>]";
-    case "completed": return "[+]";
-    case "failed": return "[!]";
-    case "verifying": return "[?]";
-    case "retrying": return "[R]";
-    default: return "[ ]";
+    case "pending":
+      return "[~]";
+    case "running":
+      return "[>]";
+    case "completed":
+      return "[+]";
+    case "failed":
+      return "[!]";
+    case "verifying":
+      return "[?]";
+    case "retrying":
+      return "[R]";
+    default:
+      return "[ ]";
   }
 }
 
@@ -112,7 +126,8 @@ function formatTokens(n: number): string {
 function colorFleetStatus(status: string): string {
   if (status === "completed") return `${GREEN}${status}${RESET}`;
   if (status === "failed" || status === "blocked") return `${RED}${status}${RESET}`;
-  if (status === "running" || status === "merging" || status === "verifying") return `${CYAN}${status}${RESET}`;
+  if (status === "running" || status === "merging" || status === "verifying")
+    return `${CYAN}${status}${RESET}`;
   return status;
 }
 
@@ -133,21 +148,21 @@ export function renderFleetDashboard(state: FleetDashboardState): string {
   const hr = "─".repeat(w - 2);
 
   // Header
-  const objTrunc = state.objective.length > 45
-    ? state.objective.slice(0, 42) + "..."
-    : state.objective;
+  const objTrunc =
+    state.objective.length > 45 ? state.objective.slice(0, 42) + "..." : state.objective;
   const runIdShort = state.runId.slice(-8);
   lines.push(`${BOLD}╭${hr}╮${RESET}`);
   lines.push(
     `${BOLD}│${RESET} Fleet: ${CYAN}${objTrunc}${RESET}` +
-    `${" ".repeat(Math.max(1, w - 10 - stripAnsi(objTrunc).length))}${BOLD}│${RESET}`,
+      `${" ".repeat(Math.max(1, w - 10 - stripAnsi(objTrunc).length))}${BOLD}│${RESET}`,
   );
 
   // Stats row
   const tokenStr = formatTokens(state.totalTokens);
-  const budgetStr = state.budgetRemaining !== undefined && state.budgetRemaining >= 0
-    ? ` / ${formatTokens(state.budgetRemaining)}`
-    : "";
+  const budgetStr =
+    state.budgetRemaining !== undefined && state.budgetRemaining >= 0
+      ? ` / ${formatTokens(state.budgetRemaining)}`
+      : "";
   const statsLine =
     `run:${runIdShort}  ` +
     `status:${colorFleetStatus(state.status)}  ` +
@@ -161,7 +176,9 @@ export function renderFleetDashboard(state: FleetDashboardState): string {
 
   // Column header
   const colHeader = `${DIM}  icon  agent         status       tokens   PDSE   time     progress${RESET}`;
-  lines.push(`${BOLD}│${RESET}${colHeader}${" ".repeat(Math.max(0, w - 2 - stripAnsi(colHeader).length))}${BOLD}│${RESET}`);
+  lines.push(
+    `${BOLD}│${RESET}${colHeader}${" ".repeat(Math.max(0, w - 2 - stripAnsi(colHeader).length))}${BOLD}│${RESET}`,
+  );
   lines.push(`${BOLD}├${"─".repeat(w - 2)}┤${RESET}`);
 
   // Lane rows
@@ -177,9 +194,10 @@ export function renderFleetDashboard(state: FleetDashboardState): string {
       const coloredStatus = colorStatus(lane.status);
       const status = padRight(coloredStatus, 10);
       const tokens = padRight(formatTokens(lane.tokensUsed), 7);
-      const pdse = lane.pdseScore !== undefined
-        ? padRight(String(Math.round(lane.pdseScore)), 6)
-        : padRight("--", 6);
+      const pdse =
+        lane.pdseScore !== undefined
+          ? padRight(String(Math.round(lane.pdseScore)), 6)
+          : padRight("--", 6);
       const elapsed = padRight(formatDuration(lane.elapsedMs), 8);
       const hint = (lane.progressHint ?? "").slice(0, 20);
 

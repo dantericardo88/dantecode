@@ -189,9 +189,7 @@ export class SubAgentManager {
    */
   spawn(prompt: string, options: SpawnOptions = {}): SubAgentTask {
     // Determine nesting depth for this spawn.
-    const parentDepth = options.parentId
-      ? (this.currentDepth.get(options.parentId) ?? 0)
-      : 0;
+    const parentDepth = options.parentId ? (this.currentDepth.get(options.parentId) ?? 0) : 0;
     const depth = parentDepth + (options.parentId ? 1 : 0);
 
     if (!this.validateDepthLimit(depth)) {
@@ -550,9 +548,8 @@ function extractCriticFindings(result: string): string[] {
   return result
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(
-      (line) =>
-        /\b(warning|risk|todo|follow-up|missing|needs proof|needs evidence)\b/i.test(line),
+    .filter((line) =>
+      /\b(warning|risk|todo|follow-up|missing|needs proof|needs evidence)\b/i.test(line),
     )
     .slice(0, 4);
 }

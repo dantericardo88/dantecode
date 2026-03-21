@@ -30,44 +30,52 @@ export const FearSetCheckpointRefSchema = z.object({
   /** Whether the full run passed the DanteForge gate. */
   gatePassed: z.boolean().optional(),
   /** ISO-8601 timestamp. */
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type FearSetCheckpointRef = z.infer<typeof FearSetCheckpointRefSchema>;
 
 export const CheckpointSchema = z.object({
   /** Unique ID for the checkpoint. */
   id: z.string().uuid(),
-  
+
   /** The full task packet associated with this checkpoint. */
   task: RuntimeTaskPacketSchema,
-  
+
   /** Parent task ID for hierarchy. */
   parentId: z.string().uuid().optional(),
-  
+
   /** Progress markers (e.g., "completed 3 of 5 steps"). */
   progress: z.string(),
-  
+
   /** Current retry count for this task. */
   retries: z.number().int().min(0).default(0),
-  
+
   /** State snapshot of the task (task-specific). */
   state: z.record(z.unknown()).default({}),
-  
+
   /** Output artifacts produced so far. */
   artifacts: z.array(z.string()).default([]),
-  
+
   /** Handoff metadata if this checkpoint was part of an agent transfer. */
-  handoff: z.object({
-    fromId: z.string().uuid(),
-    toRole: z.string(),
-    reason: z.string(),
-  }).optional(),
-  
+  handoff: z
+    .object({
+      fromId: z.string().uuid(),
+      toRole: z.string(),
+      reason: z.string(),
+    })
+    .optional(),
+
   /** Reference to isolated git worktree path, if any. */
   worktreePath: z.string().optional(),
-  
+
   /** ISO-8601 timestamp. */
-  timestamp: z.string().datetime().default(() => new Date().toISOString()),
+  timestamp: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 
   /** Reference to the Skillbook state at this checkpoint. */
   skillbookRef: SkillbookCheckpointRefSchema.optional(),

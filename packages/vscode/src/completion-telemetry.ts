@@ -204,8 +204,7 @@ export class CompletionTelemetry {
     const expired = events.filter((e) => e.outcome === "expired").length;
 
     const acceptRate = total > 0 ? accepted / total : 0;
-    const averageLatencyMs =
-      total > 0 ? events.reduce((s, e) => s + e.latencyMs, 0) / total : 0;
+    const averageLatencyMs = total > 0 ? events.reduce((s, e) => s + e.latencyMs, 0) / total : 0;
     const cacheHitRate = total > 0 ? events.filter((e) => e.cacheHit).length / total : 0;
 
     // By-language breakdown

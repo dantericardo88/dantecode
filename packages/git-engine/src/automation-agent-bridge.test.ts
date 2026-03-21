@@ -22,10 +22,11 @@ describe("substitutePromptVars", () => {
   });
 
   it("substitutes multiple variables", () => {
-    const result = substitutePromptVars(
-      "PR ${pr_number} by ${author} on ${branch}",
-      { pr_number: 7, author: "alice", branch: "feat/x" },
-    );
+    const result = substitutePromptVars("PR ${pr_number} by ${author} on ${branch}", {
+      pr_number: 7,
+      author: "alice",
+      branch: "feat/x",
+    });
     expect(result).toBe("PR 7 by alice on feat/x");
   });
 });
@@ -57,11 +58,7 @@ describe("runAutomationAgent", () => {
     expect(result.error).toBeUndefined();
 
     // Verify the prompt was substituted before passing to runner
-    expect(agentRunner).toHaveBeenCalledWith(
-      "Run tests for PR 5",
-      "/fake/project",
-      30,
-    );
+    expect(agentRunner).toHaveBeenCalledWith("Run tests for PR 5", "/fake/project", 30);
   });
 
   it("runs DanteForge verification when verifyOutput=true and files were changed", async () => {
@@ -88,10 +85,7 @@ describe("runAutomationAgent", () => {
 
     expect(result.success).toBe(true);
     expect(result.pdseScore).toBe(88);
-    expect(forgeRunner).toHaveBeenCalledWith(
-      ["/fake/project/src/index.ts"],
-      "/fake/project",
-    );
+    expect(forgeRunner).toHaveBeenCalledWith(["/fake/project/src/index.ts"], "/fake/project");
     // No warning since score >= 70
     expect(result.output).not.toContain("WARNING DanteForge");
   });
@@ -230,7 +224,9 @@ describe("GitAutomationOrchestrator agentMode integration", () => {
       pollIntervalMs: 25,
       runAgent: mockRunAgent,
       // Provide lightweight stubs for gate evaluation
-      readStatus: vi.fn().mockReturnValue({ staged: [], unstaged: [], untracked: [], conflicted: [] }),
+      readStatus: vi
+        .fn()
+        .mockReturnValue({ staged: [], unstaged: [], untracked: [], conflicted: [] }),
       readFile: vi.fn().mockResolvedValue(""),
       scoreContent: vi.fn().mockReturnValue({
         overall: 95,
@@ -259,7 +255,10 @@ describe("GitAutomationOrchestrator agentMode integration", () => {
 
     // The agent bridge must have been called — not a shell workflow
     expect(mockRunAgent).toHaveBeenCalledOnce();
-    const [calledConfig] = mockRunAgent.mock.calls[0] as [AgentBridgeConfig, Record<string, unknown>];
+    const [calledConfig] = mockRunAgent.mock.calls[0] as [
+      AgentBridgeConfig,
+      Record<string, unknown>,
+    ];
     expect(calledConfig.prompt).toBe("Fix the failing tests in ${workflowPath}");
     expect(calledConfig.maxRounds).toBe(5);
     expect(calledConfig.verifyOutput).toBe(false);

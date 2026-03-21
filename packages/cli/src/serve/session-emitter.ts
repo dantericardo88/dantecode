@@ -67,7 +67,9 @@ export class SessionEventEmitter extends EventEmitter {
   emitEvent(sessionId: string, event: SSEEvent): void {
     const set = this.subscribers.get(sessionId);
     if (!set) return;
-    for (const handler of set) {
+    // Snapshot before iteration: unsubscribe() called inside a handler mutates the Set
+    // mid-iteration, which would skip subsequent handlers in a live for...of.
+    for (const handler of [...set]) {
       handler(event);
     }
   }
@@ -82,11 +84,7 @@ export class SessionEventEmitter extends EventEmitter {
   }
 
   /** Emit tool execution start. */
-  emitToolStart(
-    sessionId: string,
-    toolName: string,
-    args: Record<string, unknown>,
-  ): void {
+  emitToolStart(sessionId: string, toolName: string, args: Record<string, unknown>): void {
     this.emitEvent(sessionId, {
       type: "tool_start",
       data: { toolName, args },
@@ -95,12 +93,7 @@ export class SessionEventEmitter extends EventEmitter {
   }
 
   /** Emit tool execution end. */
-  emitToolEnd(
-    sessionId: string,
-    toolName: string,
-    result: string,
-    isError: boolean,
-  ): void {
+  emitToolEnd(sessionId: string, toolName: string, result: string, isError: boolean): void {
     this.emitEvent(sessionId, {
       type: "tool_end",
       data: { toolName, result: result.slice(0, 500), isError },
@@ -118,7 +111,7 @@ export class SessionEventEmitter extends EventEmitter {
   ): void {
     this.emitEvent(sessionId, {
       type: "diff",
-      data: { filePath, diff, additions, deletions },
+      data: { filePath, diff: diff.slice(0, 10_000), additions, deletions },
       timestamp: new Date().toISOString(),
     });
   }

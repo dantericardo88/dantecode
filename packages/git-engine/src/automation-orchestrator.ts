@@ -153,11 +153,16 @@ export class GitAutomationOrchestrator {
     this.readFileImpl = options.readFile ?? ((filePath) => readFileFromFs(filePath, "utf-8"));
     this.scoreContentImpl = options.scoreContent ?? runLocalPDSEScorer;
     this.verifyRepoImpl =
-      options.verifyRepo ?? ((projectRoot) => new RecoveryEngine().runRepoRootVerification(projectRoot));
+      options.verifyRepo ??
+      ((projectRoot) => new RecoveryEngine().runRepoRootVerification(projectRoot));
     this.auditLoggerImpl = options.auditLogger ?? appendAuditEvent;
     this.runAgentImpl = options.runAgent ?? runAutomationAgent;
-    this.runner.setWorkFn(async (prompt: string, onProgress: (msg: string) => void, context: { task: { id: string } }) =>
-      this.executeWorkItem(prompt, onProgress, context.task.id),
+    this.runner.setWorkFn(
+      async (
+        prompt: string,
+        onProgress: (msg: string) => void,
+        context: { task: { id: string } },
+      ) => this.executeWorkItem(prompt, onProgress, context.task.id),
     );
   }
 
@@ -182,7 +187,9 @@ export class GitAutomationOrchestrator {
     });
   }
 
-  async createPullRequest(request: AutoPullRequestRequest): Promise<StoredAutomationExecutionRecord> {
+  async createPullRequest(
+    request: AutoPullRequestRequest,
+  ): Promise<StoredAutomationExecutionRecord> {
     const queued = await this.runAutoPRInBackground(request);
     return this.waitForExecution(queued.executionId);
   }
@@ -255,8 +262,7 @@ export class GitAutomationOrchestrator {
       {
         source: "input",
         step: 0,
-        triggerCommand:
-          workItem.kind === "workflow" ? "run_github_workflow" : "auto_pr_create",
+        triggerCommand: workItem.kind === "workflow" ? "run_github_workflow" : "auto_pr_create",
       },
     );
 
@@ -344,13 +350,18 @@ export class GitAutomationOrchestrator {
         },
         ctx,
       );
-      onProgress(`Agent ${bridgeResult.sessionId}: ${bridgeResult.success ? "completed" : "failed"}`);
+      onProgress(
+        `Agent ${bridgeResult.sessionId}: ${bridgeResult.success ? "completed" : "failed"}`,
+      );
       const completedAt = new Date().toISOString();
-      const status: StoredAutomationExecutionRecord["status"] =
-        bridgeResult.success ? "completed" : "failed";
+      const status: StoredAutomationExecutionRecord["status"] = bridgeResult.success
+        ? "completed"
+        : "failed";
       const gateStatus: StoredAutomationExecutionRecord["gateStatus"] =
         bridgeResult.pdseScore !== undefined
-          ? bridgeResult.pdseScore >= PDSE_GATE_THRESHOLD ? "passed" : "failed"
+          ? bridgeResult.pdseScore >= PDSE_GATE_THRESHOLD
+            ? "passed"
+            : "failed"
           : "skipped";
       await checkpointer.put(
         { executionId: workItem.executionId, kind: workItem.kind, status, gateStatus },
@@ -511,7 +522,9 @@ export class GitAutomationOrchestrator {
     onProgress(`Creating pull request ${workItem.request.title}`);
     const result = await this.createAutoPRImpl(workItem.request);
     const completedAt = new Date().toISOString();
-    const status: StoredAutomationExecutionRecord["status"] = result.success ? "completed" : "failed";
+    const status: StoredAutomationExecutionRecord["status"] = result.success
+      ? "completed"
+      : "failed";
     const summary = result.success
       ? `Pull request automation finished for ${workItem.request.title}`
       : `Pull request automation failed for ${workItem.request.title}`;

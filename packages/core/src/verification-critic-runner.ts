@@ -6,7 +6,12 @@
 // =============================================================================
 
 import { randomUUID } from "node:crypto";
-import { computeConsensus, type ConsensusOptions, type ConsensusResult, type ConsensusVote } from "./verification-consensus.js";
+import {
+  computeConsensus,
+  type ConsensusOptions,
+  type ConsensusResult,
+  type ConsensusVote,
+} from "./verification-consensus.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -88,7 +93,9 @@ export class VerificationCriticRunner {
     const debateId = randomUUID();
     const toRun =
       options?.ids && options.ids.length > 0
-        ? options.ids.map((id) => this.critics.get(id)).filter((c): c is CriticRegistration => c !== undefined)
+        ? options.ids
+            .map((id) => this.critics.get(id))
+            .filter((c): c is CriticRegistration => c !== undefined)
         : [...this.critics.values()];
 
     const criticResults: CriticRunResult[] = await Promise.all(
@@ -189,7 +196,10 @@ export const RELEVANCE_CRITIC: CriticRegistration = {
   name: "Task Relevance Check",
   weight: 1.2,
   fn(input: CriticInput): CriticOutput {
-    const taskWords = input.task.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+    const taskWords = input.task
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((w) => w.length > 4);
     const normalized = input.output.toLowerCase();
     const matched = taskWords.filter((w) => normalized.includes(w));
     const coverage = taskWords.length > 0 ? matched.length / taskWords.length : 1;
@@ -197,7 +207,10 @@ export const RELEVANCE_CRITIC: CriticRegistration = {
     return {
       verdict,
       confidence: 0.7,
-      findings: coverage < 0.5 ? [`Low task relevance: ${(coverage * 100).toFixed(0)}% of task keywords covered.`] : [],
+      findings:
+        coverage < 0.5
+          ? [`Low task relevance: ${(coverage * 100).toFixed(0)}% of task keywords covered.`]
+          : [],
     };
   },
 };
@@ -211,9 +224,7 @@ function clamp(value: number): number {
 }
 
 function buildDebateSummary(results: CriticRunResult[], consensus: ConsensusResult): string {
-  const parts = results
-    .map((r) => `${r.agentName}=${r.verdict}`)
-    .join(", ");
+  const parts = results.map((r) => `${r.agentName}=${r.verdict}`).join(", ");
   return `Debate: [${parts}] → ${consensus.summary}`;
 }
 

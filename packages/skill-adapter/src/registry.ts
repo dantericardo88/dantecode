@@ -297,8 +297,7 @@ export async function loadSkillRegistry(projectRoot: string): Promise<SkillRegis
     const fm = extractFrontmatter(content);
     if (fm === null) continue;
 
-    const importSource =
-      typeof fm["import_source"] === "string" ? fm["import_source"] : "unknown";
+    const importSource = typeof fm["import_source"] === "string" ? fm["import_source"] : "unknown";
 
     const registryEntry: SkillRegistryEntry = {
       name: typeof fm["name"] === "string" ? fm["name"] : entry,

@@ -64,9 +64,7 @@ describe("VerificationSuiteRunner", () => {
   it("registers and runs a suite by id", async () => {
     const id = runner.registerSuite({
       label: "Registered Suite",
-      cases: [
-        buildCoverageTestCase("deploy", GOOD_OUTPUT, ["deploy"]),
-      ],
+      cases: [buildCoverageTestCase("deploy", GOOD_OUTPUT, ["deploy"])],
     });
     const report = await runner.runById(id);
     expect(report).not.toBeNull();
@@ -87,7 +85,7 @@ describe("VerificationSuiteRunner", () => {
         },
         {
           ...buildCoverageTestCase("auth", BAD_OUTPUT, ["auth"]),
-          expectedDecision: "pass",  // should NOT match — output is bad
+          expectedDecision: "pass", // should NOT match — output is bad
         },
       ],
     };

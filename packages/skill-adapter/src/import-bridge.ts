@@ -16,8 +16,17 @@
 import { mkdir, copyFile, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { appendAuditEvent, readOrInitializeState, updateStateYaml } from "@dantecode/core";
-import { parseSkillBridgeManifest, bundleHasDanteCodeTarget, getDanteCodeTargetPath, sanitizeSlug } from "./parsers/skillbridge.js";
-import type { BridgeBundleMetadata, BundleBucket, SkillBridgeManifest } from "./types/skillbridge.js";
+import {
+  parseSkillBridgeManifest,
+  bundleHasDanteCodeTarget,
+  getDanteCodeTargetPath,
+  sanitizeSlug,
+} from "./parsers/skillbridge.js";
+import type {
+  BridgeBundleMetadata,
+  BundleBucket,
+  SkillBridgeManifest,
+} from "./types/skillbridge.js";
 
 // ----------------------------------------------------------------------------
 // Constants
@@ -333,11 +342,7 @@ export async function importSkillBridgeBundle(
       "cli-wrapper": manifest.emitters.cliWrapper.status,
     },
   };
-  await writeFile(
-    join(skillDir, BRIDGE_META_FILENAME),
-    JSON.stringify(meta, null, 2),
-    "utf-8",
-  );
+  await writeFile(join(skillDir, BRIDGE_META_FILENAME), JSON.stringify(meta, null, 2), "utf-8");
 
   // Update STATE.yaml to record the skills directory (mirrors importSkills behavior)
   try {
@@ -402,7 +407,12 @@ export async function importSkillBridgeBundle(
 export async function listBridgeWarnings(
   skillName: string,
   projectRoot: string,
-): Promise<{ runtimeWarnings: string[]; conversionWarnings: string[]; bucket: BundleBucket; conversionScore: number } | null> {
+): Promise<{
+  runtimeWarnings: string[];
+  conversionWarnings: string[];
+  bucket: BundleBucket;
+  conversionScore: number;
+} | null> {
   const slug = sanitizeSlug(skillName);
   const warningsPath = join(projectRoot, SKILLS_BASE, slug, WARNINGS_FILENAME);
 

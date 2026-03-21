@@ -151,10 +151,7 @@ async function verifyScripts(scriptPaths: string[]): Promise<ScriptSafetyResult>
 
     if (/\/etc\/|\/usr\/|\/var\/|~\/\./.test(content)) {
       filesystemScope = "system-wide";
-    } else if (
-      filesystemScope !== "system-wide" &&
-      /~\/|process\.env\.HOME|\$HOME/.test(content)
-    ) {
+    } else if (filesystemScope !== "system-wide" && /~\/|process\.env\.HOME|\$HOME/.test(content)) {
       filesystemScope = "user-home";
     }
   }
@@ -280,15 +277,15 @@ function scoreInstructionQuality(instructions: string): number {
 
   // Structure indicators (positive)
   if (/^\d+\.\s/m.test(instructions)) score += 10; // numbered steps
-  if (/^[-*]\s/m.test(instructions)) score += 5;    // bullet points
-  if (/```/.test(instructions)) score += 10;         // code blocks
+  if (/^[-*]\s/m.test(instructions)) score += 5; // bullet points
+  if (/```/.test(instructions)) score += 10; // code blocks
   if (/\b(must|shall|should|always|never)\b/i.test(instructions)) score += 5; // constraints
   if (instructions.length > 200) score += 5;
   if (instructions.length > 500) score += 5;
   if (instructions.length > 1000) score += 5;
 
   // Quality indicators (negative)
-  if (/\betc\.?\b/i.test(instructions)) score -= 5;  // vague "etc."
+  if (/\betc\.?\b/i.test(instructions)) score -= 5; // vague "etc."
   if (/do something/i.test(instructions)) score -= 10;
   if (/handle it/i.test(instructions)) score -= 10;
   if (instructions.split("\n").length < 3) score -= 10; // single-paragraph

@@ -426,10 +426,7 @@ export {
   createWebSearchOrchestrator,
   clearOrchestratorCache,
 } from "./web-search-orchestrator.js";
-export type {
-  WebSearchOptions,
-  OrchestratedSearchResult,
-} from "./web-search-orchestrator.js";
+export type { WebSearchOptions, OrchestratedSearchResult } from "./web-search-orchestrator.js";
 
 // ─── Search Synthesizer ────────────────────────────────────────────────────
 
@@ -439,28 +436,17 @@ export {
   formatCitationBlock,
   formatSynthesizedResult,
 } from "./search-synthesizer.js";
-export type {
-  Citation,
-  SynthesizedResult,
-  SynthesizerOptions,
-} from "./search-synthesizer.js";
+export type { Citation, SynthesizedResult, SynthesizerOptions } from "./search-synthesizer.js";
 
 // ─── Search Reranker ───────────────────────────────────────────────────────
 
 export { rerankResults } from "./search-reranker.js";
-export type {
-  RerankContext,
-  RankedSearchResult,
-  RerankOptions,
-} from "./search-reranker.js";
+export type { RerankContext, RankedSearchResult, RerankOptions } from "./search-reranker.js";
 
 // ─── Search Cache ──────────────────────────────────────────────────────────
 
 export { SemanticSearchCache } from "./search-cache.js";
-export type {
-  SearchCacheEntry,
-  SearchCacheOptions,
-} from "./search-cache.js";
+export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";
 
 // ─── Council Orchestrator ────────────────────────────────────────────────────
 
@@ -533,10 +519,7 @@ export { MergeBrain } from "./council/merge-brain.js";
 export type { MergeBrainInput, MergeBrainResult } from "./council/merge-brain.js";
 
 export { HandoffEngine as CouncilHandoffEngine } from "./council/handoff-engine.js";
-export type {
-  HandoffCreationOptions,
-  HandoffValidationResult,
-} from "./council/handoff-engine.js";
+export type { HandoffCreationOptions, HandoffValidationResult } from "./council/handoff-engine.js";
 
 export {
   createCouncilEvent,
@@ -548,10 +531,7 @@ export {
   mergeCompletedEvent,
   mergeBlockedEvent,
 } from "./council/council-events.js";
-export type {
-  CouncilEventType,
-  CouncilEvent,
-} from "./council/council-events.js";
+export type { CouncilEventType, CouncilEvent } from "./council/council-events.js";
 
 export { CouncilOrchestrator } from "./council/council-orchestrator.js";
 export type {
@@ -562,9 +542,19 @@ export type {
 } from "./council/council-orchestrator.js";
 
 export { FleetBudget, DEFAULT_FLEET_BUDGET_CONFIG } from "./council/fleet-budget.js";
-export type { FleetBudgetConfig, FleetBudgetState, FleetBudgetReport, AgentBudgetEntry, AgentBudgetRemaining } from "./council/fleet-budget.js";
+export type {
+  FleetBudgetConfig,
+  FleetBudgetState,
+  FleetBudgetReport,
+  AgentBudgetEntry,
+  AgentBudgetRemaining,
+} from "./council/fleet-budget.js";
 export { TaskRedistributor } from "./council/task-redistributor.js";
-export type { RedistributionCandidate, RedistributionResult, BusyLaneInfo } from "./council/task-redistributor.js";
+export type {
+  RedistributionCandidate,
+  RedistributionResult,
+  BusyLaneInfo,
+} from "./council/task-redistributor.js";
 
 export { DanteCodeAdapter } from "./council/agent-adapters/dantecode.js";
 export type { SelfLaneExecutor } from "./council/agent-adapters/dantecode.js";
@@ -620,7 +610,14 @@ export type {
 // ─── Reasoning Chain ──────────────────────────────────────────────────────────
 
 export { ReasoningChain, getCostMultiplier } from "./reasoning-chain.js";
-export type { ReasoningPhase, ReasoningTier, CritiqueResult, ChainStep, ReasoningChainOptions, ReasoningVerificationResult } from "./reasoning-chain.js";
+export type {
+  ReasoningPhase,
+  ReasoningTier,
+  CritiqueResult,
+  ChainStep,
+  ReasoningChainOptions,
+  ReasoningVerificationResult,
+} from "./reasoning-chain.js";
 
 // ─── Autonomy Engine ──────────────────────────────────────────────────────────
 
@@ -677,7 +674,11 @@ export type { CriticOpinion } from "./critic-debater.js";
 // ─── Rails Enforcer ───────────────────────────────────────────────────────────
 
 export { globalVerificationRailRegistry } from "./rails-enforcer.js";
-export type { VerificationRail, VerificationRailMode, VerificationRailFinding } from "./rails-enforcer.js";
+export type {
+  VerificationRail,
+  VerificationRailMode,
+  VerificationRailFinding,
+} from "./rails-enforcer.js";
 
 // ─── QA Harness ───────────────────────────────────────────────────────────────
 
@@ -697,12 +698,20 @@ export type { VerificationHistoryKind } from "./verification-history-store.js";
 // ─── Bridge Listener ──────────────────────────────────────────────────────────
 
 export { BridgeListener } from "./council/bridge-listener.js";
-export type { AgentCommandConfig, BridgeListenerOptions, SpawnFn } from "./council/bridge-listener.js";
+export type {
+  AgentCommandConfig,
+  BridgeListenerOptions,
+  SpawnFn,
+} from "./council/bridge-listener.js";
 
 // ─── Contextual Suggestions ──────────────────────────────────────────────────
 
 export { ContextualSuggestions, contextualSuggestions } from "./contextual-suggestions.js";
-export type { SuggestionContext, ContextualSuggestionsOptions, Suggestion } from "./contextual-suggestions.js";
+export type {
+  SuggestionContext,
+  ContextualSuggestionsOptions,
+  Suggestion,
+} from "./contextual-suggestions.js";
 
 // ─── GitHub Client ───────────────────────────────────────────────────────────
 

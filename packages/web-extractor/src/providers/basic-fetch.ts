@@ -13,10 +13,11 @@ export class BasicFetchProvider implements FetchProvider {
         method: "GET",
         headers: {
           "User-Agent": "DanteCode-WebExtractor/1.0 (compatible; Mozilla/5.0)",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-          ...options.preActions ? {} : {} // Placeholder for potential future header logic
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+          ...(options.preActions ? {} : {}), // Placeholder for potential future header logic
         },
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -33,8 +34,8 @@ export class BasicFetchProvider implements FetchProvider {
           status: response.status,
           renderMode: "http",
           cacheHit: false,
-          extractedAt: new Date().toISOString()
-        }
+          extractedAt: new Date().toISOString(),
+        },
       };
     } finally {
       clearTimeout(timer);

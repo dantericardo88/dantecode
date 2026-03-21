@@ -199,11 +199,7 @@ export class PersistentMemory {
   async save(): Promise<void> {
     try {
       await this.fs.mkdir(dirname(this.filePath), { recursive: true });
-      await this.fs.writeFile(
-        this.filePath,
-        JSON.stringify(this.entries, null, 2),
-        "utf-8",
-      );
+      await this.fs.writeFile(this.filePath, JSON.stringify(this.entries, null, 2), "utf-8");
     } catch {
       // Non-fatal: disk errors should not crash the agent
     }
@@ -292,7 +288,10 @@ export class PersistentMemory {
    * @param options - Optional filters and limits
    * @returns Array of entries with their similarity scores, sorted by score desc
    */
-  search(query: string, options: MemorySearchOptions = {}): Array<{ entry: MemoryEntry; score: number }> {
+  search(
+    query: string,
+    options: MemorySearchOptions = {},
+  ): Array<{ entry: MemoryEntry; score: number }> {
     const limit = options.limit ?? DEFAULT_SEARCH_LIMIT;
     const minRelevance = options.minRelevance ?? DEFAULT_MIN_RELEVANCE;
 

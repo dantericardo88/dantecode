@@ -51,27 +51,54 @@ describe("DanteSkillbook", () => {
   });
 
   it("refines an existing skill", () => {
-    book.applyUpdate({ action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" }, "pass");
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" },
+      "pass",
+    );
     const refined = makeSkill({ id: "s1", content: "Improved content." });
-    book.applyUpdate({ action: "refine", targetSkillId: "s1", candidateSkill: refined, rationale: "better" }, "pass");
+    book.applyUpdate(
+      { action: "refine", targetSkillId: "s1", candidateSkill: refined, rationale: "better" },
+      "pass",
+    );
     expect(book.findById("s1")?.content).toBe("Improved content.");
   });
 
   it("removes a skill", () => {
-    book.applyUpdate({ action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" }, "pass");
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" },
+      "pass",
+    );
     book.applyUpdate({ action: "remove", targetSkillId: "s1", rationale: "stale" }, "pass");
     expect(book.getSkills()).toHaveLength(0);
   });
 
   it("merges skill content", () => {
-    book.applyUpdate({ action: "add", candidateSkill: makeSkill({ id: "s1", content: "Part A." }), rationale: "init" }, "pass");
-    book.applyUpdate({ action: "merge", targetSkillId: "s1", candidateSkill: makeSkill({ content: "Part B." }), rationale: "merge" }, "pass");
+    book.applyUpdate(
+      {
+        action: "add",
+        candidateSkill: makeSkill({ id: "s1", content: "Part A." }),
+        rationale: "init",
+      },
+      "pass",
+    );
+    book.applyUpdate(
+      {
+        action: "merge",
+        targetSkillId: "s1",
+        candidateSkill: makeSkill({ content: "Part B." }),
+        rationale: "merge",
+      },
+      "pass",
+    );
     expect(book.findById("s1")?.content).toContain("Part A.");
     expect(book.findById("s1")?.content).toContain("Part B.");
   });
 
   it("reject action returns false without mutation", () => {
-    book.applyUpdate({ action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" }, "pass");
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" },
+      "pass",
+    );
     const result = book.applyUpdate({ action: "reject", rationale: "bad" }, "pass");
     expect(result).toBe(false);
     expect(book.getSkills()).toHaveLength(1); // unchanged

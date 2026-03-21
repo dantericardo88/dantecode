@@ -89,10 +89,7 @@ export class CouncilRouter {
   private readonly frozenLanes = new Set<string>();
   private runState: CouncilRunState | null = null;
 
-  constructor(
-    ledger: UsageLedger,
-    adapters: Map<AgentKind, CouncilAgentAdapter>,
-  ) {
+  constructor(ledger: UsageLedger, adapters: Map<AgentKind, CouncilAgentAdapter>) {
     this.ledger = ledger;
     this.adapters = adapters;
     this.overlapDetector = new OverlapDetector();
@@ -247,7 +244,13 @@ export class CouncilRouter {
     const mandate = this.runState?.mandates.find((m) => m.laneId === request.laneId);
 
     if (!currentSession || !mandate) {
-      return { success: false, handoffPacketId: "", newLaneId: "", newAgentKind: request.fromAgent, reason: "Lane not found in run state" };
+      return {
+        success: false,
+        handoffPacketId: "",
+        newLaneId: "",
+        newAgentKind: request.fromAgent,
+        reason: "Lane not found in run state",
+      };
     }
 
     // STEP 1: Select next agent FIRST — no state mutations until we know it exists.
@@ -259,10 +262,18 @@ export class CouncilRouter {
     const nextAgent =
       request.toAgent ??
       this.selectAgent(currentSession.taskCategory, undefined, excludeAgents) ??
-      (this.adapters.has(request.fromAgent) && fromAgentHealth !== "hard-capped" ? request.fromAgent : null);
+      (this.adapters.has(request.fromAgent) && fromAgentHealth !== "hard-capped"
+        ? request.fromAgent
+        : null);
 
     if (!nextAgent) {
-      return { success: false, handoffPacketId: "", newLaneId: "", newAgentKind: request.fromAgent, reason: "No replacement agent available" };
+      return {
+        success: false,
+        handoffPacketId: "",
+        newLaneId: "",
+        newAgentKind: request.fromAgent,
+        reason: "No replacement agent available",
+      };
     }
 
     // STEP 2: Build packets (pure — no state mutations yet)
@@ -306,7 +317,13 @@ export class CouncilRouter {
     // STEP 3: Submit — if rejected, currentSession is still untouched
     const submission = await adapter.submitTask(newPacket);
     if (!submission.accepted) {
-      return { success: false, handoffPacketId: packet.id, newLaneId: "", newAgentKind: nextAgent, reason: submission.reason };
+      return {
+        success: false,
+        handoffPacketId: packet.id,
+        newLaneId: "",
+        newAgentKind: nextAgent,
+        reason: submission.reason,
+      };
     }
 
     // STEP 4: Commit all mutations atomically (only reachable on full success)
@@ -340,7 +357,12 @@ export class CouncilRouter {
       });
     }
 
-    return { success: true, handoffPacketId: packet.id, newLaneId: newLane, newAgentKind: nextAgent };
+    return {
+      success: true,
+      handoffPacketId: packet.id,
+      newLaneId: newLane,
+      newAgentKind: nextAgent,
+    };
   }
 
   // --------------------------------------------------------------------------

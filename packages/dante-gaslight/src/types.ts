@@ -12,20 +12,23 @@ import { z } from "zod";
 // ────────────────────────────────────────────────────────
 
 export const TriggerChannelSchema = z.enum([
-  "explicit-user",    // "go deeper", "again but better", /gaslight on
-  "verification",     // score below threshold
-  "policy",           // task-class policy (e.g. code-generation, long-research)
-  "audit",            // random configurable audit rate
+  "explicit-user", // "go deeper", "again but better", /gaslight on
+  "verification", // score below threshold
+  "policy", // task-class policy (e.g. code-generation, long-research)
+  "audit", // random configurable audit rate
 ]);
 export type TriggerChannel = z.infer<typeof TriggerChannelSchema>;
 
 export const GaslightTriggerSchema = z.object({
   channel: TriggerChannelSchema,
-  phrase: z.string().optional(),         // for explicit-user
-  score: z.number().min(0).max(1).optional(),  // for verification
-  taskClass: z.string().optional(),      // for policy
+  phrase: z.string().optional(), // for explicit-user
+  score: z.number().min(0).max(1).optional(), // for verification
+  taskClass: z.string().optional(), // for policy
   sessionId: z.string().optional(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type GaslightTrigger = z.infer<typeof GaslightTriggerSchema>;
 
@@ -34,7 +37,15 @@ export type GaslightTrigger = z.infer<typeof GaslightTriggerSchema>;
 // ────────────────────────────────────────────────────────
 
 export const CritiquePointSchema = z.object({
-  aspect: z.enum(["shallow-reasoning", "unsupported-claim", "missing-structure", "missing-evidence", "missing-tool", "failure-pattern", "other"]),
+  aspect: z.enum([
+    "shallow-reasoning",
+    "unsupported-claim",
+    "missing-structure",
+    "missing-evidence",
+    "missing-tool",
+    "failure-pattern",
+    "other",
+  ]),
   description: z.string(),
   severity: z.enum(["low", "medium", "high"]),
 });
@@ -45,7 +56,10 @@ export const GaslightCritiqueSchema = z.object({
   points: z.array(CritiquePointSchema),
   summary: z.string(),
   needsEvidenceEscalation: z.boolean().default(false),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type GaslightCritique = z.infer<typeof GaslightCritiqueSchema>;
 
@@ -67,7 +81,10 @@ export const IterationRecordSchema = z.object({
   gateDecision: GaslightGateDecisionSchema.optional(),
   gateScore: z.number().min(0).max(1).optional(),
   tokensUsed: z.number().int().min(0).optional(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type IterationRecord = z.infer<typeof IterationRecordSchema>;
 
@@ -76,13 +93,13 @@ export type IterationRecord = z.infer<typeof IterationRecordSchema>;
 // ────────────────────────────────────────────────────────
 
 export const StopReasonSchema = z.enum([
-  "pass",               // DanteForge returned PASS
-  "confidence",         // confidence threshold reached
-  "budget-tokens",      // token budget exhausted
-  "budget-time",        // wall-clock limit hit
-  "budget-iterations",  // max iterations reached
-  "user-stop",          // explicit stop signal
-  "policy-abort",       // policy says not worth it
+  "pass", // DanteForge returned PASS
+  "confidence", // confidence threshold reached
+  "budget-tokens", // token budget exhausted
+  "budget-time", // wall-clock limit hit
+  "budget-iterations", // max iterations reached
+  "user-stop", // explicit stop signal
+  "policy-abort", // policy says not worth it
 ]);
 export type StopReason = z.infer<typeof StopReasonSchema>;
 
@@ -100,7 +117,10 @@ export const GaslightSessionSchema = z.object({
   lessonEligible: z.boolean().default(false),
   /** ISO timestamp set when this session has been distilled into the Skillbook. */
   distilledAt: z.string().datetime().optional(),
-  startedAt: z.string().datetime().default(() => new Date().toISOString()),
+  startedAt: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
   endedAt: z.string().datetime().optional(),
 });
 export type GaslightSession = z.infer<typeof GaslightSessionSchema>;

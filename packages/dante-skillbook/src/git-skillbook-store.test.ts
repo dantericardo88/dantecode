@@ -61,7 +61,11 @@ describe("GitSkillbookStore", () => {
   });
 
   it("uses custom skillbook path", () => {
-    const store = new GitSkillbookStore({ cwd: testDir, skillbookPath: "custom/path/sb.json", gitStage: false });
+    const store = new GitSkillbookStore({
+      cwd: testDir,
+      skillbookPath: "custom/path/sb.json",
+      gitStage: false,
+    });
     store.save(makeData());
     expect(existsSync(join(testDir, "custom/path/sb.json"))).toBe(true);
   });

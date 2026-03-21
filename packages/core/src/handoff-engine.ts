@@ -44,7 +44,7 @@ export class HandoffEngine {
     targetRole: string,
     reason: string,
     instructions: string,
-    contextUpdates?: Record<string, any>
+    contextUpdates?: Record<string, any>,
   ): HandoffSignal {
     return {
       _isHandoff: true,
@@ -68,11 +68,11 @@ export class HandoffEngine {
    */
   async runHandoffLoop(
     startContext: AgentContext,
-    agentExecutor: (ctx: AgentContext) => Promise<string | HandoffSignal>
+    agentExecutor: (ctx: AgentContext) => Promise<string | HandoffSignal>,
   ): Promise<string> {
     const currentContext = { ...startContext };
     let handoffCount = 0;
-    
+
     // Auto-spawn the first agent via the manager
     let currentTask = this.manager.spawn(startContext.instructions, {
       name: startContext.role,
@@ -86,10 +86,13 @@ export class HandoffEngine {
 
         if (this.isHandoff(response)) {
           // Record completion of the current task
-          this.manager.completeTask(currentTask.id, `Handed off to ${response.targetRole}: ${response.reason}`);
-          
+          this.manager.completeTask(
+            currentTask.id,
+            `Handed off to ${response.targetRole}: ${response.reason}`,
+          );
+
           handoffCount++;
-          
+
           // Apply variable updates
           currentContext.variables = { ...currentContext.variables, ...response.contextUpdates };
           currentContext.role = response.targetRole;
@@ -106,11 +109,10 @@ export class HandoffEngine {
             description: `Handoff from previous agent: ${response.reason}`,
             parentId: currentTask.agentId,
           });
-
         } else {
           // Terminal string output reached
           this.manager.completeTask(currentTask.id, response);
-          
+
           return response;
         }
       }
@@ -118,7 +120,6 @@ export class HandoffEngine {
       const failMsg = `Max Swarm handoffs (${this.maxHandoffs}) exceeded. Terminating to prevent infinite loop.`;
       this.manager.failTask(currentTask.id, failMsg);
       return `Error: ${failMsg}`;
-      
     } catch (err: any) {
       this.manager.failTask(currentTask.id, err.message || String(err));
       throw err;

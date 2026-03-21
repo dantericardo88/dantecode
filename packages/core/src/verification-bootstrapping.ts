@@ -28,12 +28,12 @@ export interface LabeledExample {
 export interface CalibrationResult {
   calibratedWeights: PdseWeights;
   calibratedThresholds: ConfidenceThresholds;
-  accuracy: number;       // fraction of examples where decision matched expected
-  errorRate: number;      // 1 - accuracy
+  accuracy: number; // fraction of examples where decision matched expected
+  errorRate: number; // 1 - accuracy
   exampleCount: number;
   decisionBreakdown: Record<LabeledDecision, { correct: number; total: number }>;
   iterationsRun: number;
-  delta: number;          // final weight delta from last iteration
+  delta: number; // final weight delta from last iteration
 }
 
 export interface BootstrapOptions {
@@ -54,12 +54,12 @@ const DEFAULT_WEIGHTS: PdseWeights = {
   correctness: 0.28,
   hallucination: 0.18,
   completeness: 0.22,
-  safety: 0.10,
+  safety: 0.1,
 };
 
 const DEFAULT_THRESHOLDS: ConfidenceThresholds = {
   passGate: 0.85,
-  softPassGate: 0.70,
+  softPassGate: 0.7,
   reviewGate: 0.45,
 };
 

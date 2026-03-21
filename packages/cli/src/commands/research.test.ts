@@ -67,8 +67,16 @@ import { ResearchPipeline } from "@dantecode/web-research";
 // Default synthesis response used by most tests
 const DEFAULT_SYNTHESIS = {
   results: [
-    { url: "https://typescriptlang.org/docs/handbook/project-references.html", title: "TS Refs", snippet: "Project references" },
-    { url: "https://brave-only.example.com/ts-monorepo", title: "Brave Source", snippet: "From brave provider" },
+    {
+      url: "https://typescriptlang.org/docs/handbook/project-references.html",
+      title: "TS Refs",
+      snippet: "Project references",
+    },
+    {
+      url: "https://brave-only.example.com/ts-monorepo",
+      title: "Brave Source",
+      snippet: "From brave provider",
+    },
   ],
   synthesized: "TypeScript monorepos use project references for incremental builds. [1][2]",
   confidence: 0.87,
@@ -109,9 +117,7 @@ describe("executeResearch — depth=quick", () => {
 
   it("passes fetchTopN: 2 to ResearchPipeline", async () => {
     await executeResearch("topic", "/project", { depth: "quick" });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 2 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 2 }));
   });
 
   it("does NOT call searchWithCitations", async () => {
@@ -154,9 +160,7 @@ describe("executeResearch — depth=standard", () => {
 
   it("passes fetchTopN: 5 to ResearchPipeline", async () => {
     await executeResearch("topic", "/project");
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 5 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 5 }));
   });
 
   it("calls searchWithCitations for synthesis", async () => {
@@ -172,9 +176,7 @@ describe("executeResearch — depth=standard", () => {
 describe("executeResearch — depth=deep", () => {
   it("passes fetchTopN: 8 to ResearchPipeline", async () => {
     await executeResearch("topic", "/project", { depth: "deep" });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 8 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 8 }));
   });
 });
 
@@ -185,23 +187,17 @@ describe("executeResearch — depth=deep", () => {
 describe("executeResearch — maxSources option", () => {
   it("passes maxSources: 3 as fetchTopN to ResearchPipeline (standard depth)", async () => {
     await executeResearch("topic", "/project", { maxSources: 3 });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 3 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 3 }));
   });
 
   it("passes maxSources: 6 as fetchTopN to ResearchPipeline (deep depth)", async () => {
     await executeResearch("topic", "/project", { depth: "deep", maxSources: 6 });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 6 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 6 }));
   });
 
   it("passes maxSources: 1 as fetchTopN for quick depth", async () => {
     await executeResearch("topic", "/project", { depth: "quick", maxSources: 1 });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 1 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 1 }));
   });
 });
 
@@ -335,25 +331,19 @@ describe("researchSlashHandler", () => {
 
   it("parses --depth=quick flag and uses fetchTopN: 2", async () => {
     await researchSlashHandler("TypeScript --depth=quick", { projectRoot: "/project" });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 2 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 2 }));
   });
 
   it("strips --depth= flag from topic before searching", async () => {
     await researchSlashHandler("TypeScript monorepo --depth=quick", { projectRoot: "/project" });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 2 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 2 }));
     // Verify the flag text is not in the Sources section as a literal string search
     // (pipeline was called with correct depth, not full args string)
   });
 
   it("parses --depth=deep flag and uses fetchTopN: 8", async () => {
     await researchSlashHandler("topic --depth=deep", { projectRoot: "/project" });
-    expect(ResearchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ fetchTopN: 8 }),
-    );
+    expect(ResearchPipeline).toHaveBeenCalledWith(expect.objectContaining({ fetchTopN: 8 }));
   });
 
   it("shows Research failed when both providers fail", async () => {

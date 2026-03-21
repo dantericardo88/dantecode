@@ -33,10 +33,8 @@ export function createReceipt(params: {
   const receiptId = randomUUID();
   const timestamp = new Date().toISOString();
 
-  const beforeHash =
-    typeof beforeState === "string" ? sha256(beforeState) : hashDict(beforeState);
-  const afterHash =
-    typeof afterState === "string" ? sha256(afterState) : hashDict(afterState);
+  const beforeHash = typeof beforeState === "string" ? sha256(beforeState) : hashDict(beforeState);
+  const afterHash = typeof afterState === "string" ? sha256(afterState) : hashDict(afterState);
 
   const receiptHash = sha256(
     `${receiptId}:${correlationId}:${actor}:${action}:${beforeHash}:${afterHash}`,

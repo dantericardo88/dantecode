@@ -130,7 +130,8 @@ describe("CompletionTelemetry", () => {
   it("getAdaptiveHints() identifies strong (rate>0.4) and weak (rate<0.15, shown>20) languages", () => {
     const t = new CompletionTelemetry(tmpDir);
     // Strong language: typescript — 9 accepted / 10 shown = 0.9 > 0.4
-    for (let i = 0; i < 9; i++) t.record(makeEvent({ language: "typescript", outcome: "accepted" }));
+    for (let i = 0; i < 9; i++)
+      t.record(makeEvent({ language: "typescript", outcome: "accepted" }));
     t.record(makeEvent({ language: "typescript", outcome: "rejected" }));
     // Weak language: rust — 2 accepted / 21 shown = ~0.095 < 0.15, shown > 20
     for (let i = 0; i < 2; i++) t.record(makeEvent({ language: "rust", outcome: "accepted" }));

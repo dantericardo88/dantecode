@@ -69,7 +69,9 @@ export function deserializeTrace(json: string): VerificationTrace | null {
       ...(serialized.completedAt !== undefined ? { completedAt: serialized.completedAt } : {}),
       ...(serialized.decision !== undefined ? { decision: serialized.decision } : {}),
       ...(serialized.finalScore !== undefined ? { finalScore: serialized.finalScore } : {}),
-      ...(serialized.finalConfidence !== undefined ? { finalConfidence: serialized.finalConfidence } : {}),
+      ...(serialized.finalConfidence !== undefined
+        ? { finalConfidence: serialized.finalConfidence }
+        : {}),
       events: serialized.events,
     };
   } catch {

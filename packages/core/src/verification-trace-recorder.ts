@@ -87,7 +87,13 @@ export class VerificationTraceRecorder {
   }
 
   /** Record a metric score. */
-  recordMetric(traceId: string, metricId: string, score: number, passed: boolean, reason?: string): void {
+  recordMetric(
+    traceId: string,
+    metricId: string,
+    score: number,
+    passed: boolean,
+    reason?: string,
+  ): void {
     this.addEvent(traceId, {
       kind: "metric_scored",
       stage: metricId,
@@ -98,7 +104,12 @@ export class VerificationTraceRecorder {
   }
 
   /** Record a rail trigger event. */
-  recordRailTrigger(traceId: string, railId: string, action: "allow" | "warn" | "block", violations?: string[]): void {
+  recordRailTrigger(
+    traceId: string,
+    railId: string,
+    action: "allow" | "warn" | "block",
+    violations?: string[],
+  ): void {
     this.addEvent(traceId, {
       kind: "rail_triggered",
       stage: railId,
@@ -108,7 +119,13 @@ export class VerificationTraceRecorder {
   }
 
   /** Record a single critic opinion. */
-  recordCriticOpinion(traceId: string, agentId: string, verdict: string, confidence?: number, findings?: string[]): void {
+  recordCriticOpinion(
+    traceId: string,
+    agentId: string,
+    verdict: string,
+    confidence?: number,
+    findings?: string[],
+  ): void {
     this.addEvent(traceId, {
       kind: "critic_opinion",
       data: { agentId, verdict, confidence, findings: findings ?? [] },
@@ -116,7 +133,12 @@ export class VerificationTraceRecorder {
   }
 
   /** Record the final debate result. */
-  recordDebateComplete(traceId: string, consensus: string, confidence: number, rationale?: string): void {
+  recordDebateComplete(
+    traceId: string,
+    consensus: string,
+    confidence: number,
+    rationale?: string,
+  ): void {
     this.addEvent(traceId, {
       kind: "debate_completed",
       data: { consensus, confidence, rationale },
@@ -124,7 +146,12 @@ export class VerificationTraceRecorder {
   }
 
   /** Record the confidence synthesis result. */
-  recordConfidenceSynthesis(traceId: string, decision: string, confidence: number, score: number): void {
+  recordConfidenceSynthesis(
+    traceId: string,
+    decision: string,
+    confidence: number,
+    score: number,
+  ): void {
     this.addEvent(traceId, {
       kind: "confidence_synthesized",
       score,
@@ -155,7 +182,12 @@ export class VerificationTraceRecorder {
   }
 
   /** Complete the trace with a final decision. */
-  endTrace(traceId: string, decision: string, score?: number, confidence?: number): VerificationTrace | null {
+  endTrace(
+    traceId: string,
+    decision: string,
+    score?: number,
+    confidence?: number,
+  ): VerificationTrace | null {
     const trace = this.traces.get(traceId);
     if (!trace) return null;
 
@@ -213,7 +245,10 @@ export class VerificationTraceRecorder {
   // Private
   // -------------------------------------------------------------------------
 
-  private addEvent(traceId: string, partial: Omit<VerificationTraceEvent, "eventId" | "traceId" | "timestamp">): void {
+  private addEvent(
+    traceId: string,
+    partial: Omit<VerificationTraceEvent, "eventId" | "traceId" | "timestamp">,
+  ): void {
     const trace = this.traces.get(traceId);
     if (!trace) return;
     const event: VerificationTraceEvent = {

@@ -21,7 +21,11 @@ import type {
 } from "./types.js";
 import { DEFAULT_ENGINE_CONFIG } from "./types.js";
 import { evaluatePolicy, buildBlockDecision } from "./policy-engine.js";
-import { detectAvailableStrategies, isDockerAvailable, isWorktreeAvailable } from "./capability-check.js";
+import {
+  detectAvailableStrategies,
+  isDockerAvailable,
+  isWorktreeAvailable,
+} from "./capability-check.js";
 
 // ─── Session Counters ─────────────────────────────────────────────────────────
 
@@ -232,9 +236,7 @@ export class SandboxEngine {
   // ── Teardown ──────────────────────────────────────────────────────────────
 
   async teardown(): Promise<void> {
-    await Promise.allSettled(
-      Array.from(this.layers.values()).map((l) => l.teardown()),
-    );
+    await Promise.allSettled(Array.from(this.layers.values()).map((l) => l.teardown()));
     this.layers.clear();
   }
 
@@ -258,7 +260,7 @@ export class SandboxEngine {
     // auto: Prefer native (zero-dep, fast) → docker → worktree → host
     const isTrusted = this.config.trustedTaskClasses.includes(request.taskType);
     if (this.layers.has("native")) return "native";
-    if (!isTrusted && await isDockerAvailable()) return "docker";
+    if (!isTrusted && (await isDockerAvailable())) return "docker";
     if (await isWorktreeAvailable()) return "worktree";
     if (await isDockerAvailable()) return "docker";
     return "host";

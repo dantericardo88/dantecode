@@ -15,7 +15,11 @@ vi.mock("@dantecode/core", () => ({
   appendAuditEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { importSkillBridgeBundle, listBridgeWarnings, validateBridgeSkill } from "./import-bridge.js";
+import {
+  importSkillBridgeBundle,
+  listBridgeWarnings,
+  validateBridgeSkill,
+} from "./import-bridge.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures

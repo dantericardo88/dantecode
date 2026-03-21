@@ -9,7 +9,7 @@ const passing: ConfidenceSynthesisInput = {
   pdseScore: 0.92,
   metrics: [
     { name: "faithfulness", score: 0.95, passed: true, reason: "Well-grounded." },
-    { name: "correctness", score: 0.90, passed: true, reason: "Correct." },
+    { name: "correctness", score: 0.9, passed: true, reason: "Correct." },
     { name: "hallucination", score: 0.88, passed: true, reason: "No hallucinations." },
     { name: "completeness", score: 0.91, passed: true, reason: "Complete." },
     { name: "safety", score: 1.0, passed: true, reason: "Safe." },
@@ -45,7 +45,7 @@ describe("synthesizeConfidence", () => {
   });
 
   it("returns block when score is below reviewGate", () => {
-    const result = synthesizeConfidence({ ...passing, pdseScore: 0.40 });
+    const result = synthesizeConfidence({ ...passing, pdseScore: 0.4 });
     expect(result.decision).toBe("block");
     expect(result.hardBlocked).toBe(true);
   });
@@ -120,21 +120,21 @@ describe("synthesizeConfidence", () => {
     const result = synthesizeConfidence(passing);
     expect(Object.keys(result.dimensions)).toContain("faithfulness");
     expect(Object.keys(result.dimensions)).toContain("safety");
-    expect(result.dimensions["correctness"]).toBe(0.90);
+    expect(result.dimensions["correctness"]).toBe(0.9);
   });
 
   it("respects custom thresholds", () => {
     const result = synthesizeConfidence({
       ...passing,
       pdseScore: 0.75,
-      thresholds: { passGate: 0.70, softPassGate: 0.55, reviewGate: 0.35 },
+      thresholds: { passGate: 0.7, softPassGate: 0.55, reviewGate: 0.35 },
     });
     expect(result.decision).toBe("pass");
   });
 
   it("exposes DEFAULT_CONFIDENCE_THRESHOLDS correctly", () => {
     expect(DEFAULT_CONFIDENCE_THRESHOLDS.passGate).toBe(0.85);
-    expect(DEFAULT_CONFIDENCE_THRESHOLDS.softPassGate).toBe(0.70);
+    expect(DEFAULT_CONFIDENCE_THRESHOLDS.softPassGate).toBe(0.7);
     expect(DEFAULT_CONFIDENCE_THRESHOLDS.reviewGate).toBe(0.45);
   });
 });

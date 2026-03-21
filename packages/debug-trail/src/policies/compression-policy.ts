@@ -101,7 +101,12 @@ export class CompressionPolicy {
       const tooLarge = s.sizeBytes > this.config.maxSnapshotSizeBytes;
 
       if (s.compressed) {
-        decisions.push({ snapshotId: s.snapshotId, filePath: s.filePath, action: "keep", reason: "already compressed" });
+        decisions.push({
+          snapshotId: s.snapshotId,
+          filePath: s.filePath,
+          action: "keep",
+          reason: "already compressed",
+        });
       } else if (tooOld || tooLarge) {
         decisions.push({
           snapshotId: s.snapshotId,
@@ -112,7 +117,12 @@ export class CompressionPolicy {
             : `older than ${this.config.compressAfterDays} days`,
         });
       } else {
-        decisions.push({ snapshotId: s.snapshotId, filePath: s.filePath, action: "keep", reason: "recent and within size limit" });
+        decisions.push({
+          snapshotId: s.snapshotId,
+          filePath: s.filePath,
+          action: "keep",
+          reason: "recent and within size limit",
+        });
       }
     }
 

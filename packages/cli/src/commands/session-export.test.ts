@@ -12,19 +12,38 @@ vi.mock("@dantecode/core", async () => {
   class MockSessionStore {
     constructor(_root: string) {}
     async save(_file: unknown) {}
-    async list() { return []; }
-    async load(_id: string) { return null; }
-    async deleteAll() { return 0; }
-    async summarize(_s: unknown) { return ""; }
-    async delete(_id: string) { return true; }
-    async exists(_id: string) { return false; }
-    getSessionsDir() { return "/mock/.dantecode/sessions"; }
+    async list() {
+      return [];
+    }
+    async load(_id: string) {
+      return null;
+    }
+    async deleteAll() {
+      return 0;
+    }
+    async summarize(_s: unknown) {
+      return "";
+    }
+    async delete(_id: string) {
+      return true;
+    }
+    async exists(_id: string) {
+      return false;
+    }
+    getSessionsDir() {
+      return "/mock/.dantecode/sessions";
+    }
   }
   return {
     ...actual,
     SessionStore: MockSessionStore,
     getProviderCatalogEntry: vi.fn(() => ({ label: "Mock" })),
-    getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+    getContextUtilization: vi.fn(() => ({
+      tokens: 100,
+      maxTokens: 128000,
+      percent: 0,
+      tier: "green",
+    })),
     parseModelReference: vi.fn((ref: string) => ({ provider: "anthropic", modelId: ref })),
     readAuditEvents: vi.fn().mockResolvedValue([]),
     MultiAgent: vi.fn(),
@@ -366,7 +385,9 @@ describe("/import command", () => {
           version: "2.0.0",
           session: {
             id: "v2-session",
-            messages: [{ id: "x1", role: "user", content: "Hello", timestamp: "2026-03-21T00:00:00Z" }],
+            messages: [
+              { id: "x1", role: "user", content: "Hello", timestamp: "2026-03-21T00:00:00Z" },
+            ],
           },
         }),
         "utf8",
@@ -393,6 +414,32 @@ describe("/import command", () => {
 
     const state = makeState(tempDir);
     const result = await routeSlashCommand("/import no-session.json", state);
+    expect(result).toMatch(/invalid session file|missing messages/i);
+  });
+
+  it("/import returns error for malformed JSON (T4)", async () => {
+    const badJsonFile = join(tempDir, "malformed.json");
+    await import("node:fs/promises").then((m) =>
+      m.writeFile(badJsonFile, "{ not valid json {{ ", "utf8"),
+    );
+
+    const state = makeState(tempDir);
+    const result = await routeSlashCommand("/import malformed.json", state);
+    expect(result).toMatch(/failed to import|error/i);
+  });
+
+  it("/import returns error when session.messages is null (T5)", async () => {
+    const nullMsgsFile = join(tempDir, "null-msgs.json");
+    await import("node:fs/promises").then((m) =>
+      m.writeFile(
+        nullMsgsFile,
+        JSON.stringify({ version: "1.0.0", session: { id: "x", messages: null } }),
+        "utf8",
+      ),
+    );
+
+    const state = makeState(tempDir);
+    const result = await routeSlashCommand("/import null-msgs.json", state);
     expect(result).toMatch(/invalid session file|missing messages/i);
   });
 });

@@ -133,7 +133,10 @@ describe("VscodeSurface", () => {
   it("sendProgress() emits a 'progress' message", () => {
     const surface = new VscodeSurface({ theme: noColor });
     const state: ProgressState = {
-      id: "p1", phase: "Building", status: "running", progress: 50,
+      id: "p1",
+      phase: "Building",
+      status: "running",
+      progress: 50,
     };
     const msg = surface.sendProgress(state);
     expect(msg.kind).toBe("progress");
@@ -163,7 +166,9 @@ describe("VscodeSurface", () => {
     const received: unknown[] = [];
     const surface = new VscodeSurface({
       theme: noColor,
-      postMessage: (m) => { received.push(m); },
+      postMessage: (m) => {
+        received.push(m);
+      },
     });
     surface.render({ kind: "text", content: "test" });
     expect(received).toHaveLength(1);
@@ -186,7 +191,10 @@ describe("VscodeSurface", () => {
   it("formatProgressLine() includes phase and percent", () => {
     const surface = new VscodeSurface({ theme: noColor });
     const state: ProgressState = {
-      id: "p", phase: "Testing", status: "running", progress: 75,
+      id: "p",
+      phase: "Testing",
+      status: "running",
+      progress: 75,
     };
     const line = surface.formatProgressLine(state);
     expect(line).toContain("Testing");

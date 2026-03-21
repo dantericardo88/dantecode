@@ -171,9 +171,15 @@ export class ExportEngine {
 
     // Score completeness — pass store's snapshotPath resolver so we can detect
     // pruned/deleted snapshot files and count them as gaps rather than coverage.
-    const completeness = options.includeCompleteness !== false
-      ? scoreCompleteness(sorted, sessionTombstones, sessionId, this.store.snapshotPath.bind(this.store))
-      : undefined;
+    const completeness =
+      options.includeCompleteness !== false
+        ? scoreCompleteness(
+            sorted,
+            sessionTombstones,
+            sessionId,
+            this.store.snapshotPath.bind(this.store),
+          )
+        : undefined;
 
     // Build export document
     const format = options.format ?? "json";
@@ -190,7 +196,13 @@ export class ExportEngine {
     if (format === "ndjson") {
       content = sorted.map((e) => JSON.stringify(e)).join("\n");
     } else if (format === "markdown") {
-      content = this.buildMarkdownReport(sessionId, sorted, sessionTombstones, completeness, exportedAt);
+      content = this.buildMarkdownReport(
+        sessionId,
+        sorted,
+        sessionTombstones,
+        completeness,
+        exportedAt,
+      );
     } else if (format === "csv") {
       content = this.buildCSVReport(sorted);
     } else if (format === "sarif") {
@@ -270,7 +282,9 @@ export class ExportEngine {
         `**Events with Provenance:** ${completeness.eventsWithProvenance}/${completeness.totalEvents}  `,
       );
       if (completeness.snapshotGaps.length > 0) {
-        lines.push(`**Snapshot Gaps:** ${completeness.snapshotGaps.length} event(s) missing snapshots  `);
+        lines.push(
+          `**Snapshot Gaps:** ${completeness.snapshotGaps.length} event(s) missing snapshots  `,
+        );
       }
     }
 
@@ -278,8 +292,7 @@ export class ExportEngine {
 
     for (const e of events) {
       const icon = this.kindIcon(e.kind);
-      const fp =
-        typeof e.payload["filePath"] === "string" ? ` \`${e.payload["filePath"]}\`` : "";
+      const fp = typeof e.payload["filePath"] === "string" ? ` \`${e.payload["filePath"]}\`` : "";
       lines.push(
         `### ${icon} [${e.seq}] ${e.kind}${fp}`,
         `- **Time:** ${e.timestamp}`,
@@ -353,11 +366,7 @@ export class ExportEngine {
   // SARIF report
   // -------------------------------------------------------------------------
 
-  private buildSARIFReport(
-    sessionId: string,
-    events: TrailEvent[],
-    exportedAt: string,
-  ): string {
+  private buildSARIFReport(sessionId: string, events: TrailEvent[], exportedAt: string): string {
     const levelMap: Record<string, string> = {
       error: "error",
       anomaly_flag: "error",

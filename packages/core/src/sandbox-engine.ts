@@ -16,12 +16,7 @@ import * as path from "node:path";
 export type SandboxMode = "process" | "docker" | "mock";
 
 /** Lifecycle state of a sandbox instance. */
-export type SandboxStatus =
-  | "idle"
-  | "running"
-  | "completed"
-  | "failed"
-  | "destroyed";
+export type SandboxStatus = "idle" | "running" | "completed" | "failed" | "destroyed";
 
 /**
  * Policy that governs what a sandbox instance is allowed to do.
@@ -102,14 +97,7 @@ const DEFAULT_POLICY: SandboxPolicy = {
   allowNetwork: false,
   allowFileWrite: true,
   allowedPaths: [],
-  blockedCommands: [
-    "rm -rf /",
-    "mkfs",
-    "dd if=",
-    ":(){:|:&};:",
-    "shutdown",
-    "reboot",
-  ],
+  blockedCommands: ["rm -rf /", "mkfs", "dd if=", ":(){:|:&};:", "shutdown", "reboot"],
   maxExecutionMs: 30_000,
   maxOutputBytes: 1024 * 1024, // 1 MB
 };
@@ -139,19 +127,11 @@ function errorMessage(err: unknown): string {
  * Merges two partial policies, preferring values from `override` while
  * falling back to `base` for unset keys.
  */
-function mergePolicy(
-  base: SandboxPolicy,
-  override: Partial<SandboxPolicy> = {}
-): SandboxPolicy {
+function mergePolicy(base: SandboxPolicy, override: Partial<SandboxPolicy> = {}): SandboxPolicy {
   return {
-    allowNetwork:
-      override.allowNetwork !== undefined
-        ? override.allowNetwork
-        : base.allowNetwork,
+    allowNetwork: override.allowNetwork !== undefined ? override.allowNetwork : base.allowNetwork,
     allowFileWrite:
-      override.allowFileWrite !== undefined
-        ? override.allowFileWrite
-        : base.allowFileWrite,
+      override.allowFileWrite !== undefined ? override.allowFileWrite : base.allowFileWrite,
     allowedPaths: override.allowedPaths ?? base.allowedPaths,
     blockedCommands: override.blockedCommands ?? base.blockedCommands,
     maxExecutionMs: override.maxExecutionMs ?? base.maxExecutionMs,
@@ -209,10 +189,7 @@ export class SandboxEngine {
    * @param policyOverrides - Per-instance policy overrides.
    * @returns The newly created, idle SandboxInstance.
    */
-  create(
-    mode?: SandboxMode,
-    policyOverrides?: Partial<SandboxPolicy>
-  ): SandboxInstance {
+  create(mode?: SandboxMode, policyOverrides?: Partial<SandboxPolicy>): SandboxInstance {
     const id = randomUUID();
     const effectiveMode = mode ?? this.options.defaultMode;
 
@@ -261,9 +238,7 @@ export class SandboxEngine {
       throw new Error(`Sandbox instance not found: ${instanceId}`);
     }
     if (instance.status === "destroyed") {
-      throw new Error(
-        `Cannot exec on destroyed sandbox instance: ${instanceId}`
-      );
+      throw new Error(`Cannot exec on destroyed sandbox instance: ${instanceId}`);
     }
 
     // Policy validation
@@ -290,8 +265,7 @@ export class SandboxEngine {
           encoding: "buffer",
           stdio: ["pipe", "pipe", "pipe"],
         });
-        stdout =
-          rawOutput instanceof Buffer ? rawOutput.toString("utf8") : String(rawOutput ?? "");
+        stdout = rawOutput instanceof Buffer ? rawOutput.toString("utf8") : String(rawOutput ?? "");
       }
       instance.status = "completed";
     } catch (err: unknown) {
@@ -334,9 +308,7 @@ export class SandboxEngine {
     if (totalBytes > maxOutputBytes) {
       truncated = true;
       // Apportion bytes proportionally, favouring stdout
-      const stdoutShare = Math.floor(
-        (stdout.length / totalBytes) * maxOutputBytes
-      );
+      const stdoutShare = Math.floor((stdout.length / totalBytes) * maxOutputBytes);
       const stderrShare = maxOutputBytes - stdoutShare;
       stdout = stdout.slice(0, stdoutShare);
       stderr = stderr.slice(0, stderrShare);
@@ -371,10 +343,7 @@ export class SandboxEngine {
    * @returns `null` when the command is permitted; a human-readable violation
    *          message when it is blocked.
    */
-  applyPolicies(
-    instance: SandboxInstance,
-    command: string
-  ): string | null {
+  applyPolicies(instance: SandboxInstance, command: string): string | null {
     const { policy } = instance;
 
     // Check explicit blocked-command list
@@ -407,9 +376,7 @@ export class SandboxEngine {
    */
   isCommandBlocked(command: string, policy: SandboxPolicy): boolean {
     const lc = command.toLowerCase();
-    return policy.blockedCommands.some((blocked) =>
-      lc.includes(blocked.toLowerCase())
-    );
+    return policy.blockedCommands.some((blocked) => lc.includes(blocked.toLowerCase()));
   }
 
   // ── Query ────────────────────────────────────────────────────────────────

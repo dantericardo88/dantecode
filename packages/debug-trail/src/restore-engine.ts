@@ -166,7 +166,13 @@ export class RestoreEngine {
         "file_restore",
         "RestoreEngine",
         `Restore hash mismatch for ${targetPath}`,
-        { snapshotId, targetPath, expected: snapRecord.contentHash, actual: afterHash, error: "hash_mismatch" },
+        {
+          snapshotId,
+          targetPath,
+          expected: snapRecord.contentHash,
+          actual: afterHash,
+          error: "hash_mismatch",
+        },
       );
       return {
         snapshotId,
@@ -229,7 +235,9 @@ export class RestoreEngine {
    * List restorable snapshots for a file path.
    */
   // A2: snapshotId is null when no before-state was captured (tombstone ID is not a snapshot ID).
-  getRestorableSnapshots(filePath: string): Array<{ snapshotId: string | null; deletedAt: string; hasBeforeState: boolean }> {
+  getRestorableSnapshots(
+    filePath: string,
+  ): Array<{ snapshotId: string | null; deletedAt: string; hasBeforeState: boolean }> {
     const tombstones = this.snapshotter.getTombstones().allForFile(filePath);
     return tombstones.map((t) => ({
       snapshotId: t.lastSnapshotId ?? null,

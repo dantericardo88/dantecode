@@ -11,8 +11,8 @@
  * Phase 2 will delegate full execution FROM agent-loop.ts → scheduler.
  */
 
-import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import type {
   ArtifactRecord,
   ToolCallRecord,
@@ -20,21 +20,18 @@ import type {
   ToolExecutionResult,
   ToolSchedulerConfig,
   VerificationResult,
-} from './tool-call-types.js';
-import { TERMINAL_STATES, VALID_TRANSITIONS } from './tool-call-types.js';
-import { ArtifactStore } from './artifact-store.js';
-import { DependencyGraph } from './dependency-graph.js';
+} from "./tool-call-types.js";
+import { TERMINAL_STATES, VALID_TRANSITIONS } from "./tool-call-types.js";
+import { ArtifactStore } from "./artifact-store.js";
+import { DependencyGraph } from "./dependency-graph.js";
 import {
   buildFileWriteChecks,
   formatVerificationMessage,
   inferVerificationChecks,
   runVerificationChecks,
-} from './verification-checks.js';
-import { ApprovalGateway, globalApprovalGateway } from './approval-gateway.js';
-import {
-  ExecutionPolicyRegistry,
-  type ToolExecutionPolicy,
-} from './execution-policy.js';
+} from "./verification-checks.js";
+import { ApprovalGateway, globalApprovalGateway } from "./approval-gateway.js";
+import { ExecutionPolicyRegistry, type ToolExecutionPolicy } from "./execution-policy.js";
 
 export interface SchedulerEvents {
   stateChange: (record: ToolCallRecord, previousStatus: ToolCallStatus) => void;
@@ -98,7 +95,8 @@ export class ToolScheduler extends EventEmitter {
       verifyAfterExecution: config.verifyAfterExecution ?? true,
     };
     this._approvalGateway = runtime.approvalGateway ?? globalApprovalGateway;
-    this._executionPolicy = runtime.executionPolicy ?? new ExecutionPolicyRegistry(runtime.policies);
+    this._executionPolicy =
+      runtime.executionPolicy ?? new ExecutionPolicyRegistry(runtime.policies);
   }
 
   // ─── State Query ────────────────────────────────────────────────────────────
@@ -135,10 +133,7 @@ export class ToolScheduler extends EventEmitter {
     }
 
     const activeRecord = [...this._calls.values()]
-      .filter((record) =>
-        record.status === 'awaiting_approval' ||
-        record.status === 'verifying',
-      )
+      .filter((record) => record.status === "awaiting_approval" || record.status === "verifying")
       .sort((left, right) => {
         const leftTs = left.statusHistory[left.statusHistory.length - 1]?.ts ?? left.createdAt;
         const rightTs = right.statusHistory[right.statusHistory.length - 1]?.ts ?? right.createdAt;
@@ -166,12 +161,12 @@ export class ToolScheduler extends EventEmitter {
       input,
       requestId,
       dependsOn: options?.dependsOn,
-      status: 'created',
-      statusHistory: [{ status: 'created', ts: now }],
+      status: "created",
+      statusHistory: [{ status: "created", ts: now }],
       createdAt: now,
     };
     this._calls.set(id, record);
-    this._transition(record, 'validating');
+    this._transition(record, "validating");
     return record;
   }
 
@@ -229,8 +224,8 @@ export class ToolScheduler extends EventEmitter {
           }
 
           const blockedReason = this._formatExplicitDependencyReason(request, explicitDependencies);
-          this._transition(record, 'blocked_by_dependency', blockedReason);
-          dependencyGraph.setState(request.id, 'failed');
+          this._transition(record, "blocked_by_dependency", blockedReason);
+          dependencyGraph.setState(request.id, "failed");
           results.set(request.id, {
             request,
             record,
@@ -248,8 +243,10 @@ export class ToolScheduler extends EventEmitter {
         );
         if (!dependencyState.satisfied) {
           const pendingToolDependencies = (dependencyState.missing ?? []).filter((dependencyTool) =>
-            pending.some((candidate) =>
-              candidate.request.id !== request.id && candidate.request.toolName === dependencyTool
+            pending.some(
+              (candidate) =>
+                candidate.request.id !== request.id &&
+                candidate.request.toolName === dependencyTool,
             ),
           );
           if (pendingToolDependencies.length > 0) {
@@ -257,10 +254,9 @@ export class ToolScheduler extends EventEmitter {
             continue;
           }
 
-          const blockedReason =
-            `Missing required tools: ${dependencyState.missing?.join(', ') ?? 'unknown'}`;
-          this._transition(record, 'blocked_by_dependency', blockedReason);
-          dependencyGraph.setState(request.id, 'failed');
+          const blockedReason = `Missing required tools: ${dependencyState.missing?.join(", ") ?? "unknown"}`;
+          this._transition(record, "blocked_by_dependency", blockedReason);
+          dependencyGraph.setState(request.id, "failed");
           results.set(request.id, {
             request,
             record,
@@ -273,11 +269,11 @@ export class ToolScheduler extends EventEmitter {
         }
 
         const approval = this._approvalGateway.check(request.toolName, request.input);
-        if (approval.decision === 'auto_deny') {
-          const deniedReason = approval.reason ?? 'Approval denied.';
+        if (approval.decision === "auto_deny") {
+          const deniedReason = approval.reason ?? "Approval denied.";
           record.errorMessage = deniedReason;
-          this._transition(record, 'error', deniedReason);
-          dependencyGraph.setState(request.id, 'failed');
+          this._transition(record, "error", deniedReason);
+          dependencyGraph.setState(request.id, "failed");
           results.set(request.id, {
             request,
             record,
@@ -289,9 +285,9 @@ export class ToolScheduler extends EventEmitter {
           continue;
         }
 
-        if (approval.decision === 'requires_approval') {
-          const approvalReason = approval.reason ?? 'Approval required.';
-          this._transition(record, 'awaiting_approval', approvalReason);
+        if (approval.decision === "requires_approval") {
+          const approvalReason = approval.reason ?? "Approval required.";
+          this._transition(record, "awaiting_approval", approvalReason);
           results.set(request.id, {
             request,
             record,
@@ -304,10 +300,11 @@ export class ToolScheduler extends EventEmitter {
         }
 
         this.schedule(record.id);
-        if (record.status !== 'executing') {
-          const blockedReason = record.status === 'awaiting_approval'
-            ? 'Approval required.'
-            : `Tool did not enter executing state (status=${record.status}).`;
+        if (record.status !== "executing") {
+          const blockedReason =
+            record.status === "awaiting_approval"
+              ? "Approval required."
+              : `Tool did not enter executing state (status=${record.status}).`;
           results.set(request.id, {
             request,
             record,
@@ -325,7 +322,7 @@ export class ToolScheduler extends EventEmitter {
 
           if (result.isError) {
             this.error(record.id, result.content);
-            dependencyGraph.setState(request.id, 'failed');
+            dependencyGraph.setState(request.id, "failed");
             results.set(request.id, {
               request,
               record,
@@ -338,19 +335,19 @@ export class ToolScheduler extends EventEmitter {
           }
 
           const completion = await this.complete(record.id, result, {
-            bashCommand: request.toolName === 'Bash'
-              ? String(request.input['command'] ?? '')
-              : undefined,
-            writtenFile: request.toolName === 'Write' || request.toolName === 'Edit'
-              ? String(request.input['file_path'] ?? '')
-              : undefined,
+            bashCommand:
+              request.toolName === "Bash" ? String(request.input["command"] ?? "") : undefined,
+            writtenFile:
+              request.toolName === "Write" || request.toolName === "Edit"
+                ? String(request.input["file_path"] ?? "")
+                : undefined,
             projectRoot: context.projectRoot,
           });
           if (this._shouldCountAsCompleted(request, result)) {
             completedTools.add(request.toolName);
-            dependencyGraph.setState(request.id, 'satisfied');
+            dependencyGraph.setState(request.id, "satisfied");
           } else {
-            dependencyGraph.setState(request.id, 'pending');
+            dependencyGraph.setState(request.id, "pending");
           }
           results.set(request.id, {
             request,
@@ -365,7 +362,7 @@ export class ToolScheduler extends EventEmitter {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           this.error(record.id, message);
-          dependencyGraph.setState(request.id, 'failed');
+          dependencyGraph.setState(request.id, "failed");
           results.set(request.id, {
             request,
             record,
@@ -394,16 +391,16 @@ export class ToolScheduler extends EventEmitter {
   schedule(id: string): void {
     const record = this._calls.get(id);
     if (!record) throw new Error(`ToolScheduler: unknown call id ${id}`);
-    if (record.status === 'validating') {
+    if (record.status === "validating") {
       // Check approval requirement
       if (this._requiresApproval(record)) {
-        this._transition(record, 'awaiting_approval');
+        this._transition(record, "awaiting_approval");
         return;
       }
-      this._transition(record, 'scheduled');
+      this._transition(record, "scheduled");
     }
-    if (record.status === 'scheduled') {
-      this._transition(record, 'executing');
+    if (record.status === "scheduled") {
+      this._transition(record, "executing");
       this._activeCallId = id;
       record.startedAt = Date.now();
     }
@@ -412,8 +409,8 @@ export class ToolScheduler extends EventEmitter {
   /** Approve a call that is awaiting_approval */
   approve(id: string): void {
     const record = this._calls.get(id);
-    if (!record || record.status !== 'awaiting_approval') return;
-    this._transition(record, 'scheduled');
+    if (!record || record.status !== "awaiting_approval") return;
+    this._transition(record, "scheduled");
     this.schedule(id);
   }
 
@@ -421,7 +418,7 @@ export class ToolScheduler extends EventEmitter {
   cancel(id: string, reason?: string): void {
     const record = this._calls.get(id);
     if (!record || TERMINAL_STATES.has(record.status)) return;
-    this._transition(record, 'cancelled', reason);
+    this._transition(record, "cancelled", reason);
     if (this._activeCallId === id) this._activeCallId = null;
   }
 
@@ -440,26 +437,26 @@ export class ToolScheduler extends EventEmitter {
     },
   ): Promise<{ verificationMessage?: string }> {
     const record = this._calls.get(id);
-    if (!record || record.status !== 'executing') return {};
+    if (!record || record.status !== "executing") return {};
 
     record.result = result;
 
     if (this._config.verifyAfterExecution && options) {
-      this._transition(record, 'verifying');
+      this._transition(record, "verifying");
 
       const verificationMessage = await this._runPostExecutionVerification(record, options);
 
       if (verificationMessage) {
         // Verification failed — mark as success anyway (the message goes to model as warning)
         // We don't block execution in Phase 1; we only inject the warning message
-        this._transition(record, 'success');
+        this._transition(record, "success");
         if (this._activeCallId === id) this._activeCallId = null;
         record.completedAt = Date.now();
         return { verificationMessage };
       }
     }
 
-    this._transition(record, 'success');
+    this._transition(record, "success");
     if (this._activeCallId === id) this._activeCallId = null;
     record.completedAt = Date.now();
     return {};
@@ -471,7 +468,7 @@ export class ToolScheduler extends EventEmitter {
     if (!record) return;
     if (!TERMINAL_STATES.has(record.status)) {
       record.errorMessage = errorMessage;
-      this._transition(record, 'error', errorMessage);
+      this._transition(record, "error", errorMessage);
       if (this._activeCallId === id) this._activeCallId = null;
       record.completedAt = Date.now();
     }
@@ -490,10 +487,7 @@ export class ToolScheduler extends EventEmitter {
    * Run verification for a completed Bash tool call.
    * Returns a warning string to inject into toolResults, or null if all good.
    */
-  async verifyBashArtifacts(
-    bashCommand: string,
-    projectRoot: string,
-  ): Promise<string | null> {
+  async verifyBashArtifacts(bashCommand: string, projectRoot: string): Promise<string | null> {
     const inferred = inferVerificationChecks(bashCommand);
     if (inferred.length === 0) return null;
 
@@ -508,12 +502,12 @@ export class ToolScheduler extends EventEmitter {
         const rec = this._artifacts.record({
           kind: artifact,
           path: target,
-          toolCallId: 'bash',
+          toolCallId: "bash",
           sourceUrl: undefined,
         });
         this._artifacts.markVerified(rec.id);
         allRecorded.push(rec);
-        this.emit('artifactRecorded', rec);
+        this.emit("artifactRecorded", rec);
       }
     }
 
@@ -525,28 +519,25 @@ export class ToolScheduler extends EventEmitter {
     return allResults
       .filter((r) => !r.passed)
       .map((r) => formatVerificationMessage(r, bashCommand))
-      .join('\n');
+      .join("\n");
   }
 
   /**
    * Run verification for a completed Write tool call.
    * Returns a warning string to inject into toolResults, or null if all good.
    */
-  async verifyWriteArtifact(
-    filePath: string,
-    projectRoot: string,
-  ): Promise<string | null> {
+  async verifyWriteArtifact(filePath: string, projectRoot: string): Promise<string | null> {
     const checks = buildFileWriteChecks(filePath);
     const result = await runVerificationChecks(checks, projectRoot);
 
     if (result.passed) {
       const rec = this._artifacts.record({
-        kind: 'file_write',
+        kind: "file_write",
         path: filePath,
-        toolCallId: 'write',
+        toolCallId: "write",
       });
       this._artifacts.markVerified(rec.id);
-      this.emit('artifactRecorded', rec);
+      this.emit("artifactRecorded", rec);
       return null;
     }
 
@@ -568,51 +559,43 @@ export class ToolScheduler extends EventEmitter {
       artifacts: record.artifacts ? [...record.artifacts] : undefined,
       result: record.result
         ? {
-          ...record.result,
-          evidence: record.result.evidence ? { ...record.result.evidence } : undefined,
-        }
+            ...record.result,
+            evidence: record.result.evidence ? { ...record.result.evidence } : undefined,
+          }
         : undefined,
       verificationResult: record.verificationResult
         ? {
-          passed: record.verificationResult.passed,
-          checks: [...record.verificationResult.checks],
-          failedChecks: [...record.verificationResult.failedChecks],
-        }
+            passed: record.verificationResult.passed,
+            checks: [...record.verificationResult.checks],
+            failedChecks: [...record.verificationResult.failedChecks],
+          }
         : undefined,
     };
 
-    if (restored.status === 'executing') {
+    if (restored.status === "executing") {
       if (restored.result?.isError) {
         this._resumeWithError(
           restored,
-          restored.result.content || 'Tool execution failed before resume.',
+          restored.result.content || "Tool execution failed before resume.",
         );
       } else if (restored.result) {
-        this._resumeTransition(
-          restored,
-          'verifying',
-          'Resumed from persisted execution evidence.',
-        );
+        this._resumeTransition(restored, "verifying", "Resumed from persisted execution evidence.");
       } else {
         this._resumeWithError(
           restored,
-          'Tool was executing when interrupted but no persisted execution evidence was available.',
+          "Tool was executing when interrupted but no persisted execution evidence was available.",
         );
       }
-    } else if (restored.status === 'verifying') {
+    } else if (restored.status === "verifying") {
       if (restored.verificationResult?.passed === true) {
-        this._resumeTransition(
-          restored,
-          'success',
-          'Verification completed before resume.',
-        );
+        this._resumeTransition(restored, "success", "Verification completed before resume.");
         restored.completedAt ??= Date.now();
       } else if (restored.verificationResult?.passed === false) {
-        this._resumeWithError(restored, 'Tool verification failed before resume.');
+        this._resumeWithError(restored, "Tool verification failed before resume.");
       } else if (restored.result?.isError) {
         this._resumeWithError(
           restored,
-          restored.result.content || 'Tool execution failed before verification completed.',
+          restored.result.content || "Tool execution failed before verification completed.",
         );
       }
     }
@@ -620,46 +603,46 @@ export class ToolScheduler extends EventEmitter {
     return restored;
   }
 
-  private _dependencyStateFromRecord(record: ToolCallRecord): 'pending' | 'satisfied' | 'failed' {
-    if (record.status === 'success') {
-      if (record.toolName === 'SubAgent' && record.input['background'] === true) {
-        return 'pending';
+  private _dependencyStateFromRecord(record: ToolCallRecord): "pending" | "satisfied" | "failed" {
+    if (record.status === "success") {
+      if (record.toolName === "SubAgent" && record.input["background"] === true) {
+        return "pending";
       }
-      return 'satisfied';
+      return "satisfied";
     }
 
     if (
-      record.status === 'error' ||
-      record.status === 'blocked_by_dependency' ||
-      record.status === 'cancelled' ||
-      record.status === 'timed_out'
+      record.status === "error" ||
+      record.status === "blocked_by_dependency" ||
+      record.status === "cancelled" ||
+      record.status === "timed_out"
     ) {
-      return 'failed';
+      return "failed";
     }
 
-    return 'pending';
+    return "pending";
   }
 
   private _formatExplicitDependencyReason(
     request: Required<ToolSchedulerExecutionRequest>,
-    readiness: ReturnType<DependencyGraph['inspect']>,
+    readiness: ReturnType<DependencyGraph["inspect"]>,
   ): string {
     if (readiness.cycle) {
-      return `Dependency cycle detected: ${readiness.cycle.join(' -> ')}`;
+      return `Dependency cycle detected: ${readiness.cycle.join(" -> ")}`;
     }
 
     const parts: string[] = [];
     if (readiness.missing.length > 0) {
-      parts.push(`missing tool calls: ${readiness.missing.join(', ')}`);
+      parts.push(`missing tool calls: ${readiness.missing.join(", ")}`);
     }
     if (readiness.failed.length > 0) {
-      parts.push(`failed prerequisites: ${readiness.failed.join(', ')}`);
+      parts.push(`failed prerequisites: ${readiness.failed.join(", ")}`);
     }
     if (readiness.pending.length > 0) {
-      parts.push(`pending prerequisites: ${readiness.pending.join(', ')}`);
+      parts.push(`pending prerequisites: ${readiness.pending.join(", ")}`);
     }
 
-    return `${request.toolName} is blocked by dependency state (${parts.join('; ')})`;
+    return `${request.toolName} is blocked by dependency state (${parts.join("; ")})`;
   }
 
   private _flushPausedRequests(
@@ -671,7 +654,7 @@ export class ToolScheduler extends EventEmitter {
     reason: string,
   ): void {
     for (const { request, record } of pending) {
-      this._transition(record, 'blocked_by_dependency', reason);
+      this._transition(record, "blocked_by_dependency", reason);
       results.set(request.id, {
         request,
         record,
@@ -697,9 +680,9 @@ export class ToolScheduler extends EventEmitter {
         completedTools,
       );
       const blockedReason = explicitDependencies.ready
-        ? `Missing required tools: ${policyDependencies.missing?.join(', ') ?? 'unknown'}`
+        ? `Missing required tools: ${policyDependencies.missing?.join(", ") ?? "unknown"}`
         : this._formatExplicitDependencyReason(request, explicitDependencies);
-      this._transition(record, 'blocked_by_dependency', blockedReason);
+      this._transition(record, "blocked_by_dependency", blockedReason);
       results.set(request.id, {
         request,
         record,
@@ -717,7 +700,7 @@ export class ToolScheduler extends EventEmitter {
       return false;
     }
 
-    if (request.toolName === 'SubAgent' && request.input['background'] === true) {
+    if (request.toolName === "SubAgent" && request.input["background"] === true) {
       return false;
     }
 
@@ -735,14 +718,10 @@ export class ToolScheduler extends EventEmitter {
     const previous = record.status;
     record.status = to;
     record.statusHistory.push({ status: to, ts: Date.now(), reason });
-    this.emit('stateChange', record, previous);
+    this.emit("stateChange", record, previous);
   }
 
-  private _resumeTransition(
-    record: ToolCallRecord,
-    to: ToolCallStatus,
-    reason: string,
-  ): void {
+  private _resumeTransition(record: ToolCallRecord, to: ToolCallStatus, reason: string): void {
     if (record.status === to) {
       return;
     }
@@ -757,7 +736,7 @@ export class ToolScheduler extends EventEmitter {
 
   private _resumeWithError(record: ToolCallRecord, message: string): void {
     record.errorMessage = message;
-    this._resumeTransition(record, 'error', message);
+    this._resumeTransition(record, "error", message);
     record.completedAt ??= Date.now();
   }
 
@@ -775,7 +754,7 @@ export class ToolScheduler extends EventEmitter {
           checks: [],
           failedChecks: [],
         };
-        this.emit('verificationFailed', record, vResult, msg);
+        this.emit("verificationFailed", record, vResult, msg);
         return msg;
       }
     }
@@ -788,7 +767,7 @@ export class ToolScheduler extends EventEmitter {
           checks: [],
           failedChecks: [],
         };
-        this.emit('verificationFailed', record, vResult, msg);
+        this.emit("verificationFailed", record, vResult, msg);
         return msg;
       }
     }

@@ -126,7 +126,9 @@ describe("createDefaultToolHandlers", () => {
           executions.some(
             (entry) =>
               entry.id === result.executionId &&
-              (entry.status === "completed" || entry.status === "failed" || entry.status === "blocked"),
+              (entry.status === "completed" ||
+                entry.status === "failed" ||
+                entry.status === "blocked"),
           )
         ) {
           break;

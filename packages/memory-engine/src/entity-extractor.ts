@@ -22,8 +22,7 @@ const FUNCTION_RE = /\b([a-z][a-zA-Z0-9]{3,}|[A-Z][a-zA-Z0-9]{3,})\s*\(/g;
 const CLASS_RE = /\b(class|interface|type|enum)\s+([A-Z][a-zA-Z0-9]+)/g;
 
 /** npm package imports */
-const PACKAGE_RE =
-  /(?:from\s+|require\()['"](@[a-z0-9-]+\/[a-z0-9-]+|[a-z][\w-]{1,})['"]/g;
+const PACKAGE_RE = /(?:from\s+|require\()['"](@[a-z0-9-]+\/[a-z0-9-]+|[a-z][\w-]{1,})['"]/g;
 
 /** Error patterns */
 const ERROR_RE =
@@ -61,10 +60,7 @@ export class EntityExtractor {
   extract(text: string, sessionId?: string, memoryKey?: string): MemoryEntity[] {
     const entityMap = new Map<string, MemoryEntity>();
 
-    const addEntity = (
-      name: string,
-      type: MemoryEntity["type"],
-    ) => {
+    const addEntity = (name: string, type: MemoryEntity["type"]) => {
       const normalizedName = name.trim();
       if (!normalizedName || normalizedName.length < 2) return;
 
@@ -168,7 +164,11 @@ export class EntityExtractor {
   /**
    * Model-backed extraction (if provider is set). Falls back to regex.
    */
-  async extractAsync(text: string, sessionId?: string, memoryKey?: string): Promise<MemoryEntity[]> {
+  async extractAsync(
+    text: string,
+    sessionId?: string,
+    memoryKey?: string,
+  ): Promise<MemoryEntity[]> {
     if (this.modelExtractor) {
       try {
         return await this.modelExtractor(text);

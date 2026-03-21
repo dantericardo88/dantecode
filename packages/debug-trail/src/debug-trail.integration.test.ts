@@ -21,17 +21,11 @@ import { ExportEngine } from "./export-engine.js";
 // ---------------------------------------------------------------------------
 
 function makeTempDir(): string {
-  return join(
-    tmpdir(),
-    `debug-trail-test-${Date.now()}${Math.random().toString(36).slice(2)}`,
-  );
+  return join(tmpdir(), `debug-trail-test-${Date.now()}${Math.random().toString(36).slice(2)}`);
 }
 
 function makeStorageRoot(): string {
-  return join(
-    tmpdir(),
-    `debug-trail-store-${Date.now()}${Math.random().toString(36).slice(2)}`,
-  );
+  return join(tmpdir(), `debug-trail-store-${Date.now()}${Math.random().toString(36).slice(2)}`);
 }
 
 function makeProvenance(sessionId: string) {
@@ -123,12 +117,22 @@ describe("GF-02: Delete tombstone + restore", () => {
     const prov = makeProvenance(sessionId);
 
     // Record deletion (captures before-state automatically)
-    const tombstone = await snapshotter.recordDeletion(filePath, "gf02-del-event", prov, "TestActor");
+    const tombstone = await snapshotter.recordDeletion(
+      filePath,
+      "gf02-del-event",
+      prov,
+      "TestActor",
+    );
     expect(tombstone.beforeStateCaptured).toBe(true);
     expect(tombstone.lastSnapshotId).toBeDefined();
 
     // Log the delete event
-    await logger.logFileDelete(filePath, tombstone.contentHash, tombstone.lastSnapshotId, tombstone.tombstoneId);
+    await logger.logFileDelete(
+      filePath,
+      tombstone.contentHash,
+      tombstone.lastSnapshotId,
+      tombstone.tombstoneId,
+    );
 
     // Actually delete the file from disk
     await unlink(filePath);
@@ -178,7 +182,11 @@ describe("GF-03: Before/after snapshot pair", () => {
     const snapshotter = new FileSnapshotter(config);
 
     // Capture before-state
-    const { beforeSnapshotId } = await snapshotter.captureBeforeState(filePath, "gf03-before", prov);
+    const { beforeSnapshotId } = await snapshotter.captureBeforeState(
+      filePath,
+      "gf03-before",
+      prov,
+    );
     expect(beforeSnapshotId).not.toBeNull();
 
     // Mutate the file

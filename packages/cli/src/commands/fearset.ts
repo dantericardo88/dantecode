@@ -75,7 +75,8 @@ function cmdStats(projectRoot: string): void {
     totalRiskReduction += r.robustnessScore?.estimatedRiskReduction ?? 0;
   }
 
-  const avgRisk = results.length > 0 ? ((totalRiskReduction / results.length) * 100).toFixed(0) : "0";
+  const avgRisk =
+    results.length > 0 ? ((totalRiskReduction / results.length) * 100).toFixed(0) : "0";
   const passRate = results.length > 0 ? ((passCount / results.length) * 100).toFixed(0) : "0";
 
   console.log(`\n${BOLD}DanteFearSet Stats${RESET}`);
@@ -110,10 +111,14 @@ function cmdReview(args: string[], projectRoot: string): void {
   console.log(`\n${BOLD}FearSet Result Review${RESET}`);
   console.log(`  ID:           ${CYAN}${result.id}${RESET}`);
   console.log(`  Context:      ${result.context.slice(0, 100)}`);
-  console.log(`  Trigger:      ${result.trigger.channel}${result.trigger.rationale ? ` — ${result.trigger.rationale.slice(0, 60)}` : ""}`);
+  console.log(
+    `  Trigger:      ${result.trigger.channel}${result.trigger.rationale ? ` — ${result.trigger.rationale.slice(0, 60)}` : ""}`,
+  );
   console.log(`  Mode:         ${result.mode}`);
   console.log(`  Columns:      ${result.columns.map((c) => c.name).join(", ")}`);
-  console.log(`  Robustness:   ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "pending"})`);
+  console.log(
+    `  Robustness:   ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "pending"})`,
+  );
   console.log(`  Passed:       ${result.passed ? `${GREEN}YES${RESET}` : `${RED}NO${RESET}`}`);
 
   if (result.synthesizedRecommendation) {
@@ -132,7 +137,9 @@ function cmdReview(args: string[], projectRoot: string): void {
   }
 
   if (result.robustnessScore?.estimatedRiskReduction !== undefined) {
-    console.log(`  Risk reduction: ${(result.robustnessScore.estimatedRiskReduction * 100).toFixed(0)}%`);
+    console.log(
+      `  Risk reduction: ${(result.robustnessScore.estimatedRiskReduction * 100).toFixed(0)}%`,
+    );
   }
 
   console.log(`  Started:      ${DIM}${result.startedAt}${RESET}`);
@@ -145,11 +152,14 @@ function cmdReview(args: string[], projectRoot: string): void {
       const indicator = col.validationWarnings?.length ? `${YELLOW}⚠${RESET}` : `${GREEN}✓${RESET}`;
       const details: string[] = [];
       if (col.worstCases.length > 0) details.push(`${col.worstCases.length} worst-cases`);
-      if (col.preventionActions.length > 0) details.push(`${col.preventionActions.length} preventions`);
+      if (col.preventionActions.length > 0)
+        details.push(`${col.preventionActions.length} preventions`);
       if (col.repairPlans.length > 0) details.push(`${col.repairPlans.length} repairs`);
       if (col.benefits.length > 0) details.push(`${col.benefits.length} benefits`);
       if (col.inactionCosts.length > 0) details.push(`${col.inactionCosts.length} inaction costs`);
-      console.log(`  ${indicator} ${CYAN}${col.name.padEnd(10)}${RESET} ${details.join(", ") || DIM + "empty" + RESET}`);
+      console.log(
+        `  ${indicator} ${CYAN}${col.name.padEnd(10)}${RESET} ${details.join(", ") || DIM + "empty" + RESET}`,
+      );
       if (col.validationWarnings?.length) {
         for (const w of col.validationWarnings) console.log(`      ${DIM}! ${w}${RESET}`);
       }
@@ -176,7 +186,10 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
     const single = store.load(idArg);
     if (!single) throw new Error(`FearSet result not found: ${idArg}`);
     if (!single.passed) throw new Error(`Result ${idArg} did not pass the gate — cannot distill.`);
-    if (single.distilledAt) throw new Error(`Result ${idArg} was already distilled at ${single.distilledAt}. Replay protection active.`);
+    if (single.distilledAt)
+      throw new Error(
+        `Result ${idArg} was already distilled at ${single.distilledAt}. Replay protection active.`,
+      );
     results = [single];
   } else {
     results = store.list().filter((r) => r.passed && !r.distilledAt);
@@ -184,7 +197,9 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
 
   if (results.length === 0) {
     console.log(`${YELLOW}No undistilled passed FearSet results found.${RESET}`);
-    console.log(`${DIM}A result becomes distillable when the DanteForge gate returns PASS.${RESET}`);
+    console.log(
+      `${DIM}A result becomes distillable when the DanteForge gate returns PASS.${RESET}`,
+    );
     console.log(`${DIM}Results stored in .dantecode/fearset/results/{id}.json${RESET}`);
     return;
   }
@@ -210,13 +225,17 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
       store.markDistilled(result.id);
       totalLessons += applied.applied;
 
-      console.log(`\n${GREEN}${BOLD}FearSet → Skillbook: ${applied.applied} lesson(s) distilled${RESET}`);
+      console.log(
+        `\n${GREEN}${BOLD}FearSet → Skillbook: ${applied.applied} lesson(s) distilled${RESET}`,
+      );
       console.log(`  Result ID:  ${CYAN}${result.id}${RESET}`);
       console.log(`  Context:    ${result.context.slice(0, 80)}`);
       console.log(`  Trigger:    ${result.trigger.channel}`);
       console.log(`  Columns:    ${result.columns.map((c) => c.name).join(", ")}`);
       for (const l of lessons) {
-        console.log(`  Section:    ${DIM}${l.section}${RESET} (trust: ${(l.trustScore * 100).toFixed(0)}%)`);
+        console.log(
+          `  Section:    ${DIM}${l.section}${RESET} (trust: ${(l.trustScore * 100).toFixed(0)}%)`,
+        );
       }
     } else {
       console.error(`${RED}applyProposals returned 0 applied for ${result.id}${RESET}`);
@@ -240,7 +259,9 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
   if (!context) {
     console.log(`${RED}Usage: dantecode fearset run "<decision context>" [--offline]${RESET}`);
     console.log(`${DIM}Example: dantecode fearset run "Should we migrate to PostgreSQL?"${RESET}`);
-    console.log(`${DIM}         dantecode fearset run "Should we sunset the v1 API?" --offline${RESET}`);
+    console.log(
+      `${DIM}         dantecode fearset run "Should we sunset the v1 API?" --offline${RESET}`,
+    );
     return;
   }
 
@@ -257,7 +278,9 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
       console.log(`${DIM}Running with LLM analysis (use --offline for structural only).${RESET}\n`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`${YELLOW}LLM setup failed (${msg}) — falling back to structural-only mode.${RESET}\n`);
+      console.warn(
+        `${YELLOW}LLM setup failed (${msg}) — falling back to structural-only mode.${RESET}\n`,
+      );
     }
   }
 
@@ -266,11 +289,17 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
     ...callbacks,
     onColumnComplete: (col, _column, warnings) => {
       const indicator = warnings.length ? `${YELLOW}⚠${RESET}` : `${GREEN}✓${RESET}`;
-      console.log(`  ${indicator} ${CYAN}${col}${RESET} — ${DIM}${warnings.length ? warnings.join("; ") : "ready"}${RESET}`);
+      console.log(
+        `  ${indicator} ${CYAN}${col}${RESET} — ${DIM}${warnings.length ? warnings.join("; ") : "ready"}${RESET}`,
+      );
     },
   };
 
-  const trigger = { channel: "explicit-user" as const, rationale: "CLI run command", at: new Date().toISOString() };
+  const trigger = {
+    channel: "explicit-user" as const,
+    rationale: "CLI run command",
+    at: new Date().toISOString(),
+  };
   const result = await runFearSetEngine(context, trigger, callbacks, {
     config: { ...DEFAULT_FEARSET_CONFIG, enabled: true },
   });
@@ -281,7 +310,9 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
   console.log(`\n${BOLD}Result:${RESET}`);
   console.log(`  ID:       ${CYAN}${result.id}${RESET}`);
   console.log(`  Passed:   ${result.passed ? `${GREEN}YES${RESET}` : `${RED}NO${RESET}`}`);
-  console.log(`  Robust:   ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "n/a"})`);
+  console.log(
+    `  Robust:   ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "n/a"})`,
+  );
 
   if (result.synthesizedRecommendation) {
     const rec = result.synthesizedRecommendation;
@@ -295,7 +326,9 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
   }
 
   if (result.passed) {
-    console.log(`\n${DIM}Run 'dantecode fearset bridge' to distill this result into DanteSkillbook.${RESET}`);
+    console.log(
+      `\n${DIM}Run 'dantecode fearset bridge' to distill this result into DanteSkillbook.${RESET}`,
+    );
   }
 }
 

@@ -75,9 +75,11 @@ describe("renderTokenDashboard", () => {
     // Get data-row lines (contain │ but not ╭ or ╰)
     const rowFilter = (l: string) => l.includes("│") && !l.includes("╭") && !l.includes("╰");
     const noColorRows = renderTokenDashboard(BASE_DATA, new ThemeEngine({ colors: false }))
-      .split("\n").filter(rowFilter);
+      .split("\n")
+      .filter(rowFilter);
     const colorRows = renderTokenDashboard(BASE_DATA, new ThemeEngine({ colors: true }))
-      .split("\n").filter(rowFilter);
+      .split("\n")
+      .filter(rowFilter);
     for (let i = 0; i < Math.min(noColorRows.length, colorRows.length); i++) {
       const noColorWidth = noColorRows[i]!.length; // no ANSI, raw = visible
       const colorVisibleWidth = stripAnsi(colorRows[i]!).length;

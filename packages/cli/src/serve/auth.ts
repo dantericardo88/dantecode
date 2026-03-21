@@ -37,10 +37,7 @@ export interface RouteResponse {
  * - No password is configured (open localhost mode), OR
  * - The request carries valid HTTP Basic credentials.
  */
-export function checkAuth(
-  headers: Record<string, string>,
-  config: AuthConfig,
-): boolean {
+export function checkAuth(headers: Record<string, string>, config: AuthConfig): boolean {
   // No password configured — allow all requests.
   // Explicitly check undefined/null only: an empty string IS a configured password.
   if (config.password === undefined || config.password === null) return true;

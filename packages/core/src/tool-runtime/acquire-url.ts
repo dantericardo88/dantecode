@@ -8,13 +8,13 @@
  * - Detailed progress and error reporting for the model
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as crypto from 'node:crypto';
-import * as https from 'node:https';
-import * as http from 'node:http';
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as crypto from "node:crypto";
+import * as https from "node:https";
+import * as http from "node:http";
 
-import { globalArtifactStore } from './artifact-store.js';
+import { globalArtifactStore } from "./artifact-store.js";
 
 export interface AcquireUrlOptions {
   /** URL to download */
@@ -72,20 +72,18 @@ export async function acquireUrl(options: AcquireUrlOptions): Promise<AcquireUrl
     return err(`Invalid URL: ${url}`);
   }
 
-  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
     return err(`Only HTTP/HTTPS URLs supported, got: ${parsedUrl.protocol}`);
   }
 
   // Resolve destination
-  const dest = path.isAbsolute(options.dest)
-    ? options.dest
-    : path.join(projectRoot, options.dest);
+  const dest = path.isAbsolute(options.dest) ? options.dest : path.join(projectRoot, options.dest);
 
   // Check overwrite policy
   if (!overwrite && fs.existsSync(dest)) {
     return err(
       `Destination already exists: ${dest}\n` +
-      `Pass overwrite: true to replace it, or choose a different dest path.`,
+        `Pass overwrite: true to replace it, or choose a different dest path.`,
     );
   }
 
@@ -98,20 +96,19 @@ export async function acquireUrl(options: AcquireUrlOptions): Promise<AcquireUrl
 
   // Download
   try {
-    const { statusCode, sizeBytes } = await downloadToFile(
-      url,
-      dest,
-      timeoutMs,
-      maxSizeBytes,
-    );
+    const { statusCode, sizeBytes } = await downloadToFile(url, dest, timeoutMs, maxSizeBytes);
 
     // Size check
     if (sizeBytes < minSizeBytes) {
       // Clean up the empty/small file
-      try { fs.unlinkSync(dest); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(dest);
+      } catch {
+        /* ignore */
+      }
       return err(
         `Download completed but file is too small (${sizeBytes} bytes < ${minSizeBytes} minimum).\n` +
-        `This usually means the URL returned an error page or redirect. Check the URL and try again.`,
+          `This usually means the URL returned an error page or redirect. Check the URL and try again.`,
       );
     }
 
@@ -120,9 +117,9 @@ export async function acquireUrl(options: AcquireUrlOptions): Promise<AcquireUrl
 
     // Register artifact
     const rec = globalArtifactStore.record({
-      kind: 'download',
+      kind: "download",
       path: dest,
-      toolCallId: 'acquire-url',
+      toolCallId: "acquire-url",
       sourceUrl: url,
       sizeBytes,
     });
@@ -146,7 +143,11 @@ export async function acquireUrl(options: AcquireUrlOptions): Promise<AcquireUrl
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     // Clean up partial file
-    try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch { /* ignore */ }
+    try {
+      if (fs.existsSync(dest)) fs.unlinkSync(dest);
+    } catch {
+      /* ignore */
+    }
     return err(`Download failed: ${msg}`);
   }
 }
@@ -154,7 +155,12 @@ export async function acquireUrl(options: AcquireUrlOptions): Promise<AcquireUrl
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 function err(message: string): AcquireUrlResult {
-  return { success: false, errorMessage: message, content: `[AcquireUrl] ERROR: ${message}`, isError: true };
+  return {
+    success: false,
+    errorMessage: message,
+    content: `[AcquireUrl] ERROR: ${message}`,
+    isError: true,
+  };
 }
 
 function formatBytes(bytes: number): string {
@@ -171,7 +177,7 @@ function downloadToFile(
 ): Promise<{ statusCode: number; sizeBytes: number }> {
   return new Promise((resolve, reject) => {
     const fileStream = fs.createWriteStream(dest);
-    const client = url.startsWith('https:') ? https : http;
+    const client = url.startsWith("https:") ? https : http;
 
     const timeout = setTimeout(() => {
       fileStream.destroy();
@@ -182,7 +188,10 @@ function downloadToFile(
       const statusCode = res.statusCode ?? 0;
 
       // Follow redirects (up to 5)
-      if ((statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) && res.headers.location) {
+      if (
+        (statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) &&
+        res.headers.location
+      ) {
         clearTimeout(timeout);
         fileStream.destroy();
         downloadToFile(res.headers.location, dest, timeoutMs, maxSizeBytes)
@@ -194,7 +203,7 @@ function downloadToFile(
       let sizeBytes = 0;
       res.pipe(fileStream);
 
-      res.on('data', (chunk: Buffer) => {
+      res.on("data", (chunk: Buffer) => {
         sizeBytes += chunk.length;
         if (sizeBytes > maxSizeBytes) {
           fileStream.destroy();
@@ -203,18 +212,18 @@ function downloadToFile(
         }
       });
 
-      fileStream.on('finish', () => {
+      fileStream.on("finish", () => {
         clearTimeout(timeout);
         resolve({ statusCode, sizeBytes });
       });
 
-      fileStream.on('error', (e) => {
+      fileStream.on("error", (e) => {
         clearTimeout(timeout);
         reject(e);
       });
     });
 
-    req.on('error', (e) => {
+    req.on("error", (e) => {
       clearTimeout(timeout);
       fileStream.destroy();
       reject(e);
@@ -224,10 +233,10 @@ function downloadToFile(
 
 async function hashFile(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
+    const hash = crypto.createHash("sha256");
     const stream = fs.createReadStream(filePath);
-    stream.on('data', (d) => hash.update(d));
-    stream.on('end', () => resolve(hash.digest('hex')));
-    stream.on('error', reject);
+    stream.on("data", (d) => hash.update(d));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
   });
 }

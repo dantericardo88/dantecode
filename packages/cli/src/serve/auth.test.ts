@@ -13,19 +13,13 @@ describe("checkAuth", () => {
 
   it("returns true for correct HTTP Basic credentials", () => {
     const encoded = Buffer.from("dantecode:mysecret").toString("base64");
-    const result = checkAuth(
-      { authorization: `Basic ${encoded}` },
-      { password: "mysecret" },
-    );
+    const result = checkAuth({ authorization: `Basic ${encoded}` }, { password: "mysecret" });
     expect(result).toBe(true);
   });
 
   it("returns false for wrong password", () => {
     const encoded = Buffer.from("dantecode:wrongpass").toString("base64");
-    const result = checkAuth(
-      { authorization: `Basic ${encoded}` },
-      { password: "correctpass" },
-    );
+    const result = checkAuth({ authorization: `Basic ${encoded}` }, { password: "correctpass" });
     expect(result).toBe(false);
   });
 
@@ -35,10 +29,7 @@ describe("checkAuth", () => {
   });
 
   it("returns false when Authorization header does not start with Basic", () => {
-    const result = checkAuth(
-      { authorization: "Bearer sometoken" },
-      { password: "mysecret" },
-    );
+    const result = checkAuth({ authorization: "Bearer sometoken" }, { password: "mysecret" });
     expect(result).toBe(false);
   });
 
@@ -53,10 +44,7 @@ describe("checkAuth", () => {
 
   it("returns false when username is wrong", () => {
     const encoded = Buffer.from("wronguser:pass123").toString("base64");
-    const result = checkAuth(
-      { authorization: `Basic ${encoded}` },
-      { password: "pass123" },
-    );
+    const result = checkAuth({ authorization: `Basic ${encoded}` }, { password: "pass123" });
     expect(result).toBe(false);
   });
 });

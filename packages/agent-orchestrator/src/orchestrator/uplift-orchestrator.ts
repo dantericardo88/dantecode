@@ -1,6 +1,4 @@
-import type {
-  EvidenceBundle,
-} from "@dantecode/runtime-spine";
+import type { EvidenceBundle } from "@dantecode/runtime-spine";
 import { ResearchPipeline } from "@dantecode/web-research";
 import { SubAgentSpawner } from "../subagent-spawner.js";
 import { WaveTreeManager } from "../hierarchy/tree-manager.js";

@@ -61,9 +61,7 @@ describe("verifySkill", () => {
       instructions: "Do the thing.",
     });
     const result = await verifySkill(skill);
-    const completenessFindings = result.findings.filter(
-      (f) => f.category === "completeness",
-    );
+    const completenessFindings = result.findings.filter((f) => f.category === "completeness");
     expect(completenessFindings.length).toBeGreaterThan(0);
     expect(completenessFindings.some((f) => f.message.includes("<50 chars"))).toBe(true);
   });
@@ -157,10 +155,13 @@ describe("verifySkill", () => {
       "Never truncate or omit required output fields.",
       "x".repeat(400),
     ].join("\n");
-    const result = await verifySkill(makeSkill({
-      instructions,
-      description: "A well-structured skill that performs data transformations with full validation and output constraints.",
-    }));
+    const result = await verifySkill(
+      makeSkill({
+        instructions,
+        description:
+          "A well-structured skill that performs data transformations with full validation and output constraints.",
+      }),
+    );
     expect(result.tier).toBe("sovereign");
     expect(result.overallScore).toBeGreaterThanOrEqual(85);
   });

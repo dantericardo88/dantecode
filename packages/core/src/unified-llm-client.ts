@@ -101,17 +101,14 @@ function sleep(ms: number): Promise<void> {
 /** Sort model IDs by ascending estimated cost. */
 function sortByCost(models: string[]): string[] {
   return [...models].sort(
-    (a, b) =>
-      (KNOWN_COST_PER_1K[a] ?? Infinity) - (KNOWN_COST_PER_1K[b] ?? Infinity),
+    (a, b) => (KNOWN_COST_PER_1K[a] ?? Infinity) - (KNOWN_COST_PER_1K[b] ?? Infinity),
   );
 }
 
 /** Sort model IDs by ascending estimated latency. */
 function sortByLatency(models: string[]): string[] {
   return [...models].sort(
-    (a, b) =>
-      (KNOWN_LATENCY_MS[a] ?? Infinity) -
-      (KNOWN_LATENCY_MS[b] ?? Infinity),
+    (a, b) => (KNOWN_LATENCY_MS[a] ?? Infinity) - (KNOWN_LATENCY_MS[b] ?? Infinity),
   );
 }
 
@@ -240,9 +237,7 @@ export class UnifiedLLMClient {
     }
 
     this.telemetry.errorCount++;
-    throw new Error(
-      `All fallback models failed:\n${errors.join("\n")}`,
-    );
+    throw new Error(`All fallback models failed:\n${errors.join("\n")}`);
   }
 
   // ── Streaming API ─────────────────────────────────────────────────────────
@@ -258,10 +253,7 @@ export class UnifiedLLMClient {
    * @param options  Standard call options (stream flag is forced to `true`).
    * @param onChunk  Callback invoked with each content fragment.
    */
-  async stream(
-    options: LLMCallOptions,
-    onChunk: (chunk: string) => void,
-  ): Promise<LLMCallResult> {
+  async stream(options: LLMCallOptions, onChunk: (chunk: string) => void): Promise<LLMCallResult> {
     this.telemetry.totalCalls++;
 
     const streamOptions: LLMCallOptions = { ...options, stream: true };

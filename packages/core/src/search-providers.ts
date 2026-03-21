@@ -157,9 +157,7 @@ export class ExaProvider implements SearchProvider {
       num_results: Math.min(options.maxResults, 20),
       use_autoprompt: true,
       type: "auto",
-      contents: options.includeRawContent
-        ? { text: { max_characters: 5000 } }
-        : undefined,
+      contents: options.includeRawContent ? { text: { max_characters: 5000 } } : undefined,
     };
 
     const response = await fetch("https://api.exa.ai/search", {
@@ -292,10 +290,9 @@ export class GoogleCSEProvider implements SearchProvider {
       num: String(Math.min(options.maxResults, 10)),
     });
 
-    const response = await fetch(
-      `https://www.googleapis.com/customsearch/v1?${params}`,
-      { signal: AbortSignal.timeout(10000) },
-    );
+    const response = await fetch(`https://www.googleapis.com/customsearch/v1?${params}`, {
+      signal: AbortSignal.timeout(10000),
+    });
 
     if (!response.ok) {
       throw new Error(`Google CSE HTTP ${response.status}: ${await response.text()}`);
@@ -346,17 +343,14 @@ export class BraveProvider implements SearchProvider {
       count: String(Math.min(options.maxResults, 20)),
     });
 
-    const response = await fetch(
-      `https://api.search.brave.com/res/v1/web/search?${params}`,
-      {
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip",
-          "X-Subscription-Token": this.apiKey,
-        },
-        signal: AbortSignal.timeout(10000),
+    const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
+      headers: {
+        Accept: "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": this.apiKey,
       },
-    );
+      signal: AbortSignal.timeout(10000),
+    });
 
     if (!response.ok) {
       throw new Error(`Brave HTTP ${response.status}`);
@@ -398,7 +392,7 @@ export class DuckDuckGoProvider implements SearchProvider {
   async search(query: string, options: SearchProviderOptions): Promise<SearchResult[]> {
     const results: SearchResult[] = [];
     const maxResults = options.maxResults || 15;
-    
+
     let df = "";
     if (options.timeRange === "day") df = "d";
     else if (options.timeRange === "week") df = "w";
@@ -428,7 +422,8 @@ export class DuckDuckGoProvider implements SearchProvider {
         method: isFirst ? "GET" : "POST",
         body: isFirst ? undefined : params,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
           // Only include Content-Type for POST
           ...(isFirst ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
@@ -466,9 +461,7 @@ export class DuckDuckGoProvider implements SearchProvider {
     const results: SearchResult[] = [];
 
     const resultBlocks =
-      html.match(
-        /<div[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi,
-      ) ?? [];
+      html.match(/<div[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) ?? [];
 
     for (const block of resultBlocks) {
       if (results.length >= maxLimit) break;
@@ -487,7 +480,12 @@ export class DuckDuckGoProvider implements SearchProvider {
       const snippet = snippetMatch ? htmlToReadableText(snippetMatch[1]!) : "";
 
       // Deduplicate duckduckgo ad links or self-referential links
-      if (title && url && !url.startsWith("//duckduckgo.com") && !url.includes("duckduckgo.com/y.js")) {
+      if (
+        title &&
+        url &&
+        !url.startsWith("//duckduckgo.com") &&
+        !url.includes("duckduckgo.com/y.js")
+      ) {
         results.push({ title, url, snippet, source: this.name });
       }
     }
@@ -495,9 +493,7 @@ export class DuckDuckGoProvider implements SearchProvider {
     // Fallback: extract links if structured parsing fails
     if (results.length === 0) {
       const linkMatches = [
-        ...html.matchAll(
-          /<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
-        ),
+        ...html.matchAll(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi),
       ];
       for (const match of linkMatches) {
         if (results.length >= maxLimit) break;
@@ -540,9 +536,7 @@ export function createSearchProviders(config?: Partial<SearchProviderConfig>): S
     duckduckgo: new DuckDuckGoProvider(),
   };
 
-  return order
-    .map((name) => providerMap[name])
-    .filter((p): p is SearchProvider => p !== undefined);
+  return order.map((name) => providerMap[name]).filter((p): p is SearchProvider => p !== undefined);
 }
 
 /** Load search provider config from environment variables. */

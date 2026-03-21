@@ -61,7 +61,9 @@ describe("renderDiff", () => {
     const result = renderDiff(SAMPLE_DIFF, { theme: THEME, compact: true });
     // Context lines start with space, should be fewer lines
     const normalResult = renderDiff(SAMPLE_DIFF, { theme: THEME, compact: false });
-    expect(result.rendered.split("\n").length).toBeLessThan(normalResult.rendered.split("\n").length);
+    expect(result.rendered.split("\n").length).toBeLessThan(
+      normalResult.rendered.split("\n").length,
+    );
   });
 });
 
@@ -88,7 +90,7 @@ describe("renderBeforeAfter — edge cases", () => {
     const result = renderBeforeAfter("new-file.ts", "", "line1\nline2\nline3", { theme: THEME });
     expect(result.additions).toBeGreaterThan(0);
     // empty string before splits to [""] → at most 1 spurious empty-line deletion
-    expect(result.deletions).toBeLessThanOrEqual(1);
+    expect(result.deletions).toBe(0);
   });
 
   it("truncates and shows warning for files > 800 lines per side", () => {

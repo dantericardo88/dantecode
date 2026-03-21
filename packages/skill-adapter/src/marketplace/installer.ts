@@ -74,9 +74,7 @@ async function resolveSource(
       return tmpDir;
     } catch (err) {
       await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-      throw new Error(
-        `Git clone failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`Git clone failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -96,15 +94,11 @@ async function resolveSource(
       return tmpDir;
     } catch (err) {
       await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-      throw new Error(
-        `HTTP fetch failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      throw new Error(`HTTP fetch failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  throw new Error(
-    "Cannot resolve skill source. Supported: local paths, git URLs, HTTP URLs.",
-  );
+  throw new Error("Cannot resolve skill source. Supported: local paths, git URLs, HTTP URLs.");
 }
 
 // ----------------------------------------------------------------------------
@@ -139,11 +133,7 @@ async function copySkillFiles(srcDir: string, destDir: string): Promise<void> {
       await mkdir(destScripts, { recursive: true });
       await copySkillFiles(srcPath, destScripts);
     } else if (entryStat.isFile()) {
-      if (
-        entry === "SKILL.md" ||
-        entry === "SKILL.dc.md" ||
-        /\.toml$/i.test(entry)
-      ) {
+      if (entry === "SKILL.md" || entry === "SKILL.dc.md" || /\.toml$/i.test(entry)) {
         try {
           await copyFile(srcPath, join(destDir, entry));
         } catch {

@@ -132,7 +132,8 @@ function createSession(ctx: ServerContext): RouteHandler {
       return { status: 429, body: { error: `Session limit reached (max ${MAX_SESSIONS})` } };
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const name = typeof body["name"] === "string" ? body["name"] : `Session ${ctx.sessions.size + 1}`;
+    const name =
+      typeof body["name"] === "string" ? body["name"] : `Session ${ctx.sessions.size + 1}`;
     const model = typeof body["model"] === "string" ? body["model"] : ctx.model;
 
     const id = generateId();
@@ -178,7 +179,10 @@ function sendMessage(ctx: ServerContext): RouteHandler {
 
     // Race condition guard: reject concurrent messages on the same session
     if (session.abortController) {
-      return { status: 409, body: { error: "Session already has an active agent run — POST /abort first" } };
+      return {
+        status: 409,
+        body: { error: "Session already has an active agent run — POST /abort first" },
+      };
     }
 
     const messageId = generateId();
@@ -366,7 +370,11 @@ function runVerification(ctx: ServerContext): RouteHandler {
           const filePath = best.paths[0] ?? join(ctx.projectRoot, f);
           const parsed = await parseUniversalSkill(filePath, best.format);
           const result = await verifySkill(parsed);
-          return { passed: result.passed, overallScore: result.overallScore, findings: result.findings };
+          return {
+            passed: result.passed,
+            overallScore: result.overallScore,
+            findings: result.findings,
+          };
         } catch {
           return { passed: true, overallScore: 100, findings: [] };
         }
@@ -378,7 +386,12 @@ function runVerification(ctx: ServerContext): RouteHandler {
         ? results.reduce((sum, r) => sum + r.overallScore, 0) / results.length
         : null;
     const allFindings = results.flatMap((r) => r.findings);
-    return ok({ projectRoot: ctx.projectRoot, files: safeFiles, pdseScore: avgScore, findings: allFindings });
+    return ok({
+      projectRoot: ctx.projectRoot,
+      files: safeFiles,
+      pdseScore: avgScore,
+      findings: allFindings,
+    });
   };
 }
 
@@ -432,6 +445,8 @@ function deleteSession(ctx: ServerContext): RouteHandler {
     if (!session) return notFound(sessionId);
     // Abort any in-flight agent before removing
     session.abortController?.abort();
+    // Notify any active SSE subscribers before removing the session
+    ctx.sessionEmitter.emitError(sessionId, "Session deleted");
     ctx.sessions.delete(sessionId);
     return ok({ deleted: true, sessionId });
   };

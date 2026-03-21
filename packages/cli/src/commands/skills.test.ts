@@ -114,7 +114,10 @@ vi.mock("node:child_process", async () => {
     execFile: (...args: unknown[]) => {
       // The promisified version calls execFile with a callback as last arg.
       // We simulate immediate success resolution.
-      const cb = args[args.length - 1] as (err: null, res: { stdout: string; stderr: string }) => void;
+      const cb = args[args.length - 1] as (
+        err: null,
+        res: { stdout: string; stderr: string },
+      ) => void;
       mockExecFile(...args);
       if (typeof cb === "function") {
         cb(null, { stdout: "", stderr: "" });
@@ -195,9 +198,11 @@ describe("skills convert --bundle-dir", () => {
   });
 
   it("--bundle-dir with non-existent directory: calls process.exit(1) with helpful error", async () => {
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number | string | null) => {
-      throw new Error("process.exit called");
-    });
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((_code?: number | string | null) => {
+        throw new Error("process.exit called");
+      });
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     const nonExistentDir = join(tmpRoot, "does-not-exist");
@@ -233,11 +238,7 @@ describe("skills import-bridge --dry-run", () => {
     await mkdir(projectRoot, { recursive: true });
     await mkdir(bundleDir, { recursive: true });
     // Write a minimal skillbridge.json so the path resolution works
-    await writeFile(
-      join(bundleDir, "skillbridge.json"),
-      JSON.stringify({ version: "1" }),
-      "utf-8",
-    );
+    await writeFile(join(bundleDir, "skillbridge.json"), JSON.stringify({ version: "1" }), "utf-8");
     mockImportSkillBridgeBundle.mockReset();
   });
 
@@ -308,7 +309,9 @@ describe("skills install", () => {
     await runSkillsCommand(["install", "."], projectRoot);
 
     expect(mockInstallSkill).toHaveBeenCalledTimes(1);
-    const [opts] = mockInstallSkill.mock.calls[0] as [{ source: string; tier: string; verify: boolean; force: boolean; symlink: boolean }];
+    const [opts] = mockInstallSkill.mock.calls[0] as [
+      { source: string; tier: string; verify: boolean; force: boolean; symlink: boolean },
+    ];
     expect(opts.source).toBe(".");
     expect(opts.tier).toBe("guardian");
     expect(opts.verify).toBe(true);
@@ -576,7 +579,9 @@ describe("skills export", () => {
 
     expect(mockGetSkill).toHaveBeenCalledWith("my-skill", projectRoot);
     expect(mockBundleSkill).toHaveBeenCalledTimes(1);
-    const [opts] = mockBundleSkill.mock.calls[0] as [{ skillName: string; includeVerification: boolean; includeScripts: boolean }];
+    const [opts] = mockBundleSkill.mock.calls[0] as [
+      { skillName: string; includeVerification: boolean; includeScripts: boolean },
+    ];
     expect(opts.skillName).toBe("my-skill");
     expect(opts.includeVerification).toBe(true);
     expect(opts.includeScripts).toBe(true);
@@ -743,7 +748,8 @@ describe("skills compose", () => {
       name: "mock-chain",
       getSteps: vi.fn().mockReturnValue([{ skillName: "step-one", params: {} }]),
     });
-    (mockSkillChainConstructor as unknown as Record<string, unknown>).fromYAML = mockSkillChainFromYAML;
+    (mockSkillChainConstructor as unknown as Record<string, unknown>).fromYAML =
+      mockSkillChainFromYAML;
   });
 
   afterEach(async () => {
@@ -870,9 +876,11 @@ describe("skills install --tier validation", () => {
   });
 
   it("--tier with invalid value: calls process.exit(1) with helpful error message", async () => {
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number | string | null) => {
-      throw new Error("process.exit called");
-    });
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((_code?: number | string | null) => {
+        throw new Error("process.exit called");
+      });
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(
@@ -890,9 +898,11 @@ describe("skills install --tier validation", () => {
 
   it("--tier with valid value 'sentinel': does NOT call process.exit", async () => {
     mockInstallSkill.mockResolvedValue({
-      success: true, name: "ok-skill",
+      success: true,
+      name: "ok-skill",
       installedPath: "/p/skills/ok-skill",
-      source: "/some/skill", format: "claude",
+      source: "/some/skill",
+      format: "claude",
     });
     const exitSpy = vi.spyOn(process, "exit");
 
@@ -926,9 +936,11 @@ describe("skills import-all --tier validation", () => {
   });
 
   it("import-all --tier with invalid value: calls process.exit(1)", async () => {
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number | string | null) => {
-      throw new Error("process.exit called");
-    });
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation((_code?: number | string | null) => {
+        throw new Error("process.exit called");
+      });
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(

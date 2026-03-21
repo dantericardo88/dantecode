@@ -7,7 +7,9 @@ import type { EventSourcedCheckpointer } from "./checkpointer.js";
 describe("MemoryOrchestrator", () => {
   it("can record a memory and sync to checkpointer", async () => {
     const mockRouter = {
-      generate: vi.fn().mockResolvedValue('{"summary":"test sum","entities":["E1"],"category":"fact"}'),
+      generate: vi
+        .fn()
+        .mockResolvedValue('{"summary":"test sum","entities":["E1"],"category":"fact"}'),
     } as unknown as ModelRouterImpl;
 
     const mockAutonomy = {
@@ -22,18 +24,20 @@ describe("MemoryOrchestrator", () => {
       { projectRoot: "/mock/root", sessionId: "session-123" },
       mockRouter,
       mockAutonomy,
-      mockCheckpointer
+      mockCheckpointer,
     );
 
     // Mock the PersistentMemory dependency internally for pure unit testing
     orchestrator.persistentMemory.store = vi.fn().mockResolvedValue({ id: "mem-1" });
 
     const entry = await orchestrator.recordMemory("Found a new fact", true);
-    
+
     expect(entry.id).toBe("mem-1");
-    expect(mockCheckpointer.putWrite).toHaveBeenCalledWith(expect.objectContaining({
-      channel: "memory_sync",
-      taskId: "memory-orchestrator"
-    }));
+    expect(mockCheckpointer.putWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "memory_sync",
+        taskId: "memory-orchestrator",
+      }),
+    );
   });
 });

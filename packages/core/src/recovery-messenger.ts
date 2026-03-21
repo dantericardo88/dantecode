@@ -62,8 +62,7 @@ const RECOVERY_TEMPLATES: Record<RecoveryScenario, Omit<RecoveryMessage, "scenar
 
   model_rate_limited: {
     title: "Model Rate Limited",
-    explanation:
-      "Your API key has hit the provider's rate limit — requests are being throttled.",
+    explanation: "Your API key has hit the provider's rate limit — requests are being throttled.",
     steps: [
       "Wait 60 seconds and retry automatically.",
       "Switch to a lower-tier model with /model to bypass the limit.",
@@ -101,8 +100,7 @@ const RECOVERY_TEMPLATES: Record<RecoveryScenario, Omit<RecoveryMessage, "scenar
 
   session_resume: {
     title: "Resuming Previous Session",
-    explanation:
-      "A saved checkpoint was found — DanteCode is resuming from where it left off.",
+    explanation: "A saved checkpoint was found — DanteCode is resuming from where it left off.",
     steps: [
       "Review .danteforge/STATE.yaml to confirm the correct checkpoint is loaded.",
       "Run /verify to validate the current state before continuing.",
@@ -165,8 +163,7 @@ const RECOVERY_TEMPLATES: Record<RecoveryScenario, Omit<RecoveryMessage, "scenar
 
   round_budget_exhausted: {
     title: "Round Budget Exhausted",
-    explanation:
-      "The session reached its maximum round limit before completing all tasks.",
+    explanation: "The session reached its maximum round limit before completing all tasks.",
     steps: [
       "Type 'continue' to automatically extend the budget and keep going.",
       "If the work is mostly done, run /verify to check what's complete.",

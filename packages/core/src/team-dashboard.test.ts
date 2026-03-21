@@ -55,7 +55,10 @@ describe("computeDashboardMetrics", () => {
     const events: AuditEvent[] = [
       makeEvent({ type: "verification_run", payload: { passed: true, pdseScore: 0.91 } }),
       makeEvent({ type: "qa_suite_run", payload: { passed: false, averagePdseScore: 0.62 } }),
-      makeEvent({ type: "critic_debate_run", payload: { consensus: "warn", averageConfidence: 0.7 } }),
+      makeEvent({
+        type: "critic_debate_run",
+        payload: { consensus: "warn", averageConfidence: 0.7 },
+      }),
     ];
 
     const m = computeDashboardMetrics(events);

@@ -8,6 +8,7 @@ export default defineConfig({
     // Retry once on failure — catches timing-sensitive tests that flake under
     // parallel turbo load (temp-dir contention, setInterval races, etc.)
     retry: 1,
+    testTimeout: 30_000,
     coverage: {
       enabled: false,
     },

@@ -11,7 +11,9 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[mAKJHF]/g, "");
 }
 
-function makeLane(overrides: Partial<FleetLaneDisplay> & { laneId: string; agentName: string }): FleetLaneDisplay {
+function makeLane(
+  overrides: Partial<FleetLaneDisplay> & { laneId: string; agentName: string },
+): FleetLaneDisplay {
   return {
     laneId: overrides.laneId,
     agentName: overrides.agentName,
@@ -93,7 +95,9 @@ describe("renderFleetDashboard", () => {
 
   it("PDSE score displayed when available", () => {
     const state = makeState({
-      lanes: [makeLane({ laneId: "l1", agentName: "builder", status: "completed", pdseScore: 92.5 })],
+      lanes: [
+        makeLane({ laneId: "l1", agentName: "builder", status: "completed", pdseScore: 92.5 }),
+      ],
     });
     const rendered = stripAnsi(renderFleetDashboard(state));
     expect(rendered).toContain("93"); // Math.round(92.5)
@@ -101,7 +105,9 @@ describe("renderFleetDashboard", () => {
 
   it("PDSE shows -- when not available", () => {
     const state = makeState({
-      lanes: [makeLane({ laneId: "l1", agentName: "builder", status: "running", pdseScore: undefined })],
+      lanes: [
+        makeLane({ laneId: "l1", agentName: "builder", status: "running", pdseScore: undefined }),
+      ],
     });
     const rendered = stripAnsi(renderFleetDashboard(state));
     expect(rendered).toContain("--");
@@ -206,7 +212,12 @@ describe("event-handler integration", () => {
     const dashboard = new FleetDashboard(
       makeState({
         lanes: [
-          makeLane({ laneId: "l1", agentName: "worker", status: "pending", progressHint: "paused (conflict)" }),
+          makeLane({
+            laneId: "l1",
+            agentName: "worker",
+            status: "pending",
+            progressHint: "paused (conflict)",
+          }),
         ],
       }),
       { enabled: false },

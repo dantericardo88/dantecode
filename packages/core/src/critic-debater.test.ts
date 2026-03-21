@@ -3,26 +3,29 @@ import { criticDebate } from "./critic-debater.js";
 
 describe("criticDebate", () => {
   it("returns fail consensus when high-confidence failure dominates", () => {
-    const result = criticDebate([
-      {
-        agentId: "critic-1",
-        verdict: "fail",
-        confidence: 0.95,
-        findings: ["Missing rollback guidance"],
-      },
-      {
-        agentId: "critic-2",
-        verdict: "warn",
-        confidence: 0.6,
-        findings: ["Needs more detail"],
-      },
-      {
-        agentId: "critic-3",
-        verdict: "fail",
-        confidence: 0.8,
-        findings: ["No verification evidence"],
-      },
-    ], "Output text");
+    const result = criticDebate(
+      [
+        {
+          agentId: "critic-1",
+          verdict: "fail",
+          confidence: 0.95,
+          findings: ["Missing rollback guidance"],
+        },
+        {
+          agentId: "critic-2",
+          verdict: "warn",
+          confidence: 0.6,
+          findings: ["Needs more detail"],
+        },
+        {
+          agentId: "critic-3",
+          verdict: "fail",
+          confidence: 0.8,
+          findings: ["No verification evidence"],
+        },
+      ],
+      "Output text",
+    );
 
     expect(result.consensus).toBe("fail");
     expect(result.blockingFindings).toContain("Missing rollback guidance");

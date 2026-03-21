@@ -157,10 +157,7 @@ describe("GF-03 — Subagent isolation (no cross-contamination)", () => {
     const engine = buildEngine();
     const proxy = new ExecutionProxy(engine);
 
-    const [r1, r2] = await Promise.all([
-      proxy.run("echo parent"),
-      proxy.run("echo child"),
-    ]);
+    const [r1, r2] = await Promise.all([proxy.run("echo parent"), proxy.run("echo child")]);
 
     expect(r1.requestId).not.toBe(r2.requestId);
   });

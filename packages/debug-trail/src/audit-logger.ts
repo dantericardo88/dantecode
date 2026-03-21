@@ -14,8 +14,12 @@ import { makeTrailEventId } from "./hash-engine.js";
 import { AnomalyDetector } from "./anomaly-detector.js";
 import type { AnomalyFlag } from "./anomaly-detector.js";
 import {
-  HashChain, MerkleTree, ReceiptChain, createReceipt,
-  createEvidenceBundle, EvidenceSealer,
+  HashChain,
+  MerkleTree,
+  ReceiptChain,
+  createReceipt,
+  createEvidenceBundle,
+  EvidenceSealer,
   EvidenceType,
 } from "@dantecode/evidence-chain";
 import type { EvidenceBundleData, CertificationSeal, Receipt } from "@dantecode/evidence-chain";
@@ -170,7 +174,10 @@ export class AuditLogger {
     summary: string,
     payload: Record<string, unknown> = {},
     extras?: Partial<
-      Pick<TrailEvent, "beforeHash" | "afterHash" | "beforeSnapshotId" | "afterSnapshotId" | "trustScore">
+      Pick<
+        TrailEvent,
+        "beforeHash" | "afterHash" | "beforeSnapshotId" | "afterSnapshotId" | "trustScore"
+      >
     > & { provenance?: Partial<TrailProvenance> },
   ): Promise<string> {
     if (!this.config.enabled) return "";
@@ -196,7 +203,9 @@ export class AuditLogger {
         eventType: this.mapKindToEvidenceType(kind),
         evidence: { kind, actor, summary, ...payload },
         prevHash: this.lastBundleHash,
-        metadata: extras?.provenance ? { provenance: extras.provenance as Record<string, unknown> } : undefined,
+        metadata: extras?.provenance
+          ? { provenance: extras.provenance as Record<string, unknown> }
+          : undefined,
       });
       precomputedBundleId = pendingBundle.bundleId;
 
@@ -251,7 +260,10 @@ export class AuditLogger {
     // Chain onto queue: ordering guaranteed, error surfaces to caller
     this.writeQueue = this.writeQueue
       .then(() => this.store.appendEvent(event))
-      .then(() => settleWrite(), (err) => settleWrite(err));
+      .then(
+        () => settleWrite(),
+        (err) => settleWrite(err),
+      );
 
     try {
       await writeSettled;
@@ -319,7 +331,10 @@ export class AuditLogger {
       "tool_result",
       toolName,
       `Tool result: ${toolName}`,
-      { result: typeof result === "string" ? result.slice(0, 500) : result, sourceEventId: eventId },
+      {
+        result: typeof result === "string" ? result.slice(0, 500) : result,
+        sourceEventId: eventId,
+      },
       { provenance: extras },
     );
   }
@@ -374,7 +389,13 @@ export class AuditLogger {
 
   /** Log a file move event. */
   async logFileMove(from: string, to: string, hash?: string): Promise<string> {
-    return this.log("file_move", "FileSystem", `File move: ${from} → ${to}`, { from, to }, { afterHash: hash });
+    return this.log(
+      "file_move",
+      "FileSystem",
+      `File move: ${from} → ${to}`,
+      { from, to },
+      { afterHash: hash },
+    );
   }
 
   /**
@@ -385,8 +406,16 @@ export class AuditLogger {
     filePath: string,
     perform: () => Promise<void>,
     snapshotter: {
-      captureBeforeState(fp: string, id: string, prov: TrailProvenance): Promise<{ beforeSnapshotId: string | null; beforeHash: string | null }>;
-      captureAfterState(fp: string, id: string, prov: TrailProvenance): Promise<{ afterSnapshotId: string | null; afterHash: string | null }>;
+      captureBeforeState(
+        fp: string,
+        id: string,
+        prov: TrailProvenance,
+      ): Promise<{ beforeSnapshotId: string | null; beforeHash: string | null }>;
+      captureAfterState(
+        fp: string,
+        id: string,
+        prov: TrailProvenance,
+      ): Promise<{ afterSnapshotId: string | null; afterHash: string | null }>;
     },
   ): Promise<{ eventId: string; beforeSnapshotId: string | null; afterSnapshotId: string | null }> {
     const prov = this.getProvenance();
@@ -412,11 +441,7 @@ export class AuditLogger {
   }
 
   /** Log a verification event. */
-  async logVerification(
-    stage: string,
-    passed: boolean,
-    details?: string,
-  ): Promise<string> {
+  async logVerification(stage: string, passed: boolean, details?: string): Promise<string> {
     return this.log(
       "verification",
       "Verification",
@@ -560,12 +585,10 @@ export class AuditLogger {
       detectorConfig.burstDeletionWindowMs,
       detectorConfig.rapidLoopWindowMs,
     );
-    return this.sessionEvents
-      .slice(0, this.detectionCursor)
-      .filter((e) => {
-        const ts = new Date(e.timestamp).getTime();
-        return ts >= anchorMs - lookbackWindowMs && e.kind !== "anomaly_flag";
-      });
+    return this.sessionEvents.slice(0, this.detectionCursor).filter((e) => {
+      const ts = new Date(e.timestamp).getTime();
+      return ts >= anchorMs - lookbackWindowMs && e.kind !== "anomaly_flag";
+    });
   }
 
   /**
@@ -599,9 +622,12 @@ export class AuditLogger {
       this.evidenceChain.append(integrityBundle);
       this.lastBundleHash = this.evidenceChain.headHash;
       if (!chainIntact) {
-        await this.log("anomaly_flag", "evidence-system",
+        await this.log(
+          "anomaly_flag",
+          "evidence-system",
           "CRITICAL: Evidence chain integrity verification FAILED — chain may be tampered",
-          { chainLength: this.evidenceChain.length, headHash: this.evidenceChain.headHash });
+          { chainLength: this.evidenceChain.length, headHash: this.evidenceChain.headHash },
+        );
       }
     }
     const shouldEndSession = options?.endSession ?? true;
@@ -622,7 +648,8 @@ export class AuditLogger {
       try {
         const diskEvents = await this.store.queryBySession(this.provenance.sessionId);
         overflowUnanalyzed = diskEvents.filter(
-          (e) => !bufferedIds.has(e.id) && e.seq > this.diskEventCursor && e.kind !== "anomaly_flag",
+          (e) =>
+            !bufferedIds.has(e.id) && e.seq > this.diskEventCursor && e.kind !== "anomaly_flag",
         );
       } catch {
         // advisory — disk read failure never blocks flush
@@ -648,7 +675,10 @@ export class AuditLogger {
       try {
         // Prepend lookback context so bursts spanning two flush() calls are visible.
         const windowForAnalysis = [...lookback, ...totalUnanalyzed];
-        const anomalies = this.anomalyDetector.analyze(windowForAnalysis, this.provenance.sessionId);
+        const anomalies = this.anomalyDetector.analyze(
+          windowForAnalysis,
+          this.provenance.sessionId,
+        );
 
         // Dedup: skip anomalies whose relatedEventIds were ALL reported in a prior flush.
         // This prevents duplicate flags when a cross-boundary burst is detected twice.
@@ -772,7 +802,9 @@ export class AuditLogger {
 
   /** Determine if a kind is state-changing (deserves a receipt). */
   private isStateChanging(kind: TrailEventKind): boolean {
-    return (["file_write", "file_delete", "file_move", "tool_call"] as TrailEventKind[]).includes(kind);
+    return (["file_write", "file_delete", "file_move", "tool_call"] as TrailEventKind[]).includes(
+      kind,
+    );
   }
 }
 

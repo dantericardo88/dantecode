@@ -68,7 +68,12 @@ vi.mock("@dantecode/core", async (importOriginal) => {
         fallback: [],
         taskOverrides: {},
       },
-      pdse: { threshold: 0.7, hardViolationsAllowed: 0, maxRegenerationAttempts: 3, weights: { completeness: 1 } },
+      pdse: {
+        threshold: 0.7,
+        hardViolationsAllowed: 0,
+        maxRegenerationAttempts: 3,
+        weights: { completeness: 1 },
+      },
       autoforge: {},
       git: {},
       sandbox: {},
@@ -207,12 +212,7 @@ describe("DanteCode HTTP Server — Integration", () => {
   });
 
   it("POST /api/verify returns pdseScore (null for empty file list) and findings array", async () => {
-    const res = await httpRequest(
-      port,
-      "POST",
-      "/api/verify",
-      JSON.stringify({ files: [] }),
-    );
+    const res = await httpRequest(port, "POST", "/api/verify", JSON.stringify({ files: [] }));
     expect(res.status).toBe(200);
     // pdseScore should be null when no files were given
     expect("pdseScore" in res.body).toBe(true);
@@ -266,11 +266,7 @@ describe("DanteCode HTTP Server — Integration", () => {
     );
 
     // Abort the in-flight generation
-    const abortRes = await httpRequest(
-      port,
-      "POST",
-      `/api/sessions/${sessionId}/abort`,
-    );
+    const abortRes = await httpRequest(port, "POST", `/api/sessions/${sessionId}/abort`);
     expect(abortRes.status).toBe(200);
     expect(abortRes.body["aborted"]).toBe(true);
     expect(abortRes.body["sessionId"]).toBe(sessionId);
@@ -401,6 +397,65 @@ describe("DanteCode HTTP Server — Integration", () => {
       "POST",
       `/api/sessions/${sessionId}/message`,
       JSON.stringify({ content: "second message" }),
+    );
+    expect(second.status).toBe(202);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IT-01: Agent response sync — requires a server with an injected agentRunner
+// Isolated describe so the agentRunner does not interfere with 409 timing test
+// ---------------------------------------------------------------------------
+
+describe("DanteCode HTTP Server — Integration — agent response sync", () => {
+  let syncServer: import("./server.js").DanteCodeServer;
+  let syncPort: number;
+  const syncRoot = join(tmpdir(), `dante-serve-sync-${Date.now()}`);
+
+  beforeAll(async () => {
+    mkdirSync(syncRoot, { recursive: true });
+    // Minimal agentRunner: fires async, clears abortController on completion
+    const agentRunner = (opts: import("./routes.js").AgentRunnerOpts): void => {
+      void Promise.resolve().then(() => {
+        const sess = syncServer.sessions.get(opts.sessionId);
+        if (sess) sess.abortController = undefined;
+      });
+    };
+    syncServer = await startServer({ port: 0, projectRoot: syncRoot, agentRunner });
+    syncPort = syncServer.port;
+  });
+
+  afterAll(async () => {
+    await syncServer.stop();
+  });
+
+  it("second POST /message after agent run completes returns 202 (abortController cleared)", async () => {
+    const created = await httpRequest(
+      syncPort,
+      "POST",
+      "/api/sessions",
+      JSON.stringify({ name: "retry-test" }),
+    );
+    const sessionId = created.body["id"] as string;
+
+    // First message — agent fires and completes asynchronously (next microtask)
+    const first = await httpRequest(
+      syncPort,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "first task" }),
+    );
+    expect(first.status).toBe(202);
+
+    // Wait for the agentRunner microtask to clear abortController
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // Second message — must succeed (not 409) because abortController was cleared
+    const second = await httpRequest(
+      syncPort,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "second task" }),
     );
     expect(second.status).toBe(202);
   });

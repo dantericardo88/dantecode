@@ -2239,7 +2239,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
     const raw = await readFile(donePath, "utf-8");
@@ -2262,7 +2262,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
     const raw = await readFile(donePath, "utf-8");
@@ -2289,7 +2289,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
     const raw = await readFile(donePath, "utf-8");
@@ -2326,7 +2326,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     expect(capturedEnvs.length).toBeGreaterThan(0);
     expect(capturedEnvs[0]?.["MY_CUSTOM_VAR"]).toBe("test-value");
@@ -2353,7 +2353,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       { pollIntervalMs: 50 },
     );
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
     const done = JSON.parse(await readFile(donePath, "utf-8")) as {
@@ -2378,7 +2378,7 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 50,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
     const done = JSON.parse(await readFile(donePath, "utf-8")) as {

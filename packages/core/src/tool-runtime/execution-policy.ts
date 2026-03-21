@@ -23,13 +23,13 @@
  * - `vcs`: Git operations — serialized, touches .git/
  */
 export type ExecutionClass =
-  | 'read_only'
-  | 'file_write'
-  | 'process'
-  | 'network'
-  | 'acquire'
-  | 'agent'
-  | 'vcs';
+  | "read_only"
+  | "file_write"
+  | "process"
+  | "network"
+  | "acquire"
+  | "agent"
+  | "vcs";
 
 export interface ToolExecutionPolicy {
   /** Tool name this policy applies to */
@@ -58,53 +58,53 @@ export interface ToolExecutionPolicy {
 // ─── Built-in Policies ────────────────────────────────────────────────────────
 
 export const BUILTIN_TOOL_POLICIES: ToolExecutionPolicy[] = [
-  { tool: 'Read',           executionClass: 'read_only' },
-  { tool: 'Glob',           executionClass: 'read_only' },
-  { tool: 'Grep',           executionClass: 'read_only' },
+  { tool: "Read", executionClass: "read_only" },
+  { tool: "Glob", executionClass: "read_only" },
+  { tool: "Grep", executionClass: "read_only" },
 
-  { tool: 'Write',          executionClass: 'file_write', verifyAfterExecution: true },
-  { tool: 'Edit',           executionClass: 'file_write', verifyAfterExecution: true },
-  { tool: 'TodoWrite',      executionClass: 'file_write' },
+  { tool: "Write", executionClass: "file_write", verifyAfterExecution: true },
+  { tool: "Edit", executionClass: "file_write", verifyAfterExecution: true },
+  { tool: "TodoWrite", executionClass: "file_write" },
 
   {
-    tool: 'Bash',
-    executionClass: 'process',
+    tool: "Bash",
+    executionClass: "process",
     verifyAfterExecution: true,
     // Bash can create artifacts that need verification before downstream tools use them
     requiresArtifactVerification: false, // post-execution only; not pre-execution check
   },
 
-  { tool: 'WebSearch',      executionClass: 'network' },
-  { tool: 'WebFetch',       executionClass: 'network' },
+  { tool: "WebSearch", executionClass: "network" },
+  { tool: "WebFetch", executionClass: "network" },
 
   {
-    tool: 'AcquireUrl',
-    executionClass: 'acquire',
+    tool: "AcquireUrl",
+    executionClass: "acquire",
     verifyAfterExecution: true,
     requiresArtifactVerification: false,
   },
   {
-    tool: 'AcquireArchive',
-    executionClass: 'acquire',
+    tool: "AcquireArchive",
+    executionClass: "acquire",
     verifyAfterExecution: true,
     requiresArtifactVerification: false,
   },
 
   {
-    tool: 'GitCommit',
-    executionClass: 'vcs',
+    tool: "GitCommit",
+    executionClass: "vcs",
     // Committing should only happen after successful file writes (file_write tools)
-    dependsOn: ['Write', 'Edit'],
+    dependsOn: ["Write", "Edit"],
   },
   {
-    tool: 'GitPush',
-    executionClass: 'vcs',
-    dependsOn: ['GitCommit'],
+    tool: "GitPush",
+    executionClass: "vcs",
+    dependsOn: ["GitCommit"],
   },
 
-  { tool: 'SubAgent',       executionClass: 'agent' },
-  { tool: 'GitHubSearch',   executionClass: 'network' },
-  { tool: 'GitHubOps',      executionClass: 'network' },
+  { tool: "SubAgent", executionClass: "agent" },
+  { tool: "GitHubSearch", executionClass: "network" },
+  { tool: "GitHubOps", executionClass: "network" },
 ];
 
 // ─── Policy Registry ──────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ export class ExecutionPolicyRegistry {
     return (
       this._policies.get(toolName) ?? {
         tool: toolName,
-        executionClass: 'process',
+        executionClass: "process",
       }
     );
   }
@@ -139,10 +139,7 @@ export class ExecutionPolicyRegistry {
 
   /** Whether concurrent execution is allowed (read_only tools can run concurrently) */
   canRunConcurrently(toolA: string, toolB: string): boolean {
-    return (
-      this.executionClass(toolA) === 'read_only' &&
-      this.executionClass(toolB) === 'read_only'
-    );
+    return this.executionClass(toolA) === "read_only" && this.executionClass(toolB) === "read_only";
   }
 
   /** Check if toolName is blocked by any tool in the already-executed set */

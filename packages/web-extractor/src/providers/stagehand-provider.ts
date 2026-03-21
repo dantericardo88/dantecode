@@ -31,8 +31,8 @@ export class StagehandProvider implements FetchProvider {
         status: 200,
         renderMode: "browser",
         cacheHit: false,
-        extractedAt: new Date().toISOString()
-      }
+        extractedAt: new Date().toISOString(),
+      },
     };
   }
 }

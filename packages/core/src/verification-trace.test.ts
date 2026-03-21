@@ -1,8 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import {
-  VerificationTraceRecorder,
-  globalTraceRecorder,
-} from "./verification-trace-recorder.js";
+import { VerificationTraceRecorder, globalTraceRecorder } from "./verification-trace-recorder.js";
 import {
   serializeTrace,
   deserializeTrace,
@@ -67,7 +64,9 @@ describe("VerificationTraceRecorder", () => {
   it("records critic opinions and debate completed", () => {
     const traceId = recorder.startTrace("task");
     recorder.recordCriticOpinion(traceId, "critic-1", "pass", 0.9);
-    recorder.recordCriticOpinion(traceId, "critic-2", "warn", 0.6, ["Consider adding more context"]);
+    recorder.recordCriticOpinion(traceId, "critic-2", "warn", 0.6, [
+      "Consider adding more context",
+    ]);
     recorder.recordDebateComplete(traceId, "warn", 0.75, "Mild concerns.");
     const trace = recorder.getTrace(traceId)!;
     const opinions = trace.events.filter((e) => e.kind === "critic_opinion");

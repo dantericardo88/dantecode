@@ -12,7 +12,15 @@
  * - cleanup — enforces a max-results cap (FIFO eviction of oldest)
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { FearSetResult } from "@dantecode/runtime-spine";
 

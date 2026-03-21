@@ -127,7 +127,9 @@ export interface CouncilAgentAdapter {
    * Optional: return token/cost usage for a session.
    * Not all adapters track this — callers must check for its presence.
    */
-  getUsage?(sessionId: string): Promise<{ tokensIn: number; tokensOut: number; costUsd: number } | null>;
+  getUsage?(
+    sessionId: string,
+  ): Promise<{ tokensIn: number; tokensOut: number; costUsd: number } | null>;
 }
 
 // ----------------------------------------------------------------------------
@@ -201,8 +203,14 @@ export abstract class BaseCouncilAdapter implements CouncilAgentAdapter {
         reject(new Error(`${label} timed out after ${ms}ms`));
       }, ms);
       op().then(
-        (v) => { clearTimeout(timer); resolve(v); },
-        (e: unknown) => { clearTimeout(timer); reject(e); },
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e: unknown) => {
+          clearTimeout(timer);
+          reject(e);
+        },
       );
     });
   }

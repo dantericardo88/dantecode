@@ -7,29 +7,13 @@
 import { describe, it, expect, afterEach } from "vitest";
 
 // color-tokens
-import {
-  COLOR_TOKENS,
-  NO_COLORS,
-  resolveColors,
-  supportsColor,
-} from "./tokens/color-tokens.js";
+import { COLOR_TOKENS, NO_COLORS, resolveColors, supportsColor } from "./tokens/color-tokens.js";
 
 // spacing-tokens
-import {
-  INDENT,
-  COLUMN_WIDTH,
-  indent,
-  padOrTruncate,
-  hRule,
-} from "./tokens/spacing-tokens.js";
+import { INDENT, COLUMN_WIDTH, indent, padOrTruncate, hRule } from "./tokens/spacing-tokens.js";
 
 // icon-tokens
-import {
-  ICONS_RICH,
-  ICONS_ASCII,
-  resolveIcons,
-  spinnerFrame,
-} from "./tokens/icon-tokens.js";
+import { ICONS_RICH, ICONS_ASCII, resolveIcons, spinnerFrame } from "./tokens/icon-tokens.js";
 
 // ---------------------------------------------------------------------------
 // color-tokens

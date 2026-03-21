@@ -3,14 +3,14 @@
 // AES-256-GCM encrypted key store. API keys stored at rest, never in plaintext.
 // ============================================================================
 
-import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from "node:crypto";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 interface VaultEntry {
   name: string;
-  iv: string;      // hex
+  iv: string; // hex
   authTag: string; // hex
   ciphertext: string; // hex
 }
@@ -20,7 +20,7 @@ interface VaultFile {
   entries: VaultEntry[];
 }
 
-const ALGORITHM = 'aes-256-gcm' as const;
+const ALGORITHM = "aes-256-gcm" as const;
 const KEY_LEN = 32;
 const IV_LEN = 16;
 const ITERATIONS = 100_000;
@@ -35,9 +35,9 @@ export class CredentialVault {
   private readonly saltPath: string;
 
   constructor(opts: CredentialVaultOptions = {}) {
-    const dir = opts.vaultDir ?? join(homedir(), '.dantecode');
-    this.vaultPath = join(dir, 'vault.enc');
-    this.saltPath = join(dir, 'vault.salt');
+    const dir = opts.vaultDir ?? join(homedir(), ".dantecode");
+    this.vaultPath = join(dir, "vault.enc");
+    this.saltPath = join(dir, "vault.salt");
   }
 
   async store(name: string, value: string): Promise<void> {
@@ -45,16 +45,16 @@ export class CredentialVault {
     const key = await this._getKey();
     const iv = randomBytes(IV_LEN);
     const cipher = createCipheriv(ALGORITHM, key, iv);
-    const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+    const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
     const authTag = cipher.getAuthTag();
 
     // Remove existing entry with same name
     const filtered = entries.filter((e) => e.name !== name);
     filtered.push({
       name,
-      iv: iv.toString('hex'),
-      authTag: authTag.toString('hex'),
-      ciphertext: encrypted.toString('hex'),
+      iv: iv.toString("hex"),
+      authTag: authTag.toString("hex"),
+      ciphertext: encrypted.toString("hex"),
     });
 
     await this._saveEntries(filtered);
@@ -67,13 +67,13 @@ export class CredentialVault {
 
     try {
       const key = await this._getKey();
-      const iv = Buffer.from(entry.iv, 'hex');
-      const authTag = Buffer.from(entry.authTag, 'hex');
-      const ciphertext = Buffer.from(entry.ciphertext, 'hex');
+      const iv = Buffer.from(entry.iv, "hex");
+      const authTag = Buffer.from(entry.authTag, "hex");
+      const ciphertext = Buffer.from(entry.ciphertext, "hex");
       const decipher = createDecipheriv(ALGORITHM, key, iv);
       decipher.setAuthTag(authTag);
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      return decrypted.toString('utf8');
+      return decrypted.toString("utf8");
     } catch {
       return null;
     }
@@ -93,26 +93,26 @@ export class CredentialVault {
   // -- Private helpers -------------------------------------------------------
 
   private async _getKey(): Promise<Buffer> {
-    const passphrase = process.env['DANTECODE_VAULT_PASSPHRASE'] ?? 'dantecode-default-vault-key';
+    const passphrase = process.env["DANTECODE_VAULT_PASSPHRASE"] ?? "dantecode-default-vault-key";
     const salt = await this._getOrCreateSalt();
-    return pbkdf2Sync(passphrase, salt, ITERATIONS, KEY_LEN, 'sha256');
+    return pbkdf2Sync(passphrase, salt, ITERATIONS, KEY_LEN, "sha256");
   }
 
   private async _getOrCreateSalt(): Promise<Buffer> {
     try {
-      const hex = await readFile(this.saltPath, 'utf8');
-      return Buffer.from(hex.trim(), 'hex');
+      const hex = await readFile(this.saltPath, "utf8");
+      return Buffer.from(hex.trim(), "hex");
     } catch {
       const salt = randomBytes(32);
-      await mkdir(join(this.saltPath, '..'), { recursive: true });
-      await writeFile(this.saltPath, salt.toString('hex'), 'utf8');
+      await mkdir(join(this.saltPath, ".."), { recursive: true });
+      await writeFile(this.saltPath, salt.toString("hex"), "utf8");
       return salt;
     }
   }
 
   private async _loadEntries(): Promise<VaultEntry[]> {
     try {
-      const raw = await readFile(this.vaultPath, 'utf8');
+      const raw = await readFile(this.vaultPath, "utf8");
       const file = JSON.parse(raw) as VaultFile;
       return file.entries ?? [];
     } catch {
@@ -121,8 +121,8 @@ export class CredentialVault {
   }
 
   private async _saveEntries(entries: VaultEntry[]): Promise<void> {
-    await mkdir(join(this.vaultPath, '..'), { recursive: true });
+    await mkdir(join(this.vaultPath, ".."), { recursive: true });
     const file: VaultFile = { version: 1, entries };
-    await writeFile(this.vaultPath, JSON.stringify(file, null, 2), 'utf8');
+    await writeFile(this.vaultPath, JSON.stringify(file, null, 2), "utf8");
   }
 }

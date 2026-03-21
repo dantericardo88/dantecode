@@ -17,11 +17,11 @@ export class WaveTreeManager {
     const node: TreeNode = {
       id,
       parentId,
-      children: []
+      children: [],
     };
-    
+
     this.nodes.set(id, node);
-    
+
     if (parentId) {
       const parent = this.nodes.get(parentId);
       if (parent) {
@@ -33,19 +33,19 @@ export class WaveTreeManager {
   getAncestors(id: string): string[] {
     const ancestors: string[] = [];
     let current = this.nodes.get(id);
-    
+
     while (current?.parentId) {
       ancestors.push(current.parentId);
       current = this.nodes.get(current.parentId);
     }
-    
+
     return ancestors;
   }
 
   getDescendants(id: string): string[] {
     const descendants: string[] = [];
     const stack = [id];
-    
+
     while (stack.length > 0) {
       const currentId = stack.pop()!;
       const node = this.nodes.get(currentId);
@@ -54,7 +54,7 @@ export class WaveTreeManager {
         stack.push(...node.children);
       }
     }
-    
+
     return descendants;
   }
 

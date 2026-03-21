@@ -448,8 +448,12 @@ describe("buildWavePrompt with bridgeWarnings", () => {
     const waves = parseSkillWaves("## Step 1\nDo something");
     const state = createWaveState(waves);
     const greenWarnings: BridgeActivationWarnings = {
-      skillName: "test", bucket: "green", conversionScore: 0.95,
-      runtimeWarnings: [], conversionWarnings: [], hasCapabilityGaps: false,
+      skillName: "test",
+      bucket: "green",
+      conversionScore: 0.95,
+      runtimeWarnings: [],
+      conversionWarnings: [],
+      hasCapabilityGaps: false,
     };
     const prompt = buildWavePrompt(state, greenWarnings);
     expect(prompt).not.toContain("SkillBridge Activation Notice");

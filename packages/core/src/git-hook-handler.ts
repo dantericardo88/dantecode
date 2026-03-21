@@ -17,12 +17,7 @@ import type { DanteEventType } from "./event-engine.js";
 // ---------------------------------------------------------------------------
 
 /** Subset of Git hooks that DanteCode natively understands. */
-export type GitHookType =
-  | "pre-commit"
-  | "post-commit"
-  | "pre-push"
-  | "post-merge"
-  | "pre-rebase";
+export type GitHookType = "pre-commit" | "post-commit" | "pre-push" | "post-merge" | "pre-rebase";
 
 /** Structured payload extracted from a Git hook invocation. */
 export interface GitHookPayload {
@@ -129,10 +124,7 @@ export class GitHookHandler {
    * @param rawArgs   `process.argv.slice(2)` as passed to the hook script.
    */
   parseHookEvent(hookType: GitHookType, rawArgs: string[]): GitHookPayload {
-    const branch =
-      process.env["DANTE_BRANCH"] ??
-      process.env["GIT_BRANCH"] ??
-      "main";
+    const branch = process.env["DANTE_BRANCH"] ?? process.env["GIT_BRANCH"] ?? "main";
 
     const base: GitHookPayload = { hookType, branch };
 

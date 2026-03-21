@@ -8,7 +8,12 @@
 import { appendFile, readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { TrailEvent, DeleteTombstone, TrailRetentionDecision, FileSnapshotRecord } from "./types.js";
+import type {
+  TrailEvent,
+  DeleteTombstone,
+  TrailRetentionDecision,
+  FileSnapshotRecord,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Store paths
@@ -325,7 +330,10 @@ export class TrailStore {
   /** Read all tombstones. */
   async readAllTombstones(): Promise<DeleteTombstone[]> {
     await this.ensureReady();
-    return this.readJsonlFile<DeleteTombstone>(this.paths.tombstonesLog, this.paths.tombstonesLog + ".corrupt");
+    return this.readJsonlFile<DeleteTombstone>(
+      this.paths.tombstonesLog,
+      this.paths.tombstonesLog + ".corrupt",
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -342,7 +350,10 @@ export class TrailStore {
   /** Read all snapshot records from the manifest log. */
   async readAllSnapshotRecords(): Promise<FileSnapshotRecord[]> {
     await this.ensureReady();
-    return this.readJsonlFile<FileSnapshotRecord>(this.paths.snapshotManifestLog, this.paths.snapshotManifestLog + ".corrupt");
+    return this.readJsonlFile<FileSnapshotRecord>(
+      this.paths.snapshotManifestLog,
+      this.paths.snapshotManifestLog + ".corrupt",
+    );
   }
 
   /** Get session records. */

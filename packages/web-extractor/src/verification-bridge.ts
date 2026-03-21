@@ -15,8 +15,12 @@ import type { WebFetchResult } from "./types.js";
  */
 export class VerificationBridge {
   private static readonly STUB_MARKERS = [
-    "TODO", "FIXME", "placeholder", "lorem ipsum",
-    "coming soon", "under construction",
+    "TODO",
+    "FIXME",
+    "placeholder",
+    "lorem ipsum",
+    "coming soon",
+    "under construction",
   ];
 
   async verify(result: WebFetchResult): Promise<RuntimeVerificationReport> {
@@ -24,8 +28,8 @@ export class VerificationBridge {
     const gates: VerificationGate[] = [];
 
     // Gate P — Provenance
-    const hasSource = (result.sources?.length ?? 0) > 0 &&
-      result.sources.some(s => s.url?.startsWith("http"));
+    const hasSource =
+      (result.sources?.length ?? 0) > 0 && result.sources.some((s) => s.url?.startsWith("http"));
     gates.push({
       name: "provenance",
       status: hasSource ? "pass" : "fail",
@@ -48,8 +52,8 @@ export class VerificationBridge {
     // Gate S — Specificity (no stub markers, title present)
     const titleOk = Boolean(result.metadata?.title && result.metadata.title.length > 2);
     const lowerContent = (result.markdown ?? "").toLowerCase();
-    const stubFound = VerificationBridge.STUB_MARKERS.find(
-      m => lowerContent.includes(m.toLowerCase())
+    const stubFound = VerificationBridge.STUB_MARKERS.find((m) =>
+      lowerContent.includes(m.toLowerCase()),
     );
     const specificityOk = titleOk && !stubFound;
     gates.push({
@@ -58,7 +62,9 @@ export class VerificationBridge {
       score: specificityOk ? 1 : 0.3,
       message: stubFound
         ? `Stub marker detected: "${stubFound}"`
-        : titleOk ? "Title present, no stubs" : "Missing title",
+        : titleOk
+          ? "Title present, no stubs"
+          : "Missing title",
       findings: stubFound ? [`Stub: ${stubFound}`] : [],
     });
 
@@ -83,13 +89,13 @@ export class VerificationBridge {
       findings: [],
     });
 
-    const passed = gates.every(g => g.status !== "fail");
+    const passed = gates.every((g) => g.status !== "fail");
     const overallScore = gates.reduce((s, g) => s + (g.score ?? 0), 0) / gates.length;
 
     const pdseOverall = overallScore;
     const pdsePassGate = pdseOverall >= 0.6;
 
-    const evidenceSources = result.sources.map(s => ({
+    const evidenceSources = result.sources.map((s) => ({
       url: s.url,
       title: s.title,
       snippet: s.snippet,

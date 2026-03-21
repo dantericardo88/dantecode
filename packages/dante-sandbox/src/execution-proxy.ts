@@ -30,8 +30,8 @@ export function getGlobalProxy(): ExecutionProxy {
   if (!_globalProxy) {
     throw new Error(
       "[DanteSandbox] ExecutionProxy not initialized. " +
-      "Call setGlobalProxy() before any execution. " +
-      "All commands must route through the sandbox engine.",
+        "Call setGlobalProxy() before any execution. " +
+        "All commands must route through the sandbox engine.",
     );
   }
   return _globalProxy;

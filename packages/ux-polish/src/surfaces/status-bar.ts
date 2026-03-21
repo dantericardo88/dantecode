@@ -84,18 +84,18 @@ export class StatusBar {
     }
 
     // Sandbox mode
-    const sandboxColor = this.state.sandboxMode === "read-only"
-      ? c.warning
-      : this.state.sandboxMode === "full-access"
-        ? c.error
-        : c.success;
+    const sandboxColor =
+      this.state.sandboxMode === "read-only"
+        ? c.warning
+        : this.state.sandboxMode === "full-access"
+          ? c.error
+          : c.success;
     parts.push(`${sandboxColor}${this.state.sandboxMode}${c.reset}`);
 
     // PDSE score
     if (this.state.pdseScore !== undefined) {
-      const pdseColor = this.state.pdseScore >= 85 ? c.success
-        : this.state.pdseScore >= 70 ? c.warning
-        : c.error;
+      const pdseColor =
+        this.state.pdseScore >= 85 ? c.success : this.state.pdseScore >= 70 ? c.warning : c.error;
       parts.push(`${pdseColor}PDSE: ${this.state.pdseScore}${c.reset}`);
     }
 
@@ -126,9 +126,7 @@ export class StatusBar {
     const truncated = truncateToVisible(rendered, cols - 2) + "\x1b[0m";
 
     // Hide cursor → save → position → clear → write → restore → show cursor
-    process.stdout.write(
-      `\x1b[?25l\x1b[s\x1b[${rows};1H\x1b[2K${truncated}\x1b[u\x1b[?25h`,
-    );
+    process.stdout.write(`\x1b[?25l\x1b[s\x1b[${rows};1H\x1b[2K${truncated}\x1b[u\x1b[?25h`);
   }
 
   /**

@@ -55,7 +55,10 @@ export const RuntimeEventKindSchema = z.enum([
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKindSchema>;
 
 export const RuntimeEventSchema = z.object({
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
   kind: RuntimeEventKindSchema,
   taskId: z.string().uuid(),
   parentId: z.string().uuid().optional(),

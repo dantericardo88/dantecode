@@ -6,7 +6,7 @@
  * dependencies.
  */
 
-export type DependencyNodeState = 'pending' | 'satisfied' | 'failed';
+export type DependencyNodeState = "pending" | "satisfied" | "failed";
 
 export interface DependencyReadiness {
   ready: boolean;
@@ -23,7 +23,7 @@ export class DependencyGraph {
   register(id: string, dependsOn: string[] = []): void {
     this._dependencies.set(id, uniqueIds(dependsOn));
     if (!this._states.has(id)) {
-      this._states.set(id, 'pending');
+      this._states.set(id, "pending");
     }
   }
 
@@ -64,11 +64,11 @@ export class DependencyGraph {
 
     for (const dependencyId of this.getDependencies(id)) {
       const state = this._states.get(dependencyId);
-      if (typeof state === 'undefined') {
+      if (typeof state === "undefined") {
         missing.push(dependencyId);
-      } else if (state === 'pending') {
+      } else if (state === "pending") {
         pending.push(dependencyId);
-      } else if (state === 'failed') {
+      } else if (state === "failed") {
         failed.push(dependencyId);
       }
     }
@@ -87,11 +87,7 @@ export class DependencyGraph {
     return this._visit(startId, visited, []);
   }
 
-  private _visit(
-    currentId: string,
-    visited: Set<string>,
-    path: string[],
-  ): string[] | null {
+  private _visit(currentId: string, visited: Set<string>, path: string[]): string[] | null {
     const cycleStart = path.indexOf(currentId);
     if (cycleStart >= 0) {
       return [...path.slice(cycleStart), currentId];

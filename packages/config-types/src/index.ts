@@ -125,12 +125,7 @@ export interface Session {
 }
 
 /** Durable execution status for long-running agent workflows. */
-export type DurableRunStatus =
-  | "running"
-  | "waiting_user"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type DurableRunStatus = "running" | "waiting_user" | "completed" | "failed" | "cancelled";
 
 /** Why a durable run paused instead of completing. */
 export type PauseReason =

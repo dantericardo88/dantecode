@@ -40,12 +40,12 @@ function isString(v: unknown): v is string {
  */
 export function sanitizeSlug(raw: string): string {
   const s = raw
-    .replace(/^[./\\]+/, "")        // strip leading dots/slashes (../../evil → evil)
-    .replace(/[/\\]/g, "-")         // path separators → hyphen
+    .replace(/^[./\\]+/, "") // strip leading dots/slashes (../../evil → evil)
+    .replace(/[/\\]/g, "-") // path separators → hyphen
     .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")   // non-alnum → hyphen
-    .replace(/-{2,}/g, "-")         // collapse consecutive hyphens
-    .replace(/^-+|-+$/g, "");       // strip leading/trailing hyphens
+    .replace(/[^a-z0-9-]/g, "-") // non-alnum → hyphen
+    .replace(/-{2,}/g, "-") // collapse consecutive hyphens
+    .replace(/^-+|-+$/g, ""); // strip leading/trailing hyphens
   return s.length > 0 ? s : "skill";
 }
 
@@ -129,7 +129,9 @@ function validateManifest(raw: unknown, errors: string[]): SkillBridgeManifest |
   return {
     version: isString(raw["version"]) ? raw["version"] : "1",
     source: {
-      kind: (isString(source["kind"]) ? source["kind"] : "local-file") as SkillBridgeManifest["source"]["kind"],
+      kind: (isString(source["kind"])
+        ? source["kind"]
+        : "local-file") as SkillBridgeManifest["source"]["kind"],
       url: isString(source["url"]) ? source["url"] : "",
       repo: isString(source["repo"]) ? source["repo"] : "",
       commit: isString(source["commit"]) ? source["commit"] : "",
@@ -140,13 +142,13 @@ function validateManifest(raw: unknown, errors: string[]): SkillBridgeManifest |
       name: isString(normalizedSkill["name"]) ? normalizedSkill["name"] : "",
       slug: sanitizeSlug(isString(normalizedSkill["slug"]) ? normalizedSkill["slug"] : ""),
       description: isString(normalizedSkill["description"]) ? normalizedSkill["description"] : "",
-      instructions: isString(normalizedSkill["instructions"]) ? normalizedSkill["instructions"] : "",
+      instructions: isString(normalizedSkill["instructions"])
+        ? normalizedSkill["instructions"]
+        : "",
       supportFiles: Array.isArray(normalizedSkill["supportFiles"])
         ? (normalizedSkill["supportFiles"] as unknown[]).filter(isString)
         : [],
-      frontmatter: isRecord(normalizedSkill["frontmatter"])
-        ? normalizedSkill["frontmatter"]
-        : {},
+      frontmatter: isRecord(normalizedSkill["frontmatter"]) ? normalizedSkill["frontmatter"] : {},
       capabilities: {
         filesystem: Boolean(caps["filesystem"]),
         network: Boolean(caps["network"]),
@@ -169,9 +171,7 @@ function validateManifest(raw: unknown, errors: string[]): SkillBridgeManifest |
           ? Math.min(1, Math.max(0, verification["conversionScore"]))
           : 0,
     },
-    warnings: Array.isArray(raw["warnings"])
-      ? (raw["warnings"] as unknown[]).filter(isString)
-      : [],
+    warnings: Array.isArray(raw["warnings"]) ? (raw["warnings"] as unknown[]).filter(isString) : [],
   };
 }
 

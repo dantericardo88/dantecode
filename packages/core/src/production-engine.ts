@@ -184,9 +184,7 @@ export class ProductionEngine {
    * @param name - Metric name to aggregate.
    */
   computeAggregates(name: string): MetricAggregates {
-    const values = this.metrics
-      .filter((m) => m.name === name)
-      .map((m) => m.value);
+    const values = this.metrics.filter((m) => m.name === name).map((m) => m.value);
 
     if (values.length === 0) {
       return { min: 0, max: 0, avg: 0, p95: 0, count: 0 };
@@ -387,11 +385,7 @@ export class ProductionEngine {
    */
   formatHealthReport(status: HealthStatus): string {
     const statusIcon =
-      status.status === "healthy"
-        ? "[OK]"
-        : status.status === "degraded"
-          ? "[WARN]"
-          : "[FAIL]";
+      status.status === "healthy" ? "[OK]" : status.status === "degraded" ? "[WARN]" : "[FAIL]";
 
     const lines: string[] = [
       `Health Report — ${status.timestamp}`,
@@ -402,10 +396,8 @@ export class ProductionEngine {
     ];
 
     for (const check of status.checks) {
-      const icon =
-        check.status === "pass" ? "  +" : check.status === "warn" ? "  ?" : "  !";
-      const latency =
-        check.latencyMs !== undefined ? ` (${check.latencyMs}ms)` : "";
+      const icon = check.status === "pass" ? "  +" : check.status === "warn" ? "  ?" : "  !";
+      const latency = check.latencyMs !== undefined ? ` (${check.latencyMs}ms)` : "";
       lines.push(`${icon} ${check.name}: ${check.message}${latency}`);
     }
 

@@ -130,8 +130,8 @@ describe("getAdaptiveBias", () => {
   it("returns 0 when expert meaningfully beats deep", () => {
     const chain = makeChain();
     record(chain, "quick", 0.75, 5);
-    record(chain, "deep", 0.80, 5);
-    record(chain, "expert", 0.90, 5); // 0.10 improvement > 0.05 threshold
+    record(chain, "deep", 0.8, 5);
+    record(chain, "expert", 0.9, 5); // 0.10 improvement > 0.05 threshold
     expect(chain.getAdaptiveBias()).toBe(0);
   });
 

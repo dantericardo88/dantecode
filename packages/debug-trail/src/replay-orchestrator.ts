@@ -4,12 +4,7 @@
 // Reconstructs decision chains and file-state at any step.
 // ============================================================================
 
-import type {
-  TrailEvent,
-  ReplayCursor,
-  DebugReplayResult,
-  DebugTrailConfig,
-} from "./types.js";
+import type { TrailEvent, ReplayCursor, DebugReplayResult, DebugTrailConfig } from "./types.js";
 import { defaultConfig } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { FileSnapshotter } from "./file-snapshotter.js";
@@ -53,10 +48,7 @@ export class ReplayOrchestrator {
   // E1: cap in-memory replay sessions to prevent unbounded growth in long-running processes.
   private static readonly MAX_REPLAY_SESSIONS = 50;
 
-  constructor(
-    config?: Partial<DebugTrailConfig>,
-    snapshotter?: FileSnapshotter,
-  ) {
+  constructor(config?: Partial<DebugTrailConfig>, snapshotter?: FileSnapshotter) {
     this.config = { ...defaultConfig(), ...config };
     this.store = getTrailStore(this.config.storageRoot);
     this.snapshotter = snapshotter ?? new FileSnapshotter(this.config);
@@ -130,7 +122,15 @@ export class ReplayOrchestrator {
     }
 
     const existing = this.replaySessions.get(sessionId);
-    if (!existing) return { sessionId, currentStep: 0, totalSteps: 0, events: [], fileStateMap: {}, complete: true };
+    if (!existing)
+      return {
+        sessionId,
+        currentStep: 0,
+        totalSteps: 0,
+        events: [],
+        fileStateMap: {},
+        complete: true,
+      };
 
     // Rebuild file state from scratch to the target step
     existing.fileStateAtStep.clear();
@@ -149,9 +149,8 @@ export class ReplayOrchestrator {
   // -------------------------------------------------------------------------
 
   async replaySession(sessionId: string, step?: number): Promise<DebugReplayResult> {
-    const cursor = step != null
-      ? await this.jumpToStep(sessionId, step)
-      : await this.startReplay(sessionId);
+    const cursor =
+      step != null ? await this.jumpToStep(sessionId, step) : await this.startReplay(sessionId);
 
     // If step not specified, advance to end for full replay
     let finalCursor = cursor;
@@ -250,9 +249,7 @@ export class ReplayOrchestrator {
   }> {
     await this.store.init();
     const events = await this.store.queryBySession(sessionId);
-    const fileWriteEvents = events.filter(
-      (e) => e.kind === "file_write" && e.afterHash,
-    );
+    const fileWriteEvents = events.filter((e) => e.kind === "file_write" && e.afterHash);
 
     const results: ReplayVerification[] = [];
     let matched = 0;

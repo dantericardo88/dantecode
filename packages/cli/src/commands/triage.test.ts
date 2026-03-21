@@ -19,10 +19,18 @@ vi.mock("@dantecode/core", () => ({
     { filePath: "src/utils/helpers.ts", score: 5, symbols: [] },
   ]),
   ModelRouterImpl: vi.fn().mockImplementation(() => ({
-    generate: vi.fn().mockResolvedValue('{"labels":["bug"],"priority":"P1","effort":"M","canAutoResolve":false,"confidence":0.85,"reasoning":"LLM classified as a bug."}'),
+    generate: vi
+      .fn()
+      .mockResolvedValue(
+        '{"labels":["bug"],"priority":"P1","effort":"M","canAutoResolve":false,"confidence":0.85,"reasoning":"LLM classified as a bug."}',
+      ),
   })),
   readOrInitializeState: vi.fn().mockResolvedValue({
-    model: { default: "claude-sonnet-4-6", fallback: "claude-haiku-4-5-20251001", taskOverrides: {} },
+    model: {
+      default: "claude-sonnet-4-6",
+      fallback: "claude-haiku-4-5-20251001",
+      taskOverrides: {},
+    },
   }),
 }));
 
@@ -151,7 +159,10 @@ describe("triageIssue", () => {
 
   it("security+crash issue → confidence > 0.6 (calibrated, not static 0.5)", async () => {
     mockGetIssue.mockResolvedValue(
-      makeIssue({ title: "Security vulnerability: crash on login", body: "App crashes and exposes security vulnerability in auth module." })
+      makeIssue({
+        title: "Security vulnerability: crash on login",
+        body: "App crashes and exposes security vulnerability in auth module.",
+      }),
     );
     const { triageIssue } = await import("./triage.js");
     const result = await triageIssue(1, "/proj", { useLLM: false });
@@ -163,7 +174,11 @@ describe("triageIssue", () => {
     mockGetIssue.mockResolvedValue(makeIssue({ body: "App crashes badly." }));
     const { ModelRouterImpl } = await import("@dantecode/core");
     (ModelRouterImpl as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      generate: vi.fn().mockResolvedValue('{"labels":["bug"],"priority":"P5","effort":"M","canAutoResolve":false,"confidence":0.9,"reasoning":"test"}'),
+      generate: vi
+        .fn()
+        .mockResolvedValue(
+          '{"labels":["bug"],"priority":"P5","effort":"M","canAutoResolve":false,"confidence":0.9,"reasoning":"test"}',
+        ),
     }));
     const { triageIssue } = await import("./triage.js");
     const result = await triageIssue(1, "/proj", { useLLM: true });
@@ -182,7 +197,11 @@ describe("triageIssue", () => {
     mockGetIssue.mockResolvedValue(makeIssue());
     const { ModelRouterImpl } = await import("@dantecode/core");
     (ModelRouterImpl as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
-      generate: vi.fn().mockResolvedValue('{"labels":["bug"],"priority":"P1","effort":"M","canAutoResolve":false,"confidence":1.5,"reasoning":"very confident"}'),
+      generate: vi
+        .fn()
+        .mockResolvedValue(
+          '{"labels":["bug"],"priority":"P1","effort":"M","canAutoResolve":false,"confidence":1.5,"reasoning":"very confident"}',
+        ),
     }));
     const { triageIssue } = await import("./triage.js");
     const result = await triageIssue(1, "/proj", { useLLM: true });

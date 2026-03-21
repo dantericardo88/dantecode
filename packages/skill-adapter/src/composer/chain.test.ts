@@ -383,7 +383,10 @@ describe("executeChain edge cases", () => {
       ],
     };
     const result = await executeChain(def, {
-      executeStep: async (_name: string, _params: Record<string, string>) => ({ output: "ran", pdseScore: 50 }),
+      executeStep: async (_name: string, _params: Record<string, string>) => ({
+        output: "ran",
+        pdseScore: 50,
+      }),
     });
     expect(result.success).toBe(true);
     expect(result.steps).toHaveLength(2);

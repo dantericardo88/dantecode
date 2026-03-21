@@ -42,7 +42,9 @@ vi.mock("@dantecode/git-engine", () => ({
   stopGitWatcher: vi.fn(),
   GitAutomationOrchestrator: vi.fn().mockImplementation(() => ({
     listExecutions: vi.fn().mockResolvedValue([]),
-    runWorkflowInBackground: vi.fn().mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
+    runWorkflowInBackground: vi
+      .fn()
+      .mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
   })),
   FilePatternWatcher: vi.fn().mockImplementation(() => {
     _mockWatcherStart = vi.fn();
@@ -57,7 +59,14 @@ vi.mock("@dantecode/git-engine", () => ({
   }),
   getTemplate: vi.fn(),
   listTemplates: vi.fn(),
-  runAutomationAgent: vi.fn().mockResolvedValue({ sessionId: "agent-1", success: true, output: "", tokensUsed: 0, durationMs: 0, filesChanged: [] }),
+  runAutomationAgent: vi.fn().mockResolvedValue({
+    sessionId: "agent-1",
+    success: true,
+    output: "",
+    tokensUsed: 0,
+    durationMs: 0,
+    filesChanged: [],
+  }),
   substitutePromptVars: vi.fn().mockImplementation((template: string) => template),
 }));
 
@@ -74,7 +83,7 @@ import {
   FilePatternWatcher,
 } from "@dantecode/git-engine";
 
-import { automateCommand } from "./automate.js";
+import { automateCommand, _resetForTesting } from "./automate.js";
 
 const mockListWebhook = vi.mocked(listWebhookListeners);
 const mockStopWebhook = vi.mocked(stopWebhookListener);
@@ -94,6 +103,7 @@ const mockState = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetForTesting();
   // Reset captured callbacks
   _capturedListenerCallbacks = new Map();
   _capturedScheduleCallback = null;
@@ -101,10 +111,15 @@ beforeEach(() => {
   mockListWebhook.mockResolvedValue([]);
   mockListSchedules.mockResolvedValue([]);
   mockListWatchers.mockResolvedValue([]);
-  MockOrchestrator.mockImplementation(() => ({
-    listExecutions: vi.fn().mockResolvedValue([]),
-    runWorkflowInBackground: vi.fn().mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
-  }) as unknown as GitAutomationOrchestrator);
+  MockOrchestrator.mockImplementation(
+    () =>
+      ({
+        listExecutions: vi.fn().mockResolvedValue([]),
+        runWorkflowInBackground: vi
+          .fn()
+          .mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
+      }) as unknown as GitAutomationOrchestrator,
+  );
   MockFilePatternWatcher.mockImplementation((): FilePatternWatcher => {
     _mockWatcherStart = vi.fn();
     _mockWatcherSnapshot = vi.fn().mockReturnValue({ watcherId: "fpw-mock-id" });
@@ -316,7 +331,12 @@ describe("/automate templates", () => {
   it("calls listTemplates() and displays all templates", async () => {
     mockListTemplates.mockReturnValue([
       { name: "pr-review", description: "Auto-review PRs", type: "webhook", create: vi.fn() },
-      { name: "daily-verify", description: "Daily codebase verification", type: "schedule", create: vi.fn() },
+      {
+        name: "daily-verify",
+        description: "Daily codebase verification",
+        type: "schedule",
+        create: vi.fn(),
+      },
     ]);
 
     const result = await automateCommand("templates", mockState);
@@ -359,16 +379,24 @@ describe("/automate template pr-review — agentMode webhook", () => {
     });
 
     // Create a fresh orchestrator mock instance to capture runWorkflowInBackground calls
-    const mockRunWorkflow = vi.fn().mockResolvedValue({ executionId: "exec-wh-1", backgroundTaskId: "bg-wh-1" });
-    MockOrchestrator.mockImplementation(() => ({
-      listExecutions: vi.fn().mockResolvedValue([]),
-      runWorkflowInBackground: mockRunWorkflow,
-    }) as unknown as GitAutomationOrchestrator);
+    const mockRunWorkflow = vi
+      .fn()
+      .mockResolvedValue({ executionId: "exec-wh-1", backgroundTaskId: "bg-wh-1" });
+    MockOrchestrator.mockImplementation(
+      () =>
+        ({
+          listExecutions: vi.fn().mockResolvedValue([]),
+          runWorkflowInBackground: mockRunWorkflow,
+        }) as unknown as GitAutomationOrchestrator,
+    );
 
     // Reset state so a new orchestrator is created
     const freshState = {
       projectRoot: "/test/project",
-      session: { id: "test-session-wh", model: { provider: "anthropic", modelId: "claude-sonnet" } },
+      session: {
+        id: "test-session-wh",
+        model: { provider: "anthropic", modelId: "claude-sonnet" },
+      },
     };
 
     await automateCommand("template pr-review", freshState);
@@ -387,9 +415,7 @@ describe("/automate template pr-review — agentMode webhook", () => {
     // Allow async operations to settle
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(mockRunWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ agentMode }),
-    );
+    expect(mockRunWorkflow).toHaveBeenCalledWith(expect.objectContaining({ agentMode }));
   });
 });
 
@@ -422,15 +448,23 @@ describe("/automate template daily-verify — agentMode schedule", () => {
       create: fakeCreate,
     });
 
-    const mockRunWorkflow = vi.fn().mockResolvedValue({ executionId: "exec-sc-1", backgroundTaskId: "bg-sc-1" });
-    MockOrchestrator.mockImplementation(() => ({
-      listExecutions: vi.fn().mockResolvedValue([]),
-      runWorkflowInBackground: mockRunWorkflow,
-    }) as unknown as GitAutomationOrchestrator);
+    const mockRunWorkflow = vi
+      .fn()
+      .mockResolvedValue({ executionId: "exec-sc-1", backgroundTaskId: "bg-sc-1" });
+    MockOrchestrator.mockImplementation(
+      () =>
+        ({
+          listExecutions: vi.fn().mockResolvedValue([]),
+          runWorkflowInBackground: mockRunWorkflow,
+        }) as unknown as GitAutomationOrchestrator,
+    );
 
     const freshState = {
       projectRoot: "/test/project",
-      session: { id: "test-session-sc", model: { provider: "anthropic", modelId: "claude-sonnet" } },
+      session: {
+        id: "test-session-sc",
+        model: { provider: "anthropic", modelId: "claude-sonnet" },
+      },
     };
 
     await automateCommand("template daily-verify", freshState);
@@ -442,9 +476,7 @@ describe("/automate template daily-verify — agentMode schedule", () => {
     // Allow async operations to settle
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(mockRunWorkflow).toHaveBeenCalledWith(
-      expect.objectContaining({ agentMode }),
-    );
+    expect(mockRunWorkflow).toHaveBeenCalledWith(expect.objectContaining({ agentMode }));
   });
 });
 

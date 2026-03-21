@@ -67,7 +67,9 @@ describe("GitHubClient", () => {
       const oc = (Octokit as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
       oc.rest.pulls.create.mockResolvedValue({ data: { number: 1, html_url: "u" } });
       const result = await client.createPR({ title: "t" });
-      expect(oc.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ owner: "myorg", repo: "myrepo" }));
+      expect(oc.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: "myorg", repo: "myrepo" }),
+      );
       expect(result.number).toBe(1);
     });
 
@@ -79,11 +81,15 @@ describe("GitHubClient", () => {
       const oc = (Octokit as unknown as ReturnType<typeof vi.fn>).mock.results[0]?.value;
       oc.rest.pulls.create.mockResolvedValue({ data: { number: 2, html_url: "u2" } });
       await client.createPR({ title: "t" });
-      expect(oc.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ owner: "acme", repo: "widget" }));
+      expect(oc.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: "acme", repo: "widget" }),
+      );
     });
 
     it("does not throw when git command fails", async () => {
-      const mockExec = vi.fn().mockImplementation(() => { throw new Error("no git"); });
+      const mockExec = vi.fn().mockImplementation(() => {
+        throw new Error("no git");
+      });
       const client = new GitHubClient({ token: "tk", execSyncFn: mockExec as never });
       await expect(client.inferFromGitRemote("/project")).resolves.toBeUndefined();
     });
@@ -93,10 +99,14 @@ describe("GitHubClient", () => {
   describe("createPR", () => {
     it("returns number and url", async () => {
       const client = makeClient();
-      mockOctokit.rest.pulls.create.mockResolvedValue({ data: { number: 42, html_url: "https://github.com/testowner/testrepo/pull/42" } });
+      mockOctokit.rest.pulls.create.mockResolvedValue({
+        data: { number: 42, html_url: "https://github.com/testowner/testrepo/pull/42" },
+      });
       const result = await client.createPR({ title: "My PR", body: "desc", base: "main" });
       expect(result).toEqual({ number: 42, url: "https://github.com/testowner/testrepo/pull/42" });
-      expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ title: "My PR", base: "main" }));
+      expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "My PR", base: "main" }),
+      );
     });
   });
 
@@ -106,9 +116,15 @@ describe("GitHubClient", () => {
       const client = makeClient();
       mockOctokit.rest.pulls.get.mockResolvedValue({
         data: {
-          number: 5, title: "Fix bug", state: "open",
-          user: { login: "devuser" }, additions: 10, deletions: 3,
-          changed_files: 2, mergeable: true, body: "fixes #3",
+          number: 5,
+          title: "Fix bug",
+          state: "open",
+          user: { login: "devuser" },
+          additions: 10,
+          deletions: 3,
+          changed_files: 2,
+          mergeable: true,
+          body: "fixes #3",
           html_url: "https://github.com/testowner/testrepo/pull/5",
           mergeable_state: "clean",
         },
@@ -125,7 +141,9 @@ describe("GitHubClient", () => {
   describe("getPRDiff", () => {
     it("returns raw diff string", async () => {
       const client = makeClient();
-      mockOctokit.rest.pulls.get.mockResolvedValue({ data: "--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n" });
+      mockOctokit.rest.pulls.get.mockResolvedValue({
+        data: "--- a/foo.ts\n+++ b/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
+      });
       const diff = await client.getPRDiff(5);
       expect(diff).toContain("--- a/foo.ts");
     });
@@ -137,8 +155,18 @@ describe("GitHubClient", () => {
       const client = makeClient();
       mockOctokit.paginate.iterator.mockReturnValue(
         (async function* () {
-          yield { data: [{ filename: "src/foo.ts", status: "modified", additions: 5, deletions: 2, patch: "@@ -1 +1 @@\n-x\n+y" }] };
-        })()
+          yield {
+            data: [
+              {
+                filename: "src/foo.ts",
+                status: "modified",
+                additions: 5,
+                deletions: 2,
+                patch: "@@ -1 +1 @@\n-x\n+y",
+              },
+            ],
+          };
+        })(),
       );
       const files = await client.listPRFiles(3);
       expect(files).toHaveLength(1);
@@ -153,7 +181,9 @@ describe("GitHubClient", () => {
       const client = makeClient();
       mockOctokit.rest.pulls.createReview.mockResolvedValue({ data: {} });
       await client.createReview(7, { event: "APPROVE", body: "LGTM" });
-      expect(mockOctokit.rest.pulls.createReview).toHaveBeenCalledWith(expect.objectContaining({ event: "APPROVE", pull_number: 7 }));
+      expect(mockOctokit.rest.pulls.createReview).toHaveBeenCalledWith(
+        expect.objectContaining({ event: "APPROVE", pull_number: 7 }),
+      );
     });
   });
 
@@ -163,7 +193,10 @@ describe("GitHubClient", () => {
       const client = makeClient();
       mockOctokit.rest.issues.get.mockResolvedValue({
         data: {
-          number: 12, title: "Bug report", state: "open", body: "steps to repro",
+          number: 12,
+          title: "Bug report",
+          state: "open",
+          body: "steps to repro",
           labels: [{ name: "bug" }, { name: "priority" }],
           html_url: "https://github.com/testowner/testrepo/issues/12",
           user: { login: "reporter" },
@@ -182,10 +215,12 @@ describe("GitHubClient", () => {
       const client = makeClient();
       mockOctokit.rest.issues.addLabels.mockResolvedValue({ data: {} });
       await client.addLabels(15, ["bug", "help wanted"]);
-      expect(mockOctokit.rest.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({
-        issue_number: 15,
-        labels: ["bug", "help wanted"],
-      }));
+      expect(mockOctokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issue_number: 15,
+          labels: ["bug", "help wanted"],
+        }),
+      );
     });
   });
 
@@ -196,7 +231,12 @@ describe("GitHubClient", () => {
       mockOctokit.rest.checks.listForRef.mockResolvedValue({
         data: {
           check_runs: [
-            { name: "CI", status: "completed", conclusion: "success", html_url: "https://gh/check/1" },
+            {
+              name: "CI",
+              status: "completed",
+              conclusion: "success",
+              html_url: "https://gh/check/1",
+            },
           ],
         },
       });
@@ -213,7 +253,14 @@ describe("GitHubClient", () => {
       mockOctokit.rest.actions.listWorkflowRunsForRepo.mockResolvedValue({
         data: {
           workflow_runs: [
-            { id: 999, name: "CI", status: "completed", conclusion: "success", head_branch: "main", html_url: "https://gh/run/999" },
+            {
+              id: 999,
+              name: "CI",
+              status: "completed",
+              conclusion: "success",
+              head_branch: "main",
+              html_url: "https://gh/run/999",
+            },
           ],
         },
       });
@@ -255,10 +302,34 @@ describe("GitHubClient", () => {
       // Mock iterator returning 3 pages of 100 files each
       mockOctokit.paginate.iterator.mockReturnValueOnce(
         (async function* () {
-          yield { data: Array.from({ length: 100 }, (_, i) => ({ filename: `file-page1-${i}.ts`, status: "modified", additions: 1, deletions: 0, patch: "+new" })) };
-          yield { data: Array.from({ length: 100 }, (_, i) => ({ filename: `file-page2-${i}.ts`, status: "modified", additions: 1, deletions: 0, patch: "+new" })) };
-          yield { data: Array.from({ length: 100 }, (_, i) => ({ filename: `file-page3-${i}.ts`, status: "modified", additions: 1, deletions: 0, patch: "+new" })) };
-        })()
+          yield {
+            data: Array.from({ length: 100 }, (_, i) => ({
+              filename: `file-page1-${i}.ts`,
+              status: "modified",
+              additions: 1,
+              deletions: 0,
+              patch: "+new",
+            })),
+          };
+          yield {
+            data: Array.from({ length: 100 }, (_, i) => ({
+              filename: `file-page2-${i}.ts`,
+              status: "modified",
+              additions: 1,
+              deletions: 0,
+              patch: "+new",
+            })),
+          };
+          yield {
+            data: Array.from({ length: 100 }, (_, i) => ({
+              filename: `file-page3-${i}.ts`,
+              status: "modified",
+              additions: 1,
+              deletions: 0,
+              patch: "+new",
+            })),
+          };
+        })(),
       );
       const client = new GitHubClient({ token: "test-token" });
       (client as any).owner = "owner";
@@ -272,19 +343,48 @@ describe("GitHubClient", () => {
     it("listIssues paginates and filters out PRs", async () => {
       mockOctokit.paginate.iterator.mockReturnValueOnce(
         (async function* () {
-          yield { data: [
-            { number: 1, title: "Issue 1", state: "open", body: "body1", labels: [], html_url: "url1", user: { login: "alice" }, pull_request: undefined },
-            { number: 2, title: "PR not issue", state: "open", body: "", labels: [], html_url: "url2", user: { login: "bob" }, pull_request: { url: "pr-url" } },
-            { number: 3, title: "Issue 3", state: "open", body: "body3", labels: [], html_url: "url3", user: { login: "carol" }, pull_request: undefined },
-          ]};
-        })()
+          yield {
+            data: [
+              {
+                number: 1,
+                title: "Issue 1",
+                state: "open",
+                body: "body1",
+                labels: [],
+                html_url: "url1",
+                user: { login: "alice" },
+                pull_request: undefined,
+              },
+              {
+                number: 2,
+                title: "PR not issue",
+                state: "open",
+                body: "",
+                labels: [],
+                html_url: "url2",
+                user: { login: "bob" },
+                pull_request: { url: "pr-url" },
+              },
+              {
+                number: 3,
+                title: "Issue 3",
+                state: "open",
+                body: "body3",
+                labels: [],
+                html_url: "url3",
+                user: { login: "carol" },
+                pull_request: undefined,
+              },
+            ],
+          };
+        })(),
       );
       const client = new GitHubClient({ token: "test-token" });
       (client as any).owner = "owner";
       (client as any).repo = "repo";
       const issues = await client.listIssues();
       expect(issues).toHaveLength(2);
-      expect(issues.map(i => i.number)).toEqual([1, 3]);
+      expect(issues.map((i) => i.number)).toEqual([1, 3]);
     });
   });
 });

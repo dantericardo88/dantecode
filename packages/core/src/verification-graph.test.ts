@@ -35,7 +35,12 @@ describe("VerificationGraph", () => {
       },
       criticOpinions: [
         { agentId: "critic-1", verdict: "pass", confidence: 0.8 },
-        { agentId: "critic-2", verdict: "warn", confidence: 0.6, findings: ["Add health-check detail"] },
+        {
+          agentId: "critic-2",
+          verdict: "warn",
+          confidence: 0.6,
+          findings: ["Add health-check detail"],
+        },
       ],
     });
 

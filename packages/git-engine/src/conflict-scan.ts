@@ -237,11 +237,7 @@ export function diffSymbols(
  *
  * Returns an array of files that would conflict.
  */
-export function predictConflicts(
-  repoRoot: string,
-  branchA: string,
-  branchB: string,
-): string[] {
+export function predictConflicts(repoRoot: string, branchA: string, branchB: string): string[] {
   try {
     // Find merge base
     const base = git(`merge-base ${branchA} ${branchB}`, repoRoot);

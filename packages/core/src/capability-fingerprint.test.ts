@@ -97,8 +97,7 @@ describe("CapabilityFingerprint", () => {
       maxCostPer1kTokens: 0.001,
     });
     expect(result).toBeDefined();
-    const avg =
-      (result!.costPer1kInputTokens + result!.costPer1kOutputTokens) / 2;
+    const avg = (result!.costPer1kInputTokens + result!.costPer1kOutputTokens) / 2;
     expect(avg).toBeLessThanOrEqual(0.001);
   });
 
@@ -253,9 +252,7 @@ describe("CapabilityFingerprint", () => {
     expect(result!.supportsVision).toBe(true);
     // And should mention vision or multimodal in its strengths
     const strengthsText = result!.strengths.join(" ").toLowerCase();
-    expect(
-      strengthsText.includes("vision") || strengthsText.includes("multimodal"),
-    ).toBe(true);
+    expect(strengthsText.includes("vision") || strengthsText.includes("multimodal")).toBe(true);
   });
 
   // 24. updateCapability() persists via save

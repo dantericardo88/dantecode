@@ -55,15 +55,20 @@ export class WorktreeIsolationLayer implements IsolationLayer {
       let stderr = "";
       let timedOut = false;
 
-      const timer = request.timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            child.kill("SIGKILL");
-          }, request.timeoutMs)
-        : null;
+      const timer =
+        request.timeoutMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              child.kill("SIGKILL");
+            }, request.timeoutMs)
+          : null;
 
-      child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
 
       child.on("close", (code) => {
         if (timer) clearTimeout(timer);
@@ -108,7 +113,11 @@ export class WorktreeIsolationLayer implements IsolationLayer {
       });
     } catch {
       // Best-effort: try fs removal
-      try { await rm(wt, { recursive: true, force: true }); } catch { /* ignore */ }
+      try {
+        await rm(wt, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -119,11 +128,10 @@ export class WorktreeIsolationLayer implements IsolationLayer {
     const id = randomUUID().slice(0, 8);
     const path = join(this.worktreeBase, `wt-${id}`);
 
-    await execFileAsync(
-      "git",
-      ["worktree", "add", "--detach", path],
-      { cwd: this.projectRoot, timeout: 15_000 },
-    );
+    await execFileAsync("git", ["worktree", "add", "--detach", path], {
+      cwd: this.projectRoot,
+      timeout: 15_000,
+    });
 
     this.worktreePath = path;
     return path;

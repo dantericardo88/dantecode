@@ -351,7 +351,9 @@ export function watchGitEvents(
   return watcher;
 }
 
-export async function listGitWatchers(projectRoot = process.cwd()): Promise<StoredGitWatcherRecord[]> {
+export async function listGitWatchers(
+  projectRoot = process.cwd(),
+): Promise<StoredGitWatcherRecord[]> {
   const store = new GitAutomationStore(path.resolve(projectRoot));
   return store.listWatchers();
 }

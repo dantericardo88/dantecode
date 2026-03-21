@@ -12,7 +12,11 @@ import type { PdseWeights } from "./pdse-scorer.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type TuningFeedback = "confirmed_correct" | "false_positive" | "false_negative" | "review_helpful";
+export type TuningFeedback =
+  | "confirmed_correct"
+  | "false_positive"
+  | "false_negative"
+  | "review_helpful";
 
 export interface VerifierOutcome {
   id: string;
@@ -26,8 +30,8 @@ export interface VerifierOutcome {
 export interface TuningSuggestion {
   dimension: "passGate" | "softPassGate" | "reviewGate" | keyof PdseWeights;
   direction: "increase" | "decrease";
-  magnitude: number;   // 0–1, suggested adjustment amount
-  confidence: number;  // how confident is the suggestion (0–1)
+  magnitude: number; // 0–1, suggested adjustment amount
+  confidence: number; // how confident is the suggestion (0–1)
   reason: string;
 }
 
@@ -192,7 +196,8 @@ export class VerificationTuner {
     const key = suggestion.dimension as keyof typeof result;
     const existing = result[key];
     if (typeof existing === "number") {
-      const delta = suggestion.direction === "increase" ? suggestion.magnitude : -suggestion.magnitude;
+      const delta =
+        suggestion.direction === "increase" ? suggestion.magnitude : -suggestion.magnitude;
       (result as Record<string, number>)[key] = clamp(existing + delta);
     }
     return result;

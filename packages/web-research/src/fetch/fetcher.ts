@@ -49,10 +49,11 @@ export class WebFetcher {
     try {
       const response = await globalThis.fetch(url, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          ...options.headers
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          ...options.headers,
         },
-        signal: controller.signal
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -68,7 +69,7 @@ export class WebFetcher {
         normalizedUrl: normalizeUrl(url),
         title,
         content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } finally {
       clearTimeout(timer);

@@ -7,7 +7,8 @@ describe("RelevanceScorer", () => {
 
   it("should score high overlap content highly", async () => {
     const goal = "Find information about climate change and carbon taxes.";
-    const content = "Climate change is a global issue. Many countries are implementing carbon taxes to reduce emissions.";
+    const content =
+      "Climate change is a global issue. Many countries are implementing carbon taxes to reduce emissions.";
     const score = await scorer.score(content, goal);
     expect(score).toBeGreaterThan(0.5);
   });

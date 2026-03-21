@@ -32,11 +32,13 @@ export const RuntimeVerificationReportSchema = z.object({
   gates: z.array(VerificationGateSchema),
   evidenceCount: z.number().int().min(0),
   sources: z.array(EvidenceSourceSchema).default([]),
-  pdse: z.object({
-    overall: z.number().min(0).max(1),
-    passedGate: z.boolean(),
-    metrics: z.record(z.number()).optional(),
-  }).optional(),
+  pdse: z
+    .object({
+      overall: z.number().min(0).max(1),
+      passedGate: z.boolean(),
+      metrics: z.record(z.number()).optional(),
+    })
+    .optional(),
 });
 
 export type RuntimeVerificationReport = z.infer<typeof RuntimeVerificationReportSchema>;

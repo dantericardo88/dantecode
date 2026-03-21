@@ -37,8 +37,6 @@ export interface ServeOptions {
   password?: string;
   /** Additional CORS origins to allow beyond localhost. */
   corsOrigins?: string[];
-  /** Enable mDNS service discovery. Default: false. */
-  enableMdns?: boolean;
   /**
    * Injected agent runner. When provided, sendMessage fires the AI agent loop.
    * Injected by commands/serve.ts; omitted in tests to avoid needing an API key.
@@ -73,22 +71,31 @@ function readBody(req: IncomingMessage): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
+    let rejected = false;
     req.on("data", (chunk: Buffer) => {
       totalBytes += chunk.length;
       if (totalBytes > MAX_BODY_BYTES) {
-        req.destroy();
-        reject(new Error("PAYLOAD_TOO_LARGE"));
+        if (!rejected) {
+          rejected = true;
+          reject(new Error("PAYLOAD_TOO_LARGE"));
+        }
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    req.on("error", reject);
+    req.on("end", () => {
+      if (!rejected) resolve(Buffer.concat(chunks).toString("utf-8"));
+    });
+    req.on("error", (err) => {
+      if (!rejected) {
+        rejected = true;
+        reject(err);
+      }
+    });
   });
 }
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
@@ -127,9 +134,13 @@ function parseURL(rawUrl: string): { path: string; query: Record<string, string>
   for (const pair of queryStr.split("&")) {
     if (!pair) continue;
     const eq = pair.indexOf("=");
-    const key = decodeURIComponent(eq === -1 ? pair : pair.slice(0, eq));
-    const val = decodeURIComponent(eq === -1 ? "" : pair.slice(eq + 1));
-    query[key] = val;
+    try {
+      const key = decodeURIComponent(eq === -1 ? pair : pair.slice(0, eq));
+      const val = decodeURIComponent(eq === -1 ? "" : pair.slice(eq + 1));
+      query[key] = val;
+    } catch {
+      // Skip malformed percent-encoding — do not propagate URIError as a 500
+    }
   }
   return { path, query };
 }
@@ -177,102 +188,108 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
   const router = new Router();
   buildRoutes(router, context);
 
-  const server: Server = createServer(
-    async (req: IncomingMessage, res: ServerResponse) => {
-      const method = (req.method?.toUpperCase() ?? "GET") as
-        | "GET"
-        | "POST"
-        | "PUT"
-        | "DELETE"
-        | "OPTIONS";
-      const rawUrl = req.url ?? "/";
+  const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const method = (req.method?.toUpperCase() ?? "GET") as
+      | "GET"
+      | "POST"
+      | "PUT"
+      | "DELETE"
+      | "OPTIONS";
+    const rawUrl = req.url ?? "/";
 
-      // Handle CORS preflight
-      if (method === "OPTIONS") {
-        res.writeHead(204, CORS_HEADERS);
-        res.end();
+    // Handle CORS preflight — compute dynamic ACAO before header normalization
+    if (method === "OPTIONS") {
+      const rawOrigin = Array.isArray(req.headers["origin"])
+        ? req.headers["origin"][0]
+        : req.headers["origin"];
+      res.writeHead(204, {
+        ...CORS_HEADERS,
+        "Access-Control-Allow-Origin": getAllowOrigin(rawOrigin, corsOrigins),
+      });
+      res.end();
+      return;
+    }
+
+    // Normalize headers to lower-case keys for consistent lookup
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      headers[k.toLowerCase()] = Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+    }
+
+    // Compute dynamic CORS origin header based on the request's Origin
+    const requestOrigin = headers["origin"];
+    const corsOriginHeader = getAllowOrigin(requestOrigin, corsOrigins);
+    const corsOverride: Record<string, string> = corsOriginHeader
+      ? { "Access-Control-Allow-Origin": corsOriginHeader }
+      : {};
+
+    // Auth check
+    if (!checkAuth(headers, authConfig)) {
+      const unauth = unauthorizedResponse();
+      sendJSON(res, unauth.status, unauth.body, { ...unauth.headers, ...corsOverride });
+      return;
+    }
+
+    const { path, query } = parseURL(rawUrl);
+
+    // SSE streams need direct access to `res` — handle before the router
+    const sseMatch = method === "GET" ? SSE_STREAM_RE.exec(path) : null;
+    if (sseMatch) {
+      const sessionId = sseMatch[1]!;
+      const session = context.sessions.get(sessionId);
+      if (!session) {
+        sendJSON(res, 404, { error: `Session not found: ${sessionId}` }, corsOverride);
         return;
       }
+      createSSEStream(res, sessionId, {
+        sessionEmitter: context.sessionEmitter,
+        corsOrigins,
+        requestOrigin,
+      });
+      return;
+    }
 
-      // Normalize headers to lower-case keys for consistent lookup
-      const headers: Record<string, string> = {};
-      for (const [k, v] of Object.entries(req.headers)) {
-        headers[k.toLowerCase()] = Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
-      }
-
-      // Compute dynamic CORS origin header based on the request's Origin
-      const requestOrigin = headers["origin"];
-      const corsOriginHeader = getAllowOrigin(requestOrigin, corsOrigins);
-      const corsOverride: Record<string, string> = corsOriginHeader
-        ? { "Access-Control-Allow-Origin": corsOriginHeader }
-        : {};
-
-      // Auth check
-      if (!checkAuth(headers, authConfig)) {
-        const unauth = unauthorizedResponse();
-        sendJSON(res, unauth.status, unauth.body, { ...unauth.headers, ...corsOverride });
-        return;
-      }
-
-      const { path, query } = parseURL(rawUrl);
-
-      // SSE streams need direct access to `res` — handle before the router
-      const sseMatch = method === "GET" ? SSE_STREAM_RE.exec(path) : null;
-      if (sseMatch) {
-        const sessionId = sseMatch[1]!;
-        const session = context.sessions.get(sessionId);
-        if (!session) {
-          sendJSON(res, 404, { error: `Session not found: ${sessionId}` }, corsOverride);
+    // Parse JSON body for POST/PUT
+    let body: unknown = undefined;
+    if (method === "POST" || method === "PUT") {
+      let raw = "";
+      try {
+        raw = await readBody(req);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "PAYLOAD_TOO_LARGE") {
+          sendJSON(res, 413, { error: "Payload too large (max 1 MB)" }, corsOverride);
+          req.resume(); // drain remaining body bytes to allow response to flush
           return;
         }
-        createSSEStream(res, sessionId, {
-          sessionEmitter: context.sessionEmitter,
-          corsOrigins,
-          requestOrigin,
-        });
-        return;
       }
-
-      // Parse JSON body for POST/PUT
-      let body: unknown = undefined;
-      if (method === "POST" || method === "PUT") {
-        let raw = "";
+      if (raw) {
         try {
-          raw = await readBody(req);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "";
-          if (msg === "PAYLOAD_TOO_LARGE") {
-            sendJSON(res, 413, { error: "Payload too large (max 1 MB)" }, corsOverride);
-            return;
-          }
-        }
-        if (raw) {
-          try {
-            body = JSON.parse(raw);
-          } catch {
-            // Leave body as undefined — handlers validate
-          }
+          body = JSON.parse(raw);
+        } catch {
+          sendJSON(res, 400, { error: "Invalid JSON body" }, corsOverride);
+          return;
         }
       }
+    }
 
-      // Route the request
-      try {
-        const result = await router.handle({
-          method: method as "GET" | "POST" | "PUT" | "DELETE",
-          path,
-          params: {},
-          query,
-          body,
-          headers,
-        });
+    // Route the request
+    try {
+      const result = await router.handle({
+        method: method as "GET" | "POST" | "PUT" | "DELETE",
+        path,
+        params: {},
+        query,
+        body,
+        headers,
+      });
 
-        sendJSON(res, result.status, result.body, { ...result.headers, ...corsOverride });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        sendJSON(res, 500, { error: "Internal server error", message }, corsOverride);
-      }
-    },
-  );
+      sendJSON(res, result.status, result.body, { ...result.headers, ...corsOverride });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJSON(res, 500, { error: "Internal server error", message }, corsOverride);
+    }
+  });
 
   // Start listening
   await new Promise<void>((resolve, reject) => {

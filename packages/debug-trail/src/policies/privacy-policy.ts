@@ -65,7 +65,9 @@ export class PrivacyPolicy {
     // D: normalize Windows backslashes in patterns before compiling to regex;
     // shouldExcludePath() normalizes the input path, but patterns were not normalized.
     this.excludePatterns = allExclude.map((g) => globToRegex(g.replace(/\\/g, "/")));
-    this.redactPatterns = this.config.redactContentPatterns.map((g) => globToRegex(g.replace(/\\/g, "/")));
+    this.redactPatterns = this.config.redactContentPatterns.map((g) =>
+      globToRegex(g.replace(/\\/g, "/")),
+    );
   }
 
   /** Check if a file path should be excluded from snapshotting entirely. */
@@ -153,10 +155,10 @@ function globToRegex(glob: string): RegExp {
   // Process ** before * so we don't double-replace
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape special regex chars
-    .replace(/\*\*/g, "\x00")              // mark ** as placeholder
-    .replace(/\*/g, "[^/]*")              // single * = one path segment (no slashes)
-    .replace(/\x00/g, ".*")               // ** = any depth (including slashes)
-    .replace(/\?/g, "[^/]");              // ? = one non-separator char
+    .replace(/\*\*/g, "\x00") // mark ** as placeholder
+    .replace(/\*/g, "[^/]*") // single * = one path segment (no slashes)
+    .replace(/\x00/g, ".*") // ** = any depth (including slashes)
+    .replace(/\?/g, "[^/]"); // ? = one non-separator char
   return new RegExp(escaped, "i");
 }
 
@@ -172,16 +174,20 @@ export class StorageQuotaPolicy {
     this.maxBytes = maxMb * 1024 * 1024;
   }
 
-  async checkQuota(
-    snapshotsDir: string,
-  ): Promise<{ ok: boolean; usedBytes: number; limitBytes: number; usedMb: number; limitMb: number }> {
+  async checkQuota(snapshotsDir: string): Promise<{
+    ok: boolean;
+    usedBytes: number;
+    limitBytes: number;
+    usedMb: number;
+    limitMb: number;
+  }> {
     const usedBytes = await this.measureDir(snapshotsDir);
     return {
       ok: usedBytes < this.maxBytes,
       usedBytes,
       limitBytes: this.maxBytes,
-      usedMb: Math.round(usedBytes / 1024 / 1024 * 100) / 100,
-      limitMb: Math.round(this.maxBytes / 1024 / 1024 * 100) / 100,
+      usedMb: Math.round((usedBytes / 1024 / 1024) * 100) / 100,
+      limitMb: Math.round((this.maxBytes / 1024 / 1024) * 100) / 100,
     };
   }
 

@@ -152,12 +152,10 @@ export class HelpEngine {
   /** Format a help entry as a rich CLI card. */
   formatEntry(entry: HelpEntry): string {
     const e = this._engine;
-    const lines: string[] = [
-      `${e.boldText(entry.command)}  ${e.muted(entry.shortDesc)}`,
-    ];
+    const lines: string[] = [`${e.boldText(entry.command)}  ${e.muted(entry.shortDesc)}`];
 
     if (entry.longDesc) lines.push(`  ${entry.longDesc}`);
-    if (entry.usage)    lines.push(`  ${e.muted("Usage:")} ${entry.usage}`);
+    if (entry.usage) lines.push(`  ${e.muted("Usage:")} ${entry.usage}`);
 
     if (entry.examples?.length) {
       lines.push(`  ${e.muted("Examples:")}`);
@@ -191,8 +189,8 @@ export class HelpEngine {
         s.priority === "high"
           ? e.warning("!")
           : s.priority === "medium"
-          ? e.info("›")
-          : e.muted("·");
+            ? e.info("›")
+            : e.muted("·");
       lines.push(`  ${badge} ${e.info(s.command)}  ${e.muted(s.reason)}`);
     }
     return lines.join("\n");
@@ -212,9 +210,18 @@ export class HelpEngine {
 
     let score = 0;
     for (const target of targets) {
-      if (target === query) { score += 10; continue; }
-      if (target.startsWith(query)) { score += 5; continue; }
-      if (target.includes(query)) { score += 3; continue; }
+      if (target === query) {
+        score += 10;
+        continue;
+      }
+      if (target.startsWith(query)) {
+        score += 5;
+        continue;
+      }
+      if (target.includes(query)) {
+        score += 3;
+        continue;
+      }
       const qTokens = query.split(/\s+/);
       const matches = qTokens.filter((tok) => target.includes(tok));
       score += matches.length;
@@ -235,47 +242,102 @@ export function getContextualSuggestions(ctx: SuggestionContext, maxResults = 5)
   const rules: Array<{ applies: (c: SuggestionContext) => boolean; suggestion: UXSuggestion }> = [
     {
       applies: (c) => (c.pdseScore ?? 1) < 0.7,
-      suggestion: { command: "/autoforge", label: "Run autoforge", reason: "PDSE score below 0.7", priority: "high" },
+      suggestion: {
+        command: "/autoforge",
+        label: "Run autoforge",
+        reason: "PDSE score below 0.7",
+        priority: "high",
+      },
     },
     {
       applies: (c) => !!c.activeErrors?.some((e) => /TS\d{4}|tsc|typecheck/i.test(e)),
-      suggestion: { command: "/verify", label: "Run verification", reason: "TypeScript errors detected", priority: "high" },
+      suggestion: {
+        command: "/verify",
+        label: "Run verification",
+        reason: "TypeScript errors detected",
+        priority: "high",
+      },
     },
     {
       applies: (c) => !!c.activeErrors?.some((e) => /AssertionError|vitest|test.*fail/i.test(e)),
-      suggestion: { command: "/debug", label: "Start systematic debug", reason: "Test failures present", priority: "high" },
+      suggestion: {
+        command: "/debug",
+        label: "Start systematic debug",
+        reason: "Test failures present",
+        priority: "high",
+      },
     },
     {
       applies: (c) => c.pipelineState === "complete",
-      suggestion: { command: "/verify", label: "Verify pipeline output", reason: "Pipeline just completed", priority: "high" },
+      suggestion: {
+        command: "/verify",
+        label: "Verify pipeline output",
+        reason: "Pipeline just completed",
+        priority: "high",
+      },
     },
     {
       applies: (c) => (c.contextPercent ?? 0) > 75,
-      suggestion: { command: "/compact", label: "Compact conversation", reason: "Context window > 75%", priority: "high" },
+      suggestion: {
+        command: "/compact",
+        label: "Compact conversation",
+        reason: "Context window > 75%",
+        priority: "high",
+      },
     },
     {
       applies: (c) => !!c.hasUncommittedChanges && c.pipelineState !== "running",
-      suggestion: { command: "/commit", label: "Commit changes", reason: "Uncommitted changes detected", priority: "medium" },
+      suggestion: {
+        command: "/commit",
+        label: "Commit changes",
+        reason: "Uncommitted changes detected",
+        priority: "medium",
+      },
     },
     {
       applies: (c) => c.pipelineState === "complete",
-      suggestion: { command: "/ship", label: "Review for release", reason: "Pipeline complete", priority: "medium" },
+      suggestion: {
+        command: "/ship",
+        label: "Review for release",
+        reason: "Pipeline complete",
+        priority: "medium",
+      },
     },
     {
       applies: (c) => c.pipelineState === "idle" && !c.isFirstMessage,
-      suggestion: { command: "/magic", label: "Run balanced forge pipeline", reason: "No active pipeline", priority: "medium" },
+      suggestion: {
+        command: "/magic",
+        label: "Run balanced forge pipeline",
+        reason: "No active pipeline",
+        priority: "medium",
+      },
     },
     {
       applies: (c) => !!c.isFirstMessage,
-      suggestion: { command: "/review", label: "Review project state", reason: "Start with a project review", priority: "medium" },
+      suggestion: {
+        command: "/review",
+        label: "Review project state",
+        reason: "Start with a project review",
+        priority: "medium",
+      },
     },
     {
       applies: (c) => !!c.editedFilePaths?.length && c.pipelineState !== "running",
-      suggestion: { command: "/verify", label: "Verify after edit", reason: "Files recently edited", priority: "medium" },
+      suggestion: {
+        command: "/verify",
+        label: "Verify after edit",
+        reason: "Files recently edited",
+        priority: "medium",
+      },
     },
     {
       applies: (c) => !!c.isFirstMessage,
-      suggestion: { command: "/verify", label: "Check quality gate", reason: "Verify clean state before changes", priority: "low" },
+      suggestion: {
+        command: "/verify",
+        label: "Check quality gate",
+        reason: "Verify clean state before changes",
+        priority: "low",
+      },
     },
   ];
 

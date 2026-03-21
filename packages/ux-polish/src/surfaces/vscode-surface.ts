@@ -108,11 +108,15 @@ export class VscodeSurface {
   formatProgressLine(state: ProgressState): string {
     const icons = this._engine.icons();
     const statusIcon =
-      state.status === "completed" ? icons.success :
-      state.status === "failed"    ? icons.error :
-      state.status === "running"   ? icons.running :
-      state.status === "paused"    ? icons.paused :
-      icons.pending;
+      state.status === "completed"
+        ? icons.success
+        : state.status === "failed"
+          ? icons.error
+          : state.status === "running"
+            ? icons.running
+            : state.status === "paused"
+              ? icons.paused
+              : icons.pending;
 
     const pctStr = state.progress !== undefined ? ` (${state.progress}%)` : "";
     const msgStr = state.message ? ` — ${state.message}` : "";
@@ -135,9 +139,7 @@ export class VscodeSurface {
     if (opts.tokens !== undefined) parts.push(`${opts.tokens}t`);
 
     const colorKey =
-      (opts.pdseScore ?? 1) >= 0.8 ? "success" :
-      (opts.pdseScore ?? 1) >= 0.5 ? "warning" :
-      "error";
+      (opts.pdseScore ?? 1) >= 0.8 ? "success" : (opts.pdseScore ?? 1) >= 0.5 ? "warning" : "error";
 
     return {
       text: parts.join(" | ") || "DanteCode",

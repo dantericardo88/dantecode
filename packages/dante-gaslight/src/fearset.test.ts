@@ -35,10 +35,7 @@ import {
   buildFearSetRobustnessPrompt,
   FEARSET_SYSTEM_PROMPT,
 } from "./gaslighter-role.js";
-import {
-  runFearSetEngine,
-  type FearSetCallbacks,
-} from "./fearset-engine.js";
+import { runFearSetEngine, type FearSetCallbacks } from "./fearset-engine.js";
 import { distillFearSetLesson } from "./lesson-distiller.js";
 import { computeFearSetStats, formatFearSetStats } from "./fearset-stats.js";
 import { DanteGaslightIntegration } from "./integration.js";
@@ -301,7 +298,9 @@ describe("classifyRisk", () => {
   const cfg = { enabled: true, policyTaskClasses: ["destructive-op"] };
 
   it("returns shouldTrigger=false and channel=null when FearSet is disabled", () => {
-    const r = classifyRisk("/fearset check this", { config: { enabled: false, policyTaskClasses: [] } });
+    const r = classifyRisk("/fearset check this", {
+      config: { enabled: false, policyTaskClasses: [] },
+    });
     expect(r.shouldTrigger).toBe(false);
     expect(r.channel).toBeNull();
     expect(r.reasons).toContain("FearSet disabled");
@@ -820,7 +819,10 @@ describe("runFearSetEngine — isStopped callback", () => {
       "Context",
       EXPLICIT_TRIGGER,
       {
-        onColumn: async () => { callCount++; return makeDefineJson(); },
+        onColumn: async () => {
+          callCount++;
+          return makeDefineJson();
+        },
         isStopped: () => callCount >= 1,
       },
       { config: ENABLED_FEARSET_CONFIG },
@@ -864,7 +866,9 @@ describe("runFearSetEngine — onColumnComplete callback", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onColumnComplete: (col) => { fired.push(col); },
+        onColumnComplete: (col) => {
+          fired.push(col);
+        },
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -883,7 +887,9 @@ describe("runFearSetEngine — onColumnComplete callback", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onColumnComplete: (_col, fc) => { captured.push(fc); },
+        onColumnComplete: (_col, fc) => {
+          captured.push(fc);
+        },
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -900,7 +906,9 @@ describe("runFearSetEngine — onColumnComplete callback", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onColumnComplete: (col) => { order.push(col); },
+        onColumnComplete: (col) => {
+          order.push(col);
+        },
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -921,7 +929,9 @@ describe("runFearSetEngine — onComplete callback", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onComplete: () => { callCount++; },
+        onComplete: () => {
+          callCount++;
+        },
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -935,7 +945,9 @@ describe("runFearSetEngine — onComplete callback", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onComplete: (r) => { captured = r; },
+        onComplete: (r) => {
+          captured = r;
+        },
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -1416,8 +1428,12 @@ describe("formatFearSetStats", () => {
 describe("DanteGaslightIntegration — cmdFearSetOn/Off/Stats/Review", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("cmdFearSetOn returns string mentioning FearSet enabled", () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir });
@@ -1480,8 +1496,12 @@ describe("DanteGaslightIntegration — cmdFearSetOn/Off/Stats/Review", () => {
 describe("DanteGaslightIntegration.runFearSet", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("stores result in fearSetResults (getFearSetResults returns it)", async () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
@@ -1506,10 +1526,15 @@ describe("DanteGaslightIntegration.runFearSet", () => {
 
   it("passes engineOpts.priorLessons into the engine", async () => {
     const capturedPrompts: string[] = [];
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      mode: "lite",
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        mode: "lite",
+      },
+    );
     await engine.runFearSet(
       "Decision",
       {
@@ -1531,8 +1556,12 @@ describe("DanteGaslightIntegration.runFearSet", () => {
 describe("DanteGaslightIntegration.maybeFearSet", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("returns null when FearSet is disabled (default)", async () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir });
@@ -1577,10 +1606,15 @@ describe("DanteGaslightIntegration.maybeFearSet", () => {
 
   it("passes priorLessons through to the engine", async () => {
     const capturedPrompts: string[] = [];
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      mode: "lite",
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        mode: "lite",
+      },
+    );
     await engine.maybeFearSet({
       message: "/fearset Should I launch?",
       priorLessons: ["Check rollback plan first"],
@@ -1602,8 +1636,12 @@ describe("DanteGaslightIntegration.maybeFearSet", () => {
 describe("DanteGaslightIntegration.distillFearSetLessons", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("returns empty array when there are no results", () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir });
@@ -1639,13 +1677,14 @@ describe("DanteGaslightIntegration.distillFearSetLessons", () => {
     // Run with a gate that returns fail
     await engine.runFearSet("Decision", {
       ...makeMockCallbacks(),
-      onGate: async () => JSON.stringify({
-        overall: 0.2,
-        hasSimulationEvidence: false,
-        estimatedRiskReduction: 0.1,
-        gateDecision: "fail",
-        justification: "Too weak.",
-      }),
+      onGate: async () =>
+        JSON.stringify({
+          overall: 0.2,
+          hasSimulationEvidence: false,
+          estimatedRiskReduction: 0.1,
+          gateDecision: "fail",
+          justification: "Too weak.",
+        }),
     });
     const lessons = engine.distillFearSetLessons();
     expect(lessons).toHaveLength(0);
@@ -1668,8 +1707,12 @@ describe("DanteGaslightIntegration.distillFearSetLessons", () => {
 describe("GF-01: Full manual /fearset run through integration", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("full /fearset flow produces passed=true result with at least one lesson", async () => {
     const columnCallCount: Record<string, number> = {};
@@ -1678,26 +1721,29 @@ describe("GF-01: Full manual /fearset run through integration", () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
     engine.cmdFearSetOn();
 
-    const result = await engine.runFearSet(
-      "Should I launch this feature to prod?",
-      {
-        onColumn: async (_sys, _user, column) => {
-          columnCallCount[column] = (columnCallCount[column] ?? 0) + 1;
-          switch (column) {
-            case "define": return makeDefineJson(["Revenue loss", "Customer churn", "Data breach"]);
-            case "prevent": return makePreventJson();
-            case "repair": return makeRepairJson();
-            case "benefits": return makeBenefitsJson();
-            case "inaction": return makeInactionJson();
-            default: return "{}";
-          }
-        },
-        onGate: async () => {
-          gateCallCount++;
-          return makeGatePassJson();
-        },
+    const result = await engine.runFearSet("Should I launch this feature to prod?", {
+      onColumn: async (_sys, _user, column) => {
+        columnCallCount[column] = (columnCallCount[column] ?? 0) + 1;
+        switch (column) {
+          case "define":
+            return makeDefineJson(["Revenue loss", "Customer churn", "Data breach"]);
+          case "prevent":
+            return makePreventJson();
+          case "repair":
+            return makeRepairJson();
+          case "benefits":
+            return makeBenefitsJson();
+          case "inaction":
+            return makeInactionJson();
+          default:
+            return "{}";
+        }
       },
-    );
+      onGate: async () => {
+        gateCallCount++;
+        return makeGatePassJson();
+      },
+    });
 
     // Verify all 5 columns were called
     expect(columnCallCount["define"]).toBe(1);
@@ -1789,8 +1835,12 @@ describe("GF-01: Full manual /fearset run through integration", () => {
 describe("GF-04: distillFearSetLessons writes FearSet-tagged section proposals", () => {
   let testDir: string;
 
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("produces FearSet-Prevent and FearSet-Repair section proposals after a passed run", async () => {
     const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
@@ -1872,8 +1922,12 @@ import { writeFileSync, mkdirSync as _mkdirSync } from "node:fs";
 
 describe("FearSetResultStore — save / load / has / list", () => {
   let storeDir: string;
-  beforeEach(() => { storeDir = makeTestDir(); });
-  afterEach(() => { rmSync(storeDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    storeDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(storeDir, { recursive: true, force: true });
+  });
 
   function makeResult(overrides: Partial<FearSetResult> = {}): FearSetResult {
     return {
@@ -1982,14 +2036,23 @@ describe("FearSetResultStore — save / load / has / list", () => {
 
 describe("GF-02: maybeFearSet auto-trigger on destructive message", () => {
   let testDir: string;
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("triggers on a DROP TABLE destructive message", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "drop table users — delete all user records permanently",
       callbacks: makeMockCallbacks(),
@@ -1999,10 +2062,15 @@ describe("GF-02: maybeFearSet auto-trigger on destructive message", () => {
   });
 
   it("triggered result is persisted to disk immediately", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "rm -rf /data/prod — remove all production data",
       callbacks: makeMockCallbacks(),
@@ -2013,10 +2081,15 @@ describe("GF-02: maybeFearSet auto-trigger on destructive message", () => {
   });
 
   it("passed destructive result is distillable", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     // Use "purge data" pattern which matches DESTRUCTIVE_PATTERNS
     const result = await engine.maybeFearSet({
       message: "purge all data from the production database permanently",
@@ -2030,10 +2103,15 @@ describe("GF-02: maybeFearSet auto-trigger on destructive message", () => {
   });
 
   it("returns null when message is not risky", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "update README.md to fix typo",
       callbacks: makeMockCallbacks(),
@@ -2049,8 +2127,12 @@ describe("GF-02: maybeFearSet auto-trigger on destructive message", () => {
 
 describe("GF-03: sandbox simulation evidence wired through result", () => {
   let testDir: string;
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("onSandboxSimulate callback fires and evidence appears in result", async () => {
     const simulatedIds: string[] = [];
@@ -2058,13 +2140,15 @@ describe("GF-03: sandbox simulation evidence wired through result", () => {
       onColumn: async (_sys, _user, column) => {
         if (column === "prevent") {
           return JSON.stringify({
-            preventionActions: [{
-              id: "pa-sim",
-              description: "Run smoke test suite",
-              mechanism: "CI gate",
-              riskReduction: 0.8,
-              simulationStatus: "simulatable",
-            }],
+            preventionActions: [
+              {
+                id: "pa-sim",
+                description: "Run smoke test suite",
+                mechanism: "CI gate",
+                riskReduction: 0.8,
+                simulationStatus: "simulatable",
+              },
+            ],
           });
         }
         if (column === "define") return makeDefineJson();
@@ -2077,20 +2161,26 @@ describe("GF-03: sandbox simulation evidence wired through result", () => {
         simulatedIds.push(actionId);
         return `Simulation passed for ${actionId}: all 42 smoke tests green.`;
       },
-      onGate: async () => JSON.stringify({
-        overall: 0.88,
-        byColumn: { define: 0.9, prevent: 0.85, repair: 0.85 },
-        hasSimulationEvidence: true,
-        estimatedRiskReduction: 0.7,
-        gateDecision: "pass",
-        justification: "Evidence from simulation present.",
-      }),
+      onGate: async () =>
+        JSON.stringify({
+          overall: 0.88,
+          byColumn: { define: 0.9, prevent: 0.85, repair: 0.85 },
+          hasSimulationEvidence: true,
+          estimatedRiskReduction: 0.7,
+          gateDecision: "pass",
+          justification: "Evidence from simulation present.",
+        }),
     });
 
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      sandboxSimulation: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        sandboxSimulation: true,
+      },
+    );
     const result = await engine.runFearSet("Deploy new payment service", callbacks);
 
     // Simulation callback should have been invoked
@@ -2112,13 +2202,15 @@ describe("GF-03: sandbox simulation evidence wired through result", () => {
       onColumn: async (_sys, _user, column) => {
         if (column === "prevent") {
           return JSON.stringify({
-            preventionActions: [{
-              id: "pa-sim2",
-              description: "Automated integration test",
-              mechanism: "Test harness",
-              riskReduction: 0.75,
-              simulationStatus: "simulatable",
-            }],
+            preventionActions: [
+              {
+                id: "pa-sim2",
+                description: "Automated integration test",
+                mechanism: "Test harness",
+                riskReduction: 0.75,
+                simulationStatus: "simulatable",
+              },
+            ],
           });
         }
         if (column === "define") return makeDefineJson();
@@ -2128,19 +2220,25 @@ describe("GF-03: sandbox simulation evidence wired through result", () => {
         return null;
       },
       onSandboxSimulate: async () => "Integration tests passed: 100% green.",
-      onGate: async () => JSON.stringify({
-        overall: 0.82,
-        hasSimulationEvidence: true,
-        estimatedRiskReduction: 0.6,
-        gateDecision: "pass",
-        justification: "Simulation evidence confirms prevention plan.",
-      }),
+      onGate: async () =>
+        JSON.stringify({
+          overall: 0.82,
+          hasSimulationEvidence: true,
+          estimatedRiskReduction: 0.6,
+          gateDecision: "pass",
+          justification: "Simulation evidence confirms prevention plan.",
+        }),
     });
 
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      sandboxSimulation: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        sandboxSimulation: true,
+      },
+    );
     const result = await engine.runFearSet("Ship new auth flow", callbacks);
     // Gate declares hasSimulationEvidence=true
     expect(result.robustnessScore?.hasSimulationEvidence).toBe(true);
@@ -2153,13 +2251,20 @@ describe("GF-03: sandbox simulation evidence wired through result", () => {
 
 describe("GF-05: persist → restart → load → distill → idempotent", () => {
   let testDir: string;
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("result survives integration instance restart", async () => {
     // Session 1 — run and persist
     const engine1 = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
-    const result1 = await engine1.runFearSet("Should we refactor the DB layer?", makeMockCallbacks());
+    const result1 = await engine1.runFearSet(
+      "Should we refactor the DB layer?",
+      makeMockCallbacks(),
+    );
     expect(result1.passed).toBe(true);
 
     // Simulate process restart — new integration instance, same cwd
@@ -2188,7 +2293,10 @@ describe("GF-05: persist → restart → load → distill → idempotent", () =>
 
   it("second distill call after restart is idempotent (0 new lessons)", async () => {
     const engine1 = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
-    await engine1.runFearSet("Architecture decision: monolith vs microservices", makeMockCallbacks());
+    await engine1.runFearSet(
+      "Architecture decision: monolith vs microservices",
+      makeMockCallbacks(),
+    );
 
     // First distill
     const engine2 = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
@@ -2261,7 +2369,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2275,7 +2385,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2291,7 +2403,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2306,7 +2420,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2320,13 +2436,16 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks({
-          onGate: async () => JSON.stringify({
-            overall: 0.3,
-            gateDecision: "fail",
-            justification: "Insufficient prevention coverage.",
-          }),
+          onGate: async () =>
+            JSON.stringify({
+              overall: 0.3,
+              gateDecision: "fail",
+              justification: "Insufficient prevention coverage.",
+            }),
         }),
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2340,7 +2459,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         isStopped: () => true,
-        onEvent: (event) => { events.push(event.kind); },
+        onEvent: (event) => {
+          events.push(event.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2371,11 +2492,12 @@ describe("runFearSetEngine — synthesizedRecommendation", () => {
       "Wipe the staging database",
       EXPLICIT_TRIGGER,
       makeMockCallbacks({
-        onGate: async () => JSON.stringify({
-          overall: 0.25,
-          gateDecision: "fail",
-          justification: "Plan is too weak.",
-        }),
+        onGate: async () =>
+          JSON.stringify({
+            overall: 0.25,
+            gateDecision: "fail",
+            justification: "Plan is too weak.",
+          }),
       }),
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2389,11 +2511,12 @@ describe("runFearSetEngine — synthesizedRecommendation", () => {
       "Consolidate microservices into monolith",
       EXPLICIT_TRIGGER,
       makeMockCallbacks({
-        onSynthesize: async () => JSON.stringify({
-          decision: "conditional",
-          reasoning: "Proceed only after full load testing completes.",
-          conditions: ["Load test passes", "CEO sign-off"],
-        }),
+        onSynthesize: async () =>
+          JSON.stringify({
+            decision: "conditional",
+            reasoning: "Proceed only after full load testing completes.",
+            conditions: ["Load test passes", "CEO sign-off"],
+          }),
       }),
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
@@ -2468,7 +2591,9 @@ describe("runFearSetEngine — column validation warnings", () => {
     );
     // define column with no worstCases should produce a validation warning
     if (warningMap["define"]) {
-      expect(warningMap["define"].some((w) => w.includes("worst-case") || w.includes("worstCase"))).toBe(true);
+      expect(
+        warningMap["define"].some((w) => w.includes("worst-case") || w.includes("worstCase")),
+      ).toBe(true);
     }
   });
 });
@@ -2479,8 +2604,12 @@ describe("runFearSetEngine — column validation warnings", () => {
 
 describe("DanteGaslightIntegration.getFearSetResults — disk merge", () => {
   let testDir: string;
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("results from disk are included after restart", async () => {
     const engine1 = new DanteGaslightIntegration({}, { cwd: testDir }, {}, ENABLED_FEARSET_CONFIG);
@@ -2523,7 +2652,8 @@ describe("DanteGaslightIntegration.getFearSetResults — disk merge", () => {
 
 describe("parseLlmClassification", () => {
   it("parses valid shouldTrigger=true response", () => {
-    const raw = '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"API retirement involves irreversible data loss."}';
+    const raw =
+      '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"API retirement involves irreversible data loss."}';
     const result = parseLlmClassification(raw);
     expect(result).not.toBeNull();
     expect(result!.shouldTrigger).toBe(true);
@@ -2532,26 +2662,30 @@ describe("parseLlmClassification", () => {
   });
 
   it("parses shouldTrigger=false response", () => {
-    const raw = '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals detected."}';
+    const raw =
+      '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals detected."}';
     const result = parseLlmClassification(raw);
     expect(result).not.toBeNull();
     expect(result!.shouldTrigger).toBe(false);
   });
 
   it("clamps confidence above 1 to 1", () => {
-    const raw = '{"shouldTrigger":true,"channel":"long-horizon","confidence":1.5,"rationale":"Over-confident."}';
+    const raw =
+      '{"shouldTrigger":true,"channel":"long-horizon","confidence":1.5,"rationale":"Over-confident."}';
     const result = parseLlmClassification(raw);
     expect(result!.confidence).toBe(1);
   });
 
   it("clamps negative confidence to 0", () => {
-    const raw = '{"shouldTrigger":true,"channel":"long-horizon","confidence":-0.3,"rationale":"test"}';
+    const raw =
+      '{"shouldTrigger":true,"channel":"long-horizon","confidence":-0.3,"rationale":"test"}';
     const result = parseLlmClassification(raw);
     expect(result!.confidence).toBe(0);
   });
 
   it("returns null for invalid channel", () => {
-    const raw = '{"shouldTrigger":true,"channel":"unknown-channel","confidence":0.8,"rationale":"test"}';
+    const raw =
+      '{"shouldTrigger":true,"channel":"unknown-channel","confidence":0.8,"rationale":"test"}';
     expect(parseLlmClassification(raw)).toBeNull();
   });
 
@@ -2560,12 +2694,14 @@ describe("parseLlmClassification", () => {
   });
 
   it("returns null when shouldTrigger is not boolean", () => {
-    const raw = '{"shouldTrigger":"yes","channel":"destructive","confidence":0.8,"rationale":"test"}';
+    const raw =
+      '{"shouldTrigger":"yes","channel":"destructive","confidence":0.8,"rationale":"test"}';
     expect(parseLlmClassification(raw)).toBeNull();
   });
 
   it("extracts JSON embedded in surrounding text", () => {
-    const raw = 'Sure! Here is my classification:\n{"shouldTrigger":true,"channel":"destructive","confidence":0.85,"rationale":"API sunset is irreversible."}\nLet me know if you need more.';
+    const raw =
+      'Sure! Here is my classification:\n{"shouldTrigger":true,"channel":"destructive","confidence":0.85,"rationale":"API sunset is irreversible."}\nLet me know if you need more.';
     const result = parseLlmClassification(raw);
     expect(result).not.toBeNull();
     expect(result!.shouldTrigger).toBe(true);
@@ -2602,7 +2738,8 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "can you help me think through whether we should sunset the old API?",
       ENABLED_OPTS,
-      async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.87,"rationale":"API retirement is irreversible system change."}',
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":0.87,"rationale":"API retirement is irreversible system change."}',
     );
     expect(result.shouldTrigger).toBe(true);
     expect(result.channel).toBe("destructive");
@@ -2613,16 +2750,20 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "I want to refactor auth — it's getting complex",
       ENABLED_OPTS,
-      async () => '{"shouldTrigger":true,"channel":"long-horizon","confidence":0.82,"rationale":"Multi-phase auth refactor spans several weeks."}',
+      async () =>
+        '{"shouldTrigger":true,"channel":"long-horizon","confidence":0.82,"rationale":"Multi-phase auth refactor spans several weeks."}',
     );
     expect(result.shouldTrigger).toBe(true);
     expect(result.channel).toBe("long-horizon");
   });
 
   it("TC-CL-05: Tier 1 fast path — regex match bypasses LLM entirely", async () => {
-    const onClassify = vi.fn(async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}');
+    const onClassify = vi.fn(
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}',
+    );
     const result = await classifyRiskWithLlm(
-      "drop table users",  // hits DESTRUCTIVE_PATTERNS
+      "drop table users", // hits DESTRUCTIVE_PATTERNS
       ENABLED_OPTS,
       onClassify,
     );
@@ -2643,7 +2784,9 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "should we sunset the API?",
       ENABLED_OPTS,
-      async () => { throw new Error("network error"); },
+      async () => {
+        throw new Error("network error");
+      },
     );
     expect(result.shouldTrigger).toBe(false);
   });
@@ -2652,7 +2795,8 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "add a dark mode toggle",
       ENABLED_OPTS,
-      async () => '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals."}',
+      async () =>
+        '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"No risk signals."}',
     );
     expect(result.shouldTrigger).toBe(false);
   });
@@ -2661,7 +2805,8 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "should we retire the billing service?",
       ENABLED_OPTS,
-      async () => '{"shouldTrigger":true,"channel":"destructive","confidence":2.5,"rationale":"Very confident."}',
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":2.5,"rationale":"Very confident."}',
     );
     expect(result.shouldTrigger).toBe(true);
     expect(result.confidence).toBeLessThanOrEqual(1);
@@ -2672,7 +2817,8 @@ describe("classifyRiskWithLlm", () => {
     const result = await classifyRiskWithLlm(
       "should we sunset the v1 API?",
       ENABLED_OPTS,
-      async () => '{"shouldTrigger":true,"channel":"totally-made-up","confidence":0.9,"rationale":"test"}',
+      async () =>
+        '{"shouldTrigger":true,"channel":"totally-made-up","confidence":0.9,"rationale":"test"}',
     );
     expect(result.shouldTrigger).toBe(false);
   });
@@ -2694,19 +2840,18 @@ describe("classifyRiskWithLlm", () => {
   it("TC-CL-12: original message passed to onClassify unchanged", async () => {
     const msg = "should we sunset the v1 API and migrate users?";
     let capturedMsg = "";
-    await classifyRiskWithLlm(
-      msg,
-      ENABLED_OPTS,
-      async (message, _rubric) => {
-        capturedMsg = message;
-        return '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"none"}';
-      },
-    );
+    await classifyRiskWithLlm(msg, ENABLED_OPTS, async (message, _rubric) => {
+      capturedMsg = message;
+      return '{"shouldTrigger":false,"channel":"weak-robustness","confidence":0.95,"rationale":"none"}';
+    });
     expect(capturedMsg).toBe(msg);
   });
 
   it("TC-CL-13: config.enabled=false → no trigger, onClassify never called", async () => {
-    const onClassify = vi.fn(async () => '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}');
+    const onClassify = vi.fn(
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}',
+    );
     const result = await classifyRiskWithLlm(
       "sunset the old API",
       { config: { ...ENABLED_FEARSET_CONFIG, enabled: false } },
@@ -2721,17 +2866,27 @@ describe("classifyRiskWithLlm", () => {
 
 describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integration", () => {
   let testDir: string;
-  beforeEach(() => { testDir = makeTestDir(); });
-  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
 
   it("TC-INT-01: onClassify called when Tier 1 misses nuanced message", async () => {
-    const onClassify = vi.fn(async () =>
-      '{"shouldTrigger":true,"channel":"destructive","confidence":0.88,"rationale":"API retirement."}',
+    const onClassify = vi.fn(
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":0.88,"rationale":"API retirement."}',
     );
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "can you help me think through whether we should sunset the old v1 API?",
       callbacks: { ...makeMockCallbacks(), onClassify },
@@ -2742,25 +2897,36 @@ describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integratio
   });
 
   it("TC-INT-02: onClassify NOT called when Tier 1 regex hits", async () => {
-    const onClassify = vi.fn(async () =>
-      '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}',
+    const onClassify = vi.fn(
+      async () =>
+        '{"shouldTrigger":true,"channel":"destructive","confidence":0.9,"rationale":"test"}',
     );
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     await engine.maybeFearSet({
-      message: "rm -rf /prod/data — nuke everything",  // Tier 1 hit
+      message: "rm -rf /prod/data — nuke everything", // Tier 1 hit
       callbacks: { ...makeMockCallbacks(), onClassify },
     });
     expect(onClassify).not.toHaveBeenCalled();
   });
 
   it("TC-INT-03: returns null when onClassify says shouldTrigger=false", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "add a dark mode toggle to the settings page",
       callbacks: {
@@ -2773,15 +2939,22 @@ describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integratio
   });
 
   it("TC-INT-04: returns null when onClassify throws (non-fatal)", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "should we sunset the old billing API?",
       callbacks: {
         ...makeMockCallbacks(),
-        onClassify: async () => { throw new Error("LLM unavailable"); },
+        onClassify: async () => {
+          throw new Error("LLM unavailable");
+        },
       },
     });
     // LLM error → falls back to Tier 1 (no trigger for this nuanced message)
@@ -2789,10 +2962,15 @@ describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integratio
   });
 
   it("TC-INT-05: LLM-detected long-horizon channel appears in result.trigger.channel", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     const result = await engine.maybeFearSet({
       message: "help me think through a 6-month migration plan for our auth system",
       callbacks: {
@@ -2807,10 +2985,15 @@ describe("DanteGaslightIntegration.maybeFearSet — onClassify Tier 2 integratio
 
   it("TC-INT-06: rubric string passed to onClassify contains key rubric question text", async () => {
     let receivedRubric = "";
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir }, {}, {
-      ...ENABLED_FEARSET_CONFIG,
-      enabled: true,
-    });
+    const engine = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      {
+        ...ENABLED_FEARSET_CONFIG,
+        enabled: true,
+      },
+    );
     await engine.maybeFearSet({
       message: "I am wondering if we should sunset the v1 API",
       callbacks: {
@@ -2862,13 +3045,15 @@ describe("LLM callback content pipeline — semantic richness", () => {
   it("onColumn prevent: specific mechanism text flows into preventionActions[0].mechanism", async () => {
     const specificMechanism = "Blue-green deployment with automated health checks every 30s";
     const customPrevent = JSON.stringify({
-      preventionActions: [{
-        id: "pa-custom",
-        description: "Blue-green switch",
-        mechanism: specificMechanism,
-        riskReduction: 0.8,
-        simulationStatus: "non-simulatable",
-      }],
+      preventionActions: [
+        {
+          id: "pa-custom",
+          description: "Blue-green switch",
+          mechanism: specificMechanism,
+          riskReduction: 0.8,
+          simulationStatus: "non-simulatable",
+        },
+      ],
     });
     const result = await runFearSetEngine(
       "Deploy the new service",
@@ -2895,13 +3080,15 @@ describe("LLM callback content pipeline — semantic richness", () => {
       "Confirm in Datadog dashboard",
     ];
     const customRepair = JSON.stringify({
-      repairPlans: [{
-        id: "rp-custom",
-        description: "Emergency rollback",
-        steps: specificSteps,
-        estimatedRecovery: "15 minutes",
-        simulationStatus: "non-simulatable",
-      }],
+      repairPlans: [
+        {
+          id: "rp-custom",
+          description: "Emergency rollback",
+          steps: specificSteps,
+          estimatedRecovery: "15 minutes",
+          simulationStatus: "non-simulatable",
+        },
+      ],
     });
     const result = await runFearSetEngine(
       "Deploy the new service",
@@ -2944,11 +3131,13 @@ describe("LLM callback content pipeline — semantic richness", () => {
   // ── Test 5: onColumn inaction → inactionCosts[0].severity === "critical" ─
   it("onColumn inaction: severity 'critical' is preserved in inactionCosts[0].severity", async () => {
     const customInaction = JSON.stringify({
-      inactionCosts: [{
-        description: "Irreversible market share loss to competitor",
-        timeHorizon: "6 weeks",
-        severity: "critical",
-      }],
+      inactionCosts: [
+        {
+          description: "Irreversible market share loss to competitor",
+          timeHorizon: "6 weeks",
+          severity: "critical",
+        },
+      ],
     });
     const result = await runFearSetEngine(
       "Should we sunset the v1 API?",
@@ -2987,7 +3176,8 @@ describe("LLM callback content pipeline — semantic richness", () => {
 
   // ── Test 7: onGate justification text flows through ──────────────────────
   it("onGate justification text appears in robustnessScore.justification", async () => {
-    const specificJustification = "Define column extremely detailed; repair plan has sandbox evidence.";
+    const specificJustification =
+      "Define column extremely detailed; repair plan has sandbox evidence.";
     const customGate = JSON.stringify({
       overall: 0.9,
       hasSimulationEvidence: true,
@@ -3079,7 +3269,8 @@ describe("LLM callback content pipeline — semantic richness", () => {
 
   // ── Test 12: onSynthesize reasoning text flows through ───────────────────
   it("onSynthesize reasoning text appears in synthesizedRecommendation.reasoning", async () => {
-    const specificReasoning = "The plan has adequate coverage across all five columns and sandbox verification was completed.";
+    const specificReasoning =
+      "The plan has adequate coverage across all five columns and sandbox verification was completed.";
     const synthResponse = JSON.stringify({
       decision: "go",
       reasoning: specificReasoning,
@@ -3097,14 +3288,16 @@ describe("LLM callback content pipeline — semantic richness", () => {
   // ── Test 13: Integrity — simulationStatus "simulated" without evidence → downgraded ─
   it("prevention action with simulationStatus='simulated' but no evidence is downgraded to 'partially-simulatable'", async () => {
     const integrityViolation = JSON.stringify({
-      preventionActions: [{
-        id: "pa-integrity",
-        description: "Run DB migration in a transaction",
-        mechanism: "Wrap in BEGIN/COMMIT with savepoint",
-        riskReduction: 0.75,
-        simulationStatus: "simulated",  // claims simulated...
-        simulationEvidence: "",          // ...but provides no evidence
-      }],
+      preventionActions: [
+        {
+          id: "pa-integrity",
+          description: "Run DB migration in a transaction",
+          mechanism: "Wrap in BEGIN/COMMIT with savepoint",
+          riskReduction: 0.75,
+          simulationStatus: "simulated", // claims simulated...
+          simulationEvidence: "", // ...but provides no evidence
+        },
+      ],
     });
     const result = await runFearSetEngine(
       "Run the database migration",
@@ -3137,24 +3330,32 @@ describe("LLM callback content pipeline — semantic richness", () => {
       {
         onColumn: async (_sys, _user, column) => {
           switch (column) {
-            case "define":   return makeDefineJson(apiSunsetCases);
-            case "prevent":  return makePreventJson();
-            case "repair":   return makeRepairJson();
-            case "benefits": return makeBenefitsJson();
-            case "inaction": return makeInactionJson();
-            default:         return "{}";
+            case "define":
+              return makeDefineJson(apiSunsetCases);
+            case "prevent":
+              return makePreventJson();
+            case "repair":
+              return makeRepairJson();
+            case "benefits":
+              return makeBenefitsJson();
+            case "inaction":
+              return makeInactionJson();
+            default:
+              return "{}";
           }
         },
         onGate: async () => makeGatePassJson(),
-        onSynthesize: async () => JSON.stringify({
-          decision: "conditional",
-          reasoning: "The sunset is viable but requires a 6-month deprecation notice and migration guides.",
-          conditions: [
-            "Publish migration guide 6 months before sunset date",
-            "Send email to all API key holders",
-            "Maintain v1 in read-only mode for 3 months post-deprecation",
-          ],
-        }),
+        onSynthesize: async () =>
+          JSON.stringify({
+            decision: "conditional",
+            reasoning:
+              "The sunset is viable but requires a 6-month deprecation notice and migration guides.",
+            conditions: [
+              "Publish migration guide 6 months before sunset date",
+              "Send email to all API key holders",
+              "Maintain v1 in read-only mode for 3 months post-deprecation",
+            ],
+          }),
       },
       { config: ENABLED_FEARSET_CONFIG },
     );
@@ -3317,7 +3518,9 @@ describe("heuristic recommendation quality — all decision paths", () => {
       { ...CB_BASE, onGate: async () => makeGateJson("pass", 0.4, true) },
       { config: ENABLED_FEARSET_CONFIG },
     );
-    expect(result.synthesizedRecommendation?.conditions).toEqual(["Monitor closely during execution"]);
+    expect(result.synthesizedRecommendation?.conditions).toEqual([
+      "Monitor closely during execution",
+    ]);
   });
 
   // ── Test HR-09: pass + low reduction → logging + rollback conditions ─────

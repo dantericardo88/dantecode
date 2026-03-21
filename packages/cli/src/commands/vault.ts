@@ -3,18 +3,18 @@
 // Subcommands for managing the encrypted credential vault.
 // ============================================================================
 
-import { CredentialVault } from '@dantecode/core';
-import * as readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
+import { CredentialVault } from "@dantecode/core";
+import * as readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
 // ----------------------------------------------------------------------------
 
-const GREEN = '\x1b[32m';
-const RED = '\x1b[31m';
-const DIM = '\x1b[2m';
-const RESET = '\x1b[0m';
+const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
 
 // ----------------------------------------------------------------------------
 // Vault Command Handler
@@ -24,7 +24,7 @@ export async function runVaultCommand(subArgs: string[]): Promise<void> {
   const sub = subArgs[0];
 
   switch (sub) {
-    case 'store': {
+    case "store": {
       const keyName = subArgs[1];
       if (!keyName) {
         process.stderr.write(`${RED}Usage: dantecode vault store <keyName>${RESET}\n`);
@@ -39,7 +39,7 @@ export async function runVaultCommand(subArgs: string[]): Promise<void> {
       break;
     }
 
-    case 'list': {
+    case "list": {
       const v = new CredentialVault();
       const names = await v.list();
       if (names.length === 0) {
@@ -50,7 +50,7 @@ export async function runVaultCommand(subArgs: string[]): Promise<void> {
       break;
     }
 
-    case 'remove': {
+    case "remove": {
       const keyName = subArgs[1];
       if (!keyName) {
         process.stderr.write(`${RED}Usage: dantecode vault remove <keyName>${RESET}\n`);
@@ -65,14 +65,14 @@ export async function runVaultCommand(subArgs: string[]): Promise<void> {
     default: {
       process.stdout.write(
         [
-          'Usage: dantecode vault <subcommand>',
-          '',
-          'Subcommands:',
-          '  store <keyName>   Store an API key in the encrypted vault',
-          '  list              List stored credential names',
-          '  remove <keyName>  Remove a stored credential',
-          '',
-        ].join('\n'),
+          "Usage: dantecode vault <subcommand>",
+          "",
+          "Subcommands:",
+          "  store <keyName>   Store an API key in the encrypted vault",
+          "  list              List stored credential names",
+          "  remove <keyName>  Remove a stored credential",
+          "",
+        ].join("\n"),
       );
       break;
     }

@@ -21,8 +21,10 @@ export interface VerificationBenchmarkRun {
   payload: Record<string, unknown>;
 }
 
-export interface VerificationBenchmarkRunInput
-  extends Omit<VerificationBenchmarkRun, "id" | "recordedAt"> {
+export interface VerificationBenchmarkRunInput extends Omit<
+  VerificationBenchmarkRun,
+  "id" | "recordedAt"
+> {
   recordedAt?: string;
 }
 
@@ -99,8 +101,7 @@ export class VerificationBenchmarkStore {
     );
 
     summaries.sort(
-      (a, b) =>
-        new Date(b.latestRunAt ?? 0).getTime() - new Date(a.latestRunAt ?? 0).getTime(),
+      (a, b) => new Date(b.latestRunAt ?? 0).getTime() - new Date(a.latestRunAt ?? 0).getTime(),
     );
 
     if (typeof limit === "number" && limit > 0) {

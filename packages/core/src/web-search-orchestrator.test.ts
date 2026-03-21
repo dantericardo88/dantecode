@@ -132,7 +132,9 @@ describe("WebSearchOrchestrator", () => {
       name: "failing",
       costPerQuery: 0,
       available: () => true,
-      search: vi.fn(async () => { throw new Error("fail"); }),
+      search: vi.fn(async () => {
+        throw new Error("fail");
+      }),
     };
     const ddg = createMockProvider("duckduckgo", [RESULT_B], true, 0);
     const orch = createTestOrchestrator({}, [failing, ddg]);
@@ -143,7 +145,7 @@ describe("WebSearchOrchestrator", () => {
   });
 
   it("respects cost cap", async () => {
-    const expensive = createMockProvider("expensive", [RESULT_A], true, 0.10);
+    const expensive = createMockProvider("expensive", [RESULT_A], true, 0.1);
     const cheap = createMockProvider("cheap", [RESULT_B], true, 0.01);
     const orch = createTestOrchestrator({ costCapPerCall: 0.05 }, [expensive, cheap]);
 
@@ -198,7 +200,7 @@ describe("WebSearchOrchestrator.chainSearch", () => {
     const orch = createTestOrchestrator({}, [provider]);
 
     const result = await orch.chainSearch("initial query", {
-      refineFn: (results) => results.length < 3 ? "refined query" : null,
+      refineFn: (results) => (results.length < 3 ? "refined query" : null),
     });
 
     expect(result.results.length).toBeGreaterThanOrEqual(2);
@@ -260,7 +262,13 @@ describe("WebSearchOrchestrator.evaluateResultConfidence", () => {
 
   it("returns higher confidence for many relevant results", () => {
     const orch = createTestOrchestrator({}, []);
-    const results = [RESULT_A, RESULT_B, RESULT_C, { ...RESULT_A, url: "https://x.com/1" }, { ...RESULT_B, url: "https://y.com/2" }];
+    const results = [
+      RESULT_A,
+      RESULT_B,
+      RESULT_C,
+      { ...RESULT_A, url: "https://x.com/1" },
+      { ...RESULT_B, url: "https://y.com/2" },
+    ];
     const confidence = orch.evaluateResultConfidence(results, "test query");
     expect(confidence).toBeGreaterThan(0.3);
   });

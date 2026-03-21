@@ -18,8 +18,8 @@ export class EvidenceAggregator {
       metadata: {
         sourceCount: sources.length,
         chunkCount: dedupedChunks.length,
-        aggregatedAt: new Date().toISOString()
-      }
+        aggregatedAt: new Date().toISOString(),
+      },
     };
   }
 }

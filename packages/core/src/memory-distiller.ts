@@ -51,10 +51,7 @@ export interface DistillerOptions {
  * Greedy single-linkage: each entry joins the first cluster whose representative
  * it exceeds the merge threshold against.
  */
-function clusterBySimilarity(
-  entries: DistillableEntry[],
-  threshold: number,
-): DistillableEntry[][] {
+function clusterBySimilarity(entries: DistillableEntry[], threshold: number): DistillableEntry[][] {
   const clusters: DistillableEntry[][] = [];
   const tokenCache = new Map<string, Set<string>>();
 
@@ -282,10 +279,7 @@ export function scoreRelevance(entry: DistillableEntry, query: string): number {
  * @param threshold - Jaccard similarity threshold for duplicate detection. Default: 0.8.
  * @returns Array of ID arrays, one per duplicate cluster.
  */
-export function findDuplicates(
-  entries: DistillableEntry[],
-  threshold = 0.8,
-): string[][] {
+export function findDuplicates(entries: DistillableEntry[], threshold = 0.8): string[][] {
   const clusters = clusterBySimilarity(entries, threshold);
 
   // Only return clusters with 2+ members (actual duplicates)

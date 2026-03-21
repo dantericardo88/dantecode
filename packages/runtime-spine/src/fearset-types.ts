@@ -11,13 +11,13 @@ import { z } from "zod";
 // ─── Trigger channels ──────────────────────────────────────────────────────────
 
 export const FearSetTriggerChannelSchema = z.enum([
-  "explicit-user",          // /fearset command
-  "long-horizon",           // task classified as spanning >N steps / long duration
-  "destructive",            // task contains irreversible or high-blast-radius actions
-  "weak-robustness",        // DanteForge or DanteGaslight marks the plan fragile
-  "high-risk-council",      // multi-agent/council plan rated high-risk
-  "repeated-failure",       // same failure pattern seen in prior sessions
-  "policy",                 // task class policy requires fear-setting
+  "explicit-user", // /fearset command
+  "long-horizon", // task classified as spanning >N steps / long duration
+  "destructive", // task contains irreversible or high-blast-radius actions
+  "weak-robustness", // DanteForge or DanteGaslight marks the plan fragile
+  "high-risk-council", // multi-agent/council plan rated high-risk
+  "repeated-failure", // same failure pattern seen in prior sessions
+  "policy", // task class policy requires fear-setting
 ]);
 export type FearSetTriggerChannel = z.infer<typeof FearSetTriggerChannelSchema>;
 
@@ -26,29 +26,32 @@ export const FearSetTriggerSchema = z.object({
   taskClass: z.string().optional(),
   sessionId: z.string().optional(),
   rationale: z.string().optional(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type FearSetTrigger = z.infer<typeof FearSetTriggerSchema>;
 
 // ─── Column names ──────────────────────────────────────────────────────────────
 
 export const FearSetColumnNameSchema = z.enum([
-  "define",     // What is the realistic worst case?
-  "prevent",    // How do we stop it from happening?
-  "repair",     // If it happens anyway, how do we recover?
-  "benefits",   // What do we gain by acting?
-  "inaction",   // What is the cost of doing nothing?
+  "define", // What is the realistic worst case?
+  "prevent", // How do we stop it from happening?
+  "repair", // If it happens anyway, how do we recover?
+  "benefits", // What do we gain by acting?
+  "inaction", // What is the cost of doing nothing?
 ]);
 export type FearSetColumnName = z.infer<typeof FearSetColumnNameSchema>;
 
 // ─── Prevention action ─────────────────────────────────────────────────────────
 
 export const SimulationStatusSchema = z.enum([
-  "simulatable",          // Can and should be sandbox-tested
-  "partially-simulatable",// Some components exercisable, others reasoned
-  "non-simulatable",      // Reasoning + verification only
-  "simulated",            // Actually ran through DanteSandbox
-  "simulation-failed",    // Ran but did not pass
+  "simulatable", // Can and should be sandbox-tested
+  "partially-simulatable", // Some components exercisable, others reasoned
+  "non-simulatable", // Reasoning + verification only
+  "simulated", // Actually ran through DanteSandbox
+  "simulation-failed", // Ran but did not pass
 ]);
 export type SimulationStatus = z.infer<typeof SimulationStatusSchema>;
 
@@ -128,7 +131,10 @@ export const FearSetRobustnessScoreSchema = z.object({
   gateDecision: z.enum(["pass", "fail", "review-required"]),
   /** Human-readable justification. */
   justification: z.string(),
-  scoredAt: z.string().datetime().default(() => new Date().toISOString()),
+  scoredAt: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type FearSetRobustnessScore = z.infer<typeof FearSetRobustnessScoreSchema>;
 
@@ -162,7 +168,10 @@ export const FearSetResultSchema = z.object({
   stopReason: z.enum(["user-stop", "budget-exhausted", "policy-abort", "completed"]).optional(),
   /** ISO timestamp when the run was stopped early (user-stop / budget / policy). */
   stoppedAt: z.string().datetime().optional(),
-  startedAt: z.string().datetime().default(() => new Date().toISOString()),
+  startedAt: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
   completedAt: z.string().datetime().optional(),
 });
 export type FearSetResult = z.infer<typeof FearSetResultSchema>;
@@ -200,7 +209,12 @@ export const DEFAULT_FEARSET_CONFIG: FearSetConfig = {
   maxSecondsPerColumn: 60,
   robustnessPassThreshold: 0.7,
   minRiskReduction: 0.2,
-  policyTaskClasses: ["destructive-op", "long-horizon", "multi-agent-plan", "architecture-decision"],
+  policyTaskClasses: [
+    "destructive-op",
+    "long-horizon",
+    "multi-agent-plan",
+    "architecture-decision",
+  ],
   sandboxSimulation: true,
   maxResults: 200,
 };

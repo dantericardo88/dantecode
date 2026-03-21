@@ -156,9 +156,7 @@ describe("PlaybookMemory", () => {
       const all = memory.getAll();
       expect(all).toHaveLength(1);
       // id should be a UUID
-      expect(all[0]!.id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-      );
+      expect(all[0]!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       // timestamp should be an ISO string
       expect(all[0]!.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
@@ -257,12 +255,8 @@ describe("PlaybookMemory", () => {
 
       const results = memory.query("fix the authentication bug on login");
       expect(results.length).toBeGreaterThanOrEqual(2);
-      expect(
-        results.some((r) => r.entry.id === "auth-1"),
-      ).toBe(true);
-      expect(
-        results.some((r) => r.entry.id === "auth-2"),
-      ).toBe(true);
+      expect(results.some((r) => r.entry.id === "auth-1")).toBe(true);
+      expect(results.some((r) => r.entry.id === "auth-2")).toBe(true);
     });
 
     it("filters out entries below 0.3 similarity threshold", async () => {
@@ -305,14 +299,10 @@ describe("PlaybookMemory", () => {
       const memory = new PlaybookMemory("/project");
       await memory.load();
 
-      const results = memory.query(
-        "fix authentication bug in login page form validation",
-      );
+      const results = memory.query("fix authentication bug in login page form validation");
       // Results should be ordered by decreasing similarity
       for (let i = 1; i < results.length; i++) {
-        expect(results[i - 1]!.similarity).toBeGreaterThanOrEqual(
-          results[i]!.similarity,
-        );
+        expect(results[i - 1]!.similarity).toBeGreaterThanOrEqual(results[i]!.similarity);
       }
     });
 
@@ -329,10 +319,7 @@ describe("PlaybookMemory", () => {
       const memory = new PlaybookMemory("/project");
       await memory.load();
 
-      const results = memory.query(
-        "fix authentication bug in login page",
-        3,
-      );
+      const results = memory.query("fix authentication bug in login page", 3);
       expect(results.length).toBeLessThanOrEqual(3);
     });
   });
@@ -354,9 +341,7 @@ describe("PlaybookMemory", () => {
       const memory = new PlaybookMemory("/project");
       await memory.load();
 
-      const output = memory.formatForPrompt(
-        "fix the authentication bug on login page",
-      );
+      const output = memory.formatForPrompt("fix the authentication bug on login page");
       expect(output).toContain("## Playbook (from past sessions)");
       expect(output).toContain("[+] check session tokens");
       expect(output).toContain("[+] validate JWT expiry");
@@ -375,9 +360,7 @@ describe("PlaybookMemory", () => {
       const memory = new PlaybookMemory("/project");
       await memory.load();
 
-      const output = memory.formatForPrompt(
-        "fix the authentication bug on login page",
-      );
+      const output = memory.formatForPrompt("fix the authentication bug on login page");
       expect(output).toContain("[-] AVOID: disable CORS checks");
       expect(output).toContain("[-] AVOID: skip token validation");
     });
@@ -419,11 +402,7 @@ describe("PlaybookMemory", () => {
     });
 
     it("reports the correct size", async () => {
-      const stored = [
-        makeEntry({ id: "a" }),
-        makeEntry({ id: "b" }),
-        makeEntry({ id: "c" }),
-      ];
+      const stored = [makeEntry({ id: "a" }), makeEntry({ id: "b" }), makeEntry({ id: "c" })];
       mockReadFile.mockResolvedValue(JSON.stringify(stored));
 
       const memory = new PlaybookMemory("/project");

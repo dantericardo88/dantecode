@@ -14,14 +14,18 @@ You are a test skill for bundler verification.
 Always write complete, production-ready code.
 `;
 
-const VERIFICATION_JSON = JSON.stringify({
-  skillName: "bundle-test-skill",
-  overallScore: 90,
-  tier: "sovereign",
-  passed: true,
-  findings: [],
-  scriptSafety: null,
-}, null, 2);
+const VERIFICATION_JSON = JSON.stringify(
+  {
+    skillName: "bundle-test-skill",
+    overallScore: 90,
+    tier: "sovereign",
+    passed: true,
+    findings: [],
+    scriptSafety: null,
+  },
+  null,
+  2,
+);
 
 describe("bundleSkill", () => {
   let projectRoot: string;
@@ -191,7 +195,9 @@ describe("bundleSkill — manifest completeness", () => {
     expect(manifest.files).toContain("SKILL.md");
     expect(manifest.files).toContain("SKILL.dc.md");
     // scripts/foo.sh is in a subdirectory — relative path must be preserved (sep varies by OS)
-    expect(manifest.files.some((f) => f === "scripts/foo.sh" || f === "scripts\\foo.sh")).toBe(true);
+    expect(manifest.files.some((f) => f === "scripts/foo.sh" || f === "scripts\\foo.sh")).toBe(
+      true,
+    );
     // bundle-manifest.json is added to filesWritten AFTER manifest is written,
     // so it does NOT appear in manifest.files (by design)
     expect(result.filesWritten.some((f) => basename(f) === "bundle-manifest.json")).toBe(true);
@@ -229,7 +235,9 @@ describe("bundleSkill — manifest stores relative paths", () => {
     const manifest = JSON.parse(manifestRaw) as { files: string[] };
 
     // Must contain the relative path (forward-slash on all platforms via node:path.relative)
-    expect(manifest.files.some((f) => f === "scripts/check.sh" || f === "scripts\\check.sh")).toBe(true);
+    expect(manifest.files.some((f) => f === "scripts/check.sh" || f === "scripts\\check.sh")).toBe(
+      true,
+    );
     // Must NOT contain only the bare basename
     expect(manifest.files).not.toContain("check.sh");
   });

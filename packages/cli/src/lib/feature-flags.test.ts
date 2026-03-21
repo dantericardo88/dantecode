@@ -22,7 +22,10 @@ describe("feature-flags", () => {
     it("every flag has a non-empty name and description", () => {
       for (const flag of FEATURE_FLAGS) {
         expect(flag.name.trim().length, `empty name for flag`).toBeGreaterThan(0);
-        expect(flag.description.trim().length, `empty description for flag ${flag.name}`).toBeGreaterThan(0);
+        expect(
+          flag.description.trim().length,
+          `empty description for flag ${flag.name}`,
+        ).toBeGreaterThan(0);
       }
     });
 
@@ -35,10 +38,9 @@ describe("feature-flags", () => {
     it("requiresOptIn is only set on experimental features", () => {
       for (const flag of FEATURE_FLAGS) {
         if (flag.requiresOptIn) {
-          expect(
-            flag.maturity,
-            `${flag.name} has requiresOptIn but is not experimental`,
-          ).toBe("experimental");
+          expect(flag.maturity, `${flag.name} has requiresOptIn but is not experimental`).toBe(
+            "experimental",
+          );
         }
       }
     });
@@ -60,7 +62,9 @@ describe("feature-flags", () => {
     });
 
     it("contains expected experimental features", () => {
-      const expNames = FEATURE_FLAGS.filter((f) => f.maturity === "experimental").map((f) => f.name);
+      const expNames = FEATURE_FLAGS.filter((f) => f.maturity === "experimental").map(
+        (f) => f.name,
+      );
       expect(expNames).toContain("http-server");
       expect(expNames).toContain("tui");
     });

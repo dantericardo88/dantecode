@@ -63,13 +63,33 @@ export interface UXEngineOptions {
 // Theme definitions
 // ---------------------------------------------------------------------------
 
-const NO_COLORS: ThemeColors = { success: "", error: "", warning: "", info: "", progress: "", reset: "" };
+const NO_COLORS: ThemeColors = {
+  success: "",
+  error: "",
+  warning: "",
+  info: "",
+  progress: "",
+  reset: "",
+};
 
 const THEMES: Record<ThemeName, Theme> = {
   default: {
     name: "default",
-    icons: { success: "\u2713", error: "\u2717", warning: "\u26a0", info: "\u2139", progress: "\u25ba" },
-    colors: { success: "\x1b[32m", error: "\x1b[31m", warning: "\x1b[33m", info: "\x1b[36m", progress: "\x1b[34m", reset: "\x1b[0m" },
+    icons: {
+      success: "\u2713",
+      error: "\u2717",
+      warning: "\u26a0",
+      info: "\u2139",
+      progress: "\u25ba",
+    },
+    colors: {
+      success: "\x1b[32m",
+      error: "\x1b[31m",
+      warning: "\x1b[33m",
+      info: "\x1b[36m",
+      progress: "\x1b[34m",
+      reset: "\x1b[0m",
+    },
   },
   minimal: {
     name: "minimal",
@@ -78,18 +98,57 @@ const THEMES: Record<ThemeName, Theme> = {
   },
   rich: {
     name: "rich",
-    icons: { success: "\u2713", error: "\u2717", warning: "\u26a0", info: "\u2139", progress: "\u25ba" },
-    colors: { success: "\x1b[1m\x1b[32m", error: "\x1b[1m\x1b[31m", warning: "\x1b[1m\x1b[33m", info: "\x1b[1m\x1b[36m", progress: "\x1b[1m\x1b[34m", reset: "\x1b[0m" },
+    icons: {
+      success: "\u2713",
+      error: "\u2717",
+      warning: "\u26a0",
+      info: "\u2139",
+      progress: "\u25ba",
+    },
+    colors: {
+      success: "\x1b[1m\x1b[32m",
+      error: "\x1b[1m\x1b[31m",
+      warning: "\x1b[1m\x1b[33m",
+      info: "\x1b[1m\x1b[36m",
+      progress: "\x1b[1m\x1b[34m",
+      reset: "\x1b[0m",
+    },
   },
   matrix: {
     name: "matrix",
-    icons: { success: "\u2713", error: "\u2717", warning: "\u26a0", info: "\u2139", progress: "\u25ba" },
-    colors: { success: "\x1b[32m", error: "\x1b[91m", warning: "\x1b[93m", info: "\x1b[92m", progress: "\x1b[32m", reset: "\x1b[0m" },
+    icons: {
+      success: "\u2713",
+      error: "\u2717",
+      warning: "\u26a0",
+      info: "\u2139",
+      progress: "\u25ba",
+    },
+    colors: {
+      success: "\x1b[32m",
+      error: "\x1b[91m",
+      warning: "\x1b[93m",
+      info: "\x1b[92m",
+      progress: "\x1b[32m",
+      reset: "\x1b[0m",
+    },
   },
   ocean: {
     name: "ocean",
-    icons: { success: "\u2713", error: "\u2717", warning: "\u26a0", info: "\u2139", progress: "\u25ba" },
-    colors: { success: "\x1b[96m", error: "\x1b[35m", warning: "\x1b[94m", info: "\x1b[96m", progress: "\x1b[94m", reset: "\x1b[0m" },
+    icons: {
+      success: "\u2713",
+      error: "\u2717",
+      warning: "\u26a0",
+      info: "\u2139",
+      progress: "\u25ba",
+    },
+    colors: {
+      success: "\x1b[96m",
+      error: "\x1b[35m",
+      warning: "\x1b[94m",
+      info: "\x1b[96m",
+      progress: "\x1b[94m",
+      reset: "\x1b[0m",
+    },
   },
 };
 
@@ -137,7 +196,9 @@ export class UXEngine {
     const filled = Math.round(pct * width);
     const empty = width - filled;
     const bar = "\u2588".repeat(filled) + "\u2591".repeat(empty);
-    const pctStr = Math.round(pct * 100).toString().padStart(3);
+    const pctStr = Math.round(pct * 100)
+      .toString()
+      .padStart(3);
     const labelPart = label ? ` ${label}` : "";
     return `[${bar}] ${pctStr}%${labelPart}`;
   }

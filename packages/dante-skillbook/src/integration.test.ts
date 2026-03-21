@@ -41,8 +41,12 @@ describe("DanteSkillbookIntegration", () => {
       action: "add",
       rationale: "good",
       candidateSkill: {
-        id: "s1", title: "T", content: "C", section: "coding",
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        id: "s1",
+        title: "T",
+        content: "C",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       },
     };
     const result = integration.applyProposals([proposal], ["pass"]);
@@ -51,20 +55,36 @@ describe("DanteSkillbookIntegration", () => {
   });
 
   it("applyProposals with review-required enqueues", () => {
-    const proposal: UpdateOperation = { action: "add", rationale: "uncertain", candidateSkill: {
-      id: "s1", title: "T", content: "C", section: "coding",
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }};
+    const proposal: UpdateOperation = {
+      action: "add",
+      rationale: "uncertain",
+      candidateSkill: {
+        id: "s1",
+        title: "T",
+        content: "C",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
     const result = integration.applyProposals([proposal], ["review-required"]);
     expect(result.queued).toBe(1);
     expect(integration.reviewQueue.pendingCount()).toBe(1);
   });
 
   it("applyProposals with fail discards", () => {
-    const proposal: UpdateOperation = { action: "add", rationale: "bad", candidateSkill: {
-      id: "s1", title: "T", content: "C", section: "coding",
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }};
+    const proposal: UpdateOperation = {
+      action: "add",
+      rationale: "bad",
+      candidateSkill: {
+        id: "s1",
+        title: "T",
+        content: "C",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
     const result = integration.applyProposals([proposal], ["fail"]);
     expect(result.rejected).toBe(1);
     expect(integration.stats().totalSkills).toBe(0);
@@ -73,19 +93,26 @@ describe("DanteSkillbookIntegration", () => {
   it("triggerReflection skips trivial tasks", async () => {
     const trivialResult: TaskResult = { ...makeResult(), taskType: "trivial" };
     const r = await integration.triggerReflection(trivialResult);
-    expect((r as {skipped: boolean}).skipped).toBe(true);
+    expect((r as { skipped: boolean }).skipped).toBe(true);
   });
 
   it("triggerReflection runs for meaningful tasks", async () => {
     const r = await integration.triggerReflection(makeResult());
-    expect((r as {skipped: boolean}).skipped).toBe(false);
+    expect((r as { skipped: boolean }).skipped).toBe(false);
   });
 
   it("getRelevantSkills works after adding", () => {
     const proposal: UpdateOperation = {
-      action: "add", rationale: "useful",
-      candidateSkill: { id: "s1", title: "TypeScript patterns", content: "Use strict null checks", section: "coding",
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      action: "add",
+      rationale: "useful",
+      candidateSkill: {
+        id: "s1",
+        title: "TypeScript patterns",
+        content: "Use strict null checks",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
     };
     integration.applyProposals([proposal], ["pass"]);
     const skills = integration.getRelevantSkills({ keywords: ["typescript", "null"] });
@@ -94,9 +121,16 @@ describe("DanteSkillbookIntegration", () => {
 
   it("persists across reload", () => {
     const proposal: UpdateOperation = {
-      action: "add", rationale: "r",
-      candidateSkill: { id: "s1", title: "T", content: "C", section: "coding",
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      action: "add",
+      rationale: "r",
+      candidateSkill: {
+        id: "s1",
+        title: "T",
+        content: "C",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
     };
     integration.applyProposals([proposal], ["pass"]);
     const integration2 = new DanteSkillbookIntegration({ cwd: testDir, gitStage: false });
@@ -104,10 +138,18 @@ describe("DanteSkillbookIntegration", () => {
   });
 
   it("applyReviewItem promotes queued item to skillbook", () => {
-    const proposal: UpdateOperation = { action: "add", rationale: "review", candidateSkill: {
-      id: "s1", title: "T", content: "C", section: "coding",
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    }};
+    const proposal: UpdateOperation = {
+      action: "add",
+      rationale: "review",
+      candidateSkill: {
+        id: "s1",
+        title: "T",
+        content: "C",
+        section: "coding",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
     integration.applyProposals([proposal], ["review-required"]);
     const pending = integration.reviewQueue.getPending();
     expect(pending).toHaveLength(1);

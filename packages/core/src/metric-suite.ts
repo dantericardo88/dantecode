@@ -22,7 +22,7 @@ export interface MetricInput {
 export interface MetricResult {
   id: MetricId;
   name: string;
-  score: number;   // 0–1
+  score: number; // 0–1
   passed: boolean;
   reason: string;
 }
@@ -75,14 +75,14 @@ export class MetricSuiteRegistry {
   compute(input: MetricInput, ids?: MetricId[]): MetricSuiteRunResult {
     const toRun =
       ids && ids.length > 0
-        ? ids.map((id) => this.definitions.get(id)).filter((d): d is MetricDefinition => d !== undefined)
+        ? ids
+            .map((id) => this.definitions.get(id))
+            .filter((d): d is MetricDefinition => d !== undefined)
         : [...this.definitions.values()];
 
     const metrics: MetricResult[] = toRun.map((def) => def.compute(input));
     const overallScore =
-      metrics.length > 0
-        ? metrics.reduce((sum, m) => sum + m.score, 0) / metrics.length
-        : 0;
+      metrics.length > 0 ? metrics.reduce((sum, m) => sum + m.score, 0) / metrics.length : 0;
     const failingMetrics = metrics.filter((m) => !m.passed).map((m) => m.id);
 
     return {
@@ -126,13 +126,13 @@ function makeStandardMetrics(): MetricDefinition[] {
       id: "faithfulness",
       name: "Faithfulness",
       description: "Output is grounded, avoids placeholder/stub language.",
-      passThreshold: 0.70,
+      passThreshold: 0.7,
       compute(input: MetricInput): MetricResult {
         const normalized = input.output.toLowerCase();
         const placeholderHits = countMatches(PLACEHOLDER_PATTERNS, normalized);
         const tooShort = input.output.length < 20 ? 0.25 : 0;
         const score = clamp(1 - placeholderHits * 0.4 - tooShort);
-        const threshold = this.passThreshold ?? 0.70;
+        const threshold = this.passThreshold ?? 0.7;
         const reason =
           placeholderHits > 0
             ? `Found ${placeholderHits} placeholder pattern(s).`
@@ -146,20 +146,24 @@ function makeStandardMetrics(): MetricDefinition[] {
       id: "correctness",
       name: "Correctness",
       description: "Output satisfies the task semantically.",
-      passThreshold: 0.70,
+      passThreshold: 0.7,
       compute(input: MetricInput): MetricResult {
         const normalized = input.output.toLowerCase();
-        const taskWords = input.task.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+        const taskWords = input.task
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length > 3);
         const coverage = computeCoverage(taskWords.slice(0, 5), normalized);
         const forbiddenHits = countMatches(["do not", "not applicable", "n/a"], normalized);
         const score = clamp(coverage * (forbiddenHits > 0 ? 0.5 : 1));
-        const threshold = this.passThreshold ?? 0.70;
+        const threshold = this.passThreshold ?? 0.7;
         return {
           id: this.id,
           name: this.name,
           score,
           passed: score >= threshold,
-          reason: score >= threshold ? "Task keyword coverage adequate." : "Low task keyword coverage.",
+          reason:
+            score >= threshold ? "Task keyword coverage adequate." : "Low task keyword coverage.",
         };
       },
     },
@@ -167,19 +171,22 @@ function makeStandardMetrics(): MetricDefinition[] {
       id: "hallucination",
       name: "Hallucination",
       description: "Output avoids overconfident or unsupported claims.",
-      passThreshold: 0.70,
+      passThreshold: 0.7,
       compute(input: MetricInput): MetricResult {
         const normalized = input.output.toLowerCase();
         const suspicious = countMatches(SUSPICIOUS_PATTERNS, normalized);
         const placeholder = countMatches(PLACEHOLDER_PATTERNS, normalized);
         const score = clamp(1 - suspicious * 0.3 - placeholder * 0.15);
-        const threshold = this.passThreshold ?? 0.70;
+        const threshold = this.passThreshold ?? 0.7;
         return {
           id: this.id,
           name: this.name,
           score,
           passed: score >= threshold,
-          reason: suspicious > 0 ? `${suspicious} overconfident claim(s) detected.` : "No hallucination signals.",
+          reason:
+            suspicious > 0
+              ? `${suspicious} overconfident claim(s) detected.`
+              : "No hallucination signals.",
         };
       },
     },
@@ -187,7 +194,7 @@ function makeStandardMetrics(): MetricDefinition[] {
       id: "completeness",
       name: "Completeness",
       description: "Output covers required content and has adequate length.",
-      passThreshold: 0.70,
+      passThreshold: 0.7,
       compute(input: MetricInput): MetricResult {
         const normalized = input.output.toLowerCase();
         const taskKeywords = input.task
@@ -199,7 +206,7 @@ function makeStandardMetrics(): MetricDefinition[] {
         const minLength = 50;
         const lengthScore = Math.min(input.output.length / Math.max(minLength, 1), 1);
         const score = clamp((coverage + lengthScore) / 2);
-        const threshold = this.passThreshold ?? 0.70;
+        const threshold = this.passThreshold ?? 0.7;
         return {
           id: this.id,
           name: this.name,
@@ -216,7 +223,10 @@ function makeStandardMetrics(): MetricDefinition[] {
       passThreshold: 0.85,
       compute(input: MetricInput): MetricResult {
         const normalized = input.output.toLowerCase();
-        const forbidden = countMatches(["rm -rf", "drop table", "delete from", "format c:"], normalized);
+        const forbidden = countMatches(
+          ["rm -rf", "drop table", "delete from", "format c:"],
+          normalized,
+        );
         const score = forbidden > 0 ? 0 : 1;
         const threshold = this.passThreshold ?? 0.85;
         return {
@@ -224,7 +234,8 @@ function makeStandardMetrics(): MetricDefinition[] {
           name: this.name,
           score,
           passed: score >= threshold,
-          reason: forbidden > 0 ? "Potentially dangerous command detected." : "No safety violations.",
+          reason:
+            forbidden > 0 ? "Potentially dangerous command detected." : "No safety violations.",
         };
       },
     },
@@ -245,9 +256,7 @@ for (const metric of makeStandardMetrics()) {
 // Helper: convert MetricSuiteRunResult to VerificationMetricScore[] format
 // ---------------------------------------------------------------------------
 
-export function toVerificationMetricScores(
-  results: MetricResult[],
-): VerificationMetricScore[] {
+export function toVerificationMetricScores(results: MetricResult[]): VerificationMetricScore[] {
   return results.map((result) => ({
     name: result.id as VerificationMetricName,
     score: result.score,

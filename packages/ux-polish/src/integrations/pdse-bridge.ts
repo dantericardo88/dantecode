@@ -156,7 +156,11 @@ export class PdseBridge {
         const bar = this._miniBar(val);
         const pctStr = `${Math.round(val * 100)}%`;
         const colored = theme
-          ? val >= 0.75 ? theme.success(`${pctStr} ${bar}`) : val >= 0.5 ? theme.warning(`${pctStr} ${bar}`) : theme.error(`${pctStr} ${bar}`)
+          ? val >= 0.75
+            ? theme.success(`${pctStr} ${bar}`)
+            : val >= 0.5
+              ? theme.warning(`${pctStr} ${bar}`)
+              : theme.error(`${pctStr} ${bar}`)
           : `${pctStr} ${bar}`;
         lines.push(`    ${key.padEnd(12)} ${colored}`);
       }

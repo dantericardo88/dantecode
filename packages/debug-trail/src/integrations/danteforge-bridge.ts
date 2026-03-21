@@ -32,8 +32,8 @@ function scoreToGrade(score: number): "A" | "B" | "C" | "D" | "F" {
   const s = Math.min(1, Math.max(0, score));
   if (s >= 0.95) return "A";
   if (s >= 0.85) return "B";
-  if (s >= 0.70) return "C";
-  if (s >= 0.50) return "D";
+  if (s >= 0.7) return "C";
+  if (s >= 0.5) return "D";
   return "F";
 }
 

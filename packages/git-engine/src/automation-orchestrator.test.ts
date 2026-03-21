@@ -120,7 +120,7 @@ describe("GitAutomationOrchestrator", () => {
         untracked: [],
         conflicted: [],
       }),
-      readFile: async () => "---\n\"pkg\": patch\n---\n\nrelease\n",
+      readFile: async () => '---\n"pkg": patch\n---\n\nrelease\n',
       scoreContent: () => ({
         overall: 40,
         completeness: 40,
@@ -225,14 +225,14 @@ describe("GitAutomationOrchestrator", () => {
     const mockRunAgent = vi
       .fn<(config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult>>()
       .mockResolvedValue({
-      sessionId: "test-session",
-      success: true,
-      output: "Agent completed the task",
-      tokensUsed: 100,
-      durationMs: 500,
-      filesChanged: ["src/foo.ts"],
-      pdseScore: 88,
-    });
+        sessionId: "test-session",
+        success: true,
+        output: "Agent completed the task",
+        tokensUsed: 100,
+        durationMs: 500,
+        filesChanged: ["src/foo.ts"],
+        pdseScore: 88,
+      });
 
     const orchestrator = new GitAutomationOrchestrator({
       projectRoot: tmpDir,
@@ -273,14 +273,14 @@ describe("GitAutomationOrchestrator", () => {
     const mockRunAgent = vi
       .fn<(config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult>>()
       .mockResolvedValue({
-      sessionId: "test-session",
-      success: true,
-      output: "Done but quality low",
-      tokensUsed: 50,
-      durationMs: 200,
-      filesChanged: ["src/bad.ts"],
-      pdseScore: 55,
-    });
+        sessionId: "test-session",
+        success: true,
+        output: "Done but quality low",
+        tokensUsed: 50,
+        durationMs: 200,
+        filesChanged: ["src/bad.ts"],
+        pdseScore: 55,
+      });
 
     const orchestrator = new GitAutomationOrchestrator({
       projectRoot: tmpDir,

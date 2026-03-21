@@ -127,10 +127,7 @@ developer_instructions = "Boolean test."
         join(agentsDir, "agent-one.toml"),
         `name = "agent-one"\ndeveloper_instructions = "Do something."`,
       );
-      await writeFile(
-        join(skillsDir, "my-skill.md"),
-        `---\nname: my-skill\n---\nInstructions.`,
-      );
+      await writeFile(join(skillsDir, "my-skill.md"), `---\nname: my-skill\n---\nInstructions.`);
 
       const resultFromSkillsDir = await scanCodexSkills(skillsDir);
       expect(resultFromSkillsDir.length).toBe(1);
@@ -233,7 +230,7 @@ alwaysApply: false
       expect(typeof result.cursorMetadata.alwaysApply).toBe("boolean");
     });
 
-    it("alwaysApply string \"false\" parses as false", () => {
+    it('alwaysApply string "false" parses as false', () => {
       const content = `---\nname: str-false-rule\nalwaysApply: "false"\n---\nInstructions here.`;
       const result = parseCursorRule(content, "/rules/str-false-rule.mdc");
       expect(result.cursorMetadata.alwaysApply).toBe(false);
@@ -346,10 +343,7 @@ describe("universal parser", () => {
     it("finds .claude/skills/ → returns { format: 'claude', confidence: 1.0 }", async () => {
       const skillsDir = join(tempDir, ".claude", "skills");
       await mkdir(skillsDir, { recursive: true });
-      await writeFile(
-        join(skillsDir, "my-skill.md"),
-        `---\nname: my-skill\n---\nInstructions.`,
-      );
+      await writeFile(join(skillsDir, "my-skill.md"), `---\nname: my-skill\n---\nInstructions.`);
 
       const results = await detectSkillSources(tempDir);
       const claudeResult = results.find((r) => r.format === "claude" && r.confidence === 1.0);
@@ -411,10 +405,7 @@ describe("universal parser", () => {
       // Place a SKILL.md directly in a subdirectory
       const subDir = join(tempDir, "my-module");
       await mkdir(subDir, { recursive: true });
-      await writeFile(
-        join(subDir, "SKILL.md"),
-        `---\nname: raw-skill\n---\nRaw instructions.`,
-      );
+      await writeFile(join(subDir, "SKILL.md"), `---\nname: raw-skill\n---\nRaw instructions.`);
 
       const results = await detectSkillSources(tempDir);
       const universalResult = results.find((r) => r.format === "universal");

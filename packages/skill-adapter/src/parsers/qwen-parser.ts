@@ -100,9 +100,8 @@ export async function scanQwenSkills(qwenDir?: string): Promise<ScannedQwenSkill
   const skills: ScannedQwenSkill[] = [];
   const seenPaths = new Set<string>();
 
-  const dirs = qwenDir !== undefined
-    ? [qwenDir]
-    : [DEFAULT_QWEN_SKILLS_DIR, DEFAULT_GEMINI_SKILLS_DIR];
+  const dirs =
+    qwenDir !== undefined ? [qwenDir] : [DEFAULT_QWEN_SKILLS_DIR, DEFAULT_GEMINI_SKILLS_DIR];
 
   for (const dir of dirs) {
     const files = await findMarkdownFiles(dir);

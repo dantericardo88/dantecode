@@ -87,7 +87,12 @@ export class ModelRouterBridge {
    * Formats a one-line model capability note for display next to a suggestion.
    */
   formatModelHint(hint: RouterCapabilityHint): string {
-    const tier = hint.costTier === "budget" ? "⚡ budget" : hint.costTier === "quality" ? "★ quality" : "◆ balanced";
+    const tier =
+      hint.costTier === "budget"
+        ? "⚡ budget"
+        : hint.costTier === "quality"
+          ? "★ quality"
+          : "◆ balanced";
     const stream = hint.supportsStreaming ? " · streaming" : "";
     return `[model: ${hint.modelId}${stream} · ${tier}]`;
   }
@@ -104,10 +109,7 @@ export class ModelRouterBridge {
     const additions: Partial<SuggestionContext> = {};
     // Inject active model as a recent-command-like signal
     if (state.activeModelId) {
-      additions.recentCommands = [
-        ...(base.recentCommands ?? []),
-        `model:${state.activeModelId}`,
-      ];
+      additions.recentCommands = [...(base.recentCommands ?? []), `model:${state.activeModelId}`];
     }
     return { ...base, ...additions };
   }
@@ -117,7 +119,12 @@ export class ModelRouterBridge {
   // ---------------------------------------------------------------------------
 
   private _inferCostTier(id: string): "budget" | "balanced" | "quality" {
-    if (id.includes("haiku") || id.includes("groq") || id.includes("grok-fast") || id.includes("mini")) {
+    if (
+      id.includes("haiku") ||
+      id.includes("groq") ||
+      id.includes("grok-fast") ||
+      id.includes("mini")
+    ) {
       return "budget";
     }
     if (id.includes("opus") || id.includes("gpt-4o") || id.includes("gemini-pro")) {

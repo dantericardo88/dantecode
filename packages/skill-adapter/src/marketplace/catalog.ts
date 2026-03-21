@@ -169,9 +169,7 @@ export class SkillCatalog {
    * Returns all entries sorted alphabetically by name.
    */
   getAll(): CatalogEntry[] {
-    return Array.from(this.entries.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    return Array.from(this.entries.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**

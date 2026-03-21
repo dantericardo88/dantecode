@@ -131,7 +131,11 @@ async function ask(rl: readline.Interface, question: string): Promise<string> {
   });
 }
 
-async function askYN(rl: readline.Interface, question: string, defaultYes = true): Promise<boolean> {
+async function askYN(
+  rl: readline.Interface,
+  question: string,
+  defaultYes = true,
+): Promise<boolean> {
   const hint = defaultYes ? "[Y/n]" : "[y/N]";
   const answer = await ask(rl, `${question} ${DIM}${hint}${RESET}`);
   if (answer === "") return defaultYes;
@@ -211,10 +215,15 @@ export async function runOnboardingWizard(
         printSuccess(`${selectedModel.apiKeyEnv} is already set in your environment.`);
       } else {
         printWarning(`${selectedModel.apiKeyEnv} not found in environment.`);
-        const saveKey = await askYN(rl, "Would you like to enter it now (saved to .dantecode/config.json)?", false);
+        const saveKey = await askYN(
+          rl,
+          "Would you like to enter it now (saved to .dantecode/config.json)?",
+          false,
+        );
         if (saveKey) {
           apiKeyValue = await ask(rl, `Enter your ${selectedModel.apiKeyEnv}:`);
-          if (!apiKeyValue) printWarning("Skipped — you can set it later via `dantecode config set`.");
+          if (!apiKeyValue)
+            printWarning("Skipped — you can set it later via `dantecode config set`.");
         } else {
           print(`${DIM}Set it later with: export ${selectedModel.apiKeyEnv}=<your-key>${RESET}`);
         }
@@ -262,8 +271,12 @@ export async function runOnboardingWizard(
     printHeader("Setup Complete");
     printSuccess(`Config saved to ${DIM}${configPath}${RESET}`);
     print(`\n  Model:       ${BOLD}${config.provider}/${config.modelId}${RESET}`);
-    print(`  DanteForge:  ${config.enableDanteForge ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`);
-    print(`  Sandbox:     ${config.enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`);
+    print(
+      `  DanteForge:  ${config.enableDanteForge ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    );
+    print(
+      `  Sandbox:     ${config.enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    );
     print(`\n${DIM}Run ${RESET}${CYAN}dantecode${RESET}${DIM} to start your session.${RESET}\n`);
 
     return { config, configPath, skipped: false };

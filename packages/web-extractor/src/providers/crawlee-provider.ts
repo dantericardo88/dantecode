@@ -12,7 +12,7 @@ export class CrawleeProvider implements FetchProvider {
     // For now, this acts as a placeholder or delegates to another provider
     // Real implementation would require adding 'crawlee' as a dependency.
     console.log(`CrawleeProvider fetching: ${url}`);
-    
+
     // placeholder implementation
     return {
       url,
@@ -22,8 +22,8 @@ export class CrawleeProvider implements FetchProvider {
         status: 200,
         renderMode: "browser",
         cacheHit: false,
-        extractedAt: new Date().toISOString()
-      }
+        extractedAt: new Date().toISOString(),
+      },
     };
   }
 }

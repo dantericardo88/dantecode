@@ -162,7 +162,10 @@ export class DurableRunStore {
     return next;
   }
 
-  async appendEvidence(runId: string, evidence: ExecutionEvidence | ExecutionEvidence[]): Promise<void> {
+  async appendEvidence(
+    runId: string,
+    evidence: ExecutionEvidence | ExecutionEvidence[],
+  ): Promise<void> {
     const current = await this.requireRun(runId);
     const merged = await this.mergeEvidence(runId, Array.isArray(evidence) ? evidence : [evidence]);
     const next: DurableRun = {
@@ -273,8 +276,7 @@ export class DurableRunStore {
       updatedAt,
       touchedFiles: task.touchedFiles ?? [],
       evidenceCount: 0,
-      nextAction:
-        status === "waiting_user" ? "Resume the paused background task." : task.progress,
+      nextAction: status === "waiting_user" ? "Resume the paused background task." : task.progress,
       legacySource: "background_task",
     };
   }
@@ -392,7 +394,10 @@ export class DurableRunStore {
     };
   }
 
-  private async mergeEvidence(runId: string, additions: ExecutionEvidence[]): Promise<ExecutionEvidence[]> {
+  private async mergeEvidence(
+    runId: string,
+    additions: ExecutionEvidence[],
+  ): Promise<ExecutionEvidence[]> {
     const current = await this.loadEvidence(runId);
     if (additions.length === 0) {
       return current;

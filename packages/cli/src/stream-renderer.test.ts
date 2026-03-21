@@ -5,8 +5,12 @@ import { StreamRenderer } from "./stream-renderer.js";
 vi.mock("@dantecode/core", () => {
   class UXEngine {
     constructor(_opts?: unknown) {}
-    formatMarkdown(text: string) { return text; }
-    generateHint(score: number) { return `hint:${score.toFixed(2)}`; }
+    formatMarkdown(text: string) {
+      return text;
+    }
+    generateHint(score: number) {
+      return `hint:${score.toFixed(2)}`;
+    }
     buildStatusLine(opts: { pdseScore?: number }) {
       return `[pdse:${opts.pdseScore?.toFixed(2)}]`;
     }

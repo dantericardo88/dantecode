@@ -82,27 +82,43 @@ export class ResearchPipeline {
     // 1. Session cache check
     const sessionHit = this.sessionCache.get(objective);
     if (sessionHit) {
-      const sources: EvidenceSource[] = sessionHit.map(r => ({
+      const sources: EvidenceSource[] = sessionHit.map((r) => ({
         url: r.url,
         title: r.title,
         snippet: r.snippet,
       }));
-      const bundle = this.aggregator.aggregate(sources, sessionHit.map(r => r.snippet));
-      return { evidenceBundle: bundle, cacheHit: true, resultCount: sessionHit.length, fetchedCount: 0 };
+      const bundle = this.aggregator.aggregate(
+        sources,
+        sessionHit.map((r) => r.snippet),
+      );
+      return {
+        evidenceBundle: bundle,
+        cacheHit: true,
+        resultCount: sessionHit.length,
+        fetchedCount: 0,
+      };
     }
 
     // 2. Persistent cache check
     if (this.persistentCache) {
       const persisted = await this.persistentCache.get(objective);
       if (persisted) {
-        const sources: EvidenceSource[] = persisted.map(r => ({
+        const sources: EvidenceSource[] = persisted.map((r) => ({
           url: r.url,
           title: r.title,
           snippet: r.snippet,
         }));
-        const bundle = this.aggregator.aggregate(sources, persisted.map(r => r.snippet));
+        const bundle = this.aggregator.aggregate(
+          sources,
+          persisted.map((r) => r.snippet),
+        );
         this.sessionCache.put(objective, persisted);
-        return { evidenceBundle: bundle, cacheHit: true, resultCount: persisted.length, fetchedCount: 0 };
+        return {
+          evidenceBundle: bundle,
+          cacheHit: true,
+          resultCount: persisted.length,
+          fetchedCount: 0,
+        };
       }
     }
 
@@ -110,7 +126,9 @@ export class ResearchPipeline {
     const rawResults = await this.ddg.search(objective, { limit: this.maxResults });
 
     // 4. BM25 + authority ranking
-    const ranked = this.ranker.rank(rawResults, objective, { authorityOverrides: this.authorityOverrides });
+    const ranked = this.ranker.rank(rawResults, objective, {
+      authorityOverrides: this.authorityOverrides,
+    });
 
     // 5. Fetch + clean top-N
     const topN = ranked.slice(0, this.fetchTopN);
@@ -140,14 +158,11 @@ export class ResearchPipeline {
     }
 
     // 6. Semantic dedup on all snippet-level content
-    const allContent = [
-      ...ranked.map(r => r.snippet).filter(Boolean),
-      ...fetchedChunks,
-    ];
+    const allContent = [...ranked.map((r) => r.snippet).filter(Boolean), ...fetchedChunks];
     const dedupedChunks = this.deduper.dedupe(allContent, 0.75);
 
     // 7. Aggregate
-    const sources: EvidenceSource[] = ranked.map(r => ({
+    const sources: EvidenceSource[] = ranked.map((r) => ({
       url: r.url,
       title: r.title,
       snippet: r.snippet,

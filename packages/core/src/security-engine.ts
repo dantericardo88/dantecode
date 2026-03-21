@@ -309,7 +309,8 @@ function createBuiltinRules(): SecurityRule[] {
     {
       id: "output-secret-generic-api-key",
       layer: "output",
-      pattern: /\b(api[_-]?key|api[_-]?secret|access[_-]?token)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/i,
+      pattern:
+        /\b(api[_-]?key|api[_-]?secret|access[_-]?token)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/i,
       riskLevel: "high",
       description: "Secret leak: generic API key/secret/token pattern in output",
     },
@@ -369,9 +370,7 @@ export class SecurityEngine {
   private actionHistory: SecurityAction[];
 
   /** Engine configuration. */
-  private options: Required<
-    Pick<SecurityEngineOptions, "anomalyDetection" | "maxQuarantine">
-  > &
+  private options: Required<Pick<SecurityEngineOptions, "anomalyDetection" | "maxQuarantine">> &
     Pick<SecurityEngineOptions, "allowedPaths">;
 
   /**
@@ -430,14 +429,8 @@ export class SecurityEngine {
     }
 
     // Check path allowance for execution-layer actions with file paths
-    if (
-      action.filePath &&
-      this.options.allowedPaths &&
-      !this.isPathAllowed(action.filePath)
-    ) {
-      matchingReasons.push(
-        `File path "${action.filePath}" is outside allowed path patterns`,
-      );
+    if (action.filePath && this.options.allowedPaths && !this.isPathAllowed(action.filePath)) {
+      matchingReasons.push(`File path "${action.filePath}" is outside allowed path patterns`);
       if (RISK_RANK.medium > RISK_RANK[worstRisk]) {
         worstRisk = "medium";
       }
@@ -508,19 +501,11 @@ export class SecurityEngine {
     // Strategy 1: High frequency of same tool/command type
     if (action.tool || action.command) {
       const toolName = action.tool ?? "bash";
-      const consecutiveSame = this.countConsecutiveTrailing(
-        recentActions,
-        toolName,
-      );
+      const consecutiveSame = this.countConsecutiveTrailing(recentActions, toolName);
       if (consecutiveSame >= BASH_FREQUENCY_THRESHOLD) {
-        const freqScore = Math.min(
-          1,
-          consecutiveSame / (BASH_FREQUENCY_THRESHOLD * 2),
-        );
+        const freqScore = Math.min(1, consecutiveSame / (BASH_FREQUENCY_THRESHOLD * 2));
         anomalyScore = Math.max(anomalyScore, freqScore);
-        anomalyReasons.push(
-          `High frequency: ${consecutiveSame} consecutive "${toolName}" actions`,
-        );
+        anomalyReasons.push(`High frequency: ${consecutiveSame} consecutive "${toolName}" actions`);
       }
     }
 
@@ -528,15 +513,11 @@ export class SecurityEngine {
     if (action.filePath && recentActions.length > 0) {
       const actionDir = this.extractDirectory(action.filePath);
       const recentDirs = new Set(
-        recentActions
-          .filter((a) => a.filePath)
-          .map((a) => this.extractDirectory(a.filePath!)),
+        recentActions.filter((a) => a.filePath).map((a) => this.extractDirectory(a.filePath!)),
       );
       if (recentDirs.size > 0 && !recentDirs.has(actionDir)) {
         anomalyScore = Math.max(anomalyScore, 0.4);
-        anomalyReasons.push(
-          `Unusual directory: "${actionDir}" not seen in recent actions`,
-        );
+        anomalyReasons.push(`Unusual directory: "${actionDir}" not seen in recent actions`);
       }
     }
 
@@ -544,10 +525,7 @@ export class SecurityEngine {
     return {
       isAnomaly,
       score: anomalyScore,
-      description:
-        anomalyReasons.length > 0
-          ? anomalyReasons.join("; ")
-          : "No anomaly detected",
+      description: anomalyReasons.length > 0 ? anomalyReasons.join("; ") : "No anomaly detected",
     };
   }
 
@@ -564,10 +542,7 @@ export class SecurityEngine {
    * @param result - The security check result that triggered quarantine.
    * @returns The unique ID of the quarantine entry.
    */
-  quarantineAction(
-    action: SecurityAction,
-    result: SecurityCheckResult,
-  ): string {
+  quarantineAction(action: SecurityAction, result: SecurityCheckResult): string {
     const entry: QuarantineEntry = {
       id: randomUUID(),
       action,
@@ -719,10 +694,7 @@ export class SecurityEngine {
    * a given tool name (by tool field or by the presence of a command
    * when toolName is "bash").
    */
-  private countConsecutiveTrailing(
-    actions: SecurityAction[],
-    toolName: string,
-  ): number {
+  private countConsecutiveTrailing(actions: SecurityAction[], toolName: string): number {
     let count = 0;
     for (let i = actions.length - 1; i >= 0; i--) {
       const a = actions[i]!;
@@ -741,10 +713,7 @@ export class SecurityEngine {
    * Works with both forward slashes and backslashes.
    */
   private extractDirectory(filePath: string): string {
-    const lastSlash = Math.max(
-      filePath.lastIndexOf("/"),
-      filePath.lastIndexOf("\\"),
-    );
+    const lastSlash = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
     return lastSlash >= 0 ? filePath.substring(0, lastSlash) : ".";
   }
 }

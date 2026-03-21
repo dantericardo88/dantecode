@@ -10,7 +10,7 @@
 
 // ─── Capability Profile ───────────────────────────────────────────────────────
 
-export type ProviderKind = 'cloud' | 'local';
+export type ProviderKind = "cloud" | "local";
 
 export interface ModelCapabilityProfile {
   /** Provider identifier (matches PROVIDER_BUILDERS key) */
@@ -67,8 +67,8 @@ const LOCAL_RETRY: RetryProfile = {
 export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
   // ── Anthropic ────────────────────────────────────────────────────────────
   {
-    provider: 'anthropic',
-    kind: 'cloud',
+    provider: "anthropic",
+    kind: "cloud",
     modelIdPattern: /^claude-/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -76,13 +76,13 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 200_000,
     timeoutMs: 120_000,
     retryProfile: DEFAULT_RETRY,
-    notes: 'Claude family — native tool use, 200K context',
+    notes: "Claude family — native tool use, 200K context",
   },
 
   // ── Grok (xAI) ───────────────────────────────────────────────────────────
   {
-    provider: 'grok',
-    kind: 'cloud',
+    provider: "grok",
+    kind: "cloud",
     modelIdPattern: /^grok-/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -90,13 +90,13 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 131_072,
     timeoutMs: 120_000,
     retryProfile: DEFAULT_RETRY,
-    notes: 'Grok family — tool calling supported, may confabulate (use anti-confab guards)',
+    notes: "Grok family — tool calling supported, may confabulate (use anti-confab guards)",
   },
 
   // ── OpenAI ────────────────────────────────────────────────────────────────
   {
-    provider: 'openai',
-    kind: 'cloud',
+    provider: "openai",
+    kind: "cloud",
     modelIdPattern: /^gpt-4/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -106,8 +106,8 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     retryProfile: DEFAULT_RETRY,
   },
   {
-    provider: 'openai',
-    kind: 'cloud',
+    provider: "openai",
+    kind: "cloud",
     modelIdPattern: /^gpt-3\.5/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -115,11 +115,11 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 16_385,
     timeoutMs: 60_000,
     retryProfile: DEFAULT_RETRY,
-    notes: 'GPT-3.5 — tool calling supported, not recommended for planning',
+    notes: "GPT-3.5 — tool calling supported, not recommended for planning",
   },
   {
-    provider: 'openai',
-    kind: 'cloud',
+    provider: "openai",
+    kind: "cloud",
     modelIdPattern: /^o[13]-/,
     supportsToolCalls: true,
     supportsStreaming: false,
@@ -127,13 +127,13 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 200_000,
     timeoutMs: 300_000, // reasoning models can take longer
     retryProfile: DEFAULT_RETRY,
-    notes: 'OpenAI reasoning models (o1, o3) — no streaming, extended reasoning',
+    notes: "OpenAI reasoning models (o1, o3) — no streaming, extended reasoning",
   },
 
   // ── Google Gemini ─────────────────────────────────────────────────────────
   {
-    provider: 'google',
-    kind: 'cloud',
+    provider: "google",
+    kind: "cloud",
     modelIdPattern: /^gemini-/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -141,13 +141,13 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 1_000_000,
     timeoutMs: 120_000,
     retryProfile: DEFAULT_RETRY,
-    notes: 'Gemini family — very large context window',
+    notes: "Gemini family — very large context window",
   },
 
   // ── Groq ─────────────────────────────────────────────────────────────────
   {
-    provider: 'groq',
-    kind: 'cloud',
+    provider: "groq",
+    kind: "cloud",
     modelIdPattern: /^llama/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -155,11 +155,11 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 8_192,
     timeoutMs: 30_000,
     retryProfile: { maxRetries: 2, initialBackoffMs: 200, maxBackoffMs: 5_000 },
-    notes: 'Groq-hosted Llama — fast inference, small context, not for planning',
+    notes: "Groq-hosted Llama — fast inference, small context, not for planning",
   },
   {
-    provider: 'groq',
-    kind: 'cloud',
+    provider: "groq",
+    kind: "cloud",
     modelIdPattern: /.*/,
     supportsToolCalls: false,
     supportsStreaming: true,
@@ -167,13 +167,13 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 8_192,
     timeoutMs: 30_000,
     retryProfile: { maxRetries: 2, initialBackoffMs: 200, maxBackoffMs: 5_000 },
-    notes: 'Groq default — no tool calling guarantee',
+    notes: "Groq default — no tool calling guarantee",
   },
 
   // ── Ollama (local) ────────────────────────────────────────────────────────
   {
-    provider: 'ollama',
-    kind: 'local',
+    provider: "ollama",
+    kind: "local",
     modelIdPattern: /^llama3/,
     supportsToolCalls: true, // llama3.1+ supports tool calling via Ollama
     supportsStreaming: true,
@@ -181,12 +181,12 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 128_000,
     timeoutMs: 300_000, // local inference can be slow
     retryProfile: LOCAL_RETRY,
-    defaultBaseUrl: 'http://localhost:11434/v1',
-    notes: 'Llama 3.1+ via Ollama — tool calling supported',
+    defaultBaseUrl: "http://localhost:11434/v1",
+    notes: "Llama 3.1+ via Ollama — tool calling supported",
   },
   {
-    provider: 'ollama',
-    kind: 'local',
+    provider: "ollama",
+    kind: "local",
     modelIdPattern: /^qwen/,
     supportsToolCalls: true,
     supportsStreaming: true,
@@ -194,12 +194,12 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: 32_768,
     timeoutMs: 300_000,
     retryProfile: LOCAL_RETRY,
-    defaultBaseUrl: 'http://localhost:11434/v1',
-    notes: 'Qwen via Ollama — tool calling supported',
+    defaultBaseUrl: "http://localhost:11434/v1",
+    notes: "Qwen via Ollama — tool calling supported",
   },
   {
-    provider: 'ollama',
-    kind: 'local',
+    provider: "ollama",
+    kind: "local",
     modelIdPattern: /.*/,
     supportsToolCalls: false, // conservative fallback for unknown Ollama models
     supportsStreaming: true,
@@ -207,14 +207,14 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: null,
     timeoutMs: 300_000,
     retryProfile: LOCAL_RETRY,
-    defaultBaseUrl: 'http://localhost:11434/v1',
-    notes: 'Ollama fallback — assume no tool calling, use XML extraction',
+    defaultBaseUrl: "http://localhost:11434/v1",
+    notes: "Ollama fallback — assume no tool calling, use XML extraction",
   },
 
   // ── vLLM (local, OpenAI-compatible) ──────────────────────────────────────
   {
-    provider: 'custom',
-    kind: 'local',
+    provider: "custom",
+    kind: "local",
     modelIdPattern: /vllm/i,
     supportsToolCalls: false, // depends on model; conservative default
     supportsStreaming: true,
@@ -222,14 +222,14 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: null,
     timeoutMs: 300_000,
     retryProfile: LOCAL_RETRY,
-    defaultBaseUrl: 'http://localhost:8000/v1',
-    notes: 'vLLM — check model-specific tool support; use XML fallback',
+    defaultBaseUrl: "http://localhost:8000/v1",
+    notes: "vLLM — check model-specific tool support; use XML fallback",
   },
 
   // ── LM Studio (local, OpenAI-compatible) ─────────────────────────────────
   {
-    provider: 'custom',
-    kind: 'local',
+    provider: "custom",
+    kind: "local",
     modelIdPattern: /lm.?studio/i,
     supportsToolCalls: false,
     supportsStreaming: true,
@@ -237,14 +237,14 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: null,
     timeoutMs: 300_000,
     retryProfile: LOCAL_RETRY,
-    defaultBaseUrl: 'http://localhost:1234/v1',
-    notes: 'LM Studio — OpenAI-compatible; tool support depends on loaded model',
+    defaultBaseUrl: "http://localhost:1234/v1",
+    notes: "LM Studio — OpenAI-compatible; tool support depends on loaded model",
   },
 
   // ── Generic custom (OpenAI-compatible) ────────────────────────────────────
   {
-    provider: 'custom',
-    kind: 'cloud',
+    provider: "custom",
+    kind: "cloud",
     modelIdPattern: /.*/,
     supportsToolCalls: false,
     supportsStreaming: true,
@@ -252,7 +252,7 @@ export const BUILTIN_CAPABILITY_PROFILES: ModelCapabilityProfile[] = [
     contextWindowTokens: null,
     timeoutMs: 120_000,
     retryProfile: DEFAULT_RETRY,
-    notes: 'Unknown custom provider — conservative defaults',
+    notes: "Unknown custom provider — conservative defaults",
   },
 ];
 
@@ -298,7 +298,7 @@ export class ModelCapabilityRegistry {
 
   /** Is this a local (on-device) provider? */
   isLocal(provider: string, modelId: string): boolean {
-    return this.lookup(provider, modelId).kind === 'local';
+    return this.lookup(provider, modelId).kind === "local";
   }
 
   /** Get the per-request timeout for this model */
@@ -327,7 +327,7 @@ export class ModelCapabilityRegistry {
   private _fallbackProfile(provider: string, _modelId: string): ModelCapabilityProfile {
     return {
       provider,
-      kind: 'cloud',
+      kind: "cloud",
       modelIdPattern: /.*/,
       supportsToolCalls: false,
       supportsStreaming: true,

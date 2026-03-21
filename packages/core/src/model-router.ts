@@ -32,7 +32,9 @@ function getVault(): CredentialVault {
  * Resolves an API key, preferring the encrypted vault over plain env vars.
  */
 async function resolveApiKey(envVar: string, vaultKey: string): Promise<string | undefined> {
-  const fromVault = await getVault().retrieve(vaultKey).catch(() => null);
+  const fromVault = await getVault()
+    .retrieve(vaultKey)
+    .catch(() => null);
   return fromVault ?? process.env[envVar] ?? undefined;
 }
 

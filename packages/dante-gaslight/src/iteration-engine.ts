@@ -22,7 +22,12 @@ import type {
 } from "./types.js";
 import { BudgetController } from "./budget-controller.js";
 import { IterationHistory } from "./iteration-history.js";
-import { buildGaslighterPrompt, buildFallbackCritique, parseGaslighterOutput, GASLIGHTER_SYSTEM_PROMPT } from "./gaslighter-role.js";
+import {
+  buildGaslighterPrompt,
+  buildFallbackCritique,
+  parseGaslighterOutput,
+  GASLIGHTER_SYSTEM_PROMPT,
+} from "./gaslighter-role.js";
 import { evaluateStopConditions, isLessonEligible } from "./stop-conditions.js";
 import { DEFAULT_GASLIGHT_CONFIG } from "./types.js";
 
@@ -119,7 +124,8 @@ export async function runIterationEngine(
     }
 
     const critique = critiqueText
-      ? (parseGaslighterOutput(critiqueText, iterNum) ?? buildFallbackCritique(currentDraft, iterNum))
+      ? (parseGaslighterOutput(critiqueText, iterNum) ??
+        buildFallbackCritique(currentDraft, iterNum))
       : buildFallbackCritique(currentDraft, iterNum);
     history.attachCritique(critique);
 
@@ -185,7 +191,9 @@ export async function runIterationEngine(
 export function createStopController(): { stop: () => void; stopped: () => boolean } {
   let _stopped = false;
   return {
-    stop: () => { _stopped = true; },
+    stop: () => {
+      _stopped = true;
+    },
     stopped: () => _stopped,
   };
 }

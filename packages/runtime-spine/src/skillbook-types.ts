@@ -34,7 +34,10 @@ export const ReflectionOutcomeSchema = z.object({
   gateDecision: SkillbookGateDecisionSchema,
   sessionId: z.string().optional(),
   runId: z.string().optional(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type ReflectionOutcome = z.infer<typeof ReflectionOutcomeSchema>;
 
@@ -52,6 +55,9 @@ export const SkillbookCheckpointRefSchema = z.object({
   skillbookVersion: z.string().optional(),
   pendingUpdates: z.array(UpdateOperationSchema).default([]),
   lastGateDecision: SkillbookGateDecisionSchema.optional(),
-  at: z.string().datetime().default(() => new Date().toISOString()),
+  at: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
 });
 export type SkillbookCheckpointRef = z.infer<typeof SkillbookCheckpointRefSchema>;

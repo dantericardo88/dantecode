@@ -25,7 +25,7 @@ export class PruningEngine {
       dailyDecayRate: 0.05,
       activeGoalBoost: 0.3,
       hardLimit: 1000,
-    }
+    },
   ) {}
 
   /**
@@ -43,14 +43,14 @@ export class PruningEngine {
     const now = new Date().getTime();
 
     // Prepare goal tokens for fast Jaccard
-    const goalTokenSets = activeGoals.map(g => tokenize(g.description + " " + g.title));
+    const goalTokenSets = activeGoals.map((g) => tokenize(g.description + " " + g.title));
 
     for (const entry of entries) {
       // 1. Time decay
       const ageMs = now - new Date(entry.lastAccessed).getTime();
       const ageDays = ageMs / (1000 * 60 * 60 * 24);
       const decay = ageDays * this.config.dailyDecayRate;
-      
+
       // 2. Goal relevance boost
       const entryTokens = tokenize(entry.content);
       let maxSim = 0;
@@ -58,25 +58,25 @@ export class PruningEngine {
         const sim = jaccardSimilarity(entryTokens, gt);
         if (sim > maxSim) maxSim = sim;
       }
-      
+
       // If highly relevant to an active goal, give it a massive boost.
       const boost = maxSim > 0.1 ? this.config.activeGoalBoost : 0;
-      
+
       // Apply updates
       entry.relevanceScore = Math.max(0, entry.relevanceScore - decay + boost);
     }
 
     await this.memory.save();
-    
+
     // 3. Hard limit distillation
     let distilled = 0;
     if (this.memory.size() > this.config.hardLimit) {
       const res = await this.memory.distill(Math.floor(this.config.hardLimit * 0.8));
       distilled = res.distilled + res.removed;
     } else {
-       // Run a lightweight distill to merge near-duplicates anyway
-       const res = await this.memory.distill(this.config.hardLimit);
-       distilled = res.distilled;
+      // Run a lightweight distill to merge near-duplicates anyway
+      const res = await this.memory.distill(this.config.hardLimit);
+      distilled = res.distilled;
     }
 
     return { itemsEvaluated: entries.length, distilled };

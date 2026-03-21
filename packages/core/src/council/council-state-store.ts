@@ -6,7 +6,12 @@
 
 import { readFile, writeFile, mkdir, readdir, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import type { CouncilRunState, AgentSessionState, OverlapRecord, HandoffPacket } from "./council-types.js";
+import type {
+  CouncilRunState,
+  AgentSessionState,
+  OverlapRecord,
+  HandoffPacket,
+} from "./council-types.js";
 
 // ----------------------------------------------------------------------------
 // Storage helpers
@@ -58,7 +63,11 @@ export async function tryLoadCouncilRun(
   repoRoot: string,
   runId: string,
 ): Promise<CouncilRunState | null> {
-  try { return await loadCouncilRun(repoRoot, runId); } catch { /* fall through */ }
+  try {
+    return await loadCouncilRun(repoRoot, runId);
+  } catch {
+    /* fall through */
+  }
   // Recovery: the .tmp file survives an interrupted rename
   try {
     const tmpPath = `${statePath(repoRoot, runId)}.tmp`;

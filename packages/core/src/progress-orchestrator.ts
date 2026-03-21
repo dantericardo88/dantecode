@@ -147,9 +147,7 @@ export class ProgressOrchestrator {
 
     for (const task of this.tasks.values()) {
       const icon = STATE_ICONS[task.state];
-      const elapsedPart = task.startedAt
-        ? ` (${_elapsed(task.startedAt, task.finishedAt)})`
-        : "";
+      const elapsedPart = task.startedAt ? ` (${_elapsed(task.startedAt, task.finishedAt)})` : "";
       const detailPart = task.detail ? `  ${task.detail}` : "";
 
       if (task.state === "running" && task.total > 0) {

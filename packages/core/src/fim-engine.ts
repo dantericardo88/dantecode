@@ -10,13 +10,7 @@ import { basename, extname } from "node:path";
 // ---------------------------------------------------------------------------
 
 /** Supported FIM model families. */
-export type FIMModel =
-  | "starcoder"
-  | "codellama"
-  | "deepseek-coder"
-  | "claude"
-  | "gpt"
-  | "generic";
+export type FIMModel = "starcoder" | "codellama" | "deepseek-coder" | "claude" | "gpt" | "generic";
 
 /** Context gathered at the cursor position. */
 export interface FIMContext {
@@ -122,12 +116,7 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
 const STOP_TOKENS: Record<FIMModel, string[]> = {
   starcoder: ["<fim_prefix>", "<fim_suffix>", "<fim_middle>", "<|endoftext|>"],
   codellama: ["<PRE>", "<SUF>", "<MID>", "</s>", "<EOT>"],
-  "deepseek-coder": [
-    "<｜fim▁begin｜>",
-    "<｜fim▁hole｜>",
-    "<｜fim▁end｜>",
-    "<|EOT|>",
-  ],
+  "deepseek-coder": ["<｜fim▁begin｜>", "<｜fim▁hole｜>", "<｜fim▁end｜>", "<|EOT|>"],
   claude: ["</completion>", "\n\nHuman:", "\n\nAssistant:"],
   gpt: ["// FILL IN THE BLANK", "<|endoftext|>"],
   generic: ["[FILL]"],
@@ -175,16 +164,14 @@ export class FIMEngine {
     const prefix = this.truncateToLines(context.prefix, this.prefixLines, true);
     const suffix = this.truncateToLines(context.suffix, this.suffixLines, false);
     const language =
-      context.language ??
-      (context.filePath ? this.detectLanguage(context.filePath) : "unknown");
+      context.language ?? (context.filePath ? this.detectLanguage(context.filePath) : "unknown");
 
-    const memoryBlock =
-      context.memoryContext
-        ? `\n// Context:\n${context.memoryContext
-            .split("\n")
-            .map((l) => `// ${l}`)
-            .join("\n")}\n`
-        : "";
+    const memoryBlock = context.memoryContext
+      ? `\n// Context:\n${context.memoryContext
+          .split("\n")
+          .map((l) => `// ${l}`)
+          .join("\n")}\n`
+      : "";
 
     let prompt: string;
 
@@ -216,12 +203,7 @@ export class FIMEngine {
         break;
 
       case "gpt":
-        prompt = [
-          memoryBlock,
-          prefix,
-          "// FILL IN THE BLANK",
-          suffix,
-        ]
+        prompt = [memoryBlock, prefix, "// FILL IN THE BLANK", suffix]
           .filter((s) => s !== "")
           .join("\n");
         break;
@@ -370,8 +352,7 @@ export class FIMEngine {
     const completionIndent = completionFirstLine.match(/^(\s*)/)?.[1] ?? "";
 
     const prefixLines = context.prefix.split("\n");
-    const lastPrefixLine =
-      [...prefixLines].reverse().find((l) => l.trim().length > 0) ?? "";
+    const lastPrefixLine = [...prefixLines].reverse().find((l) => l.trim().length > 0) ?? "";
     const prefixIndent = lastPrefixLine.match(/^(\s*)/)?.[1] ?? "";
 
     if (completionIndent.length >= prefixIndent.length) {

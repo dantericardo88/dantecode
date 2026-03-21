@@ -113,7 +113,9 @@ export function classifyRisk(
   // 5. Weak robustness score from DanteForge/Gaslight
   if (!channel && opts.verificationScore !== undefined && opts.verificationScore < 0.5) {
     channel = "weak-robustness";
-    reasons.push(`Low verification/robustness score (${opts.verificationScore.toFixed(2)}) — plan may be fragile.`);
+    reasons.push(
+      `Low verification/robustness score (${opts.verificationScore.toFixed(2)}) — plan may be fragile.`,
+    );
     confidence = 0.8;
   }
 
@@ -191,13 +193,8 @@ export function parseLlmClassification(raw: string): LlmClassificationResult | n
       shouldTrigger: p["shouldTrigger"],
       channel: p["channel"] as LlmClassificationResult["channel"],
       confidence:
-        typeof p["confidence"] === "number"
-          ? Math.min(1, Math.max(0, p["confidence"]))
-          : 0.7,
-      rationale:
-        typeof p["rationale"] === "string"
-          ? p["rationale"]
-          : "LLM classifier result.",
+        typeof p["confidence"] === "number" ? Math.min(1, Math.max(0, p["confidence"])) : 0.7,
+      rationale: typeof p["rationale"] === "string" ? p["rationale"] : "LLM classifier result.",
     };
   } catch {
     return null;

@@ -5,7 +5,7 @@ export function generateCacheKey(url: string, options: WebFetchOptions): string 
   const normalizedUrl = normalizeUrl(url);
   const normalizedInstructions = options.instructions?.trim().toLowerCase() || "";
   const schemaHash = options.schema ? hashObject(options.schema) : "";
-  
+
   const rawKey = `${normalizedUrl}|${normalizedInstructions}|${schemaHash}|${options.cleanLevel || "standard"}`;
   return createHash("sha256").update(rawKey).digest("hex").slice(0, 16);
 }

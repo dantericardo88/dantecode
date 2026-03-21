@@ -3,11 +3,7 @@
 // Primary isolation backend. Wraps @dantecode/sandbox SandboxManager.
 // ============================================================================
 
-import {
-  SandboxManager,
-  SandboxExecutor,
-  createDefaultSandboxSpec,
-} from "@dantecode/sandbox";
+import { SandboxManager, SandboxExecutor, createDefaultSandboxSpec } from "@dantecode/sandbox";
 import { appendAuditEvent } from "@dantecode/core";
 import type { IsolationLayer, ExecutionRequest, ExecutionResult } from "./types.js";
 
@@ -54,7 +50,11 @@ export class DockerIsolationLayer implements IsolationLayer {
 
   async teardown(): Promise<void> {
     if (this.manager) {
-      try { await this.manager.stop(); } catch { /* non-fatal */ }
+      try {
+        await this.manager.stop();
+      } catch {
+        /* non-fatal */
+      }
       this.manager = null;
     }
     this.executor = null;

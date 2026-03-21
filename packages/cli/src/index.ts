@@ -104,7 +104,24 @@ function parseArgs(argv: string[]): ParsedArgs {
     sessionName: undefined,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset", "research", "audit", "vault", "review", "triage", "serve"]);
+  const commands = new Set([
+    "init",
+    "skills",
+    "agent",
+    "config",
+    "git",
+    "self-update",
+    "council",
+    "gaslight",
+    "skillbook",
+    "fearset",
+    "research",
+    "audit",
+    "vault",
+    "review",
+    "triage",
+    "serve",
+  ]);
   let i = 0;
   let foundCommand = false;
 

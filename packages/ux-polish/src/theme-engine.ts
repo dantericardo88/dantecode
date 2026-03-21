@@ -83,9 +83,7 @@ export class ThemeEngine {
   }
 
   /** Get the ANSI color for a semantic role. Empty string if colors disabled. */
-  color(
-    role: "success" | "error" | "warning" | "info" | "progress" | "muted",
-  ): string {
+  color(role: "success" | "error" | "warning" | "info" | "progress" | "muted"): string {
     if (!this._useColors) return "";
     return COLOR_TOKENS[this._theme]?.[role] ?? "";
   }

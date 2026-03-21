@@ -15,9 +15,16 @@ describe("RecoveryMessenger", () => {
   // 2. all scenarios have steps
   it("every scenario has at least 1 recovery step", () => {
     const scenarios = [
-      "context_saturated", "model_rate_limited", "pipeline_stalled",
-      "partial_completion", "session_resume", "typecheck_failed",
-      "test_failed", "tool_blocked", "model_confabulated", "round_budget_exhausted",
+      "context_saturated",
+      "model_rate_limited",
+      "pipeline_stalled",
+      "partial_completion",
+      "session_resume",
+      "typecheck_failed",
+      "test_failed",
+      "tool_blocked",
+      "model_confabulated",
+      "round_budget_exhausted",
     ] as const;
     for (const s of scenarios) {
       const msg = messenger.getRecovery(s);

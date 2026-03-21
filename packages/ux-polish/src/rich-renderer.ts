@@ -74,23 +74,30 @@ export class RichRenderer {
   // Kind dispatchers
   // -------------------------------------------------------------------------
 
-  private _dispatch(
-    surface: UXSurface,
-    payload: RenderPayload,
-    density: RenderDensity,
-  ): string {
+  private _dispatch(surface: UXSurface, payload: RenderPayload, density: RenderDensity): string {
     switch (payload.kind) {
-      case "text":      return this._text(payload.content, density);
-      case "markdown":  return this._markdown(payload.content, density);
-      case "table":     return this._table(payload);
-      case "diff":      return this._diff(payload);
-      case "status":    return this._status(payload.content, density);
-      case "progress":  return this._progressLine(payload.content, density);
-      case "error":     return this._errorBlock(payload.content, density);
-      case "success":   return this._successLine(payload.content);
-      case "warning":   return this._warningLine(payload.content);
-      case "info":      return this._infoLine(payload.content, surface);
-      default:          return payload.content;
+      case "text":
+        return this._text(payload.content, density);
+      case "markdown":
+        return this._markdown(payload.content, density);
+      case "table":
+        return this._table(payload);
+      case "diff":
+        return this._diff(payload);
+      case "status":
+        return this._status(payload.content, density);
+      case "progress":
+        return this._progressLine(payload.content, density);
+      case "error":
+        return this._errorBlock(payload.content, density);
+      case "success":
+        return this._successLine(payload.content);
+      case "warning":
+        return this._warningLine(payload.content);
+      case "info":
+        return this._infoLine(payload.content, surface);
+      default:
+        return payload.content;
     }
   }
 
@@ -106,11 +113,13 @@ export class RichRenderer {
   private _markdown(content: string, density: RenderDensity): string {
     if (density === "compact") {
       // Strip markdown in compact mode — plain text only
-      return content
-        .replace(/^#{1,3}\s+/gm, "")
-        .replace(/\*\*(.+?)\*\*/g, "$1")
-        .replace(/`([^`]+)`/g, "$1")
-        .split("\n")[0] ?? content;
+      return (
+        content
+          .replace(/^#{1,3}\s+/gm, "")
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .replace(/`([^`]+)`/g, "$1")
+          .split("\n")[0] ?? content
+      );
     }
 
     const BOLD = this.engine.bold;
@@ -122,11 +131,11 @@ export class RichRenderer {
     return content
       .split("\n")
       .map((line) => {
-        if (/^# /.test(line))   return `${BOLD}${CYAN.replace(RESET, "")}${line.slice(2)}${RESET}`;
-        if (/^## /.test(line))  return `${BOLD}${line.slice(3)}${RESET}`;
+        if (/^# /.test(line)) return `${BOLD}${CYAN.replace(RESET, "")}${line.slice(2)}${RESET}`;
+        if (/^## /.test(line)) return `${BOLD}${line.slice(3)}${RESET}`;
         if (/^### /.test(line)) return `${YELLOW.replace(RESET, "")}${line.slice(4)}${RESET}`;
         if (/^---+$/.test(line.trim())) return `${DIM}${hRule(COLUMN_WIDTH.terminal)}${RESET}`;
-        if (/^- /.test(line))   line = `  • ${line.slice(2)}`;
+        if (/^- /.test(line)) line = `  • ${line.slice(2)}`;
         else if (/^\d+\. /.test(line)) line = `  ${line}`;
         line = line.replace(/\*\*(.+?)\*\*/g, `${BOLD}$1${RESET}`);
         line = line.replace(/`([^`]+)`/g, `${DIM}$1${RESET}`);
@@ -148,8 +157,7 @@ export class RichRenderer {
       Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length), 1),
     );
 
-    const divider =
-      "+-" + colWidths.map((w) => "-".repeat(w)).join("-+-") + "-+";
+    const divider = "+-" + colWidths.map((w) => "-".repeat(w)).join("-+-") + "-+";
 
     const renderRow = (cells: string[], isHeader = false): string => {
       const b = isHeader ? this.engine.bold : "";
@@ -157,9 +165,7 @@ export class RichRenderer {
       return (
         "| " +
         cells
-          .map((cell, i) =>
-            `${b}${padOrTruncate(cell ?? "", colWidths[i] ?? 1, "…")}${r}`,
-          )
+          .map((cell, i) => `${b}${padOrTruncate(cell ?? "", colWidths[i] ?? 1, "…")}${r}`)
           .join(" | ") +
         " |"
       );
@@ -185,7 +191,7 @@ export class RichRenderer {
     const lines: string[] = [];
     if (ctx) lines.push(`${DIM}--- ${ctx}${RESET}`);
     for (const line of removed) lines.push(`${RED}- ${line}${RESET}`);
-    for (const line of added)   lines.push(`${GREEN}+ ${line}${RESET}`);
+    for (const line of added) lines.push(`${GREEN}+ ${line}${RESET}`);
     return lines.join("\n");
   }
 
@@ -211,10 +217,7 @@ export class RichRenderer {
     const BOLD = this.engine.bold;
     if (density === "compact") return `${RED} ${content}${RESET}`;
     const pad = indent(2);
-    return [
-      `${BOLD}${RED} Error${RESET}`,
-      `${pad}${content}`,
-    ].join("\n");
+    return [`${BOLD}${RED} Error${RESET}`, `${pad}${content}`].join("\n");
   }
 
   private _successLine(content: string): string {

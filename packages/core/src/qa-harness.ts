@@ -1,8 +1,4 @@
-import {
-  scorePdseMetrics,
-  type PdseWeights,
-  type VerificationMetricScore,
-} from "./pdse-scorer.js";
+import { scorePdseMetrics, type PdseWeights, type VerificationMetricScore } from "./pdse-scorer.js";
 import {
   globalVerificationRailRegistry,
   type VerificationRail,
@@ -73,10 +69,14 @@ export function verifyOutput(input: VerifyOutputInput): OutputVerificationReport
       ? input.rails
       : globalVerificationRailRegistry.listRails();
   const railFindings = globalVerificationRailRegistry.evaluate(input.task, output, rails);
-  const hardRailFailures = railFindings.filter((finding) => !finding.passed && finding.mode === "hard");
+  const hardRailFailures = railFindings.filter(
+    (finding) => !finding.passed && finding.mode === "hard",
+  );
   const warnings = railFindings
     .filter((finding) => !finding.passed && finding.mode === "soft")
-    .flatMap((finding) => finding.violations.map((violation) => `${finding.railName}: ${violation}`));
+    .flatMap((finding) =>
+      finding.violations.map((violation) => `${finding.railName}: ${violation}`),
+    );
 
   const keywordTargets = criteria.requiredKeywords ?? deriveKeywords(input.task);
   const keywordCoverage = computeCoverage(keywordTargets, normalizedOutput);
@@ -93,7 +93,8 @@ export function verifyOutput(input: VerifyOutputInput): OutputVerificationReport
   const correctness = average([keywordCoverage, sectionCoverage, forbiddenHits === 0 ? 1 : 0.25]);
   const faithfulness = clamp(1 - placeholderHits * 0.4 - (output.length < 20 ? 0.25 : 0));
   const hallucination = clamp(1 - suspiciousHits * 0.3 - placeholderHits * 0.15);
-  const safety = hardRailFailures.length > 0 || forbiddenHits > 0 ? 0 : warnings.length > 0 ? 0.75 : 1;
+  const safety =
+    hardRailFailures.length > 0 || forbiddenHits > 0 ? 0 : warnings.length > 0 ? 0.75 : 1;
 
   const metrics: VerificationMetricScore[] = [
     {
@@ -106,14 +107,19 @@ export function verifyOutput(input: VerifyOutputInput): OutputVerificationReport
       name: "correctness",
       score: correctness,
       passed: correctness >= 0.7,
-      reason: correctness >= 0.7 ? "Task expectations are represented." : "Key task requirements are missing.",
+      reason:
+        correctness >= 0.7
+          ? "Task expectations are represented."
+          : "Key task requirements are missing.",
     },
     {
       name: "hallucination",
       score: hallucination,
       passed: hallucination >= 0.7,
       reason:
-        suspiciousHits > 0 ? "Suspicious certainty language detected." : "No obvious hallucination markers detected.",
+        suspiciousHits > 0
+          ? "Suspicious certainty language detected."
+          : "No obvious hallucination markers detected.",
     },
     {
       name: "completeness",
@@ -125,7 +131,10 @@ export function verifyOutput(input: VerifyOutputInput): OutputVerificationReport
       name: "safety",
       score: safety,
       passed: safety >= 0.7,
-      reason: safety >= 0.7 ? "No blocking rail or safety failures." : "Blocking rails or forbidden patterns fired.",
+      reason:
+        safety >= 0.7
+          ? "No blocking rail or safety failures."
+          : "Blocking rails or forbidden patterns fired.",
     },
   ];
 
@@ -167,7 +176,10 @@ export function verifyOutput(input: VerifyOutputInput): OutputVerificationReport
   ];
 
   return {
-    overallPassed: pdse.passedGate && hardRailFailures.length === 0 && critiqueTrace.every((stage) => stage.passed),
+    overallPassed:
+      pdse.passedGate &&
+      hardRailFailures.length === 0 &&
+      critiqueTrace.every((stage) => stage.passed),
     passedGate: pdse.passedGate,
     pdseScore: pdse.overallScore,
     metrics,
@@ -243,12 +255,14 @@ export function generateQaTestCases(task: string): GeneratedQaTestCase[] {
 }
 
 function deriveKeywords(task: string): string[] {
-  return [...new Set(
-    task
-      .toLowerCase()
-      .split(/[^a-z0-9]+/i)
-      .filter((token) => token.length >= 5),
-  )].slice(0, 6);
+  return [
+    ...new Set(
+      task
+        .toLowerCase()
+        .split(/[^a-z0-9]+/i)
+        .filter((token) => token.length >= 5),
+    ),
+  ].slice(0, 6);
 }
 
 function inferVerificationKeywords(task: string): string[] {

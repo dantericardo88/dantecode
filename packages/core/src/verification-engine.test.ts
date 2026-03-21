@@ -72,9 +72,7 @@ describe("VerificationEngine", () => {
 
   describe("detectTestRunner", () => {
     it("detects vitest when vitest.config.ts exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("vitest.config.ts"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("vitest.config.ts"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -86,9 +84,7 @@ describe("VerificationEngine", () => {
     });
 
     it("detects jest when jest.config.js exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("jest.config.js"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("jest.config.js"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -100,9 +96,7 @@ describe("VerificationEngine", () => {
     });
 
     it("detects pytest when pytest.ini exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("pytest.ini"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("pytest.ini"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -114,9 +108,7 @@ describe("VerificationEngine", () => {
     });
 
     it("detects go when go.mod exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("go.mod"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("go.mod"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -144,9 +136,7 @@ describe("VerificationEngine", () => {
 
   describe("getStageCommand", () => {
     it("returns tsc --noEmit for typecheck when tsconfig.json exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -155,22 +145,16 @@ describe("VerificationEngine", () => {
     });
 
     it("returns eslint command for lint when .eslintrc.js exists", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes(".eslintrc.js"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes(".eslintrc.js"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
       });
-      expect(engine.getStageCommand("lint")).toBe(
-        "npx eslint . --max-warnings=0",
-      );
+      expect(engine.getStageCommand("lint")).toBe("npx eslint . --max-warnings=0");
     });
 
     it("returns detected runner command for unit stage", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("vitest.config.ts"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("vitest.config.ts"));
 
       const engine = new VerificationEngine("/project", {
         execSyncFn: mockExec,
@@ -195,9 +179,7 @@ describe("VerificationEngine", () => {
 
   describe("runStage", () => {
     it("returns passing result when command succeeds", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
       mockExec.mockReturnValue("");
 
       const engine = new VerificationEngine("/project", {
@@ -211,11 +193,8 @@ describe("VerificationEngine", () => {
     });
 
     it("returns failing result with parsed errors when command fails", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
-      const tsError =
-        "src/foo.ts:12:5 - error TS2345: Argument of type 'string' is not assignable";
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
+      const tsError = "src/foo.ts:12:5 - error TS2345: Argument of type 'string' is not assignable";
       mockExec.mockImplementation(() => {
         const err = new Error("Command failed") as Error & {
           status: number;
@@ -240,9 +219,7 @@ describe("VerificationEngine", () => {
     });
 
     it("handles timeout by capturing error message", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
       mockExec.mockImplementation(() => {
         const err = new Error("TIMEOUT") as Error & {
           status: number;
@@ -266,9 +243,7 @@ describe("VerificationEngine", () => {
     });
 
     it("captures both stdout and stderr", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
       mockExec.mockImplementation(() => {
         const err = new Error("fail") as Error & {
           status: number;
@@ -291,9 +266,7 @@ describe("VerificationEngine", () => {
     });
 
     it("measures duration in milliseconds", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
       mockExec.mockReturnValue("");
 
       const engine = new VerificationEngine("/project", {
@@ -313,8 +286,8 @@ describe("VerificationEngine", () => {
   describe("verify", () => {
     it("reports all passed when every stage succeeds", () => {
       // Enable typecheck and lint config files
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json") || p.includes(".eslintrc.js"),
+      mockExistsSync.mockImplementation(
+        (p: string) => p.includes("tsconfig.json") || p.includes(".eslintrc.js"),
       );
       mockExec.mockReturnValue("");
 
@@ -331,9 +304,7 @@ describe("VerificationEngine", () => {
 
     it("reports partial failure with fix suggestions", () => {
       // Only tsconfig exists — lint will skip, unit will fail
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       let callCount = 0;
       mockExec.mockImplementation(() => {
@@ -378,8 +349,8 @@ describe("VerificationEngine", () => {
     });
 
     it("computes PDSE score in the report", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json") || p.includes(".eslintrc.js"),
+      mockExistsSync.mockImplementation(
+        (p: string) => p.includes("tsconfig.json") || p.includes(".eslintrc.js"),
       );
       mockExec.mockReturnValue("");
 
@@ -396,10 +367,11 @@ describe("VerificationEngine", () => {
 
     it("stops early when a critical stage fails", () => {
       // typecheck config exists, it will fail
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json") ||
-        p.includes(".eslintrc.js") ||
-        p.includes("vitest.config.ts"),
+      mockExistsSync.mockImplementation(
+        (p: string) =>
+          p.includes("tsconfig.json") ||
+          p.includes(".eslintrc.js") ||
+          p.includes("vitest.config.ts"),
       );
 
       mockExec.mockImplementation(() => {
@@ -436,9 +408,7 @@ describe("VerificationEngine", () => {
 
   describe("selfCorrectLoop", () => {
     it("returns corrected=true on successful retry", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       let callCount = 0;
       mockExec.mockImplementation(() => {
@@ -473,9 +443,7 @@ describe("VerificationEngine", () => {
     });
 
     it("gives up after maxFixAttempts", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       let errorNum = 0;
       mockExec.mockImplementation(() => {
@@ -505,9 +473,7 @@ describe("VerificationEngine", () => {
     });
 
     it("detects repeated error signature and stops early", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       // Always return the same error
       mockExec.mockImplementation(() => {
@@ -536,9 +502,7 @@ describe("VerificationEngine", () => {
     });
 
     it("passes fix prompt to fixFn", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       let callCount = 0;
       mockExec.mockImplementation(() => {
@@ -572,9 +536,7 @@ describe("VerificationEngine", () => {
     });
 
     it("runs only once when no fixFn provided", () => {
-      mockExistsSync.mockImplementation((p: string) =>
-        p.includes("tsconfig.json"),
-      );
+      mockExistsSync.mockImplementation((p: string) => p.includes("tsconfig.json"));
 
       mockExec.mockImplementation(() => {
         const err = new Error("fail") as Error & {

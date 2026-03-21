@@ -26,7 +26,12 @@ import {
   renderTokenDashboard,
   getThemeEngine,
 } from "@dantecode/ux-polish";
-import type { StatusBarState, PromptBuilderState, TokenUsageData, ThemeName } from "@dantecode/ux-polish";
+import type {
+  StatusBarState,
+  PromptBuilderState,
+  TokenUsageData,
+  ThemeName,
+} from "@dantecode/ux-polish";
 import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
@@ -203,7 +208,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         getThemeEngine().setTheme(savedTheme);
       }
     }
-  } catch { /* no saved theme — use default */ }
+  } catch {
+    /* no saved theme — use default */
+  }
 
   // Initialize REPL state
   const replState: ReplState = {
@@ -253,7 +260,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       priorLessonProvider: (draft: string) => {
         try {
           const skillbook = new DanteSkillbookIntegration({ cwd: options.projectRoot });
-          const keywords = draft.split(/\s+/).filter((w) => w.length > 4).slice(0, 10);
+          const keywords = draft
+            .split(/\s+/)
+            .filter((w) => w.length > 4)
+            .slice(0, 10);
           return skillbook.getRelevantSkills({ keywords }).map((s) => s.title ?? s.id);
         } catch {
           return [];
@@ -304,10 +314,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
               content: m.content,
               timestamp: m.timestamp,
             }));
+            replState.session.updatedAt = new Date().toISOString();
             if (!options.silent) {
-              process.stdout.write(
-                `${DIM}[--continue] Resumed: ${file.title}${RESET}\n`,
-              );
+              process.stdout.write(`${DIM}[--continue] Resumed: ${file.title}${RESET}\n`);
             }
           }
         }
@@ -326,7 +335,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Start GitEventWatcher when events.enabled is true in STATE.yaml
   let gitEventWatcher: GitEventWatcher | null = null;
   const stateAsMap = state as unknown as Record<string, unknown>;
-  const eventsEnabled = stateAsMap["events"] !== undefined &&
+  const eventsEnabled =
+    stateAsMap["events"] !== undefined &&
     typeof stateAsMap["events"] === "object" &&
     (stateAsMap["events"] as Record<string, unknown>)["enabled"] === true;
 
@@ -435,7 +445,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         if (fullInput.trim().length > 0) {
           await processInput(fullInput, replState, agentConfig, rl, () => {
             currentRoundCount++;
-            const totalTokens = replState.session.messages.reduce((s, m) => s + (m.tokensUsed ?? 0), 0);
+            const totalTokens = replState.session.messages.reduce(
+              (s, m) => s + (m.tokensUsed ?? 0),
+              0,
+            );
             statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
             rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
             statusBar.draw();
@@ -523,8 +536,11 @@ async function processInput(
 
   // Use richRenderer and progressOrchestrator for structured UX output.
   // For pipeline commands (/magic, /forge, /inferno, etc.) we track progress.
-  const isPipelineCommand = isSlashCommand(input) &&
-    /^\/(?:magic|forge|inferno|autoforge|blaze|ember|spark|party|ship|verify)\b/i.test(input.trim());
+  const isPipelineCommand =
+    isSlashCommand(input) &&
+    /^\/(?:magic|forge|inferno|autoforge|blaze|ember|spark|party|ship|verify)\b/i.test(
+      input.trim(),
+    );
   const progressId = isPipelineCommand ? `cmd-${Date.now()}` : null;
 
   try {
@@ -536,7 +552,8 @@ async function processInput(
       });
       if (!replState.silent) {
         process.stdout.write(
-          richRenderer.render("cli", { kind: "status", content: `Starting ${input.trim()}` }).output + "\n",
+          richRenderer.render("cli", { kind: "status", content: `Starting ${input.trim()}` })
+            .output + "\n",
         );
       }
     }

@@ -271,9 +271,7 @@ describe("WebFetchEngine", () => {
       fetchedAt: new Date().toISOString(),
     };
     const long = { ...short, content: "word ".repeat(1_000) };
-    expect(engine.computeConfidence(long)).toBeGreaterThan(
-      engine.computeConfidence(short),
-    );
+    expect(engine.computeConfidence(long)).toBeGreaterThan(engine.computeConfidence(short));
   });
 
   // -------------------------------------------------------------------------

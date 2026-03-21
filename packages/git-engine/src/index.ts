@@ -103,7 +103,12 @@ export type {
 
 // ─── Event Normalizer ────────────────────────────────────────────────────────
 
-export { normalizeGitEvent, computeEventFingerprint, isNoiseEvent, sortByPriority } from "./event-normalizer.js";
+export {
+  normalizeGitEvent,
+  computeEventFingerprint,
+  isNoiseEvent,
+  sortByPriority,
+} from "./event-normalizer.js";
 export type {
   GitAutomationEvent,
   GitAutomationEventType,
@@ -145,11 +150,7 @@ export {
   getMergedBranches,
   getMergeBase,
 } from "./merge.js";
-export type {
-  MergeAttemptResult,
-  CandidateSnapshot,
-  MergeOptions,
-} from "./merge.js";
+export type { MergeAttemptResult, CandidateSnapshot, MergeOptions } from "./merge.js";
 
 // ─── Automation Templates ────────────────────────────────────────────────────
 
@@ -163,7 +164,11 @@ export type { FilePatternWatcherOptions, FileChangeEvent } from "./file-pattern-
 
 // ─── Automation Agent Bridge ─────────────────────────────────────────────────
 
-export { runAutomationAgent, substitutePromptVars, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
+export {
+  runAutomationAgent,
+  substitutePromptVars,
+  PDSE_GATE_THRESHOLD,
+} from "./automation-agent-bridge.js";
 export type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
 // ─── Council Conflict Scanner ───────────────────────────────────────────────

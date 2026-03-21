@@ -56,10 +56,7 @@ describe("installSkill", () => {
     // Place SKILL.md directly in tmpDir (detected as universal format via findSkillMdFiles)
     await writeFile(join(tmpDir, "SKILL.md"), GOOD_SKILL_CONTENT, "utf-8");
 
-    const result = await installSkill(
-      { source: tmpDir, verify: false },
-      projectRoot,
-    );
+    const result = await installSkill({ source: tmpDir, verify: false }, projectRoot);
 
     expect(result.success).toBe(true);
     expect(result.name).toBe("my-test-skill");
@@ -144,10 +141,7 @@ describe("installSkill", () => {
   it("6. installSkill with nonexistent source returns success: false with error", async () => {
     const nonexistentPath = join(tmpDir, "does-not-exist-at-all");
 
-    const result = await installSkill(
-      { source: nonexistentPath, verify: false },
-      projectRoot,
-    );
+    const result = await installSkill({ source: nonexistentPath, verify: false }, projectRoot);
 
     expect(result.success).toBe(false);
     expect(result.error).toBeTruthy();
@@ -179,10 +173,7 @@ describe("resolveSource git cleanup", () => {
 
     const gitSource = "https://github.com/nonexistent/skill-repo.git";
 
-    const result = await installSkill(
-      { source: gitSource, verify: false },
-      projectRoot,
-    );
+    const result = await installSkill({ source: gitSource, verify: false }, projectRoot);
 
     // The install must fail
     expect(result.success).toBe(false);
@@ -232,10 +223,7 @@ describe("resolveSource git cleanup", () => {
 
     const gitSource = "https://github.com/example/skill-repo.git";
 
-    await installSkill(
-      { source: gitSource, verify: false },
-      projectRoot,
-    ).catch(() => {});
+    await installSkill({ source: gitSource, verify: false }, projectRoot).catch(() => {});
 
     const calls = mockExecFileSync.mock.calls;
     const cloneCall = calls.find(
@@ -254,10 +242,7 @@ describe("resolveSource git cleanup", () => {
 
     const httpSource = "http://example.com/skill.tar.gz";
 
-    const result = await installSkill(
-      { source: httpSource, verify: false },
-      projectRoot,
-    );
+    const result = await installSkill({ source: httpSource, verify: false }, projectRoot);
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/HTTP fetch failed/);

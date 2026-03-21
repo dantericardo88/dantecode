@@ -3,10 +3,7 @@ import { CommandPalette } from "./command-palette.js";
 import type { PaletteCommand } from "./command-palette.js";
 
 /** Helper: build a minimal PaletteCommand for registration tests */
-function makeCmd(
-  name: string,
-  overrides: Partial<PaletteCommand> = {},
-): PaletteCommand {
+function makeCmd(name: string, overrides: Partial<PaletteCommand> = {}): PaletteCommand {
   return {
     name,
     description: `Description for ${name}`,

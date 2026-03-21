@@ -77,10 +77,15 @@ describe("ProgressOrchestrator", () => {
 
   // 8. getSummary counts by state
   it("getSummary() returns correct counts", () => {
-    orch.register("a", "A"); orch.start("a"); orch.complete("a");
-    orch.register("b", "B"); orch.start("b"); orch.fail("b", "oops");
+    orch.register("a", "A");
+    orch.start("a");
+    orch.complete("a");
+    orch.register("b", "B");
+    orch.start("b");
+    orch.fail("b", "oops");
     orch.register("c", "C");
-    orch.register("d", "D"); orch.start("d");
+    orch.register("d", "D");
+    orch.start("d");
     const s = orch.getSummary();
     expect(s.done).toBe(1);
     expect(s.failed).toBe(1);
@@ -90,14 +95,18 @@ describe("ProgressOrchestrator", () => {
 
   // 9. isComplete returns true when all terminal
   it("isComplete() returns true when all tasks finished", () => {
-    orch.register("a", "A"); orch.start("a"); orch.complete("a");
-    orch.register("b", "B"); orch.skip("b");
+    orch.register("a", "A");
+    orch.start("a");
+    orch.complete("a");
+    orch.register("b", "B");
+    orch.skip("b");
     expect(orch.isComplete()).toBe(true);
   });
 
   // 10. isComplete returns false with pending
   it("isComplete() returns false when any task still pending", () => {
-    orch.register("a", "A"); orch.complete("a");
+    orch.register("a", "A");
+    orch.complete("a");
     orch.register("b", "B"); // still pending
     expect(orch.isComplete()).toBe(false);
   });

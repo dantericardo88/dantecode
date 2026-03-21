@@ -166,9 +166,7 @@ export class SlashCommandBridge {
     const shortDesc = e.shortDesc;
     const category = e.tags?.[0] ?? "General";
 
-    const coloredCmd = this._theme
-      ? `${this._theme.color("info")}${cmd}${this._theme.reset}`
-      : cmd;
+    const coloredCmd = this._theme ? `${this._theme.color("info")}${cmd}${this._theme.reset}` : cmd;
     const line = `${coloredCmd.padEnd(18)} ${this._theme ? this._theme.muted(shortDesc) : shortDesc}`;
 
     return { command: cmd, shortDesc, category, line };

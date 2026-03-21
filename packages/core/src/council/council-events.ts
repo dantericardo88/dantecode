@@ -193,9 +193,7 @@ export function mergeCompletedEvent(
   );
 }
 
-export function mergeBlockedEvent(
-  payload: CouncilMergePayload,
-): CouncilEvent<CouncilMergePayload> {
+export function mergeBlockedEvent(payload: CouncilMergePayload): CouncilEvent<CouncilMergePayload> {
   return createCouncilEvent(
     "council:merge-blocked",
     payload,

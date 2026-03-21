@@ -32,8 +32,19 @@ export { importSkills, loadChecks } from "./importer.js";
 export type { ImportOptions, ImportResult, SkippedSkill } from "./importer.js";
 
 // --- Skill Registry ---
-export { loadSkillRegistry, getSkill, getSkillWithBridgeMeta, listSkills, removeSkill, validateSkill } from "./registry.js";
-export type { SkillRegistryEntry, SkillValidationResult, SkillDefinitionWithMeta } from "./registry.js";
+export {
+  loadSkillRegistry,
+  getSkill,
+  getSkillWithBridgeMeta,
+  listSkills,
+  removeSkill,
+  validateSkill,
+} from "./registry.js";
+export type {
+  SkillRegistryEntry,
+  SkillValidationResult,
+  SkillDefinitionWithMeta,
+} from "./registry.js";
 
 // --- SkillBridge Types ---
 export type {

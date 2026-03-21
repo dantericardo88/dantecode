@@ -49,7 +49,11 @@ describe("buildAgentPrompt", () => {
 
 describe("buildReflectorPrompt", () => {
   it("includes task, outcome, summary", () => {
-    const prompt = buildReflectorPrompt({ task: "Refactor X", outcome: "success", summary: "Went well" });
+    const prompt = buildReflectorPrompt({
+      task: "Refactor X",
+      outcome: "success",
+      summary: "Went well",
+    });
     expect(prompt).toContain("Refactor X");
     expect(prompt).toContain("success");
     expect(prompt).toContain("Went well");
@@ -69,7 +73,10 @@ describe("buildReflectorPrompt", () => {
 
 describe("buildSkillManagerPrompt", () => {
   it("includes reflection text", () => {
-    const prompt = buildSkillManagerPrompt({ reflectionText: "Great strategy found.", existingSkillIds: [] });
+    const prompt = buildSkillManagerPrompt({
+      reflectionText: "Great strategy found.",
+      existingSkillIds: [],
+    });
     expect(prompt).toContain("Great strategy found.");
   });
 

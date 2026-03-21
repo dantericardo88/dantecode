@@ -79,7 +79,8 @@ export const DanteSandbox = {
    * Throws on non-zero exit, just like execSync.
    */
   async execSync(command: string, options?: Parameters<typeof sandboxRun>[1]): Promise<string> {
-    if (!_proxy) throw new Error("[DanteSandbox] Not initialized. Call DanteSandbox.setup() first.");
+    if (!_proxy)
+      throw new Error("[DanteSandbox] Not initialized. Call DanteSandbox.setup() first.");
     return _proxy.runSync(command, options);
   },
 
@@ -146,4 +147,3 @@ export const DanteSandbox = {
 export function getEngine(): SandboxEngine | null {
   return _engine;
 }
-

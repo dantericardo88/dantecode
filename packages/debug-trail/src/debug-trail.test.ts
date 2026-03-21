@@ -10,7 +10,14 @@ import { join } from "node:path";
 import { mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
 
 // --- Modules under test ---
-import { hashContent, hashFile, makeSnapshotId, makeTombstoneId, shortHash, hashesEqual } from "./hash-engine.js";
+import {
+  hashContent,
+  hashFile,
+  makeSnapshotId,
+  makeTombstoneId,
+  shortHash,
+  hashesEqual,
+} from "./hash-engine.js";
 import { diffText, formatUnifiedDiff, isBinaryContent } from "./diff-engine.js";
 import { TrailEventIndex } from "./state/trail-index.js";
 import { SessionMap } from "./state/session-map.js";
@@ -76,7 +83,6 @@ function makeDeletedTombstone(overrides?: Partial<DeleteTombstone>): DeleteTombs
 // ============================================================================
 
 describe("Hash Engine", () => {
-
   it("hashContent returns consistent SHA-256 hex for strings", () => {
     const h1 = hashContent("hello world");
     const h2 = hashContent("hello world");
@@ -134,7 +140,6 @@ describe("Hash Engine", () => {
 // ============================================================================
 
 describe("Diff Engine", () => {
-
   it("diffText detects additions", () => {
     const result = diffText("line1\nline2", "line1\nline2\nline3");
     expect(result.linesAdded).toBe(1);
@@ -186,29 +191,29 @@ describe("Diff Engine", () => {
   // -------------------------------------------------------------------------
   // Iterative LCS diff for large files (Gap 3)
   // -------------------------------------------------------------------------
-    it("diffText on 3000+ line files does not throw", () => {
-      const makeText = (n: number, prefix: string) =>
-        Array.from({ length: n }, (_, i) => `${prefix} line ${i}`).join("\n");
+  it("diffText on 3000+ line files does not throw", () => {
+    const makeText = (n: number, prefix: string) =>
+      Array.from({ length: n }, (_, i) => `${prefix} line ${i}`).join("\n");
 
-      const before = makeText(1600, "before");
-      const after = makeText(1600, "after");
+    const before = makeText(1600, "before");
+    const after = makeText(1600, "after");
 
-      expect(() => diffText(before, after)).not.toThrow();
-      const result = diffText(before, after);
-      // All before lines removed, all after lines added
-      expect(result.linesAdded).toBeGreaterThan(0);
-      expect(result.linesRemoved).toBeGreaterThan(0);
-    });
+    expect(() => diffText(before, after)).not.toThrow();
+    const result = diffText(before, after);
+    // All before lines removed, all after lines added
+    expect(result.linesAdded).toBeGreaterThan(0);
+    expect(result.linesRemoved).toBeGreaterThan(0);
+  });
 
-    it("diffText produces correct result after iterative fix (no truncation sentinel)", () => {
-      const before = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
-      const after = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
-      const result = diffText(before, after);
-      // Iterative path must not emit the old "[N lines]" sentinel
-      const allContent = result.hunks.flatMap((h) => h.lines.map((l) => l.content));
-      expect(allContent.some((c) => c.startsWith("[") && c.endsWith("lines]"))).toBe(false);
-      expect(result.linesAdded).toBe(2);
-    });
+  it("diffText produces correct result after iterative fix (no truncation sentinel)", () => {
+    const before = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
+    const after = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+    const result = diffText(before, after);
+    // Iterative path must not emit the old "[N lines]" sentinel
+    const allContent = result.hunks.flatMap((h) => h.lines.map((l) => l.content));
+    expect(allContent.some((c) => c.startsWith("[") && c.endsWith("lines]"))).toBe(false);
+    expect(result.linesAdded).toBe(2);
+  });
 });
 
 // ============================================================================
@@ -216,7 +221,6 @@ describe("Diff Engine", () => {
 // ============================================================================
 
 describe("State: TrailEventIndex", () => {
-
   it("indexes events by session", () => {
     const index = new TrailEventIndex();
     const sessionId = "sess_abc";
@@ -283,7 +287,6 @@ describe("State: TrailEventIndex", () => {
 // ============================================================================
 
 describe("State: SessionMap", () => {
-
   it("starts a new session", () => {
     const map = new SessionMap();
     const info = map.startSession({ sessionId: "s1", runId: "r1" });
@@ -343,7 +346,6 @@ describe("State: SessionMap", () => {
 // ============================================================================
 
 describe("State: TombstoneRegistry", () => {
-
   it("registers and retrieves tombstones", () => {
     const reg = new TombstoneRegistry();
     const t = makeDeletedTombstone({ filePath: "/a/b.ts" });
@@ -392,19 +394,31 @@ describe("State: TombstoneRegistry", () => {
     const prov = makeProvenance();
 
     const t1: DeleteTombstone = {
-      tombstoneId: "tomb_r13_001", filePath,
-      deletedAt: "2024-01-01T10:00:00.000Z", deletedBy: "TestActor",
-      trailEventId: "evt_r13_001", provenance: prov, beforeStateCaptured: false,
+      tombstoneId: "tomb_r13_001",
+      filePath,
+      deletedAt: "2024-01-01T10:00:00.000Z",
+      deletedBy: "TestActor",
+      trailEventId: "evt_r13_001",
+      provenance: prov,
+      beforeStateCaptured: false,
     };
     const t2: DeleteTombstone = {
-      tombstoneId: "tomb_r13_002", filePath,
-      deletedAt: "2024-01-02T10:00:00.000Z", deletedBy: "TestActor",
-      trailEventId: "evt_r13_002", provenance: prov, beforeStateCaptured: false,
+      tombstoneId: "tomb_r13_002",
+      filePath,
+      deletedAt: "2024-01-02T10:00:00.000Z",
+      deletedBy: "TestActor",
+      trailEventId: "evt_r13_002",
+      provenance: prov,
+      beforeStateCaptured: false,
     };
     const t3: DeleteTombstone = {
-      tombstoneId: "tomb_r13_003", filePath,
-      deletedAt: "2024-01-03T10:00:00.000Z", deletedBy: "TestActor",
-      trailEventId: "evt_r13_003", provenance: prov, beforeStateCaptured: false,
+      tombstoneId: "tomb_r13_003",
+      filePath,
+      deletedAt: "2024-01-03T10:00:00.000Z",
+      deletedBy: "TestActor",
+      trailEventId: "evt_r13_003",
+      provenance: prov,
+      beforeStateCaptured: false,
     };
 
     // Load in reverse order (newest first — as might come from a reverse-sorted JSONL)
@@ -434,9 +448,21 @@ describe("Anomaly Detector", () => {
     const sessionId = "s1";
     const now = Date.now();
     const events: TrailEvent[] = [
-      makeEvent({ kind: "file_delete", timestamp: new Date(now).toISOString(), payload: { filePath: "/a.ts" } }),
-      makeEvent({ kind: "file_delete", timestamp: new Date(now + 1000).toISOString(), payload: { filePath: "/b.ts" } }),
-      makeEvent({ kind: "file_delete", timestamp: new Date(now + 2000).toISOString(), payload: { filePath: "/c.ts" } }),
+      makeEvent({
+        kind: "file_delete",
+        timestamp: new Date(now).toISOString(),
+        payload: { filePath: "/a.ts" },
+      }),
+      makeEvent({
+        kind: "file_delete",
+        timestamp: new Date(now + 1000).toISOString(),
+        payload: { filePath: "/b.ts" },
+      }),
+      makeEvent({
+        kind: "file_delete",
+        timestamp: new Date(now + 2000).toISOString(),
+        payload: { filePath: "/c.ts" },
+      }),
     ];
     const flags = detector.analyze(events, sessionId);
     const burst = flags.filter((f) => f.anomalyType === "burst_deletion");
@@ -478,7 +504,11 @@ describe("Anomaly Detector", () => {
     const detector = new AnomalyDetector({ rapidLoopCount: 3, rapidLoopWindowMs: 60000 });
     const now = Date.now();
     const events: TrailEvent[] = Array.from({ length: 3 }, (_, i) =>
-      makeEvent({ kind: "tool_call", actor: "Bash", timestamp: new Date(now + i * 1000).toISOString() }),
+      makeEvent({
+        kind: "tool_call",
+        actor: "Bash",
+        timestamp: new Date(now + i * 1000).toISOString(),
+      }),
     );
     const flags = detector.analyze(events);
     expect(flags.filter((f) => f.anomalyType === "rapid_loop")).toHaveLength(1);
@@ -693,11 +723,19 @@ describe("Anomaly Detector", () => {
     });
 
     // Off by default
-    expect(detector.analyze([write], provenance.sessionId).some((f) => f.anomalyType === "untracked_write")).toBe(false);
+    expect(
+      detector
+        .analyze([write], provenance.sessionId)
+        .some((f) => f.anomalyType === "untracked_write"),
+    ).toBe(false);
 
     // Enable mid-session
     detector.updateConfig({ detectUntrackedWrites: true });
-    expect(detector.analyze([write], provenance.sessionId).some((f) => f.anomalyType === "untracked_write")).toBe(true);
+    expect(
+      detector
+        .analyze([write], provenance.sessionId)
+        .some((f) => f.anomalyType === "untracked_write"),
+    ).toBe(true);
   });
 
   it("AnomalyDetector.updateConfig() can tighten burstDeletionCount threshold", () => {
@@ -715,11 +753,19 @@ describe("Anomaly Detector", () => {
     );
 
     // 3 deletions, threshold=5 — no flag
-    expect(detector.analyze(deletions, provenance.sessionId).some((f) => f.anomalyType === "burst_deletion")).toBe(false);
+    expect(
+      detector
+        .analyze(deletions, provenance.sessionId)
+        .some((f) => f.anomalyType === "burst_deletion"),
+    ).toBe(false);
 
     // Lower threshold mid-session
     detector.updateConfig({ burstDeletionCount: 3 });
-    expect(detector.analyze(deletions, provenance.sessionId).some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    expect(
+      detector
+        .analyze(deletions, provenance.sessionId)
+        .some((f) => f.anomalyType === "burst_deletion"),
+    ).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -1091,7 +1137,6 @@ describe("Anomaly Detector", () => {
 // ============================================================================
 
 describe("Export Engine", () => {
-
   it("perfect score for empty session", () => {
     const result = scoreCompleteness([], [], "s1");
     expect(result.score).toBe(1.0);
@@ -1122,7 +1167,10 @@ describe("Export Engine", () => {
 
   it("tombstones without before-state reduce score", () => {
     const event = makeEvent({ kind: "file_delete", beforeSnapshotId: undefined });
-    const tombstone = makeDeletedTombstone({ beforeStateCaptured: false, lastSnapshotId: undefined });
+    const tombstone = makeDeletedTombstone({
+      beforeStateCaptured: false,
+      lastSnapshotId: undefined,
+    });
     const result = scoreCompleteness([event], [tombstone], "s1");
     expect(result.snapshotGaps.length).toBeGreaterThan(0);
   });
@@ -1330,7 +1378,9 @@ describe("Query Engine", () => {
   // -------------------------------------------------------------------------
 
   it("parseNaturalLanguageQuery: 3-actor OR captures all actors", () => {
-    const q = parseNaturalLanguageQuery("show events by FileSystem or Checkpointer or AnomalyDetector");
+    const q = parseNaturalLanguageQuery(
+      "show events by FileSystem or Checkpointer or AnomalyDetector",
+    );
     expect(q.actors).toEqual(["FileSystem", "Checkpointer", "AnomalyDetector"]);
     expect(q.actor).toBeUndefined();
   });
@@ -1559,232 +1609,253 @@ describe("Query Engine", () => {
 
 describe("Policies", () => {
   describe("RetentionPolicy", () => {
+    function makeSession(daysAgo: number, pinned = false) {
+      const lastEventAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+      return {
+        sessionId: `s_${daysAgo}`,
+        runId: "r1",
+        startedAt: lastEventAt,
+        lastEventAt,
+        eventCount: 10,
+        pinned,
+      };
+    }
 
-  function makeSession(daysAgo: number, pinned = false) {
-    const lastEventAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
-    return {
-      sessionId: `s_${daysAgo}`,
-      runId: "r1",
-      startedAt: lastEventAt,
-      lastEventAt,
-      eventCount: 10,
-      pinned,
-    };
-  }
+    it("keeps recent sessions", () => {
+      const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+      const sessions = { s1: makeSession(2) };
+      const decisions = policy.evaluate(sessions);
+      expect(decisions[0]?.decision).toBe("keep");
+    });
 
-  it("keeps recent sessions", () => {
-    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
-    const sessions = { s1: makeSession(2) };
-    const decisions = policy.evaluate(sessions);
-    expect(decisions[0]?.decision).toBe("keep");
-  });
+    it("prunes old sessions", () => {
+      const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+      const sessions = { s1: makeSession(35) };
+      const decisions = policy.evaluate(sessions);
+      expect(decisions[0]?.decision).toBe("prune");
+    });
 
-  it("prunes old sessions", () => {
-    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
-    const sessions = { s1: makeSession(35) };
-    const decisions = policy.evaluate(sessions);
-    expect(decisions[0]?.decision).toBe("prune");
-  });
+    it("compresses middle-age sessions", () => {
+      const policy = new RetentionPolicy({
+        keepRecentDays: 7,
+        prunePastDays: 30,
+        enableCompression: true,
+      });
+      const sessions = { s1: makeSession(15) };
+      const decisions = policy.evaluate(sessions);
+      expect(decisions[0]?.decision).toBe("compress");
+    });
 
-  it("compresses middle-age sessions", () => {
-    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30, enableCompression: true });
-    const sessions = { s1: makeSession(15) };
-    const decisions = policy.evaluate(sessions);
-    expect(decisions[0]?.decision).toBe("compress");
-  });
+    it("always keeps pinned sessions", () => {
+      const policy = new RetentionPolicy({ prunePastDays: 1 });
+      const sessions = { s1: makeSession(100, true) };
+      const decisions = policy.evaluate(sessions);
+      expect(decisions[0]?.decision).toBe("keep");
+      expect(decisions[0]?.pinned).toBe(true);
+    });
 
-  it("always keeps pinned sessions", () => {
-    const policy = new RetentionPolicy({ prunePastDays: 1 });
-    const sessions = { s1: makeSession(100, true) };
-    const decisions = policy.evaluate(sessions);
-    expect(decisions[0]?.decision).toBe("keep");
-    expect(decisions[0]?.pinned).toBe(true);
-  });
-
-  it("getPruneList returns only prune decisions", () => {
-    const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
-    const sessions = {
-      recent: makeSession(2),
-      old: makeSession(35),
-    };
-    const pruneList = policy.getPruneList(sessions);
-    expect(pruneList).toContain("old");
-    expect(pruneList).not.toContain("recent");
-  });
+    it("getPruneList returns only prune decisions", () => {
+      const policy = new RetentionPolicy({ keepRecentDays: 7, prunePastDays: 30 });
+      const sessions = {
+        recent: makeSession(2),
+        old: makeSession(35),
+      };
+      const pruneList = policy.getPruneList(sessions);
+      expect(pruneList).toContain("old");
+      expect(pruneList).not.toContain("recent");
+    });
   });
 
   describe("CompressionPolicy", () => {
+    function makeSnapshot(
+      daysAgo: number,
+      sizeBytes: number,
+      compressed = false,
+    ): FileSnapshotRecord {
+      const capturedAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+      const provenance = makeProvenance();
+      return {
+        snapshotId: `snap_${daysAgo}`,
+        filePath: "/test.ts",
+        contentHash: hashContent(`content_${daysAgo}`),
+        sizeBytes,
+        capturedAt,
+        storagePath: `/tmp/snap_${daysAgo}`,
+        compressed,
+        provenance,
+        trailEventId: `evt_test`,
+      };
+    }
 
-  function makeSnapshot(daysAgo: number, sizeBytes: number, compressed = false): FileSnapshotRecord {
-    const capturedAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
-    const provenance = makeProvenance();
-    return {
-      snapshotId: `snap_${daysAgo}`,
-      filePath: "/test.ts",
-      contentHash: hashContent(`content_${daysAgo}`),
-      sizeBytes,
-      capturedAt,
-      storagePath: `/tmp/snap_${daysAgo}`,
-      compressed,
-      provenance,
-      trailEventId: `evt_test`,
-    };
-  }
+    it("keeps recent small snapshots", () => {
+      const policy = new CompressionPolicy({
+        compressAfterDays: 7,
+        maxSnapshotSizeBytes: 10_000_000,
+      });
+      const snap = makeSnapshot(2, 1000);
+      const decisions = policy.evaluate([snap]);
+      expect(decisions[0]?.action).toBe("keep");
+    });
 
-  it("keeps recent small snapshots", () => {
-    const policy = new CompressionPolicy({ compressAfterDays: 7, maxSnapshotSizeBytes: 10_000_000 });
-    const snap = makeSnapshot(2, 1000);
-    const decisions = policy.evaluate([snap]);
-    expect(decisions[0]?.action).toBe("keep");
-  });
+    it("compresses old snapshots", () => {
+      const policy = new CompressionPolicy({ compressAfterDays: 7 });
+      const snap = makeSnapshot(10, 1000);
+      const decisions = policy.evaluate([snap]);
+      expect(decisions[0]?.action).toBe("compress");
+    });
 
-  it("compresses old snapshots", () => {
-    const policy = new CompressionPolicy({ compressAfterDays: 7 });
-    const snap = makeSnapshot(10, 1000);
-    const decisions = policy.evaluate([snap]);
-    expect(decisions[0]?.action).toBe("compress");
-  });
+    it("compresses large snapshots", () => {
+      const policy = new CompressionPolicy({ maxSnapshotSizeBytes: 1000 });
+      const snap = makeSnapshot(1, 5000);
+      const decisions = policy.evaluate([snap]);
+      expect(decisions[0]?.action).toBe("compress");
+    });
 
-  it("compresses large snapshots", () => {
-    const policy = new CompressionPolicy({ maxSnapshotSizeBytes: 1000 });
-    const snap = makeSnapshot(1, 5000);
-    const decisions = policy.evaluate([snap]);
-    expect(decisions[0]?.action).toBe("compress");
-  });
+    it("marks already compressed as keep", () => {
+      const policy = new CompressionPolicy();
+      const snap = makeSnapshot(30, 1000, true);
+      const decisions = policy.evaluate([snap]);
+      expect(decisions[0]?.action).toBe("keep");
+    });
 
-  it("marks already compressed as keep", () => {
-    const policy = new CompressionPolicy();
-    const snap = makeSnapshot(30, 1000, true);
-    const decisions = policy.evaluate([snap]);
-    expect(decisions[0]?.action).toBe("keep");
-  });
-
-  it("deduplicates identical content hashes", () => {
-    const policy = new CompressionPolicy({ enableDeduplication: true, pruneIdenticalHashes: true });
-    const hash = hashContent("same content");
-    const snap1 = { ...makeSnapshot(1, 100), contentHash: hash, snapshotId: "snap_a", capturedAt: new Date(Date.now() - 1000).toISOString() };
-    const snap2 = { ...makeSnapshot(2, 100), contentHash: hash, snapshotId: "snap_b", capturedAt: new Date(Date.now() - 2000).toISOString() };
-    const decisions = policy.evaluate([snap1, snap2]);
-    const prune = decisions.filter((d) => d.action === "prune_duplicate");
-    expect(prune).toHaveLength(1);
-    // The older one should be pruned
-    expect(prune[0]?.snapshotId).toBe("snap_b");
-  });
+    it("deduplicates identical content hashes", () => {
+      const policy = new CompressionPolicy({
+        enableDeduplication: true,
+        pruneIdenticalHashes: true,
+      });
+      const hash = hashContent("same content");
+      const snap1 = {
+        ...makeSnapshot(1, 100),
+        contentHash: hash,
+        snapshotId: "snap_a",
+        capturedAt: new Date(Date.now() - 1000).toISOString(),
+      };
+      const snap2 = {
+        ...makeSnapshot(2, 100),
+        contentHash: hash,
+        snapshotId: "snap_b",
+        capturedAt: new Date(Date.now() - 2000).toISOString(),
+      };
+      const decisions = policy.evaluate([snap1, snap2]);
+      const prune = decisions.filter((d) => d.action === "prune_duplicate");
+      expect(prune).toHaveLength(1);
+      // The older one should be pruned
+      expect(prune[0]?.snapshotId).toBe("snap_b");
+    });
   });
 
   describe("PrivacyPolicy", () => {
-
-  it("excludes node_modules by default", () => {
-    const policy = new PrivacyPolicy();
-    expect(policy.shouldExcludePath("/project/node_modules/pkg/index.ts")).toBe(true);
-    expect(policy.shouldExcludePath("/project/src/main.ts")).toBe(false);
-  });
-
-  it("redacts .env content", () => {
-    const policy = new PrivacyPolicy();
-    expect(policy.shouldRedactContent("/project/.env")).toBe(true);
-    expect(policy.shouldRedactContent("/project/.env.local")).toBe(true);
-    expect(policy.shouldRedactContent("/project/config.json")).toBe(false);
-  });
-
-  it("detects oversized files", () => {
-    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1000 });
-    expect(policy.tooLargeForSnapshot(500)).toBe(false);
-    expect(policy.tooLargeForSnapshot(2000)).toBe(true);
-  });
-
-  it("sanitizes env var patterns from event payload", () => {
-    const policy = new PrivacyPolicy({ redactEnvVars: true });
-    const event = makeEvent({
-      payload: { command: "export DATABASE_URL=postgres://user:pass@localhost/db" },
+    it("excludes node_modules by default", () => {
+      const policy = new PrivacyPolicy();
+      expect(policy.shouldExcludePath("/project/node_modules/pkg/index.ts")).toBe(true);
+      expect(policy.shouldExcludePath("/project/src/main.ts")).toBe(false);
     });
-    const sanitized = policy.sanitizeEvent(event);
-    expect(JSON.stringify(sanitized.payload)).not.toContain("postgres://");
-    expect(JSON.stringify(sanitized.payload)).toContain("[REDACTED]");
-  });
 
-  it("filterForExport removes excluded path events", () => {
-    const policy = new PrivacyPolicy();
-    const events = [
-      makeEvent({ payload: { filePath: "/src/main.ts" } }),
-      makeEvent({ payload: { filePath: "/node_modules/pkg/index.js" } }),
-    ];
-    const filtered = policy.filterForExport(events);
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]?.payload["filePath"]).toBe("/src/main.ts");
-  });
+    it("redacts .env content", () => {
+      const policy = new PrivacyPolicy();
+      expect(policy.shouldRedactContent("/project/.env")).toBe(true);
+      expect(policy.shouldRedactContent("/project/.env.local")).toBe(true);
+      expect(policy.shouldRedactContent("/project/config.json")).toBe(false);
+    });
+
+    it("detects oversized files", () => {
+      const policy = new PrivacyPolicy({ maxSnapshotBytes: 1000 });
+      expect(policy.tooLargeForSnapshot(500)).toBe(false);
+      expect(policy.tooLargeForSnapshot(2000)).toBe(true);
+    });
+
+    it("sanitizes env var patterns from event payload", () => {
+      const policy = new PrivacyPolicy({ redactEnvVars: true });
+      const event = makeEvent({
+        payload: { command: "export DATABASE_URL=postgres://user:pass@localhost/db" },
+      });
+      const sanitized = policy.sanitizeEvent(event);
+      expect(JSON.stringify(sanitized.payload)).not.toContain("postgres://");
+      expect(JSON.stringify(sanitized.payload)).toContain("[REDACTED]");
+    });
+
+    it("filterForExport removes excluded path events", () => {
+      const policy = new PrivacyPolicy();
+      const events = [
+        makeEvent({ payload: { filePath: "/src/main.ts" } }),
+        makeEvent({ payload: { filePath: "/node_modules/pkg/index.js" } }),
+      ];
+      const filtered = policy.filterForExport(events);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0]?.payload["filePath"]).toBe("/src/main.ts");
+    });
 
     // -----------------------------------------------------------------------
     // evaluateCapture + shouldExcludePath Windows paths (Round 4)
     // -----------------------------------------------------------------------
-  it("evaluateCapture excludes files over custom maxSnapshotBytes limit", () => {
-    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 }); // 1KB limit
-    expect(policy.evaluateCapture("src/big.ts", 2000)).toBe("exclude");
-  });
+    it("evaluateCapture excludes files over custom maxSnapshotBytes limit", () => {
+      const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 }); // 1KB limit
+      expect(policy.evaluateCapture("src/big.ts", 2000)).toBe("exclude");
+    });
 
-  it("evaluateCapture allows files below custom maxSnapshotBytes limit", () => {
-    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 });
-    expect(policy.evaluateCapture("src/small.ts", 500)).toBe("capture");
-  });
+    it("evaluateCapture allows files below custom maxSnapshotBytes limit", () => {
+      const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 });
+      expect(policy.evaluateCapture("src/small.ts", 500)).toBe("capture");
+    });
 
-  // -------------------------------------------------------------------------
-  // Fix 4: shouldExcludePath works on Windows backslash paths
-  // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Fix 4: shouldExcludePath works on Windows backslash paths
+    // -------------------------------------------------------------------------
 
-  it("shouldExcludePath excludes Windows-style node_modules paths", () => {
-    const policy = new PrivacyPolicy();
-    expect(policy.shouldExcludePath("C:\\Users\\proj\\node_modules\\react\\index.js")).toBe(true);
-  });
+    it("shouldExcludePath excludes Windows-style node_modules paths", () => {
+      const policy = new PrivacyPolicy();
+      expect(policy.shouldExcludePath("C:\\Users\\proj\\node_modules\\react\\index.js")).toBe(true);
+    });
 
-  it("shouldExcludePath does not exclude normal source files on Windows paths", () => {
-    const policy = new PrivacyPolicy();
-    expect(policy.shouldExcludePath("C:\\Users\\proj\\src\\auth.ts")).toBe(false);
-  });
+    it("shouldExcludePath does not exclude normal source files on Windows paths", () => {
+      const policy = new PrivacyPolicy();
+      expect(policy.shouldExcludePath("C:\\Users\\proj\\src\\auth.ts")).toBe(false);
+    });
 
     // -----------------------------------------------------------------------
     // globToRegex patterns (Round 6)
     // -----------------------------------------------------------------------
-  it("globToRegex: single * does not match across path separators", () => {
-    const policy = new PrivacyPolicy({ excludePathPatterns: ["src/*.ts"] });
-    // Should match: src/auth.ts
-    expect(policy.shouldExcludePath("src/auth.ts")).toBe(true);
-    // Should NOT match: src/nested/auth.ts (crosses path boundary)
-    expect(policy.shouldExcludePath("src/nested/auth.ts")).toBe(false);
-  });
+    it("globToRegex: single * does not match across path separators", () => {
+      const policy = new PrivacyPolicy({ excludePathPatterns: ["src/*.ts"] });
+      // Should match: src/auth.ts
+      expect(policy.shouldExcludePath("src/auth.ts")).toBe(true);
+      // Should NOT match: src/nested/auth.ts (crosses path boundary)
+      expect(policy.shouldExcludePath("src/nested/auth.ts")).toBe(false);
+    });
 
-  it("globToRegex: ** matches across path separators", () => {
-    const policy = new PrivacyPolicy({ excludePathPatterns: ["**/*.env"] });
-    expect(policy.shouldExcludePath("src/.env")).toBe(true);
-    expect(policy.shouldExcludePath("src/deeply/nested/.env")).toBe(true);
-    expect(policy.shouldExcludePath(".env")).toBe(true);
-  });
+    it("globToRegex: ** matches across path separators", () => {
+      const policy = new PrivacyPolicy({ excludePathPatterns: ["**/*.env"] });
+      expect(policy.shouldExcludePath("src/.env")).toBe(true);
+      expect(policy.shouldExcludePath("src/deeply/nested/.env")).toBe(true);
+      expect(policy.shouldExcludePath(".env")).toBe(true);
+    });
 
-  it("globToRegex: node_modules/ pattern matches nested paths", () => {
-    // The built-in common noise pattern 'node_modules/' should match nested paths
-    const policy = new PrivacyPolicy({ excludeCommonNoise: true });
-    expect(policy.shouldExcludePath("node_modules/lodash/index.js")).toBe(true);
-    expect(policy.shouldExcludePath("packages/core/node_modules/react/index.js")).toBe(true);
-    expect(policy.shouldExcludePath("src/components/MyComponent.ts")).toBe(false);
-  });
+    it("globToRegex: node_modules/ pattern matches nested paths", () => {
+      // The built-in common noise pattern 'node_modules/' should match nested paths
+      const policy = new PrivacyPolicy({ excludeCommonNoise: true });
+      expect(policy.shouldExcludePath("node_modules/lodash/index.js")).toBe(true);
+      expect(policy.shouldExcludePath("packages/core/node_modules/react/index.js")).toBe(true);
+      expect(policy.shouldExcludePath("src/components/MyComponent.ts")).toBe(false);
+    });
 
-  it("globToRegex: *.lock pattern matches .lock files but not .json files", () => {
-    const policy = new PrivacyPolicy({ excludeCommonNoise: true });
-    // yarn.lock ends in .lock — should match
-    expect(policy.shouldExcludePath("yarn.lock")).toBe(true);
-    // package-lock.json ends in .json, not .lock — correctly NOT matched by *.lock
-    expect(policy.shouldExcludePath("package-lock.json")).toBe(false);
-    // a custom lockfile
-    expect(policy.shouldExcludePath("pnpm-lock.yaml")).toBe(false); // .yaml, not .lock
-  });
+    it("globToRegex: *.lock pattern matches .lock files but not .json files", () => {
+      const policy = new PrivacyPolicy({ excludeCommonNoise: true });
+      // yarn.lock ends in .lock — should match
+      expect(policy.shouldExcludePath("yarn.lock")).toBe(true);
+      // package-lock.json ends in .json, not .lock — correctly NOT matched by *.lock
+      expect(policy.shouldExcludePath("package-lock.json")).toBe(false);
+      // a custom lockfile
+      expect(policy.shouldExcludePath("pnpm-lock.yaml")).toBe(false); // .yaml, not .lock
+    });
 
     // -----------------------------------------------------------------------
     // Windows backslash in excludePathPatterns (Round 12 D)
     // -----------------------------------------------------------------------
-  it("D: PrivacyPolicy normalizes Windows backslash in excludePathPatterns", () => {
-    const policy = new PrivacyPolicy({ excludePathPatterns: ["node_modules\\lib"] });
-    expect(policy.shouldExcludePath("node_modules/lib/index.js")).toBe(true);
-    expect(policy.shouldExcludePath("src/utils/index.js")).toBe(false);
-  });
+    it("D: PrivacyPolicy normalizes Windows backslash in excludePathPatterns", () => {
+      const policy = new PrivacyPolicy({ excludePathPatterns: ["node_modules\\lib"] });
+      expect(policy.shouldExcludePath("node_modules/lib/index.js")).toBe(true);
+      expect(policy.shouldExcludePath("src/utils/index.js")).toBe(false);
+    });
   });
 });
 
@@ -1830,53 +1901,74 @@ describe("Trail Store", () => {
   // -------------------------------------------------------------------------
   // Cache invalidation on new events (Gap 5)
   // -------------------------------------------------------------------------
-    it("invalidateCache() is called on each log() call via setOnNewEventCallback", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-cache-inval-"));
-      const storageRoot = join(dir, "trail");
+  it("invalidateCache() is called on each log() call via setOnNewEventCallback", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-cache-inval-"));
+    const storageRoot = join(dir, "trail");
 
-      const logger = new AuditLogger({
-        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
-      });
-      await logger.init();
-
-      const invalidateSpy = vi.fn();
-      logger.setOnNewEventCallback(invalidateSpy);
-
-      await logger.log("tool_call", "Actor", "first event");
-      await logger.log("tool_call", "Actor", "second event");
-
-      expect(invalidateSpy).toHaveBeenCalledTimes(2);
-
-      await rm(dir, { recursive: true });
+    const logger = new AuditLogger({
+      config: {
+        storageRoot,
+        enabled: true,
+        retentionDays: 30,
+        compressSnapshots: false,
+        compressAfterDays: 7,
+        maxStorageMb: 500,
+      },
     });
+    await logger.init();
 
-    it("TrailQueryEngine sees fresh data after log() when cache was invalidated", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-qe-fresh-"));
-      const storageRoot = join(dir, "trail");
+    const invalidateSpy = vi.fn();
+    logger.setOnNewEventCallback(invalidateSpy);
 
-      const logger = new AuditLogger({
-        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
-        sessionId: "sess_fresh",
-        runId: "run_fresh",
-      });
-      await logger.init();
+    await logger.log("tool_call", "Actor", "first event");
+    await logger.log("tool_call", "Actor", "second event");
 
-      const queryEngine = new TrailQueryEngine(
-        { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
-        logger.getIndex(),
-      );
-      // Wire cache invalidation
-      logger.setOnNewEventCallback(() => queryEngine.invalidateCache());
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
 
-      // Log an event, drain, then query — should see the event
-      await logger.log("file_write", "FileSystem", "File write: /test.ts", { filePath: "/test.ts" });
-      await logger.drain();
+    await rm(dir, { recursive: true });
+  });
 
-      const result = await queryEngine.query({ sessionId: "sess_fresh", limit: 10 });
-      expect(result.totalMatches).toBeGreaterThan(0);
+  it("TrailQueryEngine sees fresh data after log() when cache was invalidated", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-qe-fresh-"));
+    const storageRoot = join(dir, "trail");
 
-      await rm(dir, { recursive: true });
+    const logger = new AuditLogger({
+      config: {
+        storageRoot,
+        enabled: true,
+        retentionDays: 30,
+        compressSnapshots: false,
+        compressAfterDays: 7,
+        maxStorageMb: 500,
+      },
+      sessionId: "sess_fresh",
+      runId: "run_fresh",
     });
+    await logger.init();
+
+    const queryEngine = new TrailQueryEngine(
+      {
+        storageRoot,
+        enabled: true,
+        retentionDays: 30,
+        compressSnapshots: false,
+        compressAfterDays: 7,
+        maxStorageMb: 500,
+      },
+      logger.getIndex(),
+    );
+    // Wire cache invalidation
+    logger.setOnNewEventCallback(() => queryEngine.invalidateCache());
+
+    // Log an event, drain, then query — should see the event
+    await logger.log("file_write", "FileSystem", "File write: /test.ts", { filePath: "/test.ts" });
+    await logger.drain();
+
+    const result = await queryEngine.query({ sessionId: "sess_fresh", limit: 10 });
+    expect(result.totalMatches).toBeGreaterThan(0);
+
+    await rm(dir, { recursive: true });
+  });
 
   // -------------------------------------------------------------------------
   // filePathPrefix boundary semantics (Round 4)
@@ -1922,55 +2014,69 @@ describe("Audit Logger", () => {
   // -------------------------------------------------------------------------
   // Async write queue — multiple rapid log() calls (Gap 4)
   // -------------------------------------------------------------------------
-    it("multiple rapid log() calls produce correct sequential output after drain()", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-queue-"));
-      const storageRoot = join(dir, "trail");
+  it("multiple rapid log() calls produce correct sequential output after drain()", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-queue-"));
+    const storageRoot = join(dir, "trail");
 
-      const logger = new AuditLogger({
-        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
-        sessionId: "sess_queue_test",
-        runId: "run_queue_test",
-      });
-      await logger.init();
-
-      // Fire 20 rapid log calls without awaiting in between
-      const promises = Array.from({ length: 20 }, (_, i) =>
-        logger.log("tool_call", "TestActor", `event ${i}`, { seq: i }),
-      );
-      await Promise.all(promises);
-
-      // Drain ensures all queued disk writes complete
-      await logger.drain();
-
-      // Verify all events reached disk by reading the store directly
-      const store = logger.getStore();
-      const events = await store.readAllEvents();
-      expect(events).toHaveLength(20);
-
-      await rm(dir, { recursive: true });
+    const logger = new AuditLogger({
+      config: {
+        storageRoot,
+        enabled: true,
+        retentionDays: 30,
+        compressSnapshots: false,
+        compressAfterDays: 7,
+        maxStorageMb: 500,
+      },
+      sessionId: "sess_queue_test",
+      runId: "run_queue_test",
     });
+    await logger.init();
 
-    it("flush() waits for queued writes before persisting index", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-flush-"));
-      const storageRoot = join(dir, "trail");
+    // Fire 20 rapid log calls without awaiting in between
+    const promises = Array.from({ length: 20 }, (_, i) =>
+      logger.log("tool_call", "TestActor", `event ${i}`, { seq: i }),
+    );
+    await Promise.all(promises);
 
-      const logger = new AuditLogger({
-        config: { storageRoot, enabled: true, retentionDays: 30, compressSnapshots: false, compressAfterDays: 7, maxStorageMb: 500 },
-      });
-      await logger.init();
+    // Drain ensures all queued disk writes complete
+    await logger.drain();
 
-      // Log 5 events then flush immediately
-      for (let i = 0; i < 5; i++) {
-        void logger.log("tool_call", "Actor", `event ${i}`);
-      }
-      await logger.flush();
+    // Verify all events reached disk by reading the store directly
+    const store = logger.getStore();
+    const events = await store.readAllEvents();
+    expect(events).toHaveLength(20);
 
-      const store = logger.getStore();
-      const events = await store.readAllEvents();
-      expect(events).toHaveLength(5);
+    await rm(dir, { recursive: true });
+  });
 
-      await rm(dir, { recursive: true });
+  it("flush() waits for queued writes before persisting index", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-flush-"));
+    const storageRoot = join(dir, "trail");
+
+    const logger = new AuditLogger({
+      config: {
+        storageRoot,
+        enabled: true,
+        retentionDays: 30,
+        compressSnapshots: false,
+        compressAfterDays: 7,
+        maxStorageMb: 500,
+      },
     });
+    await logger.init();
+
+    // Log 5 events then flush immediately
+    for (let i = 0; i < 5; i++) {
+      void logger.log("tool_call", "Actor", `event ${i}`);
+    }
+    await logger.flush();
+
+    const store = logger.getStore();
+    const events = await store.readAllEvents();
+    expect(events).toHaveLength(5);
+
+    await rm(dir, { recursive: true });
+  });
 
   // -------------------------------------------------------------------------
   // flush() returns anomaly flags (Round 6)
@@ -2019,7 +2125,9 @@ describe("Audit Logger", () => {
     await logger.flush();
 
     expect(callbackResults).toHaveLength(1);
-    expect(callbackResults[0]!.anomalies.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    expect(callbackResults[0]!.anomalies.some((f) => f.anomalyType === "burst_deletion")).toBe(
+      true,
+    );
     expect(callbackResults[0]!.detection.analyzedCount).toBe(3);
     await rm(storageRoot, { recursive: true, force: true });
   });
@@ -2030,7 +2138,9 @@ describe("Audit Logger", () => {
     const logger = new AuditLogger({
       config: { storageRoot },
       sessionId: "sess_r6_cb_dedup",
-      onAnomalyDetected: () => { callCount++; },
+      onAnomalyDetected: () => {
+        callCount++;
+      },
     });
     await logger.init();
     for (const fp of ["/src/x.ts", "/src/y.ts", "/src/z.ts"]) {
@@ -2149,7 +2259,9 @@ describe("Audit Logger", () => {
     const logger = new AuditLogger({
       config: { storageRoot, sessionEventsBufferLimit: 2 },
       sessionId: "sess_r8_cb_meta",
-      onAnomalyDetected: (result) => { received = result; },
+      onAnomalyDetected: (result) => {
+        received = result;
+      },
     });
     await logger.init();
     for (let i = 0; i < 4; i++) {
@@ -2456,103 +2568,103 @@ describe("File Snapshotter", () => {
   // -------------------------------------------------------------------------
   // captureSnapshot deduplication (Gap 1)
   // -------------------------------------------------------------------------
-    it("captureSnapshot twice for same content writes only one .bin file", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-snap-dedup-"));
-      const storageRoot = join(dir, "trail");
-      const srcFile = join(dir, "source.ts");
-      await writeFile(srcFile, "const x = 1;");
+  it("captureSnapshot twice for same content writes only one .bin file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-snap-dedup-"));
+    const storageRoot = join(dir, "trail");
+    const srcFile = join(dir, "source.ts");
+    await writeFile(srcFile, "const x = 1;");
 
-      const snapshotter = new FileSnapshotter({ storageRoot });
-      await snapshotter.init();
+    const snapshotter = new FileSnapshotter({ storageRoot });
+    await snapshotter.init();
 
-      const provenance: TrailProvenance = {
-        sessionId: `sess_${randomUUID().slice(0, 8)}`,
-        runId: `run_${randomUUID().slice(0, 8)}`,
-      };
+    const provenance: TrailProvenance = {
+      sessionId: `sess_${randomUUID().slice(0, 8)}`,
+      runId: `run_${randomUUID().slice(0, 8)}`,
+    };
 
-      const snap1 = await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
-      const snap2 = await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
+    const snap1 = await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
+    const snap2 = await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
 
-      // Both calls must succeed and return a valid record
-      expect(snap1).not.toBeNull();
-      expect(snap2).not.toBeNull();
+    // Both calls must succeed and return a valid record
+    expect(snap1).not.toBeNull();
+    expect(snap2).not.toBeNull();
 
-      // Both records must share the same contentHash
-      expect(snap1!.contentHash).toBe(snap2!.contentHash);
+    // Both records must share the same contentHash
+    expect(snap1!.contentHash).toBe(snap2!.contentHash);
 
-      // Only one .bin file should exist on disk (dedup skips re-write)
-      const snapshotsDir = join(storageRoot, "snapshots");
-      const files = await readdir(snapshotsDir);
-      const binFiles = files.filter((f) => f.endsWith(".bin"));
-      expect(binFiles).toHaveLength(1);
+    // Only one .bin file should exist on disk (dedup skips re-write)
+    const snapshotsDir = join(storageRoot, "snapshots");
+    const files = await readdir(snapshotsDir);
+    const binFiles = files.filter((f) => f.endsWith(".bin"));
+    expect(binFiles).toHaveLength(1);
 
-      await rm(dir, { recursive: true });
-    });
+    await rm(dir, { recursive: true });
+  });
 
-    it("captureSnapshot for different content writes two .bin files", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-snap-diff-"));
-      const storageRoot = join(dir, "trail");
-      const srcFile = join(dir, "source.ts");
+  it("captureSnapshot for different content writes two .bin files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-snap-diff-"));
+    const storageRoot = join(dir, "trail");
+    const srcFile = join(dir, "source.ts");
 
-      const snapshotter = new FileSnapshotter({ storageRoot });
-      await snapshotter.init();
+    const snapshotter = new FileSnapshotter({ storageRoot });
+    await snapshotter.init();
 
-      const provenance: TrailProvenance = {
-        sessionId: `sess_${randomUUID().slice(0, 8)}`,
-        runId: `run_${randomUUID().slice(0, 8)}`,
-      };
+    const provenance: TrailProvenance = {
+      sessionId: `sess_${randomUUID().slice(0, 8)}`,
+      runId: `run_${randomUUID().slice(0, 8)}`,
+    };
 
-      await writeFile(srcFile, "const x = 1;");
-      await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
+    await writeFile(srcFile, "const x = 1;");
+    await snapshotter.captureSnapshot(srcFile, "evt1", provenance);
 
-      await writeFile(srcFile, "const x = 2;");
-      await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
+    await writeFile(srcFile, "const x = 2;");
+    await snapshotter.captureSnapshot(srcFile, "evt2", provenance);
 
-      const snapshotsDir = join(storageRoot, "snapshots");
-      const files = await readdir(snapshotsDir);
-      const binFiles = files.filter((f) => f.endsWith(".bin"));
-      expect(binFiles).toHaveLength(2);
+    const snapshotsDir = join(storageRoot, "snapshots");
+    const files = await readdir(snapshotsDir);
+    const binFiles = files.filter((f) => f.endsWith(".bin"));
+    expect(binFiles).toHaveLength(2);
 
-      await rm(dir, { recursive: true });
-    });
+    await rm(dir, { recursive: true });
+  });
 
   // -------------------------------------------------------------------------
   // Snapshot manifest persistence (Gap 2)
   // -------------------------------------------------------------------------
 
-    it("snapshot records survive across FileSnapshotter instances", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-manifest-"));
-      const storageRoot = join(dir, "trail");
-      const srcFile = join(dir, "source.ts");
-      await writeFile(srcFile, "export const x = 42;");
+  it("snapshot records survive across FileSnapshotter instances", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-manifest-"));
+    const storageRoot = join(dir, "trail");
+    const srcFile = join(dir, "source.ts");
+    await writeFile(srcFile, "export const x = 42;");
 
-      const provenance: TrailProvenance = {
-        sessionId: "sess_manifest",
-        runId: "run_manifest",
-      };
+    const provenance: TrailProvenance = {
+      sessionId: "sess_manifest",
+      runId: "run_manifest",
+    };
 
-      // First instance: capture snapshot
-      const snapshotter1 = new FileSnapshotter({ storageRoot });
-      await snapshotter1.init();
-      const snap = await snapshotter1.captureSnapshot(srcFile, "evt1", provenance);
-      expect(snap).not.toBeNull();
+    // First instance: capture snapshot
+    const snapshotter1 = new FileSnapshotter({ storageRoot });
+    await snapshotter1.init();
+    const snap = await snapshotter1.captureSnapshot(srcFile, "evt1", provenance);
+    expect(snap).not.toBeNull();
 
-      // Second instance: init should load manifest and populate dedup cache
-      const snapshotter2 = new FileSnapshotter({ storageRoot });
-      await snapshotter2.init();
+    // Second instance: init should load manifest and populate dedup cache
+    const snapshotter2 = new FileSnapshotter({ storageRoot });
+    await snapshotter2.init();
 
-      // Writing same content again should reuse cached record (no new .bin file)
-      const snap2 = await snapshotter2.captureSnapshot(srcFile, "evt2", provenance);
-      expect(snap2).not.toBeNull();
-      expect(snap2!.contentHash).toBe(snap!.contentHash);
+    // Writing same content again should reuse cached record (no new .bin file)
+    const snap2 = await snapshotter2.captureSnapshot(srcFile, "evt2", provenance);
+    expect(snap2).not.toBeNull();
+    expect(snap2!.contentHash).toBe(snap!.contentHash);
 
-      const snapshotsDir = join(storageRoot, "snapshots");
-      const files = await readdir(snapshotsDir);
-      const binFiles = files.filter((f) => f.endsWith(".bin"));
-      expect(binFiles).toHaveLength(1);
+    const snapshotsDir = join(storageRoot, "snapshots");
+    const files = await readdir(snapshotsDir);
+    const binFiles = files.filter((f) => f.endsWith(".bin"));
+    expect(binFiles).toHaveLength(1);
 
-      await rm(dir, { recursive: true });
-    });
+    await rm(dir, { recursive: true });
+  });
 
   // -------------------------------------------------------------------------
   // getSnapshotRecords() public method (Round 10)
@@ -2590,70 +2702,70 @@ describe("Replay & Restore", () => {
   // -------------------------------------------------------------------------
   // replaySession full trail + step (Gap 6)
   // -------------------------------------------------------------------------
-    it("replaySession without step returns all events in trail", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-replay-full-"));
-      const storageRoot = join(dir, "trail");
+  it("replaySession without step returns all events in trail", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-replay-full-"));
+    const storageRoot = join(dir, "trail");
 
-      // Seed the store directly with 10 events
-      const store = new TrailStore(storageRoot);
-      await store.init();
-      const sessionId = "sess_replay_test";
-      const runId = "run_replay_test";
+    // Seed the store directly with 10 events
+    const store = new TrailStore(storageRoot);
+    await store.init();
+    const sessionId = "sess_replay_test";
+    const runId = "run_replay_test";
 
-      for (let i = 0; i < 10; i++) {
-        await store.appendEvent({
-          id: `evt_${i}`,
-          seq: i,
-          timestamp: new Date().toISOString(),
-          kind: "tool_call",
-          actor: "TestActor",
-          summary: `event ${i}`,
-          payload: {},
-          provenance: { sessionId, runId },
-        });
-      }
+    for (let i = 0; i < 10; i++) {
+      await store.appendEvent({
+        id: `evt_${i}`,
+        seq: i,
+        timestamp: new Date().toISOString(),
+        kind: "tool_call",
+        actor: "TestActor",
+        summary: `event ${i}`,
+        payload: {},
+        provenance: { sessionId, runId },
+      });
+    }
 
-      const orchestrator = new ReplayOrchestrator({ storageRoot });
-      const result = await orchestrator.replaySession(sessionId);
+    const orchestrator = new ReplayOrchestrator({ storageRoot });
+    const result = await orchestrator.replaySession(sessionId);
 
-      // Full trail must contain all 10 events
-      expect(result.trail).toHaveLength(10);
-      expect(result.replayed).toBe(true);
+    // Full trail must contain all 10 events
+    expect(result.trail).toHaveLength(10);
+    expect(result.replayed).toBe(true);
 
-      await rm(dir, { recursive: true });
-    });
+    await rm(dir, { recursive: true });
+  });
 
-    it("replaySession with step returns events up to that step only", async () => {
-      const dir = await mkdtemp(join(tmpdir(), "dt-replay-step-"));
-      const storageRoot = join(dir, "trail");
+  it("replaySession with step returns events up to that step only", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-replay-step-"));
+    const storageRoot = join(dir, "trail");
 
-      const store = new TrailStore(storageRoot);
-      await store.init();
-      const sessionId = "sess_replay_step";
-      const runId = "run_replay_step";
+    const store = new TrailStore(storageRoot);
+    await store.init();
+    const sessionId = "sess_replay_step";
+    const runId = "run_replay_step";
 
-      for (let i = 0; i < 8; i++) {
-        await store.appendEvent({
-          id: `evt_${i}`,
-          seq: i,
-          timestamp: new Date().toISOString(),
-          kind: "tool_call",
-          actor: "TestActor",
-          summary: `event ${i}`,
-          payload: {},
-          provenance: { sessionId, runId },
-        });
-      }
+    for (let i = 0; i < 8; i++) {
+      await store.appendEvent({
+        id: `evt_${i}`,
+        seq: i,
+        timestamp: new Date().toISOString(),
+        kind: "tool_call",
+        actor: "TestActor",
+        summary: `event ${i}`,
+        payload: {},
+        provenance: { sessionId, runId },
+      });
+    }
 
-      const orchestrator = new ReplayOrchestrator({ storageRoot });
-      const result = await orchestrator.replaySession(sessionId, 4);
+    const orchestrator = new ReplayOrchestrator({ storageRoot });
+    const result = await orchestrator.replaySession(sessionId, 4);
 
-      // trail must contain events 0..4 (5 events)
-      expect(result.trail).toHaveLength(5);
-      expect(result.step).toBe(4);
+    // trail must contain events 0..4 (5 events)
+    expect(result.trail).toHaveLength(5);
+    expect(result.step).toBe(4);
 
-      await rm(dir, { recursive: true });
-    });
+    await rm(dir, { recursive: true });
+  });
 
   // -------------------------------------------------------------------------
   // ReplayOrchestrator session map bounded at 50 (Round 12 E1)
@@ -2799,7 +2911,9 @@ describe("Replay & Restore", () => {
       expect(snap).not.toBeNull();
 
       // Target exists, no overwrite key — overwrite must default to true so we reach dryRun.
-      const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, testFile, { dryRun: true });
+      const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, testFile, {
+        dryRun: true,
+      });
 
       expect(result.error).toBe("dry_run");
       expect(result.restored).toBe(false);
@@ -2863,7 +2977,9 @@ describe("Integrations & Config", () => {
 
   it("TrailErrorCode is exported from index.ts", async () => {
     const mod = await import("./index.js");
-    const trailErrorCode = (mod as Record<string, unknown>)["TrailErrorCode"] as Record<string, string> | undefined;
+    const trailErrorCode = (mod as Record<string, unknown>)["TrailErrorCode"] as
+      | Record<string, string>
+      | undefined;
     expect(trailErrorCode).toBeDefined();
     expect(trailErrorCode?.["SNAPSHOT_NOT_FOUND"]).toBe("snapshot_not_found");
     expect(trailErrorCode?.["DISK_WRITE_ERROR"]).toBe("disk_write_error");
@@ -2976,11 +3092,7 @@ describe("Integrations & Config", () => {
     const good = makeEvent({ kind: "file_write", payload: { filePath: "/a.ts" } });
     // Write one valid line + one corrupt line directly (bypassing appendEvent)
     const eventsLog = store.eventsLogPath();
-    await writeFile(
-      eventsLog,
-      JSON.stringify(good) + "\n" + "{INVALID_JSON\n",
-      "utf8",
-    );
+    await writeFile(eventsLog, JSON.stringify(good) + "\n" + "{INVALID_JSON\n", "utf8");
 
     const events = await store.readAllEvents();
     expect(events).toHaveLength(1);

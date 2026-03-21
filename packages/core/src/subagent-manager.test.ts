@@ -11,7 +11,12 @@ import { SubAgentManager } from "./subagent-manager.js";
 // ----------------------------------------------------------------------------
 
 function makeManager(overrides: ConstructorParameters<typeof SubAgentManager>[0] = {}) {
-  return new SubAgentManager({ maxConcurrency: 4, maxDepth: 3, defaultMaxRounds: 50, ...overrides });
+  return new SubAgentManager({
+    maxConcurrency: 4,
+    maxDepth: 3,
+    defaultMaxRounds: 50,
+    ...overrides,
+  });
 }
 
 // ----------------------------------------------------------------------------

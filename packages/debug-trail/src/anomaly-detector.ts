@@ -12,14 +12,14 @@ import type { TrailEvent } from "./types.js";
 // ---------------------------------------------------------------------------
 
 export type AnomalyType =
-  | "burst_deletion"       // multiple files deleted in rapid succession
-  | "large_rewrite"        // file rewritten with > threshold content change
-  | "phantom_commit"       // git commit with zero file modifications
-  | "recursive_delete"     // deletion of directories / many files at once
-  | "rapid_loop"           // same action repeated > N times in short window
-  | "untracked_write"      // write to a file that was never read (potential confab)
+  | "burst_deletion" // multiple files deleted in rapid succession
+  | "large_rewrite" // file rewritten with > threshold content change
+  | "phantom_commit" // git commit with zero file modifications
+  | "recursive_delete" // deletion of directories / many files at once
+  | "rapid_loop" // same action repeated > N times in short window
+  | "untracked_write" // write to a file that was never read (potential confab)
   | "missing_before_state" // deletion without captured before-state
-  | "high_error_rate";     // error events > threshold in window
+  | "high_error_rate"; // error events > threshold in window
 
 export interface AnomalyFlag {
   anomalyType: AnomalyType;
@@ -165,9 +165,7 @@ export class AnomalyDetector {
 
     for (let i = 0; i <= fingerprints.length - this.config.rapidLoopCount; i++) {
       const fp = fingerprints[i]!;
-      const isLoop = fingerprints
-        .slice(i, i + this.config.rapidLoopCount)
-        .every((f) => f === fp);
+      const isLoop = fingerprints.slice(i, i + this.config.rapidLoopCount).every((f) => f === fp);
       if (!isLoop) continue;
 
       const start = eventTimestamps[i]!;
@@ -242,9 +240,7 @@ export class AnomalyDetector {
     // F4: case-insensitive substring match — consistent with all other detectors in this file.
     const COMMIT_ACTORS = ["gitcommit", "gitpush", "git_commit", "git_push"];
     const commitEvents = events.filter(
-      (e) =>
-        e.kind === "tool_call" &&
-        COMMIT_ACTORS.some((a) => e.actor.toLowerCase().includes(a)),
+      (e) => e.kind === "tool_call" && COMMIT_ACTORS.some((a) => e.actor.toLowerCase().includes(a)),
     );
     if (commitEvents.length === 0) return [];
 

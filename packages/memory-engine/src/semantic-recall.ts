@@ -50,11 +50,7 @@ export class SemanticRecall {
   private readonly sessionMemory: SessionMemory;
   private readonly vectorStore: VectorStore;
 
-  constructor(
-    shortTerm: ShortTermStore,
-    sessionMemory: SessionMemory,
-    vectorStore: VectorStore,
-  ) {
+  constructor(shortTerm: ShortTermStore, sessionMemory: SessionMemory, vectorStore: VectorStore) {
     this.shortTerm = shortTerm;
     this.sessionMemory = sessionMemory;
     this.vectorStore = vectorStore;
@@ -127,9 +123,7 @@ export class SemanticRecall {
     const ranked = fusionRank(deduped, query);
 
     // Apply threshold + limit
-    const filtered = ranked
-      .filter((c) => c.similarity >= minSimilarity)
-      .slice(0, limit);
+    const filtered = ranked.filter((c) => c.similarity >= minSimilarity).slice(0, limit);
 
     return {
       query,
@@ -153,7 +147,11 @@ export class SemanticRecall {
     for (const scope of ["project", "global"] as MemoryScope[]) {
       const vecResults = this.vectorStore.search(userGoal, limit * 2, scope);
       for (const r of vecResults) {
-        candidates.push({ item: r.item, similarity: r.similarity, sourceLayer: `semantic:${scope}` });
+        candidates.push({
+          item: r.item,
+          similarity: r.similarity,
+          sourceLayer: `semantic:${scope}`,
+        });
       }
 
       const cpResults = await this.sessionMemory.search(userGoal, scope);
@@ -220,8 +218,7 @@ function fusionRank(candidates: RecallCandidate[], _query: string): RecallCandid
 
   return candidates
     .map((c) => {
-      const ageDays =
-        (now - new Date(c.item.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
+      const ageDays = (now - new Date(c.item.lastAccessedAt).getTime()) / (1000 * 60 * 60 * 24);
       // Recency factor: 1.0 at 0 days, 0.5 at 7 days, 0.1 at 30+ days
       const recencyFactor = Math.max(0.1, 1 - ageDays / 30);
       // Recall boost: more recalled = more relevant

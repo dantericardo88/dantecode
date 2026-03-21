@@ -35,14 +35,14 @@ export function pruneSkills(skills: Skill[], policy: PruningPolicy = {}): Skill[
   const maxAgeMs = p.maxAgeDays > 0 ? p.maxAgeDays * 24 * 60 * 60 * 1000 : 0;
 
   // 1. Filter by trust score
-  let survivors = skills.filter(s => {
+  let survivors = skills.filter((s) => {
     if (p.minTrustScore > 0 && (s.trustScore ?? 1) < p.minTrustScore) return false;
     return true;
   });
 
   // 2. Filter by age
   if (maxAgeMs > 0) {
-    survivors = survivors.filter(s => {
+    survivors = survivors.filter((s) => {
       const age = now - new Date(s.updatedAt).getTime();
       return age <= maxAgeMs;
     });

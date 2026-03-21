@@ -172,9 +172,12 @@ export class AutonomyEngine {
    * Creates parent directories as needed.
    */
   async save(): Promise<void> {
-    const dir = this.filePath.substring(0, this.filePath.lastIndexOf("/") === -1
-      ? this.filePath.lastIndexOf("\\")
-      : this.filePath.lastIndexOf("/"));
+    const dir = this.filePath.substring(
+      0,
+      this.filePath.lastIndexOf("/") === -1
+        ? this.filePath.lastIndexOf("\\")
+        : this.filePath.lastIndexOf("/"),
+    );
 
     try {
       await this.fs.mkdir(dir.length > 0 ? dir : ".", { recursive: true });
@@ -333,8 +336,7 @@ export class AutonomyEngine {
       return {
         shouldReplan: true,
         shouldAbandon: false,
-        recommendation:
-          "No goals are currently defined. Please define goals before proceeding.",
+        recommendation: "No goals are currently defined. Please define goals before proceeding.",
         confidence: 0.95,
         reasoningSteps,
       };
@@ -382,8 +384,7 @@ export class AutonomyEngine {
       return {
         shouldReplan: false,
         shouldAbandon: true,
-        recommendation:
-          `Goal(s) ${titles} have low viability scores. Consider abandoning or replanning them.`,
+        recommendation: `Goal(s) ${titles} have low viability scores. Consider abandoning or replanning them.`,
         confidence: 0.8,
         reasoningSteps,
       };
@@ -508,11 +509,7 @@ export class AutonomyEngine {
     let pruned = 0;
 
     for (const goal of this.goals.values()) {
-      if (
-        goal.status === "active" &&
-        goal.pdseScore !== undefined &&
-        goal.pdseScore < threshold
-      ) {
+      if (goal.status === "active" && goal.pdseScore !== undefined && goal.pdseScore < threshold) {
         goal.status = "abandoned";
         goal.updatedAt = new Date().toISOString();
         goal.progressNotes = [
@@ -579,8 +576,7 @@ export class AutonomyEngine {
       if (activeGoals.length > 0) {
         lines.push("\nActive goals (highest priority first):");
         for (const g of activeGoals) {
-          const pdse =
-            g.pdseScore !== undefined ? ` [PDSE: ${g.pdseScore.toFixed(2)}]` : "";
+          const pdse = g.pdseScore !== undefined ? ` [PDSE: ${g.pdseScore.toFixed(2)}]` : "";
           lines.push(`  [${g.priority}] ${g.title}${pdse}: ${g.description}`);
           if (g.completionCriteria.length > 0) {
             lines.push(`    Criteria: ${g.completionCriteria.join("; ")}`);

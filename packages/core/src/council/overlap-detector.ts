@@ -85,10 +85,7 @@ export class OverlapDetector {
    * @param snapshots - Current snapshots from WorktreeObserver.
    * @param mandates  - NOMA mandates registered for each lane.
    */
-  detect(
-    snapshots: WorktreeSnapshot[],
-    mandates: FileMandate[],
-  ): OverlapDetectionResult {
+  detect(snapshots: WorktreeSnapshot[], mandates: FileMandate[]): OverlapDetectionResult {
     const overlaps: OverlapRecord[] = [];
     const lanesToFreeze = new Set<string>();
     const lanesToWarn = new Set<string>();
@@ -105,16 +102,15 @@ export class OverlapDetector {
         const level = classifyOverlapLevel(snapA.modifiedFiles, snapB.modifiedFiles);
         if (level === 0) continue;
 
-        const intersect = snapA.modifiedFiles.filter((f) =>
-          snapB.modifiedFiles.includes(f),
-        );
+        const intersect = snapA.modifiedFiles.filter((f) => snapB.modifiedFiles.includes(f));
 
         const record: OverlapRecord = {
           id: newOverlapId(),
           laneA: snapA.laneId,
           laneB: snapB.laneId,
           level,
-          files: intersect.length > 0 ? intersect : [...snapA.modifiedFiles, ...snapB.modifiedFiles],
+          files:
+            intersect.length > 0 ? intersect : [...snapA.modifiedFiles, ...snapB.modifiedFiles],
           detectedAt: now,
           frozen: false,
         };
@@ -138,10 +134,7 @@ export class OverlapDetector {
     for (const snapshot of snapshots) {
       for (const [otherLaneId, otherMandate] of mandateMap) {
         if (otherLaneId === snapshot.laneId) continue;
-        const { forbidden, ownedByOther } = mandateViolation(
-          snapshot.modifiedFiles,
-          otherMandate,
-        );
+        const { forbidden, ownedByOther } = mandateViolation(snapshot.modifiedFiles, otherMandate);
         if (forbidden.length > 0 || ownedByOther.length > 0) {
           const violatedFiles = [...forbidden, ...ownedByOther];
           const existing = overlaps.find(
@@ -186,10 +179,7 @@ export class OverlapDetector {
       if (ownMandate.forbiddenFiles.includes(filePath)) {
         return { safe: false, reason: `File is forbidden for lane ${laneId}` };
       }
-      if (
-        ownMandate.ownedFiles.length > 0 &&
-        !ownMandate.ownedFiles.includes(filePath)
-      ) {
+      if (ownMandate.ownedFiles.length > 0 && !ownMandate.ownedFiles.includes(filePath)) {
         return {
           safe: false,
           reason: `File not in owned manifest for lane ${laneId}. Add it to ownedFiles or request a mandate extension.`,

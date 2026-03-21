@@ -13,7 +13,10 @@ function isValidDefinition(def: AutomationDefinition): boolean {
     def.id.length > 0 &&
     typeof def.name === "string" &&
     def.name.length > 0 &&
-    (def.type === "webhook" || def.type === "schedule" || def.type === "watch" || def.type === "loop") &&
+    (def.type === "webhook" ||
+      def.type === "schedule" ||
+      def.type === "watch" ||
+      def.type === "loop") &&
     typeof def.config === "object" &&
     def.config !== null &&
     typeof def.createdAt === "string" &&

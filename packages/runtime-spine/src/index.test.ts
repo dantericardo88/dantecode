@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { 
-  RuntimeTaskPacketSchema, 
-  RuntimeEventSchema, 
-  CheckpointSchema, 
-  RuntimeVerificationReportSchema 
+import {
+  RuntimeTaskPacketSchema,
+  RuntimeEventSchema,
+  CheckpointSchema,
+  RuntimeVerificationReportSchema,
 } from "./index.js";
 import { randomUUID } from "node:crypto";
 
@@ -14,10 +14,10 @@ describe("Runtime Spine Contracts", () => {
       kind: "research",
       objective: "Research DanteCode architecture",
       inputs: {
-        query: "DanteCode architecture overview"
-      }
+        query: "DanteCode architecture overview",
+      },
     };
-    
+
     const result = RuntimeTaskPacketSchema.safeParse(packet);
     expect(result.success).toBe(true);
   });
@@ -27,10 +27,10 @@ describe("Runtime Spine Contracts", () => {
       kind: "research.search.completed",
       taskId: randomUUID(),
       payload: {
-        resultsCount: 10
-      }
+        resultsCount: 10,
+      },
     };
-    
+
     const result = RuntimeEventSchema.safeParse(event);
     expect(result.success).toBe(true);
   });
@@ -41,14 +41,14 @@ describe("Runtime Spine Contracts", () => {
       task: {
         id: randomUUID(),
         kind: "subagent-task",
-        objective: "Fix bug in core"
+        objective: "Fix bug in core",
       },
       progress: "completed 1 of 2 steps",
       state: {
-        currentFile: "src/index.ts"
-      }
+        currentFile: "src/index.ts",
+      },
     };
-    
+
     const result = CheckpointSchema.safeParse(checkpoint);
     expect(result.success).toBe(true);
   });
@@ -58,15 +58,11 @@ describe("Runtime Spine Contracts", () => {
       taskId: randomUUID(),
       passed: true,
       overallScore: 0.95,
-      gates: [
-        { name: "faithfulness", status: "pass", score: 0.98 }
-      ],
+      gates: [{ name: "faithfulness", status: "pass", score: 0.98 }],
       evidenceCount: 1,
-      sources: [
-        { url: "https://example.com/doc", title: "Reference Doc" }
-      ]
+      sources: [{ url: "https://example.com/doc", title: "Reference Doc" }],
     };
-    
+
     const result = RuntimeVerificationReportSchema.safeParse(report);
     expect(result.success).toBe(true);
   });

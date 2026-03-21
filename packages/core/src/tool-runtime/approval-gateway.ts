@@ -26,23 +26,16 @@ export interface ApprovalGatewayConfig {
 /** Default rules — conservative for pipeline mode */
 export const DEFAULT_APPROVAL_RULES: ApprovalRule[] = [
   {
-    reason: 'Writing to system/config directories requires approval',
-    tools: ['Write', 'Edit', 'Bash'],
-    pathPatterns: [
-      /^\/etc\//,
-      /^\/usr\/local\//,
-      /^~\//,
-      /\.ssh\//,
-      /\.aws\//,
-      /\.config\//,
-    ],
-    decision: 'requires_approval',
+    reason: "Writing to system/config directories requires approval",
+    tools: ["Write", "Edit", "Bash"],
+    pathPatterns: [/^\/etc\//, /^\/usr\/local\//, /^~\//, /\.ssh\//, /\.aws\//, /\.config\//],
+    decision: "requires_approval",
   },
   {
-    reason: 'npm publish / git push to remote requires approval',
-    tools: ['Bash'],
+    reason: "npm publish / git push to remote requires approval",
+    tools: ["Bash"],
     pathPatterns: [/\bnpm\s+publish\b/, /\bgit\s+push\s+.*--force\b/],
-    decision: 'requires_approval',
+    decision: "requires_approval",
   },
 ];
 
@@ -59,10 +52,7 @@ export class ApprovalGateway {
   /**
    * Check whether a tool call should be auto-approved, require approval, or be denied.
    */
-  check(
-    toolName: string,
-    input: Record<string, unknown>,
-  ): ApprovalCheckResult {
+  check(toolName: string, input: Record<string, unknown>): ApprovalCheckResult {
     if (!this._config.enabled) {
       return {
         decision: "auto_approve",

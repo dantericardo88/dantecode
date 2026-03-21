@@ -26,9 +26,7 @@ import type { FearSetCallbacks } from "@dantecode/dante-gaslight";
  *
  * @param projectRoot - Project root for reading state/model config.
  */
-export async function createFearSetLLMCallbacks(
-  projectRoot: string,
-): Promise<FearSetCallbacks> {
+export async function createFearSetLLMCallbacks(projectRoot: string): Promise<FearSetCallbacks> {
   const state = await readOrInitializeState(projectRoot);
   const routerConfig = {
     default: state.model.default,
@@ -41,7 +39,12 @@ export async function createFearSetLLMCallbacks(
     onClassify: async (message: string, rubricPrompt: string) => {
       try {
         return await router.generate(
-          [{ role: "user" as const, content: `${rubricPrompt}\n\nMessage to classify:\n${message}` }],
+          [
+            {
+              role: "user" as const,
+              content: `${rubricPrompt}\n\nMessage to classify:\n${message}`,
+            },
+          ],
           { maxTokens: 200, taskType: "fearset-classify" },
         );
       } catch {
@@ -51,10 +54,11 @@ export async function createFearSetLLMCallbacks(
 
     onColumn: async (sysPrompt: string, userPrompt: string, _col) => {
       try {
-        return await router.generate(
-          [{ role: "user" as const, content: userPrompt }],
-          { maxTokens: 1200, system: sysPrompt, taskType: "fearset-column" },
-        );
+        return await router.generate([{ role: "user" as const, content: userPrompt }], {
+          maxTokens: 1200,
+          system: sysPrompt,
+          taskType: "fearset-column",
+        });
       } catch {
         return null;
       }
@@ -62,14 +66,11 @@ export async function createFearSetLLMCallbacks(
 
     onGate: async (prompt: string) => {
       try {
-        return await router.generate(
-          [{ role: "user" as const, content: prompt }],
-          {
-            maxTokens: 400,
-            system: "Score this FearSet plan. Return JSON only.",
-            taskType: "fearset-gate",
-          },
-        );
+        return await router.generate([{ role: "user" as const, content: prompt }], {
+          maxTokens: 400,
+          system: "Score this FearSet plan. Return JSON only.",
+          taskType: "fearset-gate",
+        });
       } catch {
         return null;
       }

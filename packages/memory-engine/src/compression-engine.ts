@@ -38,10 +38,7 @@ export class CompressionEngine {
    * Compress a list of MemoryItems into a single item.
    * Preserves the most important facts from each item.
    */
-  async compress(
-    items: MemoryItem[],
-    maxTokens = 200,
-  ): Promise<CompressionResult> {
+  async compress(items: MemoryItem[], maxTokens = 200): Promise<CompressionResult> {
     if (items.length === 0) {
       throw new Error("Cannot compress empty item list");
     }
@@ -97,10 +94,7 @@ export class CompressionEngine {
   /**
    * Batch compress: groups items by source/session and compresses each group.
    */
-  async batchCompress(
-    items: MemoryItem[],
-    maxTokensPerGroup = 200,
-  ): Promise<CompressionResult[]> {
+  async batchCompress(items: MemoryItem[], maxTokensPerGroup = 200): Promise<CompressionResult[]> {
     // Group by source
     const groups = new Map<string, MemoryItem[]>();
     for (const item of items) {
@@ -165,7 +159,7 @@ export class CompressionEngine {
       tokenCount += text.length;
     }
 
-    return selected.length > 0 ? selected.join(". ") + "." : items[0]!.summary ?? items[0]!.key;
+    return selected.length > 0 ? selected.join(". ") + "." : (items[0]!.summary ?? items[0]!.key);
   }
 
   private itemToText(item: MemoryItem): string {

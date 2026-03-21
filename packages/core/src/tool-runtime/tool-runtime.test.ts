@@ -8,10 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 
-import {
-  TERMINAL_STATES,
-  VALID_TRANSITIONS,
-} from "./tool-call-types.js";
+import { TERMINAL_STATES, VALID_TRANSITIONS } from "./tool-call-types.js";
 import { ArtifactStore } from "./artifact-store.js";
 import {
   detectGitCloneTarget,
@@ -43,7 +40,11 @@ describe("ToolCallStatus state machine", () => {
 
   it("created → validating → scheduled → executing → verifying → success chain is valid", () => {
     const chain: Array<keyof typeof VALID_TRANSITIONS> = [
-      "created", "validating", "scheduled", "executing", "verifying",
+      "created",
+      "validating",
+      "scheduled",
+      "executing",
+      "verifying",
     ];
     const targets = ["validating", "scheduled", "executing", "verifying", "success"];
     chain.forEach((state, i) => {
@@ -76,15 +77,21 @@ describe("detectGitCloneTarget", () => {
   });
 
   it("infers dir from URL when no explicit dir given", () => {
-    expect(detectGitCloneTarget("git clone https://github.com/org/qwen-code.git")).toBe("qwen-code");
+    expect(detectGitCloneTarget("git clone https://github.com/org/qwen-code.git")).toBe(
+      "qwen-code",
+    );
   });
 
   it("strips --depth flag", () => {
-    expect(detectGitCloneTarget("git clone --depth 1 https://github.com/org/repo.git out")).toBe("out");
+    expect(detectGitCloneTarget("git clone --depth 1 https://github.com/org/repo.git out")).toBe(
+      "out",
+    );
   });
 
   it("strips --branch flag", () => {
-    expect(detectGitCloneTarget("git clone --branch main https://github.com/org/repo.git dest")).toBe("dest");
+    expect(
+      detectGitCloneTarget("git clone --branch main https://github.com/org/repo.git dest"),
+    ).toBe("dest");
   });
 
   it("strips -q flag", () => {
@@ -98,13 +105,17 @@ describe("detectGitCloneTarget", () => {
   });
 
   it("strips .git suffix when inferring dir", () => {
-    expect(detectGitCloneTarget("git clone https://github.com/org/my-project.git")).toBe("my-project");
+    expect(detectGitCloneTarget("git clone https://github.com/org/my-project.git")).toBe(
+      "my-project",
+    );
   });
 });
 
 describe("detectMkdirTarget", () => {
   it("detects mkdir -p", () => {
-    expect(detectMkdirTarget("mkdir -p packages/core/src/tool-runtime")).toBe("packages/core/src/tool-runtime");
+    expect(detectMkdirTarget("mkdir -p packages/core/src/tool-runtime")).toBe(
+      "packages/core/src/tool-runtime",
+    );
   });
 
   it("detects simple mkdir", () => {
@@ -118,15 +129,21 @@ describe("detectMkdirTarget", () => {
 
 describe("detectDownloadTarget", () => {
   it("detects curl -o", () => {
-    expect(detectDownloadTarget("curl -o myfile.tar.gz https://example.com/file.tar.gz")).toBe("myfile.tar.gz");
+    expect(detectDownloadTarget("curl -o myfile.tar.gz https://example.com/file.tar.gz")).toBe(
+      "myfile.tar.gz",
+    );
   });
 
   it("detects curl --output", () => {
-    expect(detectDownloadTarget("curl --output archive.zip https://example.com/a.zip")).toBe("archive.zip");
+    expect(detectDownloadTarget("curl --output archive.zip https://example.com/a.zip")).toBe(
+      "archive.zip",
+    );
   });
 
   it("detects wget -O", () => {
-    expect(detectDownloadTarget("wget -O myfile.zip https://example.com/file.zip")).toBe("myfile.zip");
+    expect(detectDownloadTarget("wget -O myfile.zip https://example.com/file.zip")).toBe(
+      "myfile.zip",
+    );
   });
 
   it("returns null for unrecognized commands", () => {
@@ -189,10 +206,7 @@ describe("runVerificationChecks", () => {
   it("passes file_exists check for an existing file", async () => {
     const filePath = tmpRoot + "/testfile.txt";
     fs.writeFileSync(filePath, "hello");
-    const result = await runVerificationChecks(
-      [{ kind: "file_exists", path: filePath }],
-      tmpRoot,
-    );
+    const result = await runVerificationChecks([{ kind: "file_exists", path: filePath }], tmpRoot);
     expect(result.passed).toBe(true);
   });
 
@@ -208,10 +222,7 @@ describe("runVerificationChecks", () => {
   it("passes directory_exists check for an existing directory", async () => {
     const dir = tmpRoot + "/subdir";
     fs.mkdirSync(dir);
-    const result = await runVerificationChecks(
-      [{ kind: "directory_exists", path: dir }],
-      tmpRoot,
-    );
+    const result = await runVerificationChecks([{ kind: "directory_exists", path: dir }], tmpRoot);
     expect(result.passed).toBe(true);
   });
 
@@ -267,10 +278,7 @@ describe("runVerificationChecks", () => {
     const filePath = tmpRoot + "/rel.txt";
     fs.writeFileSync(filePath, "relative test");
     // Pass relative path, expect it to be joined with tmpRoot
-    const result = await runVerificationChecks(
-      [{ kind: "file_exists", path: "rel.txt" }],
-      tmpRoot,
-    );
+    const result = await runVerificationChecks([{ kind: "file_exists", path: "rel.txt" }], tmpRoot);
     expect(result.passed).toBe(true);
   });
 });
@@ -283,10 +291,7 @@ describe("formatVerificationMessage", () => {
     fs.mkdirSync(tmpRoot2, { recursive: true });
     const filePath = tmpRoot2 + "/f.txt";
     fs.writeFileSync(filePath, "x");
-    const result = await runVerificationChecks(
-      [{ kind: "file_exists", path: filePath }],
-      tmpRoot2,
-    );
+    const result = await runVerificationChecks([{ kind: "file_exists", path: filePath }], tmpRoot2);
     const msg = formatVerificationMessage(result, "Write");
     expect(msg).toContain("✓");
     fs.rmSync(tmpRoot2, { recursive: true, force: true });
@@ -295,8 +300,20 @@ describe("formatVerificationMessage", () => {
   it("returns failure message with DTR-VERIFY prefix when failed", () => {
     const result = {
       passed: false,
-      checks: [{ check: { kind: "file_exists" as const, path: "/missing/file.ts" }, passed: false, errorMessage: "File not found" }],
-      failedChecks: [{ check: { kind: "file_exists" as const, path: "/missing/file.ts" }, passed: false, errorMessage: "File not found" }],
+      checks: [
+        {
+          check: { kind: "file_exists" as const, path: "/missing/file.ts" },
+          passed: false,
+          errorMessage: "File not found",
+        },
+      ],
+      failedChecks: [
+        {
+          check: { kind: "file_exists" as const, path: "/missing/file.ts" },
+          passed: false,
+          errorMessage: "File not found",
+        },
+      ],
     };
     const msg = formatVerificationMessage(result, "Write(/missing/file.ts)");
     expect(msg).toContain("[DTR-VERIFY]");

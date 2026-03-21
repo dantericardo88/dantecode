@@ -9,11 +9,17 @@ import { Octokit } from "@octokit/rest";
 
 function translateOctokitError(err: unknown, context: string): never {
   const status = (err as { status?: number }).status;
-  if (status === 401) throw new Error(`GitHub authentication failed — set GITHUB_TOKEN (${context})`);
+  if (status === 401)
+    throw new Error(`GitHub authentication failed — set GITHUB_TOKEN (${context})`);
   if (status === 403) throw new Error(`GitHub permission denied or rate limited (${context})`);
   if (status === 404) throw new Error(`GitHub resource not found (${context})`);
-  if (status === 422) throw new Error(`GitHub validation error: ${err instanceof Error ? err.message : String(err)} (${context})`);
-  throw new Error(`GitHub API error: ${err instanceof Error ? err.message : String(err)} (${context})`);
+  if (status === 422)
+    throw new Error(
+      `GitHub validation error: ${err instanceof Error ? err.message : String(err)} (${context})`,
+    );
+  throw new Error(
+    `GitHub API error: ${err instanceof Error ? err.message : String(err)} (${context})`,
+  );
 }
 
 export interface GitHubClientConfig {

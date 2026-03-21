@@ -214,17 +214,13 @@ describe("ExportEngine — buildCSVReport", () => {
   });
 
   it("CSV-06: commas in summary are escaped with double-quotes", () => {
-    const events: TrailEvent[] = [
-      makeEvent({ id: "e1", seq: 1, summary: "step one, step two" }),
-    ];
+    const events: TrailEvent[] = [makeEvent({ id: "e1", seq: 1, summary: "step one, step two" })];
     const output = (engine as any).buildCSVReport(events);
     expect(output).toContain('"step one, step two"');
   });
 
   it("CSV-07: double-quotes in fields are escaped as double double-quotes", () => {
-    const events: TrailEvent[] = [
-      makeEvent({ id: "e1", seq: 1, summary: 'He said "hello"' }),
-    ];
+    const events: TrailEvent[] = [makeEvent({ id: "e1", seq: 1, summary: 'He said "hello"' })];
     const output = (engine as any).buildCSVReport(events);
     expect(output).toContain('"He said ""hello"""');
   });

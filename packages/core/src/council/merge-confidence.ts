@@ -235,10 +235,7 @@ export class MergeConfidenceScorer {
 
     // Weighted composite
     const score =
-      structural * 40 +
-      testCoverage * 25 +
-      intentCompat * 20 +
-      contractPreservation * 15;
+      structural * 40 + testCoverage * 25 + intentCompat * 20 + contractPreservation * 15;
 
     const roundedScore = Math.round(score);
     let bucket: MergeConfidenceBucket;

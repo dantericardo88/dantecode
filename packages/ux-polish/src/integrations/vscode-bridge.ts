@@ -7,7 +7,11 @@
  */
 
 import { VscodeSurface } from "../surfaces/vscode-surface.js";
-import type { VscodeMessage, VscodeMessageKind, StatusBarItem } from "../surfaces/vscode-surface.js";
+import type {
+  VscodeMessage,
+  VscodeMessageKind,
+  StatusBarItem,
+} from "../surfaces/vscode-surface.js";
 import type { ThemeEngine } from "../theme-engine.js";
 import type { ProgressState, UXSuggestion } from "../types.js";
 
@@ -120,9 +124,7 @@ export class VscodeBridge {
       .map((p) => p.tooltip)
       .join(" | ");
 
-    const diamond = this._theme
-      ? `${this._theme.color("info")}◆${this._theme.reset}`
-      : "◆";
+    const diamond = this._theme ? `${this._theme.color("info")}◆${this._theme.reset}` : "◆";
     const item: StatusBarItem = {
       text: this._theme ? `${diamond} ${text}` : text,
       tooltip: tooltip || undefined,

@@ -17,10 +17,7 @@ export function normalizeQuery(query: string): string {
 export function generateCacheKey(query: string, context: Record<string, unknown> = {}): string {
   const normalized = normalizeQuery(query);
   const contextStr = JSON.stringify(context, Object.keys(context).sort());
-  return createHash("sha256")
-    .update(`${normalized}|${contextStr}`)
-    .digest("hex")
-    .slice(0, 32);
+  return createHash("sha256").update(`${normalized}|${contextStr}`).digest("hex").slice(0, 32);
 }
 
 /**
@@ -32,12 +29,12 @@ export function normalizeUrl(url: string): string {
     const host = parsed.hostname.replace(/^www\./, "");
     let path = parsed.pathname.replace(/\/+$/, "");
     if (!path) path = "/";
-    
+
     // Sort query parameters
     const params = new URLSearchParams(parsed.search);
     params.sort();
     const search = params.toString();
-    
+
     return `${host}${path}${search ? "?" + search : ""}`;
   } catch {
     return url.toLowerCase().trim();

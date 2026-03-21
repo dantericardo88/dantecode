@@ -83,6 +83,8 @@ export function formatFearSetStats(stats: FearSetStats): string {
     `  Avg robustness score: ${stats.averageRobustnessScore.toFixed(2)}`,
     `  Avg risk reduction: ${(stats.averageRiskReduction * 100).toFixed(0)}%`,
     `  Simulation coverage: ${(stats.simulationCoverage * 100).toFixed(0)}%`,
-    `  Triggers: ${Object.entries(stats.triggerChannelBreakdown).map(([k, v]) => `${k}=${v}`).join(", ")}`,
+    `  Triggers: ${Object.entries(stats.triggerChannelBreakdown)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")}`,
   ].join("\n");
 }

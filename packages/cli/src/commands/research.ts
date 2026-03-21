@@ -12,12 +12,14 @@ const DIM = "\x1b[2m";
 
 export async function runResearchCommand(subArgs: string[], projectRoot: string): Promise<void> {
   // Strip flags from topic so `--depth=deep` doesn't end up in the search query
-  const topicArgs = subArgs.filter(a => !a.startsWith("--"));
+  const topicArgs = subArgs.filter((a) => !a.startsWith("--"));
   const topic = topicArgs.join(" ").trim();
 
   if (!topic) {
     console.log(`${BOLD}Usage:${RESET} dantecode research [--depth=quick|standard|deep] <topic>`);
-    console.log(`${DIM}Example: dantecode research "TypeScript monorepo best practices" --depth=deep${RESET}`);
+    console.log(
+      `${DIM}Example: dantecode research "TypeScript monorepo best practices" --depth=deep${RESET}`,
+    );
     return;
   }
 
@@ -37,11 +39,14 @@ export async function runResearchCommand(subArgs: string[], projectRoot: string)
 }
 
 /** Handler for the /research slash command inside the REPL. */
-export async function researchSlashHandler(args: string, state: { projectRoot: string }): Promise<string> {
+export async function researchSlashHandler(
+  args: string,
+  state: { projectRoot: string },
+): Promise<string> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
-  const depthFlag = parts.find(p => p.startsWith("--depth="));
+  const depthFlag = parts.find((p) => p.startsWith("--depth="));
   const depth = (depthFlag?.split("=")[1] as ResearchOptions["depth"]) ?? "standard";
-  const topic = parts.filter(p => !p.startsWith("--")).join(" ");
+  const topic = parts.filter((p) => !p.startsWith("--")).join(" ");
 
   if (!topic) {
     return "Usage: /research [--depth=quick|standard|deep] <topic or question>";

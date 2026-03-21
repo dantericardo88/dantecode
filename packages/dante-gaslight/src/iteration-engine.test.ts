@@ -75,15 +75,27 @@ describe("runIterationEngine", () => {
   });
 
   it("sets lessonEligible false on fail stop", async () => {
-    const session = await runIterationEngine("draft", trigger, {}, { config: { ...minConfig, maxIterations: 1 } });
+    const session = await runIterationEngine(
+      "draft",
+      trigger,
+      {},
+      { config: { ...minConfig, maxIterations: 1 } },
+    );
     expect(session.lessonEligible).toBe(false);
   });
 
   it("calls onStop when session ends", async () => {
     let stopCalled = false;
-    await runIterationEngine("draft", trigger, {
-      onStop: () => { stopCalled = true; },
-    }, { config: { ...minConfig, maxIterations: 1 } });
+    await runIterationEngine(
+      "draft",
+      trigger,
+      {
+        onStop: () => {
+          stopCalled = true;
+        },
+      },
+      { config: { ...minConfig, maxIterations: 1 } },
+    );
     expect(stopCalled).toBe(true);
   });
 });
@@ -109,7 +121,9 @@ describe("onLessonEligible callback", () => {
       trigger,
       {
         onGate: async () => ({ decision: "pass" as const, score: 0.95 }),
-        onLessonEligible: (id) => { capturedId = id; },
+        onLessonEligible: (id) => {
+          capturedId = id;
+        },
       },
       { config: minConfig },
     );
@@ -122,7 +136,9 @@ describe("onLessonEligible callback", () => {
       "draft",
       trigger,
       {
-        onLessonEligible: () => { called = true; },
+        onLessonEligible: () => {
+          called = true;
+        },
       },
       { config: { ...minConfig, maxIterations: 1 } },
     );

@@ -132,12 +132,7 @@ export class HierarchicalPlanner {
   generateWaveTree(plan: ExecutionPlan, description?: string): WaveTree {
     const waves = this.groupStepsByWave(plan.steps);
     const rootNodes: WaveNode[] = waves.map((waveSteps, waveIndex) => {
-      const node = this.createNode(
-        `Wave ${waveIndex + 1}`,
-        waveSteps,
-        0,
-        undefined,
-      );
+      const node = this.createNode(`Wave ${waveIndex + 1}`, waveSteps, 0, undefined);
 
       // Attempt sub-decomposition when the wave is complex enough.
       if (this.shouldSubDecompose(node, 0)) {
@@ -417,16 +412,8 @@ export class HierarchicalPlanner {
    * @param parentId - Parent node id, if any.
    * @returns A fully initialised WaveNode.
    */
-  private createNode(
-    title: string,
-    steps: PlanStep[],
-    depth: number,
-    parentId?: string,
-  ): WaveNode {
-    const description =
-      steps.length > 0
-        ? steps.map((s) => s.description).join("; ")
-        : title;
+  private createNode(title: string, steps: PlanStep[], depth: number, parentId?: string): WaveNode {
+    const description = steps.length > 0 ? steps.map((s) => s.description).join("; ") : title;
 
     return {
       id: randomUUID(),
@@ -475,12 +462,7 @@ export class HierarchicalPlanner {
 
     const subWaves = this.groupStepsByWave(node.steps);
     node.children = subWaves.map((waveSteps, i) => {
-      const child = this.createNode(
-        `${node.title}.${i + 1}`,
-        waveSteps,
-        childDepth,
-        node.id,
-      );
+      const child = this.createNode(`${node.title}.${i + 1}`, waveSteps, childDepth, node.id);
 
       // Recurse if still complex enough and within depth budget.
       if (this.shouldSubDecompose(child, childDepth)) {
@@ -529,10 +511,14 @@ export class HierarchicalPlanner {
    */
   private statusIndicator(status: WaveNode["status"]): string {
     switch (status) {
-      case "completed": return "✓";
-      case "failed":    return "✗";
-      case "running":   return "⟳";
-      default:          return "○";
+      case "completed":
+        return "✓";
+      case "failed":
+        return "✗";
+      case "running":
+        return "⟳";
+      default:
+        return "○";
     }
   }
 }

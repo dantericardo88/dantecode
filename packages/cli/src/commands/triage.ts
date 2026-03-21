@@ -3,7 +3,12 @@
 // Model-assisted GitHub issue triage with label suggestions and effort estimates.
 // ============================================================================
 
-import { GitHubClient, buildRepoMap, ModelRouterImpl, readOrInitializeState } from "@dantecode/core";
+import {
+  GitHubClient,
+  buildRepoMap,
+  ModelRouterImpl,
+  readOrInitializeState,
+} from "@dantecode/core";
 import type { GitHubIssue } from "@dantecode/core";
 
 // ────────────────────────────────────────────────────────
@@ -49,9 +54,29 @@ export interface TriageOptions {
 // ────────────────────────────────────────────────────────
 
 const LABEL_KEYWORDS: Record<string, string[]> = {
-  bug: ["bug", "error", "crash", "fail", "broken", "exception", "typeerror", "null", "undefined", "traceback"],
+  bug: [
+    "bug",
+    "error",
+    "crash",
+    "fail",
+    "broken",
+    "exception",
+    "typeerror",
+    "null",
+    "undefined",
+    "traceback",
+  ],
   feature: ["feature", "request", "add", "support", "implement", "want", "would like", "new"],
-  enhancement: ["enhance", "improve", "better", "update", "upgrade", "performance", "faster", "speed"],
+  enhancement: [
+    "enhance",
+    "improve",
+    "better",
+    "update",
+    "upgrade",
+    "performance",
+    "faster",
+    "speed",
+  ],
   documentation: ["docs", "documentation", "readme", "typo", "comment", "explain", "example"],
   security: ["security", "vulnerability", "cve", "injection", "xss", "csrf", "exploit"],
   test: ["test", "spec", "coverage", "flaky", "testing"],
@@ -120,22 +145,21 @@ function heuristicTriage(
  * Calibrates heuristic confidence based on signal strength.
  * Returns 0.25–0.75 (LLM can push higher).
  */
-function computeHeuristicConfidence(
-  labels: string[],
-  priority: Priority,
-  text: string,
-): number {
+function computeHeuristicConfidence(labels: string[], priority: Priority, text: string): number {
   let conf = 0.35;
   // Strong signal: known-critical keywords with matching priority
   if (
     priority === "P0" &&
-    (text.includes("crash") || text.includes("security") || text.includes("data loss") || text.includes("vulnerability"))
+    (text.includes("crash") ||
+      text.includes("security") ||
+      text.includes("data loss") ||
+      text.includes("vulnerability"))
   )
     conf += 0.35;
   // Multi-label agreement → more confidence
-  if (labels.length >= 2) conf += 0.10;
+  if (labels.length >= 2) conf += 0.1;
   // Longer body → more information → higher confidence
-  if (text.length > 200) conf += 0.10;
+  if (text.length > 200) conf += 0.1;
   if (text.length > 500) conf += 0.05;
   // P3 with single label → low signal
   if (priority === "P3" && labels.length <= 1) conf -= 0.05;
@@ -146,10 +170,7 @@ function computeHeuristicConfidence(
 // Repo file matching
 // ────────────────────────────────────────────────────────
 
-async function findRelevantFiles(
-  issueText: string,
-  projectRoot: string,
-): Promise<string[]> {
+async function findRelevantFiles(issueText: string, projectRoot: string): Promise<string[]> {
   try {
     const words = new Set(
       issueText
@@ -182,7 +203,10 @@ async function findRelevantFiles(
 function buildTriagePrompt(issue: GitHubIssue, relevantFiles: string[]): string {
   const filesSection =
     relevantFiles.length > 0
-      ? `\nPossibly related files:\n${relevantFiles.slice(0, 5).map((f) => `- ${f}`).join("\n")}`
+      ? `\nPossibly related files:\n${relevantFiles
+          .slice(0, 5)
+          .map((f) => `- ${f}`)
+          .join("\n")}`
       : "";
   return (
     `You are a GitHub issue triage expert. Classify the issue using these definitions:\n\n` +
@@ -224,12 +248,14 @@ function parseTriageLLMOutput(
       effort: validEfforts.includes(parsed.effort as Effort)
         ? (parsed.effort as Effort)
         : fallback.effort,
-      canAutoResolve: typeof parsed.canAutoResolve === "boolean"
-        ? parsed.canAutoResolve
-        : fallback.canAutoResolve,
-      confidence: typeof parsed.confidence === "number"
-        ? Math.min(1, Math.max(0, parsed.confidence))
-        : fallback.confidence,
+      canAutoResolve:
+        typeof parsed.canAutoResolve === "boolean"
+          ? parsed.canAutoResolve
+          : fallback.canAutoResolve,
+      confidence:
+        typeof parsed.confidence === "number"
+          ? Math.min(1, Math.max(0, parsed.confidence))
+          : fallback.confidence,
       reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : fallback.reasoning,
     };
   } catch {
@@ -250,11 +276,7 @@ export async function triageIssue(
   projectRoot: string,
   options: TriageOptions = {},
 ): Promise<TriageResult> {
-  const token =
-    options.token ??
-    process.env["GITHUB_TOKEN"] ??
-    process.env["GH_TOKEN"] ??
-    "";
+  const token = options.token ?? process.env["GITHUB_TOKEN"] ?? process.env["GH_TOKEN"] ?? "";
 
   const client = new GitHubClient({ token });
   await client.inferFromGitRemote(projectRoot);
@@ -264,14 +286,10 @@ export async function triageIssue(
   const heuristic = heuristicTriage(issue);
 
   // Step 2: Find relevant files
-  const relevantFiles = await findRelevantFiles(
-    issue.title + " " + issue.body,
-    projectRoot,
-  );
+  const relevantFiles = await findRelevantFiles(issue.title + " " + issue.body, projectRoot);
 
   // Step 3: LLM refinement (optional, graceful fallback)
-  let finalFields: Omit<TriageResult, "relevantFiles" | "postedToGitHub"> =
-    heuristic;
+  let finalFields: Omit<TriageResult, "relevantFiles" | "postedToGitHub"> = heuristic;
 
   if (options.useLLM !== false) {
     try {
@@ -286,10 +304,9 @@ export async function triageIssue(
         "triage-llm",
       );
       const prompt = buildTriagePrompt(issue, relevantFiles);
-      const llmOutput = await router.generate(
-        [{ role: "user" as const, content: prompt }],
-        { maxTokens: 600 },
-      );
+      const llmOutput = await router.generate([{ role: "user" as const, content: prompt }], {
+        maxTokens: 600,
+      });
       const refined = parseTriageLLMOutput(llmOutput, heuristic);
       finalFields = { ...heuristic, ...refined };
     } catch (err) {
@@ -347,7 +364,9 @@ export function formatTriageOutput(result: TriageResult): string {
   ];
 
   if (result.suggestedLabels.length > 0) {
-    lines.push(`  Labels:     ${result.suggestedLabels.map((l) => `${CYAN}[${l}]${RESET}`).join(" ")}`);
+    lines.push(
+      `  Labels:     ${result.suggestedLabels.map((l) => `${CYAN}[${l}]${RESET}`).join(" ")}`,
+    );
   }
 
   if (result.relevantFiles.length > 0) {
@@ -395,10 +414,7 @@ function printTriageHelp(): void {
   );
 }
 
-export async function runTriageCommand(
-  args: string[],
-  projectRoot: string,
-): Promise<void> {
+export async function runTriageCommand(args: string[], projectRoot: string): Promise<void> {
   const sub = args[0];
 
   if (!sub || sub === "--help" || sub === "-h") {
@@ -408,9 +424,7 @@ export async function runTriageCommand(
 
   const issueNumber = parseInt(sub, 10);
   if (isNaN(issueNumber) || issueNumber <= 0) {
-    console.error(
-      `${RED}Error: Issue number must be a positive integer, got: "${sub}"${RESET}`,
-    );
+    console.error(`${RED}Error: Issue number must be a positive integer, got: "${sub}"${RESET}`);
     console.error(`${DIM}Usage: dantecode triage <issue#> [--post-labels] [--no-llm]${RESET}`);
     return;
   }

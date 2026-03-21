@@ -80,9 +80,7 @@ describe("Router", () => {
         messageId: req.params["messageId"],
       },
     }));
-    const res = await router.handle(
-      makeReq("GET", "/api/sessions/s1/messages/m2"),
-    );
+    const res = await router.handle(makeReq("GET", "/api/sessions/s1/messages/m2"));
     const body = res.body as Record<string, string>;
     expect(body["sessionId"]).toBe("s1");
     expect(body["messageId"]).toBe("m2");

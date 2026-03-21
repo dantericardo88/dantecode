@@ -125,7 +125,11 @@ describe("getContextualSuggestions()", () => {
   });
 
   it("respects maxResults limit", () => {
-    const ctx: SuggestionContext = { pdseScore: 0.3, activeErrors: ["TS1234: err"], contextPercent: 90 };
+    const ctx: SuggestionContext = {
+      pdseScore: 0.3,
+      activeErrors: ["TS1234: err"],
+      contextPercent: 90,
+    };
     const suggestions = getContextualSuggestions(ctx, 2);
     expect(suggestions.length).toBeLessThanOrEqual(2);
   });

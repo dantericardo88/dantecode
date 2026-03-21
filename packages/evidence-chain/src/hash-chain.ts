@@ -62,9 +62,7 @@ export class HashChain<T = Record<string, unknown>> {
    */
   append(data: T): string {
     if (!this.verifyIntegrity()) {
-      throw new HashChainError(
-        "Chain integrity check failed — cannot append to compromised chain",
-      );
+      throw new HashChainError("Chain integrity check failed — cannot append to compromised chain");
     }
     const prev = this.blocks[this.blocks.length - 1]!;
     const block = this._buildBlock(this.blocks.length, data, prev.hash);
@@ -113,9 +111,7 @@ export class HashChain<T = Record<string, unknown>> {
   }
 
   /** Find entries matching a predicate. */
-  findEntries(
-    predicate: (entry: HashChainBlock<T>) => boolean,
-  ): HashChainBlock<T>[] {
+  findEntries(predicate: (entry: HashChainBlock<T>) => boolean): HashChainBlock<T>[] {
     return this.blocks.filter(predicate);
   }
 
@@ -134,10 +130,7 @@ export class HashChain<T = Record<string, unknown>> {
    * Throws HashChainError if integrity check fails.
    */
   static fromJSON<T>(data: HashChainExport<T>): HashChain<T> {
-    const chain = new HashChain<T>(
-      data.chain[0]!.data,
-      data.metadata,
-    );
+    const chain = new HashChain<T>(data.chain[0]!.data, data.metadata);
     // Replace the auto-generated genesis with the imported blocks
     chain.blocks = data.chain.map((b) => ({ ...b }));
     if (!chain.verifyIntegrity()) {
@@ -160,20 +153,11 @@ export class HashChain<T = Record<string, unknown>> {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private _computeHash(
-    index: number,
-    timestamp: string,
-    data: T,
-    previousHash: string,
-  ): string {
+  private _computeHash(index: number, timestamp: string, data: T, previousHash: string): string {
     return sha256(stableJSON({ index, timestamp, data, previousHash }));
   }
 
-  private _buildBlock(
-    index: number,
-    data: T,
-    previousHash: string,
-  ): HashChainBlock<T> {
+  private _buildBlock(index: number, data: T, previousHash: string): HashChainBlock<T> {
     const timestamp = new Date().toISOString();
     const hash = this._computeHash(index, timestamp, data, previousHash);
     return { index, timestamp, data, previousHash, hash };

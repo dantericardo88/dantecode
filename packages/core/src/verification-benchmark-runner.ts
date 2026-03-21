@@ -43,18 +43,18 @@ export interface BenchmarkReport {
   taskCount: number;
   passRate: number;
   averagePdseScore: number;
-  goldAccuracy: number;     // fraction of tasks matching gold decision
+  goldAccuracy: number; // fraction of tasks matching gold decision
   categoryBreakdown: Record<string, { count: number; passRate: number; avgScore: number }>;
   results: BenchmarkTaskResult[];
-  regressions: string[];    // task ids that degraded vs baseline
-  improvements: string[];   // task ids that improved vs baseline
+  regressions: string[]; // task ids that degraded vs baseline
+  improvements: string[]; // task ids that improved vs baseline
   ranAt: string;
   durationMs: number;
 }
 
 export interface BenchmarkBaseline {
   runId: string;
-  taskScores: Record<string, number>;   // task id → pdse score
+  taskScores: Record<string, number>; // task id → pdse score
   taskDecisions: Record<string, string>; // task id → decision
 }
 
@@ -100,7 +100,9 @@ export class VerificationBenchmarkRunner {
 
     const toRun =
       options?.taskIds && options.taskIds.length > 0
-        ? options.taskIds.map((id) => this.tasks.get(id)).filter((t): t is BenchmarkTask => t !== undefined)
+        ? options.taskIds
+            .map((id) => this.tasks.get(id))
+            .filter((t): t is BenchmarkTask => t !== undefined)
         : [...this.tasks.values()];
 
     const results: BenchmarkTaskResult[] = [];
@@ -120,8 +122,7 @@ export class VerificationBenchmarkRunner {
         critiqueTrace: report.critiqueTrace,
       });
 
-      const goldMatch =
-        task.goldDecision === undefined || synthesis.decision === task.goldDecision;
+      const goldMatch = task.goldDecision === undefined || synthesis.decision === task.goldDecision;
 
       results.push({
         id: task.id,
@@ -137,7 +138,8 @@ export class VerificationBenchmarkRunner {
     }
 
     // Category breakdown
-    const categoryBreakdown: Record<string, { count: number; passRate: number; avgScore: number }> = {};
+    const categoryBreakdown: Record<string, { count: number; passRate: number; avgScore: number }> =
+      {};
     for (const result of results) {
       const cat = result.category;
       const existing = categoryBreakdown[cat] ?? { count: 0, passRate: 0, avgScore: 0 };
@@ -170,9 +172,8 @@ export class VerificationBenchmarkRunner {
 
     const passCount = results.filter((r) => r.passed).length;
     const goldCount = results.filter((r) => r.goldMatch).length;
-    const avgScore = results.length > 0
-      ? results.reduce((sum, r) => sum + r.pdseScore, 0) / results.length
-      : 0;
+    const avgScore =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.pdseScore, 0) / results.length : 0;
 
     return {
       runId,
@@ -217,7 +218,8 @@ export function createStandardBenchmarkCorpus(): BenchmarkTask[] {
       label: "Deployment steps",
       category: "code-generation",
       task: "Provide deployment steps and rollback guidance",
-      output: "Steps:\n1. Build release artifact.\n2. Deploy to staging.\n3. Run smoke tests.\n4. Deploy to production.\nRollback: revert to prior artifact if health checks fail.",
+      output:
+        "Steps:\n1. Build release artifact.\n2. Deploy to staging.\n3. Run smoke tests.\n4. Deploy to production.\nRollback: revert to prior artifact if health checks fail.",
       criteria: { requiredKeywords: ["deploy", "rollback"], minLength: 60 },
       goldDecision: "pass",
     },
@@ -226,7 +228,8 @@ export function createStandardBenchmarkCorpus(): BenchmarkTask[] {
       label: "Migration plan",
       category: "planning",
       task: "Create a database migration plan",
-      output: "Migration plan:\n1. Schema diff review.\n2. Backup current data.\n3. Apply migration script.\n4. Verify row counts.\n5. Rollback if errors.",
+      output:
+        "Migration plan:\n1. Schema diff review.\n2. Backup current data.\n3. Apply migration script.\n4. Verify row counts.\n5. Rollback if errors.",
       criteria: { requiredKeywords: ["migration", "backup", "rollback"], minLength: 60 },
       goldDecision: "pass",
     },
@@ -244,7 +247,8 @@ export function createStandardBenchmarkCorpus(): BenchmarkTask[] {
       label: "Research summary",
       category: "research",
       task: "Summarize the key findings on agent autonomy",
-      output: "Key findings:\n1. Agents with persistent memory outperform stateless agents.\n2. Multi-step planning reduces hallucination rates.\n3. Self-reflection improves task completion by 20%.",
+      output:
+        "Key findings:\n1. Agents with persistent memory outperform stateless agents.\n2. Multi-step planning reduces hallucination rates.\n3. Self-reflection improves task completion by 20%.",
       criteria: { requiredKeywords: ["agent", "memory", "planning"], minLength: 80 },
       goldDecision: "pass",
     },
@@ -253,7 +257,8 @@ export function createStandardBenchmarkCorpus(): BenchmarkTask[] {
       label: "Code review synthesis",
       category: "synthesis",
       task: "Synthesize the code review findings",
-      output: "Review findings:\n- Authentication: missing input validation on login endpoint.\n- Performance: N+1 query in user list.\n- Security: SQL injection risk in search filter.",
+      output:
+        "Review findings:\n- Authentication: missing input validation on login endpoint.\n- Performance: N+1 query in user list.\n- Security: SQL injection risk in search filter.",
       criteria: { requiredKeywords: ["authentication", "performance", "security"], minLength: 80 },
       goldDecision: "pass",
     },

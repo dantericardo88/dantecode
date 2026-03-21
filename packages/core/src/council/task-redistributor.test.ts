@@ -92,9 +92,21 @@ describe("TaskRedistributor", () => {
 
     it("picks the lane with the most remaining work (lowest completion)", async () => {
       const lanes = [
-        busyLane({ laneId: "lane-60", objective: "Write tests and add docs", estimatedCompletion: 0.6 }),
-        busyLane({ laneId: "lane-20", objective: "Implement auth and add caching", estimatedCompletion: 0.2 }),
-        busyLane({ laneId: "lane-40", objective: "Refactor module and write tests", estimatedCompletion: 0.4 }),
+        busyLane({
+          laneId: "lane-60",
+          objective: "Write tests and add docs",
+          estimatedCompletion: 0.6,
+        }),
+        busyLane({
+          laneId: "lane-20",
+          objective: "Implement auth and add caching",
+          estimatedCompletion: 0.2,
+        }),
+        busyLane({
+          laneId: "lane-40",
+          objective: "Refactor module and write tests",
+          estimatedCompletion: 0.4,
+        }),
       ];
       const candidate = await redistributor.findRedistribution("idle-lane", "dantecode", lanes);
       expect(candidate).not.toBeNull();
@@ -231,7 +243,10 @@ describe("TaskRedistributor", () => {
         startedAt: Date.now() - 50_000, // slightly newer — ensures tiebreaker isn't the differentiator
         estimatedCompletion: undefined,
       });
-      const candidate = await redistributor.findRedistribution("idle", "dantecode", [definedLane, undefinedLane]);
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [
+        definedLane,
+        undefinedLane,
+      ]);
       expect(candidate).not.toBeNull();
       // undefined → 0% → beats 50% → should pick "undefined" lane
       expect(candidate!.fromLaneId).toBe("undefined");

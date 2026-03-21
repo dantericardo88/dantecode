@@ -14,9 +14,7 @@ import {
   SessionStore,
 } from "@dantecode/core";
 import { WebExtractor } from "@dantecode/web-extractor";
-import {
-  DuckDuckGoProvider,
-} from "@dantecode/web-research";
+import { DuckDuckGoProvider } from "@dantecode/web-research";
 import { UpliftOrchestrator } from "@dantecode/agent-orchestrator";
 import {
   formatLessonsForPrompt,
@@ -222,7 +220,14 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const output = requiredString(args, "output");
       const criteria = optionalRecord(args, "criteria");
       const rails = optionalRailArray(args, "rails");
-      return serialize(verifyOutput({ task, output, ...(criteria ? { criteria } : {}), ...(rails ? { rails } : {}) }));
+      return serialize(
+        verifyOutput({
+          task,
+          output,
+          ...(criteria ? { criteria } : {}),
+          ...(rails ? { rails } : {}),
+        }),
+      );
     },
     run_qa_suite: async (args) => {
       const planId = requiredString(args, "planId");
@@ -236,7 +241,10 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
           throw new Error(`outputs[${index}] must be an object`);
         }
 
-        const id = typeof entry["id"] === "string" && entry["id"].trim() ? entry["id"] : `output-${index + 1}`;
+        const id =
+          typeof entry["id"] === "string" && entry["id"].trim()
+            ? entry["id"]
+            : `output-${index + 1}`;
         const task = requiredString(entry, "task");
         const output = requiredString(entry, "output");
         const criteria = optionalRecord(entry, "criteria");
@@ -270,7 +278,8 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
               ? entry["id"]
               : `critic-${index + 1}`;
         const verdict = requiredString(entry, "verdict") as "pass" | "warn" | "fail";
-        const confidence = typeof entry["confidence"] === "number" ? entry["confidence"] : undefined;
+        const confidence =
+          typeof entry["confidence"] === "number" ? entry["confidence"] : undefined;
         const findings = Array.isArray(entry["findings"])
           ? entry["findings"].filter((value): value is string => typeof value === "string")
           : undefined;
@@ -301,7 +310,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       return serialize({
         query,
         results,
-        uplifted: true
+        uplifted: true,
       });
     },
 
@@ -311,24 +320,24 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const schemaStr = optionalString(args, "schema");
       const options = (args["options"] as Record<string, unknown> | undefined) || {};
       const projectRoot = (options["projectRoot"] as string) || process.cwd();
-      
+
       const state = await readOrInitializeState(projectRoot);
       const routerConfig = {
         default: state.model.default,
         fallback: state.model.fallback,
-        overrides: state.model.taskOverrides
+        overrides: state.model.taskOverrides,
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
       const browserAgent = new BrowserAgent({ headless: true });
       const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
-      
+
       const schema: Record<string, unknown> | undefined = schemaStr
         ? (JSON.parse(schemaStr) as Record<string, unknown>)
         : undefined;
       const result = await extractor.fetch(url, {
         instructions,
         schema,
-        ...options
+        ...options,
       });
       return serialize(result);
     },
@@ -336,17 +345,17 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const url = requiredString(args, "url");
       const goal = requiredString(args, "goal");
       const projectRoot = process.cwd();
-      
+
       const state = await readOrInitializeState(projectRoot);
       const routerConfig = {
         default: state.model.default,
         fallback: state.model.fallback,
-        overrides: state.model.taskOverrides
+        overrides: state.model.taskOverrides,
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
       const browserAgent = new BrowserAgent({ headless: true });
       const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
-      
+
       const result = await extractor.fetch(url, { instructions: goal });
       return serialize(result);
     },
@@ -357,17 +366,17 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       }
       const commonInstructions = optionalString(args, "commonInstructions");
       const projectRoot = process.cwd();
-      
+
       const state = await readOrInitializeState(projectRoot);
       const routerConfig = {
         default: state.model.default,
         fallback: state.model.fallback,
-        overrides: state.model.taskOverrides
+        overrides: state.model.taskOverrides,
       };
       const router = new ModelRouterImpl(routerConfig, projectRoot, "mcp-session");
       const browserAgent = new BrowserAgent({ headless: true });
       const extractor = new WebExtractor({ projectRoot, modelRouter: router, browserAgent });
-      
+
       const results = await extractor.batchFetch(urls, { instructions: commonInstructions });
       return serialize({ results });
     },
@@ -375,15 +384,15 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const role = requiredString(args, "role");
       const task = requiredString(args, "task");
       const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
-      
+
       const orchestrator = new UpliftOrchestrator({ projectRoot });
       const message = await orchestrator.executeSubTask("mcp-root", role, task);
-      
+
       return serialize({
         role,
         status: "completed",
         uplifted: true,
-        message
+        message,
       });
     },
 
@@ -499,7 +508,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       // Optional changeset generation before PR
       const generateChangeset = args["generateChangeset"] as boolean | undefined;
       const type = (optionalString(args, "bumpType") || "patch") as BumpType;
-      const packages = Array.isArray(args["packages"]) ? args["packages"] as string[] : [];
+      const packages = Array.isArray(args["packages"]) ? (args["packages"] as string[]) : [];
 
       const changesetFiles: string[] = [];
       if (generateChangeset && packages.length > 0) {
@@ -686,16 +695,21 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const memory = new PersistentMemory(projectRoot);
       await memory.load();
       const results = memory.search(query, { limit, sessionId: scope });
-      return serialize({ 
+      return serialize({
         query,
         count: results.length,
-        results: results.map(r => ({ id: r.entry.id, content: r.entry.content, score: r.score, tags: r.entry.tags }))
+        results: results.map((r) => ({
+          id: r.entry.id,
+          content: r.entry.content,
+          score: r.score,
+          tags: r.entry.tags,
+        })),
       });
     },
     memory_summarize: async (args) => {
       const projectRoot = requiredString(args, "projectRoot");
       const sessionId = requiredString(args, "sessionId");
-      
+
       const store = new SessionStore(projectRoot);
       const session = await store.load(sessionId);
       if (!session) {
@@ -720,10 +734,12 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const memory = new PersistentMemory(projectRoot);
       await memory.load();
       const results = memory.search(userGoal, { limit: 15 });
-      return serialize({ 
+      return serialize({
         userGoal,
-        context: results.map(r => `[${r.entry.category.toUpperCase()}] ${r.entry.content}`).join("\n"),
-        count: results.length
+        context: results
+          .map((r) => `[${r.entry.category.toUpperCase()}] ${r.entry.content}`)
+          .join("\n"),
+        count: results.length,
       });
     },
     memory_visualize: async (args) => {
@@ -734,17 +750,19 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const entries = memory.getAll();
       const byCategory: Record<string, number> = {};
       const bySession: Record<string, number> = {};
-      
-      entries.forEach(e => {
+
+      entries.forEach((e) => {
         byCategory[e.category] = (byCategory[e.category] || 0) + 1;
         if (e.sessionId) bySession[e.sessionId] = (bySession[e.sessionId] || 0) + 1;
       });
 
-      return serialize({ 
+      return serialize({
         totalEntries: entries.length,
         byCategory,
         sessionsWithMemory: Object.keys(bySession).length,
-        mostRecentEntries: entries.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 5)
+        mostRecentEntries: entries
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 5),
       });
     },
   };
@@ -816,7 +834,10 @@ function requiredRecord(args: Record<string, unknown>, key: string): Record<stri
   return value;
 }
 
-function optionalRecord(args: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+function optionalRecord(
+  args: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined {
   const value = args[key];
   return isRecord(value) ? value : undefined;
 }
@@ -824,16 +845,18 @@ function optionalRecord(args: Record<string, unknown>, key: string): Record<stri
 function optionalRailArray(
   args: Record<string, unknown>,
   key: string,
-): Array<{
-  id: string;
-  name: string;
-  description?: string;
-  mode?: "hard" | "soft";
-  requiredSubstrings?: string[];
-  forbiddenPatterns?: string[];
-  minLength?: number;
-  maxLength?: number;
-}> | undefined {
+):
+  | Array<{
+      id: string;
+      name: string;
+      description?: string;
+      mode?: "hard" | "soft";
+      requiredSubstrings?: string[];
+      forbiddenPatterns?: string[];
+      minLength?: number;
+      maxLength?: number;
+    }>
+  | undefined {
   const value = args[key];
   if (!Array.isArray(value)) {
     return undefined;
@@ -879,7 +902,9 @@ function normalizeRail(rule: Record<string, unknown>): {
 }
 
 function arrayOfStrings(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

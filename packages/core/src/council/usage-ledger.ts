@@ -104,7 +104,13 @@ function defaultProfiles(kind: AgentKind): AgentTaskProfile[] {
       { category: "testing", qualityScore: 65, costScore: 50, latencyMs: 10000, capRisk: 0.2 },
       { category: "synthesis", qualityScore: 65, costScore: 50, latencyMs: 10000, capRisk: 0.2 },
       { category: "debugging", qualityScore: 65, costScore: 50, latencyMs: 10000, capRisk: 0.2 },
-      { category: "long-context", qualityScore: 60, costScore: 50, latencyMs: 12000, capRisk: 0.25 },
+      {
+        category: "long-context",
+        qualityScore: 60,
+        costScore: 50,
+        latencyMs: 12000,
+        capRisk: 0.25,
+      },
     ],
   };
   return map[kind] ?? map.custom;
@@ -232,18 +238,20 @@ export class UsageLedger {
     const profile = entry.taskProfiles.find((p) => p.category === category);
     if (!profile) return 0;
 
-    const healthPenalty = entry.health === "soft-capped" ? 0.5 : entry.health === "degraded" ? 0.75 : 1.0;
+    const healthPenalty =
+      entry.health === "soft-capped" ? 0.5 : entry.health === "degraded" ? 0.75 : 1.0;
     const successRate =
       entry.successCount + entry.failureCount > 0
         ? entry.successCount / (entry.successCount + entry.failureCount)
         : 1.0;
 
     return (
-      profile.qualityScore * 0.4 +
-      (100 - profile.costScore) * 0.2 +
-      (1 - profile.capRisk) * 100 * 0.2 +
-      successRate * 100 * 0.2
-    ) * healthPenalty;
+      (profile.qualityScore * 0.4 +
+        (100 - profile.costScore) * 0.2 +
+        (1 - profile.capRisk) * 100 * 0.2 +
+        successRate * 100 * 0.2) *
+      healthPenalty
+    );
   }
 
   /** Return all agents sorted by routing score for a given task category. */
@@ -261,9 +269,7 @@ export class UsageLedger {
     if (!entry) return null;
     const total = entry.latencySamples.length;
     const avgLatency =
-      total > 0
-        ? entry.latencySamples.reduce((s, x) => s + x.durationMs, 0) / total
-        : 0;
+      total > 0 ? entry.latencySamples.reduce((s, x) => s + x.durationMs, 0) / total : 0;
     const successRate =
       entry.successCount + entry.failureCount > 0
         ? entry.successCount / (entry.successCount + entry.failureCount)

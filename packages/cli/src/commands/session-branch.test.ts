@@ -13,7 +13,12 @@ vi.mock("@dantecode/core", async () => {
   return {
     ...actual,
     getProviderCatalogEntry: vi.fn(() => ({ label: "Mock" })),
-    getContextUtilization: vi.fn(() => ({ tokens: 100, maxTokens: 128000, percent: 0, tier: "green" })),
+    getContextUtilization: vi.fn(() => ({
+      tokens: 100,
+      maxTokens: 128000,
+      percent: 0,
+      tier: "green",
+    })),
     parseModelReference: vi.fn((ref: string) => ({ provider: "anthropic", modelId: ref })),
     readAuditEvents: vi.fn().mockResolvedValue([]),
     MultiAgent: vi.fn(),
@@ -243,6 +248,35 @@ describe("/branch command", () => {
     await routeSlashCommand("/branch new-id-test", state);
     expect(state.session.id).not.toBe(parentId);
   });
+
+  it("/branch returns warning when new-branch save fails (T2)", async () => {
+    const state = makeState(tempDir);
+    const { SessionStore } = await import("@dantecode/core");
+    vi.spyOn(SessionStore.prototype, "save")
+      .mockResolvedValueOnce(undefined) // parent save OK
+      .mockRejectedValueOnce(new Error("ENOSPC: no space left")); // branch save fails
+    const result = await routeSlashCommand("/branch nospc-branch", state);
+    expect(result).toContain("branched");
+    expect(result).toMatch(/warning|not persisted/i);
+    // Session state was still mutated (new ID/name)
+    expect(state.session.name).toBe("nospc-branch");
+  });
+
+  it("/branch falls back to message count when memorySummarize throws (T3)", async () => {
+    const state = makeState(tempDir);
+    state.memoryOrchestrator = {
+      memorySummarize: vi.fn().mockRejectedValueOnce(new Error("OOM")),
+    } as unknown as typeof state.memoryOrchestrator;
+    await routeSlashCommand("/branch mem-fallback", state);
+    const sysMsg = state.session.messages.find(
+      (m) =>
+        m.role === "system" &&
+        typeof m.content === "string" &&
+        (m.content as string).includes("Branched from:"),
+    );
+    expect(sysMsg).toBeDefined();
+    expect(sysMsg?.content).toMatch(/\d+ messages/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -285,6 +319,19 @@ describe("/name command", () => {
     const raw = await readFile(sessionFile, "utf8");
     const saved = JSON.parse(raw) as { id: string; title: string };
     expect(saved.title).toBe("persisted-name");
+  });
+
+  it("/name returns warning when SessionStore.save fails (T1)", async () => {
+    const state = makeState(tempDir);
+    const { SessionStore } = await import("@dantecode/core");
+    vi.spyOn(SessionStore.prototype, "save").mockRejectedValueOnce(
+      new Error("EACCES: permission denied"),
+    );
+    const result = await routeSlashCommand("/name fail-name", state);
+    // In-memory rename still applied (D2 design: name updates even if disk fails)
+    expect(state.session.name).toBe("fail-name");
+    // Warning emitted about persistence failure
+    expect(result).toMatch(/warning|failed to persist/i);
   });
 });
 

@@ -98,7 +98,9 @@ export type OrchestratorEvents = {
   "overlap:detected": [{ laneA: string; laneB: string; level: number }];
   "merge:complete": [MergeBrainResult];
   /** Emitted when a retry session enters backoff — waiting for delay to elapse. */
-  "lane:retry-pending": [{ laneId: string; agentKind: string; retryCount: number; retryAfterTs: number }];
+  "lane:retry-pending": [
+    { laneId: string; agentKind: string; retryCount: number; retryAfterTs: number },
+  ];
   /** Emitted when a running lane is paused because an overlapping retry is in progress. */
   "lane:paused": [{ laneId: string; agentKind: string; pausedForRetry: string }];
   /** Emitted when a paused lane resumes because its coordinating retry finished or was promoted. */
@@ -119,8 +121,8 @@ export type OrchestratorEvents = {
   /** Emitted when a single agent's per-agent token limit is reached. */
   "budget:agent-limit": [{ agentId: string; report: FleetBudgetReport }];
   /** Emitted when TaskRedistributor finds a redistribution candidate for an idle lane. */
-  "redistribution": [{ fromLaneId: string; toLaneId: string; subObjective: string }];
-  "error": [{ message: string; context?: string }];
+  redistribution: [{ fromLaneId: string; toLaneId: string; subObjective: string }];
+  error: [{ message: string; context?: string }];
 };
 
 // ----------------------------------------------------------------------------
@@ -152,6 +154,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private readonly _budget: FleetBudget;
   /** Set to true after the first budget:warning emission to prevent duplicate events. */
   private _budgetWarnFired = false;
+  /** Set to true after the first budget:exhausted emission to prevent duplicate events. */
+  private _budgetExhaustFired = false;
   /** Tracks lanes whose per-agent cap has already been signalled — prevents repeated events. */
   private readonly _capExceededLanes = new Set<string>();
   /** Counts poll cycles to enforce a maximum and prevent deadlock. */
@@ -190,7 +194,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // Default safety handler: prevents Node ERR_UNHANDLED_ERROR if no external
     // listener is attached. Callers should attach their own handler.
-    this.on("error", () => { /* intentional default no-op */ });
+    this.on("error", () => {
+      /* intentional default no-op */
+    });
   }
 
   // --------------------------------------------------------------------------
@@ -204,13 +210,13 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   async start(opts: OrchestratorStartOptions): Promise<string> {
     this.transition("planning");
 
-    const auditLogPath =
-      opts.auditLogPath ??
-      `${opts.repoRoot}/.dantecode/council/audit.jsonl`;
+    const auditLogPath = opts.auditLogPath ?? `${opts.repoRoot}/.dantecode/council/audit.jsonl`;
 
     const runState = createCouncilRunState(opts.repoRoot, opts.objective, auditLogPath);
     this.runState = runState;
     this._allTerminalFired = false;
+    this._budgetExhaustFired = false;
+    this._capExceededLanes.clear(); // Reset per-run dedup guard (not reset by constructor)
 
     // Init router
     this.router = new CouncilRouter(this.ledger, this.adapters);
@@ -230,7 +236,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     // Forward drift events — trigger overlap detection
     this.observer.on("drift", () => {
       if (this.status === "running" && this.observer && this.runState) {
-        const snapshots = this.observer.getLaneIds()
+        const snapshots = this.observer
+          .getLaneIds()
           .map((id) => this.observer!.getSnapshot(id))
           .filter((s) => s !== null);
         this.router?.detectAndEnforceOverlap(snapshots);
@@ -273,7 +280,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // Re-register active lanes with the observer
     for (const agent of state.agents) {
-      if (agent.status === "running" || agent.status === "paused" || agent.status === "retry-pending") {
+      if (
+        agent.status === "running" ||
+        agent.status === "paused" ||
+        agent.status === "retry-pending"
+      ) {
         this.observer.register(agent.laneId, agent.agentKind, agent.worktreePath);
       }
     }
@@ -299,7 +310,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (Number.isFinite(maxDepth) && requestedDepth >= maxDepth) {
       throw new Error(
         `Lane at depth ${requestedDepth} exceeds maxNestingDepth=${maxDepth}. ` +
-        `Increase CouncilConfig.maxNestingDepth or reduce sub-agent nesting.`,
+          `Increase CouncilConfig.maxNestingDepth or reduce sub-agent nesting.`,
       );
     }
 
@@ -399,11 +410,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
 
     this.transition("completed");
-    await setRunStatus(
-      this.runState.repoRoot,
-      this.runState.runId,
-      "completed",
-    );
+    await setRunStatus(this.runState.repoRoot, this.runState.runId, "completed");
   }
 
   /**
@@ -417,14 +424,15 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     await Promise.all(
       this.runState.agents
         .filter(
-          (s) =>
-            s.status === "running" || s.status === "retry-pending" || s.status === "paused",
+          (s) => s.status === "running" || s.status === "retry-pending" || s.status === "paused",
         )
         .map((s) => {
           const adapter = this.adapters.get(s.agentKind);
           const sessionId = s.sessionId ?? s.laneId;
           return adapter
-            ? adapter.abortTask(sessionId).catch(() => { /* per-lane fault isolation */ })
+            ? adapter.abortTask(sessionId).catch(() => {
+                /* per-lane fault isolation */
+              })
             : Promise.resolve();
         }),
     );
@@ -519,13 +527,32 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     const sessionId = lane.sessionId ?? lane.laneId;
     const patch = await adapter.collectPatch(sessionId).catch(() => null);
-    if (!patch || !patch.unifiedDiff) {
+    if (!patch || !patch.unifiedDiff || typeof patch.unifiedDiff !== "string") {
       // No patch at all — mark lane and emit the verify-failed gate event.
       lane.pdseScore = 0;
       lane.verificationPassed = false;
       const noPatchFindings = ["No patch available"];
       this.emit("lane:verify-failed", { laneId, score: 0, findings: noPatchFindings });
       return { passed: false, score: 0, findings: noPatchFindings };
+    }
+
+    // NOMA pre-merge gate: reject the lane if it wrote any forbidden files.
+    // This is the first hard enforcement point — overlap-detector catches violations
+    // after the fact, but we gate the merge pool here before any patch is accepted.
+    const mandate = this.runState?.mandates.find((m) => m.laneId === laneId);
+    if (mandate && mandate.forbiddenFiles.length > 0) {
+      const violations = patch.changedFiles.filter((f) =>
+        mandate.forbiddenFiles.some(
+          (fb) => f === fb || f.endsWith(`/${fb}`) || fb.endsWith(`/${f}`),
+        ),
+      );
+      if (violations.length > 0) {
+        lane.pdseScore = 0;
+        lane.verificationPassed = false;
+        const nomaFindings = [`NOMA violation: wrote forbidden file(s): ${violations.join(", ")}`];
+        this.emit("lane:verify-failed", { laneId, score: 0, findings: nomaFindings });
+        return { passed: false, score: 0, findings: nomaFindings };
+      }
     }
 
     // Diff-based PDSE heuristic — avoids the always-passing scorer trap.
@@ -555,9 +582,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       findings.push("No test file changes detected in this patch");
     }
     if (!passed) {
-      findings.push(
-        `Score ${rawScore} is below threshold ${this._config.pdseThreshold ?? 70}`,
-      );
+      findings.push(`Score ${rawScore} is below threshold ${this._config.pdseThreshold ?? 70}`);
     }
 
     // Store verification result on the lane for observability
@@ -600,7 +625,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
   private assertStatus(expected: CouncilLifecycleStatus): void {
     if (this.status !== expected) {
-      throw new Error(`Expected orchestrator to be in status '${expected}' but got '${this.status}'`);
+      throw new Error(
+        `Expected orchestrator to be in status '${expected}' but got '${this.status}'`,
+      );
     }
   }
 
@@ -699,8 +726,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
               return this.complete();
             }
             // Candidates exist but couldn't be auto-merged → blocked (recoverable by human)
-            const hasCandidates =
-              (mergeResult.synthesis.candidateLanes?.length ?? 0) > 0;
+            const hasCandidates = (mergeResult.synthesis.candidateLanes?.length ?? 0) > 0;
             if (hasCandidates) {
               return this.block(
                 mergeResult.error ?? "Merge blocked: conflicts require manual resolution",
@@ -719,7 +745,13 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       };
       this.on("lanes:all-terminal", onAllTerminal);
 
-      const onTransition = ({ to }: { from: CouncilLifecycleStatus; to: CouncilLifecycleStatus; runId: string }) => {
+      const onTransition = ({
+        to,
+      }: {
+        from: CouncilLifecycleStatus;
+        to: CouncilLifecycleStatus;
+        runId: string;
+      }) => {
         if (to === "completed" || to === "failed" || to === "blocked") {
           cleanup();
           resolve();
@@ -790,13 +822,23 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           const canContinue = this._budget.record(session.laneId, tokensForBudget, costForBudget);
           // Per-agent cap path — only when fleet is NOT globally exhausted.
           // If the fleet is exhausted, fall through to the isExhausted() check below.
-          if (!canContinue && !this._budget.isExhausted() && !this._capExceededLanes.has(session.laneId)) {
+          if (
+            !canContinue &&
+            !this._budget.isExhausted() &&
+            !this._capExceededLanes.has(session.laneId)
+          ) {
             this._capExceededLanes.add(session.laneId);
-            this.emit("budget:agent-limit", { agentId: session.laneId, report: this._budget.report() });
+            this.emit("budget:agent-limit", {
+              agentId: session.laneId,
+              report: this._budget.report(),
+            });
             // Abort the lane — it has consumed its per-agent allocation
             await adapter?.abortTask(sessionId).catch(() => {});
             session.status = "failed";
             session.errorMessage = `Per-agent token cap exceeded (${tokensForBudget} tokens)`;
+            // Verify before persisting — ensures pdseScore is set on cap-failed lanes
+            // so the merge gate can correctly exclude them (undefined scores pass the gate).
+            await this.verifyLaneOutput(session.laneId).catch(() => {});
             await this.persistRunState();
             continue;
           }
@@ -805,8 +847,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             this._budgetWarnFired = true;
             this.emit("budget:warning", this._budget.report());
           }
-          // Hard-stop: abort the entire run when budget is fully exhausted
-          if (this._budget.isExhausted()) {
+          // Hard-stop: abort the entire run when budget is fully exhausted.
+          // Guard with _budgetExhaustFired so the event fires exactly once even when
+          // pollAllLanes() is called again before the observer stop propagates.
+          if (this._budget.isExhausted() && !this._budgetExhaustFired) {
+            this._budgetExhaustFired = true;
             this.emit("budget:exhausted", this._budget.report());
             await this.fail("Fleet budget exhausted");
             return;
@@ -865,7 +910,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
                     baseBranch: this.options.baseBranch,
                     preferredAgent: session.agentKind,
                     nestingDepth: (session.nestingDepth ?? 0) + 1,
-                  }).catch(() => null);
+                  }).catch((err: unknown) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    this.emitError(`Redistribution skipped: ${msg}`, "redistribution");
+                    return null;
+                  });
                   if (newAssignment?.accepted) {
                     this.emit("redistribution", {
                       fromLaneId: candidate.fromLaneId,
@@ -879,7 +928,6 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
               }
             }
           }
-
         } else if (status.status === "failed" || status.status === "aborted") {
           const maxRetries = this.options.maxLaneRetries;
           let retried = false;
@@ -964,7 +1012,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
               await this.persistRunState();
               this.emitError(
                 `Lane ${session.laneId} ${status.status} — retry ` +
-                `${(session.retryCount + 1)}/${maxRetries} as ${retryResult.newLaneId}`,
+                  `${session.retryCount + 1}/${maxRetries} as ${retryResult.newLaneId}`,
                 "retry",
               );
               retried = true;
@@ -977,7 +1025,6 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             this._unpauseWaiters(session.laneId);
             await this.persistRunState();
           }
-
         } else if (status.status === "capped" || status.status === "stalled") {
           session.health = "soft-capped";
         }

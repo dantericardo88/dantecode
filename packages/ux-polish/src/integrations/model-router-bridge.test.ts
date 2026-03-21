@@ -52,7 +52,10 @@ describe("ModelRouterBridge", () => {
     });
 
     it("propagates taskType from state", () => {
-      const hint = bridge.extractHint({ activeModelId: "claude-sonnet-4-6", activeTaskType: "code" });
+      const hint = bridge.extractHint({
+        activeModelId: "claude-sonnet-4-6",
+        activeTaskType: "code",
+      });
       expect(hint!.taskType).toBe("code");
     });
   });

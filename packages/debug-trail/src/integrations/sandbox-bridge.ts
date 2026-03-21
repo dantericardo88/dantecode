@@ -72,7 +72,12 @@ export class SandboxBridge {
         "tool_result",
         "SandboxFileSystem",
         `File write completed: ${filePath} (hash: ${after.afterHash.slice(0, 8)})`,
-        { filePath, afterHash: after.afterHash, afterSnapshotId: after.afterSnapshotId, writeEventId },
+        {
+          filePath,
+          afterHash: after.afterHash,
+          afterSnapshotId: after.afterSnapshotId,
+          writeEventId,
+        },
         { afterHash: after.afterHash, afterSnapshotId: after.afterSnapshotId ?? undefined },
       );
     }

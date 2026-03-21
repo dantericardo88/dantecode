@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import os from "node:os";
-import {
-  listScheduledGitTasks,
-  scheduleGitTask,
-} from "./scheduled-tasks.js";
+import { listScheduledGitTasks, scheduleGitTask } from "./scheduled-tasks.js";
 
 describe("scheduleGitTask", () => {
   let tmpDir: string | undefined;

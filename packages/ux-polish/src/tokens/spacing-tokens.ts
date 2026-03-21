@@ -73,11 +73,7 @@ export function indent(n: number): string {
 /**
  * Pad a string to exactly `width` chars, truncating with suffix if too long.
  */
-export function padOrTruncate(
-  s: string,
-  width: number,
-  suffix = "…",
-): string {
+export function padOrTruncate(s: string, width: number, suffix = "…"): string {
   if (s.length <= width) return s.padEnd(width);
   return s.slice(0, width - suffix.length) + suffix;
 }
@@ -85,9 +81,6 @@ export function padOrTruncate(
 /**
  * Create a horizontal rule of `char` repeated to `width` chars.
  */
-export function hRule(
-  width: number = COLUMN_WIDTH.terminal,
-  char = "─",
-): string {
+export function hRule(width: number = COLUMN_WIDTH.terminal, char = "─"): string {
   return char.repeat(Math.max(0, width));
 }

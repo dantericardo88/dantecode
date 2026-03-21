@@ -79,18 +79,13 @@ describe("VscodeBridge", () => {
     });
 
     it("concatenates multiple parts", () => {
-      const item = bridge.buildStatusBarSegment([
-        { text: "PDSE: 90%" },
-        { text: "branch: main" },
-      ]);
+      const item = bridge.buildStatusBarSegment([{ text: "PDSE: 90%" }, { text: "branch: main" }]);
       expect(item.text).toContain("PDSE: 90%");
       expect(item.text).toContain("branch: main");
     });
 
     it("includes tooltip from parts", () => {
-      const item = bridge.buildStatusBarSegment([
-        { text: "Build", tooltip: "All tests pass" },
-      ]);
+      const item = bridge.buildStatusBarSegment([{ text: "Build", tooltip: "All tests pass" }]);
       expect(item.tooltip).toContain("All tests pass");
     });
   });

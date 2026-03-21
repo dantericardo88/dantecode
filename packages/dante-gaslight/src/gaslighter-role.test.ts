@@ -61,7 +61,11 @@ describe("parseGaslighterOutput", () => {
   });
 
   it("filters invalid aspect values", () => {
-    const badAspect = JSON.stringify({ points: [{ aspect: "invalid-aspect", description: "D", severity: "high" }], summary: "S", needsEvidenceEscalation: false });
+    const badAspect = JSON.stringify({
+      points: [{ aspect: "invalid-aspect", description: "D", severity: "high" }],
+      summary: "S",
+      needsEvidenceEscalation: false,
+    });
     const critique = parseGaslighterOutput(badAspect, 1);
     expect(critique?.points).toHaveLength(0);
   });
@@ -76,7 +80,7 @@ describe("parseGaslighterOutput", () => {
 describe("buildFallbackCritique", () => {
   it("short draft triggers shallow-reasoning point", () => {
     const critique = buildFallbackCritique("Short.", 1);
-    expect(critique.points.some(p => p.aspect === "shallow-reasoning")).toBe(true);
+    expect(critique.points.some((p) => p.aspect === "shallow-reasoning")).toBe(true);
   });
 
   it("long draft has no points", () => {

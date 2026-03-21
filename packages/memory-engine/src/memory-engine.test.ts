@@ -32,13 +32,17 @@ function normPath(p: string): string {
 function makeInMemoryFS() {
   const fs = new Map<string, string>();
   return {
-    writeFileFn: async (p: string, d: string) => { fs.set(normPath(p), d); },
+    writeFileFn: async (p: string, d: string) => {
+      fs.set(normPath(p), d);
+    },
     readFileFn: async (p: string) => {
       const v = fs.get(normPath(p));
       if (!v) throw new Error(`ENOENT: ${p}`);
       return v;
     },
-    mkdirFn: async (_p: string, _opts?: { recursive?: boolean }) => { /* noop */ },
+    mkdirFn: async (_p: string, _opts?: { recursive?: boolean }) => {
+      /* noop */
+    },
     readdirFn: async (p: string) => {
       const norm = normPath(p);
       const prefix = norm.endsWith("/") ? norm : norm + "/";
@@ -47,7 +51,9 @@ function makeInMemoryFS() {
         .filter((k) => k.startsWith(prefix) && !k.slice(prefix.length).includes("/"))
         .map((k) => k.slice(prefix.length));
     },
-    unlinkFn: async (p: string) => { fs.delete(normPath(p)); },
+    unlinkFn: async (p: string) => {
+      fs.delete(normPath(p));
+    },
     existsFn: async (p: string) => fs.has(normPath(p)),
     _fs: fs,
   };
@@ -202,7 +208,9 @@ describe("VectorStore", () => {
   });
 
   it("filters by scope", async () => {
-    await vectorStore.add(makeItem({ key: "proj-item", scope: "project", summary: "project memory" }));
+    await vectorStore.add(
+      makeItem({ key: "proj-item", scope: "project", summary: "project memory" }),
+    );
     await vectorStore.add(makeItem({ key: "user-item", scope: "user", summary: "user memory" }));
 
     const results = vectorStore.search("memory", 10, "project");
@@ -210,7 +218,9 @@ describe("VectorStore", () => {
   });
 
   it("delete removes from index", async () => {
-    await vectorStore.add(makeItem({ key: "delete-me", scope: "session", summary: "deletable item" }));
+    await vectorStore.add(
+      makeItem({ key: "delete-me", scope: "session", summary: "deletable item" }),
+    );
     expect(vectorStore.size).toBe(1);
     await vectorStore.delete("delete-me", "session");
     expect(vectorStore.size).toBe(0);
@@ -228,9 +238,13 @@ describe("VectorStore", () => {
   });
 
   it("findSimilar returns related items", async () => {
-    await vectorStore.add(makeItem({ key: "a", scope: "session", summary: "memory engine recall" }));
+    await vectorStore.add(
+      makeItem({ key: "a", scope: "session", summary: "memory engine recall" }),
+    );
     await vectorStore.add(makeItem({ key: "b", scope: "session", summary: "memory engine store" }));
-    await vectorStore.add(makeItem({ key: "c", scope: "session", summary: "completely unrelated" }));
+    await vectorStore.add(
+      makeItem({ key: "c", scope: "session", summary: "completely unrelated" }),
+    );
 
     const similar = vectorStore.findSimilar("a", "session", 5);
     expect(similar.length).toBeGreaterThan(0);
@@ -465,9 +479,9 @@ describe("RetentionPolicy", () => {
   it("evaluateBatch groups by decision", () => {
     const oldDate = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
     const items = [
-      makeItem({ score: 0.9, recallCount: 10 }),               // keep
+      makeItem({ score: 0.9, recallCount: 10 }), // keep
       makeItem({ score: 0.05, createdAt: oldDate, recallCount: 0 }), // prune
-      makeItem({ score: 0.9, verified: true }),                  // keep (verified)
+      makeItem({ score: 0.9, verified: true }), // keep (verified)
     ];
     const result = policy.evaluateBatch(items);
     expect(result.keep.length).toBe(2);
@@ -559,8 +573,20 @@ describe("GraphMemory", () => {
   });
 
   it("merges entity counts", () => {
-    graph.addEntity({ name: "Entity1", type: "class", count: 2, sessionIds: ["s1"], memoryKeys: [] });
-    graph.addEntity({ name: "Entity1", type: "class", count: 3, sessionIds: ["s2"], memoryKeys: [] });
+    graph.addEntity({
+      name: "Entity1",
+      type: "class",
+      count: 2,
+      sessionIds: ["s1"],
+      memoryKeys: [],
+    });
+    graph.addEntity({
+      name: "Entity1",
+      type: "class",
+      count: 3,
+      sessionIds: ["s2"],
+      memoryKeys: [],
+    });
     const node = graph.getNode("Entity1");
     expect(node!.entity.count).toBe(5);
     expect(node!.entity.sessionIds).toContain("s1");
@@ -738,15 +764,30 @@ describe("SnapshotStore — GF-06", () => {
   });
 
   it("findByBranch filters correctly", async () => {
-    await snapshotStore.capture({ worktreePath: "/p", branch: "main", commitHash: "c1", memoryKeys: [] });
-    await snapshotStore.capture({ worktreePath: "/p", branch: "feat/test", commitHash: "c2", memoryKeys: [] });
+    await snapshotStore.capture({
+      worktreePath: "/p",
+      branch: "main",
+      commitHash: "c1",
+      memoryKeys: [],
+    });
+    await snapshotStore.capture({
+      worktreePath: "/p",
+      branch: "feat/test",
+      commitHash: "c2",
+      memoryKeys: [],
+    });
     const results = await snapshotStore.findByBranch("main");
     expect(results).toHaveLength(1);
     expect(results[0]!.branch).toBe("main");
   });
 
   it("associateMemoryKeys adds keys to snapshot", async () => {
-    const snap = await snapshotStore.capture({ worktreePath: "/p", branch: "main", commitHash: "c1", memoryKeys: ["k1"] });
+    const snap = await snapshotStore.capture({
+      worktreePath: "/p",
+      branch: "main",
+      commitHash: "c1",
+      memoryKeys: ["k1"],
+    });
     await snapshotStore.associateMemoryKeys(snap.id, ["k2", "k3"]);
     const loaded = await snapshotStore.get(snap.id);
     expect(loaded!.memoryKeys).toContain("k1");
@@ -834,12 +875,14 @@ describe("SemanticRecall", () => {
 
     // Pre-populate
     shortTerm.set("st-auth", "JWT authentication system", "session");
-    await vectorStore.add(makeItem({
-      key: "vec-auth",
-      scope: "project",
-      summary: "JWT authentication and token management",
-      layer: "semantic",
-    }));
+    await vectorStore.add(
+      makeItem({
+        key: "vec-auth",
+        scope: "project",
+        summary: "JWT authentication and token management",
+        layer: "semantic",
+      }),
+    );
   });
 
   it("recall returns results from multiple layers", async () => {
@@ -900,12 +943,9 @@ describe("MemoryOrchestrator — Golden Flows", () => {
 
   // GF-02: Semantic cross-session recall
   it("GF-02: memoryRecall returns relevant results", async () => {
-    await orchestrator.memoryStore(
-      "auth-module",
-      "JWT tokens and OAuth2 flow",
-      "project",
-      { summary: "Authentication module" },
-    );
+    await orchestrator.memoryStore("auth-module", "JWT tokens and OAuth2 flow", "project", {
+      summary: "Authentication module",
+    });
     const result = await orchestrator.memoryRecall("authentication", 5, "project");
     expect(result.query).toBe("authentication");
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
@@ -1058,12 +1098,14 @@ describe("LocalEmbeddingProvider", () => {
     const provider = new LocalEmbeddingProvider();
     vectorStore.setEmbeddingProvider((text) => provider.embed(text));
 
-    await vectorStore.add(makeItem({
-      key: "auth-item",
-      scope: "project",
-      summary: "JWT authentication token management security",
-      layer: "semantic",
-    }));
+    await vectorStore.add(
+      makeItem({
+        key: "auth-item",
+        scope: "project",
+        summary: "JWT authentication token management security",
+        layer: "semantic",
+      }),
+    );
 
     const results = await vectorStore.searchAsync("authentication token security", 5, "project");
     expect(Array.isArray(results)).toBe(true);

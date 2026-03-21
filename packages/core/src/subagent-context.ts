@@ -62,15 +62,8 @@ export class SubAgentContext {
    * @param options - Optional configuration (tools, depth, metadata).
    * @returns A new {@link ContextSlice} at depth 0 with no parent.
    */
-  createIsolatedContext(
-    agentId: string,
-    options: IsolatedContextOptions = {},
-  ): ContextSlice {
-    const {
-      allowedTools = [],
-      maxDepth = 3,
-      metadata = {},
-    } = options;
+  createIsolatedContext(agentId: string, options: IsolatedContextOptions = {}): ContextSlice {
+    const { allowedTools = [], maxDepth = 3, metadata = {} } = options;
 
     return {
       id: randomUUID(),
@@ -179,10 +172,7 @@ export class SubAgentContext {
    * @param key - The key to look up.
    * @returns The matching {@link ContextMemoryEntry}, or `undefined` if absent.
    */
-  getMemoryEntry(
-    context: ContextSlice,
-    key: string,
-  ): ContextMemoryEntry | undefined {
+  getMemoryEntry(context: ContextSlice, key: string): ContextMemoryEntry | undefined {
     return context.memoryEntries.find((e) => e.key === key);
   }
 
@@ -197,17 +187,12 @@ export class SubAgentContext {
    * @param child - The child context whose entries are merged in.
    * @returns A {@link ContextMergeResult} describing the merge outcome.
    */
-  mergeContextResults(
-    parent: ContextSlice,
-    child: ContextSlice,
-  ): ContextMergeResult {
+  mergeContextResults(parent: ContextSlice, child: ContextSlice): ContextMergeResult {
     const conflicts: string[] = [];
     const newKeys: string[] = [];
 
     for (const childEntry of child.memoryEntries) {
-      const parentEntry = parent.memoryEntries.find(
-        (e) => e.key === childEntry.key,
-      );
+      const parentEntry = parent.memoryEntries.find((e) => e.key === childEntry.key);
 
       if (parentEntry) {
         if (parentEntry.value !== childEntry.value) {

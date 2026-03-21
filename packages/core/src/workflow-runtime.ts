@@ -62,7 +62,10 @@ export async function loadWorkflowCommands(
   options: WorkflowLoadOptions = {},
 ): Promise<WorkflowParseResult[]> {
   const results: WorkflowParseResult[] = [];
-  const directories = [join(projectRoot, "commands"), join(options.homeDir ?? homedir(), ".codex", "commands")];
+  const directories = [
+    join(projectRoot, "commands"),
+    join(options.homeDir ?? homedir(), ".codex", "commands"),
+  ];
 
   for (const directory of directories) {
     const entries = await safeReadDir(directory);
@@ -98,7 +101,9 @@ export async function loadWorkflowCommand(
     }
   }
 
-  return { error: `Workflow command /${normalizedName} was not found in repo commands/ or ~/.codex/commands.` };
+  return {
+    error: `Workflow command /${normalizedName} was not found in repo commands/ or ~/.codex/commands.`,
+  };
 }
 
 export function parseWorkflowCommand(
@@ -108,7 +113,9 @@ export function parseWorkflowCommand(
 ): WorkflowParseResult {
   const { frontmatter, body } = extractFrontmatter(raw);
   const fallbackName = fileName.replace(/\.md$/i, "").toLowerCase();
-  const name = String(frontmatter["name"] ?? fallbackName).trim().toLowerCase();
+  const name = String(frontmatter["name"] ?? fallbackName)
+    .trim()
+    .toLowerCase();
   const description = String(frontmatter["description"] ?? `Workflow command /${name}`).trim();
   const usage = String(frontmatter["usage"] ?? `/${name}`).trim();
   const contractResult = parseWorkflowContract(frontmatter, name);
@@ -135,7 +142,10 @@ export function createWorkflowExecutionContext(
   command: WorkflowCommand,
   invocation: string,
 ): WorkflowExecutionContext {
-  const args = invocation.trim().replace(new RegExp(`^/${command.name}\\b`, "i"), "").trim();
+  const args = invocation
+    .trim()
+    .replace(new RegExp(`^/${command.name}\\b`, "i"), "")
+    .trim();
   return {
     command,
     invocation,

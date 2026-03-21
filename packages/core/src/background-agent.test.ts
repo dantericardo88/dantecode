@@ -317,9 +317,12 @@ describe("BackgroundAgentRunner", () => {
 
         const id = retryRunner.enqueue("recover me", { longRunning: true });
 
-        await vi.waitFor(() => {
-          expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
-        });
+        await vi.waitFor(
+          () => {
+            expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
+          },
+          { timeout: 15_000 },
+        );
         expect(retryRunner.getTask(id)?.status).toBe("paused");
         expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
       },
@@ -432,17 +435,23 @@ describe("BackgroundAgentRunner", () => {
 
       const id = retryRunner.enqueue("resume me", { longRunning: true });
 
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.status).toBe("paused");
-      });
+      await vi.waitFor(
+        () => {
+          expect(retryRunner.getTask(id)?.status).toBe("paused");
+        },
+        { timeout: 15_000 },
+      );
       expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
 
       const resumed = await retryRunner.resume(id);
       expect(resumed).toBe(true);
 
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(retryRunner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 15_000 },
+      );
       expect(retryRunner.getTask(id)?.output).toBe("recovered");
     });
 

@@ -100,7 +100,10 @@ function gitStatus(projectRoot: string): void {
     // Remote tracking info
     try {
       const upstream = gitExec(["rev-parse", "--abbrev-ref", "@{upstream}"], projectRoot);
-      const aheadBehind = gitExec(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], projectRoot);
+      const aheadBehind = gitExec(
+        ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+        projectRoot,
+      );
       const [behind, ahead] = aheadBehind.split("\t").map(Number);
       if (ahead && ahead > 0) {
         process.stdout.write(`  ${GREEN}Ahead ${ahead} commit(s)${RESET}`);
@@ -180,7 +183,10 @@ function gitLog(args: string[], projectRoot: string): void {
   const count = args[0] || "15";
 
   try {
-    const log = gitExec(["log", "--oneline", "--graph", "--decorate", "--color=always", `-${count}`], projectRoot);
+    const log = gitExec(
+      ["log", "--oneline", "--graph", "--decorate", "--color=always", `-${count}`],
+      projectRoot,
+    );
 
     process.stdout.write(`\n${BOLD}Commit History (last ${count}):${RESET}\n\n`);
     process.stdout.write(log);

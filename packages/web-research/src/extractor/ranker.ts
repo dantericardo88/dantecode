@@ -53,14 +53,18 @@ export class RelevanceRanker {
     this.b = b;
   }
 
-  rank(results: SearchResult[], query: string, opts?: { authorityOverrides?: Record<string, number> }): SearchResult[] {
+  rank(
+    results: SearchResult[],
+    query: string,
+    opts?: { authorityOverrides?: Record<string, number> },
+  ): SearchResult[] {
     if (results.length === 0) return results;
 
     const queryTerms = this.tokenize(query);
     if (queryTerms.length === 0) return results;
 
     // Build document corpus from title + snippet fields
-    const docs = results.map(r => this.tokenize(`${r.title} ${r.snippet}`));
+    const docs = results.map((r) => this.tokenize(`${r.title} ${r.snippet}`));
 
     // Compute average document length
     const avgDocLen = docs.reduce((s, d) => s + d.length, 0) / docs.length;
@@ -76,16 +80,14 @@ export class RelevanceRanker {
       return { result, score: bm25 + authority };
     });
 
-    return scored
-      .sort((a, b) => b.score - a.score)
-      .map(s => s.result);
+    return scored.sort((a, b) => b.score - a.score).map((s) => s.result);
   }
 
   private bm25Score(
     queryTerms: string[],
     doc: string[],
     avgDocLen: number,
-    idf: Map<string, number>
+    idf: Map<string, number>,
   ): number {
     const docLen = doc.length;
     const termFreq = new Map<string, number>();
@@ -108,7 +110,7 @@ export class RelevanceRanker {
     const idf = new Map<string, number>();
 
     for (const term of queryTerms) {
-      const df = docs.filter(doc => doc.includes(term)).length;
+      const df = docs.filter((doc) => doc.includes(term)).length;
       // Robertson-Spärck Jones IDF with +1 smoothing
       idf.set(term, Math.log((N - df + 0.5) / (df + 0.5) + 1));
     }
@@ -120,6 +122,6 @@ export class RelevanceRanker {
     return text
       .toLowerCase()
       .split(/\W+/)
-      .filter(t => t.length > 2);
+      .filter((t) => t.length > 2);
   }
 }

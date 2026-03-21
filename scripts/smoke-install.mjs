@@ -10,11 +10,22 @@ const repoRoot = resolve(scriptsDir, "..");
 
 const publishablePackages = [
   "packages/config-types",
+  "packages/runtime-spine",
   "packages/core",
   "packages/danteforge",
   "packages/git-engine",
   "packages/skill-adapter",
   "packages/sandbox",
+  "packages/evidence-chain",
+  "packages/memory-engine",
+  "packages/debug-trail",
+  "packages/dante-gaslight",
+  "packages/dante-skillbook",
+  "packages/dante-sandbox",
+  "packages/ux-polish",
+  "packages/web-extractor",
+  "packages/web-research",
+  "packages/agent-orchestrator",
   "packages/cli",
 ];
 

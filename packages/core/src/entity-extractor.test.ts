@@ -5,7 +5,9 @@ import type { ModelRouterImpl } from "./model-router.js";
 describe("EntityExtractor", () => {
   it("extracts entities, summary, and category correctly from JSON response", async () => {
     const mockRouter = {
-      generate: vi.fn().mockResolvedValue('{"summary":"Mock sum","entities":["e1","e2"],"category":"decision"}'),
+      generate: vi
+        .fn()
+        .mockResolvedValue('{"summary":"Mock sum","entities":["e1","e2"],"category":"decision"}'),
     } as unknown as ModelRouterImpl;
 
     const extractor = new EntityExtractor(mockRouter);

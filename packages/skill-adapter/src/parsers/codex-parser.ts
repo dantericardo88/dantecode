@@ -141,7 +141,7 @@ export function parseTOML(content: string): Record<string, unknown> {
       let fullValue = rawValue;
       let lineIndex = i + 1;
       while (!fullValue.includes("]") && lineIndex < lines.length) {
-        fullValue += " " + (lines[lineIndex]!).trim();
+        fullValue += " " + lines[lineIndex]!.trim();
         lineIndex++;
       }
 
@@ -411,7 +411,10 @@ export function parseCodexSkill(content: string, sourcePath: string): ParsedCode
     let name = fallbackName;
     if (typeof parsed["name"] === "string" && parsed["name"].length > 0) {
       name = parsed["name"];
-    } else if (Array.isArray(parsed["nickname_candidates"]) && parsed["nickname_candidates"].length > 0) {
+    } else if (
+      Array.isArray(parsed["nickname_candidates"]) &&
+      parsed["nickname_candidates"].length > 0
+    ) {
       const first = parsed["nickname_candidates"][0];
       if (typeof first === "string") {
         name = first;
@@ -419,9 +422,10 @@ export function parseCodexSkill(content: string, sourcePath: string): ParsedCode
     }
 
     const description = typeof parsed["description"] === "string" ? parsed["description"] : "";
-    const instructions = typeof parsed["developer_instructions"] === "string"
-      ? parsed["developer_instructions"].trim()
-      : "";
+    const instructions =
+      typeof parsed["developer_instructions"] === "string"
+        ? parsed["developer_instructions"].trim()
+        : "";
 
     const model = typeof parsed["model"] === "string" ? parsed["model"] : undefined;
     const reasoningEffort =

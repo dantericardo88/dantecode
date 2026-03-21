@@ -7,7 +7,7 @@ describe("Agent Orchestrator MVP", () => {
     it("should spawn a new subagent with a valid task packet", () => {
       const spawner = new SubAgentSpawner();
       const instance = spawner.spawn("researcher", "Research AI trends");
-      
+
       expect(instance.role).toBe("researcher");
       expect(instance.task.objective).toBe("Research AI trends");
       expect(instance.status).toBe("idle");
@@ -21,9 +21,9 @@ describe("Agent Orchestrator MVP", () => {
         fromId: "agent-1",
         toRole: "critic",
         reason: "Need review",
-        context: {}
+        context: {},
       });
-      
+
       expect(event.kind).toBe("subagent.handoff");
       expect(event.payload.toRole).toBe("critic");
     });

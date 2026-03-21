@@ -55,7 +55,10 @@ describe("buildReflectorRole", () => {
 
 describe("buildSkillManagerRole", () => {
   it("returns systemPrompt and userPrompt", () => {
-    const role = buildSkillManagerRole({ reflectionText: "Strategy A worked well.", existingSkillIds: ["s1"] });
+    const role = buildSkillManagerRole({
+      reflectionText: "Strategy A worked well.",
+      existingSkillIds: ["s1"],
+    });
     expect(role.systemPrompt).toContain("DanteSkillManager");
     expect(role.userPrompt).toContain("Strategy A");
     expect(role.userPrompt).toContain("s1");

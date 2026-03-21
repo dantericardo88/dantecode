@@ -99,24 +99,52 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
-      process.stdout.write(`  dantecode skills list                        List registered skills\n`);
+      process.stdout.write(
+        `  dantecode skills list                        List registered skills\n`,
+      );
       process.stdout.write(`  dantecode skills import --from-claude        Import from Claude\n`);
-      process.stdout.write(`  dantecode skills import --from-continue      Import from Continue.dev\n`);
+      process.stdout.write(
+        `  dantecode skills import --from-continue      Import from Continue.dev\n`,
+      );
       process.stdout.write(`  dantecode skills import --from-opencode      Import from OpenCode\n`);
-      process.stdout.write(`  dantecode skills import --file <path>        Import a single skill file\n`);
-      process.stdout.write(`  dantecode skills import-bridge <bundle-dir>  Import a SkillBridge bundle\n`);
-      process.stdout.write(`  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`);
-      process.stdout.write(`  dantecode skills wrap <name>                 Wrap an existing skill\n`);
-      process.stdout.write(`  dantecode skills show <name>                 Show skill definition\n`);
-      process.stdout.write(`  dantecode skills info <name>                 Show skill definition (alias for show)\n`);
+      process.stdout.write(
+        `  dantecode skills import --file <path>        Import a single skill file\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import-bridge <bundle-dir>  Import a SkillBridge bundle\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills wrap <name>                 Wrap an existing skill\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills show <name>                 Show skill definition\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills info <name>                 Show skill definition (alias for show)\n`,
+      );
       process.stdout.write(`  dantecode skills validate <name>             Validate a skill\n`);
       process.stdout.write(`  dantecode skills remove <name>               Remove a skill\n`);
-      process.stdout.write(`  dantecode skills install <source>            Install skill from path/URL\n`);
-      process.stdout.write(`  dantecode skills search [query]              Search the skill catalog\n`);
-      process.stdout.write(`  dantecode skills scan [path]                 Scan directory for skill sources\n`);
-      process.stdout.write(`  dantecode skills export <name> [outdir]      Export/bundle a skill\n`);
-      process.stdout.write(`  dantecode skills import-all <path>           Import all detected skills from path\n`);
-      process.stdout.write(`  dantecode skills compose <chain-name>        Show/manage a skill chain\n`);
+      process.stdout.write(
+        `  dantecode skills install <source>            Install skill from path/URL\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills search [query]              Search the skill catalog\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills scan [path]                 Scan directory for skill sources\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills export <name> [outdir]      Export/bundle a skill\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import-all <path>           Import all detected skills from path\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills compose <chain-name>        Show/manage a skill chain\n`,
+      );
       break;
   }
 }
@@ -484,9 +512,13 @@ async function skillsImportBridge(args: string[], projectRoot: string): Promise<
   const resolvedBundleDir = resolve(projectRoot, bundleDir);
 
   if (dryRun) {
-    process.stdout.write(`\n${YELLOW}[DRY RUN]${RESET} ${DIM}Previewing import from: ${resolvedBundleDir}${RESET}\n`);
+    process.stdout.write(
+      `\n${YELLOW}[DRY RUN]${RESET} ${DIM}Previewing import from: ${resolvedBundleDir}${RESET}\n`,
+    );
   } else {
-    process.stdout.write(`\n${DIM}Importing SkillBridge bundle from: ${resolvedBundleDir}${RESET}\n`);
+    process.stdout.write(
+      `\n${DIM}Importing SkillBridge bundle from: ${resolvedBundleDir}${RESET}\n`,
+    );
   }
 
   const result = await importSkillBridgeBundle({
@@ -503,8 +535,7 @@ async function skillsImportBridge(args: string[], projectRoot: string): Promise<
   }
 
   // Bucket indicator
-  const bucketColor =
-    result.bucket === "green" ? GREEN : result.bucket === "amber" ? YELLOW : RED;
+  const bucketColor = result.bucket === "green" ? GREEN : result.bucket === "amber" ? YELLOW : RED;
   const bucketLabel = result.bucket.toUpperCase();
 
   if (result.dryRun) {
@@ -525,7 +556,9 @@ async function skillsImportBridge(args: string[], projectRoot: string): Promise<
   }
 
   if (result.runtimeWarnings.length > 0) {
-    process.stdout.write(`\n${YELLOW}Runtime warnings (${result.runtimeWarnings.length}):${RESET}\n`);
+    process.stdout.write(
+      `\n${YELLOW}Runtime warnings (${result.runtimeWarnings.length}):${RESET}\n`,
+    );
     for (const w of result.runtimeWarnings) {
       process.stdout.write(`  ${YELLOW}!${RESET} ${w}\n`);
     }
@@ -560,9 +593,8 @@ async function skillsConvert(args: string[], projectRoot: string): Promise<void>
 
   // Parse --bundle-dir <path> option
   const bundleDirIdx = args.indexOf("--bundle-dir");
-  const bundleDirOverride = bundleDirIdx !== -1 && args[bundleDirIdx + 1]
-    ? args[bundleDirIdx + 1]
-    : undefined;
+  const bundleDirOverride =
+    bundleDirIdx !== -1 && args[bundleDirIdx + 1] ? args[bundleDirIdx + 1] : undefined;
 
   if (!source) {
     process.stdout.write(
@@ -606,16 +638,10 @@ async function skillsConvert(args: string[], projectRoot: string): Promise<void>
 
   // Derive the expected bundle output path
   // DanteForge defaults to .danteforge/converted/<slug>/
-  const rawSlug =
-    resolve(projectRoot, source)
-      .split(/[\\/]/)
-      .filter(Boolean)
-      .pop() ?? "skill";
+  const rawSlug = resolve(projectRoot, source).split(/[\\/]/).filter(Boolean).pop() ?? "skill";
   const slug = rawSlug.toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const defaultBundleDir = join(projectRoot, ".danteforge", "converted", slug);
-  const bundleDir = bundleDirOverride
-    ? resolve(projectRoot, bundleDirOverride)
-    : defaultBundleDir;
+  const bundleDir = bundleDirOverride ? resolve(projectRoot, bundleDirOverride) : defaultBundleDir;
 
   // Verify the bundle directory exists before attempting import
   try {
@@ -747,7 +773,9 @@ async function skillsSearch(args: string[], projectRoot: string): Promise<void> 
 
   if (tag) {
     const tagLower = tag.toLowerCase();
-    entries = entries.filter((e: CatalogEntry) => e.tags.some((t: string) => t.toLowerCase() === tagLower));
+    entries = entries.filter((e: CatalogEntry) =>
+      e.tags.some((t: string) => t.toLowerCase() === tagLower),
+    );
   }
 
   if (sourceFilter) {
@@ -843,7 +871,8 @@ async function skillsExport(args: string[], projectRoot: string): Promise<void> 
   }
 
   const outputPath =
-    args[1] ?? join(projectRoot, "exported-skills", skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
+    args[1] ??
+    join(projectRoot, "exported-skills", skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
 
   process.stdout.write(`\n${DIM}Exporting skill: ${skillName}${RESET}\n`);
 
@@ -919,10 +948,11 @@ async function skillsImportAll(args: string[], projectRoot: string): Promise<voi
 
   for (const detection of detections) {
     for (const skillPath of detection.paths) {
-      let skillName = basename(skillPath)
-        .replace(/\.(md|mdc|toml)$/i, "")
-        .replace(/^SKILL[._-]?/i, "")
-        .toLowerCase() || "unknown";
+      let skillName =
+        basename(skillPath)
+          .replace(/\.(md|mdc|toml)$/i, "")
+          .replace(/^SKILL[._-]?/i, "")
+          .toLowerCase() || "unknown";
 
       try {
         const parsed = await parseUniversalSkill(skillPath, detection.format);

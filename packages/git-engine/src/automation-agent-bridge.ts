@@ -14,11 +14,7 @@ export interface AgentBridgeConfig {
   maxRounds?: number;
   projectRoot: string;
   /** Injectable for testing */
-  agentRunner?: (
-    prompt: string,
-    projectRoot: string,
-    maxRounds: number,
-  ) => Promise<AgentRunResult>;
+  agentRunner?: (prompt: string, projectRoot: string, maxRounds: number) => Promise<AgentRunResult>;
   forgeRunner?: (files: string[], projectRoot: string) => Promise<ForgeResult>;
 }
 
@@ -46,10 +42,7 @@ interface ForgeResult {
   error?: string;
 }
 
-export function substitutePromptVars(
-  template: string,
-  context: Record<string, unknown>,
-): string {
+export function substitutePromptVars(template: string, context: Record<string, unknown>): string {
   return template.replace(/\$\{(\w+)\}/g, (_match, key: string) => {
     const value = context[key];
     return value !== undefined && value !== null ? String(value) : `\${${key}}`;
@@ -72,10 +65,12 @@ async function defaultAgentRunner(
     // @dantecode/cli is an optional peer — if this package is used standalone
     // (e.g. in git-engine unit tests), callers should inject a custom agentRunner
     // via AgentBridgeConfig.agentRunner instead.
-    const agentLoopModule = await import(/* @vite-ignore */ _CLI_AGENT_LOOP_DIST).catch(async () => {
-      // Fallback: try the src path in dev / non-compiled environments
-      return import(/* @vite-ignore */ _CLI_AGENT_LOOP_SRC).catch(() => null);
-    });
+    const agentLoopModule = await import(/* @vite-ignore */ _CLI_AGENT_LOOP_DIST).catch(
+      async () => {
+        // Fallback: try the src path in dev / non-compiled environments
+        return import(/* @vite-ignore */ _CLI_AGENT_LOOP_SRC).catch(() => null);
+      },
+    );
 
     if (!agentLoopModule) {
       return {
@@ -83,7 +78,8 @@ async function defaultAgentRunner(
         filesChanged: [],
         tokensUsed: 0,
         success: false,
-        error: "Agent runner unavailable: @dantecode/cli not found in this context. Inject agentRunner via AgentBridgeConfig.",
+        error:
+          "Agent runner unavailable: @dantecode/cli not found in this context. Inject agentRunner via AgentBridgeConfig.",
       };
     }
 
@@ -102,7 +98,8 @@ async function defaultAgentRunner(
         filesChanged: [],
         tokensUsed: 0,
         success: false,
-        error: "Agent runner unavailable: runAgentLoop is not exported from @dantecode/cli agent-loop module",
+        error:
+          "Agent runner unavailable: runAgentLoop is not exported from @dantecode/cli agent-loop module",
       };
     }
 
@@ -188,10 +185,7 @@ async function defaultAgentRunner(
   }
 }
 
-async function defaultForgeRunner(
-  files: string[],
-  projectRoot: string,
-): Promise<ForgeResult> {
+async function defaultForgeRunner(files: string[], projectRoot: string): Promise<ForgeResult> {
   // Dynamic import to avoid circular deps with danteforge
   try {
     const { runLocalPDSEScorer } = await import("@dantecode/danteforge");
@@ -207,9 +201,7 @@ async function defaultForgeRunner(
       }
     }
     const aggregateScore =
-      scores.length > 0
-        ? scores.reduce((a, b) => a + b, 0) / scores.length
-        : 85;
+      scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 85;
     return { aggregateScore };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -250,14 +242,12 @@ export async function runAutomationAgent(
       const runForge = config.forgeRunner ?? defaultForgeRunner;
       const forgeResult = await runForge(agentResult.filesChanged, config.projectRoot);
       if (forgeResult.error) {
-        result.output +=
-          `\n\nWARNING DanteForge: Verification unavailable — ${forgeResult.error}. Gate skipped.`;
+        result.output += `\n\nWARNING DanteForge: Verification unavailable — ${forgeResult.error}. Gate skipped.`;
         // Leave pdseScore unset so orchestrator records gateStatus: "skipped"
       } else {
         result.pdseScore = forgeResult.aggregateScore;
         if (forgeResult.aggregateScore < PDSE_GATE_THRESHOLD) {
-          result.output +=
-            `\n\nWARNING DanteForge: Automation output scored ${forgeResult.aggregateScore}/100 (below ${PDSE_GATE_THRESHOLD} threshold). Review recommended.`;
+          result.output += `\n\nWARNING DanteForge: Automation output scored ${forgeResult.aggregateScore}/100 (below ${PDSE_GATE_THRESHOLD} threshold). Review recommended.`;
         }
       }
     }

@@ -25,9 +25,7 @@ interface CreateEvidenceBundleOptions {
   metadata?: Record<string, unknown>;
 }
 
-export function createEvidenceBundle(
-  opts: CreateEvidenceBundleOptions,
-): EvidenceBundleData {
+export function createEvidenceBundle(opts: CreateEvidenceBundleOptions): EvidenceBundleData {
   // PRD spec: "ev_" + randomBytes(8).toString("hex") → "ev_" prefix + 16 hex chars = 19 chars total
   const bundleId = "ev_" + randomBytes(8).toString("hex");
   const timestamp = new Date().toISOString();

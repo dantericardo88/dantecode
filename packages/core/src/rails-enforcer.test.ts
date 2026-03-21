@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  VerificationRailRegistry,
-  globalVerificationRailRegistry,
-} from "./rails-enforcer.js";
+import { VerificationRailRegistry, globalVerificationRailRegistry } from "./rails-enforcer.js";
 
 describe("VerificationRailRegistry", () => {
   beforeEach(() => {

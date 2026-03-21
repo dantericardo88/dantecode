@@ -3,11 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import {
-  PolicyEnforcer,
-  type PolicyRule,
-  type PolicyRequest,
-} from "./policy-enforcer.js";
+import { PolicyEnforcer, type PolicyRule, type PolicyRequest } from "./policy-enforcer.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,9 +191,7 @@ describe("PolicyEnforcer", () => {
     const enforcer = new PolicyEnforcer();
     enforcer.addRule(makeRule({ id: "dup-id" }));
 
-    expect(() => enforcer.addRule(makeRule({ id: "dup-id" }))).toThrow(
-      /duplicate rule id/i,
-    );
+    expect(() => enforcer.addRule(makeRule({ id: "dup-id" }))).toThrow(/duplicate rule id/i);
   });
 
   // -------------------------------------------------------------------------
@@ -283,17 +277,11 @@ describe("PolicyEnforcer", () => {
     const req = makeRequest({ action: "write", resource: "/tmp/foo.txt" });
 
     expect(
-      enforcer.evaluateCondition(
-        { field: "action", operator: "equals", value: "write" },
-        req,
-      ),
+      enforcer.evaluateCondition({ field: "action", operator: "equals", value: "write" }, req),
     ).toBe(true);
 
     expect(
-      enforcer.evaluateCondition(
-        { field: "action", operator: "equals", value: "read" },
-        req,
-      ),
+      enforcer.evaluateCondition({ field: "action", operator: "equals", value: "read" }, req),
     ).toBe(false);
   });
 
@@ -312,10 +300,7 @@ describe("PolicyEnforcer", () => {
     ).toBe(true);
 
     expect(
-      enforcer.evaluateCondition(
-        { field: "resource", operator: "contains", value: "etc" },
-        req,
-      ),
+      enforcer.evaluateCondition({ field: "resource", operator: "contains", value: "etc" }, req),
     ).toBe(false);
   });
 
@@ -338,10 +323,7 @@ describe("PolicyEnforcer", () => {
     ).toBe(true);
 
     expect(
-      enforcer.evaluateCondition(
-        { field: "resource", operator: "matches", value: "\\.zip$" },
-        req,
-      ),
+      enforcer.evaluateCondition({ field: "resource", operator: "matches", value: "\\.zip$" }, req),
     ).toBe(false);
 
     // Invalid regex should not throw — returns false.
@@ -383,9 +365,7 @@ describe("PolicyEnforcer", () => {
 
     // Add a custom rule and a policy set.
     enforcer.addRule(makeRule({ id: "custom-before-reset" }));
-    const set = enforcer.createPolicySet("Temp Set", [
-      makeRule({ id: "set-before-reset" }),
-    ]);
+    const set = enforcer.createPolicySet("Temp Set", [makeRule({ id: "set-before-reset" })]);
     enforcer.applyPolicySet(set.id);
 
     expect(enforcer.getRules().length).toBeGreaterThan(builtinCount);

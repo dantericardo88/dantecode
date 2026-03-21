@@ -1552,7 +1552,8 @@ describe("VS Code Extension", () => {
       const context = createMockContext();
       activate(context);
 
-      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock.calls;
+      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
+        .calls;
       const viewTypes = callArgs.map((c: unknown[]) => c[0]);
       expect(viewTypes).toContain("dantecode.verificationView");
     });
@@ -1561,7 +1562,8 @@ describe("VS Code Extension", () => {
       const context = createMockContext();
       activate(context);
 
-      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock.calls;
+      const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
+        .calls;
       const viewTypes = callArgs.map((c: unknown[]) => c[0]);
       expect(viewTypes).toContain("dantecode.automationView");
     });
@@ -1665,9 +1667,7 @@ describe("VS Code Extension", () => {
       );
       const terminal = (vscode.window.createTerminal as ReturnType<typeof vi.fn>).mock.results[0]
         ?.value as { sendText: (value: string) => void; show: () => void };
-      expect(terminal.sendText).toHaveBeenCalledWith(
-        expect.stringContaining("git add -u"),
-      );
+      expect(terminal.sendText).toHaveBeenCalledWith(expect.stringContaining("git add -u"));
       expect(terminal.sendText).toHaveBeenCalledWith(
         expect.stringContaining("node packages/cli/dist/index.js self-update --verbose"),
       );

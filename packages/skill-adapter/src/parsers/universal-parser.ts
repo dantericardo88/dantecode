@@ -303,11 +303,12 @@ export async function parseUniversalSkill(
     content = "";
   }
 
-  const fallbackName = basename(filePath)
-    .replace(/\.(md|mdc|toml)$/i, "")
-    .replace(/^SKILL[._-]?/i, "")
-    .replace(/[._]/g, "-")
-    .toLowerCase() || "unknown";
+  const fallbackName =
+    basename(filePath)
+      .replace(/\.(md|mdc|toml)$/i, "")
+      .replace(/^SKILL[._-]?/i, "")
+      .replace(/[._]/g, "-")
+      .toLowerCase() || "unknown";
 
   switch (format) {
     case "claude":
@@ -319,9 +320,7 @@ export async function parseUniversalSkill(
         instructions: parsed.instructions,
         source: format,
         sourcePath: filePath,
-        metadata: parsed.frontmatter.model
-          ? { model: parsed.frontmatter.model }
-          : undefined,
+        metadata: parsed.frontmatter.model ? { model: parsed.frontmatter.model } : undefined,
       };
     }
 
@@ -387,10 +386,8 @@ export async function parseUniversalSkill(
     default: {
       // "unknown" — attempt YAML frontmatter extraction
       const fm = extractUnknownFrontmatter(content);
-      const name =
-        typeof fm.data["name"] === "string" ? fm.data["name"] : fallbackName;
-      const description =
-        typeof fm.data["description"] === "string" ? fm.data["description"] : "";
+      const name = typeof fm.data["name"] === "string" ? fm.data["name"] : fallbackName;
+      const description = typeof fm.data["description"] === "string" ? fm.data["description"] : "";
       return {
         name,
         description,
@@ -457,10 +454,8 @@ export function universalToWrappable(u: UniversalParsedSkill): ParsedSkill {
       tools: Array.isArray(u.metadata?.["tools"])
         ? (u.metadata["tools"] as unknown[]).filter((t): t is string => typeof t === "string")
         : undefined,
-      model:
-        typeof u.metadata?.["model"] === "string" ? u.metadata["model"] : undefined,
-      mode:
-        typeof u.metadata?.["mode"] === "string" ? u.metadata["mode"] : undefined,
+      model: typeof u.metadata?.["model"] === "string" ? u.metadata["model"] : undefined,
+      mode: typeof u.metadata?.["mode"] === "string" ? u.metadata["mode"] : undefined,
     },
     instructions: u.instructions,
     sourcePath: u.sourcePath,

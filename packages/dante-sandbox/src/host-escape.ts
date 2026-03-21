@@ -41,15 +41,20 @@ export class HostEscapeLayer implements IsolationLayer {
       let stderr = "";
       let timedOut = false;
 
-      const timer = request.timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            child.kill("SIGKILL");
-          }, request.timeoutMs)
-        : null;
+      const timer =
+        request.timeoutMs > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              child.kill("SIGKILL");
+            }, request.timeoutMs)
+          : null;
 
-      child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
 
       child.on("close", (code) => {
         if (timer) clearTimeout(timer);

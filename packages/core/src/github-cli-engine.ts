@@ -126,10 +126,7 @@ export class GitHubCLIEngine {
    * @param json    - Whether to append `--json` parsing (caller is responsible for flag)
    * @returns stdout string + success flag + optional error message
    */
-  exec(
-    command: string,
-    _json?: boolean,
-  ): { stdout: string; success: boolean; error?: string } {
+  exec(command: string, _json?: boolean): { stdout: string; success: boolean; error?: string } {
     try {
       const stdout = this.execFn(command, {
         encoding: "utf8",
@@ -138,10 +135,7 @@ export class GitHubCLIEngine {
       }) as string;
       return { stdout: stdout ?? "", success: true };
     } catch (err: unknown) {
-      const error =
-        err instanceof Error
-          ? err.message
-          : String(err);
+      const error = err instanceof Error ? err.message : String(err);
       return { stdout: "", success: false, error };
     }
   }
@@ -225,11 +219,7 @@ export class GitHubCLIEngine {
     event: "approve" | "request-changes" | "comment",
     body?: string,
   ): GHResult {
-    const parts: string[] = [
-      `gh pr review ${number}`,
-      `--repo ${shellArg(repo)}`,
-      `--${event}`,
-    ];
+    const parts: string[] = [`gh pr review ${number}`, `--repo ${shellArg(repo)}`, `--${event}`];
     if (body) parts.push(`--body ${shellArg(body)}`);
 
     const command = parts.join(" ");
@@ -250,11 +240,7 @@ export class GitHubCLIEngine {
     strategy: "merge" | "squash" | "rebase" = "merge",
   ): GHResult {
     const flag =
-      strategy === "squash"
-        ? "--squash"
-        : strategy === "rebase"
-          ? "--rebase"
-          : "--merge";
+      strategy === "squash" ? "--squash" : strategy === "rebase" ? "--rebase" : "--merge";
     const command = `gh pr merge ${number} --repo ${shellArg(repo)} ${flag}`;
     const result = this.exec(command);
     return this.toGHResult("merge-pr", result);
@@ -361,10 +347,7 @@ export class GitHubCLIEngine {
    * @param repo  - Optional repo scope in `owner/repo` format
    */
   searchCode(query: string, repo?: string): GHResult {
-    const parts: string[] = [
-      `gh search code ${shellArg(query)}`,
-      "--json path,repository,url",
-    ];
+    const parts: string[] = [`gh search code ${shellArg(query)}`, "--json path,repository,url"];
     if (repo) parts.push(`--repo ${shellArg(repo)}`);
 
     const command = parts.join(" ");
@@ -384,10 +367,7 @@ export class GitHubCLIEngine {
    * @param ref      - Branch or tag to run on (defaults to default branch)
    */
   triggerWorkflow(repo: string, workflow: string, ref?: string): GHResult {
-    const parts: string[] = [
-      `gh workflow run ${shellArg(workflow)}`,
-      `--repo ${shellArg(repo)}`,
-    ];
+    const parts: string[] = [`gh workflow run ${shellArg(workflow)}`, `--repo ${shellArg(repo)}`];
     if (ref) parts.push(`--ref ${shellArg(ref)}`);
 
     const command = parts.join(" ");

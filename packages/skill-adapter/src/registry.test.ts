@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { loadSkillRegistry, getSkill, getSkillWithBridgeMeta, listSkills, removeSkill, validateSkill } from "./registry.js";
+import {
+  loadSkillRegistry,
+  getSkill,
+  getSkillWithBridgeMeta,
+  listSkills,
+  removeSkill,
+  validateSkill,
+} from "./registry.js";
 import { wrapSkillWithAdapter, type ParsedSkill } from "./wrap.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -391,7 +398,11 @@ describe("skill-adapter registry", () => {
         classification: "instruction-only",
         emitterStatuses: { dantecode: "success" },
       };
-      await writeFile(join(skillDir, "bridge-meta.json"), JSON.stringify(bridgeMeta, null, 2), "utf-8");
+      await writeFile(
+        join(skillDir, "bridge-meta.json"),
+        JSON.stringify(bridgeMeta, null, 2),
+        "utf-8",
+      );
 
       const result = await getSkillWithBridgeMeta("bridge-test-skill", testDir);
       expect(result).not.toBeNull();

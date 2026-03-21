@@ -53,11 +53,7 @@ export class GaslightSessionStore {
     if (!existsSync(this.sessionsDir)) {
       mkdirSync(this.sessionsDir, { recursive: true });
     }
-    writeFileSync(
-      this.sessionPath(session.sessionId),
-      JSON.stringify(session, null, 2),
-      "utf-8",
-    );
+    writeFileSync(this.sessionPath(session.sessionId), JSON.stringify(session, null, 2), "utf-8");
   }
 
   /** Load a session by ID. Returns null if not found or corrupt. */
@@ -112,11 +108,7 @@ export class GaslightSessionStore {
     const session = this.load(sessionId);
     if (!session) return;
     const updated = { ...session, distilledAt: new Date().toISOString() };
-    writeFileSync(
-      this.sessionPath(sessionId),
-      JSON.stringify(updated, null, 2),
-      "utf-8",
-    );
+    writeFileSync(this.sessionPath(sessionId), JSON.stringify(updated, null, 2), "utf-8");
   }
 
   /**

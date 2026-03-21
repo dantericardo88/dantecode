@@ -1,10 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as path from "node:path";
-import {
-  GitAutomationStore,
-  type StoredAutoPRRecord,
-} from "./automation-store.js";
+import { GitAutomationStore, type StoredAutoPRRecord } from "./automation-store.js";
 
 export interface AutoPROptions {
   cwd?: string;

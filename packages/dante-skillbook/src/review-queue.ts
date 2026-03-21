@@ -21,7 +21,10 @@ export class ReviewQueue {
   private nextId = 1;
 
   /** Enqueue a review-required proposal. */
-  enqueue(proposal: UpdateOperation, opts: { sessionId?: string; runId?: string } = {}): ReviewQueueItem {
+  enqueue(
+    proposal: UpdateOperation,
+    opts: { sessionId?: string; runId?: string } = {},
+  ): ReviewQueueItem {
     const item: ReviewQueueItem = {
       id: `rq-${this.nextId++}`,
       proposedAt: new Date().toISOString(),
@@ -36,7 +39,7 @@ export class ReviewQueue {
 
   /** Get all pending items. */
   getPending(): ReviewQueueItem[] {
-    return this.items.filter(i => i.status === "pending");
+    return this.items.filter((i) => i.status === "pending");
   }
 
   /** Get all items (all statuses). */
@@ -46,7 +49,7 @@ export class ReviewQueue {
 
   /** Approve a pending item by ID. Returns true if found and transitioned. */
   approve(id: string): boolean {
-    const item = this.items.find(i => i.id === id && i.status === "pending");
+    const item = this.items.find((i) => i.id === id && i.status === "pending");
     if (!item) return false;
     item.status = "approved";
     return true;
@@ -54,7 +57,7 @@ export class ReviewQueue {
 
   /** Reject a pending item by ID. Returns true if found and transitioned. */
   reject(id: string): boolean {
-    const item = this.items.find(i => i.id === id && i.status === "pending");
+    const item = this.items.find((i) => i.id === id && i.status === "pending");
     if (!item) return false;
     item.status = "rejected";
     return true;
@@ -62,6 +65,6 @@ export class ReviewQueue {
 
   /** Count of pending items. */
   pendingCount(): number {
-    return this.items.filter(i => i.status === "pending").length;
+    return this.items.filter((i) => i.status === "pending").length;
   }
 }

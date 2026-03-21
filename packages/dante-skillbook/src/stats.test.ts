@@ -20,7 +20,11 @@ describe("computeStats", () => {
   });
 
   it("counts by section", () => {
-    const skills = [makeSkill("s1", "coding"), makeSkill("s2", "coding"), makeSkill("s3", "research")];
+    const skills = [
+      makeSkill("s1", "coding"),
+      makeSkill("s2", "coding"),
+      makeSkill("s3", "research"),
+    ];
     const stats = computeStats(skills);
     expect(stats.totalSkills).toBe(3);
     expect(stats.sections.coding).toBe(2);

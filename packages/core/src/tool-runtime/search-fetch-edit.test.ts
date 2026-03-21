@@ -29,11 +29,7 @@ describe("Search -> fetch -> edit integration", () => {
 
     baseUrl = `http://127.0.0.1:${address.port}`;
     await mkdir(join(projectRoot, "src"), { recursive: true });
-    await writeFile(
-      join(projectRoot, "src", "app.ts"),
-      'const headline = "TODO";\n',
-      "utf-8",
-    );
+    await writeFile(join(projectRoot, "src", "app.ts"), 'const headline = "TODO";\n', "utf-8");
   });
 
   afterEach(async () => {
@@ -60,7 +56,12 @@ describe("Search -> fetch -> edit integration", () => {
       policies: [
         { tool: "WebSearch", executionClass: "network" },
         { tool: "WebFetch", executionClass: "network", dependsOn: ["WebSearch"] },
-        { tool: "Edit", executionClass: "file_write", dependsOn: ["WebFetch"], verifyAfterExecution: true },
+        {
+          tool: "Edit",
+          executionClass: "file_write",
+          dependsOn: ["WebFetch"],
+          verifyAfterExecution: true,
+        },
       ],
     });
     const executed: string[] = [];
@@ -120,7 +121,11 @@ describe("Search -> fetch -> edit integration", () => {
 
     expect(executed).toEqual(["WebSearch", "WebFetch", "Edit"]);
     expect(results).toHaveLength(3);
-    expect(results.map((result) => result.record.status)).toEqual(["success", "success", "success"]);
+    expect(results.map((result) => result.record.status)).toEqual([
+      "success",
+      "success",
+      "success",
+    ]);
     expect(await readFile(targetFile, "utf-8")).toContain("Patched from fetched content");
   });
 });

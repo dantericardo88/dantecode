@@ -47,9 +47,7 @@ describe("PatchValidator", () => {
   // ── getDiffStats ─────────────────────────────────────────────────────────
 
   it("parses insertions and deletions from shortstat", () => {
-    mockExecSync.mockReturnValueOnce(
-      " 3 files changed, 42 insertions(+), 17 deletions(-)\n",
-    );
+    mockExecSync.mockReturnValueOnce(" 3 files changed, 42 insertions(+), 17 deletions(-)\n");
 
     const validator = new PatchValidator("/project", {
       execSyncFn: mockExecSync,
@@ -169,8 +167,7 @@ describe("PatchValidator", () => {
   });
 
   it("reports dirty repo correctly", () => {
-    mockExecSync
-      .mockReturnValueOnce("M  src/index.ts\n?? new-file.ts\n"); // git status --porcelain
+    mockExecSync.mockReturnValueOnce("M  src/index.ts\n?? new-file.ts\n"); // git status --porcelain
 
     const validator = new PatchValidator("/project", {
       execSyncFn: mockExecSync,

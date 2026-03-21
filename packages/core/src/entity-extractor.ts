@@ -60,7 +60,7 @@ ${text}
         .trim();
 
       const parsed = JSON.parse(cleanJsonStr);
-      
+
       return {
         summary: parsed.summary ?? text.slice(0, 100),
         entities: Array.isArray(parsed.entities) ? parsed.entities.slice(0, 10) : [],

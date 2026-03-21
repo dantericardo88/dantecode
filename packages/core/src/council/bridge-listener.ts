@@ -7,11 +7,7 @@
 import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import {
-  spawn as nodeSpawn,
-  type SpawnOptions,
-  type ChildProcess,
-} from "node:child_process";
+import { spawn as nodeSpawn, type SpawnOptions, type ChildProcess } from "node:child_process";
 import type { CouncilTaskPacket } from "./council-types.js";
 
 /** Config for a specific agent CLI tool. */
@@ -189,7 +185,11 @@ export class BridgeListener {
       const msg = err instanceof Error ? err.message : String(err);
       await writeFile(
         donePath,
-        JSON.stringify({ success: false, exitCode: -1, error: `Failed to read task inputs: ${msg}` }),
+        JSON.stringify({
+          success: false,
+          exitCode: -1,
+          error: `Failed to read task inputs: ${msg}`,
+        }),
         "utf-8",
       );
       return;

@@ -5,19 +5,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  EventEngine,
-  type DanteEvent,
-  type WorkflowDefinition,
-} from "./event-engine.js";
+import { EventEngine, type DanteEvent, type WorkflowDefinition } from "./event-engine.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeWorkflow(
-  overrides: Partial<WorkflowDefinition> = {},
-): WorkflowDefinition {
+function makeWorkflow(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
   return {
     id: "wf-1",
     name: "Test Workflow",
@@ -50,9 +44,7 @@ describe("EventEngine", () => {
   // 2
   it("registerWorkflow() throws on duplicate ID", () => {
     engine.registerWorkflow(makeWorkflow());
-    expect(() => engine.registerWorkflow(makeWorkflow())).toThrow(
-      /already registered/,
-    );
+    expect(() => engine.registerWorkflow(makeWorkflow())).toThrow(/already registered/);
   });
 
   // 3
@@ -171,9 +163,7 @@ describe("EventEngine", () => {
   // 15
   it("routeEvent() returns matching enabled workflows", () => {
     engine.registerWorkflow(makeWorkflow({ id: "wf-a", trigger: "git:commit" }));
-    engine.registerWorkflow(
-      makeWorkflow({ id: "wf-b", trigger: "git:push" }),
-    );
+    engine.registerWorkflow(makeWorkflow({ id: "wf-b", trigger: "git:push" }));
     const event = engine.createEvent("git:commit", {});
     const matches = engine.routeEvent(event);
     expect(matches).toHaveLength(1);
@@ -240,9 +230,7 @@ describe("EventEngine", () => {
   // 23
   it("matchesConditions() returns false when any condition mismatches", () => {
     const event = engine.createEvent("git:commit", { branch: "dev" });
-    const result = engine.matchesConditions(event, [
-      { field: "branch", value: "main" },
-    ]);
+    const result = engine.matchesConditions(event, [{ field: "branch", value: "main" }]);
     expect(result).toBe(false);
   });
 
@@ -255,9 +243,7 @@ describe("EventEngine", () => {
 
   // 25
   it("workflow with array trigger matches multiple event types", () => {
-    engine.registerWorkflow(
-      makeWorkflow({ trigger: ["git:commit", "git:push"] }),
-    );
+    engine.registerWorkflow(makeWorkflow({ trigger: ["git:commit", "git:push"] }));
     const commitEvent = engine.createEvent("git:commit", {});
     const pushEvent = engine.createEvent("git:push", {});
     const otherEvent = engine.createEvent("fs:change", {});
@@ -336,7 +322,7 @@ describe("EventEngine", () => {
     );
 
     engine.enqueue("git:commit", { branch: "feature/y" }); // should NOT trigger
-    engine.enqueue("git:commit", { branch: "main" });       // should trigger
+    engine.enqueue("git:commit", { branch: "main" }); // should trigger
 
     await engine.processAll();
     expect(handler).toHaveBeenCalledTimes(1);

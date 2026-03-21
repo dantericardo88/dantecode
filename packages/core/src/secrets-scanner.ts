@@ -93,14 +93,12 @@ const BUILTIN_PATTERNS: SecretsPattern[] = [
   },
   {
     name: "generic_api_key",
-    pattern:
-      /(?:api[_-]?key|apikey)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{20,})/gi,
+    pattern: /(?:api[_-]?key|apikey)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{20,})/gi,
     confidence: "medium",
   },
   {
     name: "generic_secret",
-    pattern:
-      /(?:secret|password|passwd|pwd)\s*[:=]\s*['"]?([^\s'"]{8,})/gi,
+    pattern: /(?:secret|password|passwd|pwd)\s*[:=]\s*['"]?([^\s'"]{8,})/gi,
     confidence: "medium",
   },
   {
@@ -145,8 +143,7 @@ const BUILTIN_PATTERNS: SecretsPattern[] = [
   },
   {
     name: "database_url",
-    pattern:
-      /(?:postgres|mysql|mongodb)(?:ql)?:\/\/[^\s'"]+:[^\s'"]+@[^\s'"]+/gi,
+    pattern: /(?:postgres|mysql|mongodb)(?:ql)?:\/\/[^\s'"]+:[^\s'"]+@[^\s'"]+/gi,
     confidence: "high",
   },
   {
@@ -185,13 +182,11 @@ export class SecretsScanner {
     const excludeSet = new Set(options.excludePatterns ?? []);
 
     // Clone built-in patterns (with fresh RegExp instances) and filter exclusions
-    this.patterns = BUILTIN_PATTERNS
-      .filter((p) => !excludeSet.has(p.name))
-      .map((p) => ({
-        name: p.name,
-        pattern: new RegExp(p.pattern.source, p.pattern.flags),
-        confidence: p.confidence,
-      }));
+    this.patterns = BUILTIN_PATTERNS.filter((p) => !excludeSet.has(p.name)).map((p) => ({
+      name: p.name,
+      pattern: new RegExp(p.pattern.source, p.pattern.flags),
+      confidence: p.confidence,
+    }));
 
     // Append custom patterns (also cloning RegExp)
     if (options.customPatterns) {
@@ -229,9 +224,7 @@ export class SecretsScanner {
       for (const m of matches) {
         typeCounts.set(m.type, (typeCounts.get(m.type) ?? 0) + 1);
       }
-      const parts = [...typeCounts.entries()].map(
-        ([type, count]) => `${count} ${type}`,
-      );
+      const parts = [...typeCounts.entries()].map(([type, count]) => `${count} ${type}`);
       summary = `Found ${matches.length} secret(s): ${parts.join(", ")}.`;
     }
 
@@ -251,10 +244,7 @@ export class SecretsScanner {
 
     let result = content;
     for (const match of sorted) {
-      result =
-        result.slice(0, match.startIndex) +
-        match.redacted +
-        result.slice(match.endIndex);
+      result = result.slice(0, match.startIndex) + match.redacted + result.slice(match.endIndex);
     }
     return result;
   }
@@ -338,9 +328,7 @@ export class SecretsScanner {
         // For patterns with capture groups, use the captured group;
         // otherwise use the full match.
         const value = match[1] ?? match[0];
-        const startIndex = match[1]
-          ? match.index + match[0].indexOf(match[1])
-          : match.index;
+        const startIndex = match[1] ? match.index + match[0].indexOf(match[1]) : match.index;
         const endIndex = startIndex + value.length;
 
         rawMatches.push({
@@ -373,10 +361,7 @@ export class SecretsScanner {
       );
       if (overlapping === -1) {
         deduped.push(m);
-      } else if (
-        confidenceRank[m.confidence] >
-        confidenceRank[deduped[overlapping]!.confidence]
-      ) {
+      } else if (confidenceRank[m.confidence] > confidenceRank[deduped[overlapping]!.confidence]) {
         deduped[overlapping] = m;
       }
     }

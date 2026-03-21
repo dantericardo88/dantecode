@@ -3,14 +3,24 @@
 // Classifies execution requests by risk and enforces blocked-command rules.
 // ============================================================================
 
-import type { ExecutionRequest, RiskLevel, GateVerdict, SandboxDecision, IsolationStrategy } from "./types.js";
+import type {
+  ExecutionRequest,
+  RiskLevel,
+  GateVerdict,
+  SandboxDecision,
+  IsolationStrategy,
+} from "./types.js";
 
 // ─── Risk Patterns ────────────────────────────────────────────────────────────
 
 type RiskPattern = { pattern: RegExp; risk: RiskLevel; reason: string };
 
 const CRITICAL_PATTERNS: RiskPattern[] = [
-  { pattern: /rm\s+-rf\s+\/(?:\s|$)/, risk: "critical", reason: "recursive delete of root filesystem" },
+  {
+    pattern: /rm\s+-rf\s+\/(?:\s|$)/,
+    risk: "critical",
+    reason: "recursive delete of root filesystem",
+  },
   { pattern: /mkfs/, risk: "critical", reason: "filesystem formatting" },
   { pattern: /dd\s+if=/, risk: "critical", reason: "raw disk write" },
   { pattern: /:\s*\(\s*\)\s*\{.*:\s*\|.*:.*&.*\}/, risk: "critical", reason: "fork bomb" },
@@ -101,7 +111,12 @@ export function evaluatePolicy(request: ExecutionRequest): PolicyDecision {
     return { riskLevel: "low", gateVerdict: "allow", reason: "trusted task class", allow: true };
   }
 
-  return { riskLevel: "low", gateVerdict: "allow", reason: "no policy violations detected", allow: true };
+  return {
+    riskLevel: "low",
+    gateVerdict: "allow",
+    reason: "no policy violations detected",
+    allow: true,
+  };
 }
 
 /**

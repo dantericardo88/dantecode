@@ -184,10 +184,7 @@ export class OnboardingWizard {
     this._log(`${e.muted("Let's get you set up in under 5 minutes.")}\n`);
   }
 
-  private _findNextStep(
-    steps: OnboardingStep[],
-    failedId: string,
-  ): OnboardingStep | undefined {
+  private _findNextStep(steps: OnboardingStep[], failedId: string): OnboardingStep | undefined {
     const idx = steps.findIndex((s) => s.id === failedId);
     return idx >= 0 ? steps[idx] : undefined;
   }
@@ -220,9 +217,7 @@ const _defaultStepRunner: StepRunner = async (step: OnboardingStep) => {
 let _wizard: OnboardingWizard | null = null;
 
 /** Run the onboarding wizard with the shared default instance. */
-export async function runOnboardingWizard(
-  context?: OnboardingContext,
-): Promise<OnboardingResult> {
+export async function runOnboardingWizard(context?: OnboardingContext): Promise<OnboardingResult> {
   if (!_wizard) _wizard = new OnboardingWizard();
   return _wizard.run(context);
 }

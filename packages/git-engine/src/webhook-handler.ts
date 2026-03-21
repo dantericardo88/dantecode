@@ -127,10 +127,7 @@ export class WebhookListener extends EventEmitter {
     };
   }
 
-  private async handleRequest(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): Promise<void> {
+  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       if (req.method !== "POST" || req.url !== this.path) {
         res.writeHead(404, { "Content-Type": "text/plain" });
@@ -285,10 +282,7 @@ function signPayload(secret: string, payload: string): string {
   return `sha256=${hmac.digest("hex")}`;
 }
 
-function readHeader(
-  headers: http.IncomingHttpHeaders,
-  key: string,
-): string | undefined {
+function readHeader(headers: http.IncomingHttpHeaders, key: string): string | undefined {
   const value = headers[key];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }

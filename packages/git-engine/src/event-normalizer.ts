@@ -72,10 +72,14 @@ export function computeEventFingerprint(raw: RawGitEvent): string {
   const sortedPaths = [...(raw.paths ?? [])].sort().join("|");
   const payloadKey =
     raw.payload !== undefined
-      ? JSON.stringify(Object.keys(raw.payload).sort().reduce<Record<string, unknown>>((acc, k) => {
-          acc[k] = raw.payload![k];
-          return acc;
-        }, {}))
+      ? JSON.stringify(
+          Object.keys(raw.payload)
+            .sort()
+            .reduce<Record<string, unknown>>((acc, k) => {
+              acc[k] = raw.payload![k];
+              return acc;
+            }, {}),
+        )
       : "";
   return `${raw.type}:${raw.repoRoot}:${raw.worktreeId ?? ""}:${sortedPaths}:${payloadKey}`;
 }

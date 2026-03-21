@@ -175,7 +175,10 @@ async function withStoreLock<T>(storePath: string, work: () => Promise<T>): Prom
     release = resolve;
   });
 
-  STORE_LOCKS.set(storePath, previous.then(() => current));
+  STORE_LOCKS.set(
+    storePath,
+    previous.then(() => current),
+  );
   await previous;
 
   try {
@@ -270,9 +273,7 @@ export class GitAutomationStore {
         workflowRuns: Array.isArray(parsed.workflowRuns) ? parsed.workflowRuns : [],
         webhookListeners: Array.isArray(parsed.webhookListeners) ? parsed.webhookListeners : [],
         scheduledTasks: Array.isArray(parsed.scheduledTasks) ? parsed.scheduledTasks : [],
-        autoPullRequests: Array.isArray(parsed.autoPullRequests)
-          ? parsed.autoPullRequests
-          : [],
+        autoPullRequests: Array.isArray(parsed.autoPullRequests) ? parsed.autoPullRequests : [],
         automationExecutions: Array.isArray(parsed.automationExecutions)
           ? parsed.automationExecutions
           : [],

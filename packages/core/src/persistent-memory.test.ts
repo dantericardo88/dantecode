@@ -45,9 +45,7 @@ describe("PersistentMemory", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     // Default: no existing file (fresh state)
-    mockReadFile.mockRejectedValue(
-      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-    );
+    mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     mockWriteFile.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
   });
@@ -81,7 +79,12 @@ describe("PersistentMemory", () => {
       const mem = createMemory();
       await mem.load();
 
-      const entry = await mem.store("TypeScript strict mode is enabled", "decision", ["config"], "session-1");
+      const entry = await mem.store(
+        "TypeScript strict mode is enabled",
+        "decision",
+        ["config"],
+        "session-1",
+      );
 
       expect(entry.content).toBe("TypeScript strict mode is enabled");
       expect(entry.category).toBe("decision");
@@ -295,8 +298,16 @@ describe("PersistentMemory", () => {
       // These are duplicated content but first store() deduplicates, so force via load
       // They should be 1 entry due to dedup, but let's test with pre-loaded data
       const entries = [
-        fakeEntry({ id: "e1", content: "Fix authentication bug in login module handler", category: "error" }),
-        fakeEntry({ id: "e2", content: "Fix authentication bug in login module system", category: "strategy" }),
+        fakeEntry({
+          id: "e1",
+          content: "Fix authentication bug in login module handler",
+          category: "error",
+        }),
+        fakeEntry({
+          id: "e2",
+          content: "Fix authentication bug in login module system",
+          category: "strategy",
+        }),
       ];
       mockReadFile.mockResolvedValueOnce(JSON.stringify(entries));
       const mem2 = createMemory();
@@ -330,9 +341,7 @@ describe("PersistentMemory", () => {
     });
 
     it("handles missing file gracefully on load", async () => {
-      mockReadFile.mockRejectedValueOnce(
-        Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-      );
+      mockReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
 
       const mem = createMemory();
       await mem.load();
@@ -376,7 +385,12 @@ describe("PersistentMemory", () => {
 
       await mem.store("database migration strategy rollback plan", "fact", [], "session-a");
       await mem.store("entry for session beta", "fact", [], "session-b");
-      await mem.store("webpack bundler configuration hot reload setup", "decision", [], "session-a");
+      await mem.store(
+        "webpack bundler configuration hot reload setup",
+        "decision",
+        [],
+        "session-a",
+      );
 
       const sessionEntries = mem.getSessionEntries("session-a");
       expect(sessionEntries.length).toBe(2);
@@ -442,8 +456,18 @@ describe("PersistentMemory", () => {
   describe("formatForPrompt()", () => {
     it("formats top entries as bullet points", async () => {
       const entries = [
-        fakeEntry({ id: "e1", content: "fact about TypeScript", category: "fact", relevanceScore: 0.9 }),
-        fakeEntry({ id: "e2", content: "strategy for testing", category: "strategy", relevanceScore: 1.0 }),
+        fakeEntry({
+          id: "e1",
+          content: "fact about TypeScript",
+          category: "fact",
+          relevanceScore: 0.9,
+        }),
+        fakeEntry({
+          id: "e2",
+          content: "strategy for testing",
+          category: "strategy",
+          relevanceScore: 1.0,
+        }),
       ];
 
       mockReadFile.mockResolvedValueOnce(JSON.stringify(entries));

@@ -49,9 +49,7 @@ export class OnboardingState {
 
   constructor(options: OnboardingStateOptions = {}) {
     const root = options.projectRoot ?? process.cwd();
-    this._filePath =
-      options.stateFilePath ??
-      path.join(root, ".dantecode", "onboarding.json");
+    this._filePath = options.stateFilePath ?? path.join(root, ".dantecode", "onboarding.json");
     this._record = { ...DEFAULTS, updatedAt: new Date().toISOString() };
     this._load();
   }
@@ -82,7 +80,11 @@ export class OnboardingState {
 
   /** Get a full snapshot of the record. */
   getRecord(): OnboardingRecord {
-    return { ...this._record, stepsCompleted: [...this._record.stepsCompleted], stepsSkipped: [...this._record.stepsSkipped] };
+    return {
+      ...this._record,
+      stepsCompleted: [...this._record.stepsCompleted],
+      stepsSkipped: [...this._record.stepsSkipped],
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -144,9 +146,12 @@ export class OnboardingState {
       const parsed = JSON.parse(raw) as Partial<OnboardingRecord>;
       this._record = {
         completed: typeof parsed.completed === "boolean" ? parsed.completed : false,
-        stepsCompleted: Array.isArray(parsed.stepsCompleted) ? parsed.stepsCompleted as string[] : [],
-        stepsSkipped: Array.isArray(parsed.stepsSkipped) ? parsed.stepsSkipped as string[] : [],
-        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+        stepsCompleted: Array.isArray(parsed.stepsCompleted)
+          ? (parsed.stepsCompleted as string[])
+          : [],
+        stepsSkipped: Array.isArray(parsed.stepsSkipped) ? (parsed.stepsSkipped as string[]) : [],
+        updatedAt:
+          typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
         completedAt: typeof parsed.completedAt === "string" ? parsed.completedAt : undefined,
       };
     } catch {

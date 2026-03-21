@@ -125,12 +125,7 @@ export async function bundleSkill(
   options: BundleOptions,
   projectRoot: string,
 ): Promise<BundleResult> {
-  const skillDir = join(
-    projectRoot,
-    ".dantecode",
-    "skills",
-    sanitizeName(options.skillName),
-  );
+  const skillDir = join(projectRoot, ".dantecode", "skills", sanitizeName(options.skillName));
 
   // Verify source skill directory exists
   try {
@@ -166,10 +161,7 @@ export async function bundleSkill(
   // Copy core skill files (SKILL.md is required; SKILL.dc.md is optional)
   const coreFiles = ["SKILL.md", "SKILL.dc.md"];
   for (const filename of coreFiles) {
-    const dest = await copyIfExists(
-      join(skillDir, filename),
-      join(options.outputPath, filename),
-    );
+    const dest = await copyIfExists(join(skillDir, filename), join(options.outputPath, filename));
     if (dest !== null) filesWritten.push(dest);
   }
 
@@ -271,8 +263,5 @@ export async function exportSkillToDirectory(
   outputPath: string,
   projectRoot: string,
 ): Promise<BundleResult> {
-  return bundleSkill(
-    { skillName: entry.name, outputPath },
-    projectRoot,
-  );
+  return bundleSkill({ skillName: entry.name, outputPath }, projectRoot);
 }

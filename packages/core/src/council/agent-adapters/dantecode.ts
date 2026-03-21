@@ -140,9 +140,7 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
       files: [],
       logs: [
         `Self-lane session ${sessionId} for run ${session.packet.runId}`,
-        ...(touchedFiles.length > 0
-          ? [`Touched files: ${touchedFiles.join(", ")}`]
-          : []),
+        ...(touchedFiles.length > 0 ? [`Touched files: ${touchedFiles.join(", ")}`] : []),
         ...(session.error ? [`Error: ${session.error}`] : []),
       ],
     };

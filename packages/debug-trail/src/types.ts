@@ -296,7 +296,9 @@ export class DiskWriteError extends Error {
     public readonly seq: number,
     public readonly cause: unknown,
   ) {
-    super(`DiskWriteError: event seq=${seq} id=${eventId} — ${cause instanceof Error ? cause.message : String(cause)}`);
+    super(
+      `DiskWriteError: event seq=${seq} id=${eventId} — ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
     this.name = "DiskWriteError";
   }
 }

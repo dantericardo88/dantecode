@@ -77,9 +77,7 @@ export function buildDanteForgeGate(): GateFn {
     if (!policy.allow || safetyScore < 0.1) {
       return buildBlockDecision(
         request.id,
-        warnings.length > 0
-          ? `DanteForge gate blocked: ${warnings.join("; ")}`
-          : policy.reason,
+        warnings.length > 0 ? `DanteForge gate blocked: ${warnings.join("; ")}` : policy.reason,
         strategy,
       );
     }
@@ -89,9 +87,7 @@ export function buildDanteForgeGate(): GateFn {
       ...decision,
       gateScore: safetyScore,
       gateVerdict: safetyScore < 0.5 ? "warn" : decision.gateVerdict,
-      reason: warnings.length > 0
-        ? `DanteForge gate: ${warnings.join("; ")}`
-        : decision.reason,
+      reason: warnings.length > 0 ? `DanteForge gate: ${warnings.join("; ")}` : decision.reason,
     };
   };
 }

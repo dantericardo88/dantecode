@@ -8,7 +8,15 @@
 // ─── Public Interfaces ───────────────────────────────────────────────────────
 
 export interface BrowserAction {
-  type: "goto" | "click" | "type" | "screenshot" | "accessibility_tree" | "scroll" | "wait" | "evaluate";
+  type:
+    | "goto"
+    | "click"
+    | "type"
+    | "screenshot"
+    | "accessibility_tree"
+    | "scroll"
+    | "wait"
+    | "evaluate";
   url?: string;
   selector?: string;
   text?: string;
@@ -211,7 +219,9 @@ export class BrowserAgent {
       case "scroll":
         return this.scroll(action.direction ?? "down");
       case "wait":
-        return this.wait(action.timeMs ?? Math.max(1000, action.text ? parseInt(action.text) : 1000));
+        return this.wait(
+          action.timeMs ?? Math.max(1000, action.text ? parseInt(action.text) : 1000),
+        );
       case "evaluate":
         return this.evaluate(action.script ?? "return null;");
       default: {

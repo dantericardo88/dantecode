@@ -127,8 +127,7 @@ export class WebFetchEngine {
         : async () => {
             throw new Error("No fetchFn provided and global fetch unavailable.");
           });
-    this.lowConfidenceThreshold =
-      options.lowConfidenceThreshold ?? DEFAULT_LOW_CONFIDENCE;
+    this.lowConfidenceThreshold = options.lowConfidenceThreshold ?? DEFAULT_LOW_CONFIDENCE;
     this.maxContentLength = options.maxContentLength ?? DEFAULT_MAX_CONTENT;
   }
 
@@ -160,8 +159,7 @@ export class WebFetchEngine {
 
     try {
       const mergedHeaders: Record<string, string> = {
-        "User-Agent":
-          "DanteCode-WebFetchEngine/1.0 (compatible; Mozilla/5.0)",
+        "User-Agent": "DanteCode-WebFetchEngine/1.0 (compatible; Mozilla/5.0)",
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7",
         ...options.headers,
@@ -269,21 +267,15 @@ export class WebFetchEngine {
    */
   extractDescription(html: string): string {
     // Standard meta description
-    let match = /<meta\s[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i.exec(
-      html,
-    );
+    let match = /<meta\s[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i.exec(html);
     if (match) return this.decodeEntities(match[1]!.trim());
 
     // Alternate attribute order
-    match = /<meta\s[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i.exec(
-      html,
-    );
+    match = /<meta\s[^>]*content=["']([^"']+)["'][^>]*name=["']description["']/i.exec(html);
     if (match) return this.decodeEntities(match[1]!.trim());
 
     // OG description
-    match = /<meta\s[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i.exec(
-      html,
-    );
+    match = /<meta\s[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i.exec(html);
     if (match) return this.decodeEntities(match[1]!.trim());
 
     return "";
@@ -420,10 +412,7 @@ export class WebFetchEngine {
   /** Decode common HTML entities. */
   private decodeEntities(text: string): string {
     // Named entities
-    let result = text.replace(
-      /&[a-zA-Z]+;/g,
-      (match) => HTML_ENTITY_MAP[match] ?? match,
-    );
+    let result = text.replace(/&[a-zA-Z]+;/g, (match) => HTML_ENTITY_MAP[match] ?? match);
     // Numeric decimal entities
     result = result.replace(/&#(\d+);/g, (_match, code: string) =>
       String.fromCodePoint(Number(code)),
@@ -443,10 +432,7 @@ export class WebFetchEngine {
     // Strip leading . or # for matching
     const clean = selector.replace(/^[.#]/, "");
     // Try id= match
-    const idPattern = new RegExp(
-      `<[^>]+id=["']${clean}["'][^>]*>([\\s\\S]*?)<\/[^>]+>`,
-      "i",
-    );
+    const idPattern = new RegExp(`<[^>]+id=["']${clean}["'][^>]*>([\\s\\S]*?)<\/[^>]+>`, "i");
     const idMatch = idPattern.exec(html);
     if (idMatch) return idMatch[1] ?? null;
 
@@ -462,11 +448,7 @@ export class WebFetchEngine {
   }
 
   /** Build a graceful error result when a network request fails. */
-  private buildErrorResult(
-    url: string,
-    mode: FetchMode,
-    errorMessage: string,
-  ): FetchResult {
+  private buildErrorResult(url: string, mode: FetchMode, errorMessage: string): FetchResult {
     return {
       url,
       mode,

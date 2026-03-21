@@ -25,9 +25,7 @@ vi.mock("./approach-memory.js", () => ({
 // ---------------------------------------------------------------------------
 
 const mockFs = {
-  readFile: vi.fn().mockRejectedValue(
-    Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-  ),
+  readFile: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
   writeFile: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
 };
@@ -44,9 +42,7 @@ describe("AutonomyEngine", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Default: no existing goals file
-    mockFs.readFile.mockRejectedValue(
-      Object.assign(new Error("ENOENT"), { code: "ENOENT" }),
-    );
+    mockFs.readFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     mockFs.writeFile.mockResolvedValue(undefined);
     mockFs.mkdir.mockResolvedValue(undefined);
   });
@@ -54,7 +50,9 @@ describe("AutonomyEngine", () => {
   // 1 -----------------------------------------------------------------------
   it("addGoal() creates goal with correct fields", async () => {
     const engine = makeEngine();
-    const goal = await engine.addGoal("Fix lint", "Run eslint and fix all errors", ["eslint exits 0"]);
+    const goal = await engine.addGoal("Fix lint", "Run eslint and fix all errors", [
+      "eslint exits 0",
+    ]);
 
     expect(goal.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(goal.title).toBe("Fix lint");
@@ -270,7 +268,13 @@ describe("AutonomyEngine", () => {
     const h2 = engine.getAdaptationHistory();
     expect(h1).toEqual(h2);
     // Should be copies (mutating one does not affect the engine)
-    h1.push({ goalId: "fake", previousStatus: "active", newStatus: "completed", reason: "", timestamp: "" });
+    h1.push({
+      goalId: "fake",
+      previousStatus: "active",
+      newStatus: "completed",
+      reason: "",
+      timestamp: "",
+    });
     expect(engine.getAdaptationHistory()).toHaveLength(1);
   });
 

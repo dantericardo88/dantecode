@@ -6,7 +6,12 @@
  * This is NOT the Skillbook — raw history stays separate.
  */
 
-import type { GaslightSession, IterationRecord, GaslightCritique, GaslightGateDecision } from "./types.js";
+import type {
+  GaslightSession,
+  IterationRecord,
+  GaslightCritique,
+  GaslightGateDecision,
+} from "./types.js";
 
 export class IterationHistory {
   private records: IterationRecord[] = [];

@@ -20,11 +20,21 @@ import type { ProgressState } from "../types.js";
 export interface CheckpointerLike {
   put(
     sessionId: string,
-    checkpoint: { v: number; id: string; ts: string; step: number; channelValues: Record<string, unknown>; channelVersions: Record<string, number> },
+    checkpoint: {
+      v: number;
+      id: string;
+      ts: string;
+      step: number;
+      channelValues: Record<string, unknown>;
+      channelVersions: Record<string, number>;
+    },
     metadata: { source: string; step: number },
     writes: Array<{ taskId: string; channel: string; value: unknown; timestamp: string }>,
   ): Promise<void>;
-  getTuple(sessionId: string): Promise<{ checkpoint: { channelValues: Record<string, unknown>; step: number }; metadata: { step: number } } | null>;
+  getTuple(sessionId: string): Promise<{
+    checkpoint: { channelValues: Record<string, unknown>; step: number };
+    metadata: { step: number };
+  } | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +94,14 @@ export class CheckpointedProgress {
         channelVersions: { progressState: step },
       },
       { source: "loop", step },
-      [{ taskId: "ux-progress", channel: "progressState", value: serialized, timestamp: new Date().toISOString() }],
+      [
+        {
+          taskId: "ux-progress",
+          channel: "progressState",
+          value: serialized,
+          timestamp: new Date().toISOString(),
+        },
+      ],
     );
 
     this._restoredStep = step;

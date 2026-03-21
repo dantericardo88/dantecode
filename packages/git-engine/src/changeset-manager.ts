@@ -23,9 +23,7 @@ export async function addChangeset(
   options: ChangesetOptions = {},
 ): Promise<ChangesetResult> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
-  const cleanedPackages = packages
-    .map((pkg) => pkg.trim())
-    .filter((pkg) => pkg.length > 0);
+  const cleanedPackages = packages.map((pkg) => pkg.trim()).filter((pkg) => pkg.length > 0);
 
   if (cleanedPackages.length === 0) {
     return {
@@ -47,9 +45,7 @@ export async function addChangeset(
 
   try {
     await fs.mkdir(changesetDir, { recursive: true });
-    const frontmatter = cleanedPackages
-      .map((pkg) => `"${pkg}": ${bumpType}`)
-      .join("\n");
+    const frontmatter = cleanedPackages.map((pkg) => `"${pkg}": ${bumpType}`).join("\n");
     const content = `---\n${frontmatter}\n---\n\n${message.trim()}\n`;
     await fs.writeFile(filePath, content, "utf-8");
     return {
