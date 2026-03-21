@@ -189,6 +189,7 @@ export class DanteGaslightIntegration {
       `  Sessions aborted: ${s.sessionsAborted}`,
       `  Avg iterations: ${s.averageIterations.toFixed(1)}`,
       `  Lesson-eligible: ${s.lessonEligibleCount}`,
+      `  Distilled to Skillbook: ${s.distilledCount}`,
       `  Engine enabled: ${this.config.enabled}`,
     ].join("\n");
   }
@@ -197,7 +198,7 @@ export class DanteGaslightIntegration {
   cmdReview(): string {
     const sessions = this._mergedSessions();
     if (sessions.length === 0) return "No Gaslight sessions recorded yet.";
-    const last = sessions[sessions.length - 1] as GaslightSession;
+    const last = sessions[0] as GaslightSession;
     return [
       `Last session: ${last.sessionId}`,
       `  Trigger: ${last.trigger.channel}`,
@@ -214,12 +215,14 @@ export class DanteGaslightIntegration {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Merge in-memory sessions with disk sessions.
+   * Merge in-memory sessions with disk sessions, sorted newest-first by startedAt.
    * In-memory sessions shadow disk versions with the same ID.
    */
   private _mergedSessions(): GaslightSession[] {
     const inMemoryIds = new Set(this.sessions.map((s) => s.sessionId));
     const diskOnly = this.store.list().filter((s) => !inMemoryIds.has(s.sessionId));
-    return [...this.sessions, ...diskOnly];
+    return [...this.sessions, ...diskOnly].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    );
   }
 }

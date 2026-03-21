@@ -49,6 +49,7 @@ import {
   detectAndRecordPatterns,
 } from "@dantecode/danteforge";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
+import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
 import type {
   ExecutionEvidence,
   Session,
@@ -158,6 +159,13 @@ export interface AgentLoopConfig {
    * This gives non-Claude models structured guidance instead of raw markdown text.
    */
   workflowContext?: WorkflowExecutionContext;
+  /**
+   * DanteGaslight integration for the Gaslight→Skillbook closed loop.
+   * When provided, each agent turn is checked for gaslight triggers. Sessions
+   * are persisted to disk and can be distilled into the Skillbook via
+   * `dantecode gaslight bridge`.
+   */
+  gaslight?: DanteGaslightIntegration;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -3380,6 +3388,30 @@ export async function runAgentLoop(
     await autonomyEngine.save();
   } catch {
     // Non-fatal
+  }
+
+  // ---- DanteGaslight: detect triggers, persist session for Skillbook bridge ----
+  // Checks whether the user's prompt or quality score triggered a gaslight event.
+  // Sessions are persisted to disk; run `dantecode gaslight bridge` to distill
+  // lesson-eligible sessions into the Skillbook (closing the feedback loop).
+  if (config.gaslight) {
+    try {
+      const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+      if (lastAssistant?.content) {
+        const gaslightSession = await config.gaslight.maybeGaslight({
+          message: durablePrompt,
+          draft: lastAssistant.content,
+        });
+        if (gaslightSession && !config.silent) {
+          process.stdout.write(
+            `\n${CYAN}[gaslight] Session triggered (${gaslightSession.trigger.channel}): ` +
+            `${gaslightSession.sessionId} — run ${BOLD}dantecode gaslight bridge${RESET}${CYAN} to distill.${RESET}\n`,
+          );
+        }
+      }
+    } catch {
+      // Non-fatal: gaslight failure must never block the agent response
+    }
   }
 
   return session;

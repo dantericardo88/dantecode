@@ -77,6 +77,13 @@ describe("DanteGaslightIntegration", () => {
     const s = engine.cmdStats();
     expect(s).toContain("Total sessions");
     expect(s).toContain("Engine enabled");
+    expect(s).toContain("Distilled to Skillbook");
+  });
+
+  it("stats includes distilledCount", () => {
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir });
+    const s = engine.stats();
+    expect(s.distilledCount).toBe(0);
   });
 
   it("cmdReview returns no sessions message when empty", () => {
@@ -89,6 +96,31 @@ describe("DanteGaslightIntegration", () => {
     await engine.maybeGaslight({ message: "go deeper", draft: "draft" });
     const review = engine.cmdReview();
     expect(review).toContain("explicit-user");
+  });
+
+  it("cmdReview shows the most recent session (newest-first ordering)", async () => {
+    const store = new GaslightSessionStore({ cwd: testDir });
+    const older = {
+      sessionId: "older-sess",
+      trigger: { channel: "explicit-user" as const, at: new Date("2024-01-01").toISOString() },
+      iterations: [],
+      lessonEligible: false,
+      startedAt: new Date("2024-01-01").toISOString(),
+    };
+    const newer = {
+      sessionId: "newer-sess",
+      trigger: { channel: "explicit-user" as const, at: new Date("2024-06-01").toISOString() },
+      iterations: [],
+      lessonEligible: false,
+      startedAt: new Date("2024-06-01").toISOString(),
+    };
+    store.save(older);
+    store.save(newer);
+
+    const engine = new DanteGaslightIntegration({}, { cwd: testDir });
+    const review = engine.cmdReview();
+    expect(review).toContain("newer-sess");
+    expect(review).not.toContain("older-sess");
   });
 
   it("getSession returns session by ID", async () => {
@@ -179,5 +211,107 @@ describe("DanteGaslightIntegration — store persistence", () => {
     }
     const engine = new DanteGaslightIntegration({}, { cwd: testDir });
     expect(engine.stats().totalSessions).toBe(3);
+  });
+});
+
+describe("DanteGaslightIntegration — maxSessions cleanup", () => {
+  let testDir: string;
+
+  beforeEach(() => { testDir = makeTestDir(); });
+  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+
+  it("cleanup is triggered after runSession when maxSessions is set", async () => {
+    const engine = new DanteGaslightIntegration(
+      { ...enabledConfig, maxSessions: 1 },
+      { cwd: testDir },
+    );
+    await engine.maybeGaslight({ message: "go deeper", draft: "first draft" });
+    await new Promise((r) => setTimeout(r, 20));
+    await engine.maybeGaslight({ message: "go deeper", draft: "second draft" });
+
+    const store = new GaslightSessionStore({ cwd: testDir });
+    expect(store.list().length).toBe(1);
+  });
+
+  it("maxSessions=0 disables cleanup", async () => {
+    const engine = new DanteGaslightIntegration(
+      { ...enabledConfig, maxSessions: 0 },
+      { cwd: testDir },
+    );
+    await engine.maybeGaslight({ message: "go deeper", draft: "first" });
+    await engine.maybeGaslight({ message: "go deeper", draft: "second" });
+    await engine.maybeGaslight({ message: "go deeper", draft: "third" });
+
+    const store = new GaslightSessionStore({ cwd: testDir });
+    expect(store.list().length).toBe(3);
+  });
+});
+
+describe("DanteGaslightIntegration — priorLessonProvider", () => {
+  let testDir: string;
+
+  beforeEach(() => { testDir = makeTestDir(); });
+  afterEach(() => { rmSync(testDir, { recursive: true, force: true }); });
+
+  it("priorLessonProvider is called on maybeGaslight", async () => {
+    let called = false;
+    const engine = new DanteGaslightIntegration(
+      enabledConfig,
+      { cwd: testDir },
+      { priorLessonProvider: () => { called = true; return []; } },
+    );
+    await engine.maybeGaslight({ message: "go deeper", draft: "draft" });
+    expect(called).toBe(true);
+  });
+
+  it("priorLessonProvider receives draft and taskClass", async () => {
+    let capturedDraft = "";
+    let capturedClass: string | undefined;
+    const engine = new DanteGaslightIntegration(
+      enabledConfig,
+      { cwd: testDir },
+      {
+        priorLessonProvider: (d, tc) => {
+          capturedDraft = d;
+          capturedClass = tc;
+          return [];
+        },
+      },
+    );
+    await engine.maybeGaslight({ message: "go deeper", draft: "my draft", taskClass: "review" });
+    expect(capturedDraft).toBe("my draft");
+    expect(capturedClass).toBe("review");
+  });
+
+  it("explicit priorLessons skips provider", async () => {
+    let providerCalled = false;
+    const engine = new DanteGaslightIntegration(
+      enabledConfig,
+      { cwd: testDir },
+      { priorLessonProvider: () => { providerCalled = true; return []; } },
+    );
+    await engine.maybeGaslight({
+      message: "go deeper",
+      draft: "draft",
+      priorLessons: ["override lesson"],
+    });
+    expect(providerCalled).toBe(false);
+  });
+
+  it("async priorLessonProvider is awaited", async () => {
+    let resolved = false;
+    const engine = new DanteGaslightIntegration(
+      enabledConfig,
+      { cwd: testDir },
+      {
+        priorLessonProvider: async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          resolved = true;
+          return ["async lesson"];
+        },
+      },
+    );
+    await engine.maybeGaslight({ message: "go deeper", draft: "draft" });
+    expect(resolved).toBe(true);
   });
 });

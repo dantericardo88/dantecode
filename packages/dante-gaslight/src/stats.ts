@@ -11,6 +11,7 @@ export function computeStats(sessions: GaslightSession[]): GaslightStats {
   let sessionsAborted = 0;
   let totalIterations = 0;
   let lessonEligibleCount = 0;
+  let distilledCount = 0;
 
   for (const s of sessions) {
     const stopReason = s.stopReason;
@@ -18,6 +19,7 @@ export function computeStats(sessions: GaslightSession[]): GaslightStats {
     if (stopReason === "user-stop" || stopReason === "policy-abort") sessionsAborted++;
     totalIterations += s.iterations.length;
     if (s.lessonEligible) lessonEligibleCount++;
+    if (s.distilledAt) distilledCount++;
   }
 
   const averageIterations = sessions.length > 0 ? totalIterations / sessions.length : 0;
@@ -28,5 +30,6 @@ export function computeStats(sessions: GaslightSession[]): GaslightStats {
     sessionsAborted,
     averageIterations,
     lessonEligibleCount,
+    distilledCount,
   };
 }

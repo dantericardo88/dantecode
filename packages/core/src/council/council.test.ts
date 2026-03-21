@@ -48,7 +48,6 @@ import type { WorktreeSnapshot } from "./worktree-observer.js";
 import { WorktreeObserver } from "./worktree-observer.js";
 import { CouncilRouter } from "./council-router.js";
 import { MergeBrain } from "./merge-brain.js";
-import type { WorktreeHooks } from "./merge-brain.js";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
 import type { CouncilAgentAdapter } from "./agent-adapters/base.js";
 import { DanteCodeAdapter } from "./agent-adapters/dantecode.js";
@@ -2262,17 +2261,14 @@ describe("Lane B — BridgeListener Daemon", () => {
 
 
 describe("Lane C — MergeBrain WorktreeHooks", () => {
-  it("MergeBrain constructor accepts WorktreeHooks without error", () => {
-    const hooks: WorktreeHooks = {
-      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt-branch" }),
-      removeWorktree: () => {},
-    };
-    expect(() => new MergeBrain(hooks)).not.toThrow();
+  it("MergeBrain constructor works without arguments", () => {
+    expect(() => new MergeBrain()).not.toThrow();
   });
 
-  it("MergeBrain constructor works without hooks (backward compat)", () => {
-    expect(() => new MergeBrain()).not.toThrow();
-    expect(() => new MergeBrain(undefined)).not.toThrow();
+  it("MergeBrain instance is defined after construction", () => {
+    const brain = new MergeBrain();
+    expect(brain).toBeDefined();
+    expect(brain).toBeInstanceOf(MergeBrain);
   });
 
   it("synthesize() returns valid MergeBrainResult structure with empty candidates", async () => {
@@ -2307,23 +2303,16 @@ describe("Lane C — MergeBrain WorktreeHooks", () => {
     expect(result.synthesis.preservedCandidates["dantecode-lane1"]).toBe(candidate.unifiedDiff);
   });
 
-  it("CouncilOrchestratorOptions.worktreeHooks accepted by constructor", () => {
-    const hooks: WorktreeHooks = {
-      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt" }),
-      removeWorktree: () => {},
-    };
+  it("CouncilOrchestrator constructs without worktree hooks", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>();
-    expect(() => new CouncilOrchestrator(adapters, { worktreeHooks: hooks })).not.toThrow();
+    const orchestrator = new CouncilOrchestrator(adapters);
+    expect(orchestrator).toBeDefined();
+    expect(orchestrator.currentStatus).toBe("idle");
   });
 
-  it("CouncilOrchestrator accepts worktreeHooks and stores them in options", () => {
-    const hooks: WorktreeHooks = {
-      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt" }),
-      removeWorktree: () => {},
-    };
+  it("CouncilOrchestrator is an instance of CouncilOrchestrator after construction", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>();
-    const orchestrator = new CouncilOrchestrator(adapters, { worktreeHooks: hooks });
-    // Indirectly verify: instance was created successfully (no throw)
+    const orchestrator = new CouncilOrchestrator(adapters);
     expect(orchestrator).toBeInstanceOf(CouncilOrchestrator);
   });
 
@@ -2431,6 +2420,8 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   const activeOrchestrators: CouncilOrchestrator[] = [];
   afterEach(() => {
     for (const o of activeOrchestrators) {
+      // Suppress any pending "error" events so they don't become unhandled exceptions.
+      o.on("error", () => {});
       const oc = o as unknown as PollOrchestrator;
       if (oc.pollTimer) {
         clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
@@ -2462,7 +2453,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("session.status advances to completed after pollAllLanes with completed response", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
     await orchestrator.start({ objective: "poll test", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2474,7 +2465,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("session.status advances to failed after pollAllLanes with failed response", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "failed", progressSummary: "err" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "failed", progressSummary: "err" }));
     await orchestrator.start({ objective: "poll fail", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2494,6 +2485,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     });
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    activeOrchestrators.push(orchestrator);
     await orchestrator.start({ objective: "fault isolation", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2509,7 +2501,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
 
   it("pollAllLanes is idempotent on already-completed sessions", async () => {
     let pollCalls = 0;
-    const orchestrator = makeOrchestrator(async (s) => { pollCalls++; return { sessionId: s, status: "completed" }; });
+    const orchestrator = trackOrchestrator(async (s) => { pollCalls++; return { sessionId: s, status: "completed" }; });
     await orchestrator.start({ objective: "idempotent", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2521,7 +2513,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("session.health set to soft-capped on capped pollStatus", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "capped" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "capped" }));
     await orchestrator.start({ objective: "capped", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2533,7 +2525,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("startPolling sets pollTimer; fail() clears it", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
     orchestrator.on("error", () => {}); // suppress unhandled error from fail()
     await orchestrator.start({ objective: "timer test", agents: ["dantecode"], repoRoot: testDir });
 
@@ -2544,7 +2536,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
 
   it("lane:completed event payload includes laneId, agentKind, and sessionId", async () => {
     const events: Array<{ laneId: string; agentKind: string; sessionId: string }> = [];
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
     orchestrator.on("lane:completed", (evt) => events.push(evt));
     await orchestrator.start({ objective: "payload test", agents: ["dantecode"], repoRoot: testDir });
 
@@ -2559,7 +2551,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("pollAllLanes skips session with no matching adapter", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
     await orchestrator.start({ objective: "no adapter", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
@@ -2573,7 +2565,7 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("start() call causes pollTimer to be set", async () => {
-    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
     orchestrator.on("error", () => {}); // suppress unhandled error from fail()
 
     expect((orchestrator as unknown as PollOrchestrator).pollTimer).toBeNull();

@@ -112,7 +112,7 @@ function createSelfExecutor(projectRoot: string): SelfLaneExecutor {
       const maxRounds = opts?.maxRounds ?? 80;
       const bin = join(projectRoot, "node_modules/.bin/dantecode");
       const { stdout } = await execAsync(
-        `"${bin}" --prompt-file "${promptFile}" --max-rounds ${maxRounds}`,
+        `"${bin}" --prompt-file "${promptFile}" --max-rounds ${maxRounds} --silent`,
         { cwd, timeout: 30 * 60 * 1000, maxBuffer: 50 * 1024 * 1024 },
       );
 

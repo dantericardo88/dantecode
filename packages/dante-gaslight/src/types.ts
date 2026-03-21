@@ -158,4 +158,5 @@ export interface GaslightStats {
   sessionsAborted: number;
   averageIterations: number;
   lessonEligibleCount: number;
+  distilledCount: number;
 }
