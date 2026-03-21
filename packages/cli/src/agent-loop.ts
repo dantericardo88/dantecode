@@ -12,6 +12,7 @@ import {
   SessionStore,
   DurableRunStore,
   BackgroundTaskStore,
+  MetricsCollector,
   estimateMessageTokens,
   getContextUtilization,
   isProtectedWriteTarget,
@@ -1781,6 +1782,11 @@ export async function runAgentLoop(
   let transientTimeoutRetries = 0;
   const maxTransientRetries = config.timeoutPolicy?.transientRetries ?? 1;
 
+  // ---- Feature: Metrics collection ----
+  // Per-session Prometheus-compatible metrics collector.
+  // Records per-round latency for observability dashboards.
+  const metricsCollector = new MetricsCollector();
+
   if (config.verbose && thinkingBudget) {
     process.stdout.write(
       `${DIM}[thinking: ${config.state.model.default.provider}/${config.state.model.default.modelId}, budget=${thinkingBudget}]${RESET}\n`,
@@ -1823,6 +1829,7 @@ export async function runAgentLoop(
 
     maxToolRounds--;
     roundCounter++;
+    const _roundStartMs = Date.now();
 
     // Context compaction (opencode/OpenHands pattern): condense old messages
     // when approaching the context window limit
@@ -3255,6 +3262,9 @@ export async function runAgentLoop(
       });
       evidenceLedger.length = 0;
     }
+
+    // Record per-round latency metric
+    metricsCollector.recordTiming("agent.round.latency", Date.now() - _roundStartMs);
   }
 
   // Diff-based anti-confabulation: compare claimed vs actual file changes (advisory)

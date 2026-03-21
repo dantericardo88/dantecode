@@ -2,6 +2,32 @@
 
 All notable changes to DanteCode are documented here.
 
+## [1.0.0-beta.3] - 2026-03-20
+
+### Added (Production Maturity Sprint — Lane 5)
+
+- **MetricsCollector wiring** (`packages/cli`): Agent loop now instantiates `MetricsCollector` from `@dantecode/core` and records per-round latency via `metricsCollector.recordTiming("agent.round.latency", durationMs)` after each tool round. Enables Prometheus-compatible observability on agent loop performance.
+- **Coverage gates for 5 new packages** (`vitest.config.ts`): Added `packages/memory-engine`, `packages/ux-polish`, `packages/web-research`, `packages/web-extractor`, and `packages/agent-orchestrator` to the coverage `include` array with per-path thresholds at 70% (statements, functions, lines).
+- **Git-engine event pipeline** (`@dantecode/git-engine`): Added `EventNormalizer`, `GitEventQueue`, `GitEventRateLimiter`, and `MultiRepoCoordinator` to the public API — forming the full event normalization and rate-limiting backbone for the multi-repo automation system.
+- **Agent Orchestrator MVP** (`packages/agent-orchestrator`): New package implementing `SubAgentSpawner`, `HandoffEngine`, `WaveTreeManager`, `UpliftOrchestrator`, and `WorktreeHook` for multi-agent coordination (GF-06 golden flow).
+- **Memory Engine MVP** (`packages/memory-engine`): New package implementing `ShortTermStore`, `VectorStore`, `GraphMemory`, `CompressionEngine`, `SessionMemory`, `SemanticRecall`, `RetentionPolicy`, `ScoringPolicy`, and `MemoryOrchestrator` with adapter interfaces for Mem0 and Zep.
+- **Web Research MVP** (`packages/web-research`): New package implementing `ResearchPipeline` — native DDG search with retry/backoff, BM25 relevance ranking, semantic deduplication, persistent + session caching, and `EvidenceBundle` synthesis.
+- **Web Extractor polish** (`packages/web-extractor`): `MarkdownCleaner`, `RelevanceScorer`, and `Dedupe` updated; coverage gate added.
+- **Verification Suite** (`packages/core`): Added `VerificationSuiteRunner`, `VerificationBenchmarkRunner`, `VerificationTraceRecorder`, `VerificationTraceSerializer`, `VerificationCriticRunner`, `ConfidenceSynthesizer`, and `MetricSuiteRegistry` — production-grade verification stack for agent output quality.
+
+### Fixed
+
+- **Agent loop test mock** (`packages/cli/agent-loop.test.ts`): Added `MetricsCollector` mock class to the `@dantecode/core` mock so tests pass after the MetricsCollector wiring was added to the agent loop.
+- **Coverage configuration** (`vitest.config.ts`): Per-path thresholds added for the 5 new package paths so CI coverage gates enforce the 70% floor.
+
+### Validation
+
+- `npm run typecheck` — 16+ packages, zero errors
+- `npm test` — all new test suites pass (event-normalizer, event-queue, rate-limiter, multi-repo-coordinator, memory-engine, web-research, web-extractor, agent-orchestrator, verification-harness, verification-critics, verification-trace, verification-optimization)
+- Coverage gates: 70% statements/functions/lines for all 5 new production packages
+
+---
+
 ## [1.0.0-beta.2] - 2026-03-18
 
 ### Added (Gap-Closing Sprint — 6 Parallel Workstreams)
