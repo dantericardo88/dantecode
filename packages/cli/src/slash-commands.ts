@@ -8,14 +8,19 @@ import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  appendAuditEvent,
+  criticDebate,
   createSelfImprovementContext,
   getProviderCatalogEntry,
   getContextUtilization,
+  globalVerificationRailRegistry,
   parseModelReference,
   readAuditEvents,
   MultiAgent,
   ModelRouterImpl,
+  runQaSuite,
   SessionStore,
+  DurableRunStore,
   AutoforgeCheckpointManager,
   TaskCircuitBreaker,
   RecoveryEngine,
@@ -23,8 +28,25 @@ import {
   LoopDetector,
   parseSkillWaves,
   createWaveState,
+  verifyOutput,
+  VerificationHistoryStore,
+  VerificationBenchmarkStore,
+  VerificationSuiteRunner,
 } from "@dantecode/core";
-import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
+import type {
+  CriticOpinion,
+  MultiAgentProgressCallback,
+  QaSuiteOutputInput,
+  VerificationHistoryKind,
+  VerificationRail,
+  VerifyOutputInput,
+  WaveOrchestratorState,
+  WorkflowExecutionContext,
+  ConfidenceSynthesisResult,
+  ReasoningTier,
+  ReasoningChain,
+} from "@dantecode/core";
+import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -35,7 +57,14 @@ import {
   runAutoforgeIAL,
   formatBladeProgressLine,
 } from "@dantecode/danteforge";
-import { listSkills, getSkill } from "@dantecode/skill-adapter";
+import {
+  listSkills,
+  getSkill,
+  SkillCatalog,
+  installSkill,
+  verifySkill,
+} from "@dantecode/skill-adapter";
+import { getFeaturesByMaturity } from "./lib/feature-flags.js";
 import {
   getStatus,
   getDiff,
@@ -44,16 +73,40 @@ import {
   createWorktree,
   mergeWorktree,
   removeWorktree,
+  watchGitEvents,
+  listGitWatchers,
+  stopGitWatcher,
+  addChangeset,
+  WebhookListener,
+  listWebhookListeners,
+  stopWebhookListener,
+  scheduleGitTask,
+  listScheduledGitTasks,
+  stopScheduledGitTask,
+  GitAutomationOrchestrator,
+  substitutePromptVars,
 } from "@dantecode/git-engine";
+import type { AgentBridgeConfig, AgentBridgeResult } from "@dantecode/git-engine";
 import type {
   Session,
   SessionMessage,
+  ChatSessionFile,
   DanteCodeState,
   ModelConfig,
   ModelRouterConfig,
 } from "@dantecode/config-types";
+import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
+import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import { getThemeEngine, renderTokenDashboard } from "@dantecode/ux-polish";
+import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
+import { runGaslightCommand } from "./commands/gaslight.js";
+import { runFearsetCommand } from "./commands/fearset.js";
+import { researchSlashHandler } from "./commands/research.js";
+import { automateCommand } from "./commands/automate.js";
+import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -87,6 +140,16 @@ export interface ReplState {
   recentToolCalls: string[];
   /** When set by a slash command, processInput will feed this prompt to the agent loop. */
   pendingAgentPrompt: string | null;
+  /** Pending durable run ID to resume on the next agent loop turn. */
+  pendingResumeRunId: string | null;
+  /** Expected workflow name for the next agent loop turn. */
+  pendingExpectedWorkflow: string | null;
+  /**
+   * Full workflow execution context loaded from workflow-runtime.ts.
+   * When set, the agent loop injects the contract preamble (stages, failure/rollback
+   * policy) into the system prompt — giving all models structured pipeline guidance.
+   */
+  pendingWorkflowContext?: WorkflowExecutionContext | null;
   /** Active abort controller for cancelling streaming generation via Ctrl+C. */
   activeAbortController: AbortController | null;
   /** Live sandbox bridge when sandbox mode is enabled. */
@@ -99,12 +162,36 @@ export interface ReplState {
   };
   /** Background agent runner (lazily initialized by /bg). */
   _bgRunner?: unknown;
+  /** Durable git automation orchestrator for workflow/webhook/schedule pipelines. */
+  _gitAutomationOrchestrator?: unknown;
   /** Code index (lazily initialized by /index and /search). */
   _codeIndex?: unknown;
   /** Currently active skill name, or null. Used to enable universal pipeline continuation. */
   activeSkill: string | null;
   /** Wave orchestrator state for step-by-step skill execution (Claude Workflow Mode). */
   waveState: WaveOrchestratorState | null;
+  /**
+   * Live DanteGaslightIntegration singleton shared between the agent loop and
+   * slash commands. When set, /gaslight on/off call setEnabled() on the same
+   * instance the agent loop uses — not a detached disk-reading copy.
+   */
+  gaslight: DanteGaslightIntegration | null;
+  /** DanteMemory orchestrator — wired from repl.ts. Null if init failed. */
+  memoryOrchestrator: import("@dantecode/memory-engine").MemoryOrchestrator | null;
+  /**
+   * Manual reasoning tier override set by /think command.
+   * When set, the agent loop uses this tier instead of calling decideTier.
+   * Cleared after each prompt unless reasoningOverrideSession is true.
+   */
+  reasoningOverride?: ReasoningTier;
+  /** When true, reasoningOverride persists for the entire session. Default: false. */
+  reasoningOverrideSession?: boolean;
+  /** Last thinking budget used (tokens). Displayed by /think. */
+  lastThinkingBudget?: number;
+  /** Active ReasoningChain instance — shared between agent-loop and /think stats. */
+  reasoningChain?: ReasoningChain;
+  /** Active TUI theme name. Defaults to "default". Persisted via /theme command. */
+  theme: ThemeName;
 }
 
 /** A single slash command handler. */
@@ -215,15 +302,493 @@ async function ensureBackgroundRunner(state: ReplState) {
   return runner;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRequiredString(record: Record<string, unknown>, key: string, context: string): string {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${context} must include a non-empty "${key}" string.`);
+  }
+  return value;
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return undefined;
+  }
+  return value;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function shorten(value: string, max = 96): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= max) {
+    return normalized;
+  }
+  return `${normalized.slice(0, max - 3)}...`;
+}
+
+function formatFraction(value: number | undefined): string {
+  return typeof value === "number" ? value.toFixed(2) : "-";
+}
+
+function formatPassFail(passed: boolean): string {
+  return passed ? `${GREEN}PASSED${RESET}` : `${RED}FAILED${RESET}`;
+}
+
+function hasFlag(args: string, flag: string): boolean {
+  return new RegExp(`(^|\\s)${escapeRegExp(flag)}(?=\\s|$)`).test(args);
+}
+
+function readFlagValue(args: string, flag: string): string | undefined {
+  const match = args.match(new RegExp(`${escapeRegExp(flag)}\\s+([^\\s]+)`));
+  return match?.[1];
+}
+
+function stripFlag(args: string, flag: string): string {
+  return args.replace(new RegExp(`(^|\\s)${escapeRegExp(flag)}(?=\\s|$)`, "g"), " ").trim();
+}
+
+function stripFlagWithValue(args: string, flag: string): string {
+  return args.replace(new RegExp(`${escapeRegExp(flag)}\\s+([^\\s]+)`, "g"), " ").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function loadJsonFile(
+  relativeFilePath: string,
+  state: ReplState,
+): Promise<Record<string, unknown>> {
+  const resolved = resolve(state.projectRoot, relativeFilePath.replace(/^['"]|['"]$/g, ""));
+  const raw = await readFile(resolved, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function getGitAutomationOrchestrator(state: ReplState): GitAutomationOrchestrator {
+  if (!state._gitAutomationOrchestrator) {
+    state._gitAutomationOrchestrator = new GitAutomationOrchestrator({
+      projectRoot: state.projectRoot,
+      sessionId: state.session.id,
+      modelId: `${state.session.model.provider}/${state.session.model.modelId}`,
+      runAgent: buildAutomationAgentRunner(state),
+    });
+  }
+  return state._gitAutomationOrchestrator as GitAutomationOrchestrator;
+}
+
+function buildAutomationAgentRunner(
+  state: ReplState,
+): (config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult> {
+  return async (
+    config: AgentBridgeConfig,
+    ctx: Record<string, unknown>,
+  ): Promise<AgentBridgeResult> => {
+    const taskId = randomUUID().slice(0, 12);
+    const prompt = substitutePromptVars(config.prompt, ctx);
+    const taskSession = cloneSessionForTask(state.session, config.projectRoot, taskId);
+    const startMs = Date.now();
+
+    try {
+      const completed = await runAgentLoop(prompt, taskSession, {
+        state: state.state,
+        verbose: false,
+        enableGit: state.enableGit,
+        enableSandbox: state.enableSandbox,
+        silent: true,
+        ...(state.sandboxBridge ? { sandboxBridge: state.sandboxBridge } : {}),
+      });
+
+      const output = getLastAssistantText(completed);
+      const filesChanged = collectTouchedFilesFromSession(completed, config.projectRoot);
+
+      // Run DanteForge verification if requested
+      let pdseScore: number | undefined;
+      if (config.verifyOutput !== false && filesChanged.length > 0) {
+        try {
+          const scores: number[] = [];
+          for (const file of filesChanged) {
+            const content = await readFile(file, "utf-8").catch(() => null);
+            if (content !== null) {
+              const score = runLocalPDSEScorer(content, config.projectRoot);
+              scores.push(score.overall > 1 ? score.overall : score.overall * 100);
+            }
+          }
+          if (scores.length > 0) {
+            pdseScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+          }
+        } catch {
+          // forge unavailable — skip scoring
+        }
+      }
+
+      return {
+        sessionId: `bg-${taskId}`,
+        success: true,
+        output,
+        tokensUsed: 0,
+        durationMs: Date.now() - startMs,
+        filesChanged,
+        ...(pdseScore !== undefined ? { pdseScore } : {}),
+      };
+    } catch (error: unknown) {
+      return {
+        sessionId: `bg-${taskId}`,
+        success: false,
+        output: "",
+        tokensUsed: 0,
+        durationMs: Date.now() - startMs,
+        filesChanged: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+}
+
+async function loadJsonCommandInput(
+  args: string,
+  state: ReplState,
+  usage: string,
+): Promise<unknown> {
+  const filePath = args.trim();
+  if (!filePath) {
+    throw new Error(`Usage: ${usage}`);
+  }
+
+  const resolved = resolve(state.projectRoot, filePath.replace(/^['"]|['"]$/g, ""));
+
+  try {
+    const raw = await readFile(resolved, "utf-8");
+    return JSON.parse(raw) as unknown;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Could not load JSON input from ${relative(state.projectRoot, resolved)}: ${message}`,
+    );
+  }
+}
+
+function parseVerificationRailRecord(
+  record: Record<string, unknown>,
+  context: string,
+): VerificationRail {
+  const requiredSubstrings = readStringArray(record["requiredSubstrings"]);
+  const forbiddenPatterns = readStringArray(record["forbiddenPatterns"]);
+  const mode = record["mode"] === "soft" ? "soft" : record["mode"] === "hard" ? "hard" : undefined;
+
+  return {
+    id: readRequiredString(record, "id", context),
+    name: readRequiredString(record, "name", context),
+    ...(readOptionalString(record, "description")
+      ? { description: readOptionalString(record, "description") }
+      : {}),
+    ...(mode ? { mode } : {}),
+    ...(requiredSubstrings.length > 0 ? { requiredSubstrings } : {}),
+    ...(forbiddenPatterns.length > 0 ? { forbiddenPatterns } : {}),
+    ...(readOptionalNumber(record, "minLength") !== undefined
+      ? { minLength: readOptionalNumber(record, "minLength") }
+      : {}),
+    ...(readOptionalNumber(record, "maxLength") !== undefined
+      ? { maxLength: readOptionalNumber(record, "maxLength") }
+      : {}),
+  };
+}
+
+function parseVerificationCriteria(value: unknown): VerifyOutputInput["criteria"] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const requiredKeywords = readStringArray(value["requiredKeywords"]);
+  const forbiddenPatterns = readStringArray(value["forbiddenPatterns"]);
+  const expectedSections = readStringArray(value["expectedSections"]);
+  const minLength = readOptionalNumber(value, "minLength");
+  const pdseGate = readOptionalNumber(value, "pdseGate");
+  const weightsValue = value["weights"];
+  const weights = isRecord(weightsValue)
+    ? {
+        ...(readOptionalNumber(weightsValue, "faithfulness") !== undefined
+          ? { faithfulness: readOptionalNumber(weightsValue, "faithfulness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "correctness") !== undefined
+          ? { correctness: readOptionalNumber(weightsValue, "correctness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "hallucination") !== undefined
+          ? { hallucination: readOptionalNumber(weightsValue, "hallucination") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "completeness") !== undefined
+          ? { completeness: readOptionalNumber(weightsValue, "completeness") }
+          : {}),
+        ...(readOptionalNumber(weightsValue, "safety") !== undefined
+          ? { safety: readOptionalNumber(weightsValue, "safety") }
+          : {}),
+      }
+    : undefined;
+
+  return {
+    ...(requiredKeywords.length > 0 ? { requiredKeywords } : {}),
+    ...(forbiddenPatterns.length > 0 ? { forbiddenPatterns } : {}),
+    ...(expectedSections.length > 0 ? { expectedSections } : {}),
+    ...(minLength !== undefined ? { minLength } : {}),
+    ...(pdseGate !== undefined ? { pdseGate } : {}),
+    ...(weights && Object.keys(weights).length > 0 ? { weights } : {}),
+  };
+}
+
+function parseVerifyOutputInput(payload: unknown): VerifyOutputInput {
+  if (!isRecord(payload)) {
+    throw new Error("verify-output input must be a JSON object.");
+  }
+
+  const railsValue = payload["rails"];
+  const rails = Array.isArray(railsValue)
+    ? railsValue.map((entry, index) => {
+        if (!isRecord(entry)) {
+          throw new Error(`verify-output rails[${index}] must be an object.`);
+        }
+        return parseVerificationRailRecord(entry, `verify-output rails[${index}]`);
+      })
+    : undefined;
+
+  return {
+    task: readRequiredString(payload, "task", "verify-output input"),
+    output: readRequiredString(payload, "output", "verify-output input"),
+    ...(parseVerificationCriteria(payload["criteria"])
+      ? { criteria: parseVerificationCriteria(payload["criteria"]) }
+      : {}),
+    ...(rails && rails.length > 0 ? { rails } : {}),
+  };
+}
+
+function parseQaSuiteInput(payload: unknown): {
+  planId: string;
+  benchmarkId?: string;
+  outputs: QaSuiteOutputInput[];
+} {
+  if (!isRecord(payload)) {
+    throw new Error("qa-suite input must be a JSON object.");
+  }
+
+  const rawOutputs = payload["outputs"];
+  if (!Array.isArray(rawOutputs) || rawOutputs.length === 0) {
+    throw new Error('qa-suite input must include a non-empty "outputs" array.');
+  }
+
+  const outputs = rawOutputs.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`qa-suite outputs[${index}] must be an object.`);
+    }
+
+    const parsed = parseVerifyOutputInput(entry);
+    return {
+      id: readOptionalString(entry, "id") ?? `output-${index + 1}`,
+      ...parsed,
+    };
+  });
+
+  return {
+    planId: readRequiredString(payload, "planId", "qa-suite input"),
+    ...(readOptionalString(payload, "benchmarkId")
+      ? { benchmarkId: readOptionalString(payload, "benchmarkId") }
+      : {}),
+    outputs,
+  };
+}
+
+function parseCriticDebateInput(payload: unknown): { opinions: CriticOpinion[]; output?: string } {
+  if (!isRecord(payload)) {
+    throw new Error("critic-debate input must be a JSON object.");
+  }
+
+  const rawOpinions = payload["subagents"] ?? payload["opinions"] ?? payload["agents"];
+  if (!Array.isArray(rawOpinions) || rawOpinions.length === 0) {
+    throw new Error('critic-debate input must include a non-empty "subagents" array.');
+  }
+
+  const opinions = rawOpinions.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`critic-debate subagents[${index}] must be an object.`);
+    }
+
+    const verdict = readRequiredString(entry, "verdict", `critic-debate subagents[${index}]`);
+    if (verdict !== "pass" && verdict !== "warn" && verdict !== "fail") {
+      throw new Error(`critic-debate subagents[${index}] verdict must be pass, warn, or fail.`);
+    }
+
+    const findings = readStringArray(entry["findings"]);
+    const confidence = readOptionalNumber(entry, "confidence");
+    return {
+      agentId:
+        readOptionalString(entry, "agentId") ??
+        readOptionalString(entry, "id") ??
+        `critic-${index + 1}`,
+      verdict,
+      ...(confidence !== undefined ? { confidence } : {}),
+      ...(findings.length > 0 ? { findings } : {}),
+      ...(readOptionalString(entry, "critique")
+        ? { critique: readOptionalString(entry, "critique") }
+        : {}),
+    } satisfies CriticOpinion;
+  });
+
+  return {
+    opinions,
+    ...(readOptionalString(payload, "output")
+      ? { output: readOptionalString(payload, "output") }
+      : {}),
+  };
+}
+
+function parseVerificationHistoryArgs(args: string): {
+  limit: number;
+  kind?: VerificationHistoryKind;
+} {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return { limit: 10 };
+  }
+
+  const kindMatch = trimmed.match(/--kind\s+([^\s]+)/);
+  const kindCandidate = kindMatch?.[1] as VerificationHistoryKind | undefined;
+  const kind =
+    kindCandidate &&
+    ["verify_output", "qa_suite", "critic_debate", "verification_rail"].includes(kindCandidate)
+      ? kindCandidate
+      : undefined;
+
+  const limitMatch = trimmed.match(/\b(\d+)\b/);
+  const limit = limitMatch ? Math.max(1, Math.min(Number(limitMatch[1]), 50)) : 10;
+  return kind ? { limit, kind } : { limit };
+}
+
+async function persistVerificationTelemetry(
+  state: ReplState,
+  input: {
+    kind: VerificationHistoryKind;
+    label: string;
+    summary: string;
+    payload: Record<string, unknown>;
+    passed?: boolean;
+    pdseScore?: number;
+    averageConfidence?: number;
+    auditType: "verification_run" | "qa_suite_run" | "critic_debate_run" | "verification_rail_add";
+  },
+): Promise<string[]> {
+  const warnings: string[] = [];
+  const historyStore = new VerificationHistoryStore(state.projectRoot);
+
+  try {
+    await historyStore.append({
+      kind: input.kind,
+      source: "cli",
+      label: input.label,
+      summary: input.summary,
+      sessionId: state.session.id,
+      ...(input.passed !== undefined ? { passed: input.passed } : {}),
+      ...(input.pdseScore !== undefined ? { pdseScore: input.pdseScore } : {}),
+      ...(input.averageConfidence !== undefined
+        ? { averageConfidence: input.averageConfidence }
+        : {}),
+      payload: input.payload,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`History persistence failed: ${message}`);
+  }
+
+  try {
+    await appendAuditEvent(state.projectRoot, {
+      sessionId: state.session.id,
+      type: input.auditType,
+      payload: input.payload,
+      modelId: state.session.model.modelId,
+      projectRoot: state.projectRoot,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (input.pdseScore !== undefined && input.auditType !== "critic_debate_run") {
+      await appendAuditEvent(state.projectRoot, {
+        sessionId: state.session.id,
+        type: input.passed ? "pdse_gate_pass" : "pdse_gate_fail",
+        payload: {
+          score: input.pdseScore,
+          source: input.kind,
+          label: input.label,
+        },
+        modelId: state.session.model.modelId,
+        projectRoot: state.projectRoot,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`Audit logging failed: ${message}`);
+  }
+
+  return warnings;
+}
+
+async function persistVerificationBenchmark(
+  state: ReplState,
+  input: {
+    benchmarkId: string;
+    planId: string;
+    passed: boolean;
+    averagePdseScore: number;
+    outputCount: number;
+    failingOutputIds: string[];
+    payload: Record<string, unknown>;
+  },
+): Promise<string[]> {
+  const warnings: string[] = [];
+  const store = new VerificationBenchmarkStore(state.projectRoot);
+
+  try {
+    await store.append({
+      benchmarkId: input.benchmarkId,
+      planId: input.planId,
+      source: "cli",
+      passed: input.passed,
+      averagePdseScore: input.averagePdseScore,
+      outputCount: input.outputCount,
+      failingOutputIds: input.failingOutputIds,
+      payload: input.payload,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`Benchmark persistence failed: ${message}`);
+  }
+
+  return warnings;
+}
+
 // ----------------------------------------------------------------------------
 // Command Implementations
 // ----------------------------------------------------------------------------
 
-async function helpCommand(_args: string, _state: ReplState): Promise<string> {
+async function helpCommand(_args: string, state: ReplState): Promise<string> {
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
   const lines = ["", `${BOLD}Available Slash Commands${RESET}`, ""];
 
-  for (const cmd of SLASH_COMMANDS) {
-    lines.push(`  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`);
+  for (const cmd of registry) {
+    const sourceLabel = cmd.source === "native" ? "native" : "markdown";
+    lines.push(
+      `  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description} [${sourceLabel}]${RESET}`,
+    );
   }
 
   lines.push("");
@@ -231,6 +796,45 @@ async function helpCommand(_args: string, _state: ReplState): Promise<string> {
     `${DIM}Type a command with / prefix, or type naturally to chat with the agent.${RESET}`,
   );
   lines.push("");
+
+  return lines.join("\n");
+}
+
+async function resumeCommand(args: string, state: ReplState): Promise<string> {
+  const requestedRunId = args.trim() || undefined;
+  const store = new DurableRunStore(state.projectRoot);
+  const run = requestedRunId
+    ? await store.loadRun(requestedRunId)
+    : await store.getLatestWaitingUserRun();
+
+  if (!run) {
+    return `${YELLOW}No paused durable run found.${RESET}`;
+  }
+
+  state.pendingAgentPrompt = "continue";
+  state.pendingResumeRunId = run.id;
+  state.pendingExpectedWorkflow = run.workflow;
+
+  const hint = await store.getResumeHint(run.id);
+  const nextAction = hint?.nextAction ?? run.nextAction ?? "Resume from the last checkpoint.";
+  return `${GREEN}Queued durable run ${run.id} for resume.${RESET}\n${DIM}${nextAction}${RESET}`;
+}
+
+async function runsCommand(_args: string, state: ReplState): Promise<string> {
+  const store = new DurableRunStore(state.projectRoot);
+  const runs = await store.listRuns();
+
+  if (runs.length === 0) {
+    return `${DIM}No durable runs found for this project.${RESET}`;
+  }
+
+  const lines = [`${BOLD}Durable Runs${RESET}`, ""];
+  for (const run of runs) {
+    const source = run.legacySource ? ` (${run.legacySource})` : "";
+    lines.push(
+      `  ${CYAN}${run.id}${RESET} ${run.status.padEnd(12)} ${DIM}${run.workflow}${source}${RESET}`,
+    );
+  }
 
   return lines.join("\n");
 }
@@ -499,6 +1103,326 @@ async function qaCommand(_args: string, state: ReplState): Promise<string> {
   }
 }
 
+async function verifyOutputCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/verify-output <input.json>");
+    const input = parseVerifyOutputInput(payload);
+    const report = verifyOutput(input);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "verify_output",
+      auditType: "verification_run",
+      label: shorten(input.task, 72),
+      summary: report.overallPassed ? "verify_output passed" : "verify_output failed",
+      passed: report.overallPassed,
+      pdseScore: report.pdseScore,
+      payload: {
+        task: input.task,
+        passed: report.overallPassed,
+        pdseScore: report.pdseScore,
+        warnings: report.warnings,
+        failingRails: report.railFindings
+          .filter((finding) => !finding.passed)
+          .map((finding) => finding.railName),
+      },
+    });
+
+    const lines = [
+      `${BOLD}Verification Output${RESET} ${formatPassFail(report.overallPassed)}`,
+      "",
+      `  Task:        ${shorten(input.task, 80)}`,
+      `  PDSE Score:  ${report.passedGate ? GREEN : RED}${formatFraction(report.pdseScore)}${RESET}`,
+      `  Rail checks: ${report.railFindings.length}`,
+      "",
+      `  ${BOLD}Metrics${RESET}`,
+      ...report.metrics.map(
+        (metric) =>
+          `    ${metric.passed ? GREEN : RED}${metric.name.padEnd(14)}${RESET} ${formatFraction(metric.score)} ${DIM}${metric.reason}${RESET}`,
+      ),
+      "",
+      `  ${BOLD}Critique Trace${RESET}`,
+      ...report.critiqueTrace.map(
+        (stage) =>
+          `    ${stage.passed ? GREEN : RED}${stage.stage.padEnd(10)}${RESET} ${DIM}${stage.summary}${RESET}`,
+      ),
+    ];
+
+    if (report.warnings.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Warnings${RESET}`);
+      lines.push(...report.warnings.map((warning) => `    ${YELLOW}- ${warning}${RESET}`));
+    }
+
+    // VerificationSuiteRunner: run a one-shot suite and display confidence decision
+    try {
+      const suiteRunner = new VerificationSuiteRunner();
+      const suiteReport = await suiteRunner.run({
+        label: `verify-output: ${shorten(input.task, 60)}`,
+        cases: [
+          {
+            id: "primary",
+            label: "Primary check",
+            kind: "custom",
+            task: input.task,
+            output: input.output,
+            ...(input.criteria ? { criteria: input.criteria } : {}),
+            ...(input.rails ? { rails: input.rails } : {}),
+          },
+        ],
+      });
+
+      const primaryResult = suiteReport.results[0];
+      if (primaryResult) {
+        const synthesis: ConfidenceSynthesisResult = primaryResult.synthesis;
+        const decisionColor =
+          synthesis.decision === "pass" ? GREEN : synthesis.decision === "soft-pass" ? YELLOW : RED;
+        lines.push("");
+        lines.push(`  ${BOLD}Confidence Decision${RESET}`);
+        lines.push(
+          `    Decision:   ${decisionColor}${synthesis.decision.toUpperCase()}${RESET}  ${DIM}(confidence ${(synthesis.confidence * 100).toFixed(0)}%)${RESET}`,
+        );
+        if (synthesis.reasons.length > 0) {
+          lines.push(`    Reasons:`);
+          for (const reason of synthesis.reasons.slice(0, 5)) {
+            lines.push(`      ${RED}- ${reason}${RESET}`);
+          }
+        }
+        if (synthesis.softWarnings.length > 0) {
+          lines.push(`    Warnings:`);
+          for (const warning of synthesis.softWarnings.slice(0, 3)) {
+            lines.push(`      ${YELLOW}- ${warning}${RESET}`);
+          }
+        }
+      }
+    } catch {
+      // VerificationSuiteRunner errors must not break the existing command output
+    }
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function qaSuiteCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/qa-suite <input.json>");
+    const { planId, benchmarkId, outputs } = parseQaSuiteInput(payload);
+    const report = runQaSuite(planId, outputs);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "qa_suite",
+      auditType: "qa_suite_run",
+      label: shorten(planId, 72),
+      summary: report.overallPassed ? "qa_suite passed" : "qa_suite failed",
+      passed: report.overallPassed,
+      pdseScore: report.averagePdseScore,
+      payload: {
+        planId: report.planId,
+        passed: report.overallPassed,
+        averagePdseScore: report.averagePdseScore,
+        failingOutputIds: report.failingOutputIds,
+        outputCount: report.outputReports.length,
+      },
+    });
+    const benchmarkWarnings = await persistVerificationBenchmark(state, {
+      benchmarkId: benchmarkId ?? planId,
+      planId: report.planId,
+      passed: report.overallPassed,
+      averagePdseScore: report.averagePdseScore,
+      outputCount: report.outputReports.length,
+      failingOutputIds: report.failingOutputIds,
+      payload: {
+        outputIds: report.outputReports.map((entry) => entry.id),
+      },
+    });
+
+    const lines = [
+      `${BOLD}QA Suite${RESET} ${formatPassFail(report.overallPassed)}`,
+      "",
+      `  Plan:         ${report.planId}`,
+      `  Outputs:      ${report.outputReports.length}`,
+      `  Avg PDSE:     ${report.averagePdseScore >= 0.85 ? GREEN : YELLOW}${formatFraction(report.averagePdseScore)}${RESET}`,
+      `  Failing IDs:  ${report.failingOutputIds.length > 0 ? report.failingOutputIds.join(", ") : `${GREEN}none${RESET}`}`,
+      "",
+      `  ${BOLD}Per Output${RESET}`,
+      ...report.outputReports.map(
+        (entry) =>
+          `    ${entry.report.overallPassed ? GREEN : RED}${entry.id.padEnd(14)}${RESET} score=${formatFraction(entry.report.pdseScore)} warnings=${entry.report.warnings.length}`,
+      ),
+    ];
+
+    if (telemetryWarnings.length > 0 || benchmarkWarnings.length > 0) {
+      lines.push("");
+      lines.push(
+        ...[...telemetryWarnings, ...benchmarkWarnings].map(
+          (warning) => `${YELLOW}${warning}${RESET}`,
+        ),
+      );
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function criticDebateCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/critic-debate <input.json>");
+    const { opinions, output } = parseCriticDebateInput(payload);
+    const report = criticDebate(opinions, output);
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "critic_debate",
+      auditType: "critic_debate_run",
+      label: `critic debate (${opinions.length})`,
+      summary: report.summary,
+      averageConfidence: report.averageConfidence,
+      payload: {
+        consensus: report.consensus,
+        averageConfidence: report.averageConfidence,
+        verdictCounts: report.verdictCounts,
+        blockingFindings: report.blockingFindings,
+      },
+    });
+
+    const lines = [
+      `${BOLD}Critic Debate${RESET}`,
+      "",
+      `  Consensus:    ${report.consensus === "pass" ? GREEN : report.consensus === "warn" ? YELLOW : RED}${report.consensus.toUpperCase()}${RESET}`,
+      `  Confidence:   ${formatFraction(report.averageConfidence)}`,
+      `  Verdicts:     pass=${report.verdictCounts.pass} warn=${report.verdictCounts.warn} fail=${report.verdictCounts.fail}`,
+      `  Summary:      ${report.summary}`,
+    ];
+
+    if (report.blockingFindings.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Blocking Findings${RESET}`);
+      lines.push(...report.blockingFindings.map((finding) => `    ${RED}- ${finding}${RESET}`));
+    }
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function addVerificationRailCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const payload = await loadJsonCommandInput(args, state, "/add-verification-rail <input.json>");
+    const rawRail = isRecord(payload) && isRecord(payload["rule"]) ? payload["rule"] : payload;
+    if (!isRecord(rawRail)) {
+      throw new Error('add-verification-rail input must be a rail object or { "rule": { ... } }.');
+    }
+
+    const rail = parseVerificationRailRecord(rawRail, "add-verification-rail input");
+    const added = globalVerificationRailRegistry.addRail(rail);
+    const totalRails = globalVerificationRailRegistry.listRails().length;
+    const telemetryWarnings = await persistVerificationTelemetry(state, {
+      kind: "verification_rail",
+      auditType: "verification_rail_add",
+      label: rail.name,
+      summary: added ? "verification rail added" : "verification rail replaced",
+      passed: true,
+      payload: {
+        railId: rail.id,
+        name: rail.name,
+        mode: rail.mode ?? "hard",
+        totalRails,
+      },
+    });
+
+    const lines = [
+      `${BOLD}Verification Rail${RESET} ${GREEN}${added ? "REGISTERED" : "UPDATED"}${RESET}`,
+      "",
+      `  ID:           ${rail.id}`,
+      `  Name:         ${rail.name}`,
+      `  Mode:         ${rail.mode ?? "hard"}`,
+      `  Total rails:  ${totalRails}`,
+    ];
+
+    if (telemetryWarnings.length > 0) {
+      lines.push("");
+      lines.push(...telemetryWarnings.map((warning) => `${YELLOW}${warning}${RESET}`));
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
+async function verificationHistoryCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const filter = parseVerificationHistoryArgs(args);
+    const store = new VerificationHistoryStore(state.projectRoot);
+    const benchmarkStore = new VerificationBenchmarkStore(state.projectRoot);
+    const [entries, summaries] = await Promise.all([
+      store.list({
+        limit: filter.limit,
+        ...(filter.kind ? { kind: filter.kind } : {}),
+      }),
+      benchmarkStore.summarizeAll(5),
+    ]);
+
+    if (entries.length === 0 && summaries.length === 0) {
+      return `${DIM}No verification history recorded yet.${RESET}`;
+    }
+
+    const lines = [`${BOLD}Verification History${RESET}`, ""];
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        const parts = [
+          new Date(entry.recordedAt).toLocaleString(),
+          entry.kind,
+          entry.passed === undefined ? undefined : entry.passed ? "pass" : "fail",
+          typeof entry.pdseScore === "number"
+            ? `pdse=${formatFraction(entry.pdseScore)}`
+            : undefined,
+          typeof entry.averageConfidence === "number"
+            ? `confidence=${formatFraction(entry.averageConfidence)}`
+            : undefined,
+        ].filter((part): part is string => Boolean(part));
+
+        lines.push(`  ${CYAN}${entry.label}${RESET}`);
+        lines.push(`    ${DIM}${parts.join(" | ")}${RESET}`);
+        lines.push(`    ${entry.summary}`);
+      }
+    }
+
+    if (summaries.length > 0) {
+      lines.push("");
+      lines.push(`  ${BOLD}Benchmark Summary${RESET}`);
+      for (const summary of summaries) {
+        lines.push(`    ${CYAN}${summary.benchmarkId}${RESET}`);
+        lines.push(
+          `      ${DIM}runs=${summary.totalRuns} passRate=${formatFraction(summary.passRate)} avgPdse=${formatFraction(summary.averagePdseScore)}${RESET}`,
+        );
+        if (summary.latestFailingOutputIds.length > 0) {
+          lines.push(`      latest failing: ${summary.latestFailingOutputIds.join(", ")}`);
+        }
+      }
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}${message}${RESET}`;
+  }
+}
+
 async function auditCommand(_args: string, state: ReplState): Promise<string> {
   try {
     const events = await readAuditEvents(state.projectRoot, {
@@ -670,7 +1594,7 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
       "2. Then execute each step ONE AT A TIME with real tool calls.",
       "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
       "4. After each step, verify your work (Read the file, run a check, etc.).",
-      "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+      '5. For GitHub search: `gh search repos "query" --limit 10 --json name,url,description,stargazersCount`',
       "6. For web content: `curl -sL 'url' | head -200`",
       "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
       "8. Mark each TodoWrite step completed as you finish it.",
@@ -697,6 +1621,123 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
     ? `\n${DIM}Detected ${waves.length} waves — Claude Workflow Mode active${RESET}`
     : "";
   return `${GREEN}Activated skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n${DIM}${skill.frontmatter.description}${RESET}${waveInfo}`;
+}
+
+async function skillsListCommand(_args: string, state: ReplState): Promise<string> {
+  const catalog = new SkillCatalog(state.projectRoot);
+  await catalog.load();
+  const entries = catalog.getAll();
+
+  const registry = await listSkills(state.projectRoot);
+  if (entries.length === 0 && registry.length === 0) {
+    return `${DIM}No skills installed. Use '/skill-install <source>' or 'dantecode skills install <source>'.${RESET}`;
+  }
+
+  const lines = [
+    `${BOLD}Installed Skills (${entries.length} catalog + ${registry.length} registry):${RESET}`,
+    "",
+  ];
+
+  if (entries.length > 0) {
+    lines.push(`${BOLD}Catalog Skills:${RESET}`);
+    for (const entry of entries) {
+      const scoreStr =
+        entry.verificationScore !== undefined
+          ? ` ${entry.verificationScore >= 85 ? GREEN : entry.verificationScore >= 70 ? YELLOW : RED}[score:${entry.verificationScore}]${RESET}`
+          : "";
+      const tierStr = entry.verificationTier ? ` ${DIM}[${entry.verificationTier}]${RESET}` : "";
+      lines.push(
+        `  ${YELLOW}${entry.name.padEnd(24)}${RESET} ${DIM}${entry.source}${RESET}${tierStr}${scoreStr} ${entry.description.slice(0, 50)}`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (registry.length > 0) {
+    lines.push(`${BOLD}Registry Skills:${RESET}`);
+    for (const skill of registry) {
+      lines.push(
+        `  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${DIM}${skill.importSource}${RESET} ${skill.description.slice(0, 60)}`,
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function skillInstallCommand(args: string, state: ReplState): Promise<string> {
+  const source = args.trim();
+  if (!source) {
+    return `${RED}Usage: /skill-install <source>${RESET}\n${DIM}source can be a local path, git URL, or HTTP URL${RESET}`;
+  }
+
+  const lines = [`${DIM}Installing skill from: ${source}...${RESET}`];
+  const result = await installSkill({ source, verify: true, tier: "guardian" }, state.projectRoot);
+
+  if (!result.success) {
+    return lines
+      .concat([`${RED}Install failed: ${result.error ?? "unknown error"}${RESET}`])
+      .join("\n");
+  }
+
+  lines.push(`${GREEN}Installed:${RESET} ${BOLD}${result.name}${RESET}`);
+  lines.push(`  ${DIM}Format: ${result.format}${RESET}`);
+  lines.push(`  ${DIM}Path: ${result.installedPath}${RESET}`);
+  if (result.verification) {
+    const tierColor =
+      result.verification.tier === "sovereign"
+        ? GREEN
+        : result.verification.tier === "sentinel"
+          ? YELLOW
+          : DIM;
+    lines.push(
+      `  ${DIM}Verification: ${tierColor}${result.verification.tier}${RESET} ${DIM}(score: ${result.verification.overallScore})${RESET}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+async function skillVerifyCommand(args: string, state: ReplState): Promise<string> {
+  const skillName = args.trim();
+  if (!skillName) {
+    return `${RED}Usage: /skill-verify <name>${RESET}`;
+  }
+
+  const skill = await getSkill(skillName, state.projectRoot);
+  if (!skill) {
+    return `${RED}Skill not found: ${skillName}${RESET}`;
+  }
+
+  const universalSkill = {
+    name: skill.frontmatter.name,
+    description: skill.frontmatter.description,
+    instructions: skill.instructions,
+    source: "claude" as const,
+    sourcePath: skill.sourcePath,
+  };
+
+  const result = await verifySkill(universalSkill, { tier: "guardian" });
+  const lines = [`${BOLD}Verification: ${skill.frontmatter.name}${RESET}`, ""];
+
+  const overallColor =
+    result.tier === "sovereign" ? GREEN : result.tier === "sentinel" ? YELLOW : RED;
+  lines.push(`  Score:  ${overallColor}${result.overallScore}/100${RESET}`);
+  lines.push(`  Tier:   ${overallColor}${result.tier}${RESET}`);
+  lines.push(`  Passed: ${result.passed ? `${GREEN}YES${RESET}` : `${RED}NO${RESET}`}`);
+
+  if (result.findings.length > 0) {
+    lines.push("", `${BOLD}Findings (${result.findings.length}):${RESET}`);
+    for (const f of result.findings) {
+      const icon =
+        f.severity === "critical"
+          ? RED + "CRIT"
+          : f.severity === "warning"
+            ? YELLOW + "WARN"
+            : DIM + "INFO";
+      lines.push(`  ${icon}${RESET} [${f.category}] ${f.message}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 async function agentsCommand(_args: string, state: ReplState): Promise<string> {
@@ -807,21 +1848,186 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
     return `${DIM}Context is small enough (${before} messages) — no compaction needed.${RESET}`;
   }
 
-  // Tier 3 aggressive compaction: keep first message + last 10, replace middle with summary
+  // When DanteMemory is available, use semantic summarization
+  if (state.memoryOrchestrator) {
+    try {
+      const sumResult = await state.memoryOrchestrator.memorySummarize(state.session.id);
+      if (sumResult.compressed && sumResult.summary) {
+        const KEEP_RECENT = 10;
+        const first = state.session.messages[0]!;
+        const recent = state.session.messages.slice(-KEEP_RECENT);
+        const removed = before - KEEP_RECENT - 1;
+        const summaryMsg: SessionMessage = {
+          id: randomUUID(),
+          role: "system",
+          content: `## Session Summary (DanteMemory compact)\n${sumResult.summary}`,
+          timestamp: new Date().toISOString(),
+        };
+        state.session.messages = [first, summaryMsg, ...recent];
+        const savedNote = sumResult.tokensSaved ? ` (~${sumResult.tokensSaved} tokens saved)` : "";
+        return `${GREEN}Compacted (DanteMemory):${RESET} ${before} → ${state.session.messages.length} messages (${removed} removed)${savedNote}`;
+      }
+    } catch {
+      // Fall through to basic compaction
+    }
+  }
+
+  // Fallback: basic slice compaction
   const KEEP_RECENT = 10;
   const first = state.session.messages[0]!;
   const last = state.session.messages.slice(-KEEP_RECENT);
   const removed = before - KEEP_RECENT - 1;
-
   const summaryMsg: SessionMessage = {
     id: randomUUID(),
     role: "system",
     content: `[${removed} earlier messages compacted to save context]`,
     timestamp: new Date().toISOString(),
   };
-
   state.session.messages = [first, summaryMsg, ...last];
   return `${GREEN}Compacted:${RESET} ${before} → ${state.session.messages.length} messages (${removed} removed)`;
+}
+
+async function memoryCommand(args: string, state: ReplState): Promise<string> {
+  if (!state.memoryOrchestrator) {
+    return `${DIM}DanteMemory not initialized. Restart to activate the memory engine.${RESET}`;
+  }
+
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const subcommand = parts[0] ?? "list";
+
+  switch (subcommand) {
+    case "list": {
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const nodes = viz.nodes ?? [];
+        const counts: Record<string, number> = {};
+        for (const node of nodes) {
+          const t = (node as { type?: string }).type ?? "unknown";
+          counts[t] = (counts[t] ?? 0) + 1;
+        }
+        const lines = [
+          `${BOLD}DanteMemory State${RESET}`,
+          ...Object.entries(counts).map(([t, n]) => `  ${t}: ${n}`),
+          "",
+          `${DIM}Use /memory search <query> to retrieve relevant memories${RESET}`,
+          `${DIM}Use /memory stats for capacity info${RESET}`,
+        ];
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error listing memories: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "search": {
+      const query = parts.slice(1).join(" ");
+      if (!query) return `${RED}Usage: /memory search <query>${RESET}`;
+      try {
+        const result = await state.memoryOrchestrator.memoryRecall(query, 10);
+        if (!result.results.length) {
+          return `${DIM}No memories found for: "${query}"${RESET}`;
+        }
+        const lines = [`${BOLD}Semantic Recall:${RESET} "${query}" (${result.latencyMs}ms)\n`];
+        for (const item of result.results) {
+          const summary =
+            item.summary ??
+            (typeof item.value === "string"
+              ? item.value.slice(0, 100)
+              : JSON.stringify(item.value).slice(0, 100));
+          lines.push(`  [${item.scope}] ${item.key}`);
+          lines.push(`    ${DIM}${summary}${RESET}`);
+          lines.push(`    score: ${item.score.toFixed(2)} | recalls: ${item.recallCount}`);
+        }
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error searching memories: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "stats": {
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const nodes = viz.nodes ?? [];
+        const edges = viz.edges ?? [];
+        return [
+          `${BOLD}DanteMemory Statistics${RESET}`,
+          `  Nodes: ${nodes.length}`,
+          `  Edges: ${edges.length}`,
+          `${DIM}Use /memory list for type breakdown${RESET}`,
+        ].join("\n");
+      } catch (e) {
+        return `${RED}Error getting stats: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "forget": {
+      const key = parts.slice(1).join(" ");
+      if (!key) return `${RED}Usage: /memory forget <key>${RESET}`;
+      return `${YELLOW}Memory "${key}" flagged for low-priority. Run /memory prune to clean up low-value entries.${RESET}`;
+    }
+
+    case "export": {
+      const exportPath =
+        parts[1] ?? `dantecode-memory-${new Date().toISOString().slice(0, 10)}.json`;
+      try {
+        const viz = state.memoryOrchestrator.memoryVisualize();
+        const recallAll = await state.memoryOrchestrator.memoryRecall("*", 1000);
+        const exportData = {
+          version: "1.0.0",
+          exportedAt: new Date().toISOString(),
+          projectRoot: state.projectRoot,
+          stats: {
+            nodeCount: (viz.nodes ?? []).length,
+            edgeCount: (viz.edges ?? []).length,
+          },
+          memories: recallAll.results.map((r) => ({
+            key: r.key,
+            scope: r.scope,
+            value: r.value,
+            summary: r.summary,
+            score: r.score,
+            recallCount: r.recallCount,
+          })),
+        };
+        await writeFile(
+          resolve(state.projectRoot, exportPath),
+          JSON.stringify(exportData, null, 2),
+          "utf8",
+        );
+        return `${GREEN}Memory exported to: ${BOLD}${exportPath}${RESET} (${exportData.memories.length} memories)`;
+      } catch (e) {
+        return `${RED}Error exporting memory: ${String(e)}${RESET}`;
+      }
+    }
+
+    case "cross-session": {
+      const goal = parts.slice(1).join(" ") || undefined;
+      try {
+        const result = await state.memoryOrchestrator.crossSessionRecall(goal, 5);
+        if (!result.results.length) {
+          return `${DIM}No cross-session memories found${RESET}`;
+        }
+        const lines = [`${BOLD}Cross-session Recall${RESET}\n`];
+        for (const item of result.results) {
+          const summary = item.summary ?? String(item.value).slice(0, 100);
+          lines.push(`  [${item.scope}] ${item.key}: ${DIM}${summary}${RESET}`);
+        }
+        return lines.join("\n");
+      } catch (e) {
+        return `${RED}Error in cross-session recall: ${String(e)}${RESET}`;
+      }
+    }
+
+    default:
+      return [
+        `${BOLD}/memory subcommands:${RESET}`,
+        `  list            — show memory state overview`,
+        `  search <query>  — semantic search across all memories`,
+        `  stats           — node/edge counts`,
+        `  forget <key>    — mark a memory for low-priority pruning`,
+        `  cross-session   — find memories across past sessions`,
+        `  export [path]   — export all memories to JSON backup`,
+      ].join("\n");
+  }
 }
 
 async function architectCommand(_args: string, state: ReplState): Promise<string> {
@@ -902,17 +2108,110 @@ Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. V
     : `Execute the /oss pipeline now. Start with Phase 0 — scan this project to understand what it does, then search the internet for the most relevant OSS tools in the same domain, clone them, analyze, harvest the best patterns, implement them, and run autoforge to verify everything passes.`;
 
   state.pendingAgentPrompt = prompt;
+  state.pendingExpectedWorkflow = "oss";
 
   return `${GREEN}${BOLD}OSS Research Pipeline activated${RESET}\n${DIM}Scanning project → searching internet → cloning repos → analyzing → implementing → autoforging${RESET}`;
 }
 
-async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
+async function sandboxCommand(args: string, state: ReplState): Promise<string> {
+  const sub = args.trim().toLowerCase();
+
+  // /sandbox status — real enforcement state from DanteSandbox engine
+  if (sub === "status" || sub === "") {
+    const status = await DanteSandbox.status();
+    const modeColor = status.enforced ? GREEN : RED;
+    const dockerStr = status.dockerReady ? `${GREEN}ready${RESET}` : `${RED}unavailable${RESET}`;
+    const worktreeStr = status.worktreeReady
+      ? `${GREEN}ready${RESET}`
+      : `${RED}unavailable${RESET}`;
+    return [
+      `${BOLD}DanteSandbox Status${RESET}`,
+      `  Enforced:    ${modeColor}${status.enforced ? "YES" : "NO"}${RESET}`,
+      `  Mode:        ${BOLD}${status.mode}${RESET}`,
+      `  Preferred:   ${BOLD}${status.preferred}${RESET}`,
+      `  Docker:      ${dockerStr}`,
+      `  Worktree:    ${worktreeStr}`,
+      `  Executions:  ${status.executionCount}`,
+      `  Violations:  ${status.violationCount > 0 ? RED : DIM}${status.violationCount}${RESET}`,
+      `  Host escapes:${status.hostEscapeCount > 0 ? YELLOW : DIM}${status.hostEscapeCount}${RESET}`,
+    ].join("\n");
+  }
+
+  // /sandbox force-docker
+  if (sub === "force-docker") {
+    DanteSandbox.setMode("docker");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}force-docker${RESET} — all executions routed to Docker.`;
+  }
+
+  // /sandbox force-worktree
+  if (sub === "force-worktree") {
+    DanteSandbox.setMode("worktree");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}force-worktree${RESET} — all executions routed to git worktree.`;
+  }
+
+  // /sandbox force-host — loud warning required
+  if (sub === "force-host") {
+    DanteSandbox.setMode("host-escape");
+    return [
+      `${RED}${BOLD}[DanteSandbox WARNING]${RESET} Host escape mode enabled.`,
+      `Commands will run UNSANDBOXED on the host. This is audited.`,
+      `Use /sandbox force-docker or /sandbox force-worktree to re-engage isolation.`,
+    ].join("\n");
+  }
+
+  // /sandbox read-only — worktree isolation (safest, no host writes)
+  if (sub === "read-only") {
+    DanteSandbox.setMode("worktree");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}read-only${RESET} ${DIM}(worktree isolation — no host writes)${RESET}`;
+  }
+
+  // /sandbox workspace-write — auto mode (Docker preferred, worktree fallback)
+  if (sub === "workspace-write") {
+    DanteSandbox.setMode("auto");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}workspace-write${RESET} ${DIM}(auto — Docker preferred, worktree fallback)${RESET}`;
+  }
+
+  // /sandbox full-access — host escape with loud warning
+  if (sub === "full-access") {
+    DanteSandbox.setMode("host-escape");
+    return [
+      `${RED}${BOLD}[DanteSandbox WARNING]${RESET} Full-access mode enabled.`,
+      `Commands will run UNSANDBOXED on the host. This is audited.`,
+      `Use /sandbox read-only or /sandbox workspace-write to re-engage isolation.`,
+    ].join("\n");
+  }
+
+  // /sandbox on|off — toggle (backward compat)
+  if (sub === "off") {
+    if (state.sandboxBridge) {
+      await state.sandboxBridge.shutdown();
+      state.sandboxBridge = null;
+    }
+    state.enableSandbox = false;
+    DanteSandbox.setMode("off");
+    return `${BOLD}Sandbox mode:${RESET} ${RED}OFF${RESET} ${DIM}(legacy compat only)${RESET}`;
+  }
+
+  if (sub === "on") {
+    const bridge = new SandboxBridge(state.projectRoot, state.verbose);
+    const dockerAvailable = await bridge.isAvailable();
+    state.sandboxBridge = bridge;
+    state.enableSandbox = true;
+    DanteSandbox.setMode("auto");
+    if (dockerAvailable) {
+      return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker + DanteSandbox enforcement active)${RESET}`;
+    }
+    return `${BOLD}Sandbox mode:${RESET} ${YELLOW}ON (worktree fallback)${RESET} ${DIM}(Docker unavailable)${RESET}`;
+  }
+
+  // Default: toggle on/off (original behavior)
   if (state.enableSandbox) {
     if (state.sandboxBridge) {
       await state.sandboxBridge.shutdown();
     }
     state.sandboxBridge = null;
     state.enableSandbox = false;
+    DanteSandbox.setMode("off");
     return `${BOLD}Sandbox mode:${RESET} ${RED}OFF${RESET}`;
   }
 
@@ -920,12 +2219,13 @@ async function sandboxCommand(_args: string, state: ReplState): Promise<string> 
   const dockerAvailable = await bridge.isAvailable();
   state.sandboxBridge = bridge;
   state.enableSandbox = true;
+  DanteSandbox.setMode("auto");
 
   if (dockerAvailable) {
-    return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker isolation active for the next tool run)${RESET}`;
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker isolation + DanteSandbox enforcement active)${RESET}`;
   }
 
-  return `${BOLD}Sandbox mode:${RESET} ${YELLOW}HOST FALLBACK${RESET} ${DIM}(Docker unavailable; commands will run on the host until sandbox support is restored)${RESET}`;
+  return `${BOLD}Sandbox mode:${RESET} ${YELLOW}HOST FALLBACK${RESET} ${DIM}(Docker unavailable; worktree isolation in use)${RESET}`;
 }
 
 async function silentCommand(_args: string, state: ReplState): Promise<string> {
@@ -945,6 +2245,7 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   if (selfImprove && !state.lastEditFile && state.session.activeFiles.length === 0) {
     state.pendingAgentPrompt =
       "/autoforge --self-improve improve codebase reliability from the repository root. Run repo-root typecheck, lint, and test after every major edit batch and stop on red.";
+    state.pendingExpectedWorkflow = "autoforge";
     return `${GREEN}${BOLD}Self-improvement autoforge queued.${RESET}\n${DIM}The next agent loop will run with explicit protected-write access.${RESET}`;
   }
 
@@ -1362,19 +2663,19 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
         `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
         `  Iterations: ${result.iterations}`,
-        `  Lanes used: ${result.outputs.map((o) => o.lane).join(", ")}`,
+        `  Lanes used: ${result.outputs.map((o) => o.role).join(", ")}`,
         "",
       ];
 
       for (const output of result.outputs) {
         const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
         lines.push(
-          `  ${BOLD}${output.lane.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
+          `  ${BOLD}${output.role.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
         );
       }
 
       const combinedContent = result.outputs
-        .map((o) => `## ${o.lane} (PDSE: ${o.pdseScore})\n\n${o.content}`)
+        .map((o) => `## ${o.role} (PDSE: ${o.pdseScore})\n\n${o.content}`)
         .join("\n\n---\n\n");
 
       state.session.messages.push({
@@ -1718,6 +3019,458 @@ async function mcpCommand(_args: string, state: ReplState): Promise<string> {
 
   lines.push("", `${DIM}Total: ${tools.length} MCP tools available to the agent.${RESET}`);
   return lines.join("\n");
+}
+
+async function gitWatchCommand(args: string, state: ReplState): Promise<string> {
+  let trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const watchers = await listGitWatchers(state.projectRoot);
+    if (watchers.length === 0) {
+      return `${DIM}No Git watchers registered. Start one with /git-watch <eventType> [path].${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Git Watchers${RESET}`, ""];
+    for (const watcher of watchers) {
+      lines.push(
+        `  ${GREEN}${watcher.id}${RESET} ${DIM}${watcher.status}${RESET} ${watcher.eventType} ${watcher.targetPath ?? "."}`,
+      );
+      lines.push(`    ${DIM}events=${watcher.eventCount} updated=${watcher.updatedAt}${RESET}`);
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopGitWatcher(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped Git watcher ${stopMatch[1]}.${RESET}`
+      : `${RED}Git watcher not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  const workflowPath = readFlagValue(trimmed, "--workflow");
+  trimmed = stripFlagWithValue(trimmed, "--workflow");
+  const eventFile = readFlagValue(trimmed, "--event");
+  trimmed = stripFlagWithValue(trimmed, "--event");
+  const [eventTypeToken, ...rest] = trimmed.split(/\s+/);
+  const eventType = eventTypeToken as GitEventType | undefined;
+  if (
+    eventType !== "post-commit" &&
+    eventType !== "pre-push" &&
+    eventType !== "branch-update" &&
+    eventType !== "file-change"
+  ) {
+    return `${RED}Usage: /git-watch [list | stop <id> | <post-commit|pre-push|branch-update|file-change> [path] [--workflow path] [--event event.json]]${RESET}`;
+  }
+
+  const targetPath = rest.join(" ").trim() || undefined;
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+  const watcher = watchGitEvents(eventType, targetPath, { cwd: state.projectRoot });
+  watcher.on("event", (event) => {
+    const data = event as { type: string; data: { relativePath: string } };
+    if (workflowPath) {
+      const orchestrator = getGitAutomationOrchestrator(state);
+      void orchestrator
+        .runWorkflowInBackground({
+          workflowPath,
+          eventPayload: {
+            ...(eventPayload ?? {}),
+            eventName: data.type,
+            watchId: watcher.id,
+            relativePath: data.data.relativePath,
+          },
+          trigger: {
+            kind: "watch",
+            sourceId: watcher.id,
+            label: `${data.type} ${data.data.relativePath}`,
+          },
+        })
+        .then((queued) => {
+          process.stdout.write(
+            `${DIM}[git-watch ${watcher.id}] queued ${queued.executionId} for ${data.type} ${data.data.relativePath}${RESET}\n`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          process.stdout.write(
+            `${RED}[git-watch ${watcher.id}] automation failed: ${message}${RESET}\n`,
+          );
+        });
+      return;
+    }
+
+    process.stdout.write(
+      `${DIM}[git-watch ${watcher.id}] ${data.type} ${data.data.relativePath}${RESET}\n`,
+    );
+  });
+
+  return [
+    "",
+    `${GREEN}${BOLD}Git Watcher Started${RESET}`,
+    `  ID:        ${watcher.id}`,
+    `  Event:     ${eventType}`,
+    `  Target:    ${targetPath ?? "."}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    `  Project:   ${state.projectRoot}`,
+    "",
+  ].join("\n");
+}
+
+async function runWorkflowCommand(args: string, state: ReplState): Promise<string> {
+  let trimmed = args.trim();
+  if (!trimmed) {
+    return `${RED}Usage: /run-workflow <workflowPath> [event.json] [--background]${RESET}`;
+  }
+
+  const background = hasFlag(trimmed, "--background");
+  trimmed = stripFlag(trimmed, "--background");
+  const [workflowPath, eventFile] = trimmed.split(/\s+/, 2);
+  if (!workflowPath) {
+    return `${RED}Usage: /run-workflow <workflowPath> [event.json] [--background]${RESET}`;
+  }
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+
+  if (background) {
+    const queued = await getGitAutomationOrchestrator(state).runWorkflowInBackground({
+      workflowPath,
+      eventPayload,
+      trigger: {
+        kind: "manual",
+        label: "CLI /run-workflow",
+      },
+    });
+
+    return [
+      "",
+      `${GREEN}${BOLD}Workflow Queued${RESET}`,
+      `  Execution: ${queued.executionId}`,
+      `  Task:      ${queued.backgroundTaskId}`,
+      `  Workflow:  ${workflowPath}`,
+      "",
+    ].join("\n");
+  }
+
+  const result = await getGitAutomationOrchestrator(state).runWorkflow({
+    workflowPath,
+    eventPayload,
+    trigger: {
+      kind: "manual",
+      label: "CLI /run-workflow",
+    },
+  });
+
+  const lines = [
+    "",
+    `${BOLD}Workflow Run${RESET}`,
+    `  Name:      ${result.workflowName ?? workflowPath}`,
+    `  Status:    ${formatPassFail(result.status === "completed")}`,
+    `  Gate:      ${result.gateStatus}`,
+    `  Execution: ${result.id}`,
+  ];
+  if (result.modifiedFiles.length > 0) {
+    lines.push(`  Files:     ${result.modifiedFiles.join(", ")}`);
+  }
+  if (typeof result.pdseScore === "number") {
+    lines.push(`  PDSE:      ${formatFraction(result.pdseScore)}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+async function autoPrCommand(args: string, state: ReplState): Promise<string> {
+  let remaining = args.trim();
+  if (!remaining) {
+    return `${RED}Usage: /auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]${RESET}`;
+  }
+
+  const background = hasFlag(remaining, "--background");
+  remaining = stripFlag(remaining, "--background");
+  const draft = hasFlag(remaining, "--draft");
+  remaining = stripFlag(remaining, "--draft");
+  const bodyFile = readFlagValue(remaining, "--body-file");
+  remaining = stripFlagWithValue(remaining, "--body-file");
+  const base = readFlagValue(remaining, "--base");
+  remaining = stripFlagWithValue(remaining, "--base");
+
+  const changesetMatch = remaining.match(/--changeset\s+(patch|minor|major):([^\s]+)/);
+  let changesetFiles: string[] = [];
+  if (changesetMatch?.[0]) {
+    remaining = remaining.replace(changesetMatch[0], " ").trim();
+  }
+
+  const title = remaining.trim();
+  if (!title) {
+    return `${RED}A PR title is required.${RESET}`;
+  }
+
+  const body = bodyFile ? await readFile(resolve(state.projectRoot, bodyFile), "utf-8") : "";
+
+  if (changesetMatch?.[1] && changesetMatch[2]) {
+    const packages = changesetMatch[2]
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const changeset = await addChangeset(
+      changesetMatch[1] as "patch" | "minor" | "major",
+      packages,
+      title,
+      { cwd: state.projectRoot },
+    );
+    if (!changeset.success || !changeset.filePath) {
+      return `${RED}Changeset generation failed: ${changeset.error ?? "Unknown error"}${RESET}`;
+    }
+    changesetFiles = [changeset.filePath];
+  }
+
+  const orchestrator = getGitAutomationOrchestrator(state);
+  if (background) {
+    const queued = await orchestrator.runAutoPRInBackground({
+      title,
+      body,
+      changesetFiles,
+      options: {
+        cwd: state.projectRoot,
+        ...(base ? { base } : {}),
+        draft,
+      },
+      trigger: {
+        kind: "manual",
+        label: "CLI /auto-pr",
+      },
+    });
+
+    return [
+      "",
+      `${GREEN}${BOLD}Pull Request Queued${RESET}`,
+      `  Execution: ${queued.executionId}`,
+      `  Task:      ${queued.backgroundTaskId}`,
+      `  Title:     ${title}`,
+      "",
+    ].join("\n");
+  }
+
+  const execution = await orchestrator.createPullRequest({
+    title,
+    body,
+    changesetFiles,
+    options: {
+      cwd: state.projectRoot,
+      ...(base ? { base } : {}),
+      draft,
+    },
+    trigger: {
+      kind: "manual",
+      label: "CLI /auto-pr",
+    },
+  });
+
+  if (execution.status !== "completed") {
+    const reason = execution.error ?? execution.summary ?? "Unknown error";
+    return `${RED}PR creation ${execution.status}: ${reason}${RESET}`;
+  }
+
+  return [
+    "",
+    `${GREEN}${BOLD}Pull Request Created${RESET}`,
+    `  ID:        ${execution.id}`,
+    `  URL:       ${execution.prUrl ?? "(gh returned no URL)"}`,
+    `  Base:      ${base ?? "(default)"}`,
+    `  Draft:     ${draft ? "yes" : "no"}`,
+    `  Changeset: ${changesetFiles.length > 0 ? relative(state.projectRoot, changesetFiles[0]!) : "none"}`,
+    "",
+  ].join("\n");
+}
+
+async function webhookListenCommand(args: string, state: ReplState): Promise<string> {
+  const trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const listeners = await listWebhookListeners(state.projectRoot);
+    if (listeners.length === 0) {
+      return `${DIM}No webhook listeners registered. Start one with /webhook-listen [github|gitlab|custom] [port].${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Webhook Listeners${RESET}`, ""];
+    for (const listener of listeners) {
+      lines.push(
+        `  ${GREEN}${listener.id}${RESET} ${DIM}${listener.status}${RESET} ${listener.provider} ${listener.path} port=${listener.port}`,
+      );
+      lines.push(
+        `    ${DIM}received=${listener.receivedCount} updated=${listener.updatedAt}${RESET}`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopWebhookListener(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped webhook listener ${stopMatch[1]}.${RESET}`
+      : `${RED}Webhook listener not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  let remaining = trimmed;
+  const pathFlag = readFlagValue(remaining, "--path");
+  remaining = stripFlagWithValue(remaining, "--path");
+  const portFlag = readFlagValue(remaining, "--port");
+  remaining = stripFlagWithValue(remaining, "--port");
+  const workflowPath = readFlagValue(remaining, "--workflow");
+  remaining = stripFlagWithValue(remaining, "--workflow");
+  const providerToken = remaining.split(/\s+/, 1)[0];
+  const provider =
+    providerToken === "gitlab" || providerToken === "custom" ? providerToken : "github";
+
+  const port = portFlag ? Number(portFlag) : 3000;
+  const listener = new WebhookListener({
+    cwd: state.projectRoot,
+    provider: provider as WebhookProvider,
+    port,
+    path: pathFlag ?? "/webhook",
+    secret:
+      provider === "github"
+        ? process.env.GITHUB_WEBHOOK_SECRET
+        : provider === "gitlab"
+          ? process.env.GITLAB_WEBHOOK_SECRET
+          : process.env.CUSTOM_WEBHOOK_SECRET,
+  });
+  await listener.start();
+  listener.on("any-event", (event) => {
+    const data = event as { event: string; provider: string; payload: Record<string, unknown> };
+    if (workflowPath) {
+      const orchestrator = getGitAutomationOrchestrator(state);
+      void orchestrator
+        .runWorkflowInBackground({
+          workflowPath,
+          eventPayload: {
+            ...data.payload,
+            eventName: data.event,
+          },
+          trigger: {
+            kind: "webhook",
+            sourceId: listener.id,
+            label: `${data.provider}:${data.event}`,
+          },
+        })
+        .then((queued) => {
+          process.stdout.write(
+            `${DIM}[webhook ${listener.id}] queued ${queued.executionId} for ${data.provider}:${data.event}${RESET}\n`,
+          );
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error);
+          process.stdout.write(`${RED}[webhook ${listener.id}] ${message}${RESET}\n`);
+        });
+      return;
+    }
+
+    process.stdout.write(`${DIM}[webhook ${listener.id}] ${data.provider}:${data.event}${RESET}\n`);
+  });
+
+  return [
+    "",
+    `${GREEN}${BOLD}Webhook Listener Started${RESET}`,
+    `  ID:        ${listener.id}`,
+    `  Provider:  ${provider}`,
+    `  Port:      ${listener.port}`,
+    `  Path:      ${pathFlag ?? "/webhook"}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    "",
+  ].join("\n");
+}
+
+async function scheduleGitTaskCommand(args: string, state: ReplState): Promise<string> {
+  const trimmed = args.trim();
+
+  if (!trimmed || trimmed === "list") {
+    const tasks = await listScheduledGitTasks(state.projectRoot);
+    if (tasks.length === 0) {
+      return `${DIM}No scheduled Git tasks registered. Start one with /schedule-git-task <cron|intervalMs> <task>${RESET}`;
+    }
+
+    const lines = ["", `${BOLD}Scheduled Git Tasks${RESET}`, ""];
+    for (const task of tasks) {
+      lines.push(
+        `  ${GREEN}${task.id}${RESET} ${DIM}${task.status}${RESET} ${task.schedule} ${task.taskName}`,
+      );
+      lines.push(`    ${DIM}runs=${task.runCount} next=${task.nextRunAt ?? "unknown"}${RESET}`);
+    }
+    return lines.join("\n");
+  }
+
+  const stopMatch = trimmed.match(/^stop\s+(\S+)$/);
+  if (stopMatch?.[1]) {
+    const stopped = await stopScheduledGitTask(stopMatch[1], state.projectRoot);
+    return stopped
+      ? `${GREEN}Stopped scheduled task ${stopMatch[1]}.${RESET}`
+      : `${RED}Scheduled task not found: ${stopMatch[1]}${RESET}`;
+  }
+
+  let remaining = trimmed;
+  const workflowPath = readFlagValue(remaining, "--workflow");
+  remaining = stripFlagWithValue(remaining, "--workflow");
+  const eventFile = readFlagValue(remaining, "--event");
+  remaining = stripFlagWithValue(remaining, "--event");
+
+  const tokens = remaining.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return `${RED}Usage: /schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]${RESET}`;
+  }
+
+  let scheduleValue: string | number;
+  let taskName: string;
+  if (/^\d+$/.test(tokens[0]!)) {
+    scheduleValue = Number(tokens[0]);
+    taskName = tokens.slice(1).join(" ");
+  } else if (
+    tokens.length >= 6 &&
+    tokens.slice(0, 5).every((token) => /^[\d*/,\-]+$/.test(token))
+  ) {
+    scheduleValue = tokens.slice(0, 5).join(" ");
+    taskName = tokens.slice(5).join(" ");
+  } else {
+    return `${RED}Provide either an interval in milliseconds or a 5-field cron expression.${RESET}`;
+  }
+
+  const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
+  const resolvedTaskName =
+    taskName.trim() || (workflowPath ? `Run workflow ${workflowPath}` : "Scheduled Git task");
+
+  const task = scheduleGitTask(
+    scheduleValue,
+    async () => {
+      if (workflowPath) {
+        await getGitAutomationOrchestrator(state).runWorkflowInBackground({
+          workflowPath,
+          eventPayload,
+          trigger: {
+            kind: "schedule",
+            sourceId: task.id,
+            label: resolvedTaskName,
+          },
+        });
+        return;
+      }
+      process.stdout.write(
+        `${DIM}[schedule ${resolvedTaskName}] fired at ${new Date().toISOString()}${RESET}\n`,
+      );
+    },
+    {
+      cwd: state.projectRoot,
+      taskName: resolvedTaskName,
+      runOnStart: false,
+    },
+  );
+
+  return [
+    "",
+    `${GREEN}${BOLD}Scheduled Git Task Started${RESET}`,
+    `  ID:        ${task.id}`,
+    `  Schedule:  ${task.schedule}`,
+    `  Task:      ${resolvedTaskName}`,
+    `  Workflow:  ${workflowPath ?? "none"}`,
+    "",
+  ].join("\n");
 }
 
 async function listenCommand(args: string, state: ReplState): Promise<string> {
@@ -2083,6 +3836,239 @@ async function searchCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// Session Utilities
+// ----------------------------------------------------------------------------
+
+/**
+ * Converts the live Session object to the ChatSessionFile format used by SessionStore.
+ */
+function sessionToFile(session: Session): ChatSessionFile {
+  const now = new Date().toISOString();
+  return {
+    id: session.id,
+    title: session.name ?? session.id.slice(0, 8),
+    createdAt: session.createdAt,
+    updatedAt: now,
+    model: `${session.model.provider}/${session.model.modelId}`,
+    messages: session.messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      timestamp: m.timestamp ?? now,
+    })),
+    contextFiles: session.activeFiles,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// /name Command
+// ----------------------------------------------------------------------------
+
+async function nameCommand(args: string, state: ReplState): Promise<string> {
+  const name = args.trim();
+  if (!name) {
+    const current = state.session.name ?? state.session.id.slice(0, 8);
+    return `Current session: ${BOLD}${current}${RESET}\nUsage: /name <new-name>`;
+  }
+  state.session.name = name;
+  const store = new SessionStore(state.projectRoot);
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${YELLOW}Session renamed to: ${BOLD}${name}${RESET}\n${DIM}Warning: failed to persist rename — ${msg}${RESET}`;
+  }
+  return `${GREEN}Session renamed to: ${BOLD}${name}${RESET}`;
+}
+
+// ----------------------------------------------------------------------------
+// /export Command
+// ----------------------------------------------------------------------------
+
+async function exportCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/);
+  const format = parts[0] === "md" || parts[0] === "markdown" ? "md" : "json";
+  const defaultName = `session-${state.session.name ?? state.session.id.slice(0, 8)}.${format}`;
+  const outputPath = parts[1] ?? defaultName;
+  const absPath = resolve(state.projectRoot, outputPath);
+
+  try {
+    if (format === "json") {
+      const data = {
+        version: "1.0.0",
+        exportedAt: new Date().toISOString(),
+        session: {
+          id: state.session.id,
+          name: state.session.name,
+          createdAt: state.session.createdAt,
+          model: `${state.session.model.provider}/${state.session.model.modelId}`,
+          messageCount: state.session.messages.length,
+          messages: state.session.messages,
+          activeFiles: state.session.activeFiles,
+          todoList: state.session.todoList,
+        },
+        memoryStats: state.memoryOrchestrator ? state.memoryOrchestrator.memoryVisualize() : null,
+      };
+      await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
+    } else {
+      const lines: string[] = [
+        `# Session: ${state.session.name ?? state.session.id.slice(0, 8)}`,
+        "",
+        `- **Created:** ${state.session.createdAt}`,
+        `- **Model:** ${state.session.model.provider}/${state.session.model.modelId}`,
+        `- **Messages:** ${state.session.messages.length}`,
+        "",
+        "---",
+        "",
+      ];
+      for (const msg of state.session.messages) {
+        const role =
+          msg.role === "user"
+            ? "**You**"
+            : msg.role === "assistant"
+              ? "**DanteCode**"
+              : `*${msg.role}*`;
+        const ts = msg.timestamp ?? "";
+        lines.push(`### ${role} (${ts})`);
+        lines.push("");
+        const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+        lines.push(text.slice(0, 5000));
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+      }
+      await writeFile(absPath, lines.join("\n"), "utf8");
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to export session: ${msg}${RESET}`;
+  }
+
+  return `${GREEN}Session exported to: ${BOLD}${outputPath}${RESET} (${format})`;
+}
+
+// ----------------------------------------------------------------------------
+// /import Command
+// ----------------------------------------------------------------------------
+
+async function importSessionCommand(args: string, state: ReplState): Promise<string> {
+  const filePath = args.trim();
+  if (!filePath) return `${RED}Usage: /import <path-to-session.json>${RESET}`;
+
+  try {
+    const content = await readFile(resolve(state.projectRoot, filePath), "utf8");
+    const data = JSON.parse(content) as Record<string, unknown>;
+
+    const sessionData = data["session"] as Record<string, unknown> | undefined;
+    if (!sessionData || !Array.isArray(sessionData["messages"])) {
+      return `${RED}Invalid session file: missing messages array${RESET}`;
+    }
+
+    const version = typeof data["version"] === "string" ? data["version"] : "0.0.0";
+    if (!version.startsWith("1.")) {
+      state.session.messages.push({
+        id: randomUUID(),
+        role: "system",
+        content: `WARN: session file version ${version} may not be fully compatible`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const importedMessages = sessionData["messages"] as Array<Record<string, unknown>>;
+    const imported = importedMessages.length;
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: `## Imported Session Context\nImported ${imported} messages from ${String(sessionData["name"] ?? sessionData["id"] ?? "unknown")} (${String(sessionData["createdAt"] ?? "unknown date")}).\nOriginal model: ${String(sessionData["model"] ?? "unknown")}.`,
+      timestamp: new Date().toISOString(),
+    });
+
+    const contextSummary = importedMessages
+      .filter((m) => m["role"] === "user" || m["role"] === "assistant")
+      .slice(-20)
+      .map((m) => {
+        const raw = m["content"] ?? "";
+        const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+        return `[${String(m["role"])}]: ${text.slice(0, 500)}`;
+      })
+      .join("\n\n");
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "system",
+      content: `## Previous Session Context\n${contextSummary}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    const sessionName = String(sessionData["name"] ?? sessionData["id"] ?? "unknown").slice(0, 8);
+    return `${GREEN}Imported session: ${BOLD}${sessionName}${RESET} (${imported} messages → context summary injected)`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to import session: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// /branch Command
+// ----------------------------------------------------------------------------
+
+async function branchCommand(args: string, state: ReplState): Promise<string> {
+  const branchName = args.trim() || `branch-${Date.now()}`;
+
+  const store = new SessionStore(state.projectRoot);
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to save parent session before branching: ${msg}${RESET}`;
+  }
+
+  let summary: string;
+  if (state.memoryOrchestrator) {
+    try {
+      const sumResult = await state.memoryOrchestrator.memorySummarize(state.session.id);
+      summary = sumResult.summary ?? `Session with ${state.session.messages.length} messages`;
+    } catch {
+      summary = `Session with ${state.session.messages.length} messages`;
+    }
+  } else {
+    summary = `Session with ${state.session.messages.length} messages`;
+  }
+
+  const oldName = state.session.name ?? state.session.id.slice(0, 8);
+  const recentMessages = state.session.messages.slice(-5);
+
+  state.session.id = randomUUID();
+  state.session.name = branchName;
+  state.session.createdAt = new Date().toISOString();
+  state.session.updatedAt = new Date().toISOString();
+  state.session.messages = [
+    {
+      id: randomUUID(),
+      role: "system",
+      content: `## Branched from: ${oldName}\n\n${summary}\n\n---\n*This is a new branch. The parent session is preserved.*`,
+      timestamp: new Date().toISOString(),
+    },
+    ...recentMessages,
+  ];
+
+  try {
+    await store.save(sessionToFile(state.session));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return (
+      `${GREEN}Session branched: ${BOLD}${oldName}${RESET} → ${BOLD}${branchName}${RESET}\n` +
+      `${YELLOW}Warning: new branch not persisted — ${msg}${RESET}`
+    );
+  }
+
+  return (
+    `${GREEN}Session branched: ${BOLD}${oldName}${RESET} → ${BOLD}${branchName}${RESET}\n` +
+    `${DIM}Parent session preserved. ${state.session.messages.length} messages in new branch (summary + recent).${RESET}`
+  );
+}
+
+// ----------------------------------------------------------------------------
 // History Command
 // ----------------------------------------------------------------------------
 
@@ -2195,11 +4181,710 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// /think — reasoning effort control
+// ----------------------------------------------------------------------------
+
+function formatThinkTier(tier: string): string {
+  switch (tier) {
+    case "quick":
+      return `${CYAN}quick${RESET} (fast, minimal reasoning)`;
+    case "deep":
+      return `${YELLOW}deep${RESET} (step-by-step analysis)`;
+    case "expert":
+      return `${RED}expert${RESET} (full decomposition + verification)`;
+    case "auto":
+      return `${GREEN}auto${RESET} (complexity-driven)`;
+    default:
+      return tier;
+  }
+}
+
+function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | undefined): string {
+  if (!chain) return `${DIM}No reasoning chain active.${RESET}`;
+
+  const steps = chain.getHistory();
+  const tiers = { quick: 0, deep: 0, expert: 0 };
+  let totalCritiques = 0;
+  let escalations = 0;
+  let avgPdse = 0;
+  let pdseCount = 0;
+
+  for (const step of steps) {
+    const content = step.phase.content;
+    if (content.startsWith("Consider the most direct")) tiers.quick++;
+    else if (content.startsWith("Analyze step-by-step")) tiers.deep++;
+    else if (content.startsWith("Deep analysis required")) tiers.expert++;
+    if (step.phase.type === "critique") totalCritiques++;
+    if (step.escalated) escalations++;
+    if (step.phase.pdseScore !== undefined) {
+      avgPdse += step.phase.pdseScore;
+      pdseCount++;
+    }
+  }
+
+  const avg = pdseCount > 0 ? ((avgPdse / pdseCount) * 100).toFixed(0) : "N/A";
+  const tierPerf = chain.getTierPerformance();
+  const perfLines: string[] = [];
+  for (const [t, v] of Object.entries(tierPerf)) {
+    if (v !== undefined) {
+      perfLines.push(`    ${t}: avg PDSE ${(v * 100).toFixed(0)}`);
+    }
+  }
+
+  // PRD §3.5: display distilled playbook bullets when available
+  const playbook = chain.getPlaybook();
+  const playbookSection =
+    playbook.length > 0
+      ? `  Distilled playbook (${playbook.length} bullet${playbook.length === 1 ? "" : "s"}):\n${playbook.map((b) => `    • ${b.slice(0, 100)}`).join("\n")}`
+      : "";
+
+  return [
+    `${BOLD}Reasoning Statistics${RESET}`,
+    `  Total steps: ${steps.length}`,
+    `  Tier distribution: quick=${tiers.quick} deep=${tiers.deep} expert=${tiers.expert}`,
+    `  Critiques: ${totalCritiques}`,
+    `  Auto-escalations: ${escalations}`,
+    `  Average PDSE: ${avg}`,
+    perfLines.length > 0 ? `  Tier performance (>=3 samples):\n${perfLines.join("\n")}` : "",
+    playbookSection,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatThinkChain(
+  chain: import("@dantecode/core").ReasoningChain | undefined,
+  limit: number,
+): string {
+  if (!chain) return `${DIM}No reasoning chain active.${RESET}`;
+
+  const steps = chain.getHistory().slice(-limit);
+  if (steps.length === 0) return `${DIM}Reasoning chain is empty.${RESET}`;
+
+  const lines = [`${BOLD}Reasoning Chain (last ${steps.length} steps)${RESET}`, ""];
+  for (const step of steps) {
+    const icon =
+      step.phase.type === "thinking"
+        ? "💭"
+        : step.phase.type === "critique"
+          ? "🔍"
+          : step.phase.type === "action"
+            ? "⚡"
+            : "👁";
+    const pdse =
+      step.phase.pdseScore !== undefined ? ` P:${(step.phase.pdseScore * 100).toFixed(0)}` : "";
+    const esc = step.escalated ? ` ${YELLOW}↑escalated${RESET}` : "";
+    lines.push(`  ${icon} #${step.stepNumber} [${step.phase.type}]${pdse}${esc}`);
+    lines.push(`    ${DIM}${step.phase.content.slice(0, 120)}${RESET}`);
+    if (step.rootCause) lines.push(`    ${RED}Root cause: ${step.rootCause}${RESET}`);
+    if (step.playbookBullets?.length) {
+      lines.push(`    ${GREEN}Playbook: ${step.playbookBullets[0]}${RESET}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+async function thinkCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+  const isSession = parts.includes("--session");
+
+  if (!sub) {
+    const current = state.reasoningOverride ?? "auto";
+    const budget = state.lastThinkingBudget;
+    const chain = state.reasoningChain;
+    return [
+      `${BOLD}Reasoning Effort${RESET}`,
+      `  Current tier: ${formatThinkTier(current)}`,
+      `  Mode: ${state.reasoningOverride ? "manual override" : "automatic (decideTier)"}`,
+      `  Scope: ${state.reasoningOverrideSession ? "session" : "next prompt only"}`,
+      budget !== undefined ? `  Last thinking budget: ${budget.toLocaleString()} tokens` : "",
+      `  Chain depth: ${chain?.getHistory().length ?? 0} steps`,
+      "",
+      `  ${DIM}Usage: /think [quick|deep|expert|auto] [--session]${RESET}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (sub === "stats") return formatThinkStats(state.reasoningChain);
+  if (sub === "chain") {
+    const limit = Math.max(1, parseInt(parts[1] ?? "10", 10) || 10);
+    return formatThinkChain(state.reasoningChain, limit);
+  }
+
+  const validTiers = ["quick", "deep", "expert", "auto"];
+  if (!validTiers.includes(sub)) {
+    return `${RED}Invalid tier: ${sub}. Options: ${validTiers.join(", ")}${RESET}`;
+  }
+
+  if (sub === "auto") {
+    state.reasoningOverride = undefined;
+    state.reasoningOverrideSession = false;
+    return `${GREEN}Reasoning: automatic tier selection restored${RESET}`;
+  }
+
+  state.reasoningOverride = sub as ReasoningTier;
+  state.reasoningOverrideSession = isSession;
+  const scope = isSession ? "session" : "next prompt";
+  const hint =
+    sub === "expert" ? " (high token usage)" : sub === "quick" ? " (minimal tokens)" : "";
+  return `${GREEN}Reasoning set to ${BOLD}${sub}${RESET}${GREEN} for ${scope}${hint}${RESET}`;
+}
+
+// ----------------------------------------------------------------------------
+// DanteGaslight slash command
+// ----------------------------------------------------------------------------
+
+async function gaslightCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+
+  if (!state.gaslight) {
+    return `${RED}Gaslight integration not active.${RESET}\n${DIM}The integration is always created at REPL startup. Try /gaslight on to enable.${RESET}`;
+  }
+
+  switch (sub) {
+    case "on":
+      return state.gaslight.cmdOn();
+    case "off":
+      return state.gaslight.cmdOff();
+    case "stats":
+      return state.gaslight.cmdStats();
+    case "review":
+      return state.gaslight.cmdReview();
+    case "bridge": {
+      // Bridge is disk-based and async — delegate to the CLI command handler.
+      // Must catch: cmdBridge() throws on error (after Fix A1); process.exit was removed
+      // so errors now propagate as exceptions rather than killing the REPL process.
+      try {
+        await runGaslightCommand(parts, state.projectRoot);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}Gaslight bridge error: ${msg}${RESET}`;
+      }
+      return "";
+    }
+    default:
+      return [
+        `${BOLD}DanteGaslight${RESET} — bounded adversarial refinement engine`,
+        `  ${CYAN}/gaslight on${RESET}        Enable the engine (default: off)`,
+        `  ${CYAN}/gaslight off${RESET}       Disable the engine`,
+        `  ${CYAN}/gaslight stats${RESET}     Session statistics`,
+        `  ${CYAN}/gaslight review${RESET}    Review last session`,
+        `  ${CYAN}/gaslight bridge${RESET}    Distill PASS session → Skillbook`,
+        `  ${DIM}Trigger: "go deeper", "again but better", "truth mode"${RESET}`,
+      ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteFearSet slash command
+// ----------------------------------------------------------------------------
+
+async function fearsetCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+
+  if (!state.gaslight) {
+    return `${RED}FearSet integration not active.${RESET}\n${DIM}The integration is always created at REPL startup.${RESET}`;
+  }
+
+  switch (sub) {
+    case "on":
+      return state.gaslight.cmdFearSetOn();
+    case "off":
+      return state.gaslight.cmdFearSetOff();
+    case "stats":
+      return state.gaslight.cmdFearSetStats();
+    case "review":
+      return state.gaslight.cmdFearSetReview();
+    case "bridge": {
+      try {
+        await runFearsetCommand(["bridge", ...parts.slice(1)], state.projectRoot);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}FearSet bridge error: ${msg}${RESET}`;
+      }
+      return "";
+    }
+    case "run": {
+      const context = parts.slice(1).join(" ").trim();
+      if (!context) {
+        return `${RED}Usage: /fearset run <decision context>${RESET}\n${DIM}Example: /fearset run "Should we migrate to PostgreSQL?"${RESET}`;
+      }
+      try {
+        const result = await state.gaslight.runFearSet(context);
+        const decColor =
+          result.synthesizedRecommendation?.decision === "go"
+            ? GREEN
+            : result.synthesizedRecommendation?.decision === "no-go"
+              ? RED
+              : YELLOW;
+        const lines = [
+          `${BOLD}FearSet complete${RESET}  ${result.passed ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`}`,
+          `  ID:         ${CYAN}${result.id}${RESET}`,
+          `  Robustness: ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "n/a"})`,
+          `  Columns:    ${result.columns.map((c) => c.name).join(", ")}`,
+        ];
+        if (result.synthesizedRecommendation) {
+          lines.push(
+            `  Decision:   ${decColor}${BOLD}${result.synthesizedRecommendation.decision.toUpperCase()}${RESET}`,
+          );
+          lines.push(`  ${result.synthesizedRecommendation.reasoning.slice(0, 120)}`);
+        }
+        if (result.passed) {
+          lines.push(`${DIM}Run /fearset bridge to distill lessons → Skillbook.${RESET}`);
+        }
+        return lines.join("\n");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}FearSet run error: ${msg}${RESET}`;
+      }
+    }
+    default:
+      return [
+        `${BOLD}DanteFearSet${RESET} — Tim Ferriss Fear-Setting for high-stakes decisions`,
+        `  ${CYAN}/fearset on${RESET}              Enable auto-trigger`,
+        `  ${CYAN}/fearset off${RESET}             Disable FearSet`,
+        `  ${CYAN}/fearset stats${RESET}           Aggregated run statistics`,
+        `  ${CYAN}/fearset review${RESET}          Review last result`,
+        `  ${CYAN}/fearset run <context>${RESET}   One-shot fear-setting analysis`,
+        `  ${CYAN}/fearset bridge${RESET}          Distill PASS results → Skillbook`,
+        `${DIM}Columns: Define→Prevent→Repair+Benefits+Inaction${RESET}`,
+      ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Approval Engine slash commands
+// ----------------------------------------------------------------------------
+
+async function approveCommand(_args: string, _state: ReplState): Promise<string> {
+  // Interactive approval signal — registers a pending approval for the current sandboxed action.
+  // Full interactive wiring is deferred; this confirms the intent to the user.
+  globalApprovalEngine.setPolicy("auto");
+  return `${GREEN}Approval registered.${RESET} ${DIM}The pending sandboxed action has been approved for this session (policy: auto).${RESET}`;
+}
+
+async function denyCommand(_args: string, _state: ReplState): Promise<string> {
+  // Interactive denial signal — registers a denial for the current sandboxed action.
+  globalApprovalEngine.setPolicy("manual");
+  return `${RED}Denial registered.${RESET} ${DIM}The pending sandboxed action has been denied. Policy reset to manual — all actions will prompt.${RESET}`;
+}
+
+async function alwaysAllowCommand(args: string, _state: ReplState): Promise<string> {
+  const pattern = args.trim();
+  if (!pattern) {
+    return `${RED}Usage: /always-allow <pattern>${RESET}\n${DIM}Example: /always-allow npm test${RESET}`;
+  }
+  try {
+    globalApprovalEngine.addAllowRule(pattern);
+    return `${GREEN}Allow rule added:${RESET} ${BOLD}${pattern}${RESET}\n${DIM}Commands matching this pattern will bypass approval prompts.${RESET}`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Invalid pattern: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteReview slash command
+// ----------------------------------------------------------------------------
+
+async function reviewCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const prArg = parts[0];
+
+  if (!prArg || prArg === "--help" || prArg === "-h") {
+    return [
+      `${BOLD}DanteReview${RESET} — DanteForge-powered PR review`,
+      `  ${CYAN}/review <PR#>${RESET}                           Analyze PR without posting`,
+      `  ${CYAN}/review <PR#> --post${RESET}                   Analyze and post review to GitHub`,
+      `  ${CYAN}/review <PR#> --severity=strict|normal|lenient${RESET}`,
+      `  ${DIM}Requires GITHUB_TOKEN environment variable.${RESET}`,
+    ].join("\n");
+  }
+
+  const prNumber = parseInt(prArg, 10);
+  if (isNaN(prNumber) || prNumber <= 0) {
+    return `${RED}Error: /review requires a positive PR number. Got: "${prArg}"${RESET}`;
+  }
+
+  const postComments = parts.includes("--post");
+  const severityArg = parts.find((p) => p.startsWith("--severity="));
+  const severity = (severityArg?.split("=")[1] ?? "normal") as "strict" | "normal" | "lenient";
+
+  try {
+    const { reviewPR, formatReviewOutput } = await import("./commands/review.js");
+    const result = await reviewPR(prNumber, state.projectRoot, {
+      postComments,
+      severity,
+    });
+    return formatReviewOutput(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Review error: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteTriage slash command
+// ----------------------------------------------------------------------------
+
+async function triageCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const issueArg = parts[0];
+
+  if (!issueArg || issueArg === "--help" || issueArg === "-h") {
+    return [
+      `${BOLD}DanteTriage${RESET} — model-assisted GitHub issue triage`,
+      `  ${CYAN}/triage <issue#>${RESET}              Analyze issue (heuristics + LLM)`,
+      `  ${CYAN}/triage <issue#> --post-labels${RESET} Analyze and apply labels`,
+      `  ${CYAN}/triage <issue#> --no-llm${RESET}      Heuristic-only (fast)`,
+      `  ${DIM}Requires GITHUB_TOKEN environment variable.${RESET}`,
+    ].join("\n");
+  }
+
+  const issueNumber = parseInt(issueArg, 10);
+  if (isNaN(issueNumber) || issueNumber <= 0) {
+    return `${RED}Error: /triage requires a positive issue number. Got: "${issueArg}"${RESET}`;
+  }
+
+  const postLabels = parts.includes("--post-labels");
+  const useLLM = !parts.includes("--no-llm");
+
+  try {
+    const { triageIssue, formatTriageOutput } = await import("./commands/triage.js");
+    const result = await triageIssue(issueNumber, state.projectRoot, {
+      postLabels,
+      useLLM,
+    });
+    return formatTriageOutput(result);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Triage error: ${msg}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteFleet slash command
+// ----------------------------------------------------------------------------
+
+/**
+ * Reads .dantecode/agents/*.yaml manifests and returns their names.
+ * Non-fatal: returns empty array if the directory does not exist.
+ */
+async function listAgentManifests(projectRoot: string): Promise<string[]> {
+  const agentsDir = join(projectRoot, ".dantecode", "agents");
+  try {
+    const entries = await readdir(agentsDir);
+    return entries
+      .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
+      .map((f) => f.replace(/\.(yaml|yml)$/, ""));
+  } catch {
+    return [];
+  }
+}
+
+async function fleetCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return [
+      `${BOLD}DanteFleet${RESET} — launch parallel agents to solve a task using Git worktrees`,
+      `  ${CYAN}/fleet <task>${RESET}    Launch builder + reviewer + tester agents in parallel`,
+      ``,
+      `  Each agent gets its own worktree isolation. Results are merged via Council.`,
+      `  Agent manifests are read from ${DIM}.dantecode/agents/*.yaml${RESET}`,
+      ``,
+      `  Examples:`,
+      `    ${DIM}/fleet implement authentication middleware${RESET}`,
+      `    ${DIM}/fleet refactor the database layer with full test coverage${RESET}`,
+    ].join("\n");
+  }
+
+  const task = parts.join(" ");
+  const manifests = await listAgentManifests(state.projectRoot);
+
+  const agentList =
+    manifests.length > 0 ? manifests.join(", ") : "builder, reviewer, tester (default)";
+
+  // Wire up the fleet by queueing a council start via pendingAgentPrompt.
+  // This triggers the agent loop to invoke the council orchestrator with the
+  // named agent roles discovered from .dantecode/agents/.
+  const defaultAgents = manifests.length > 0 ? manifests : ["builder", "reviewer", "tester"];
+  const fleetPrompt = [
+    `Run dantecode council start with the following configuration:`,
+    `  Objective: ${task}`,
+    `  Agents: ${defaultAgents.join(", ")}`,
+    `  Use worktrees for NOMA isolation.`,
+    `  After all agents complete, run council merge --auto then council verify.`,
+    ``,
+    `Use the council CLI commands to orchestrate this multi-agent task.`,
+  ].join("\n");
+
+  state.pendingAgentPrompt = fleetPrompt;
+
+  return [
+    `${GREEN}${BOLD}Fleet launched${RESET} for: ${CYAN}${task}${RESET}`,
+    `  Agents: ${BOLD}${agentList}${RESET}`,
+    `  Manifests: ${manifests.length > 0 ? `${manifests.length} loaded from .dantecode/agents/` : "using defaults"}`,
+    `  Results will be merged via Council orchestrator.`,
+    ``,
+    `${DIM}Handing off to agent loop — type /council status to monitor progress.${RESET}`,
+  ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// DanteLoop slash command — autonomous recurring task
+// ----------------------------------------------------------------------------
+
+async function loopCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return [
+      `${BOLD}DanteLoop${RESET} — autonomous recurring task loop`,
+      `  ${CYAN}/loop [--max=N] <task>${RESET}    Run task autonomously up to N times (default: 5)`,
+      ``,
+      `  The agent will retry the task until it succeeds or reaches max iterations.`,
+      `  Stops on: success, max iterations, or explicit failure.`,
+      ``,
+      `  Examples:`,
+      `    ${DIM}/loop fix all failing tests${RESET}`,
+      `    ${DIM}/loop --max=3 refactor until all types pass${RESET}`,
+    ].join("\n");
+  }
+
+  const maxFlag = parts.find((a) => a.startsWith("--max="));
+  const max = maxFlag ? parseInt(maxFlag.split("=")[1] ?? "5", 10) : 5;
+  const taskParts = parts.filter((a) => !a.startsWith("--"));
+  const task = taskParts.join(" ");
+
+  if (!task) {
+    return `${RED}Usage: /loop [--max=5] <task>${RESET}\n${DIM}Example: /loop fix all failing tests${RESET}`;
+  }
+
+  if (!Number.isFinite(max) || max < 1) {
+    return `${RED}--max must be a positive integer. Got: ${maxFlag?.split("=")[1] ?? "?"}${RESET}`;
+  }
+
+  // Build an autonomous loop prompt that instructs the agent to retry up to max times.
+  const loopPrompt = [
+    `AUTONOMOUS LOOP MODE — max iterations: ${max}`,
+    ``,
+    `Task: ${task}`,
+    ``,
+    `Instructions:`,
+    `1. Attempt the task above.`,
+    `2. After each attempt, evaluate: did the task succeed? (run tests, typecheck, or other verification as appropriate)`,
+    `3. If it succeeded: stop and report LOOP_SUCCESS.`,
+    `4. If it failed and iterations < ${max}: analyze what went wrong, adjust your approach, retry.`,
+    `5. If it failed after ${max} iterations: stop and report LOOP_MAX_REACHED with a summary of attempts.`,
+    ``,
+    `Always use tools to verify your work. Never claim success without evidence.`,
+    `Report format on completion: LOOP_STATUS: <success|failed|max-reached> after <N> iteration(s).`,
+  ].join("\n");
+
+  state.pendingAgentPrompt = loopPrompt;
+
+  return [
+    `${GREEN}${BOLD}Autonomous loop started${RESET}`,
+    `  Task: ${CYAN}${task}${RESET}`,
+    `  Max iterations: ${BOLD}${max}${RESET}`,
+    `  Stop on: success or max iterations`,
+    ``,
+    `${DIM}Handing off to agent loop — the agent will iterate autonomously.${RESET}`,
+  ].join("\n");
+}
+
+async function statusCommand(_args: string, state: ReplState): Promise<string> {
+  const stable = getFeaturesByMaturity("stable");
+  const beta = getFeaturesByMaturity("beta");
+  const experimental = getFeaturesByMaturity("experimental");
+
+  const providerName = state.state.model.default.provider;
+  const modelId = state.state.model.default.modelId;
+
+  const lines: string[] = [
+    "",
+    `${BOLD}DanteCode Status${RESET}`,
+    "",
+    `${DIM}Version:${RESET}  2.0.0`,
+    `${DIM}Provider:${RESET} ${providerName} / ${modelId}`,
+    `${DIM}Project:${RESET}  ${state.projectRoot}`,
+    `${DIM}Sandbox:${RESET}  ${state.enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    `${DIM}Git:${RESET}      ${state.enableGit ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
+    "",
+    `${BOLD}Features${RESET}`,
+    "",
+    `${GREEN}Stable${RESET}`,
+    ...stable.map(
+      (f) => `  ${GREEN}[ok]${RESET} ${f.name.padEnd(20)} ${DIM}${f.description}${RESET}`,
+    ),
+    "",
+    `${YELLOW}Beta${RESET}`,
+    ...beta.map(
+      (f) => `  ${YELLOW}[beta]${RESET} ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
+    ),
+    "",
+    `${DIM}Experimental (opt-in)${RESET}`,
+    ...experimental.map(
+      (f) => `  ${DIM}[exp]${RESET}  ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
+    ),
+    "",
+  ];
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// /theme — Switch terminal theme with live preview
+// ----------------------------------------------------------------------------
+
+const AVAILABLE_THEMES: ThemeName[] = ["default", "minimal", "rich", "matrix", "ocean"];
+
+async function themeCommand(args: string, state: ReplState): Promise<string> {
+  const engine = getThemeEngine();
+  const themeName = args.trim().toLowerCase();
+
+  if (!themeName) {
+    const current = state.theme;
+    const lines = ["Available themes (current: " + BOLD + current + RESET + "):", ""];
+    for (const name of AVAILABLE_THEMES) {
+      engine.setTheme(name as ThemeName);
+      const c = engine.resolve().colors;
+      const indicator = name === current ? GREEN + "*" + RESET : " ";
+      const preview =
+        "  " +
+        c.success +
+        "ok" +
+        c.reset +
+        " " +
+        c.error +
+        "err" +
+        c.reset +
+        " " +
+        c.warning +
+        "warn" +
+        c.reset +
+        " " +
+        c.info +
+        "info" +
+        c.reset +
+        " " +
+        c.muted +
+        "muted" +
+        c.reset;
+      lines.push("  " + indicator + " " + BOLD + name.padEnd(10) + RESET + " " + preview);
+    }
+    engine.setTheme(current);
+    lines.push("");
+    lines.push(DIM + "Usage: /theme <name>" + RESET);
+    return lines.join("\n");
+  }
+
+  if (!AVAILABLE_THEMES.includes(themeName as ThemeName)) {
+    return (
+      RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET
+    );
+  }
+
+  // Always apply visual + in-memory change unconditionally so the user
+  // sees the new theme immediately regardless of disk state.
+  engine.setTheme(themeName as ThemeName);
+  state.theme = themeName as ThemeName;
+
+  let persistNote = "";
+  try {
+    const stateYamlPath = join(state.projectRoot, ".dantecode", "STATE.yaml");
+    const raw = await readFile(stateYamlPath, "utf8").catch(() => "");
+    const updated = raw.includes("theme:")
+      ? raw.replace(/^theme:.*$/m, "theme: " + themeName)
+      : raw + "\ntheme: " + themeName + "\n";
+    await writeFile(stateYamlPath, updated, "utf8");
+  } catch {
+    persistNote = " " + RED + "(not saved — check .dantecode/ permissions)" + RESET;
+  }
+
+  const c = engine.resolve().colors;
+  return [
+    GREEN + "Theme set to " + BOLD + themeName + RESET + persistNote,
+    "",
+    "Preview with " + BOLD + themeName + RESET + ":",
+    "  " + c.success + "verification passed" + c.reset,
+    "  " + c.error + "anti-stub violation" + c.reset,
+    "  " + c.warning + "PDSE score: 78 (below threshold)" + c.reset,
+    "  " + c.info + "model: grok/grok-3" + c.reset,
+    "  " + c.muted + "session: my-session | tokens: 12,450" + c.reset,
+  ].join("\n");
+}
+
+// ----------------------------------------------------------------------------
+// /cost — Show token usage dashboard
+// ----------------------------------------------------------------------------
+
+async function costCommand(_args: string, state: ReplState): Promise<string> {
+  const messages = state.session.messages;
+  let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  const byTool: Record<string, { calls: number; tokens: number }> = {};
+
+  for (const msg of messages) {
+    const t = msg.tokensUsed ?? 0;
+    totalTokens += t;
+    if (msg.role === "user" || msg.role === "tool") {
+      inputTokens += t;
+    } else if (msg.role === "assistant") {
+      outputTokens += t;
+    }
+    if (msg.toolUse && msg.toolUse.name) {
+      const tool = msg.toolUse.name;
+      if (!byTool[tool]) byTool[tool] = { calls: 0, tokens: 0 };
+      byTool[tool].calls++;
+      byTool[tool].tokens += t;
+    }
+  }
+
+  // Also count tool calls tracked in recentToolCalls (stuck-loop detection array).
+  // These carry tool names without per-call token info, so we add call counts only,
+  // merging with any entry already populated from msg.toolUse above.
+  for (const toolName of state.recentToolCalls) {
+    if (!toolName) continue;
+    if (!byTool[toolName]) byTool[toolName] = { calls: 0, tokens: 0 };
+    byTool[toolName].calls++;
+  }
+
+  const modelId = state.state.model.default.provider + "/" + state.state.model.default.modelId;
+  const sessionStart = new Date(state.session.createdAt).getTime();
+  const sessionDurationMs = Date.now() - sessionStart;
+
+  const data = {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    byTool,
+    modelId,
+    contextWindow: 131072,
+    contextUtilization: Math.min(1, totalTokens / 131072),
+    sessionDurationMs,
+  };
+
+  return renderTokenDashboard(data, getThemeEngine());
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
+  {
+    name: "status",
+    description: "Show DanteCode version, features, and health status",
+    usage: "/status",
+    handler: statusCommand,
+  },
   {
     name: "model",
     description: "Switch model mid-session",
@@ -2253,6 +4938,37 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand },
   {
+    name: "verify-output",
+    description: "Run structured output verification from JSON input",
+    usage: "/verify-output <input.json>",
+    handler: verifyOutputCommand,
+  },
+  {
+    name: "qa-suite",
+    description: "Run the QA harness across multiple outputs from JSON input",
+    usage: "/qa-suite <input.json>",
+    handler: qaSuiteCommand,
+  },
+  {
+    name: "critic-debate",
+    description: "Aggregate critic verdicts from JSON input",
+    usage: "/critic-debate <input.json>",
+    handler: criticDebateCommand,
+  },
+  {
+    name: "add-verification-rail",
+    description: "Register an output verification rail from JSON input",
+    usage: "/add-verification-rail <input.json>",
+    handler: addVerificationRailCommand,
+  },
+  {
+    name: "verification-history",
+    description: "Show recent verification reports and benchmark entries",
+    usage:
+      "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
+    handler: verificationHistoryCommand,
+  },
+  {
     name: "audit",
     description: "Show recent audit log entries",
     usage: "/audit",
@@ -2284,6 +5000,24 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: skillCommand,
   },
   {
+    name: "skills",
+    description: "List all installed skills with verification scores",
+    usage: "/skills",
+    handler: skillsListCommand,
+  },
+  {
+    name: "skill-install",
+    description: "Quick install a skill from a path, git URL, or HTTP URL",
+    usage: "/skill-install <source>",
+    handler: skillInstallCommand,
+  },
+  {
+    name: "skill-verify",
+    description: "Run DanteForge verification on an installed skill",
+    usage: "/skill-verify <name>",
+    handler: skillVerifyCommand,
+  },
+  {
     name: "agents",
     description: "List available agents",
     usage: "/agents",
@@ -2302,6 +5036,36 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: compactCommand,
   },
   {
+    name: "memory",
+    description: "Browse, search, and manage persistent memories",
+    usage: "/memory [list|search <q>|stats|forget <key>|cross-session|export [path]]",
+    handler: memoryCommand,
+  },
+  {
+    name: "name",
+    description: "Name or rename the current session",
+    usage: "/name <session-name>",
+    handler: nameCommand,
+  },
+  {
+    name: "export",
+    description: "Export current session to JSON or Markdown",
+    usage: "/export [json|md] [path]",
+    handler: exportCommand,
+  },
+  {
+    name: "import",
+    description: "Import a session from JSON file",
+    usage: "/import <path>",
+    handler: importSessionCommand,
+  },
+  {
+    name: "branch",
+    description: "Fork current session into a new context (preserves history)",
+    usage: "/branch [name]",
+    handler: branchCommand,
+  },
+  {
     name: "architect",
     description: "Toggle plan-first architect mode",
     usage: "/architect",
@@ -2315,8 +5079,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "sandbox",
-    description: "Toggle sandbox mode on/off",
-    usage: "/sandbox",
+    description:
+      "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
+    usage: "/sandbox [status|force-docker|force-worktree|force-host|on|off]",
     handler: sandboxCommand,
   },
   {
@@ -2330,6 +5095,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--self-improve] [--silent] [--persist]",
     handler: autoforgeCommand,
+  },
+  {
+    name: "resume",
+    description: "Queue a paused durable run for continuation",
+    usage: "/resume [runId]",
+    handler: resumeCommand,
+  },
+  {
+    name: "runs",
+    description: "List durable runs and legacy resumable sessions",
+    usage: "/runs",
+    handler: runsCommand,
   },
   {
     name: "oss",
@@ -2348,6 +5125,50 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List MCP servers and tools",
     usage: "/mcp",
     handler: mcpCommand,
+  },
+  {
+    name: "git-watch",
+    description: "Start, list, or stop durable Git event watchers",
+    usage:
+      "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
+    handler: gitWatchCommand,
+  },
+  {
+    name: "run-workflow",
+    description: "Run a local GitHub-style workflow file",
+    usage: "/run-workflow <workflowPath> [event.json] [--background]",
+    handler: runWorkflowCommand,
+  },
+  {
+    name: "auto-pr",
+    description: "Create a PR with optional changeset generation",
+    usage:
+      "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
+    handler: autoPrCommand,
+  },
+  {
+    name: "automate",
+    description: "Unified automation management: dashboard, templates, create, stop, logs",
+    usage:
+      "/automate [dashboard | list | create <type> | template <name> | templates | stop <id> | logs <id>]",
+    handler: async (args: string, state: ReplState) => {
+      getGitAutomationOrchestrator(state); // pre-populate with buildAutomationAgentRunner DI
+      return automateCommand(args, state);
+    },
+  },
+  {
+    name: "webhook-listen",
+    description: "Start, list, or stop local webhook listeners",
+    usage:
+      "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
+    handler: webhookListenCommand,
+  },
+  {
+    name: "schedule-git-task",
+    description: "Start, list, or stop durable scheduled git tasks",
+    usage:
+      "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
+    handler: scheduleGitTaskCommand,
   },
   {
     name: "bg",
@@ -2373,7 +5194,94 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/search <query>",
     handler: searchCommand,
   },
+  {
+    name: "think",
+    description: "Control reasoning effort tier for next prompt or entire session",
+    usage: "/think [quick|deep|expert|auto] [--session] | stats | chain [N]",
+    handler: thinkCommand,
+  },
+  {
+    name: "gaslight",
+    description: "DanteGaslight adversarial refinement — on/off/stats/review/bridge",
+    usage: "/gaslight <on|off|stats|review|bridge>",
+    handler: gaslightCommand,
+  },
+  {
+    name: "fearset",
+    description: "DanteFearSet — Fear-Setting on/off/stats/review/run/bridge",
+    usage: "/fearset <on|off|stats|review|run <context>|bridge>",
+    handler: fearsetCommand,
+  },
+  {
+    name: "research",
+    description:
+      "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
+    usage: "/research <topic or question>",
+    handler: researchSlashHandler,
+  },
+  {
+    name: "review",
+    description: "Review a GitHub PR using DanteForge PDSE + constitutional verification",
+    usage: "/review <PR#> [--post] [--severity=strict|normal|lenient]",
+    handler: reviewCommand,
+  },
+  {
+    name: "triage",
+    description: "Triage a GitHub issue — labels, priority, effort, relevant files",
+    usage: "/triage <issue#> [--post-labels] [--no-llm]",
+    handler: triageCommand,
+  },
+  {
+    name: "approve",
+    description: "Approve the pending sandboxed action",
+    usage: "/approve",
+    handler: approveCommand,
+  },
+  {
+    name: "deny",
+    description: "Deny the pending sandboxed action and reset policy to manual",
+    usage: "/deny",
+    handler: denyCommand,
+  },
+  {
+    name: "always-allow",
+    description: "Add an allow rule to bypass sandbox approval for matching commands",
+    usage: "/always-allow <pattern>",
+    handler: alwaysAllowCommand,
+  },
+  {
+    name: "fleet",
+    description: "Launch parallel agents to solve a task using Git worktrees. Usage: /fleet <task>",
+    usage: "/fleet <task>",
+    handler: fleetCommand,
+  },
+  {
+    name: "loop",
+    description: "Run an autonomous task loop until condition met. Usage: /loop [--max=N] <task>",
+    usage: "/loop [--max=N] <task>",
+    handler: loopCommand,
+  },
+  {
+    name: "theme",
+    description: "Switch terminal theme with live preview",
+    usage: "/theme [name]",
+    handler: themeCommand,
+  },
+  {
+    name: "cost",
+    description: "Show token usage and cost estimate for this session",
+    usage: "/cost",
+    handler: costCommand,
+  },
 ];
+
+function getNativeCommandDefinitions(): NativeSlashCommandDefinition[] {
+  return SLASH_COMMANDS.map((command) => ({
+    name: command.name,
+    description: command.description,
+    usage: command.usage,
+  }));
+}
 
 // ----------------------------------------------------------------------------
 // Public API
@@ -2400,12 +5308,34 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
       : withoutSlash.slice(0, spaceIndex).toLowerCase();
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
-  const command = SLASH_COMMANDS.find((c) => c.name === commandName);
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
+  const command = registry.find((c) => c.name === commandName);
   if (!command) {
     return `${RED}Unknown command: /${commandName}${RESET}\n${DIM}Type /help to see available commands.${RESET}`;
   }
 
-  return command.handler(args, state);
+  if (command.source === "markdown") {
+    state.pendingAgentPrompt = trimmed;
+    state.pendingExpectedWorkflow = command.name;
+    // Load the full workflow contract so the agent loop can inject structured context
+    // (stages, failure/rollback policy) into the system prompt for all models.
+    try {
+      const loaded = await loadWorkflowCommand(state.projectRoot, command.name);
+      if (loaded.command) {
+        state.pendingWorkflowContext = createWorkflowExecutionContext(loaded.command, trimmed);
+      }
+    } catch {
+      // Non-fatal: workflow context enrichment is best-effort
+    }
+    return `${GREEN}Activated markdown-backed workflow /${command.name}.${RESET}\n${DIM}Queued for agent execution using the synced command file.${RESET}`;
+  }
+
+  const nativeCommand = SLASH_COMMANDS.find((c) => c.name === commandName);
+  if (!nativeCommand) {
+    return `${RED}Native command handler missing for /${commandName}.${RESET}`;
+  }
+
+  return nativeCommand.handler(args, state);
 }
 
 /**

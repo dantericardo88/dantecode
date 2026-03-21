@@ -9,6 +9,25 @@
 // Types
 // ----------------------------------------------------------------------------
 
+/**
+ * Warnings produced when activating a skill via the SkillBridge adapter.
+ * Surfaced in the wave prompt preamble for non-green skills.
+ */
+export interface BridgeActivationWarnings {
+  /** The skill name for display. */
+  skillName: string;
+  /** Conversion quality bucket: green = fully compatible, amber = warnings, red = blocked. */
+  bucket: "green" | "amber" | "red";
+  /** Numeric conversion score (0–1). */
+  conversionScore: number;
+  /** Runtime capability gaps detected (e.g., "needs shell", "needs browser"). */
+  runtimeWarnings: string[];
+  /** Warnings emitted during conversion (e.g., "check MCP config"). */
+  conversionWarnings: string[];
+  /** Whether any capability gaps were found. */
+  hasCapabilityGaps: boolean;
+}
+
 /** A single decomposed wave from a skill's instructions. */
 export interface SkillWave {
   /** 1-based wave number. */
@@ -38,8 +57,7 @@ export interface WaveOrchestratorState {
 // ----------------------------------------------------------------------------
 
 /** Regex that splits on wave-like headings in markdown. */
-const WAVE_SPLIT_RE =
-  /^(#{1,4}\s*(?:Wave|Step|Phase)\s+\d+\s*[:\u2014\u2013-]\s*.+)$/gim;
+const WAVE_SPLIT_RE = /^(#{1,4}\s*(?:Wave|Step|Phase)\s+\d+\s*[:\u2014\u2013-]\s*.+)$/gim;
 
 /**
  * Parses skill instructions into discrete waves.
@@ -83,10 +101,7 @@ export function parseSkillWaves(instructions: string): SkillWave[] {
 /**
  * Splits instruction text by detected markers into waves.
  */
-function splitByMarkers(
-  instructions: string,
-  markers: RegExpMatchArray[],
-): SkillWave[] {
+function splitByMarkers(instructions: string, markers: RegExpMatchArray[]): SkillWave[] {
   const waves: SkillWave[] = [];
 
   // Check if there's content before the first marker (preamble)
@@ -104,9 +119,7 @@ function splitByMarkers(
     const title = extractTitle(markerText);
 
     // For the first wave, prepend any preamble content
-    const fullInstructions = i === 0 && preamble.length > 0
-      ? `${preamble}\n\n${body}`
-      : body;
+    const fullInstructions = i === 0 && preamble.length > 0 ? `${preamble}\n\n${body}` : body;
 
     waves.push({
       number: i + 1,
@@ -122,11 +135,13 @@ function splitByMarkers(
  * Extracts a clean title from a heading marker string.
  */
 function extractTitle(marker: string): string {
-  return marker
-    .replace(/^#+\s*/, "")           // Strip heading hashes
-    .replace(/^\d+\.\s*/, "")        // Strip numbered list prefix
-    .replace(/^(?:Wave|Step|Phase)\s+\d+\s*[:\u2014\u2013-]\s*/i, "") // Strip Wave/Step/Phase prefix
-    .trim() || "Untitled";
+  return (
+    marker
+      .replace(/^#+\s*/, "") // Strip heading hashes
+      .replace(/^\d+\.\s*/, "") // Strip numbered list prefix
+      .replace(/^(?:Wave|Step|Phase)\s+\d+\s*[:\u2014\u2013-]\s*/i, "") // Strip Wave/Step/Phase prefix
+      .trim() || "Untitled"
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -136,10 +151,7 @@ function extractTitle(marker: string): string {
 /**
  * Creates a fresh orchestrator state from parsed waves.
  */
-export function createWaveState(
-  waves: SkillWave[],
-  maxRetries = 2,
-): WaveOrchestratorState {
+export function createWaveState(waves: SkillWave[], maxRetries = 2): WaveOrchestratorState {
   return {
     waves,
     currentIndex: 0,
@@ -185,6 +197,63 @@ export function recordWaveFailure(state: WaveOrchestratorState): boolean {
 }
 
 // ----------------------------------------------------------------------------
+// Bridge Warning Helpers
+// ----------------------------------------------------------------------------
+
+/**
+ * Returns true when the runtimeWarnings array has at least one entry.
+ */
+export function hasBridgeCapabilityGaps(runtimeWarnings: string[]): boolean {
+  return runtimeWarnings.length > 0;
+}
+
+/**
+ * Builds a markdown preamble block for skills converted via SkillBridge that
+ * have amber or red quality buckets. Returns an empty string for green skills.
+ */
+export function buildBridgeWarningPreamble(warnings: BridgeActivationWarnings): string {
+  if (warnings.bucket === "green" && !warnings.hasCapabilityGaps) {
+    return "";
+  }
+
+  const lines: string[] = ["## SkillBridge Activation Notice", ""];
+
+  if (warnings.bucket === "red") {
+    lines.push(
+      "> BLOCKED: This skill was classified as BLOCKED during conversion. Manual review is",
+      "> required before execution. Proceed with caution.",
+      "",
+    );
+  } else {
+    lines.push(
+      "> WARNING: This skill was converted with warnings. Some features may behave differently",
+      "> than in the original environment.",
+      "",
+    );
+  }
+
+  if (warnings.runtimeWarnings.length > 0) {
+    lines.push("**Runtime capability gaps:**");
+    for (const w of warnings.runtimeWarnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push("");
+  }
+
+  if (warnings.conversionWarnings.length > 0) {
+    lines.push("**Conversion warnings:**");
+    for (const w of warnings.conversionWarnings) {
+      lines.push(`- ${w}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---\n");
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Prompt Building
 // ----------------------------------------------------------------------------
 
@@ -212,7 +281,7 @@ export const CLAUDE_WORKFLOW_MODE = [
   "- Do NOT summarize, do NOT skip ahead, do NOT claim future waves are done.",
   "",
   "### Tool Recipes (use these via Bash when needed):",
-  "- GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+  '- GitHub search: `gh search repos "query" --limit 10 --json name,url,description,stargazersCount`',
   "- Web fetch: `curl -sL 'url' | head -200`",
   "- Clone repo: `git clone --depth 1 'url' /tmp/oss-scan/name`",
   "- GitHub API: `gh api 'search/repositories?q=query' --jq '.items[:5] | .[].full_name'`",
@@ -223,20 +292,24 @@ export const CLAUDE_WORKFLOW_MODE = [
  * Builds the prompt injection for the current wave.
  * Includes: wave context, current wave instructions, workflow rules.
  */
-export function buildWavePrompt(state: WaveOrchestratorState): string {
+export function buildWavePrompt(
+  state: WaveOrchestratorState,
+  bridgeWarnings?: BridgeActivationWarnings,
+): string {
   const current = getCurrentWave(state);
   if (!current) {
     return "All waves complete. Summarize what was accomplished.";
   }
 
+  // Inject bridge warning preamble on first wave only if bridge skill
+  const bridgePreamble =
+    bridgeWarnings && state.currentIndex === 0 ? buildBridgeWarningPreamble(bridgeWarnings) : "";
+
   const progress = state.completedWaves.length;
   const total = state.waves.length;
   const attempt = state.attempts[current.number] ?? 0;
 
-  const parts: string[] = [
-    `## Current Wave: ${current.number}/${total} — ${current.title}`,
-    "",
-  ];
+  const parts: string[] = [`## Current Wave: ${current.number}/${total} — ${current.title}`, ""];
 
   if (progress > 0) {
     const completed = state.completedWaves
@@ -266,6 +339,9 @@ export function buildWavePrompt(state: WaveOrchestratorState): string {
     "Do NOT proceed to the next wave — it will be provided automatically.",
   );
 
+  if (bridgePreamble.length > 0) {
+    parts.splice(2, 0, bridgePreamble); // insert after header + blank line, before content
+  }
   return parts.join("\n");
 }
 

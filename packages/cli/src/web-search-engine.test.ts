@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  MultiEngineSearch,
-  clearSearchCache,
-  createSearchEngine,
-} from "./web-search-engine.js";
+import { MultiEngineSearch, clearSearchCache, createSearchEngine } from "./web-search-engine.js";
 
 // Mock the @dantecode/core module to avoid real provider initialization
 vi.mock("@dantecode/core", async (importOriginal) => {
@@ -14,8 +10,20 @@ vi.mock("@dantecode/core", async (importOriginal) => {
     createWebSearchOrchestrator: vi.fn(() => ({
       search: vi.fn().mockResolvedValue({
         results: [
-          { title: "Mock Result", url: "https://mock.com/1", snippet: "Mock snippet", source: "mock", rank: 1 },
-          { title: "Mock Result 2", url: "https://mock.com/2", snippet: "Another mock", source: "mock", rank: 2 },
+          {
+            title: "Mock Result",
+            url: "https://mock.com/1",
+            snippet: "Mock snippet",
+            source: "mock",
+            rank: 1,
+          },
+          {
+            title: "Mock Result 2",
+            url: "https://mock.com/2",
+            snippet: "Another mock",
+            source: "mock",
+            rank: 2,
+          },
         ],
         providersUsed: ["mock"],
         totalCost: 0.01,
@@ -25,7 +33,13 @@ vi.mock("@dantecode/core", async (importOriginal) => {
       }),
       chainSearch: vi.fn().mockResolvedValue({
         results: [
-          { title: "Chain Result", url: "https://chain.com/1", snippet: "Chain snippet", source: "mock", rank: 1 },
+          {
+            title: "Chain Result",
+            url: "https://chain.com/1",
+            snippet: "Chain snippet",
+            source: "mock",
+            rank: 1,
+          },
         ],
         providersUsed: ["mock"],
         totalCost: 0.02,
@@ -35,7 +49,13 @@ vi.mock("@dantecode/core", async (importOriginal) => {
       }),
       agenticSearch: vi.fn().mockResolvedValue({
         results: [
-          { title: "Agentic Result", url: "https://agentic.com/1", snippet: "Agentic snippet", source: "mock", rank: 1 },
+          {
+            title: "Agentic Result",
+            url: "https://agentic.com/1",
+            snippet: "Agentic snippet",
+            source: "mock",
+            rank: 1,
+          },
         ],
         providersUsed: ["mock"],
         totalCost: 0.03,
@@ -107,9 +127,8 @@ describe("MultiEngineSearch v2", () => {
 
   it("supports chain search via backward-compatible API", async () => {
     const engine = new MultiEngineSearch();
-    const results = await engine.chainSearch(
-      "initial query",
-      (results) => results.length < 5 ? "refined" : null,
+    const results = await engine.chainSearch("initial query", (results) =>
+      results.length < 5 ? "refined" : null,
     );
     expect(results).toHaveLength(1);
     expect(results[0]!.title).toBe("Chain Result");

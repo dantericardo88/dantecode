@@ -167,7 +167,8 @@ describe("extractByCSS", () => {
   });
 
   it("handles nested elements with bracket counting", () => {
-    const html = '<div id="outer"><div>Inner 1</div><div>Inner 2</div></div><div id="sibling">After</div>';
+    const html =
+      '<div id="outer"><div>Inner 1</div><div>Inner 2</div></div><div id="sibling">After</div>';
     const result = extractByCSS(html, "#outer");
     expect(result).toContain("Inner 1");
     expect(result).toContain("Inner 2");
@@ -199,7 +200,8 @@ describe("extractPageMetadata", () => {
   });
 
   it("extracts meta description", () => {
-    const html = '<html><head><meta name="description" content="Page description here"></head></html>';
+    const html =
+      '<html><head><meta name="description" content="Page description here"></head></html>';
     const meta = extractPageMetadata(html);
     expect(meta.description).toBe("Page description here");
   });
@@ -250,21 +252,24 @@ describe("parseHTML", () => {
   });
 
   it("extracts links from document", () => {
-    const html = '<a href="https://example.com">Example</a> <a href="/page">Page</a> <a href="#anchor">Skip</a>';
+    const html =
+      '<a href="https://example.com">Example</a> <a href="/page">Page</a> <a href="#anchor">Skip</a>';
     const doc = parseHTML(html);
     expect(doc.links).toHaveLength(2); // #anchor excluded
     expect(doc.links[0]).toEqual({ text: "Example", href: "https://example.com" });
   });
 
   it("sets title and description from metadata", () => {
-    const html = '<html><head><title>My Site</title><meta name="description" content="A great site"></head><body><p>Content</p></body></html>';
+    const html =
+      '<html><head><title>My Site</title><meta name="description" content="A great site"></head><body><p>Content</p></body></html>';
     const doc = parseHTML(html);
     expect(doc.title).toBe("My Site");
     expect(doc.description).toBe("A great site");
   });
 
   it("provides mainContent via readability extraction", () => {
-    const html = '<html><body><article><p>The main article content is here with enough words to be detected.</p></article></body></html>';
+    const html =
+      "<html><body><article><p>The main article content is here with enough words to be detected.</p></article></body></html>";
     const doc = parseHTML(html);
     expect(doc.mainContent).toContain("main article content");
   });

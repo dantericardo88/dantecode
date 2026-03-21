@@ -2,7 +2,7 @@
 // @dantecode/git-engine — Diff Parsing and Review
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,12 +18,13 @@ export type { DiffHunk, DiffLine, ColoredDiffHunk } from "@dantecode/config-type
 // ----------------------------------------------------------------------------
 
 /**
- * Execute a git command synchronously in the given working directory.
- * Returns the raw stdout as a string.
+ * Execute a git command via execFileSync (no shell — injection-safe).
+ * Arguments are passed as an array so refs/paths are never interpolated.
+ * Note: git diff exits with 1 when differences exist — treated as success here.
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -42,7 +43,7 @@ function git(args: string, cwd: string): string {
     }
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
     const msg = stderr || err.message || "Unknown git error";
-    throw new Error(`git ${args.split(" ")[0]}: ${msg}`);
+    throw new Error(`git ${args[0] ?? "?"}: ${msg}`);
   }
 }
 
@@ -76,9 +77,10 @@ const DIFF_FILE_HEADER_RE = /^diff --git a\/(.+?) b\/(.+)$/;
  */
 export function getDiff(projectRoot: string, ref?: string): string {
   if (ref) {
-    return git(`diff "${ref}"`, projectRoot);
+    // ref is a separate arg — no shell injection possible
+    return git(["diff", ref], projectRoot);
   }
-  return git("diff", projectRoot);
+  return git(["diff"], projectRoot);
 }
 
 /**
@@ -88,7 +90,7 @@ export function getDiff(projectRoot: string, ref?: string): string {
  * @returns The raw unified diff output as a string.
  */
 export function getStagedDiff(projectRoot: string): string {
-  return git("diff --cached", projectRoot);
+  return git(["diff", "--cached"], projectRoot);
 }
 
 /**
@@ -451,7 +453,7 @@ export function applyDiff(hunk: DiffHunk, projectRoot: string): void {
   try {
     writeFileSync(tmpPath, patch, "utf-8");
 
-    execSync(`git apply --allow-empty "${tmpPath}"`, {
+    execFileSync("git", ["apply", "--allow-empty", tmpPath], {
       cwd: projectRoot,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

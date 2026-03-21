@@ -120,6 +120,71 @@ export interface Session {
   sandboxContainerId?: string;
   agentStack: AgentFrame[];
   todoList: TodoItem[];
+  /** User-assigned display name for this session (set via /name command). */
+  name?: string;
+}
+
+/** Durable execution status for long-running agent workflows. */
+export type DurableRunStatus = "running" | "waiting_user" | "completed" | "failed" | "cancelled";
+
+/** Why a durable run paused instead of completing. */
+export type PauseReason =
+  | "model_timeout"
+  | "tool_timeout"
+  | "verification_failed"
+  | "recoverable_error"
+  | "user_input_required"
+  | "process_restart";
+
+/** Confirmed execution fact captured in the durable evidence ledger. */
+export interface ExecutionEvidence {
+  id: string;
+  kind:
+    | "file_write"
+    | "verification_pass"
+    | "source_fetch"
+    | "agent_spawn"
+    | "commit"
+    | "blocked_action"
+    | "tool_result";
+  success: boolean;
+  label: string;
+  timestamp: string;
+  filePath?: string;
+  command?: string;
+  sourceUrl?: string;
+  agentId?: string;
+  details?: Record<string, unknown>;
+}
+
+/** User-facing resume guidance persisted with a durable run. */
+export interface ResumeHint {
+  runId: string;
+  summary: string;
+  lastConfirmedStep?: string;
+  lastSuccessfulTool?: string;
+  nextAction: string;
+  continueCommand: string;
+}
+
+/** Persisted durable execution state for resumable workflows. */
+export interface DurableRun {
+  id: string;
+  projectRoot: string;
+  sessionId: string;
+  prompt: string;
+  workflow: string;
+  status: DurableRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  pauseReason?: PauseReason;
+  touchedFiles: string[];
+  evidenceCount: number;
+  lastConfirmedStep?: string;
+  lastSuccessfulTool?: string;
+  nextAction?: string;
+  resumeHint?: ResumeHint;
+  legacySource?: "autoforge_checkpoint" | "background_task";
 }
 
 // ----------------------------------------------------------------------------
@@ -444,7 +509,14 @@ export type AuditEventType =
   | "loop_terminated"
   | "tier_escalation"
   | "cost_update"
-  | "webhook_received";
+  | "webhook_received"
+  | "git_automation_run"
+  | "git_automation_gate_pass"
+  | "git_automation_gate_fail"
+  | "verification_run"
+  | "qa_suite_run"
+  | "critic_debate_run"
+  | "verification_rail_add";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {

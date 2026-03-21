@@ -202,6 +202,10 @@ export type {
 } from "./event-triggers.js";
 export { slugifyTitle } from "./event-triggers.js";
 
+// ─── Credential Vault ────────────────────────────────────────────────────────
+export { CredentialVault } from "./credential-vault.js";
+export type { CredentialVaultOptions } from "./credential-vault.js";
+
 // ─── Webhook Server ─────────────────────────────────────────────────────────
 
 export { createWebhookServer } from "./webhook-server.js";
@@ -357,10 +361,13 @@ export {
   isWaveComplete,
   CLAUDE_WORKFLOW_MODE,
   WAVE_COMPLETE_RE,
+  buildBridgeWarningPreamble,
+  hasBridgeCapabilityGaps,
 } from "./skill-wave-orchestrator.js";
 export type {
   SkillWave,
   WaveOrchestratorState,
+  BridgeActivationWarnings,
 } from "./skill-wave-orchestrator.js";
 
 // ─── Approach Memory ────────────────────────────────────────────────────────
@@ -419,10 +426,7 @@ export {
   createWebSearchOrchestrator,
   clearOrchestratorCache,
 } from "./web-search-orchestrator.js";
-export type {
-  WebSearchOptions,
-  OrchestratedSearchResult,
-} from "./web-search-orchestrator.js";
+export type { WebSearchOptions, OrchestratedSearchResult } from "./web-search-orchestrator.js";
 
 // ─── Search Synthesizer ────────────────────────────────────────────────────
 
@@ -432,25 +436,291 @@ export {
   formatCitationBlock,
   formatSynthesizedResult,
 } from "./search-synthesizer.js";
-export type {
-  Citation,
-  SynthesizedResult,
-  SynthesizerOptions,
-} from "./search-synthesizer.js";
+export type { Citation, SynthesizedResult, SynthesizerOptions } from "./search-synthesizer.js";
 
 // ─── Search Reranker ───────────────────────────────────────────────────────
 
 export { rerankResults } from "./search-reranker.js";
-export type {
-  RerankContext,
-  RankedSearchResult,
-  RerankOptions,
-} from "./search-reranker.js";
+export type { RerankContext, RankedSearchResult, RerankOptions } from "./search-reranker.js";
 
 // ─── Search Cache ──────────────────────────────────────────────────────────
 
 export { SemanticSearchCache } from "./search-cache.js";
+export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";
+
+// ─── Council Orchestrator ────────────────────────────────────────────────────
+
+export {
+  createCouncilRunState,
+  newRunId,
+  newLaneId,
+  newHandoffId,
+} from "./council/council-types.js";
 export type {
-  SearchCacheEntry,
-  SearchCacheOptions,
-} from "./search-cache.js";
+  AgentKind,
+  AdapterKind,
+  AgentHealthStatus,
+  CostClass,
+  TaskCategory,
+  OverlapLevel,
+  MergeDecision,
+  MergeConfidenceBucket,
+  AgentTaskProfile,
+  FileMandate,
+  OverlapRecord,
+  HandoffPacket,
+  AgentSessionState,
+  FinalSynthesisRecord,
+  CouncilRunState,
+  CouncilTaskPacket,
+  CouncilConfig,
+} from "./council/council-types.js";
+
+export {
+  saveCouncilRun,
+  loadCouncilRun,
+  tryLoadCouncilRun,
+  listCouncilRuns,
+  updateAgentSession,
+  appendOverlapRecord,
+  appendHandoffPacket,
+  setRunStatus,
+} from "./council/council-state-store.js";
+
+export { UsageLedger } from "./council/usage-ledger.js";
+export type { LedgerEntry, LedgerSnapshot } from "./council/usage-ledger.js";
+
+export { OverlapDetector, classifyOverlapLevel } from "./council/overlap-detector.js";
+export type { OverlapDetectionResult } from "./council/overlap-detector.js";
+
+export { WorktreeObserver } from "./council/worktree-observer.js";
+export type {
+  WorktreeSnapshot,
+  WorktreeDriftEvent,
+  WorktreeObserverOptions,
+} from "./council/worktree-observer.js";
+
+export { CouncilRouter } from "./council/council-router.js";
+export type {
+  LaneAssignmentRequest,
+  LaneAssignmentResult,
+  ReassignmentRequest,
+  ReassignmentResult,
+} from "./council/council-router.js";
+
+export { MergeConfidenceScorer } from "./council/merge-confidence.js";
+export type {
+  MergeCandidatePatch,
+  ConfidenceFactors,
+  MergeConfidenceScore,
+} from "./council/merge-confidence.js";
+
+export { MergeBrain } from "./council/merge-brain.js";
+export type { MergeBrainInput, MergeBrainResult } from "./council/merge-brain.js";
+
+export { HandoffEngine as CouncilHandoffEngine } from "./council/handoff-engine.js";
+export type { HandoffCreationOptions, HandoffValidationResult } from "./council/handoff-engine.js";
+
+export {
+  createCouncilEvent,
+  councilStartEvent,
+  laneAssignedEvent,
+  laneFrozenEvent,
+  overlapDetectedEvent,
+  handoffCreatedEvent,
+  mergeCompletedEvent,
+  mergeBlockedEvent,
+} from "./council/council-events.js";
+export type { CouncilEventType, CouncilEvent } from "./council/council-events.js";
+
+export { CouncilOrchestrator } from "./council/council-orchestrator.js";
+export type {
+  CouncilLifecycleStatus,
+  CouncilOrchestratorOptions,
+  OrchestratorEvents,
+  OrchestratorStartOptions,
+} from "./council/council-orchestrator.js";
+
+export { FleetBudget, DEFAULT_FLEET_BUDGET_CONFIG } from "./council/fleet-budget.js";
+export type {
+  FleetBudgetConfig,
+  FleetBudgetState,
+  FleetBudgetReport,
+  AgentBudgetEntry,
+  AgentBudgetRemaining,
+} from "./council/fleet-budget.js";
+export { TaskRedistributor } from "./council/task-redistributor.js";
+export type {
+  RedistributionCandidate,
+  RedistributionResult,
+  BusyLaneInfo,
+} from "./council/task-redistributor.js";
+
+export { DanteCodeAdapter } from "./council/agent-adapters/dantecode.js";
+export type { SelfLaneExecutor } from "./council/agent-adapters/dantecode.js";
+export { CodexAdapter } from "./council/agent-adapters/codex.js";
+export { ClaudeCodeAdapter } from "./council/agent-adapters/claude-code.js";
+export { AntigravityAdapter } from "./council/agent-adapters/antigravity.js";
+export { FileBridgeAdapter } from "./council/agent-adapters/file-bridge.js";
+export { BaseCouncilAdapter } from "./council/agent-adapters/base.js";
+export type {
+  AdapterAvailability,
+  AdapterCapacity,
+  AdapterSubmission,
+  AdapterStatus,
+  AdapterStatusKind,
+  AdapterArtifacts,
+  AdapterPatch,
+  RateLimitSignal,
+  CouncilAgentAdapter,
+} from "./council/agent-adapters/base.js";
+
+// ─── FIM Engine ───────────────────────────────────────────────────────────────
+
+export { FIMEngine } from "./fim-engine.js";
+export type { FIMEngineOptions, FIMContext } from "./fim-engine.js";
+
+// ─── Persistent Memory ────────────────────────────────────────────────────────
+
+export { PersistentMemory } from "./persistent-memory.js";
+
+// ─── Durable Run Store ────────────────────────────────────────────────────────
+
+export { DurableRunStore } from "./durable-run-store.js";
+
+// ─── Workflow Runtime ─────────────────────────────────────────────────────────
+
+export {
+  WORKFLOW_CONTRACT_VERSION,
+  loadWorkflowCommand,
+  loadWorkflowCommands,
+  parseWorkflowCommand,
+  createWorkflowExecutionContext,
+  buildWorkflowInvocationPrompt,
+  summarizeWorkflowBlocked,
+  summarizeWorkflowCompleted,
+} from "./workflow-runtime.js";
+export type {
+  WorkflowContract,
+  WorkflowCommand,
+  WorkflowParseResult,
+  WorkflowExecutionContext,
+} from "./workflow-runtime.js";
+
+// ─── Reasoning Chain ──────────────────────────────────────────────────────────
+
+export { ReasoningChain, getCostMultiplier } from "./reasoning-chain.js";
+export type {
+  ReasoningPhase,
+  ReasoningTier,
+  CritiqueResult,
+  ChainStep,
+  ReasoningChainOptions,
+  ReasoningVerificationResult,
+} from "./reasoning-chain.js";
+
+// ─── Autonomy Engine ──────────────────────────────────────────────────────────
+
+export { AutonomyEngine } from "./autonomy-engine.js";
+
+// ─── Metrics Collector ────────────────────────────────────────────────────────
+
+export { MetricsCollector } from "./metrics-collector.js";
+
+// ─── Security Engine ──────────────────────────────────────────────────────────
+
+export { SecurityEngine } from "./security-engine.js";
+
+// ─── Secrets Scanner ──────────────────────────────────────────────────────────
+
+export { SecretsScanner } from "./secrets-scanner.js";
+
+// ─── Confidence Synthesizer ───────────────────────────────────────────────────
+
+export { synthesizeConfidence } from "./confidence-synthesizer.js";
+export type { ConfidenceSynthesisResult } from "./confidence-synthesizer.js";
+
+// ─── UX Engine ────────────────────────────────────────────────────────────────
+
+export { UXEngine, Spinner } from "./ux-engine.js";
+export type { ThemeName, UXEngineOptions } from "./ux-engine.js";
+
+// ─── Acquire Utilities ────────────────────────────────────────────────────────
+
+export { acquireUrl } from "./tool-runtime/acquire-url.js";
+export { acquireArchive } from "./tool-runtime/acquire-archive.js";
+
+// ─── Git Hook Handler ─────────────────────────────────────────────────────────
+
+export { GitHookHandler } from "./git-hook-handler.js";
+
+// ─── Tool Adapters ────────────────────────────────────────────────────────────
+
+export { adaptToolResult, formatEvidenceSummary } from "./tool-runtime/tool-adapters.js";
+
+// ─── Artifact Store ───────────────────────────────────────────────────────────
+
+export { globalArtifactStore } from "./tool-runtime/artifact-store.js";
+
+// ─── Verification Suite Runner ────────────────────────────────────────────────
+
+export { VerificationSuiteRunner } from "./verification-suite-runner.js";
+
+// ─── Critic Debater ───────────────────────────────────────────────────────────
+
+export { criticDebate } from "./critic-debater.js";
+export type { CriticOpinion } from "./critic-debater.js";
+
+// ─── Rails Enforcer ───────────────────────────────────────────────────────────
+
+export { globalVerificationRailRegistry } from "./rails-enforcer.js";
+export type {
+  VerificationRail,
+  VerificationRailMode,
+  VerificationRailFinding,
+} from "./rails-enforcer.js";
+
+// ─── QA Harness ───────────────────────────────────────────────────────────────
+
+export { runQaSuite, verifyOutput } from "./qa-harness.js";
+export type { VerifyOutputInput, QaSuiteOutputInput } from "./qa-harness.js";
+
+// ─── Tool Scheduler ───────────────────────────────────────────────────────────
+
+export { globalToolScheduler } from "./tool-runtime/tool-scheduler.js";
+
+// ─── Verification Stores ──────────────────────────────────────────────────────
+
+export { VerificationBenchmarkStore } from "./verification-benchmark-store.js";
+export { VerificationHistoryStore } from "./verification-history-store.js";
+export type { VerificationHistoryKind } from "./verification-history-store.js";
+
+// ─── Bridge Listener ──────────────────────────────────────────────────────────
+
+export { BridgeListener } from "./council/bridge-listener.js";
+export type {
+  AgentCommandConfig,
+  BridgeListenerOptions,
+  SpawnFn,
+} from "./council/bridge-listener.js";
+
+// ─── Contextual Suggestions ──────────────────────────────────────────────────
+
+export { ContextualSuggestions, contextualSuggestions } from "./contextual-suggestions.js";
+export type {
+  SuggestionContext,
+  ContextualSuggestionsOptions,
+  Suggestion,
+} from "./contextual-suggestions.js";
+
+// ─── GitHub Client ───────────────────────────────────────────────────────────
+
+export { GitHubClient } from "./github-client.js";
+export type {
+  GitHubClientConfig,
+  PRDetails,
+  PRFile,
+  Issue as GitHubIssue,
+  CheckRun,
+  WorkflowRun,
+} from "./github-client.js";

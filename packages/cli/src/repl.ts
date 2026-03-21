@@ -6,23 +6,54 @@
 
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import { parseModelReference, readOrInitializeState } from "@dantecode/core";
+import { readFile as fsReadFile } from "node:fs/promises";
+import { join as pathJoin } from "node:path";
+
+import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
+import { checkForUpdate } from "./lib/auto-update.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
 import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import {
+  RichRenderer,
+  ProgressOrchestrator,
+  StatusBar,
+  buildPrompt,
+  renderTokenDashboard,
+  getThemeEngine,
+} from "@dantecode/ux-polish";
+import type {
+  StatusBarState,
+  PromptBuilderState,
+  TokenUsageData,
+  ThemeName,
+} from "@dantecode/ux-polish";
+import { watchGitEvents } from "@dantecode/git-engine";
+import type { GitEventWatcher } from "@dantecode/git-engine";
+import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
+import { DanteSandbox } from "@dantecode/dante-sandbox";
+import { createMemoryOrchestrator } from "@dantecode/memory-engine";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
 // ----------------------------------------------------------------------------
 
-const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
+
+// ----------------------------------------------------------------------------
+// UX Polish: RichRenderer + ProgressOrchestrator singletons
+// These wire the @dantecode/ux-polish engine into the CLI surface.
+// ----------------------------------------------------------------------------
+
+const richRenderer = new RichRenderer({ defaultDensity: "normal" });
+const progressOrchestrator = new ProgressOrchestrator();
 
 // ----------------------------------------------------------------------------
 // Types
@@ -38,6 +69,19 @@ export interface ReplOptions {
   verbose: boolean;
   silent: boolean;
   configPath?: string;
+  /** Maximum tool rounds for non-interactive/one-shot mode. */
+  maxRounds?: number;
+  /** Override config root directory for spawned child processes.
+   *  When set, state is loaded from this path instead of projectRoot.
+   *  Used by council createSelfExecutor so worktree-spawned processes
+   *  still read API keys and settings from the main repo. */
+  configRoot?: string;
+  /** --continue / -C: resume the last session on startup. */
+  resumeFromLastSession?: boolean;
+  /** --fearset-block-on-nogo: block and prompt when FearSet returns no-go. */
+  fearSetBlockOnNoGo?: boolean;
+  /** --name <n>: human-readable name for this session. */
+  sessionName?: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -89,9 +133,16 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.silent = replState.silent;
   agentConfig.skillActive = replState.activeSkill !== null;
   agentConfig.waveState = replState.waveState ?? undefined;
+  agentConfig.resumeFrom = replState.pendingResumeRunId ?? undefined;
+  agentConfig.expectedWorkflow = replState.pendingExpectedWorkflow ?? undefined;
+  agentConfig.workflowContext = replState.pendingWorkflowContext ?? undefined;
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
+  // Fix 3: sync the live gaslight integration so /gaslight on/off affect the agent loop
+  agentConfig.gaslight = replState.gaslight ?? undefined;
+  // Wire replState for /think override and reasoning feedback loop
+  agentConfig.replState = replState;
 }
 
 // ----------------------------------------------------------------------------
@@ -130,11 +181,35 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
+  if (options.sessionName) {
+    session.name = options.sessionName;
+  }
 
   // Display banner (suppressed in silent mode)
   if (!options.silent) {
     const banner = getBanner(state.model.default, options.projectRoot);
     process.stdout.write(banner);
+    void checkForUpdate("2.0.0");
+  }
+
+  // Load saved theme from STATE.yaml (persisted by /theme command)
+  let savedTheme: ThemeName = "default";
+  try {
+    const stateYamlRaw = await fsReadFile(
+      pathJoin(options.projectRoot, ".dantecode", "STATE.yaml"),
+      "utf8",
+    );
+    const themeMatch = /^theme:\s*(\w+)$/m.exec(stateYamlRaw);
+    if (themeMatch?.[1]) {
+      const candidate = themeMatch[1];
+      const validThemes = ["default", "minimal", "rich", "matrix", "ocean"];
+      if (validThemes.includes(candidate)) {
+        savedTheme = candidate as ThemeName;
+        getThemeEngine().setTheme(savedTheme);
+      }
+    }
+  } catch {
+    /* no saved theme — use default */
   }
 
   // Initialize REPL state
@@ -150,10 +225,17 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    pendingResumeRunId: null,
+    pendingExpectedWorkflow: null,
+    pendingWorkflowContext: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    gaslight: null, // populated immediately after agentConfig.gaslight is created below
+    memoryOrchestrator: null, // populated after DanteSandbox.setup() below
+    reasoningOverrideSession: false,
+    theme: savedTheme,
   };
 
   // Agent loop config
@@ -163,7 +245,86 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
     silent: options.silent,
+    fearSetBlockOnNoGo: options.fearSetBlockOnNoGo === true,
+    replState: replState,
   };
+
+  // DanteGaslight: wire the closed Gaslight→Skillbook→Gaslight feedback loop.
+  // Defaults to disabled; activate with DANTECODE_GASLIGHT=1 env var.
+  // priorLessonProvider pulls relevant Skillbook skills back into each critique
+  // prompt so the gaslighter checks whether past lessons have been applied.
+  agentConfig.gaslight = new DanteGaslightIntegration(
+    { enabled: process.env["DANTECODE_GASLIGHT"] === "1" },
+    { cwd: options.projectRoot },
+    {
+      priorLessonProvider: (draft: string) => {
+        try {
+          const skillbook = new DanteSkillbookIntegration({ cwd: options.projectRoot });
+          const keywords = draft
+            .split(/\s+/)
+            .filter((w) => w.length > 4)
+            .slice(0, 10);
+          return skillbook.getRelevantSkills({ keywords }).map((s) => s.title ?? s.id);
+        } catch {
+          return [];
+        }
+      },
+    },
+  );
+  // Fix 3: Share the live integration with replState so /gaslight on/off call
+  // setEnabled() on the same instance the agent loop uses — not a detached copy.
+  replState.gaslight = agentConfig.gaslight;
+
+  // Initialize DanteSandbox enforcement engine — ALWAYS mandatory, mode="auto".
+  // allowHostEscape:false = hard rejection when Docker + worktree both unavailable.
+  // This is true mandatory enforcement: isolation is not optional.
+  await DanteSandbox.setup({
+    projectRoot: options.projectRoot,
+    config: { mode: "auto", allowHostEscape: false },
+  });
+
+  // Initialize DanteMemory orchestrator — non-fatal if it fails.
+  // /memory and /compact degrade gracefully when null.
+  try {
+    const mo = createMemoryOrchestrator(options.projectRoot); // SYNC — no await
+    await mo.initialize();
+    replState.memoryOrchestrator = mo;
+  } catch {
+    // Non-fatal: /memory and /compact degrade gracefully when null
+  }
+
+  // --continue / -C: restore the most recent session from disk
+  if (options.resumeFromLastSession) {
+    try {
+      const { SessionStore } = await import("@dantecode/core");
+      const store = new SessionStore(options.projectRoot);
+      const sessions = await store.list();
+      if (sessions.length > 0) {
+        const latest = sessions[0]; // list() already sorted newest-first
+        if (latest) {
+          const file = await store.load(latest.id);
+          if (file) {
+            // Restore identity and full message history into the live session
+            replState.session.id = file.id;
+            replState.session.name = file.title;
+            replState.session.createdAt = file.createdAt;
+            replState.session.messages = file.messages.map((m) => ({
+              id: randomUUID(),
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+            }));
+            replState.session.updatedAt = new Date().toISOString();
+            if (!options.silent) {
+              process.stdout.write(`${DIM}[--continue] Resumed: ${file.title}${RESET}\n`);
+            }
+          }
+        }
+      }
+    } catch {
+      // Non-fatal: --continue failure falls back to fresh session
+    }
+  }
 
   // Initialize sandbox bridge when --sandbox is enabled
   if (options.enableSandbox) {
@@ -171,11 +332,73 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     replState.sandboxBridge = agentConfig.sandboxBridge;
   }
 
+  // Start GitEventWatcher when events.enabled is true in STATE.yaml
+  let gitEventWatcher: GitEventWatcher | null = null;
+  const stateAsMap = state as unknown as Record<string, unknown>;
+  const eventsEnabled =
+    stateAsMap["events"] !== undefined &&
+    typeof stateAsMap["events"] === "object" &&
+    (stateAsMap["events"] as Record<string, unknown>)["enabled"] === true;
+
+  if (eventsEnabled) {
+    try {
+      gitEventWatcher = watchGitEvents("post-commit", undefined, {
+        cwd: options.projectRoot,
+        persist: false,
+      });
+      gitEventWatcher.on("event", (evt) => {
+        appendAuditEvent(options.projectRoot, {
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+          type: "git_commit",
+          payload: { source: "git-event-watcher", event: evt },
+          modelId: "system",
+          projectRoot: options.projectRoot,
+        }).catch(() => {});
+      });
+      if (!options.silent) {
+        process.stdout.write(`${DIM}[git-event-watcher: monitoring post-commit events]${RESET}\n`);
+      }
+    } catch {
+      // GitEventWatcher startup failure must not prevent the REPL from starting
+    }
+  }
+
+  // Initialize TUI components
+  const sessionStartMs = Date.now();
+  const themeEngine = getThemeEngine();
+
+  // Status bar (non-TTY: render() returns "" and draw() is a no-op)
+  const modelLabel = `${state.model.default.provider}/${state.model.default.modelId}`;
+  const sandboxMode = options.enableSandbox ? "workspace-write" : "full-access";
+  const initialStatusBarState: StatusBarState = {
+    modelLabel,
+    tokensUsed: 0,
+    sandboxMode,
+    sessionName: options.sessionName ?? session.id.slice(0, 8),
+  };
+  const statusBar = new StatusBar(initialStatusBarState, themeEngine);
+
+  // Context-aware prompt builder
+  const modelShort = state.model.default.modelId.split("-").slice(0, 2).join("-");
+  const buildCurrentPrompt = (roundCount = 0, lastPdse?: number): string =>
+    buildPrompt({
+      sessionName: options.sessionName ?? session.id.slice(0, 8),
+      modelShort,
+      sandboxMode,
+      roundCount,
+      lastPdse,
+      theme: themeEngine,
+    } satisfies PromptBuilderState);
+
+  let currentRoundCount = 0;
+  let currentPdseScore: number | undefined;
+
   // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${CYAN}>${RESET} `,
+    prompt: buildCurrentPrompt(),
     terminal: true,
   });
 
@@ -202,6 +425,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Multi-line input support: track whether we are collecting multi-line input
   let multiLineBuffer: string[] | null = null;
 
+  // Draw status bar then show initial prompt
+  statusBar.draw();
   rl.prompt();
 
   rl.on("line", async (rawLine: string) => {
@@ -218,7 +443,16 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         multiLineBuffer = null;
 
         if (fullInput.trim().length > 0) {
-          await processInput(fullInput, replState, agentConfig, rl);
+          await processInput(fullInput, replState, agentConfig, rl, () => {
+            currentRoundCount++;
+            const totalTokens = replState.session.messages.reduce(
+              (s, m) => s + (m.tokensUsed ?? 0),
+              0,
+            );
+            statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+            rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
+            statusBar.draw();
+          });
         } else {
           rl.prompt();
         }
@@ -241,14 +475,47 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       return;
     }
 
-    await processInput(line, replState, agentConfig, rl);
+    await processInput(line, replState, agentConfig, rl, () => {
+      currentRoundCount++;
+      const totalTokens = replState.session.messages.reduce((s, m) => s + (m.tokensUsed ?? 0), 0);
+      statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+      rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
+      statusBar.draw();
+    });
   });
 
   rl.on("close", async () => {
+    // Stop GitEventWatcher if running
+    if (gitEventWatcher) {
+      await gitEventWatcher.stop().catch(() => {});
+    }
+    // Tear down DanteSandbox isolation layers (containers, worktrees)
+    await DanteSandbox.teardown().catch(() => {});
     // Shut down sandbox container if running
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
     }
+
+    // Clear status bar, then show token dashboard at session end
+    statusBar.clear();
+    if (!options.silent && currentRoundCount > 0) {
+      const sessionMessages = replState.session.messages;
+      const totalTokens = sessionMessages.reduce((sum, m) => sum + (m.tokensUsed ?? 0), 0);
+      if (totalTokens > 0) {
+        const tokenData: TokenUsageData = {
+          totalTokens,
+          inputTokens: Math.round(totalTokens * 0.66),
+          outputTokens: Math.round(totalTokens * 0.34),
+          byTool: {},
+          modelId: state.model.default.modelId,
+          contextWindow: 131072,
+          contextUtilization: Math.min(1, totalTokens / 131072),
+          sessionDurationMs: Date.now() - sessionStartMs,
+        };
+        process.stdout.write(renderTokenDashboard(tokenData, themeEngine));
+      }
+    }
+
     process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
     process.exit(0);
   });
@@ -262,15 +529,41 @@ async function processInput(
   replState: ReplState,
   agentConfig: AgentLoopConfig,
   rl: readline.Interface,
+  onBeforePrompt?: () => void,
 ): Promise<void> {
   // Pause the readline while processing
   rl.pause();
 
+  // Use richRenderer and progressOrchestrator for structured UX output.
+  // For pipeline commands (/magic, /forge, /inferno, etc.) we track progress.
+  const isPipelineCommand =
+    isSlashCommand(input) &&
+    /^\/(?:magic|forge|inferno|autoforge|blaze|ember|spark|party|ship|verify)\b/i.test(
+      input.trim(),
+    );
+  const progressId = isPipelineCommand ? `cmd-${Date.now()}` : null;
+
   try {
+    if (progressId) {
+      progressOrchestrator.startProgress(progressId, {
+        phase: input.trim().split(/\s+/)[0] ?? input.trim(),
+        message: "running",
+        initialProgress: 0,
+      });
+      if (!replState.silent) {
+        process.stdout.write(
+          richRenderer.render("cli", { kind: "status", content: `Starting ${input.trim()}` })
+            .output + "\n",
+        );
+      }
+    }
+
     if (isSlashCommand(input)) {
       // Route to slash command handler
       const output = await routeSlashCommand(input, replState);
-      process.stdout.write(`${output}\n`);
+      // Render slash command output through the RichRenderer for structured formatting
+      const rendered = richRenderer.render("cli", { kind: "markdown", content: output });
+      process.stdout.write(`${rendered.rendered ? rendered.output : output}\n`);
 
       // Some slash commands (e.g. /oss) set a pending prompt to chain into the agent loop
       if (replState.pendingAgentPrompt) {
@@ -280,6 +573,9 @@ async function processInput(
         replState.activeAbortController = new AbortController();
         agentConfig.abortSignal = replState.activeAbortController.signal;
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
+        replState.pendingResumeRunId = null;
+        replState.pendingExpectedWorkflow = null;
+        replState.pendingWorkflowContext = null;
         replState.activeAbortController = null;
       }
     } else {
@@ -288,13 +584,33 @@ async function processInput(
       replState.activeAbortController = new AbortController();
       agentConfig.abortSignal = replState.activeAbortController.signal;
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
+      replState.pendingResumeRunId = null;
+      replState.pendingExpectedWorkflow = null;
+      replState.pendingWorkflowContext = null;
       replState.activeAbortController = null;
+    }
+
+    if (progressId) {
+      progressOrchestrator.completeProgress(progressId, "done");
+      if (!replState.silent) {
+        process.stdout.write(progressOrchestrator.renderOne(progressId) + "\n");
+      }
+      progressOrchestrator.remove(progressId);
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (progressId) {
+      progressOrchestrator.failProgress(progressId, message);
+      if (!replState.silent) {
+        process.stdout.write(progressOrchestrator.renderOne(progressId) + "\n");
+      }
+      progressOrchestrator.remove(progressId);
+    }
     process.stdout.write(`\n${RED}Error: ${message}${RESET}\n`);
   }
 
+  // Invoke UI hook (status bar update + prompt update) before resuming
+  onBeforePrompt?.();
   // Resume readline and prompt
   rl.resume();
   rl.prompt();
@@ -309,10 +625,14 @@ async function processInput(
  * Sends the prompt to the agent, prints the response, and exits.
  */
 export async function runOneShotPrompt(prompt: string, options: ReplOptions): Promise<void> {
-  // Load or initialize state
+  // Load or initialize state.
+  // When configRoot is set (e.g. spawned inside a council worktree), load config
+  // from the main repo root so API keys and settings are available even though
+  // the worktree has no STATE.yaml.
+  const stateRoot = options.configRoot ?? options.projectRoot;
   let state: DanteCodeState;
   try {
-    state = await readOrInitializeState(options.projectRoot);
+    state = await readOrInitializeState(stateRoot);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${RED}Error loading state: ${message}${RESET}\n`);
@@ -326,6 +646,9 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
 
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
+  if (options.sessionName) {
+    session.name = options.sessionName;
+  }
 
   // Config
   const agentConfig: AgentLoopConfig = {
@@ -335,6 +658,10 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     enableSandbox: options.enableSandbox,
     silent: options.silent,
   };
+
+  if (options.maxRounds !== undefined) {
+    agentConfig.requiredRounds = options.maxRounds;
+  }
 
   if (options.enableSandbox) {
     agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);

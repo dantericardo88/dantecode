@@ -14,20 +14,18 @@ export type MultiAgentProgressCallback = (update: {
   pdseScore?: number;
 }) => void;
 
-const agentLanes = ["orchestrator", "planner", "coder", "tester", "reviewer", "deployer"] as const;
-type AgentLane = (typeof agentLanes)[number];
-
-type DelegationPlan = Partial<Record<AgentLane, string>>;
+type SpecialistTask = { role: string; task: string };
+type DelegationPlan = SpecialistTask[];
 
 type AgentOutput = {
-  lane: AgentLane;
+  role: string;
   content: string;
   pdseScore: number; // 0-100 heuristic
 };
 
 export interface MultiAgentConfig {
   maxConcurrent: number;
-  defaultLane: AgentLane;
+  defaultLane: string;
   iterationLimit: number;
 }
 
@@ -41,7 +39,7 @@ export class MultiAgent {
     this.state = state;
     this.config = {
       maxConcurrent: state.agents.maxConcurrent,
-      defaultLane: state.agents.defaultLane as AgentLane,
+      defaultLane: state.agents.defaultLane || "coder",
       iterationLimit: 3,
     };
   }
@@ -87,37 +85,28 @@ export class MultiAgent {
       task = this.refineTask(task, outputs);
     }
 
-    return { plan: {}, outputs: [], compositePdse, iterations };
+    return { plan: [], outputs: [], compositePdse, iterations };
   }
 
   private async delegateTask(task: string): Promise<DelegationPlan> {
-    const orchestratorSystem = `You are the orchestrator agent. Analyze the task and delegate subtasks to specialist agents:
-- planner: Break down into steps
-- coder: Implement code changes
-- tester: Write/run tests
-- reviewer: Audit for PDSE (completeness, correctness, clarity, consistency)
-- deployer: Prepare commits/publish
-
+    const orchestratorSystem = `You are the orchestrator agent. Analyze the task and dynamically decompose it into subtasks for specialized agents. Create precise roles as needed (e.g., planner, coder, tester, reviewer).
 Task: ${task}
-
-Respond ONLY with valid JSON: { "planner": "subtask desc", "coder": "...", ... }`;
+Respond ONLY with a valid JSON array of objects: [{"role": "e.g. planner", "task": "subtask desc"}]`;
 
     const delegationText = await this.router.generate([{ role: "user", content: task }], {
       system: orchestratorSystem,
     });
 
-    const planObj = agentLanes.reduce((obj: Record<string, z.ZodString>, lane) => {
-      obj[lane] = z.string();
-      return obj;
-    }, {});
-    const planSchema = z.object(planObj).partial();
+    const planSchema = z.array(z.object({ role: z.string(), task: z.string() }));
     let parsed;
     try {
       parsed = planSchema.safeParse(JSON.parse(delegationText));
     } catch {
       parsed = { success: false };
     }
-    return parsed.success ? (parsed.data as DelegationPlan) : { [this.config.defaultLane]: task };
+    return parsed.success && (parsed.data as DelegationPlan).length > 0
+      ? (parsed.data as DelegationPlan)
+      : [{ role: this.config.defaultLane, task }];
   }
 
   private async executeParallel(
@@ -129,70 +118,60 @@ Respond ONLY with valid JSON: { "planner": "subtask desc", "coder": "...", ... }
     const semaphore = new Semaphore(this.config.maxConcurrent);
 
     await Promise.all(
-      Object.entries(plan)
-        .filter(([, subtask]) => subtask && subtask.trim())
-        .map(async ([lane, subtask]) => {
-          await semaphore.acquire();
-          try {
-            onProgress?.({ lane, status: "started", message: subtask.slice(0, 80) });
-            const output = await this.executeAgent(lane as AgentLane, subtask, options);
-            onProgress?.({
-              lane,
-              status: "completed",
-              message: `PDSE: ${output.pdseScore}`,
-              pdseScore: output.pdseScore,
-            });
-            outputs.push(output);
-          } catch (err) {
-            onProgress?.({
-              lane,
-              status: "failed",
-              message: err instanceof Error ? err.message : String(err),
-            });
-          } finally {
-            semaphore.release();
-          }
-        }),
+      plan.map(async ({ role, task: subtask }) => {
+        await semaphore.acquire();
+        try {
+          onProgress?.({ lane: role, status: "started", message: subtask.slice(0, 80) });
+          const output = await this.executeAgent(role, subtask, options);
+          onProgress?.({
+            lane: role,
+            status: "completed",
+            message: `PDSE: ${output.pdseScore}`,
+            pdseScore: output.pdseScore,
+          });
+          outputs.push(output);
+        } catch (err) {
+          onProgress?.({
+            lane: role,
+            status: "failed",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          semaphore.release();
+        }
+      }),
     );
 
     return outputs;
   }
 
   private async executeAgent(
-    lane: AgentLane,
+    role: string,
     subtask: string,
     options: GenerateOptions,
   ): Promise<AgentOutput> {
-    const systemPrompts: Record<AgentLane, string> = {
-      orchestrator: "You orchestrate multi-agent workflows.",
-      planner: "You plan precise steps for tasks. Output structured plans.",
-      coder: "You write production-ready TypeScript code. No stubs, full impls.",
-      tester: "You write comprehensive Vitest tests. Mock minimally, test real.",
-      reviewer: "You score PDSE: completeness/correctness/clarity/consistency. Critique.",
-      deployer: "You prepare git commits, changelogs, publish scripts.",
-    };
-
+    const defaultSystem = `You are the ${role} agent. Perform your task with high quality and focus exactly on your assigned responsibilities.`;
     const content = await this.router.generate([{ role: "user", content: subtask }], {
-      system: systemPrompts[lane],
+      system: defaultSystem,
       ...options,
     });
 
     const pdseScore = this.heuristicPdse(content); // 0-100
 
-    return { lane, content, pdseScore };
+    return { role, content, pdseScore };
   }
 
   private computeCompositePdse(outputs: AgentOutput[]): number {
     if (outputs.length === 0) return 0;
     const avg = outputs.reduce((sum, o) => sum + o.pdseScore, 0) / outputs.length;
-    // Weight reviewer higher
-    const reviewer = outputs.find((o) => o.lane === "reviewer")?.pdseScore ?? avg;
-    return Math.round(avg * 0.7 + reviewer * 0.3);
+    // Boost score slightly if a reviewer role was present
+    const reviewer = outputs.find((o) => o.role.toLowerCase().includes("review"))?.pdseScore ?? avg;
+    return Math.round(avg * 0.8 + reviewer * 0.2);
   }
 
   private refineTask(task: string, outputs: AgentOutput[]): string {
     const feedback = outputs
-      .map((o) => `${o.lane}: PDSE ${o.pdseScore} - ${o.content.slice(0, 100)}...`)
+      .map((o) => `${o.role}: PDSE ${o.pdseScore} - ${o.content.slice(0, 100)}...`)
       .join("\n");
     return `Refine: ${task}\nPrior feedback:\n${feedback}`;
   }

@@ -1,0 +1,11 @@
+name: reviewer
+description: Code review agent with DanteForge verification
+model: claude-sonnet-4-6
+sandbox_mode: read-only
+system_prompt: |
+  You are a code reviewer. Check for anti-stub violations, security issues,
+  test coverage gaps, and architectural problems. Score using PDSE framework.
+tool_permissions:
+  - Read
+  - Glob
+  - Grep

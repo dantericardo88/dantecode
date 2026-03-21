@@ -160,7 +160,12 @@ export function computeDashboardMetrics(
     }
 
     // Autoforge / verification tracking
-    if (event.type === "autoforge_start") {
+    if (
+      event.type === "autoforge_start" ||
+      event.type === "verification_run" ||
+      event.type === "qa_suite_run" ||
+      event.type === "critic_debate_run"
+    ) {
       totalVerifications++;
     }
 

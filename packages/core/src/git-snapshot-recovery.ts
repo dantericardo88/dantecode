@@ -25,6 +25,12 @@ export interface GitSnapshotOptions {
   maxSnapshots?: number;
   /** Function to execute git commands. Injectable for testing. */
   execSyncFn?: typeof execSync;
+  /**
+   * Controls whether `git clean -fd` runs during rollback.
+   * Default: "preserve_untracked" — new files written by the pipeline survive rollback.
+   * Set "clean_untracked" only when you explicitly want a fully clean state.
+   */
+  rollbackPolicy?: "preserve_untracked" | "clean_untracked";
 }
 
 /**
@@ -40,10 +46,12 @@ export class GitSnapshotRecovery {
   private readonly maxSnapshots: number;
   private readonly projectRoot: string;
   private readonly exec: typeof execSync;
+  private readonly rollbackPolicy: "preserve_untracked" | "clean_untracked";
 
   constructor(projectRoot: string, options: GitSnapshotOptions = {}) {
     this.projectRoot = projectRoot;
     this.maxSnapshots = options.maxSnapshots ?? 10;
+    this.rollbackPolicy = options.rollbackPolicy ?? "preserve_untracked";
     this.exec = options.execSyncFn ?? execSync;
   }
 
@@ -102,13 +110,16 @@ export class GitSnapshotRecovery {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
-      // Clean untracked files that were added
-      this.exec("git clean -fd", {
-        cwd: this.projectRoot,
-        encoding: "utf-8",
-        timeout: 10000,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      // Only remove untracked files when explicitly configured — the default preserves them
+      // so new files written during a pipeline survive rollback of tracked-file changes.
+      if (this.rollbackPolicy === "clean_untracked") {
+        this.exec("git clean -fd", {
+          cwd: this.projectRoot,
+          encoding: "utf-8",
+          timeout: 10000,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      }
 
       // Apply the snapshot
       this.exec(`git stash apply ${snapshotHash}`, {

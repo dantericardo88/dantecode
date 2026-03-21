@@ -133,11 +133,7 @@ export class SemanticSearchCache {
   /**
    * Store search results in the cache.
    */
-  async put(
-    query: string,
-    results: SearchResult[],
-    providers: string[],
-  ): Promise<void> {
+  async put(query: string, results: SearchResult[], providers: string[]): Promise<void> {
     await this.load();
 
     const queryTokens = [...tokenize(query)];
@@ -172,9 +168,7 @@ export class SemanticSearchCache {
 
     // Evict if over capacity (LRU by cachedAt)
     if (this.entries.length > this.maxEntries) {
-      this.entries.sort(
-        (a, b) => new Date(b.cachedAt).getTime() - new Date(a.cachedAt).getTime(),
-      );
+      this.entries.sort((a, b) => new Date(b.cachedAt).getTime() - new Date(a.cachedAt).getTime());
       this.entries = this.entries.slice(0, this.maxEntries);
     }
 
@@ -205,11 +199,12 @@ export class SemanticSearchCache {
   /** Get cache statistics. */
   getStats(): { entries: number; totalHits: number; oldestEntry: string | null } {
     const totalHits = this.entries.reduce((sum, e) => sum + e.hitCount, 0);
-    const oldest = this.entries.length > 0
-      ? this.entries.reduce((a, b) =>
-          new Date(a.cachedAt).getTime() < new Date(b.cachedAt).getTime() ? a : b,
-        ).cachedAt
-      : null;
+    const oldest =
+      this.entries.length > 0
+        ? this.entries.reduce((a, b) =>
+            new Date(a.cachedAt).getTime() < new Date(b.cachedAt).getTime() ? a : b,
+          ).cachedAt
+        : null;
     return { entries: this.entries.length, totalHits, oldestEntry: oldest };
   }
 }

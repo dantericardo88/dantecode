@@ -941,8 +941,10 @@ function parseToolCallPayload(
 export function extractToolCalls(text: string): {
   cleanText: string;
   toolCalls: ExtractedToolCall[];
+  parseErrors: string[]; // raw snippets of malformed <tool_use> blocks
 } {
   const toolCalls: ExtractedToolCall[] = [];
+  const parseErrors: string[] = [];
   let cleanText = text;
   let idCounter = 0;
 
@@ -958,6 +960,9 @@ export function extractToolCalls(text: string): {
         name: parsed.name,
         input: parsed.input,
       });
+    } else {
+      // Capture malformed blocks so the execution loop can report them to the model
+      parseErrors.push(match[1]!.slice(0, 300).trim());
     }
     cleanText = cleanText.replace(match[0], "");
   }
@@ -977,7 +982,7 @@ export function extractToolCalls(text: string): {
     }
   }
 
-  return { cleanText: cleanText.trim(), toolCalls };
+  return { cleanText: cleanText.trim(), toolCalls, parseErrors };
 }
 
 // ----------------------------------------------------------------------------

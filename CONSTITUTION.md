@@ -106,14 +106,20 @@ Generated code must **never** contain:
 
 ---
 
-## 6. Evidence Chain & Audit
+## 6. Cryptographic Evidence Chain
 
-**HARD RULE — Immutable logging.**
+**HARD RULE — Tamper-evident logging.**
 
-- Every decision, gate score, lesson, and action is logged to `.dantecode/audit.jsonl`.
-- Audit log is append-only — never modified or truncated during a session.
-- Each entry includes: timestamp, session ID, event type, payload, and result.
-- Log rotation occurs at 100MB boundary.
+Every decision, gate score, lesson, and action is recorded as a cryptographic evidence bundle.
+
+- Each event is SHA-256 hash-chained to the previous event. Tampering breaks the chain.
+- Each event is a leaf in the session's Merkle tree. One root hash proves everything.
+- State-changing operations (file writes, tool calls) produce cryptographic receipts with before_hash → after_hash provenance.
+- Sessions are sealed on completion with a composite CertificationSeal.
+- `verifyIntegrity()` is called on every flush. A broken chain is a HARD system error.
+- Exports include the full chain, Merkle root, all receipts, and the session seal.
+
+Storage: `.dantecode/debug-trail/` (SQLite + evidence chain).
 
 ---
 

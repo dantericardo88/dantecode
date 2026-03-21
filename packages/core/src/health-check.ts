@@ -5,6 +5,7 @@
 
 import { access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -135,9 +136,11 @@ function checkProviderApiKeys(): HealthCheck {
  */
 function checkDanteForge(): HealthCheck {
   try {
-    // Attempt to require the compiled DanteForge binary. This is a dynamic
-    // check — we only need to know it resolves, not actually invoke it.
-    require.resolve("@dantecode/danteforge");
+    // Use createRequire so esbuild doesn't statically follow the package
+    // and bundle its contents into the core dist chunk. We only need to
+    // verify the package resolves at runtime — not import it.
+    const req = createRequire(import.meta.url);
+    req.resolve("@dantecode/danteforge");
     return {
       name: "DanteForge binary",
       status: "pass",

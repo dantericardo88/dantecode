@@ -6,9 +6,14 @@
 
 import * as vscode from "vscode";
 import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
-import { ModelRouterImpl, parseModelReference } from "@dantecode/core";
+import { ModelRouterImpl, parseModelReference, FIMEngine } from "@dantecode/core";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 import { gatherCrossFileContext } from "./cross-file-context.js";
+import { CompletionTelemetry } from "./completion-telemetry.js";
+import { PrefixTreeCache } from "./prefix-tree-cache.js";
+
+// Module-level FIMEngine instance — used to build FIM prompts via core/fim-engine.ts
+const fimEngine = new FIMEngine({ prefixLines: 60, suffixLines: 25 });
 
 const DEFAULT_DEBOUNCE_MS = 180;
 const MULTILINE_MAX_TOKENS = 512;
@@ -177,7 +182,7 @@ function addInlinePDSEDiagnostic(
   );
   const diag = new vscode.Diagnostic(
     range,
-    `PDSE ${score}/100 – ${reason}`,
+    `PDSE ${score}/100 \u2013 ${reason}`,
     vscode.DiagnosticSeverity.Warning,
   );
   diag.source = "DanteCode Inline";
@@ -215,12 +220,46 @@ export function disposeInlinePDSEDiagnostics(): void {
  * - PDSE inline diagnostics (yellow squiggly + comment annotation)
  * - Configurable debounce with adaptive fast-typing detection
  * - Smart stop on double blank lines, balanced brackets, scope exits
+ * - Completion telemetry (local-only, no external calls)
+ * - Smart cache invalidation on edits above cursor
+ * - Post-accept prefetching for reduced latency
+ * - Adaptive hints from telemetry (debounce, multiline preference)
  */
 export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemProvider {
   private readonly cache: CacheEntry[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   private lastRequestId = 0;
   private lastKeystrokeTimes: number[] = [];
+
+  /** Trie cache used for edit-aware invalidation. Exposed for extension.ts wiring. */
+  readonly completionCache: PrefixTreeCache = new PrefixTreeCache(MAX_CACHE_SIZE);
+
+  /** Local-only completion telemetry tracker. */
+  private readonly telemetry: CompletionTelemetry;
+
+  /** Adaptive debounce override applied from telemetry hints (ms). */
+  debounceMs: number = DEFAULT_DEBOUNCE_MS;
+
+  /** Whether to default to multiline completions based on telemetry preference. */
+  defaultMultiline: boolean = false;
+
+  /** Per-language debounce overrides for weak languages (from adaptive hints). */
+  readonly languageDebounceOverrides: Map<string, number> = new Map();
+
+  /** Last shown completion reference for accept-detection. */
+  private lastShownCompletion: { text: string; document: vscode.TextDocument } | undefined;
+
+  /** Index into telemetry.getRecent() for the last recorded event. */
+  private lastEventIndex = -1;
+
+  constructor() {
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    this.telemetry = new CompletionTelemetry(projectRoot);
+    // Load telemetry and apply adaptive hints — fully non-blocking
+    void this.telemetry.load().then(() => {
+      this._applyAdaptiveHints();
+    });
+  }
 
   async provideInlineCompletionItems(
     document: vscode.TextDocument,
@@ -248,6 +287,10 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     const customDebounce = config.get<number>("inline.debounceMs", 0);
     const baseDebounceMs = getInlineCompletionDebounceMs(provider, customDebounce);
 
+    // Apply per-language debounce override for weak languages
+    const langOverride = this.languageDebounceOverrides.get(language);
+    const effectiveBase = langOverride ?? baseDebounceMs;
+
     // Adaptive debounce: reduce delay when typing quickly
     const now = Date.now();
     this.lastKeystrokeTimes.push(now);
@@ -255,18 +298,21 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       this.lastKeystrokeTimes = this.lastKeystrokeTimes.slice(-5);
     }
     const adaptiveEnabled = config.get<boolean>("debounceAdaptive", true);
-    let debounceMs = baseDebounceMs;
+    let debounceMs = effectiveBase;
     if (adaptiveEnabled && this.lastKeystrokeTimes.length >= 3) {
       const oldest = this.lastKeystrokeTimes[0]!;
       const elapsed = (now - oldest) / 1000;
       const charsPerSec = this.lastKeystrokeTimes.length / elapsed;
-      // Graduated adaptive curve: faster typing → lower debounce (floor 80ms)
+      // Graduated adaptive curve: faster typing => lower debounce (floor 80ms)
       if (charsPerSec > 5) {
-        debounceMs = Math.max(80, baseDebounceMs - 100);
+        debounceMs = Math.max(80, effectiveBase - 100);
       } else if (charsPerSec > 3) {
-        debounceMs = Math.max(80, baseDebounceMs - 80);
+        debounceMs = Math.max(80, effectiveBase - 80);
       }
     }
+
+    // Update cursor position for smart cache invalidation
+    this.completionCache.updateCursorPosition(document.uri.toString(), position.line);
 
     // Build a cache key from last 3 lines before cursor + suffix head
     const prefixLines = prefix.split("\n");
@@ -278,6 +324,8 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     if (cached) {
       return cached;
     }
+
+    const requestStart = Date.now();
 
     const completions = await new Promise<vscode.InlineCompletionItem[]>((resolve) => {
       if (this.debounceTimer !== undefined) {
@@ -314,9 +362,116 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
 
     if (completions.length > 0) {
       this.storeCache(cacheKey, completions);
+
+      // Record telemetry — outcome starts as "rejected", updated on accept detection
+      const item = completions[0];
+      const completionText =
+        item !== undefined && "insertText" in item ? String(item.insertText) : "";
+      const latencyMs = Date.now() - requestStart;
+      const isMultiline = completionText.includes("\n");
+      this.telemetry.record({
+        timestamp: new Date().toISOString(),
+        modelId: selectedModel,
+        language,
+        filePath,
+        completionLength: completionText.length,
+        completionLines: completionText.split("\n").length,
+        isMultiline,
+        outcome: "rejected",
+        latencyMs,
+        cacheHit: false,
+        contextTokens: 0,
+      });
+      this.lastEventIndex = this.telemetry.getRecent().length - 1;
+      this.lastShownCompletion = { text: completionText, document };
     }
 
     return completions;
+  }
+
+  /**
+   * Handle a document change event for accept detection and cache invalidation.
+   * Called from the onDidChangeTextDocument listener wired in extension.ts.
+   */
+  handleDocumentChange(event: vscode.TextDocumentChangeEvent): void {
+    if (
+      this.lastShownCompletion === undefined ||
+      event.document !== this.lastShownCompletion.document ||
+      event.contentChanges.length === 0
+    ) {
+      return;
+    }
+
+    const inserted = event.contentChanges[0]?.text ?? "";
+    const shown = this.lastShownCompletion.text;
+
+    if (inserted === shown) {
+      // Full accept
+      this._updateLastEventOutcome("accepted");
+
+      // Fire-and-forget prefetch at the new cursor position
+      const change = event.contentChanges[0]!;
+      const insertedLines = inserted.split("\n").length - 1;
+      const lastLineContent = inserted.includes("\n") ? inserted.split("\n").pop()! : "";
+      const newLine = change.range.start.line + insertedLines;
+      const newChar = inserted.includes("\n") ? lastLineContent.length : inserted.length;
+      const newPosition = new vscode.Position(newLine, newChar);
+      const cts = new vscode.CancellationTokenSource();
+      void this.prefetchNext(event.document, newPosition, cts.token);
+    } else if (inserted.length > 0 && shown.startsWith(inserted)) {
+      // Partial accept
+      this._updateLastEventOutcome("partial");
+    }
+
+    this.lastShownCompletion = undefined;
+  }
+
+  /**
+   * Prefetch the next likely completion after the user accepts one.
+   * Runs in background — failure is silent, never blocks the editor.
+   */
+  async prefetchNext(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    token: vscode.CancellationToken,
+  ): Promise<void> {
+    if (token.isCancellationRequested) return;
+
+    const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
+    const suffix = document.getText(
+      new vscode.Range(
+        position,
+        new vscode.Position(document.lineCount - 1, Number.MAX_SAFE_INTEGER),
+      ),
+    );
+    const language = document.languageId;
+    const filePath = document.uri.fsPath;
+
+    try {
+      const items = await this.fetchCompletions(
+        prefix,
+        suffix,
+        language,
+        filePath,
+        position,
+        document,
+        token,
+      );
+      if (items.length > 0 && !token.isCancellationRequested) {
+        const config = vscode.workspace.getConfiguration("dantecode");
+        const modelString = resolveInlineCompletionModel(
+          config.get<string>("defaultModel", "grok/grok-3"),
+          config.get<string>("fimModel"),
+        );
+        const prefixLines = prefix.split("\n");
+        const last3Lines = prefixLines.slice(-3).join("\n");
+        const suffixHead = suffix.slice(0, 100);
+        const cacheKey = `${modelString}:${language}:${position.line}:${last3Lines}:${suffixHead}`;
+        this.storeCache(cacheKey, items);
+      }
+    } catch {
+      // Prefetch failure is silent — it is speculative
+    }
   }
 
   /**
@@ -345,7 +500,8 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       config.get<string>("inline.multiline") ?? config.get<string>("multilineCompletions", "auto");
     const isMultilineContext = shouldUseMultilineCompletion(prefix, suffix);
     const isMultiline =
-      multilineConfig === "always" || (multilineConfig === "auto" && isMultilineContext);
+      multilineConfig === "always" ||
+      (multilineConfig === "auto" && (isMultilineContext || this.defaultMultiline));
 
     const [provider, modelId] = parseModelString(modelString);
 
@@ -368,10 +524,30 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       // Cross-file context is best-effort
     }
 
-    const fimPrompt = buildFIMPrompt(
-      { prefix, suffix, language, filePath, crossFileContext },
-      multilineConfig === "always" ? true : multilineConfig === "never" ? false : undefined,
-    );
+    // Build FIM context and prompt via core FIMEngine (replaces local buildFIMPrompt).
+    // FIMEngine.buildContext() slices prefix/suffix lines, detects language from filePath.
+    // We inject crossFileContext as memoryContext and use "generic" format so the router
+    // receives a clean prefix/suffix/FIM-token prompt without model-specific encoding.
+    const fimCtx = fimEngine.buildContext(filePath, prefix + suffix, prefix.length);
+    if (crossFileContext) {
+      (fimCtx as { memoryContext?: string }).memoryContext = crossFileContext;
+    }
+    const fimPromptRaw = fimEngine.buildPrompt(fimCtx, "generic");
+    // Adapt FIMPrompt (single prompt string) => FIMPromptResult shape used by streamCompletion.
+    const fimPrompt: FIMPromptResult = {
+      systemPrompt: [
+        "You are a fill-in-the-middle code completion engine.",
+        `Language: ${language}`,
+        `File: ${filePath}`,
+        ...(crossFileContext ? ["Cross-file context:", crossFileContext] : []),
+        isMultiline
+          ? "Complete the next block of code and preserve indentation."
+          : "Complete the next span of code naturally at the cursor position.",
+        "Return ONLY the completion text with no explanations or markdown fences.",
+      ].join("\n"),
+      userPrompt: fimPromptRaw.prompt,
+      maxTokens: isMultiline ? MULTILINE_MAX_TOKENS : SINGLE_LINE_MAX_TOKENS,
+    };
 
     const modelConfig: ModelConfig = {
       provider: provider as ModelConfig["provider"],
@@ -450,10 +626,10 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       gateLabel = "";
     }
 
-    // Build the completion text — append PDSE warning comment for low scores
+    // Build the completion text -- append PDSE warning comment for low scores
     let insertText = cleaned;
     if (pdseWarnings && pdseScore !== undefined && pdseScore < pdseThreshold) {
-      insertText += `\n// PDSE ${pdseScore}/100 – ${pdseReason}`;
+      insertText += `\n// PDSE ${pdseScore}/100 \u2013 ${pdseReason}`;
       addInlinePDSEDiagnostic(document, position, pdseScore, pdseReason);
     }
 
@@ -542,6 +718,35 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
 
   clearCache(): void {
     this.cache.length = 0;
+    this.completionCache.clear();
+  }
+
+  /** Apply adaptive hints derived from accumulated telemetry data. */
+  private _applyAdaptiveHints(): void {
+    const hints = this.telemetry.getAdaptiveHints();
+
+    if (hints.suggestedDebounceMs !== this.debounceMs) {
+      this.debounceMs = hints.suggestedDebounceMs;
+    }
+    if (hints.preferMultiline) {
+      this.defaultMultiline = true;
+    }
+    for (const lang of hints.weakLanguages) {
+      this.languageDebounceOverrides.set(lang, hints.suggestedDebounceMs * 1.5);
+    }
+  }
+
+  /** Update the outcome of the last recorded telemetry event. */
+  private _updateLastEventOutcome(outcome: "accepted" | "partial"): void {
+    const recent = this.telemetry.getRecent();
+    if (this.lastEventIndex >= 0 && this.lastEventIndex < recent.length) {
+      const original = recent[this.lastEventIndex];
+      if (original !== undefined) {
+        // Record a corrected event to represent the true outcome
+        this.telemetry.record({ ...original, outcome });
+        this.lastEventIndex = -1;
+      }
+    }
   }
 }
 

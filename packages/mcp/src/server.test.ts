@@ -46,7 +46,27 @@ describe("MCP Server", () => {
       expect(EXPOSED_TOOL_NAMES).toContain("semantic_search");
       expect(EXPOSED_TOOL_NAMES).toContain("record_lesson");
       expect(EXPOSED_TOOL_NAMES).toContain("autoforge_verify");
-      expect(EXPOSED_TOOL_NAMES).toHaveLength(7);
+      expect(EXPOSED_TOOL_NAMES).toContain("verify_output");
+      expect(EXPOSED_TOOL_NAMES).toContain("run_qa_suite");
+      expect(EXPOSED_TOOL_NAMES).toContain("critic_debate");
+      expect(EXPOSED_TOOL_NAMES).toContain("add_verification_rail");
+      expect(EXPOSED_TOOL_NAMES).toContain("web_search");
+      expect(EXPOSED_TOOL_NAMES).toContain("web_fetch");
+      expect(EXPOSED_TOOL_NAMES).toContain("smart_extract");
+      expect(EXPOSED_TOOL_NAMES).toContain("batch_fetch");
+      expect(EXPOSED_TOOL_NAMES).toContain("spawn_subagent");
+      expect(EXPOSED_TOOL_NAMES).toContain("git_watch");
+      expect(EXPOSED_TOOL_NAMES).toContain("run_github_workflow");
+      expect(EXPOSED_TOOL_NAMES).toContain("auto_pr_create");
+      expect(EXPOSED_TOOL_NAMES).toContain("webhook_listen");
+      expect(EXPOSED_TOOL_NAMES).toContain("schedule_git_task");
+      expect(EXPOSED_TOOL_NAMES).toContain("memory_store");
+      expect(EXPOSED_TOOL_NAMES).toContain("memory_recall");
+      expect(EXPOSED_TOOL_NAMES).toContain("memory_summarize");
+      expect(EXPOSED_TOOL_NAMES).toContain("memory_prune");
+      expect(EXPOSED_TOOL_NAMES).toContain("cross_session_recall");
+      expect(EXPOSED_TOOL_NAMES).toContain("memory_visualize");
+      expect(EXPOSED_TOOL_NAMES).toHaveLength(27);
     });
   });
 
@@ -101,6 +121,24 @@ describe("MCP Server", () => {
 
       expect(mockHandler).toHaveBeenCalledWith({ projectRoot: "/repo" });
       expect(result.content[0]!.text).toBe("verification passed");
+    });
+
+    it("dispatches verify_output through the handler registry", async () => {
+      const mockHandler = vi.fn().mockResolvedValue("qa ok");
+      setToolHandlers({ verify_output: mockHandler });
+
+      const server = createMCPServer();
+      const handlers = (
+        server as unknown as { _handlers: Map<string, (...args: unknown[]) => unknown> }
+      )._handlers;
+      const callHandler = handlers.get("tools/call")!;
+
+      const result = (await callHandler({
+        params: { name: "verify_output", arguments: { task: "test", output: "value" } },
+      })) as { content: Array<{ text: string }> };
+
+      expect(mockHandler).toHaveBeenCalledWith({ task: "test", output: "value" });
+      expect(result.content[0]!.text).toBe("qa ok");
     });
 
     it("tools/call returns error for unknown tool", async () => {

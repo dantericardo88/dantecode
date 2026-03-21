@@ -77,7 +77,13 @@ describe("jaccardSimilarity", () => {
 describe("formatApproachesForPrompt", () => {
   it("formats success/failure/partial records", () => {
     const output = formatApproachesForPrompt([
-      { description: "regex parser", outcome: "failed", errorSignature: "EPARSE", toolCalls: 5, timestamp: "" },
+      {
+        description: "regex parser",
+        outcome: "failed",
+        errorSignature: "EPARSE",
+        toolCalls: 5,
+        timestamp: "",
+      },
       { description: "AST parser", outcome: "success", toolCalls: 3, timestamp: "" },
       { description: "manual parse", outcome: "partial", toolCalls: 7, timestamp: "" },
     ]);
@@ -104,7 +110,12 @@ describe("ApproachMemory", () => {
 
   it("loads from disk on first access", async () => {
     const stored = [
-      { description: "tried regex", outcome: "failed", toolCalls: 3, timestamp: "2026-03-18T00:00:00Z" },
+      {
+        description: "tried regex",
+        outcome: "failed",
+        toolCalls: 3,
+        timestamp: "2026-03-18T00:00:00Z",
+      },
     ];
     mockReadFile.mockResolvedValue(JSON.stringify(stored));
 
@@ -143,9 +154,24 @@ describe("ApproachMemory", () => {
 
   it("finds similar approaches by Jaccard similarity", async () => {
     const stored = [
-      { description: "fix authentication bug in login page", outcome: "failed", toolCalls: 3, timestamp: "" },
-      { description: "deploy to production server", outcome: "success", toolCalls: 2, timestamp: "" },
-      { description: "fix login page authentication error", outcome: "success", toolCalls: 4, timestamp: "" },
+      {
+        description: "fix authentication bug in login page",
+        outcome: "failed",
+        toolCalls: 3,
+        timestamp: "",
+      },
+      {
+        description: "deploy to production server",
+        outcome: "success",
+        toolCalls: 2,
+        timestamp: "",
+      },
+      {
+        description: "fix login page authentication error",
+        outcome: "success",
+        toolCalls: 4,
+        timestamp: "",
+      },
     ];
     mockReadFile.mockResolvedValue(JSON.stringify(stored));
 
@@ -154,21 +180,26 @@ describe("ApproachMemory", () => {
 
     // Both auth-related entries should be found; deploy should not
     expect(similar.length).toBeGreaterThanOrEqual(2);
-    expect(similar.some(r => r.description.includes("authentication"))).toBe(true);
-    expect(similar.some(r => r.description.includes("deploy"))).toBe(false);
+    expect(similar.some((r) => r.description.includes("authentication"))).toBe(true);
+    expect(similar.some((r) => r.description.includes("deploy"))).toBe(false);
   });
 
   it("returns only failed approaches via getFailedApproaches", async () => {
     const stored = [
       { description: "fix auth with regex", outcome: "failed", toolCalls: 3, timestamp: "" },
       { description: "fix auth with parser", outcome: "success", toolCalls: 4, timestamp: "" },
-      { description: "fix auth with manual approach", outcome: "failed", toolCalls: 5, timestamp: "" },
+      {
+        description: "fix auth with manual approach",
+        outcome: "failed",
+        toolCalls: 5,
+        timestamp: "",
+      },
     ];
     mockReadFile.mockResolvedValue(JSON.stringify(stored));
 
     const memory = new ApproachMemory("/project");
     const failed = await memory.getFailedApproaches("fix auth");
-    expect(failed.every(r => r.outcome === "failed")).toBe(true);
+    expect(failed.every((r) => r.outcome === "failed")).toBe(true);
   });
 
   it("enforces LRU eviction at 500 records", async () => {
@@ -176,7 +207,7 @@ describe("ApproachMemory", () => {
       description: `approach-${i}`,
       outcome: "failed" as const,
       toolCalls: 1,
-      timestamp: `2026-01-${String(i % 28 + 1).padStart(2, "0")}T00:00:00Z`,
+      timestamp: `2026-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z`,
     }));
     mockReadFile.mockResolvedValue(JSON.stringify(existing));
 
@@ -193,9 +224,7 @@ describe("ApproachMemory", () => {
   });
 
   it("clears all records", async () => {
-    const stored = [
-      { description: "something", outcome: "success", toolCalls: 1, timestamp: "" },
-    ];
+    const stored = [{ description: "something", outcome: "success", toolCalls: 1, timestamp: "" }];
     mockReadFile.mockResolvedValue(JSON.stringify(stored));
 
     const memory = new ApproachMemory("/project");
@@ -217,7 +246,7 @@ describe("ApproachMemory", () => {
     const memory = new ApproachMemory("/project");
     const successes = await memory.getAll({ outcome: "success" });
     expect(successes).toHaveLength(2);
-    expect(successes.every(r => r.outcome === "success")).toBe(true);
+    expect(successes.every((r) => r.outcome === "success")).toBe(true);
   });
 
   it("only loads from disk once (idempotent)", async () => {

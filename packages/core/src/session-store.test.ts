@@ -13,14 +13,16 @@ vi.mock("node:fs/promises", () => ({
   readdir: vi.fn(),
   mkdir: vi.fn(),
   unlink: vi.fn(),
+  rename: vi.fn(),
 }));
 
-import { readFile, writeFile, readdir, mkdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, unlink, rename } from "node:fs/promises";
 const mockReadFile = vi.mocked(readFile);
 const mockWriteFile = vi.mocked(writeFile);
 const mockReaddir = vi.mocked(readdir);
 const mockMkdir = vi.mocked(mkdir);
 const mockUnlink = vi.mocked(unlink);
+const mockRename = vi.mocked(rename);
 
 describe("SessionStore", () => {
   let store: SessionStore;
@@ -44,6 +46,7 @@ describe("SessionStore", () => {
     store = new SessionStore(projectRoot);
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
+    mockRename.mockResolvedValue(undefined);
   });
 
   describe("save", () => {

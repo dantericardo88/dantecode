@@ -31,14 +31,17 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0"
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/core": "1.0.0",
+    "@dantecode/danteforge": "1.0.0",
+    "yaml": "^2.7.0"
   },
   "publishConfig": {
     "access": "public"

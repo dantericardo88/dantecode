@@ -34,6 +34,7 @@ import {
   readOrInitializeState,
   responseNeedsToolExecutionNudge,
   shouldContinueLoop,
+  globalToolScheduler,
 } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -84,6 +85,7 @@ interface WebviewInboundMessage {
     | "pick_image"
     | "remove_attachment"
     | "paste_image"
+    | "file_drop"
     | "save_agent_config"
     | "load_agent_config"
     | "user_confirmed_self_mod";
@@ -244,7 +246,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private pendingRequiredRounds = 0;
   /** Currently active skill name. Enables universal pipeline continuation for all skills. */
   private activeSkill: string | null = null;
-
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly secrets: vscode.SecretStorage,
@@ -389,6 +390,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Image data comes as base64 from the webview; store for next request
         this.pendingImages.push(String(message.payload["data"] ?? ""));
         break;
+      case "file_drop":
+        // Non-image file dragged onto the chat. Save content to .dantecode/context-drops/
+        // and add the path to contextFiles so it appears as a context pill.
+        await this.handleFileDrop(
+          String(message.payload["name"] ?? "dropped-file"),
+          String(message.payload["content"] ?? ""),
+        );
+        break;
       case "save_agent_config":
         await this.handleSaveAgentConfig(message.payload as Partial<AgentConfig>);
         break;
@@ -522,7 +531,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     let consecutiveEmptyRounds = 0;
     const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
     let confabulationNudges = 0;
-    const MAX_CONFABULATION_NUDGES = 2;
+    // 4 chances: Grok needs more nudges than Claude to actually start writing files
+    const MAX_CONFABULATION_NUDGES = 4;
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -538,6 +548,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "5. Do NOT fabricate tool outputs, diffs, test results, coverage numbers, or PDSE scores. Only report real tool results.",
       "6. Do NOT make up file names, test counts, or progress percentages. If you haven't read or run something, say 'not verified'.",
       "7. When asked about progress, report ONLY what tool calls have actually confirmed. Everything else is 'pending' or 'unverified'.",
+      "",
+      "## Tool Execution Protocol — Sequential Verification",
+      "Tool calls in a single response execute ONE AT A TIME in order. Each result appears BEFORE the next tool runs.",
+      "",
+      "VERIFY BEFORE PROCEEDING — after any Bash command (git clone, npm install, mkdir), confirm it succeeded:",
+      "- After `git clone <url> <dir>`: use ListDir to verify `<dir>` exists before reading files inside it.",
+      "- After `Bash` commands that create directories/files: verify with ListDir or Read before referencing them.",
+      "- After `Write <file>`: the SUCCESS result confirms the file exists. If you see an ERROR result, do NOT proceed as if it succeeded.",
+      "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
+      "",
+      "JSON TOOL CALL FORMAT — malformed JSON causes silent drops (file never written, command never ran):",
+      '- Double quotes inside string values MUST be escaped: \\"',
+      "- Backslashes MUST be escaped: \\\\",
+      "- Real newlines inside string values MUST be \\n (not a literal newline character)",
+      '- Test JSON mentally: every { must close with }, every " must be paired.',
       "",
       "## Response Formatting",
       "Format every response for maximum readability in the VS Code sidebar:",
@@ -632,7 +657,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       );
       systemParts.push("```");
       systemParts.push(
-        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+        'To search code: `gh search code "pattern" --limit 10 --json path,repository`',
       );
       systemParts.push("");
       systemParts.push("### Fetching Web Content");
@@ -1074,7 +1099,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.updateStatusBar({ contextPercent: ctxUtil.percent });
 
         // Extract tool calls from the response
-        const { toolCalls } = extractToolCalls(fullResponse);
+        const { toolCalls, parseErrors: toolCallParseErrors } = extractToolCalls(fullResponse);
 
         // ---- Anti-confabulation: empty response circuit breaker ----
         if (fullResponse.trim().length === 0 && toolCalls.length === 0) {
@@ -1117,12 +1142,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Pipeline detection: used by both no-tool-calls handling and tool execution guards
         const isPipelineWorkflow =
           this.activeSkill !== null ||
-          /\/(?:magic|autoforge|party|inferno|blaze|ember|forge|verify|ship)\b/i.test(text);
+          /\/(?:magic|autoforge|party|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest)\b/i.test(
+            text,
+          );
         const PREMATURE_SUMMARY_RE =
-          /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete)/i;
+          /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete|git\s+status|verification\s+results?|changes?\s+made|next\s+steps?|recommendations?)/i;
+        // Grok-specific confabulation: fake verification tables, fake git status, fake PDSE scores.
+        // These patterns appear when Grok narrates what it "did" without using Edit/Write tools.
+        const GROK_CONFAB_RE =
+          /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
 
         // No tool calls → check if we should nudge the model to actually execute
         if (toolCalls.length === 0) {
+          // Parse error nudge: ALL <tool_use> blocks were malformed JSON — nothing executed.
+          // The model thinks tools ran, but they were silently dropped, causing ENOENT in
+          // subsequent rounds (model references files it thinks it wrote but never did).
+          if (toolCallParseErrors.length > 0) {
+            const errorSummary = toolCallParseErrors
+              .map((e, i) => `  Block ${i + 1}: ${e}`)
+              .join("\n");
+            agentMessages.push({ role: "assistant", content: fullResponse });
+            agentMessages.push({
+              role: "user",
+              content:
+                `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n\n` +
+                `No files were written. No commands ran. Fix the JSON and re-emit:\n` +
+                `  - Escape double quotes inside values: " → \\"\n` +
+                `  - Escape backslashes: \\ → \\\\\n` +
+                `  - Escape newlines inside strings: use \\n not real newline`,
+            });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n\n---\n> **Tool parse error** — ${toolCallParseErrors.length} malformed \`<tool_use>\` block(s), nothing executed. Asking model to fix JSON.\n\n`,
+                partial: "",
+              },
+            });
+            continue;
+          }
           const isExecutionMode = agentMode === "yolo" || agentMode === "build";
           const needsExecutionNudge =
             isExecutionMode &&
@@ -1181,27 +1238,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue;
           }
 
-          // Anti-confabulation gate: model claims completion but no files were modified
+          // Anti-confabulation gate v2: fires in two scenarios:
+          // 1. Classic: model claims completion (PREMATURE_SUMMARY_RE or GROK_CONFAB_RE match)
+          //    but touchedFiles === 0 (nothing was actually written).
+          // 2. Reads-only: model did tool calls (executedToolsThisTurn > 0) but ALL were reads,
+          //    touchedFiles === 0, and either fake-verification text was detected OR we've been
+          //    reading for 3+ rounds. Grok's pattern: read N files → write "turbo typecheck: PASS"
+          //    → stop. The PREMATURE_SUMMARY_RE doesn't match Grok's specific format, so we need
+          //    both the GROK_CONFAB_RE detector and the round-count fallback.
+          const isGrokConfab = GROK_CONFAB_RE.test(fullResponse);
+          const isClassicConfab = PREMATURE_SUMMARY_RE.test(fullResponse) || isGrokConfab;
+          const isReadsOnlyConfab = executedToolsThisTurn > 0 && (isGrokConfab || roundNumber >= 3);
           if (
             isPipelineWorkflow &&
             touchedFiles.length === 0 &&
             confabulationNudges < MAX_CONFABULATION_NUDGES &&
-            PREMATURE_SUMMARY_RE.test(fullResponse)
+            (isClassicConfab || isReadsOnlyConfab)
           ) {
             confabulationNudges++;
             agentMessages.push({ role: "assistant", content: fullResponse });
             agentMessages.push({
               role: "user",
               content:
-                "You claimed to complete work, but NO files were actually modified in this session " +
-                "(filesModified === 0). You MUST use Edit or Write tools to make real file changes. " +
-                "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
-                "the next step with real tool calls.",
+                "CONFABULATION DETECTED: You have read files and/or claimed to have implemented " +
+                "changes, but ZERO files were actually written in this session. " +
+                "Running `git status` would show 0 changed files. " +
+                "\n\nDo NOT write planning text, summaries, or fake verification results. " +
+                "\nYour VERY NEXT response MUST contain a Write or Edit tool call to create/modify a real file. " +
+                "\n\nSteps to unblock:" +
+                "\n1. Pick the FIRST file from your implementation plan (e.g. a new .ts file you planned to create)" +
+                "\n2. Use the Write tool to create it with complete, production-ready code" +
+                "\n3. Only AFTER real file changes: run Bash for typecheck/lint/test" +
+                "\n\nDo NOT claim 'typecheck PASS', 'committed', 'pushed', or 'PDSE score' unless " +
+                "you actually ran those commands with the Bash tool and got real output.",
             });
             this.postMessage({
               type: "chat_response_chunk",
               payload: {
-                chunk: `\n\n---\n> **Anti-confabulation** (${confabulationNudges}/${MAX_CONFABULATION_NUDGES}) — model claims completion but 0 files modified.\n\n`,
+                chunk: `\n\n---\n> **Anti-confabulation v2** (${confabulationNudges}/${MAX_CONFABULATION_NUDGES}) — ${isReadsOnlyConfab && !isClassicConfab ? "reads-only pattern" : "fake completion detected"}, 0 files written.\n\n`,
                 partial: "",
               },
             });
@@ -1227,6 +1301,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // so tool execution output is visible in the chat in real-time
 
         const toolResultParts: string[] = [];
+        // Report malformed blocks alongside valid tool results so model can fix and retry.
+        if (toolCallParseErrors.length > 0) {
+          const errorSummary = toolCallParseErrors
+            .map((e, i) => `  Block ${i + 1}: ${e}`)
+            .join("\n");
+          toolResultParts.push(
+            `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) had malformed JSON — NOT executed:\n${errorSummary}\n` +
+              `Fix JSON escaping and re-emit those tool calls in your next response.`,
+          );
+        }
 
         for (let ti = 0; ti < toolCalls.length; ti++) {
           executedToolsThisTurn++;
@@ -1286,8 +1370,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 });
                 toolResultParts.push(
                   `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
-                  `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
-                  `Break your changes into multiple small Edit calls targeting specific sections.`,
+                    `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+                    `Break your changes into multiple small Edit calls targeting specific sections.`,
                 );
                 continue;
               }
@@ -1317,8 +1401,69 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             toolResultParts.push(
               `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
-              `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
-              `then commit. Do NOT claim you already made changes — only tool results count.`,
+                `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+                `then commit. Do NOT claim you already made changes — only tool results count.`,
+            );
+            continue;
+          }
+
+          // Destructive-git pipeline guard: block git clean, git checkout --, git reset --hard.
+          // These commands wipe untracked/unstaged work, destroying all in-progress edits.
+          // Applies to ALL models (Grok, GPT, Claude) running ANY DanteForge command or skill.
+          //
+          // NOTE: `git clean\b` matches ALL forms — `-fd`, `-d -f`, `--force`, etc.
+          // The old pattern `clean\s+-[a-z]*f[a-z]*` missed space-separated flags and long form.
+          const DESTRUCTIVE_GIT_RE =
+            /\bgit\s+(?:clean\b|checkout\s+--\s+[./]|reset\s+--(?:hard|merge)\b|stash(?:\s+push)?\b[^\n]*--include-untracked)/;
+          if (
+            toolCall.name === "Bash" &&
+            isPipelineWorkflow &&
+            DESTRUCTIVE_GIT_RE.test((toolCall.input["command"] as string | undefined) ?? "")
+          ) {
+            const blockedCmd = toolCall.input["command"] as string;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **[PIPELINE GUARD] BLOCKED:** destructive git command \`${blockedCmd.slice(0, 80)}\` — this would undo all in-progress work.\n`,
+                partial: "",
+              },
+            });
+            toolResultParts.push(
+              `[PIPELINE GUARD] Destructive git command BLOCKED: \`${blockedCmd}\`\n` +
+                `This command would undo all in-progress work. During a pipeline/workflow you MUST NOT run:\n` +
+                `  - git clean (removes untracked files)\n` +
+                `  - git checkout -- . (discards unstaged changes)\n` +
+                `  - git reset --hard / --merge (discards ALL changes)\n` +
+                `  - git stash --include-untracked (stashes new files out of existence)\n` +
+                `Instead: use Edit/Write/Read tools to make file changes. ` +
+                `Use GitCommit only AFTER real file edits (Edit or Write tool results).`,
+            );
+            continue;
+          }
+
+          // rm -rf source directory guard: block deletion of package/source dirs during pipelines.
+          // When typecheck fails on a newly-created package, Grok often runs `rm -rf packages/<name>`
+          // to "clean up" the broken package — destroying all in-progress work.
+          const RM_SOURCE_RE =
+            /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\b)[^\n]*\b(?:packages|src|lib)\//;
+          if (
+            toolCall.name === "Bash" &&
+            isPipelineWorkflow &&
+            RM_SOURCE_RE.test((toolCall.input["command"] as string | undefined) ?? "")
+          ) {
+            const blockedCmd = toolCall.input["command"] as string;
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **[PIPELINE GUARD] BLOCKED:** \`rm -rf\` on source directory \`${blockedCmd.slice(0, 80)}\` — this destroys in-progress work.\n`,
+                partial: "",
+              },
+            });
+            toolResultParts.push(
+              `[PIPELINE GUARD] Destructive rm BLOCKED: \`${blockedCmd}\`\n` +
+                `Deleting package/source directories during a pipeline destroys all in-progress work.\n` +
+                `Instead: fix the TypeScript errors in the new package using Edit. ` +
+                `Read the failing file, then Edit to correct the type issues.`,
             );
             continue;
           }
@@ -1505,6 +1650,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
 
           toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
+
+          // DTR Phase 1: Post-execution verification for Bash and Write tools.
+          // After git clone, mkdir, curl/wget — verify the artifact exists before continuing.
+          if (!result.isError) {
+            try {
+              let dtrVerifyMsg: string | null = null;
+              if (toolCall.name === "Bash") {
+                const bashCmd = (toolCall.input["command"] as string) || "";
+                dtrVerifyMsg = await globalToolScheduler.verifyBashArtifacts(
+                  bashCmd,
+                  projectRoot ?? process.cwd(),
+                );
+              } else if (toolCall.name === "Write" && writtenFile) {
+                dtrVerifyMsg = await globalToolScheduler.verifyWriteArtifact(
+                  writtenFile,
+                  projectRoot ?? process.cwd(),
+                );
+              }
+              if (dtrVerifyMsg) {
+                toolResultParts.push(dtrVerifyMsg);
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk: `\n> ⚠️ ${dtrVerifyMsg.split("\n")[0]}\n`, partial: "" },
+                });
+              }
+            } catch {
+              // Non-fatal: DTR verification errors must not interrupt execution
+            }
+          }
         }
 
         // Append the assistant response + tool results to the conversation for next round
@@ -2069,6 +2243,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // --------------------------------------------------------------------------
   // File, model, and skill handlers (existing)
   // --------------------------------------------------------------------------
+
+  /**
+   * Handles a file dragged onto the chat from outside VS Code (e.g. a PRD .md file
+   * from Explorer or Finder). Saves the content to `.dantecode/context-drops/<name>`
+   * then adds that path to contextFiles so it appears as a context pill and is
+   * included in the next agent request's system prompt.
+   */
+  private async handleFileDrop(fileName: string, content: string): Promise<void> {
+    if (!content) return;
+    try {
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const { join } = await import("node:path");
+      const dropsDir = join(this.getProjectRoot(), ".dantecode", "context-drops");
+      await mkdir(dropsDir, { recursive: true });
+      const safeName = fileName.replace(/[/\\:*?"<>|]/g, "_");
+      const destPath = join(dropsDir, safeName);
+      await writeFile(destPath, content, "utf-8");
+      this.handleFileAdd(destPath);
+    } catch {
+      // Non-fatal — fall back to adding by name only
+      this.handleFileAdd(fileName);
+    }
+  }
 
   public handleFileAdd(filePath: string): void {
     if (filePath.length === 0) {
@@ -3593,7 +3790,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   </div>
 
   <!-- Drop Zone Overlay -->
-  <div class="drop-zone-overlay" id="drop-zone">Drop files here</div>
+  <div class="drop-zone-overlay" id="drop-zone">Drop images here &bull; Right-click files in Explorer &rarr; Add to DanteCode Context</div>
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>
@@ -4031,6 +4228,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 renderAttachments();
               };
               reader.readAsDataURL(file);
+            } else {
+              // Non-image file: read as text and add to context (e.g. .md, .ts, .json PRD files)
+              var textReader = new FileReader();
+              textReader.onload = function(ev) {
+                vscode.postMessage({
+                  type: 'file_drop',
+                  payload: { name: file.name, content: ev.target.result }
+                });
+              };
+              textReader.readAsText(file);
             }
           });
         }
@@ -4545,7 +4752,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           case 'self_modification_blocked':
             if (currentAssistantEl) {
               var modPath = message.payload.filePath || 'unknown';
-              streamBuffer += '\\n\\n> **Self-modification blocked:** \\x60' + modPath + '\\x60 — This file is protected.\\n';
+              streamBuffer += '\\n\\n> **Self-modification attempt detected and blocked:** \\x60' + modPath + '\\x60 — This file is protected.\\n';
               currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }

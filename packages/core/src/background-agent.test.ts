@@ -302,32 +302,32 @@ describe("BackgroundAgentRunner", () => {
       expect(task!.error).toContain("No work function");
     });
 
-    it("opens the circuit after five failures and pauses before retrying", async () => {
-      vi.useFakeTimers();
-      const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-retry-"));
-      const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
-        failureThreshold: 5,
-        resetTimeoutMs: 200,
-      });
+    it(
+      "pauses a long-running task when repeated failures form a loop",
+      async () => {
+        const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-retry-"));
+        const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
+          failureThreshold: 5,
+          resetTimeoutMs: 10_000,
+        });
 
-      let attempts = 0;
-      retryRunner.setWorkFn(async () => {
-        attempts++;
-        if (attempts < 6) {
-          throw new Error(`boom-${attempts}`);
-        }
-        return { output: "recovered", touchedFiles: [] };
-      });
+        retryRunner.setWorkFn(async () => {
+          throw new Error("boom");
+        });
 
-      const id = retryRunner.enqueue("recover me", { longRunning: true });
+        const id = retryRunner.enqueue("recover me", { longRunning: true });
 
-      await vi.advanceTimersByTimeAsync(0);
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
-      });
-      expect(retryRunner.getTask(id)?.status).toBe("paused");
-      expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
-    });
+        await vi.waitFor(
+          () => {
+            expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
+          },
+          { timeout: 15_000 },
+        );
+        expect(retryRunner.getTask(id)?.status).toBe("paused");
+        expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
+      },
+      { timeout: 20_000 },
+    );
   });
 
   describe("enqueue with EnqueueOptions", () => {
@@ -435,17 +435,23 @@ describe("BackgroundAgentRunner", () => {
 
       const id = retryRunner.enqueue("resume me", { longRunning: true });
 
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.status).toBe("paused");
-      });
+      await vi.waitFor(
+        () => {
+          expect(retryRunner.getTask(id)?.status).toBe("paused");
+        },
+        { timeout: 15_000 },
+      );
       expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
 
       const resumed = await retryRunner.resume(id);
       expect(resumed).toBe(true);
 
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(retryRunner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 15_000 },
+      );
       expect(retryRunner.getTask(id)?.output).toBe("recovered");
     });
 

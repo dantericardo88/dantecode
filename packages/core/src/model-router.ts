@@ -19,6 +19,24 @@ import type {
 } from "@dantecode/config-types";
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
+import { CredentialVault } from "./credential-vault.js";
+
+// ─── Vault singleton ──────────────────────────────────────────────────────────
+let _vaultInstance: CredentialVault | null = null;
+function getVault(): CredentialVault {
+  if (!_vaultInstance) _vaultInstance = new CredentialVault();
+  return _vaultInstance;
+}
+
+/**
+ * Resolves an API key, preferring the encrypted vault over plain env vars.
+ */
+async function resolveApiKey(envVar: string, vaultKey: string): Promise<string | undefined> {
+  const fromVault = await getVault()
+    .retrieve(vaultKey)
+    .catch(() => null);
+  return fromVault ?? process.env[envVar] ?? undefined;
+}
 
 type ProviderOptionValue =
   | string
@@ -134,11 +152,30 @@ export class ModelRouterImpl {
   // Model-assisted complexity scoring cache
   private _modelRatedComplexity: number | null = null;
   private _firstTurnCompleted = false;
+  // Fallback state — set when primary model fails and a fallback succeeds
+  private _usingFallback = false;
+  private _fallbackModelId: string | undefined = undefined;
 
   constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
     this.projectRoot = projectRoot;
     this.sessionId = sessionId;
+  }
+
+  /** Returns true if the last model call used a fallback (primary was unavailable). */
+  isUsingFallback(): boolean {
+    return this._usingFallback;
+  }
+
+  /** Returns the model ID of the active fallback, or undefined when on the primary model. */
+  getFallbackModelId(): string | undefined {
+    return this._fallbackModelId;
+  }
+
+  /** Resets fallback state. Called automatically when primary model succeeds. */
+  resetFallbackState(): void {
+    this._usingFallback = false;
+    this._fallbackModelId = undefined;
   }
 
   /**
@@ -159,6 +196,7 @@ export class ModelRouterImpl {
     // Try the primary model first
     const primaryResult = await this.tryGenerate(modelConfig, messages, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.text;
     }
 
@@ -169,6 +207,8 @@ export class ModelRouterImpl {
       const fallbackResult = await this.tryGenerate(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.text;
       }
     }
@@ -198,6 +238,7 @@ export class ModelRouterImpl {
     // Try the primary model first
     const primaryResult = await this.tryStream(modelConfig, messages, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.stream;
     }
 
@@ -208,6 +249,8 @@ export class ModelRouterImpl {
       const fallbackResult = await this.tryStream(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.stream;
       }
     }
@@ -247,6 +290,7 @@ export class ModelRouterImpl {
     // Try the primary model
     const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
+      this.resetFallbackState();
       return primaryResult.stream;
     }
 
@@ -261,6 +305,8 @@ export class ModelRouterImpl {
         options,
       );
       if (fallbackResult.success) {
+        this._usingFallback = true;
+        this._fallbackModelId = fallbackConfig.modelId;
         return fallbackResult.stream;
       }
     }
@@ -353,6 +399,23 @@ export class ModelRouterImpl {
   }
 
   /**
+   * Opportunistically resolves an API key from the encrypted vault and returns
+   * a shallow copy of the config with `apiKey` set (if the config does not
+   * already carry one). Only anthropic and grok are touched (conservative).
+   */
+  private async _enrichConfigApiKey(config: ModelConfig): Promise<ModelConfig> {
+    if (config.apiKey) return config;
+    let apiKey: string | undefined;
+    if (config.provider === "anthropic") {
+      apiKey = await resolveApiKey("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY");
+    } else if (config.provider === "grok") {
+      apiKey = await resolveApiKey("XAI_API_KEY", "XAI_API_KEY");
+    }
+    if (!apiKey) return config;
+    return { ...config, apiKey };
+  }
+
+  /**
    * Attempts a generateText call with a single provider. Returns either
    * the success result or the captured error.
    */
@@ -367,7 +430,8 @@ export class ModelRouterImpl {
 
     try {
       const builder = this.resolveProvider(config);
-      const model = builder(config);
+      const enrichedConfig = await this._enrichConfigApiKey(config);
+      const model = builder(enrichedConfig);
       const providerOptions = this.buildProviderOptions(config, options);
 
       this.logEntry(config, "attempt", 0);
@@ -431,7 +495,8 @@ export class ModelRouterImpl {
 
     try {
       const builder = this.resolveProvider(config);
-      const model = builder(config);
+      const enrichedConfig = await this._enrichConfigApiKey(config);
+      const model = builder(enrichedConfig);
       const providerOptions = this.buildProviderOptions(config, options);
 
       this.logEntry(config, "attempt", 0);
@@ -829,6 +894,7 @@ export class ModelRouterImpl {
     this._consecutiveGstackFailures = 0;
     this._modelRatedComplexity = null;
     this._firstTurnCompleted = false;
+    this.resetFallbackState();
   }
 
   /**

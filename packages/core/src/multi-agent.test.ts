@@ -43,16 +43,21 @@ describe("MultiAgent", () => {
 
   it("coordinates simple task with delegation", async () => {
     // Default fallback for any extra iterations
-    mockGenerate.mockResolvedValue('{"planner":"done"}');
+    mockGenerate.mockResolvedValue('[{"role":"planner","task":"done"}]');
     // First iteration: delegation + agent executions
     mockGenerate
-      .mockResolvedValueOnce('{"planner":"plan subtask","coder":"code subtask"}')
+      .mockResolvedValueOnce(
+        '[{"role":"planner","task":"plan subtask"},{"role":"coder","task":"code subtask"}]',
+      )
       .mockResolvedValueOnce("Plan output with function export async")
       .mockResolvedValueOnce("Code output with function export async await");
 
     const result = await agent.coordinate("Implement login");
 
-    expect(result.plan).toEqual({ planner: "plan subtask", coder: "code subtask" });
+    expect(result.plan).toEqual([
+      { role: "planner", task: "plan subtask" },
+      { role: "coder", task: "code subtask" },
+    ]);
     expect(result.iterations).toBeGreaterThanOrEqual(1);
     expect(mockGenerate).toHaveBeenCalled();
   });
@@ -82,7 +87,7 @@ describe("MultiAgent", () => {
   it("computeCompositePdse returns 0 for empty outputs", () => {
     const agentAny = agent as unknown as {
       computeCompositePdse: (
-        outputs: Array<{ lane: string; content: string; pdseScore: number }>,
+        outputs: Array<{ role: string; content: string; pdseScore: number }>,
       ) => number;
     };
     expect(agentAny.computeCompositePdse([])).toBe(0);
@@ -91,16 +96,16 @@ describe("MultiAgent", () => {
   it("computeCompositePdse weights reviewer higher", () => {
     const agentAny = agent as unknown as {
       computeCompositePdse: (
-        outputs: Array<{ lane: string; content: string; pdseScore: number }>,
+        outputs: Array<{ role: string; content: string; pdseScore: number }>,
       ) => number;
     };
     const outputs = [
-      { lane: "coder", content: "", pdseScore: 60 },
-      { lane: "reviewer", content: "", pdseScore: 100 },
+      { role: "coder", content: "", pdseScore: 60 },
+      { role: "reviewer", content: "", pdseScore: 100 },
     ];
     const score = agentAny.computeCompositePdse(outputs);
-    // avg=80, reviewer=100 => 80*0.7 + 100*0.3 = 86
-    expect(score).toBe(86);
+    // avg=80, reviewer=100 => 80*0.8 + 100*0.2 = 84
+    expect(score).toBe(84);
   });
 
   // ---------- Integration Tests ----------
@@ -108,7 +113,7 @@ describe("MultiAgent", () => {
   it("full happy-path: coordinate() with 3-lane delegation produces PDSE and outputs", async () => {
     // Delegation: orchestrator returns 3 lanes
     mockGenerate.mockResolvedValueOnce(
-      '{"planner":"Break task into steps","coder":"Implement login form","reviewer":"Review code quality"}',
+      '[{"role":"planner","task":"Break task into steps"},{"role":"coder","task":"Implement login form"},{"role":"reviewer","task":"Review code quality"}]',
     );
     // Planner lane output (rich content → high heuristic PDSE)
     mockGenerate.mockResolvedValueOnce(
@@ -125,9 +130,9 @@ describe("MultiAgent", () => {
 
     const result = await agent.coordinate("Implement login");
 
-    expect(result.plan).toHaveProperty("planner");
-    expect(result.plan).toHaveProperty("coder");
-    expect(result.plan).toHaveProperty("reviewer");
+    expect(result.plan.some((p) => p.role === "planner")).toBe(true);
+    expect(result.plan.some((p) => p.role === "coder")).toBe(true);
+    expect(result.plan.some((p) => p.role === "reviewer")).toBe(true);
     expect(result.outputs).toHaveLength(3);
     expect(result.outputs.every((o) => o.pdseScore > 0)).toBe(true);
     expect(result.compositePdse).toBeGreaterThan(0);
@@ -152,7 +157,9 @@ describe("MultiAgent", () => {
 
   it("handles agent lane failure gracefully via onProgress", async () => {
     // Delegation: 2 lanes
-    mockGenerate.mockResolvedValueOnce('{"planner":"plan it","coder":"code it"}');
+    mockGenerate.mockResolvedValueOnce(
+      '[{"role":"planner","task":"plan it"},{"role":"coder","task":"code it"}]',
+    );
     // Planner succeeds
     mockGenerate.mockResolvedValueOnce(
       "Plan: step 1, step 2\n```ts\nexport async function plan() { await work(); }\n```",
@@ -160,7 +167,7 @@ describe("MultiAgent", () => {
     // Coder throws
     mockGenerate.mockRejectedValueOnce(new Error("model timeout"));
     // Fallback for potential re-iterations
-    mockGenerate.mockResolvedValue('{"orchestrator":"try again"}');
+    mockGenerate.mockResolvedValue('[{"role":"orchestrator","task":"try again"}]');
 
     const progressUpdates: Array<{ lane: string; status: string }> = [];
     const onProgress: MultiAgentProgressCallback = (update) => {
@@ -181,7 +188,7 @@ describe("MultiAgent", () => {
   });
 
   it("onProgress reports started → completed for successful lanes", async () => {
-    mockGenerate.mockResolvedValueOnce('{"coder":"implement feature"}');
+    mockGenerate.mockResolvedValueOnce('[{"role":"coder","task":"implement feature"}]');
     mockGenerate.mockResolvedValueOnce(
       "```ts\nexport async function feature() { await doWork(); }\nexport interface Config { type: string; }\n```",
     );
@@ -217,6 +224,6 @@ describe("MultiAgent", () => {
     const result = await agent.coordinate("Do something");
 
     expect(result.outputs.length).toBeGreaterThanOrEqual(1);
-    expect(result.outputs[0]!.lane).toBe("orchestrator");
+    expect(result.outputs[0]!.role).toBe("orchestrator");
   });
 });

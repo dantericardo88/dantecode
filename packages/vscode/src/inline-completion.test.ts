@@ -125,6 +125,16 @@ vi.mock("@dantecode/core", () => ({
     const provider = /^(llama|qwen|mistral)/i.test(model) ? "ollama" : "grok";
     return { id: `${provider}/${model}`, provider, modelId: model };
   }),
+  // FIMEngine — wired by Lane 3 into inline-completion.ts
+  FIMEngine: class MockFIMEngine {
+    constructor() {}
+    buildContext(_filePath: string, _code: string, _cursorOffset: number) {
+      return { prefix: "", suffix: "", filePath: _filePath, language: "typescript" };
+    }
+    buildPrompt(_ctx: unknown, _model: string) {
+      return "<PRE> <SUF> <MID>";
+    }
+  },
 }));
 
 let pdseScoreOverride: { overall: number; violations: { message: string }[]; passedGate: boolean } =
@@ -1172,5 +1182,118 @@ describe("DanteCodeCompletionProvider v2", () => {
     expect(items).toHaveLength(1);
     const insertText = (items[0] as { insertText: string }).insertText;
     expect(insertText).toContain("below quality threshold");
+  });
+});
+
+// ─── Tests: Cache Invalidation + Adaptive Hints ────────────────────────────────
+
+import { PrefixTreeCache } from "./prefix-tree-cache.js";
+
+describe("PrefixTreeCache — edit-aware invalidation", () => {
+  it("edit above cursor line clears the entire cache", () => {
+    const cache = new PrefixTreeCache(10);
+    cache.set("hello world", "completion1");
+    cache.set("function foo", "completion2");
+    expect(cache.size).toBe(2);
+
+    // Track cursor at line 5 for this file
+    cache.updateCursorPosition("file:///workspace/test.ts", 5);
+    // Edit at line 3 (above cursor 5) — must clear the cache
+    cache.onDocumentChange("file:///workspace/test.ts", 3, 2);
+
+    expect(cache.size).toBe(0);
+  });
+
+  it("edit below cursor line does NOT clear the cache", () => {
+    const cache = new PrefixTreeCache(10);
+    cache.set("hello world", "completion1");
+    expect(cache.size).toBe(1);
+
+    // Cursor at line 2
+    cache.updateCursorPosition("file:///workspace/test.ts", 2);
+    // Edit at line 5 (below cursor 2) — must NOT clear
+    cache.onDocumentChange("file:///workspace/test.ts", 5, 2);
+
+    expect(cache.size).toBe(1);
+  });
+
+  it("edit in a different file does not clear cache when that file's cursor is below edit", () => {
+    const cache = new PrefixTreeCache(10);
+    cache.set("hello world", "completion1");
+    expect(cache.size).toBe(1);
+
+    // File B cursor at line 10
+    cache.updateCursorPosition("file:///workspace/b.ts", 10);
+    // Edit in file B at line 15 (below cursor 10) — no clear
+    cache.onDocumentChange("file:///workspace/b.ts", 15, 2);
+
+    expect(cache.size).toBe(1);
+  });
+
+  it("prefetchNext is an async public method on DanteCodeCompletionProvider", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Verify the method exists and is callable
+    expect(typeof provider.prefetchNext).toBe("function");
+    // Call it with a mock (fire-and-forget) — should return a Promise
+    const doc = createDocument("const x = ", "");
+    const token = createMockToken();
+    const result = provider.prefetchNext(
+      doc as never,
+      new vscodeMocks.Position(0, 10) as never,
+      token as never,
+    );
+    expect(result).toBeInstanceOf(Promise);
+    // Silence any unhandled promise rejection from the mocked router
+    result.catch(() => {});
+  });
+
+  it("defaultMultiline starts as false (neutral preference)", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // With no telemetry data, preference is neutral (false)
+    expect(provider.defaultMultiline).toBe(false);
+  });
+
+  it("languageDebounceOverrides starts empty and can be set for weak languages", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Initially empty
+    expect(provider.languageDebounceOverrides.size).toBe(0);
+    // Simulate what _applyAdaptiveHints does for weak languages
+    provider.languageDebounceOverrides.set("rust", 270);
+    expect(provider.languageDebounceOverrides.get("rust")).toBe(270);
+    // Strong languages remain untouched
+    expect(provider.languageDebounceOverrides.get("typescript")).toBeUndefined();
+  });
+});
+
+// ─── Tests: Cache Cursor Tracking ──────────────────────────────────────────────
+
+describe("cache cursor tracking", () => {
+  it("updateCursorPosition is called from document change handler in extension context", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Create a spy on the cache's updateCursorPosition method
+    const spy = vi.spyOn(provider.completionCache, "updateCursorPosition");
+
+    // Mirror what extension.ts does in onDidChangeTextDocument before onDocumentChange:
+    // capture the active editor's cursor line then call updateCursorPosition.
+    const mockDoc = createDocument("const x = ", "");
+    const cursorLine = 5; // simulates vscode.window.activeTextEditor?.selection.active.line
+
+    provider.completionCache.updateCursorPosition(mockDoc.uri.toString(), cursorLine);
+    expect(spy).toHaveBeenCalledWith(mockDoc.uri.toString(), cursorLine);
+  });
+
+  it("cache invalidation uses correct cursor line for stale detection", () => {
+    const provider = new DanteCodeCompletionProvider();
+    // Set cursor at line 10
+    provider.completionCache.updateCursorPosition("file:///test.ts", 10);
+    // Store a completion
+    provider.completionCache.set("const x", "= 1;");
+    expect(provider.completionCache.size).toBe(1);
+    // Edit at line 8 (above cursor line 10) — should invalidate cache
+    provider.completionCache.onDocumentChange("file:///test.ts", 8, 2);
+    // Cache should be cleared because edit was above cursor
+    expect(provider.completionCache.size).toBe(0);
+    const result = provider.completionCache.get("const x");
+    expect(result).toBeUndefined();
   });
 });
