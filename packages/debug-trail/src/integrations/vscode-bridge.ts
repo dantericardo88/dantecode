@@ -48,11 +48,15 @@ export class VsCodeBridge {
   async handleQuery(query?: string): Promise<VsCodeTrailMessage> {
     try {
       const result = await this.cli.debugTrail(query);
-      return this.wrap("trail_query_result", result);
+      return this.wrap("trail_query_result", { success: true, ...result });
     } catch (err) {
       return this.wrap("trail_query_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "query_failed",
+        results: [],
+        totalMatches: 0,
+        latencyMs: 0,
       });
     }
   }
@@ -60,9 +64,10 @@ export class VsCodeBridge {
   async handleSnapshot(fileOrSession?: string): Promise<VsCodeTrailMessage> {
     try {
       const result = await this.cli.debugSnapshot(fileOrSession);
-      return this.wrap("snapshot_result", result);
+      return this.wrap("snapshot_result", { success: true, ...result });
     } catch (err) {
       return this.wrap("snapshot_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "snapshot_failed",
       });
@@ -72,9 +77,10 @@ export class VsCodeBridge {
   async handleRestore(id: string): Promise<VsCodeTrailMessage> {
     try {
       const result = await this.cli.debugRestore(id);
-      return this.wrap("restore_result", result);
+      return this.wrap("restore_result", { success: true, ...result });
     } catch (err) {
       return this.wrap("restore_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "restore_failed",
       });
@@ -84,9 +90,10 @@ export class VsCodeBridge {
   async handleReplay(sessionId: string, step?: number): Promise<VsCodeTrailMessage> {
     try {
       const result = await this.cli.debugReplay(sessionId, step);
-      return this.wrap("replay_result", result);
+      return this.wrap("replay_result", { success: true, ...result });
     } catch (err) {
       return this.wrap("replay_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "replay_failed",
       });
@@ -96,9 +103,10 @@ export class VsCodeBridge {
   async handleExport(sessionId: string): Promise<VsCodeTrailMessage> {
     try {
       const result = await this.cli.auditExport(sessionId);
-      return this.wrap("export_result", result);
+      return this.wrap("export_result", { success: true, ...result });
     } catch (err) {
       return this.wrap("export_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "export_failed",
       });
@@ -111,11 +119,14 @@ export class VsCodeBridge {
       const result = await this.cli.debugTrail(undefined);
       // Take most recent N events
       const recent = result.results.slice(0, limit);
-      return this.wrap("recent_events", { events: recent, totalMatches: result.totalMatches });
+      return this.wrap("recent_events", { success: true, events: recent, totalMatches: result.totalMatches });
     } catch (err) {
       return this.wrap("recent_events", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         errorCode: "recent_events_failed",
+        events: [],
+        totalMatches: 0,
       });
     }
   }
@@ -143,13 +154,17 @@ export class VsCodeBridge {
         case "recent":
           return this.getRecentEvents(args["limit"] as number | undefined);
         default:
-          return this.wrap("trail_query_result", { error: `Unknown command: ${command}` });
+          return this.wrap("trail_query_result", { success: false, error: `Unknown command: ${command}`, results: [], totalMatches: 0, latencyMs: 0 });
       }
     } catch (err) {
       return this.wrap("trail_query_result", {
+        success: false,
         error: err instanceof Error ? err.message : String(err),
         command,
         errorCode: "dispatch_failed",
+        results: [],
+        totalMatches: 0,
+        latencyMs: 0,
       });
     }
   }

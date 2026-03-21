@@ -4,6 +4,7 @@
 // phantom commits, unusual erasure sequences. Advisory-only, never blocking.
 // ============================================================================
 
+import { dirname } from "node:path";
 import type { TrailEvent } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -312,7 +313,7 @@ export class AnomalyDetector {
     const byDir = new Map<string, TrailEvent[]>();
     for (const d of deletions) {
       const fp = String(d.payload["filePath"] ?? "");
-      const dir = fp.replace(/[/\\][^/\\]+$/, "") || fp; // dirname
+      const dir = fp ? dirname(fp) || fp : ".";
       if (!byDir.has(dir)) byDir.set(dir, []);
       byDir.get(dir)!.push(d);
     }

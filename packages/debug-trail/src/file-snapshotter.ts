@@ -274,6 +274,12 @@ export class FileSnapshotter {
   // Storage verification
   // -------------------------------------------------------------------------
 
+  /** Get all persisted snapshot records (used by RestoreEngine for hash verification). */
+  async getSnapshotRecords(): Promise<FileSnapshotRecord[]> {
+    await this.ensureReady();
+    return this.store.readAllSnapshotRecords();
+  }
+
   async snapshotExists(snapshotId: string): Promise<boolean> {
     const path = this.store.snapshotPath(snapshotId);
     try {

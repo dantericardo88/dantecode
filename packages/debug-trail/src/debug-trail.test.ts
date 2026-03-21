@@ -2299,3 +2299,140 @@ describe("Round 9 fixes", () => {
     expect(detector.getConfig().burstDeletionCount).toBe(10);
   });
 });
+
+// ============================================================================
+// Round 10 fixes
+// ============================================================================
+
+describe("Round 10 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 1: FileSnapshotter.getSnapshotRecords() public method
+  // -------------------------------------------------------------------------
+
+  it("FileSnapshotter.getSnapshotRecords() returns persisted records after captureSnapshot", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r10-snaprecs-"));
+    const testFile = join(storageRoot, "test.ts");
+    await writeFile(testFile, "export const x = 1;");
+
+    const snapshotter = new FileSnapshotter({ storageRoot });
+    const prov = makeProvenance({ sessionId: "sess_r10_snaprecs" });
+    await snapshotter.captureSnapshot(testFile, "evt1", prov);
+
+    const records = await snapshotter.getSnapshotRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0]!.filePath).toBe(testFile);
+    expect(records[0]!.contentHash).toBeTruthy();
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("FileSnapshotter.getSnapshotRecords() returns empty array before any snapshots", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r10-snaprecs-empty-"));
+    const snapshotter = new FileSnapshotter({ storageRoot });
+    const records = await snapshotter.getSnapshotRecords();
+    expect(records).toEqual([]);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 2: detectRecursiveDelete uses path.dirname() — edge cases handled
+  // -------------------------------------------------------------------------
+
+  it("detectRecursiveDelete: groups by dirname for deep nested paths", () => {
+    const detector = new AnomalyDetector();
+    const now = Date.now();
+    const makeDelete = (fp: string, i: number): TrailEvent => ({
+      id: `rd_${i}`,
+      seq: i,
+      timestamp: new Date(now + i).toISOString(),
+      kind: "file_delete",
+      actor: "FileSystem",
+      summary: `delete ${fp}`,
+      payload: { filePath: fp },
+      provenance: { sessionId: "sess_rd", runId: "run_rd" },
+    });
+
+    // 3 files from the same deep directory — should be recursive_delete
+    const events = [
+      makeDelete("/project/src/utils/a.ts", 0),
+      makeDelete("/project/src/utils/b.ts", 1),
+      makeDelete("/project/src/utils/c.ts", 2),
+    ];
+    const flags = detector.analyze(events, "sess_rd");
+    const rdFlags = flags.filter((f) => f.anomalyType === "recursive_delete");
+    expect(rdFlags).toHaveLength(1);
+    expect(rdFlags[0]!.description).toContain("/project/src/utils");
+    expect(rdFlags[0]!.relatedEventIds).toHaveLength(3);
+  });
+
+  it("detectRecursiveDelete: does not group files from different directories", () => {
+    const detector = new AnomalyDetector();
+    const now = Date.now();
+    const makeDelete = (fp: string, i: number): TrailEvent => ({
+      id: `rd2_${i}`,
+      seq: i,
+      timestamp: new Date(now + i).toISOString(),
+      kind: "file_delete",
+      actor: "FileSystem",
+      summary: `delete ${fp}`,
+      payload: { filePath: fp },
+      provenance: { sessionId: "sess_rd2", runId: "run_rd2" },
+    });
+
+    // 3 files from 3 different directories — no recursive_delete
+    const events = [
+      makeDelete("/src/a.ts", 0),
+      makeDelete("/lib/b.ts", 1),
+      makeDelete("/test/c.ts", 2),
+    ];
+    const flags = detector.analyze(events, "sess_rd2");
+    const rdFlags = flags.filter((f) => f.anomalyType === "recursive_delete");
+    expect(rdFlags).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 3: VsCodeBridge — success field on all responses
+  // -------------------------------------------------------------------------
+
+  it("VsCodeBridge.handleQuery() success response has success:true", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r10-vscode-"));
+    const { VsCodeBridge } = await import("./integrations/vscode-bridge.js");
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r10_vsc" });
+    await logger.init();
+
+    const bridge = new VsCodeBridge(logger, { storageRoot });
+    const msg = await bridge.handleQuery("recent errors");
+    expect((msg.data as Record<string, unknown>)["success"]).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("VsCodeBridge dispatch unknown command has success:false with results array", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r10-vscode-err-"));
+    const { VsCodeBridge } = await import("./integrations/vscode-bridge.js");
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r10_vsc_err" });
+    await logger.init();
+
+    const bridge = new VsCodeBridge(logger, { storageRoot });
+    const msg = await bridge.dispatch("unknown_command_xyz", {});
+    const data = msg.data as Record<string, unknown>;
+    expect(data["success"]).toBe(false);
+    expect(data["error"]).toContain("Unknown command");
+    expect(Array.isArray(data["results"])).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("VsCodeBridge.getRecentEvents() success response has events array", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r10-recent-"));
+    const { VsCodeBridge } = await import("./integrations/vscode-bridge.js");
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r10_recent" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "something happened", {});
+    await logger.flush();
+
+    const bridge = new VsCodeBridge(logger, { storageRoot });
+    const msg = await bridge.getRecentEvents(5);
+    const data = msg.data as Record<string, unknown>;
+    expect(data["success"]).toBe(true);
+    expect(Array.isArray(data["events"])).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+});

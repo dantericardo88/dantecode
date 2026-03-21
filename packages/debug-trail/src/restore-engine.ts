@@ -134,7 +134,7 @@ export class RestoreEngine {
       : null;
 
     // Verify content integrity: restored file hash must match snapshot record
-    const snapRecords = await (this.snapshotter as unknown as { store: { readAllSnapshotRecords(): Promise<import("./types.js").FileSnapshotRecord[]> } }).store.readAllSnapshotRecords?.() ?? [];
+    const snapRecords = await this.snapshotter.getSnapshotRecords();
     const snapRecord = snapRecords.find((r) => r.snapshotId === snapshotId);
     if (snapRecord && afterHash && afterHash !== snapRecord.contentHash) {
       const errEventId = await this.logger.log(
