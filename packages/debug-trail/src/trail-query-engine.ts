@@ -138,7 +138,6 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   }
   if (!negatedDeletes && DELETE_KEYWORDS.some((k) => lower.includes(k))) {
     query.kinds = [...(query.kinds ?? []), "file_delete"];
-    if (!query.errorsOnly) delete query.errorsOnly;
   }
   if (WRITE_KEYWORDS.some((k) => lower.includes(k)) && !query.kinds) {
     query.kinds = ["file_write"];
@@ -152,6 +151,12 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   } else {
     const actorMatch = nl.match(/(?:by|from|what did)\s+([A-Z][a-zA-Z]+)/);
     if (actorMatch?.[1]) query.actor = actorMatch[1];
+  }
+
+  // F7: resolve mutually exclusive filters — errorsOnly and kinds can't both be set.
+  // kinds wins: the user named specific event types, which is more explicit than errorsOnly.
+  if (query.kinds && query.kinds.length > 0 && query.errorsOnly) {
+    delete query.errorsOnly;
   }
 
   // File path extraction — file with extension (expanded list)
@@ -186,6 +191,8 @@ export class TrailQueryEngine {
   private cachedEvents: TrailEvent[] | null = null;
   private cacheTime = 0;
   private static CACHE_TTL_MS = 10_000; // 10s cache
+  // F2: de-duplicate concurrent cache-miss reads — all callers share the same in-flight Promise.
+  private pendingRead: Promise<TrailEvent[]> | null = null;
 
   constructor(config?: Partial<DebugTrailConfig>, index?: TrailEventIndex) {
     this.config = { ...defaultConfig(), ...config };
@@ -384,16 +391,21 @@ export class TrailQueryEngine {
       crlfDelay: Infinity,
     });
 
-    for await (const line of rl) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as import("./types.js").TrailEvent;
-        if (!filter || filter(event)) {
-          yield event;
+    // F3: try/finally ensures rl.close() is called even on early break/return from the caller.
+    try {
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as import("./types.js").TrailEvent;
+          if (!filter || filter(event)) {
+            yield event;
+          }
+        } catch {
+          // malformed line — skip silently
         }
-      } catch {
-        // malformed line — skip silently
       }
+    } finally {
+      rl.close();
     }
   }
 
@@ -405,16 +417,22 @@ export class TrailQueryEngine {
     if (this.cachedEvents && Date.now() - this.cacheTime < TrailQueryEngine.CACHE_TTL_MS) {
       return this.cachedEvents;
     }
-    const events = await this.store.readAllEvents();
-    this.cachedEvents = events;
-    this.cacheTime = Date.now();
-    return events;
+    // F2: if a read is already in flight, return the same Promise — no duplicate disk reads.
+    if (this.pendingRead) return this.pendingRead;
+    this.pendingRead = this.store.readAllEvents().then((events) => {
+      this.cachedEvents = events;
+      this.cacheTime = Date.now();
+      this.pendingRead = null;
+      return events;
+    });
+    return this.pendingRead;
   }
 
   /** Invalidate cache (call after new events are appended). */
   invalidateCache(): void {
     this.cachedEvents = null;
     this.cacheTime = 0;
+    this.pendingRead = null; // F2: also cancel any in-flight read so next caller gets fresh data.
   }
 
   private async ensureReady(): Promise<void> {

@@ -32,14 +32,19 @@ export class TombstoneRegistry {
 
   /** Get most recent tombstone for a file path. */
   latestForFile(filePath: string): DeleteTombstone | undefined {
-    const list = this.byFile.get(filePath);
-    if (!list || list.length === 0) return undefined;
-    return list[list.length - 1];
+    // F5: reuse allForFile() which guarantees chronological order.
+    const sorted = this.allForFile(filePath);
+    return sorted.length > 0 ? sorted[sorted.length - 1] : undefined;
   }
 
   /** Get all tombstones for a file path (oldest first). */
   allForFile(filePath: string): DeleteTombstone[] {
-    return this.byFile.get(filePath) ?? [];
+    const list = this.byFile.get(filePath) ?? [];
+    // F5: sort explicitly — bulkLoad() may deliver tombstones in non-chronological order.
+    // Spread to avoid mutating the internal insertion-order list.
+    return [...list].sort(
+      (a, b) => new Date(a.deletedAt).getTime() - new Date(b.deletedAt).getTime(),
+    );
   }
 
   /** All tombstones in a session. */

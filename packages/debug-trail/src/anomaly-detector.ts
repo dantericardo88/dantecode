@@ -235,10 +235,12 @@ export class AnomalyDetector {
   // -------------------------------------------------------------------------
 
   private detectPhantomCommit(events: TrailEvent[], sessionId?: string): AnomalyFlag[] {
+    // F4: case-insensitive substring match — consistent with all other detectors in this file.
+    const COMMIT_ACTORS = ["gitcommit", "gitpush", "git_commit", "git_push"];
     const commitEvents = events.filter(
       (e) =>
         e.kind === "tool_call" &&
-        (e.actor === "GitCommit" || e.actor === "GitPush"),
+        COMMIT_ACTORS.some((a) => e.actor.toLowerCase().includes(a)),
     );
     if (commitEvents.length === 0) return [];
 

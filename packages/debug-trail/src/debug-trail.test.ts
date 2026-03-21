@@ -26,7 +26,7 @@ import { defaultConfig, DiskWriteError } from "./types.js";
 import { FileSnapshotter } from "./file-snapshotter.js";
 import { AuditLogger } from "./audit-logger.js";
 import { ReplayOrchestrator } from "./replay-orchestrator.js";
-import { TrailStore } from "./sqlite-store.js";
+import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { RestoreEngine } from "./restore-engine.js";
 
 // ============================================================================
@@ -2708,11 +2708,11 @@ describe("Round 12 fixes", () => {
       const snap = await snapshotter.captureSnapshot(testFile, "test", provenance);
       expect(snap).not.toBeNull();
 
-      // Use a non-existent target so the overwrite guard (existsSync && !overwrite) is not triggered.
-      const dryRunTarget = join(tmpDir, "restored-copy.txt");
+      // F1 fix: dryRun:true with no overwrite key must now reach the dry-run path even when
+      // the target already exists (overwrite defaults to true per JSDoc).
       const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, testFile, {
         dryRun: true,
-        targetPath: dryRunTarget,
+        // NOTE: no overwrite key — undefined must be treated as true per "Default: true"
       });
 
       expect(result.error).toBe("dry_run");
@@ -2797,5 +2797,172 @@ describe("Round 12 fixes", () => {
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ============================================================================
+// Round 13 fixes
+// ============================================================================
+
+describe("Round 13 fixes", () => {
+  // F1: overwrite defaults to true — dryRun on existing target must reach dry-run path.
+  it("F1: restoreFromSnapshot dryRun on existing file (no overwrite key) returns dry_run not overwrite error", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r13-f1-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const logger = new AuditLogger({ config });
+      const snapshotter = new FileSnapshotter(config);
+      const restoreEngine = new RestoreEngine(snapshotter, logger);
+
+      const testFile = join(tmpDir, "existing-target.txt");
+      await writeFile(testFile, "existing content");
+      const snap = await snapshotter.captureSnapshot(testFile, "test", makeProvenance());
+      expect(snap).not.toBeNull();
+
+      // Target exists, no overwrite key — overwrite must default to true so we reach dryRun.
+      const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, testFile, { dryRun: true });
+
+      expect(result.error).toBe("dry_run");
+      expect(result.restored).toBe(false);
+      expect(result.auditEventId).toBeTruthy();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // F2: concurrent cache-miss reads must only trigger one disk read.
+  it("F2: concurrent query() calls after cache expiry trigger readAllEvents() exactly once", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r13-f2-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const store = getTrailStore(config.storageRoot);
+      await store.init();
+
+      const engine = new TrailQueryEngine(config);
+      await engine.init(); // warm up
+
+      // Expire the cache
+      engine.invalidateCache();
+
+      let readCount = 0;
+      const originalRead = store.readAllEvents.bind(store);
+      vi.spyOn(store, "readAllEvents").mockImplementation(async () => {
+        readCount++;
+        return originalRead();
+      });
+
+      // 10 concurrent callers — should share one in-flight read
+      await Promise.all(Array.from({ length: 10 }, () => engine.query({ limit: 1 })));
+
+      expect(readCount).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // F3: streamEvents() with early break must not leak file handles.
+  it("F3: streamEvents() with early break does not leak file handles over many iterations", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "r13-f3-"));
+    try {
+      const config = { ...defaultConfig(), storageRoot: tmpDir };
+      const engine = new TrailQueryEngine(config);
+
+      // 100 partial streams — if handles leaked, OS would reject around fd limit.
+      for (let i = 0; i < 100; i++) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _event of engine.streamEvents()) {
+          break; // early exit — this is the path that previously leaked file handles
+        }
+      }
+      // Reaching here without EMFILE error means handles are being closed correctly.
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // F4: phantom commit detection is case-insensitive — actor "git_commit" (underscore) must fire.
+  it("F4: detectPhantomCommit fires for lowercase/underscore actor names like git_commit", () => {
+    const detector = new AnomalyDetector();
+    const sess = `sess_f4_${randomUUID().slice(0, 8)}`;
+
+    const events = [
+      makeEvent({
+        kind: "tool_call",
+        actor: "git_commit", // underscore, lowercase — previously missed by exact-match
+        payload: {},
+        provenance: makeProvenance({ sessionId: sess }),
+        summary: "git commit",
+        seq: 1,
+      }),
+      // No preceding file_write in 60s window → phantom commit
+    ];
+
+    const flags = detector.analyze(events, sess);
+    const phantomFlags = flags.filter((f) => f.anomalyType === "phantom_commit");
+    expect(phantomFlags).toHaveLength(1);
+    expect(phantomFlags[0]!.severity).toBe("high");
+  });
+
+  // F5: allForFile() must return tombstones oldest-first regardless of bulkLoad() order.
+  it("F5: TombstoneRegistry.allForFile() returns oldest-first after reverse-chronological bulkLoad", () => {
+    const registry = new TombstoneRegistry();
+    const filePath = "/virtual/multi-deleted.ts";
+    const prov = makeProvenance();
+
+    const t1: DeleteTombstone = {
+      tombstoneId: "tomb_r13_001", filePath,
+      deletedAt: "2024-01-01T10:00:00.000Z", deletedBy: "TestActor",
+      trailEventId: "evt_r13_001", provenance: prov, beforeStateCaptured: false,
+    };
+    const t2: DeleteTombstone = {
+      tombstoneId: "tomb_r13_002", filePath,
+      deletedAt: "2024-01-02T10:00:00.000Z", deletedBy: "TestActor",
+      trailEventId: "evt_r13_002", provenance: prov, beforeStateCaptured: false,
+    };
+    const t3: DeleteTombstone = {
+      tombstoneId: "tomb_r13_003", filePath,
+      deletedAt: "2024-01-03T10:00:00.000Z", deletedBy: "TestActor",
+      trailEventId: "evt_r13_003", provenance: prov, beforeStateCaptured: false,
+    };
+
+    // Load in reverse order (newest first — as might come from a reverse-sorted JSONL)
+    registry.bulkLoad([t3, t1, t2]);
+
+    const sorted = registry.allForFile(filePath);
+    expect(sorted).toHaveLength(3);
+    expect(sorted[0]!.tombstoneId).toBe("tomb_r13_001"); // oldest first
+    expect(sorted[2]!.tombstoneId).toBe("tomb_r13_003"); // newest last
+
+    const latest = registry.latestForFile(filePath);
+    expect(latest!.tombstoneId).toBe("tomb_r13_003"); // newest
+  });
+
+  // F6: scoreCompleteness always returns [0,1] — clamping in scoreToGrade is defensive.
+  it("F6: scoreCompleteness always returns score in [0, 1]", () => {
+    // Empty session
+    const empty = scoreCompleteness([], [], "sess_f6_empty");
+    expect(empty.score).toBeGreaterThanOrEqual(0);
+    expect(empty.score).toBeLessThanOrEqual(1);
+
+    // Single file_write without snapshot (worst case provenance + snapshot gap)
+    const worst = scoreCompleteness(
+      [makeEvent({ kind: "file_write", payload: { filePath: "/a.ts" } })],
+      [],
+      "sess_f6_worst",
+    );
+    expect(worst.score).toBeGreaterThanOrEqual(0);
+    expect(worst.score).toBeLessThanOrEqual(1);
+  });
+
+  // F7: NL parser "errors during file deletion" must not set both errorsOnly + kinds.
+  it("F7: parseNaturalLanguageQuery resolves errorsOnly vs kinds conflict — not both set", () => {
+    const q = parseNaturalLanguageQuery("errors during file deletion");
+    const hasBoth = q.errorsOnly === true && q.kinds !== undefined && q.kinds.length > 0;
+    expect(hasBoth).toBe(false);
+
+    // Verify at least one filter is set (query must still narrow results)
+    const hasAtLeastOne = q.errorsOnly === true || (q.kinds !== undefined && q.kinds.length > 0);
+    expect(hasAtLeastOne).toBe(true);
   });
 });

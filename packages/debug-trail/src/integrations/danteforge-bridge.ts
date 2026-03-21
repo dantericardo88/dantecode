@@ -27,10 +27,13 @@ export interface TrailTrustResult {
 // ---------------------------------------------------------------------------
 
 function scoreToGrade(score: number): "A" | "B" | "C" | "D" | "F" {
-  if (score >= 0.95) return "A";
-  if (score >= 0.85) return "B";
-  if (score >= 0.70) return "C";
-  if (score >= 0.50) return "D";
+  // F6: clamp to [0, 1] before mapping — scoreCompleteness() should always return in range,
+  // but defensive clamping prevents silent grade miscalculation if it ever doesn't.
+  const s = Math.min(1, Math.max(0, score));
+  if (s >= 0.95) return "A";
+  if (s >= 0.85) return "B";
+  if (s >= 0.70) return "C";
+  if (s >= 0.50) return "D";
   return "F";
 }
 

@@ -64,7 +64,8 @@ export class RestoreEngine {
     }
 
     // Check target safety
-    if (existsSync(targetPath) && !options.overwrite) {
+    // F1: treat undefined as true per JSDoc "Default: true" — only block when explicitly false.
+    if (existsSync(targetPath) && options.overwrite === false) {
       const auditEventId = await this.logger.log(
         "file_restore",
         "RestoreEngine",
