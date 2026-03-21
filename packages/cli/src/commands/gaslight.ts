@@ -26,7 +26,6 @@ import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
-const RED = "\x1b[31m";
 const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
@@ -90,8 +89,7 @@ function cmdReview(args: string[], projectRoot: string): void {
   if (sessionIdArg) {
     session = store.load(sessionIdArg);
     if (!session) {
-      console.error(`${RED}Session not found: ${sessionIdArg}${RESET}`);
-      process.exit(1);
+      throw new Error(`Session not found: ${sessionIdArg}`);
     }
   } else {
     const all = store.list();
@@ -145,24 +143,13 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
   if (sessionIdArg) {
     session = store.load(sessionIdArg);
     if (!session) {
-      console.error(`${RED}Session not found: ${sessionIdArg}${RESET}`);
-      process.exit(1);
+      throw new Error(`Session not found: ${sessionIdArg}`);
     }
     if (!session.lessonEligible) {
-      console.error(
-        `${RED}Session ${sessionIdArg} is not lesson-eligible (gate did not PASS).${RESET}`,
-      );
-      console.error(
-        `${DIM}Only sessions where DanteForge returns PASS are eligible for lesson distillation.${RESET}`,
-      );
-      process.exit(1);
+      throw new Error(`Session ${sessionIdArg} is not lesson-eligible. Only PASS sessions qualify.`);
     }
     if (session.distilledAt) {
-      console.error(
-        `${YELLOW}Session ${sessionIdArg} was already distilled at ${session.distilledAt}.${RESET}`,
-      );
-      console.error(`${DIM}Distilling the same session twice creates duplicate skills.${RESET}`);
-      process.exit(1);
+      throw new Error(`Session ${sessionIdArg} was already distilled at ${session.distilledAt}. Distilling twice creates duplicates.`);
     }
   } else {
     const all = store.list();
@@ -185,8 +172,7 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
     lesson = distillLesson(session);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`${RED}Lesson distillation failed: ${msg}${RESET}`);
-    process.exit(1);
+    throw new Error(`Lesson distillation failed: ${msg}`);
   }
 
   const skillbook = new DanteSkillbookIntegration({ cwd: projectRoot, gitStage: true });
@@ -208,8 +194,7 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
     console.log(`${DIM}Session marked as distilled — won't be bridged again.${RESET}`);
     console.log(`${DIM}Run 'git commit' to persist the lesson permanently.${RESET}`);
   } else {
-    console.error(`${RED}applyProposals returned 0 applied. Check skillbook state.${RESET}`);
-    process.exit(1);
+    throw new Error(`applyProposals returned 0 applied — check skillbook state.`);
   }
 }
 

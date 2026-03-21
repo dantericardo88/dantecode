@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { createWorktree, removeWorktree } from "@dantecode/git-engine";
@@ -43,9 +43,9 @@ export interface MergeBrainResult {
 // Helpers
 // ----------------------------------------------------------------------------
 
-function git(args: string, cwd: string, timeoutMs = 10_000): string {
+function git(args: string[], cwd: string, timeoutMs = 10_000): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -87,25 +87,25 @@ async function tryStructuralMergeIsolated(
     worktreeDir = worktree.directory;
 
     // Run merge in isolated worktree — never touches the main repo
-    git(`merge "${branchB}" --no-commit --no-ff`, worktreeDir, MERGE_TIMEOUT_MS);
+    git(["merge", branchB, "--no-commit", "--no-ff"], worktreeDir, MERGE_TIMEOUT_MS);
 
-    const conflictedRaw = git("diff --name-only --diff-filter=U", worktreeDir);
+    const conflictedRaw = git(["diff", "--name-only", "--diff-filter=U"], worktreeDir);
     const conflicts = conflictedRaw ? conflictedRaw.split("\n").filter(Boolean) : [];
 
     if (conflicts.length === 0) {
-      try { git("merge --abort", worktreeDir); } catch { git("reset --hard HEAD", worktreeDir); }
+      try { git(["merge", "--abort"], worktreeDir); } catch { git(["reset", "--hard", "HEAD"], worktreeDir); }
       removeWorktree(worktreeDir);
       return { success: true, conflicts: [] };
     }
 
     // Abort merge in worktree, remove it, report conflicts
-    try { git("merge --abort", worktreeDir); } catch { /* ignore */ }
+    try { git(["merge", "--abort"], worktreeDir); } catch { /* ignore */ }
     removeWorktree(worktreeDir);
     return { success: false, conflicts };
   } catch {
     if (worktreeDir) {
       try {
-        git("merge --abort", worktreeDir);
+        git(["merge", "--abort"], worktreeDir);
       } catch { /* ignore */ }
       try { removeWorktree(worktreeDir); } catch { /* non-fatal cleanup */ }
     }

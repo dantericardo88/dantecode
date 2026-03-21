@@ -17,6 +17,9 @@ import { SandboxBridge } from "./sandbox-bridge.js";
 import { RichRenderer, ProgressOrchestrator } from "@dantecode/ux-polish";
 import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
+import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
+import { DanteSandbox } from "@dantecode/dante-sandbox";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -51,6 +54,11 @@ export interface ReplOptions {
   configPath?: string;
   /** Maximum tool rounds for non-interactive/one-shot mode. */
   maxRounds?: number;
+  /** Override config root directory for spawned child processes.
+   *  When set, state is loaded from this path instead of projectRoot.
+   *  Used by council createSelfExecutor so worktree-spawned processes
+   *  still read API keys and settings from the main repo. */
+  configRoot?: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -108,6 +116,8 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
+  // Fix 3: sync the live gaslight integration so /gaslight on/off affect the agent loop
+  agentConfig.gaslight = replState.gaslight ?? undefined;
 }
 
 // ----------------------------------------------------------------------------
@@ -173,6 +183,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    gaslight: null, // populated immediately after agentConfig.gaslight is created below
   };
 
   // Agent loop config
@@ -183,6 +194,37 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableSandbox: options.enableSandbox,
     silent: options.silent,
   };
+
+  // DanteGaslight: wire the closed Gaslight→Skillbook→Gaslight feedback loop.
+  // Defaults to disabled; activate with DANTECODE_GASLIGHT=1 env var.
+  // priorLessonProvider pulls relevant Skillbook skills back into each critique
+  // prompt so the gaslighter checks whether past lessons have been applied.
+  agentConfig.gaslight = new DanteGaslightIntegration(
+    { enabled: process.env["DANTECODE_GASLIGHT"] === "1" },
+    { cwd: options.projectRoot },
+    {
+      priorLessonProvider: (draft: string) => {
+        try {
+          const skillbook = new DanteSkillbookIntegration({ cwd: options.projectRoot });
+          const keywords = draft.split(/\s+/).filter((w) => w.length > 4).slice(0, 10);
+          return skillbook.getRelevantSkills({ keywords }).map((s) => s.title ?? s.id);
+        } catch {
+          return [];
+        }
+      },
+    },
+  );
+  // Fix 3: Share the live integration with replState so /gaslight on/off call
+  // setEnabled() on the same instance the agent loop uses — not a detached copy.
+  replState.gaslight = agentConfig.gaslight;
+
+  // Initialize DanteSandbox enforcement engine — ALWAYS mandatory, mode="auto".
+  // allowHostEscape:false = hard rejection when Docker + worktree both unavailable.
+  // This is true mandatory enforcement: isolation is not optional.
+  await DanteSandbox.setup({
+    projectRoot: options.projectRoot,
+    config: { mode: "auto", allowHostEscape: false },
+  });
 
   // Initialize sandbox bridge when --sandbox is enabled
   if (options.enableSandbox) {
@@ -299,6 +341,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     if (gitEventWatcher) {
       await gitEventWatcher.stop().catch(() => {});
     }
+    // Tear down DanteSandbox isolation layers (containers, worktrees)
+    await DanteSandbox.teardown().catch(() => {});
     // Shut down sandbox container if running
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
@@ -405,10 +449,14 @@ async function processInput(
  * Sends the prompt to the agent, prints the response, and exits.
  */
 export async function runOneShotPrompt(prompt: string, options: ReplOptions): Promise<void> {
-  // Load or initialize state
+  // Load or initialize state.
+  // When configRoot is set (e.g. spawned inside a council worktree), load config
+  // from the main repo root so API keys and settings are available even though
+  // the worktree has no STATE.yaml.
+  const stateRoot = options.configRoot ?? options.projectRoot;
   let state: DanteCodeState;
   try {
-    state = await readOrInitializeState(options.projectRoot);
+    state = await readOrInitializeState(stateRoot);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`${RED}Error loading state: ${message}${RESET}\n`);

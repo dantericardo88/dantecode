@@ -123,6 +123,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -171,6 +172,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -222,6 +224,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

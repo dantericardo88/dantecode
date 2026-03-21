@@ -36,6 +36,7 @@ import {
   formatSynthesizedResult,
 } from "@dantecode/core";
 import type { SandboxBridge } from "./sandbox-bridge.js";
+import { DanteSandbox, toToolResult as sandboxToToolResult } from "@dantecode/dante-sandbox";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -82,9 +83,9 @@ export interface CliToolExecutionContext {
   /** Injected by the agent loop to enable sub-agent spawning. */
   subAgentExecutor?: SubAgentExecutor;
   /**
-   * When set, Bash tool commands are routed through this bridge instead of
-   * using execSync directly. Routes to Docker when available, falls back to
-   * LocalExecutor when Docker is not present.
+   * Legacy sandbox bridge (activated by --sandbox flag). When present, provides
+   * additional Docker isolation on top of the mandatory DanteSandbox layer.
+   * DanteSandbox enforcement runs regardless of whether this bridge is set.
    */
   sandboxBridge?: SandboxBridge;
 }
@@ -362,10 +363,11 @@ async function toolEdit(
 
 /**
  * Bash tool: executes a shell command and returns stdout/stderr.
- * When context.sandboxBridge is set, routes the command through the sandbox
- * (Docker container when available, LocalExecutor fallback otherwise) instead
- * of calling execSync directly on the host. The non-sandbox execSync path is
- * preserved as the fallback when sandboxBridge is NOT present.
+ * ALL commands are routed through the DanteSandbox enforcement engine —
+ * no direct host execution is permitted. The DanteForge gate scores every
+ * command before execution; blocked commands return an error result.
+ * The legacy sandboxBridge (explicit --sandbox flag) is checked first and
+ * provides additional Docker isolation when that flag is active.
  */
 async function toolBash(
   input: Record<string, unknown>,
@@ -386,36 +388,24 @@ async function toolBash(
     return context.sandboxBridge.runInSandbox(command, timeoutMs);
   }
 
-  // Non-sandbox fallback: direct host execution via execSync.
-  try {
-    const result = execSync(command, {
-      cwd: projectRoot,
-      encoding: "utf-8",
-      timeout: timeoutMs,
-      maxBuffer: 10 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: resolvePreferredShell(),
-    });
-    return { content: result || "(no output)", isError: false };
-  } catch (err: unknown) {
-    const error = err as {
-      stdout?: string;
-      stderr?: string;
-      status?: number;
-      message?: string;
+  // DanteSandbox enforcement is mandatory — every Bash command goes through the gate.
+  if (!DanteSandbox.isReady()) {
+    // This should never happen: DanteSandbox.setup() runs before the agent loop starts.
+    // If it does, fail closed rather than silently falling back to unsandboxed execution.
+    return {
+      content: "[DanteCode] FATAL: DanteSandbox is not initialized. Call DanteSandbox.setup() before tool execution.",
+      isError: true,
     };
-    const stdout = typeof error.stdout === "string" ? error.stdout : "";
-    const stderr = typeof error.stderr === "string" ? error.stderr : "";
-    const exitCode = typeof error.status === "number" ? error.status : 1;
-    const output = [
-      stdout ? `stdout:\n${stdout}` : "",
-      stderr ? `stderr:\n${stderr}` : "",
-      `Exit code: ${exitCode}`,
-    ]
-      .filter(Boolean)
-      .join("\n");
-    return { content: output, isError: exitCode !== 0 };
   }
+
+  const result = await DanteSandbox.execute(command, {
+    cwd: projectRoot,
+    timeoutMs,
+    taskType: "bash",
+    actor: "tools",
+    sessionId: context?.sessionId,
+  });
+  return sandboxToToolResult(result);
 }
 
 /**

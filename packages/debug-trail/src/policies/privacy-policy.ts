@@ -186,21 +186,20 @@ export class StorageQuotaPolicy {
   }
 
   private async measureDir(dir: string): Promise<number> {
-    let total = 0;
     try {
       const entries = await readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          total += await this.measureDir(full);
-        } else if (entry.isFile()) {
-          const s = await stat(full);
-          total += s.size;
-        }
-      }
+      const sizes = await Promise.all(
+        entries.map((entry) => {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) return this.measureDir(full);
+          if (entry.isFile()) return stat(full).then((s) => s.size);
+          return Promise.resolve(0);
+        }),
+      );
+      return sizes.reduce((sum, s) => sum + s, 0);
     } catch {
       // dir doesn't exist yet — quota is 0 used
+      return 0;
     }
-    return total;
   }
 }

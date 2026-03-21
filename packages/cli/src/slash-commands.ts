@@ -84,8 +84,12 @@ import type {
   ModelRouterConfig,
 } from "@dantecode/config-types";
 import type { GitEventType, WebhookProvider } from "@dantecode/git-engine";
+import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { DanteSandbox } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
+import { runGaslightCommand } from "./commands/gaslight.js";
+import { runFearsetCommand } from "./commands/fearset.js";
 import {
   loadSlashCommandRegistry,
   type NativeSlashCommandDefinition,
@@ -153,6 +157,12 @@ export interface ReplState {
   activeSkill: string | null;
   /** Wave orchestrator state for step-by-step skill execution (Claude Workflow Mode). */
   waveState: WaveOrchestratorState | null;
+  /**
+   * Live DanteGaslightIntegration singleton shared between the agent loop and
+   * slash commands. When set, /gaslight on/off call setEnabled() on the same
+   * instance the agent loop uses — not a detached disk-reading copy.
+   */
+  gaslight: DanteGaslightIntegration | null;
 }
 
 /** A single slash command handler. */
@@ -1708,13 +1718,81 @@ Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. V
   return `${GREEN}${BOLD}OSS Research Pipeline activated${RESET}\n${DIM}Scanning project → searching internet → cloning repos → analyzing → implementing → autoforging${RESET}`;
 }
 
-async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
+async function sandboxCommand(args: string, state: ReplState): Promise<string> {
+  const sub = args.trim().toLowerCase();
+
+  // /sandbox status — real enforcement state from DanteSandbox engine
+  if (sub === "status" || sub === "") {
+    const status = await DanteSandbox.status();
+    const modeColor = status.enforced ? GREEN : RED;
+    const dockerStr = status.dockerReady ? `${GREEN}ready${RESET}` : `${RED}unavailable${RESET}`;
+    const worktreeStr = status.worktreeReady ? `${GREEN}ready${RESET}` : `${RED}unavailable${RESET}`;
+    return [
+      `${BOLD}DanteSandbox Status${RESET}`,
+      `  Enforced:    ${modeColor}${status.enforced ? "YES" : "NO"}${RESET}`,
+      `  Mode:        ${BOLD}${status.mode}${RESET}`,
+      `  Preferred:   ${BOLD}${status.preferred}${RESET}`,
+      `  Docker:      ${dockerStr}`,
+      `  Worktree:    ${worktreeStr}`,
+      `  Executions:  ${status.executionCount}`,
+      `  Violations:  ${status.violationCount > 0 ? RED : DIM}${status.violationCount}${RESET}`,
+      `  Host escapes:${status.hostEscapeCount > 0 ? YELLOW : DIM}${status.hostEscapeCount}${RESET}`,
+    ].join("\n");
+  }
+
+  // /sandbox force-docker
+  if (sub === "force-docker") {
+    DanteSandbox.setMode("docker");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}force-docker${RESET} — all executions routed to Docker.`;
+  }
+
+  // /sandbox force-worktree
+  if (sub === "force-worktree") {
+    DanteSandbox.setMode("worktree");
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}force-worktree${RESET} — all executions routed to git worktree.`;
+  }
+
+  // /sandbox force-host — loud warning required
+  if (sub === "force-host") {
+    DanteSandbox.setMode("host-escape");
+    return [
+      `${RED}${BOLD}[DanteSandbox WARNING]${RESET} Host escape mode enabled.`,
+      `Commands will run UNSANDBOXED on the host. This is audited.`,
+      `Use /sandbox force-docker or /sandbox force-worktree to re-engage isolation.`,
+    ].join("\n");
+  }
+
+  // /sandbox on|off — toggle (backward compat)
+  if (sub === "off") {
+    if (state.sandboxBridge) {
+      await state.sandboxBridge.shutdown();
+      state.sandboxBridge = null;
+    }
+    state.enableSandbox = false;
+    DanteSandbox.setMode("off");
+    return `${BOLD}Sandbox mode:${RESET} ${RED}OFF${RESET} ${DIM}(legacy compat only)${RESET}`;
+  }
+
+  if (sub === "on") {
+    const bridge = new SandboxBridge(state.projectRoot, state.verbose);
+    const dockerAvailable = await bridge.isAvailable();
+    state.sandboxBridge = bridge;
+    state.enableSandbox = true;
+    DanteSandbox.setMode("auto");
+    if (dockerAvailable) {
+      return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker + DanteSandbox enforcement active)${RESET}`;
+    }
+    return `${BOLD}Sandbox mode:${RESET} ${YELLOW}ON (worktree fallback)${RESET} ${DIM}(Docker unavailable)${RESET}`;
+  }
+
+  // Default: toggle on/off (original behavior)
   if (state.enableSandbox) {
     if (state.sandboxBridge) {
       await state.sandboxBridge.shutdown();
     }
     state.sandboxBridge = null;
     state.enableSandbox = false;
+    DanteSandbox.setMode("off");
     return `${BOLD}Sandbox mode:${RESET} ${RED}OFF${RESET}`;
   }
 
@@ -1722,12 +1800,13 @@ async function sandboxCommand(_args: string, state: ReplState): Promise<string> 
   const dockerAvailable = await bridge.isAvailable();
   state.sandboxBridge = bridge;
   state.enableSandbox = true;
+  DanteSandbox.setMode("auto");
 
   if (dockerAvailable) {
-    return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker isolation active for the next tool run)${RESET}`;
+    return `${BOLD}Sandbox mode:${RESET} ${GREEN}ON${RESET} ${DIM}(Docker isolation + DanteSandbox enforcement active)${RESET}`;
   }
 
-  return `${BOLD}Sandbox mode:${RESET} ${YELLOW}HOST FALLBACK${RESET} ${DIM}(Docker unavailable; commands will run on the host until sandbox support is restored)${RESET}`;
+  return `${BOLD}Sandbox mode:${RESET} ${YELLOW}HOST FALLBACK${RESET} ${DIM}(Docker unavailable; worktree isolation in use)${RESET}`;
 }
 
 async function silentCommand(_args: string, state: ReplState): Promise<string> {
@@ -3452,6 +3531,116 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// DanteGaslight slash command
+// ----------------------------------------------------------------------------
+
+async function gaslightCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+
+  if (!state.gaslight) {
+    return `${RED}Gaslight integration not active.${RESET}\n${DIM}The integration is always created at REPL startup. Try /gaslight on to enable.${RESET}`;
+  }
+
+  switch (sub) {
+    case "on":     return state.gaslight.cmdOn();
+    case "off":    return state.gaslight.cmdOff();
+    case "stats":  return state.gaslight.cmdStats();
+    case "review": return state.gaslight.cmdReview();
+    case "bridge": {
+      // Bridge is disk-based and async — delegate to the CLI command handler.
+      // Must catch: cmdBridge() throws on error (after Fix A1); process.exit was removed
+      // so errors now propagate as exceptions rather than killing the REPL process.
+      try {
+        await runGaslightCommand(parts, state.projectRoot);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}Gaslight bridge error: ${msg}${RESET}`;
+      }
+      return "";
+    }
+    default:
+      return [
+        `${BOLD}DanteGaslight${RESET} — bounded adversarial refinement engine`,
+        `  ${CYAN}/gaslight on${RESET}        Enable the engine (default: off)`,
+        `  ${CYAN}/gaslight off${RESET}       Disable the engine`,
+        `  ${CYAN}/gaslight stats${RESET}     Session statistics`,
+        `  ${CYAN}/gaslight review${RESET}    Review last session`,
+        `  ${CYAN}/gaslight bridge${RESET}    Distill PASS session → Skillbook`,
+        `  ${DIM}Trigger: "go deeper", "again but better", "truth mode"${RESET}`,
+      ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// DanteFearSet slash command
+// ----------------------------------------------------------------------------
+
+async function fearsetCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+
+  if (!state.gaslight) {
+    return `${RED}FearSet integration not active.${RESET}\n${DIM}The integration is always created at REPL startup.${RESET}`;
+  }
+
+  switch (sub) {
+    case "on":     return state.gaslight.cmdFearSetOn();
+    case "off":    return state.gaslight.cmdFearSetOff();
+    case "stats":  return state.gaslight.cmdFearSetStats();
+    case "review": return state.gaslight.cmdFearSetReview();
+    case "bridge": {
+      try {
+        await runFearsetCommand(["bridge", ...parts.slice(1)], state.projectRoot);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}FearSet bridge error: ${msg}${RESET}`;
+      }
+      return "";
+    }
+    case "run": {
+      const context = parts.slice(1).join(" ").trim();
+      if (!context) {
+        return `${RED}Usage: /fearset run <decision context>${RESET}\n${DIM}Example: /fearset run "Should we migrate to PostgreSQL?"${RESET}`;
+      }
+      try {
+        const result = await state.gaslight.runFearSet(context);
+        const decColor = result.synthesizedRecommendation?.decision === "go" ? GREEN
+          : result.synthesizedRecommendation?.decision === "no-go" ? RED : YELLOW;
+        const lines = [
+          `${BOLD}FearSet complete${RESET}  ${result.passed ? `${GREEN}PASS${RESET}` : `${RED}FAIL${RESET}`}`,
+          `  ID:         ${CYAN}${result.id}${RESET}`,
+          `  Robustness: ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${result.robustnessScore?.gateDecision ?? "n/a"})`,
+          `  Columns:    ${result.columns.map((c) => c.name).join(", ")}`,
+        ];
+        if (result.synthesizedRecommendation) {
+          lines.push(`  Decision:   ${decColor}${BOLD}${result.synthesizedRecommendation.decision.toUpperCase()}${RESET}`);
+          lines.push(`  ${result.synthesizedRecommendation.reasoning.slice(0, 120)}`);
+        }
+        if (result.passed) {
+          lines.push(`${DIM}Run /fearset bridge to distill lessons → Skillbook.${RESET}`);
+        }
+        return lines.join("\n");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `${RED}FearSet run error: ${msg}${RESET}`;
+      }
+    }
+    default:
+      return [
+        `${BOLD}DanteFearSet${RESET} — Tim Ferriss Fear-Setting for high-stakes decisions`,
+        `  ${CYAN}/fearset on${RESET}              Enable auto-trigger`,
+        `  ${CYAN}/fearset off${RESET}             Disable FearSet`,
+        `  ${CYAN}/fearset stats${RESET}           Aggregated run statistics`,
+        `  ${CYAN}/fearset review${RESET}          Review last result`,
+        `  ${CYAN}/fearset run <context>${RESET}   One-shot fear-setting analysis`,
+        `  ${CYAN}/fearset bridge${RESET}          Distill PASS results → Skillbook`,
+        `${DIM}Columns: Define→Prevent→Repair+Benefits+Inaction${RESET}`,
+      ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
@@ -3602,8 +3791,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "sandbox",
-    description: "Toggle sandbox mode on/off",
-    usage: "/sandbox",
+    description: "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
+    usage: "/sandbox [status|force-docker|force-worktree|force-host|on|off]",
     handler: sandboxCommand,
   },
   {
@@ -3701,6 +3890,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Search code index for relevant code",
     usage: "/search <query>",
     handler: searchCommand,
+  },
+  {
+    name: "gaslight",
+    description: "DanteGaslight adversarial refinement — on/off/stats/review/bridge",
+    usage: "/gaslight <on|off|stats|review|bridge>",
+    handler: gaslightCommand,
+  },
+  {
+    name: "fearset",
+    description: "DanteFearSet — Fear-Setting on/off/stats/review/run/bridge",
+    usage: "/fearset <on|off|stats|review|run <context>|bridge>",
+    handler: fearsetCommand,
   },
 ];
 

@@ -2,7 +2,7 @@
 // @dantecode/git-engine — Git Worktree Management
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { WorktreeSpec } from "@dantecode/config-types";
 
@@ -39,12 +39,12 @@ export interface WorktreeMergeResult {
 // ----------------------------------------------------------------------------
 
 /**
- * Execute a git command synchronously in the given working directory.
- * Throws with a descriptive message on failure.
+ * Execute a git command via execFileSync (no shell — injection-safe).
+ * Arguments are passed as an array so branch names/paths are never interpolated.
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -54,7 +54,7 @@ function git(args: string, cwd: string): string {
     const err = error as { stderr?: string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
     const msg = stderr || err.message || "Unknown git error";
-    throw new Error(`git ${args.split(" ")[0]}: ${msg}`);
+    throw new Error(`git ${args[0] ?? "?"}: ${msg}`);
   }
 }
 
@@ -62,7 +62,7 @@ function git(args: string, cwd: string): string {
  * Resolve the top-level git directory from any path within the repo.
  */
 function getRepoRoot(cwd: string): string {
-  return git("rev-parse --show-toplevel", cwd);
+  return git(["rev-parse", "--show-toplevel"], cwd);
 }
 
 // ----------------------------------------------------------------------------
@@ -83,7 +83,7 @@ export function createWorktree(spec: WorktreeSpec): WorktreeCreateResult {
   // Resolve the worktree directory to an absolute path relative to repo root
   const worktreeDir = path.resolve(repoRoot, ".dantecode", "worktrees", spec.sessionId);
 
-  git(`worktree add -b "${spec.branch}" "${worktreeDir}" "${spec.baseBranch}"`, repoRoot);
+  git(["worktree", "add", "-b", spec.branch, worktreeDir, spec.baseBranch], repoRoot);
 
   return {
     directory: worktreeDir,
@@ -99,7 +99,7 @@ export function createWorktree(spec: WorktreeSpec): WorktreeCreateResult {
 export function removeWorktree(directory: string): void {
   // We need to run the command from the main repo, not from the worktree itself
   const repoRoot = getRepoRoot(directory);
-  git(`worktree remove "${directory}" --force`, repoRoot);
+  git(["worktree", "remove", directory, "--force"], repoRoot);
 }
 
 /**
@@ -109,7 +109,7 @@ export function removeWorktree(directory: string): void {
  * @returns Array of parsed worktree entries.
  */
 export function listWorktrees(projectRoot: string): WorktreeEntry[] {
-  const raw = git("worktree list --porcelain", projectRoot);
+  const raw = git(["worktree", "list", "--porcelain"], projectRoot);
 
   if (!raw) {
     return [];
@@ -180,22 +180,22 @@ export function mergeWorktree(
   projectRoot: string,
 ): WorktreeMergeResult {
   // Determine the branch name of the worktree
-  const worktreeBranch = git("rev-parse --abbrev-ref HEAD", worktreeDir);
+  const worktreeBranch = git(["rev-parse", "--abbrev-ref", "HEAD"], worktreeDir);
 
   // Switch to the target branch in the main working tree
-  git(`checkout "${targetBranch}"`, projectRoot);
+  git(["checkout", targetBranch], projectRoot);
 
   // Merge the worktree branch
-  git(`merge "${worktreeBranch}" --no-edit`, projectRoot);
+  git(["merge", worktreeBranch, "--no-edit"], projectRoot);
 
   // Get the resulting merge commit hash
-  const mergeCommitHash = git("rev-parse HEAD", projectRoot);
+  const mergeCommitHash = git(["rev-parse", "HEAD"], projectRoot);
 
   // Remove the worktree
-  git(`worktree remove "${worktreeDir}" --force`, projectRoot);
+  git(["worktree", "remove", worktreeDir, "--force"], projectRoot);
 
   // Delete the worktree branch (it's been merged)
-  git(`branch -d "${worktreeBranch}"`, projectRoot);
+  git(["branch", "-d", worktreeBranch], projectRoot);
 
   return {
     merged: true,
@@ -217,8 +217,8 @@ export function mergeWorktree(
  */
 export function isWorktree(directory: string): boolean {
   try {
-    const gitCommonDir = git("rev-parse --git-common-dir", directory);
-    const gitDir = git("rev-parse --git-dir", directory);
+    const gitCommonDir = git(["rev-parse", "--git-common-dir"], directory);
+    const gitDir = git(["rev-parse", "--git-dir"], directory);
 
     // In a linked worktree, git-dir and git-common-dir differ.
     // In the main working tree, they are the same (both ".git").

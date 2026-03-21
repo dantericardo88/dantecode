@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import type { DebugRestoreResult } from "./types.js";
 import { FileSnapshotter } from "./file-snapshotter.js";
 import { AuditLogger } from "./audit-logger.js";
-import { hashFile } from "./hash-engine.js";
+import { hashFile, shortHash } from "./hash-engine.js";
 
 // ---------------------------------------------------------------------------
 // Restore options
@@ -173,7 +173,7 @@ export class RestoreEngine {
         restored: false,
         targetPath,
         auditEventId: errEventId,
-        error: `Content hash mismatch: expected ${snapRecord.contentHash.slice(0, 8)} got ${afterHash.slice(0, 8)}`,
+        error: `Content hash mismatch: expected ${shortHash(snapRecord.contentHash)} got ${shortHash(afterHash)}`,
       };
     }
 

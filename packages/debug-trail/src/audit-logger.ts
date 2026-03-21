@@ -72,13 +72,11 @@ export class AuditLogger {
   // Cursor into sessionEvents: events[0..detectionCursor) have already been analyzed.
   // Using a cursor (not a boolean) supports multi-lane: each flush() analyzes only new events.
   private detectionCursor = 0;
-  // Set to true when sessionEvents hits sessionEventsBufferLimit — signals partial analysis.
-  private bufferTruncated = false;
   // Tracks event IDs already reported as anomalies to prevent duplicate flags across flush boundaries.
   // A cross-boundary burst produces the same relatedEventIds each flush — dedup filters them.
   private reportedAnomalyEventIds = new Set<string>();
   // Seq number of the last overflow (post-buffer) event analyzed via disk fallback.
-  // When bufferTruncated=true, flush() queries disk for events with seq > diskEventCursor
+  // When the buffer is full, flush() queries disk for events with seq > diskEventCursor
   // that are not already in sessionEvents. Prevents re-analysis on subsequent flush() calls.
   private diskEventCursor = -1;
   private onAnomalyDetected?: (result: FlushResult) => void;
@@ -121,7 +119,6 @@ export class AuditLogger {
     this.seqCounter = lastSeq + 1;
     this.initialized = true;
     this.detectionCursor = 0;
-    this.bufferTruncated = false;
     this.reportedAnomalyEventIds = new Set<string>();
     this.diskEventCursor = -1;
   }
@@ -195,11 +192,8 @@ export class AuditLogger {
     // Index synchronously so in-process queries see the event immediately
     this.index.index(event);
     // Buffer for anomaly detection on flush — bounded to avoid unbounded memory growth.
-    // bufferTruncated is set so flush() can surface this in FlushResult.
     if (this.sessionEvents.length < this.config.sessionEventsBufferLimit) {
       this.sessionEvents.push(event);
-    } else {
-      this.bufferTruncated = true;
     }
 
     // Gap 5: notify registered listener (e.g. TrailQueryEngine.invalidateCache)
@@ -517,7 +511,7 @@ export class AuditLogger {
     // exceed the buffer limit. This prevents silent detection blind spots on large sessions
     // without paying disk-read costs for normal (non-truncated) sessions.
     let overflowUnanalyzed: TrailEvent[] = [];
-    if (this.bufferTruncated) {
+    if (this.sessionEvents.length >= this.config.sessionEventsBufferLimit) {
       const bufferedIds = new Set(this.sessionEvents.map((e) => e.id));
       try {
         const diskEvents = await this.store.queryBySession(this.provenance.sessionId);
@@ -568,7 +562,7 @@ export class AuditLogger {
 
       const result: FlushResult = {
         anomalies: detectedAnomalies,
-        bufferTruncated: this.bufferTruncated,
+        bufferTruncated: this.sessionEvents.length >= this.config.sessionEventsBufferLimit,
         analyzedCount,
       };
       this.onAnomalyDetected?.(result);
@@ -578,7 +572,7 @@ export class AuditLogger {
     if (shouldEndSession) {
       this.sessionMap.endSession(this.provenance.sessionId);
     }
-    return { anomalies: detectedAnomalies, bufferTruncated: this.bufferTruncated, analyzedCount };
+    return { anomalies: detectedAnomalies, bufferTruncated: this.sessionEvents.length >= this.config.sessionEventsBufferLimit, analyzedCount };
   }
 }
 

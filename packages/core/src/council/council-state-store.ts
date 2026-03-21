@@ -4,7 +4,7 @@
 // Stored under <repoRoot>/.dantecode/council/<runId>/state.json
 // ============================================================================
 
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { CouncilRunState, AgentSessionState, OverlapRecord, HandoffPacket } from "./council-types.js";
 
@@ -30,12 +30,15 @@ function statePath(repoRoot: string, runId: string): string {
  */
 export async function saveCouncilRun(state: CouncilRunState): Promise<void> {
   const path = statePath(state.repoRoot, state.runId);
+  const tmpPath = `${path}.tmp`;
   await mkdir(dirname(path), { recursive: true });
   const updated: CouncilRunState = {
     ...state,
     updatedAt: new Date().toISOString(),
   };
-  await writeFile(path, JSON.stringify(updated, null, 2), "utf-8");
+  // Write to .tmp first, then rename — atomic on POSIX, best-effort on Windows
+  await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
+  await rename(tmpPath, path);
 }
 
 /**
@@ -55,8 +58,12 @@ export async function tryLoadCouncilRun(
   repoRoot: string,
   runId: string,
 ): Promise<CouncilRunState | null> {
+  try { return await loadCouncilRun(repoRoot, runId); } catch { /* fall through */ }
+  // Recovery: the .tmp file survives an interrupted rename
   try {
-    return await loadCouncilRun(repoRoot, runId);
+    const tmpPath = `${statePath(repoRoot, runId)}.tmp`;
+    const raw = await readFile(tmpPath, "utf-8");
+    return JSON.parse(raw) as CouncilRunState;
   } catch {
     return null;
   }

@@ -574,6 +574,24 @@ function escapeLiteralControlCharsInJsonStrings(payload: string): string {
   return result;
 }
 
+/** Pure Jaccard word-overlap [0–1]. ES2022-safe — no findLastIndex, Array.at, etc. */
+function jaccardWordOverlap(a: string, b: string): number {
+  const tokenize = (s: string): Set<string> => {
+    const words = s.toLowerCase().match(/[a-z]{3,}/g) ?? [];
+    const out = new Set<string>();
+    for (const w of words) out.add(w);
+    return out;
+  };
+  const setA = tokenize(a);
+  const setB = tokenize(b);
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let intersection = 0;
+  for (const w of setA) { if (setB.has(w)) intersection++; }
+  let union = setA.size;
+  for (const w of setB) { if (!setA.has(w)) union++; }
+  return union === 0 ? 1 : intersection / union;
+}
+
 function parseToolCallPayload(
   payload: string,
 ): { name?: string; input?: Record<string, unknown>; dependsOn?: string[] } | null {
@@ -3390,27 +3408,258 @@ export async function runAgentLoop(
     // Non-fatal
   }
 
-  // ---- DanteGaslight: detect triggers, persist session for Skillbook bridge ----
-  // Checks whether the user's prompt or quality score triggered a gaslight event.
-  // Sessions are persisted to disk; run `dantecode gaslight bridge` to distill
-  // lesson-eligible sessions into the Skillbook (closing the feedback loop).
+  // ---- DanteGaslight: closed refinement loop + Skillbook bridge ----
+  // When enabled (DANTECODE_GASLIGHT=1), detects trigger phrases in the user prompt,
+  // runs a bounded critique→gate→rewrite loop using the current model router,
+  // and persists sessions to disk. Lesson-eligible (PASS) sessions are surfaced
+  // to the user for distillation via `dantecode gaslight bridge`.
   if (config.gaslight) {
     try {
-      const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-      if (lastAssistant?.content) {
+      // Read draft from session.messages (durable), not local messages (LLM API array).
+      // After a two-round loop the final response is pushed to session.messages then
+      // the loop early-returns — local messages only has the first-round text.
+      const lastSessionAssistant = session.messages.filter((m) => m.role === "assistant").pop();
+      const lastDraft = !lastSessionAssistant
+        ? undefined
+        : typeof lastSessionAssistant.content === "string"
+          ? lastSessionAssistant.content
+          : lastSessionAssistant.content
+              .filter((b) => b.type === "text")
+              .map((b) => b.text ?? "")
+              .join("");
+      if (lastDraft) {
+        // Fix 2: Closure variables capture the parsed critique from onCritique so the
+        // gate can ask "does the rewrite address THIS critique?" rather than self-rating.
+        let lastCritiqueSummary: string | undefined;
+        // Fix B (structural pre-gate): capture the original draft at session start.
+        // onGate receives each rewrite attempt; Jaccard overlap vs this baseline
+        // must be ≤ 0.88 — a higher overlap means the model copy-pasted rather than rewrote.
+        const originalDraft = lastDraft;
+        let lastCritiquePoints: string | undefined;
+
         const gaslightSession = await config.gaslight.maybeGaslight({
           message: durablePrompt,
-          draft: lastAssistant.content,
+          draft: lastDraft,
+          callbacks: {
+            // Critique: ask the model to identify weaknesses in the draft.
+            // Parses the JSON result and stashes summary + high/medium points for onGate.
+            onCritique: async (sysPrompt: string, userPrompt: string) => {
+              try {
+                const raw = await router.generate(
+                  [{ role: "user" as const, content: userPrompt }],
+                  { maxTokens: 600, system: sysPrompt, taskType: "gaslight-critique" },
+                );
+                // Stash critique context for the gate (non-fatal if parse fails)
+                try {
+                  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+                  if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]) as {
+                      summary?: string;
+                      points?: Array<{ severity?: string; description?: string }>;
+                    };
+                    if (typeof parsed.summary === "string") lastCritiqueSummary = parsed.summary;
+                    if (Array.isArray(parsed.points)) {
+                      const highMed = parsed.points
+                        .filter((p) => p.severity === "high" || p.severity === "medium")
+                        .map((p) => `- ${p.description ?? ""}`)
+                        .join("\n");
+                      if (highMed) lastCritiquePoints = highMed;
+                    }
+                  }
+                } catch { /* non-fatal: gate falls back to self-rating prompt */ }
+                return raw;
+              } catch {
+                return null; // engine falls back to buildFallbackCritique
+              }
+            },
+            // Fix 2: Critique-aware gate (threshold raised 0.75 → 0.85).
+            // When critique context is available, asks "does this address the critique?"
+            // instead of "rate from 0-1" — much harder for the model to self-approve.
+            onGate: async (draft: string) => {
+              try {
+                // ── Structural pre-gate (deterministic — cannot be self-gamed) ──────────────
+                // Two checks. Either failing → immediate "fail" (score: 0.2) with no LLM call.
+                // This is the adversarial layer: math cannot be argued with by the model.
+                const structuralIssues: string[] = [];
+
+                // Check 1 — Differentiation: rewrite must diverge meaningfully from original.
+                // Jaccard word-overlap > 0.88 = copy-paste job, not a genuine improvement.
+                const overlap = jaccardWordOverlap(originalDraft, draft);
+                if (overlap > 0.88) {
+                  structuralIssues.push(
+                    `Rewrite too similar to original (${(overlap * 100).toFixed(0)}% word overlap > 88%)`,
+                  );
+                }
+
+                // Check 2 — Coverage: concept words from critique bullets must appear in rewrite.
+                // Extract up to 3 meaningful words (≥4 chars) per bullet; allow 40% absent,
+                // but if 60%+ are missing the model is ignoring the critique entirely.
+                if (lastCritiquePoints) {
+                  const conceptWords = lastCritiquePoints
+                    .split("\n")
+                    .flatMap(
+                      (line) => (line.replace(/^-\s*/, "").match(/[a-z]{4,}/gi) ?? []).slice(0, 3),
+                    );
+                  if (conceptWords.length > 0) {
+                    const rewriteLower = draft.toLowerCase();
+                    const missingCount = conceptWords.filter(
+                      (w) => !rewriteLower.includes(w.toLowerCase()),
+                    ).length;
+                    if (missingCount > conceptWords.length * 0.6) {
+                      structuralIssues.push(
+                        `Rewrite ignores critique (${missingCount}/${conceptWords.length} concept words absent)`,
+                      );
+                    }
+                  }
+                }
+
+                if (structuralIssues.length > 0) {
+                  // Short-circuit: skip LLM gate entirely on structural failure.
+                  return { decision: "fail" as const, score: 0.2 };
+                }
+                // ─────────────────────────────────────────────────────────────────────────────
+
+                let gatePrompt: string;
+                if (lastCritiqueSummary) {
+                  const pointsBlock = lastCritiquePoints
+                    ? `\n\nSpecific issues to address:\n${lastCritiquePoints}` : "";
+                  gatePrompt =
+                    `Does this response adequately address the following critique?\n\n` +
+                    `Critique: ${lastCritiqueSummary}${pointsBlock}\n\n` +
+                    `Response:\n${draft.slice(0, 3000)}\n\n` +
+                    `Respond ONLY with JSON: {"score": <0.0–1.0>} where 1.0 = fully addressed.`;
+                } else {
+                  gatePrompt =
+                    `Rate the quality of this response from 0.0 to 1.0. ` +
+                    `Respond ONLY with JSON: {"score": <number>}\n\n${draft.slice(0, 3000)}`;
+                }
+                const raw = await router.generate(
+                  [{ role: "user" as const, content: gatePrompt }],
+                  { maxTokens: 60, system: "Quality gate. Return only JSON with a score field (0.0–1.0). No explanation.", taskType: "gaslight-gate" },
+                );
+                const m = raw.match(/\{[\s\S]*?\}/);
+                const parsed = m ? (JSON.parse(m[0]) as { score?: number }) : {};
+                const score = typeof parsed.score === "number" ? Math.min(1, Math.max(0, parsed.score)) : 0.5;
+                const decision: "pass" | "fail" = score >= 0.85 ? "pass" : "fail";
+                return { decision, score };
+              } catch {
+                return { decision: "fail" as const, score: 0.5 };
+              }
+            },
+            // Rewrite: ask the model to improve the draft based on the critique.
+            // Fix 4: floor of 800 tokens prevents starvation on short drafts.
+            onRewrite: async (draft: string, critiqueSummary: string) => {
+              try {
+                return await router.generate(
+                  [{ role: "user" as const, content: `Rewrite the following response to address this critique:\n\nCritique: ${critiqueSummary}\n\nOriginal:\n${draft}` }],
+                  { maxTokens: Math.max(800, Math.min(4000, draft.length * 2)), system: "You are a skilled writer. Improve the response to address all critique points. Preserve all correct content.", taskType: "gaslight-rewrite" },
+                );
+              } catch {
+                return draft; // keep original if rewrite fails
+              }
+            },
+            // LessonEligible: session passed — surface to user for bridge distillation
+            onLessonEligible: (sessionId: string) => {
+              if (!config.silent) {
+                process.stdout.write(
+                  `\n${GREEN}[gaslight] PASS — session ${sessionId} is lesson-eligible. ` +
+                  `Run ${BOLD}dantecode gaslight bridge${RESET}${GREEN} to distill to Skillbook.${RESET}\n`,
+                );
+              }
+            },
+          },
         });
+
+        // Fix 1: Surface the rewrite when gaslight passes.
+        // Injects the refined output back into session.messages so the conversation
+        // continues from the improved version, and prints it to stdout.
+        if (
+          gaslightSession &&
+          gaslightSession.stopReason === "pass" &&
+          gaslightSession.finalOutput &&
+          gaslightSession.finalOutput !== lastDraft
+        ) {
+          // Find last assistant SessionMessage using a backwards loop.
+          // NOTE: findLastIndex is ES2023; tsconfig targets ES2022 — use for loop.
+          let lastAssistantIdx = -1;
+          for (let i = session.messages.length - 1; i >= 0; i--) {
+            if (session.messages[i]?.role === "assistant") { lastAssistantIdx = i; break; }
+          }
+          if (lastAssistantIdx !== -1) {
+            // Preserve id, timestamp, modelId etc — only replace the content.
+            session.messages[lastAssistantIdx] = {
+              ...session.messages[lastAssistantIdx]!,
+              content: gaslightSession.finalOutput,
+            };
+          }
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${GREEN}${BOLD}[gaslight] Refined response:${RESET}\n` +
+              gaslightSession.finalOutput + "\n",
+            );
+          }
+        }
+
         if (gaslightSession && !config.silent) {
           process.stdout.write(
             `\n${CYAN}[gaslight] Session triggered (${gaslightSession.trigger.channel}): ` +
-            `${gaslightSession.sessionId} — run ${BOLD}dantecode gaslight bridge${RESET}${CYAN} to distill.${RESET}\n`,
+            `${gaslightSession.sessionId} — stop: ${gaslightSession.stopReason ?? "in-progress"}${RESET}\n`,
           );
         }
       }
     } catch {
       // Non-fatal: gaslight failure must never block the agent response
+    }
+
+    // ---- DanteFearSet: auto-trigger on high-risk tasks ----
+    // Runs fear-setting (Define→Prevent→Repair+Benefits+Inaction) when the
+    // message matches destructive/long-horizon/policy risk criteria.
+    // Only fires when FearSet is explicitly enabled — disabled by default.
+    try {
+      if (config.gaslight.getFearSetConfig().enabled) {
+        const fearSetResult = await config.gaslight.maybeFearSet({
+          message: durablePrompt,
+          callbacks: {
+            onColumn: async (sysPrompt: string, userPrompt: string, _col: string) => {
+              try {
+                return await router.generate(
+                  [{ role: "user" as const, content: userPrompt }],
+                  { maxTokens: 1200, system: sysPrompt, taskType: "fearset-column" },
+                );
+              } catch { return null; }
+            },
+            onGate: async (prompt: string) => {
+              try {
+                return await router.generate(
+                  [{ role: "user" as const, content: prompt }],
+                  { maxTokens: 400, system: "Score this FearSet plan. Return JSON only.", taskType: "fearset-gate" },
+                );
+              } catch { return null; }
+            },
+            onComplete: (result) => {
+              if (!config.silent && result.passed) {
+                process.stdout.write(
+                  `\n${GREEN}[fearset] PASS — run ${result.id} ready for distillation. ` +
+                  `Run ${BOLD}dantecode fearset bridge${RESET}${GREEN} to write to Skillbook.${RESET}\n`,
+                );
+              } else if (!config.silent && !result.passed) {
+                process.stdout.write(
+                  `\n${RED}[fearset] FAIL — robustness ${result.robustnessScore?.overall.toFixed(2) ?? "n/a"} ` +
+                  `(${result.robustnessScore?.gateDecision ?? "n/a"}). Review: dantecode fearset review${RESET}\n`,
+                );
+              }
+            },
+          },
+        });
+        if (fearSetResult && !config.silent) {
+          process.stdout.write(
+            `\n${CYAN}[fearset] Auto-triggered (${fearSetResult.trigger.channel}): ` +
+            `${fearSetResult.id} — ${fearSetResult.passed ? "PASS" : "FAIL"}${RESET}\n`,
+          );
+        }
+      }
+    } catch {
+      // Non-fatal: fearset failure must never block the agent response
     }
   }
 

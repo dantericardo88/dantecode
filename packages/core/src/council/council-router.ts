@@ -236,22 +236,29 @@ export class CouncilRouter {
    * Creates a handoff packet and submits to the next best agent.
    */
   async reassignLane(request: ReassignmentRequest): Promise<ReassignmentResult> {
-    const currentSession = this.runState?.agents.find(
-      (a) => a.laneId === request.laneId,
-    );
+    const currentSession = this.runState?.agents.find((a) => a.laneId === request.laneId);
     const mandate = this.runState?.mandates.find((m) => m.laneId === request.laneId);
 
     if (!currentSession || !mandate) {
-      return {
-        success: false,
-        handoffPacketId: "",
-        newLaneId: "",
-        newAgentKind: request.fromAgent,
-        reason: "Lane not found in run state",
-      };
+      return { success: false, handoffPacketId: "", newLaneId: "", newAgentKind: request.fromAgent, reason: "Lane not found in run state" };
     }
 
-    // Build handoff packet
+    // STEP 1: Select next agent FIRST — no state mutations until we know it exists.
+    // Exclude the failing agent so alternatives are tried first.
+    // Fallback: if no alternative exists (single-adapter setup), allow same agent ONLY when healthy.
+    // Hard-capped agents must not be used as fallback — they'd immediately fail again.
+    const excludeAgents = new Set<AgentKind>([request.fromAgent]);
+    const fromAgentHealth = this.ledger.getHealth(request.fromAgent);
+    const nextAgent =
+      request.toAgent ??
+      this.selectAgent(currentSession.taskCategory, undefined, excludeAgents) ??
+      (this.adapters.has(request.fromAgent) && fromAgentHealth !== "hard-capped" ? request.fromAgent : null);
+
+    if (!nextAgent) {
+      return { success: false, handoffPacketId: "", newLaneId: "", newAgentKind: request.fromAgent, reason: "No replacement agent available" };
+    }
+
+    // STEP 2: Build packets (pure — no state mutations yet)
     const packet: HandoffPacket = {
       id: newHandoffId(),
       laneId: request.laneId,
@@ -268,28 +275,6 @@ export class CouncilRouter {
       openQuestions: request.openQuestions ?? [],
       blockerReason: request.blockerReason,
     };
-
-    // Mark current lane as handed-off
-    currentSession.status = "handed-off";
-    currentSession.handoffPacketId = packet.id;
-    if (this.runState) {
-      this.runState.handoffs.push(packet);
-    }
-
-    // Pick replacement agent (exclude the one that just failed)
-    const excludeAgents = new Set<AgentKind>([request.fromAgent]);
-    const nextAgent =
-      request.toAgent ?? this.selectAgent(currentSession.taskCategory, undefined, excludeAgents);
-
-    if (!nextAgent) {
-      return {
-        success: false,
-        handoffPacketId: packet.id,
-        newLaneId: "",
-        newAgentKind: request.fromAgent,
-        reason: "No replacement agent available",
-      };
-    }
 
     const newLane = newLaneId(nextAgent);
     const adapter = this.adapters.get(nextAgent)!;
@@ -311,19 +296,23 @@ export class CouncilRouter {
       resumeFrom: packet,
     };
 
+    // STEP 3: Submit — if rejected, currentSession is still untouched
     const submission = await adapter.submitTask(newPacket);
     if (!submission.accepted) {
-      return {
-        success: false,
-        handoffPacketId: packet.id,
-        newLaneId: "",
-        newAgentKind: nextAgent,
-        reason: submission.reason,
-      };
+      return { success: false, handoffPacketId: packet.id, newLaneId: "", newAgentKind: nextAgent, reason: submission.reason };
     }
 
-    // Register new session
+    // STEP 4: Commit all mutations atomically (only reachable on full success)
     if (this.runState) {
+      currentSession.status = "handed-off";
+      currentSession.handoffPacketId = packet.id;
+      this.runState.handoffs.push(packet);
+
+      // F1: Remove stale overlap records for the old lane
+      this.runState.overlaps = this.runState.overlaps.filter(
+        (o) => o.laneA !== request.laneId && o.laneB !== request.laneId,
+      );
+
       this.runState.mandates.push({ ...mandate, laneId: newLane });
       this.runState.agents.push({
         laneId: newLane,
@@ -339,17 +328,12 @@ export class CouncilRouter {
         lastProgressAt: new Date().toISOString(),
         objective: currentSession.objective,
         taskCategory: currentSession.taskCategory,
-        touchedFiles: request.touchedFiles, // inherit touched files from handoff
-        retryCount: 0,
+        touchedFiles: request.touchedFiles,
+        retryCount: 0, // orchestrator overwrites this with cumulative count immediately after
       });
     }
 
-    return {
-      success: true,
-      handoffPacketId: packet.id,
-      newLaneId: newLane,
-      newAgentKind: nextAgent,
-    };
+    return { success: true, handoffPacketId: packet.id, newLaneId: newLane, newAgentKind: nextAgent };
   }
 
   // --------------------------------------------------------------------------

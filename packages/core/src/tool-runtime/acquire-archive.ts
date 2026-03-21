@@ -8,7 +8,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 import { acquireUrl } from './acquire-url.js';
 import { globalArtifactStore } from './artifact-store.js';
@@ -172,19 +172,19 @@ function extractArchive(
   filename: string,
   stripComponents: number,
 ): void {
-  const strip = stripComponents > 0 ? `--strip-components=${stripComponents}` : '';
-
   if (filename.endsWith('.zip')) {
-    // Try unzip first, fall back to python
+    // Try unzip first, fall back to python — both use array args (no shell injection)
     try {
-      execSync(`unzip -q "${archivePath}" -d "${extractTo}"`, { timeout: 120_000 });
+      execFileSync("unzip", ["-q", archivePath, "-d", extractTo], { timeout: 120_000 });
       return;
     } catch {
-      // Try python zipfile
-      execSync(
-        `python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "${archivePath}" "${extractTo}"`,
-        { timeout: 120_000 },
-      );
+      // python3 -c receives archivePath + extractTo as sys.argv, not shell-expanded
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
+        archivePath,
+        extractTo,
+      ], { timeout: 120_000 });
       return;
     }
   }
@@ -195,10 +195,9 @@ function extractArchive(
   else if (filename.endsWith('.tar.bz2')) flag = 'j';
   else if (filename.endsWith('.tar.xz')) flag = 'J';
 
-  execSync(
-    `tar -x${flag}f "${archivePath}" -C "${extractTo}" ${strip}`.trim(),
-    { timeout: 120_000 },
-  );
+  const tarArgs = [flag ? `-x${flag}f` : "-xf", archivePath, "-C", extractTo];
+  if (stripComponents > 0) tarArgs.push(`--strip-components=${stripComponents}`);
+  execFileSync("tar", tarArgs, { timeout: 120_000 });
 }
 
 function countFiles(dir: string): number {

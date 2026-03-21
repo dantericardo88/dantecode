@@ -6,7 +6,7 @@
 
 import { readFile, writeFile, readdir, stat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   spawn as nodeSpawn,
   type SpawnOptions,
@@ -61,6 +61,8 @@ export class BridgeListener {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Track dispatched sessions to avoid double-dispatch. */
   private readonly dispatched = new Set<string>();
+  /** Suppress repeated inbox-missing warnings after the first one. */
+  private _inboxWarned = false;
 
   constructor(
     bridgeDir: string,
@@ -75,8 +77,27 @@ export class BridgeListener {
     this.gitTimeoutMs = options?.gitTimeoutMs ?? 10_000;
   }
 
+  /** Probes whether a CLI command is available in PATH. Non-blocking; returns false on any error. */
+  private isCommandAvailable(command: string): boolean {
+    const prog = process.platform === "win32" ? "where" : "which";
+    try {
+      execFileSync(prog, [command], { stdio: "pipe", timeout: 5_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   start(): void {
     if (this.pollTimer) return; // idempotent
+    // Pre-flight: warn for any agent commands not found in PATH
+    for (const agent of this.agents) {
+      if (!this.isCommandAvailable(agent.command)) {
+        process.stderr.write(
+          `[bridge-listener] WARNING: "${agent.command}" (${agent.kind}) not found in PATH — sessions will fail.\n`,
+        );
+      }
+    }
     this.pollTimer = setInterval(() => void this.poll(), this.pollIntervalMs);
     // Run immediately on start
     void this.poll();
@@ -96,7 +117,13 @@ export class BridgeListener {
     try {
       sessionDirs = await readdir(inboxBase);
     } catch {
-      return; // inbox dir doesn't exist yet
+      if (!this._inboxWarned) {
+        this._inboxWarned = true;
+        process.stderr.write(
+          `[bridge-listen] WARNING: inbox not found: ${inboxBase} — waiting for it to be created\n`,
+        );
+      }
+      return;
     }
 
     await Promise.allSettled(
@@ -231,7 +258,7 @@ export class BridgeListener {
     if (exitCode === 0) {
       // Collect git diff from the worktree (non-fatal if it fails)
       try {
-        const diff = execSync("git diff HEAD", {
+        const diff = execFileSync("git", ["diff", "HEAD"], {
           cwd: packet.worktreePath,
           encoding: "utf-8",
           stdio: ["pipe", "pipe", "pipe"],
@@ -255,12 +282,14 @@ export class BridgeListener {
         "utf-8",
       );
     } else {
+      const errorTail = (logBuffer.length > 500 ? logBuffer.slice(-500) : logBuffer).trim();
       await writeFile(
         donePath,
         JSON.stringify({
           success: false,
           exitCode,
           completedAt: new Date().toISOString(),
+          error: errorTail || `Process exited with code ${exitCode}`,
         }),
         "utf-8",
       );

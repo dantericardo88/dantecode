@@ -7,6 +7,32 @@
 import { z } from "zod";
 import { RuntimeTaskPacketSchema } from "./task-packets.js";
 import { SkillbookCheckpointRefSchema } from "./skillbook-types.js";
+import { SandboxAuditRefSchema } from "./sandbox-types.js";
+import { FearSetColumnNameSchema, FearSetRobustnessScoreSchema } from "./fearset-types.js";
+
+// ─── FearSet trace ref ────────────────────────────────────────────────────────
+
+/**
+ * Lightweight FearSet trace embedded in each Checkpoint.
+ * Links to the full FearSetResult without duplicating the data.
+ */
+export const FearSetCheckpointRefSchema = z.object({
+  /** ID of the FearSetResult this checkpoint window participates in. */
+  fearSetResultId: z.string().uuid().optional(),
+  /** Current column being processed when checkpoint was taken. */
+  currentColumn: FearSetColumnNameSchema.optional(),
+  /** Columns completed so far. */
+  completedColumns: z.array(FearSetColumnNameSchema).default([]),
+  /** Whether sandbox simulation has run for at least one action. */
+  hasSimulationEvidence: z.boolean().default(false),
+  /** Partial or final robustness score if available. */
+  robustnessScore: FearSetRobustnessScoreSchema.optional(),
+  /** Whether the full run passed the DanteForge gate. */
+  gatePassed: z.boolean().optional(),
+  /** ISO-8601 timestamp. */
+  at: z.string().datetime().default(() => new Date().toISOString()),
+});
+export type FearSetCheckpointRef = z.infer<typeof FearSetCheckpointRefSchema>;
 
 export const CheckpointSchema = z.object({
   /** Unique ID for the checkpoint. */
@@ -45,6 +71,12 @@ export const CheckpointSchema = z.object({
 
   /** Reference to the Skillbook state at this checkpoint. */
   skillbookRef: SkillbookCheckpointRefSchema.optional(),
+
+  /** Sandbox audit trail summary for this checkpoint window. */
+  sandboxAuditRef: SandboxAuditRefSchema.optional(),
+
+  /** FearSet trace for this checkpoint window. */
+  fearSetRef: FearSetCheckpointRefSchema.optional(),
 });
 
 export type Checkpoint = z.infer<typeof CheckpointSchema>;

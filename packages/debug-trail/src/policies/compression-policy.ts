@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { FileSnapshotRecord } from "../types.js";
+import { MS_PER_DAY } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Policy config
@@ -55,7 +56,7 @@ export class CompressionPolicy {
    */
   evaluate(snapshots: FileSnapshotRecord[]): CompressionDecision[] {
     const now = Date.now();
-    const ageThreshold = now - this.config.compressAfterDays * 86_400_000;
+    const ageThreshold = now - this.config.compressAfterDays * MS_PER_DAY;
     const decisions: CompressionDecision[] = [];
 
     // Group by content hash for deduplication
@@ -122,7 +123,7 @@ export class CompressionPolicy {
   shouldCompress(snapshot: FileSnapshotRecord): boolean {
     if (snapshot.compressed) return false;
     const ageMs = Date.now() - new Date(snapshot.capturedAt).getTime();
-    const ageThresholdMs = this.config.compressAfterDays * 86_400_000;
+    const ageThresholdMs = this.config.compressAfterDays * MS_PER_DAY;
     return ageMs > ageThresholdMs || snapshot.sizeBytes > this.config.maxSnapshotSizeBytes;
   }
 }

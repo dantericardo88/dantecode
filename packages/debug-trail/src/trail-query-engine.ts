@@ -10,7 +10,7 @@ import type {
   DebugTrailResult,
   DebugTrailConfig,
 } from "./types.js";
-import { defaultConfig } from "./types.js";
+import { defaultConfig, FILE_EVENT_KINDS } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TrailEventIndex } from "./state/trail-index.js";
 
@@ -247,11 +247,13 @@ export class TrailQueryEngine {
     }
 
     if (q.filePathPrefix) {
+      const prefix = q.filePathPrefix;
+      const prefixSlash = prefix + "/";
+      const prefixBackslash = prefix + "\\";
       results = results.filter((e) => {
         if (typeof e.payload["filePath"] !== "string") return false;
         const fp = e.payload["filePath"] as string;
-        const prefix = q.filePathPrefix!;
-        return fp === prefix || fp.startsWith(prefix + "/") || fp.startsWith(prefix + "\\");
+        return fp === prefix || fp.startsWith(prefixSlash) || fp.startsWith(prefixBackslash);
       });
     }
 
@@ -284,12 +286,7 @@ export class TrailQueryEngine {
     }
 
     if (q.fileEventsOnly) {
-      const fileKinds = new Set<TrailEventKind>([
-        "file_write",
-        "file_delete",
-        "file_move",
-        "file_restore",
-      ]);
+      const fileKinds = new Set<TrailEventKind>(FILE_EVENT_KINDS);
       results = results.filter((e) => fileKinds.has(e.kind));
     }
 

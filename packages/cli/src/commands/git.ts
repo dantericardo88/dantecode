@@ -3,7 +3,7 @@
 // Sub-commands for git operations: status, log, diff
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { getStatus, getDiff } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
@@ -24,9 +24,9 @@ const RESET = "\x1b[0m";
 /**
  * Runs a git command and returns stdout, or an error message.
  */
-function gitExec(command: string, cwd: string): string {
+function gitExec(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${command}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

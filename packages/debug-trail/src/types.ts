@@ -49,6 +49,17 @@ export type TrailEventKind =
   | "workflow_event"
   | "anomaly_flag";
 
+/** Milliseconds in one day — use instead of magic `86_400_000` literals. */
+export const MS_PER_DAY = 86_400_000;
+
+/** File mutation event kinds — shared across query engine, export engine, and completeness scorer. */
+export const FILE_EVENT_KINDS: readonly TrailEventKind[] = [
+  "file_write",
+  "file_delete",
+  "file_move",
+  "file_restore",
+] as const;
+
 export interface TrailEvent {
   /** Unique event ID (UUID v4). */
   id: string;

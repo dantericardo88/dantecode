@@ -147,18 +147,10 @@ describe("runGaslightCommand", () => {
     const store = new GaslightSessionStore({ cwd: testDir });
     store.save(makeEligibleSession("done-sess"));
     store.markDistilled("done-sess");
-    let exitCalled = false;
-    const origExit = process.exit;
-    (process as unknown as { exit: (code?: number) => void }).exit = () => { exitCalled = true; throw new Error("process.exit"); };
-    try {
-      await runGaslightCommand(["bridge", "done-sess"], testDir);
-    } catch {
-      // expected
-    } finally {
-      (process as unknown as { exit: (code?: number) => void }).exit = origExit;
-    }
-    expect(exitCalled).toBe(true);
-    expect(output.join("\n")).toMatch(/already distilled/i);
+    // After Fix A1: cmdBridge throws instead of calling process.exit — test the thrown error.
+    await expect(runGaslightCommand(["bridge", "done-sess"], testDir)).rejects.toThrow(
+      /already distilled/i,
+    );
   });
 
   it("unknown subcommand — shows help text", async () => {

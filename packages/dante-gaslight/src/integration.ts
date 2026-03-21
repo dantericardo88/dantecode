@@ -18,6 +18,17 @@ import { detectTrigger } from "./triggers.js";
 import { runIterationEngine, type EngineCallbacks } from "./iteration-engine.js";
 import { computeStats } from "./stats.js";
 import { GaslightSessionStore, type SessionStoreOptions } from "./session-store.js";
+import {
+  runFearSetEngine,
+  type FearSetCallbacks,
+  type FearSetEngineOptions,
+} from "./fearset-engine.js";
+import { classifyRisk, buildFearSetTrigger } from "./risk-classifier.js";
+import { computeFearSetStats, formatFearSetStats } from "./fearset-stats.js";
+import { distillFearSetLesson } from "./lesson-distiller.js";
+import { FearSetResultStore } from "./fearset-result-store.js";
+import type { FearSetConfig, FearSetResult } from "@dantecode/runtime-spine";
+import { DEFAULT_FEARSET_CONFIG } from "@dantecode/runtime-spine";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Integration options
@@ -51,17 +62,23 @@ export interface GaslightIntegrationOptions {
 
 export class DanteGaslightIntegration {
   private config: GaslightConfig;
+  private fearSetConfig: FearSetConfig;
   private sessions: GaslightSession[] = [];
+  private fearSetResults: FearSetResult[] = [];
   private store: GaslightSessionStore;
+  private resultStore: FearSetResultStore;
   private options: GaslightIntegrationOptions;
 
   constructor(
     config: Partial<GaslightConfig> = {},
     storeOptions: SessionStoreOptions = {},
     options: GaslightIntegrationOptions = {},
+    fearSetConfig: Partial<FearSetConfig> = {},
   ) {
     this.config = { ...DEFAULT_GASLIGHT_CONFIG, ...config };
+    this.fearSetConfig = { ...DEFAULT_FEARSET_CONFIG, ...fearSetConfig };
     this.store = new GaslightSessionStore(storeOptions);
+    this.resultStore = new FearSetResultStore({ cwd: storeOptions.cwd });
     this.options = options;
   }
 
@@ -211,8 +228,180 @@ export class DanteGaslightIntegration {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // DanteFearSet surface
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Enable or disable FearSet. */
+  setFearSetEnabled(enabled: boolean): void {
+    this.fearSetConfig = { ...this.fearSetConfig, enabled };
+  }
+
+  /** Get the current FearSet config. */
+  getFearSetConfig(): Readonly<FearSetConfig> {
+    return { ...this.fearSetConfig };
+  }
+
+  /**
+   * Run a FearSet session explicitly (used by /fearset command).
+   *
+   * @param context - The decision or task to fear-set.
+   * @param callbacks - LLM + sandbox hooks.
+   * @param engineOpts - Optional config overrides and prior lessons.
+   */
+  async runFearSet(
+    context: string,
+    callbacks: FearSetCallbacks = {},
+    engineOpts: FearSetEngineOptions = {},
+  ): Promise<FearSetResult> {
+    const trigger = {
+      channel: "explicit-user" as const,
+      rationale: "Manual /fearset invocation.",
+      at: new Date().toISOString(),
+    };
+    const result = await runFearSetEngine(context, trigger, callbacks, {
+      ...engineOpts,
+      config: { ...this.fearSetConfig, enabled: true, ...engineOpts.config },
+    });
+    this.fearSetResults.push(result);
+    this.resultStore.save(result);
+    if (this.fearSetConfig.maxResults > 0) {
+      this.resultStore.cleanup(this.fearSetConfig.maxResults);
+    }
+    return result;
+  }
+
+  /**
+   * Auto-trigger FearSet if the message/task meets risk criteria.
+   * Returns null if FearSet is disabled or no trigger fires.
+   */
+  async maybeFearSet(opts: {
+    message: string;
+    taskClass?: string;
+    verificationScore?: number;
+    priorFailureCount?: number;
+    priorLessons?: string[];
+    callbacks?: FearSetCallbacks;
+  }): Promise<FearSetResult | null> {
+    const classification = classifyRisk(opts.message, {
+      taskClass: opts.taskClass,
+      verificationScore: opts.verificationScore,
+      priorFailureCount: opts.priorFailureCount,
+      config: this.fearSetConfig,
+    });
+
+    if (!classification.shouldTrigger) return null;
+
+    const trigger = buildFearSetTrigger(classification, {
+      taskClass: opts.taskClass,
+    });
+    if (!trigger) return null;
+
+    const result = await runFearSetEngine(
+      opts.message,
+      trigger,
+      opts.callbacks ?? {},
+      {
+        config: this.fearSetConfig,
+        priorLessons: opts.priorLessons,
+      },
+    );
+    this.fearSetResults.push(result);
+    this.resultStore.save(result);
+    if (this.fearSetConfig.maxResults > 0) {
+      this.resultStore.cleanup(this.fearSetConfig.maxResults);
+    }
+    return result;
+  }
+
+  /**
+   * Distill all passed, undistilled FearSet results into Skillbook proposals.
+   * Uses disk-level markDistilled for replay protection across restarts.
+   */
+  distillFearSetLessons(): ReturnType<typeof distillFearSetLesson> {
+    const allLessons: ReturnType<typeof distillFearSetLesson> = [];
+    const merged = this._mergedFearSetResults();
+
+    for (const result of merged) {
+      if (!result.passed || result.distilledAt) continue;
+      const lessons = distillFearSetLesson(result);
+      allLessons.push(...lessons);
+      // Persist distilledAt to disk for replay protection
+      this.resultStore.markDistilled(result.id);
+      // Also update in-memory copy
+      const inMemIdx = this.fearSetResults.findIndex((r) => r.id === result.id);
+      if (inMemIdx >= 0) {
+        this.fearSetResults[inMemIdx] = {
+          ...this.fearSetResults[inMemIdx]!,
+          distilledAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    return allLessons;
+  }
+
+  /**
+   * Get all FearSet results (in-memory + disk, deduped by id, newest-first).
+   * In-memory results shadow disk versions with the same ID.
+   */
+  getFearSetResults(): FearSetResult[] {
+    return this._mergedFearSetResults();
+  }
+
+  // ─── /fearset slash commands ───────────────────────────────────────────────
+
+  /** Slash command: /fearset on */
+  cmdFearSetOn(): string {
+    this.setFearSetEnabled(true);
+    return "DanteFearSet enabled. I will run Fear-Setting (Define\u2192Prevent\u2192Repair+Benefits+Inaction) on risky or high-stakes tasks.";
+  }
+
+  /** Slash command: /fearset off */
+  cmdFearSetOff(): string {
+    this.setFearSetEnabled(false);
+    return "DanteFearSet disabled.";
+  }
+
+  /** Slash command: /fearset stats */
+  cmdFearSetStats(): string {
+    return formatFearSetStats(computeFearSetStats(this._mergedFearSetResults()));
+  }
+
+  /** Slash command: /fearset review — shows last result summary */
+  cmdFearSetReview(): string {
+    const all = this._mergedFearSetResults();
+    if (all.length === 0) return "No FearSet runs recorded yet.";
+    const last = all[0]!;
+    const columnsCompleted = last.columns.map((c) => c.name).join(", ");
+    return [
+      `Last FearSet run: ${last.id}`,
+      `  Context: ${last.context.slice(0, 80)}`,
+      `  Trigger: ${last.trigger.channel}`,
+      `  Mode: ${last.mode}`,
+      `  Columns: ${columnsCompleted}`,
+      `  Robustness: ${last.robustnessScore?.overall.toFixed(2) ?? "n/a"} (${last.robustnessScore?.gateDecision ?? "pending"})`,
+      `  Passed: ${last.passed}`,
+      ...(last.stopReason ? [`  Stop reason: ${last.stopReason}`] : []),
+      ...(last.synthesizedRecommendation ? [`  Recommendation: ${last.synthesizedRecommendation.decision.toUpperCase()} — ${last.synthesizedRecommendation.reasoning.slice(0, 80)}`] : []),
+      ...(last.distilledAt ? [`  Distilled at: ${last.distilledAt}`] : []),
+    ].join("\n");
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Private helpers
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Merge in-memory FearSet results with disk results, newest-first.
+   * In-memory results shadow disk versions with the same ID.
+   */
+  private _mergedFearSetResults(): FearSetResult[] {
+    const inMemIds = new Set(this.fearSetResults.map((r) => r.id));
+    const diskOnly = this.resultStore.list().filter((r) => !inMemIds.has(r.id));
+    return [...this.fearSetResults, ...diskOnly].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    );
+  }
 
   /**
    * Merge in-memory sessions with disk sessions, sorted newest-first by startedAt.

@@ -35,6 +35,21 @@ export const RuntimeEventKindSchema = z.enum([
   "gaslight.iteration.gated",
   "gaslight.lesson.written",
   "gaslight.stopped",
+  "sandbox.execution.requested",
+  "sandbox.execution.allowed",
+  "sandbox.execution.blocked",
+  "sandbox.execution.completed",
+  "sandbox.danteforge.gate.passed",
+  "sandbox.danteforge.gate.failed",
+  "sandbox.violation",
+  "fearset.triggered",
+  "fearset.column.started",
+  "fearset.column.completed",
+  "fearset.danteforge.passed",
+  "fearset.danteforge.failed",
+  "fearset.sandbox.simulated",
+  "fearset.lesson.distilled",
+  "fearset.stopped",
 ]);
 
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKindSchema>;

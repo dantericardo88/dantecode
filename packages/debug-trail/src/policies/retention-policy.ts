@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { TrailRetentionDecision } from "../types.js";
+import { MS_PER_DAY } from "../types.js";
 import type { SessionRecord } from "../sqlite-store.js";
 
 // ---------------------------------------------------------------------------
@@ -46,8 +47,8 @@ export class RetentionPolicy {
    */
   evaluate(sessions: Record<string, SessionRecord>): TrailRetentionDecision[] {
     const now = Date.now();
-    const keepThreshold = now - this.config.keepRecentDays * 86_400_000;
-    const pruneThreshold = now - this.config.prunePastDays * 86_400_000;
+    const keepThreshold = now - this.config.keepRecentDays * MS_PER_DAY;
+    const pruneThreshold = now - this.config.prunePastDays * MS_PER_DAY;
     const decidedAt = new Date().toISOString();
 
     const decisions: TrailRetentionDecision[] = [];

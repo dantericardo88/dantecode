@@ -5,7 +5,7 @@
 // council router, worktree observer.
 // ============================================================================
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
@@ -56,6 +56,7 @@ import type { CouncilTaskPacket } from "./council-types.js";
 import { BridgeListener } from "./bridge-listener.js";
 import type { AgentCommandConfig, SpawnFn } from "./bridge-listener.js";
 import { CouncilOrchestrator } from "./council-orchestrator.js";
+import type { CouncilLifecycleStatus } from "./council-orchestrator.js";
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -2030,6 +2031,49 @@ describe("Lane A — DanteCodeAdapter SelfLaneExecutor", () => {
     expect(logsJoined).toContain("src/foo.ts");
     expect(logsJoined).toContain("src/bar.ts");
   });
+
+  it("injected executor returning success:true sets session status to completed", async () => {
+    const executor: SelfLaneExecutor = async (_prompt, _worktreePath) => ({
+      output: "Done",
+      touchedFiles: ["src/foo.ts"],
+      success: true,
+    });
+    const adapter = new DanteCodeAdapter({ executor });
+    const packet = makeTestPacket();
+    const submission = await adapter.submitTask(packet);
+    // Wait for fire-and-forget promise to settle
+    await new Promise((r) => setTimeout(r, 50));
+    const status = await adapter.pollStatus(submission.sessionId);
+    expect(status.status).toBe("completed");
+  });
+
+  it("injected executor returning success:false sets session status to failed", async () => {
+    const executor: SelfLaneExecutor = async () => ({
+      output: "error",
+      touchedFiles: [],
+      success: false,
+      error: "runAgentLoop threw",
+    });
+    const adapter = new DanteCodeAdapter({ executor });
+    const packet = makeTestPacket();
+    const submission = await adapter.submitTask(packet);
+    await new Promise((r) => setTimeout(r, 50));
+    const status = await adapter.pollStatus(submission.sessionId);
+    expect(status.status).toBe("failed");
+  });
+
+  it("injected executor that throws marks session as failed", async () => {
+    const executor: SelfLaneExecutor = async () => {
+      throw new Error("in-process runAgentLoop failed");
+    };
+    const adapter = new DanteCodeAdapter({ executor });
+    const packet = makeTestPacket();
+    const submission = await adapter.submitTask(packet);
+    await new Promise((r) => setTimeout(r, 50));
+    const status = await adapter.pollStatus(submission.sessionId);
+    expect(status.status).toBe("failed");
+    expect(status.progressSummary).toMatch(/in-process runAgentLoop failed/);
+  });
 });
 
 // ============================================================================
@@ -2252,6 +2296,81 @@ describe("Lane B — BridgeListener Daemon", () => {
 
     expect(capturedEnvs.length).toBeGreaterThan(0);
     expect(capturedEnvs[0]?.["MY_CUSTOM_VAR"]).toBe("test-value");
+  });
+
+  it("done.json failure includes error field with stderr content", async () => {
+    const { spawnFn } = makeSpawnMock({
+      stdout: "",
+      stderr: "FATAL: connection refused",
+      exitCode: 1,
+    });
+    const bridgeDir = join(testDir, "bridge-done-fail-stderr");
+    const sessionId = "claude-code-fail-stderr1";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-fs1");
+    await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const listener = new BridgeListener(
+      bridgeDir,
+      [{ kind: "claude-code", command: "claude" }],
+      spawnFn,
+      { pollIntervalMs: 50 },
+    );
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
+    const done = JSON.parse(await readFile(donePath, "utf-8")) as { success: boolean; error?: string };
+    expect(done.success).toBe(false);
+    expect(done.error).toContain("FATAL: connection refused");
+  });
+
+  it("done.json error field falls back to exit-code message when log empty", async () => {
+    const { spawnFn } = makeSpawnMock({ stdout: "", stderr: "", exitCode: 2 });
+    const bridgeDir = join(testDir, "bridge-done-fail-empty");
+    const sessionId = "codex-fail-empty1";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("codex-fe1");
+    await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const listener = new BridgeListener(
+      bridgeDir,
+      [{ kind: "codex", command: "codex" }],
+      spawnFn,
+      { pollIntervalMs: 50 },
+    );
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
+    const done = JSON.parse(await readFile(donePath, "utf-8")) as { success: boolean; error?: string };
+    expect(done.success).toBe(false);
+    expect(done.error).toMatch(/Process exited with code 2/);
+  });
+
+  it("start() writes WARNING to stderr when agent command not in PATH", () => {
+    const stderrWrites: string[] = [];
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation((data) => {
+      stderrWrites.push(String(data));
+      return true;
+    });
+
+    const listener = new BridgeListener(
+      "/tmp/test-bridge-warn",
+      [{ kind: "claude-code", command: "this-binary-does-not-exist-xyz-abc" }],
+      undefined,
+      { pollIntervalMs: 60_000 }, // long interval so poll doesn't run
+    );
+    listener.start();
+    listener.stop();
+
+    stderrSpy.mockRestore();
+
+    expect(stderrWrites.some((w) => w.includes("not found in PATH"))).toBe(true);
   });
 });
 
@@ -2668,5 +2787,562 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
 
     expect(completedIds).toHaveLength(1);
     expect(completedIds[0]).toContain("dantecode-watch");
+  });
+
+  it("watchUntilComplete rejects with timeout when lanes never complete", async () => {
+    const adapter = makeWatchAdapter(["running"]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "timeout test", agents: ["dantecode"], repoRoot: testDir });
+    injectWatchSession(orchestrator, "watch-timeout");
+
+    await expect(
+      orchestrator.watchUntilComplete({ timeoutMs: 50 }),
+    ).rejects.toThrow(/timed out/i);
+
+    expect(orchestrator.currentStatus).toBe("failed");
+  });
+
+  it("watchUntilComplete waits for all lanes before resolving", async () => {
+    const sessionPollCounts = new Map<string, number>();
+    const adapter: CouncilAgentAdapter = {
+      ...makeWatchAdapter(["running", "completed"]),
+      pollStatus: async (sessionId: string) => {
+        const count = (sessionPollCounts.get(sessionId) ?? 0) + 1;
+        sessionPollCounts.set(sessionId, count);
+        if (sessionId === "multi-a" || count >= 2) return { sessionId, status: "completed" as const };
+        return { sessionId, status: "running" as const };
+      },
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+
+    await orchestrator.start({ objective: "multi-lane test", agents: ["dantecode"], repoRoot: testDir });
+
+    injectWatchSession(orchestrator, "multi-a");
+    injectWatchSession(orchestrator, "multi-b");
+
+    await orchestrator.watchUntilComplete();
+
+    expect(orchestrator.currentStatus).toBe("completed");
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState!;
+    expect(state.agents.every((a) => a.status === "completed" || a.status === "failed")).toBe(true);
+  });
+
+  it("fail() fallback path emits state:transition when normal transition throws", async () => {
+    const adapter = makeWatchAdapter(["running"]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "fallback test", agents: ["dantecode"], repoRoot: testDir });
+
+    // Force orchestrator into "completed" state — "completed" → "failed" is invalid in the state machine
+    const oc = orchestrator as unknown as { status: CouncilLifecycleStatus };
+    oc.status = "completed";
+
+    const transitions: Array<{ from: string; to: string }> = [];
+    orchestrator.on("state:transition", ({ from, to }) => transitions.push({ from, to }));
+
+    await orchestrator.fail("forced from invalid state");
+
+    expect(orchestrator.currentStatus).toBe("failed");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]!.to).toBe("failed");
+    expect(transitions[0]!.from).toBe("completed");
+  });
+});
+
+// ============================================================================
+// Lane F — Retry Engine + Aborted Status
+// ============================================================================
+
+describe("Lane F — Retry Engine + Aborted Status", () => {
+  let testDirF: string;
+  const activeOrchestratorsF: CouncilOrchestrator[] = [];
+
+  beforeEach(async () => {
+    testDirF = join(tmpdir(), `council-retry-${randomUUID()}`);
+    await mkdir(testDirF, { recursive: true });
+  });
+
+  afterEach(async () => {
+    for (const o of activeOrchestratorsF) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown; observer?: { stop: () => void } };
+      if (oc.pollTimer) clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+      oc.observer?.stop();
+    }
+    activeOrchestratorsF.length = 0;
+    // Allow any in-flight async FS ops to settle before cleanup (Windows EBUSY guard)
+    await new Promise((r) => setTimeout(r, 50));
+    await rm(testDirF, { recursive: true, force: true }).catch(() => { /* best-effort */ });
+  });
+
+  it("DanteCodeAdapter marks session 'aborted' (not 'failed') when AbortController fires", async () => {
+    // Executor that hangs until its abortSignal is signalled
+    const executor: SelfLaneExecutor = async (_prompt, _root, opts) => {
+      await new Promise<void>((_, reject) => {
+        opts?.abortSignal?.addEventListener("abort", () => reject(new Error("aborted by signal")));
+      });
+      return { output: "", touchedFiles: [], success: true };
+    };
+
+    const adapter = new DanteCodeAdapter({ executor });
+    const packet: CouncilTaskPacket = {
+      packetId: randomUUID(),
+      runId: "test-run",
+      laneId: "abort-lane",
+      objective: "abort test",
+      branch: "feature/abort",
+      baseBranch: "main",
+      worktreePath: testDirF,
+      taskCategory: "coding",
+      ownedFiles: [],
+      forbiddenFiles: [],
+      readOnlyFiles: [],
+      contractDependencies: [],
+      assumptions: [],
+    };
+
+    const { sessionId } = await adapter.submitTask(packet);
+    await adapter.abortTask(sessionId);
+    // Let the microtask queue drain so the .catch() callback updates session.status
+    await new Promise((r) => setTimeout(r, 20));
+
+    const status = await adapter.pollStatus(sessionId);
+    expect(status.status).toBe("aborted");
+  });
+
+  it("failed lane is automatically retried — retryCount increments on new session", async () => {
+    const FAIL_SESSION = "fail-me";
+    const retryAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Retry mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => {
+        if (sessionId === FAIL_SESSION) return { sessionId, status: "failed" as const };
+        return { sessionId, status: "completed" as const };
+      },
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", retryAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1, maxLaneRetries: 2 });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "retry test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    state.agents.push({
+      laneId: "dantecode-retry-lane",
+      agentKind: "dantecode",
+      sessionId: FAIL_SESSION,
+      status: "running",
+      assignedFiles: [],
+      objective: "retry test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/retry",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+    state.mandates.push({
+      laneId: "dantecode-retry-lane",
+      ownedFiles: [],
+      readOnlyFiles: [],
+      forbiddenFiles: [],
+      contractDependencies: [],
+      overlapPolicy: "warn" as const,
+    });
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("completed");
+    expect(state.agents.length).toBeGreaterThanOrEqual(2);
+    const handedOff = state.agents.find((s) => s.sessionId === FAIL_SESSION);
+    expect(handedOff?.status).toBe("handed-off");
+    const retried = state.agents.find((s) => s.retryCount === 1);
+    expect(retried).toBeDefined();
+    expect(retried?.retryCount).toBe(1);
+  });
+
+  it("retries exhausted — run transitions to failed after maxLaneRetries attempts", async () => {
+    const alwaysFailAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Always-fail mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => ({ sessionId, status: "failed" as const }),
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async () => null,
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", alwaysFailAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1, maxLaneRetries: 1 });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "exhausted retry", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    state.agents.push({
+      laneId: "dantecode-exhaust-lane",
+      agentKind: "dantecode",
+      sessionId: "exhaust-s1",
+      status: "running",
+      assignedFiles: [],
+      objective: "exhausted retry",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/exhaust",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+    state.mandates.push({
+      laneId: "dantecode-exhaust-lane",
+      ownedFiles: [],
+      readOnlyFiles: [],
+      forbiddenFiles: [],
+      contractDependencies: [],
+      overlapPolicy: "warn" as const,
+    });
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("failed");
+    // original (handed-off after 1st fail) + retry session (failed after 2nd fail)
+    expect(state.agents.length).toBeGreaterThanOrEqual(2);
+    const finalFailed = state.agents.find((s) => s.status === "failed");
+    expect(finalFailed).toBeDefined();
+    expect(finalFailed?.retryCount).toBe(1);
+  });
+
+  it("D3: retry fires in NEXT poll cycle, not the same one (backoff path exercised)", async () => {
+    const FAIL_SESSION = "backoff-fail";
+    const pollLog: string[] = [];
+
+    const backoffAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Backoff mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => {
+        pollLog.push(sessionId);
+        if (sessionId === FAIL_SESSION) return { sessionId, status: "failed" as const };
+        return { sessionId, status: "completed" as const };
+      },
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", backoffAdapter]]);
+    // retryBaseDelayMs: 50 — non-zero but short enough that the test finishes fast
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 20,
+      maxLaneRetries: 1,
+      retryBaseDelayMs: 50,
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "backoff test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    state.agents.push({
+      laneId: "dantecode-backoff-lane",
+      agentKind: "dantecode",
+      sessionId: FAIL_SESSION,
+      status: "running",
+      assignedFiles: [],
+      objective: "backoff test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/backoff",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+    state.mandates.push({
+      laneId: "dantecode-backoff-lane",
+      ownedFiles: [],
+      readOnlyFiles: [],
+      forbiddenFiles: [],
+      contractDependencies: [],
+      overlapPolicy: "warn" as const,
+    });
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("completed");
+    // FAIL_SESSION should only have been polled ONCE — the retry session has a different sessionId
+    expect(pollLog.filter((s) => s === FAIL_SESSION).length).toBe(1);
+    const retried = state.agents.find((s) => s.retryCount === 1);
+    expect(retried).toBeDefined();
+  });
+
+  it("D4: concurrent multi-lane failure — both lanes fail, run transitions to failed", async () => {
+    const alwaysFail: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Always-fail mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => ({ sessionId, status: "failed" as const }),
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async () => null,
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", alwaysFail]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 1,
+      maxLaneRetries: 0,
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "multi-fail test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    for (const laneId of ["dantecode-fail-1", "dantecode-fail-2"]) {
+      state.agents.push({
+        laneId,
+        agentKind: "dantecode",
+        sessionId: `sess-${laneId}`,
+        status: "running",
+        assignedFiles: [],
+        objective: "multi-fail test",
+        taskCategory: "coding",
+        touchedFiles: [],
+        retryCount: 0,
+        health: "ready",
+        adapterKind: "native-cli",
+        worktreePath: testDirF,
+        branch: "feature/multi-fail",
+        startedAt: new Date().toISOString(),
+        lastProgressAt: new Date().toISOString(),
+      } as AgentSessionState);
+      state.mandates.push({
+        laneId,
+        ownedFiles: [],
+        readOnlyFiles: [],
+        forbiddenFiles: [],
+        contractDependencies: [],
+        overlapPolicy: "warn" as const,
+      });
+    }
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("failed");
+    const failedSessions = state.agents.filter((s) => s.status === "failed");
+    expect(failedSessions.length).toBe(2);
+  });
+
+  it("D5: single-adapter fallback — same agent retries when no alternative exists", async () => {
+    const FAIL_SESSION = "single-adapter-fail";
+    let callCount = 0;
+
+    const singleAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "Single-adapter mock",
+      kind: "native-cli" as const,
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 8), accepted: true }),
+      pollStatus: async (sessionId: string) => {
+        if (sessionId === FAIL_SESSION) return { sessionId, status: "failed" as const };
+        // Second session (retry) — let it succeed after a brief simulated delay
+        callCount++;
+        if (callCount < 2) return { sessionId, status: "running" as const };
+        return { sessionId, status: "completed" as const };
+      },
+      collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
+      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    };
+
+    // Only ONE adapter registered — single-adapter setup
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", singleAdapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 1,
+      retryBaseDelayMs: 0, // disable backoff for test speed
+    });
+    activeOrchestratorsF.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "single-adapter test", agents: ["dantecode"], repoRoot: testDirF });
+
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    state.agents.push({
+      laneId: "dantecode-single-lane",
+      agentKind: "dantecode",
+      sessionId: FAIL_SESSION,
+      status: "running",
+      assignedFiles: [],
+      objective: "single-adapter test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDirF,
+      branch: "feature/single",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+    state.mandates.push({
+      laneId: "dantecode-single-lane",
+      ownedFiles: [],
+      readOnlyFiles: [],
+      forbiddenFiles: [],
+      contractDependencies: [],
+      overlapPolicy: "warn" as const,
+    });
+
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    expect(orchestrator.currentStatus).toBe("completed");
+    const retried = state.agents.find((s) => s.retryCount === 1);
+    expect(retried).toBeDefined();
+    expect(retried?.agentKind).toBe("dantecode");
+  });
+});
+
+// ============================================================================
+// Lane E — CouncilOrchestrator watchUntilComplete / foreground status
+// ============================================================================
+
+describe("Lane E — CouncilOrchestrator watchUntilComplete foreground", () => {
+  const activeOrchestratorsE: CouncilOrchestrator[] = [];
+  afterEach(() => {
+    for (const o of activeOrchestratorsE) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown };
+      if (oc.pollTimer) {
+        clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+      }
+    }
+    activeOrchestratorsE.length = 0;
+  });
+
+  it("watchUntilComplete resolves immediately when orchestrator is already in completed state", async () => {
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>();
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    activeOrchestratorsE.push(orchestrator);
+
+    // Force status directly to "completed" without going through the state machine
+    (orchestrator as unknown as { status: CouncilLifecycleStatus }).status = "completed";
+
+    const start = Date.now();
+    await orchestrator.watchUntilComplete();
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(orchestrator.currentStatus).toBe("completed");
+  });
+
+  it("watchUntilComplete resolves immediately when orchestrator is already in failed state", async () => {
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>();
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    activeOrchestratorsE.push(orchestrator);
+
+    // Force status directly to "failed"
+    (orchestrator as unknown as { status: CouncilLifecycleStatus }).status = "failed";
+
+    const start = Date.now();
+    await orchestrator.watchUntilComplete();
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(orchestrator.currentStatus).toBe("failed");
+  });
+
+  it("orchestrator.currentStatus reflects the state machine status through idle→running", async () => {
+    const adapter = makeInlineAdapter(async (s) => ({ sessionId: s, status: "running" as const }));
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    activeOrchestratorsE.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    expect(orchestrator.currentStatus).toBe("idle");
+    await orchestrator.start({
+      objective: "status test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
+    expect(orchestrator.currentStatus).toBe("running");
+    await orchestrator.fail("cleanup");
+  });
+});
+
+// ============================================================================
+// DanteCodeAdapter edge cases (post-Lane A — covers output/touchedFiles/status)
+// ============================================================================
+
+describe("DanteCodeAdapter edge cases", () => {
+  it("pollStatus returns unknown for a session ID that was never submitted", async () => {
+    const adapter = new DanteCodeAdapter();
+    const status = await adapter.pollStatus("nonexistent-session-xyz");
+    expect(status.status).toBe("unknown");
+  });
+
+  it("executor touchedFiles flow through to collectArtifacts logs", async () => {
+    const executor: SelfLaneExecutor = async () => ({
+      output: "all tests passed",
+      touchedFiles: ["src/main.ts", "src/util.ts"],
+      success: true,
+    });
+    const adapter = new DanteCodeAdapter({ executor });
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    // Wait for fire-and-forget promise to settle
+    await new Promise((r) => setTimeout(r, 50));
+    const artifacts = await adapter.collectArtifacts(sessionId);
+    const logsJoined = artifacts.logs.join("\n");
+    expect(logsJoined).toMatch(/Touched files/i);
+    expect(logsJoined).toMatch(/src\/main\.ts/);
+  });
+
+  it("markCompleted and markFailed directly mutate session status", async () => {
+    const adapter = new DanteCodeAdapter();
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+
+    adapter.markCompleted(sessionId);
+    const afterComplete = await adapter.pollStatus(sessionId);
+    expect(afterComplete.status).toBe("completed");
+
+    adapter.markFailed(sessionId);
+    const afterFail = await adapter.pollStatus(sessionId);
+    expect(afterFail.status).toBe("failed");
   });
 });

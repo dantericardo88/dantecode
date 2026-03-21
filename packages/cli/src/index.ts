@@ -16,6 +16,7 @@ import { runCouncilCommand } from "./commands/council.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runSkillbookCommand } from "./commands/skillbook.js";
+import { runFearsetCommand } from "./commands/fearset.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -57,6 +58,8 @@ interface ParsedArgs {
   promptFile: string | undefined;
   /** --max-rounds <n> — maximum tool rounds for non-interactive mode */
   maxRounds: number | undefined;
+  /** --config-root <path> — override config directory for non-interactive mode */
+  configRoot: string | undefined;
 }
 
 /**
@@ -82,9 +85,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     showHelp: false,
     promptFile: undefined,
     maxRounds: undefined,
+    configRoot: undefined,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset"]);
   let i = 0;
   let foundCommand = false;
 
@@ -159,6 +163,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === "--config-root") {
+      result.configRoot = args[i + 1];
+      i += 2;
+      continue;
+    }
+
     // Skip unknown flags
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2)) {
       // Check if this flag takes a value
@@ -212,6 +222,11 @@ function parseArgs(argv: string[]): ParsedArgs {
         if (subArg === "--max-rounds") {
           const n = parseInt(args[i + 1] ?? "", 10);
           if (!isNaN(n) && n > 0) result.maxRounds = n;
+          i += 2;
+          continue;
+        }
+        if (subArg === "--config-root") {
+          result.configRoot = args[i + 1];
           i += 2;
           continue;
         }
@@ -277,6 +292,7 @@ async function main(): Promise<void> {
     silent: parsed.silent,
     configPath: parsed.configPath,
     maxRounds: parsed.maxRounds,
+    configRoot: parsed.configRoot,
   };
 
   // Route to the appropriate command
@@ -311,6 +327,9 @@ async function main(): Promise<void> {
         return;
       case "skillbook":
         await runSkillbookCommand(parsed.subArgs, projectRoot);
+        return;
+      case "fearset":
+        await runFearsetCommand(parsed.subArgs, projectRoot);
         return;
     }
   }

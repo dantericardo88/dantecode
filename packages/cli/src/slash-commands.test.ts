@@ -132,6 +132,7 @@ function makeState(projectRoot: string): ReplState {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    gaslight: null,
   };
 }
 

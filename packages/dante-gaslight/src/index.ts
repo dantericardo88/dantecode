@@ -9,3 +9,7 @@ export * from "./iteration-engine.js";
 export * from "./integration.js";
 export * from "./lesson-distiller.js";
 export * from "./session-store.js";
+export * from "./fearset-engine.js";
+export * from "./fearset-result-store.js";
+export * from "./risk-classifier.js";
+export * from "./fearset-stats.js";

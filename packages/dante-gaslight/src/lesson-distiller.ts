@@ -13,7 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { GaslightSession, TriggerChannel } from "./types.js";
-import type { Skill, UpdateOperation } from "@dantecode/runtime-spine";
+import type { Skill, UpdateOperation, FearSetResult } from "@dantecode/runtime-spine";
 
 // ────────────────────────────────────────────────────────
 // Types
@@ -146,4 +146,105 @@ export function distillLesson(
   };
 
   return { proposal, section, trustScore };
+}
+
+// ────────────────────────────────────────────────────────
+// FearSet lesson distillation
+// ────────────────────────────────────────────────────────
+
+export interface FearSetLessonDistillerOptions {
+  section?: string;
+  title?: string;
+  trustScore?: number;
+}
+
+/**
+ * Distill a passed FearSetResult into one or more Skillbook UpdateOperations.
+ *
+ * Tags lessons with "FearSet-Prevent", "FearSet-Repair" etc. for
+ * high-priority retrieval in future risky tasks.
+ *
+ * @throws if result.passed === false
+ */
+export function distillFearSetLesson(
+  result: FearSetResult,
+  opts: FearSetLessonDistillerOptions = {},
+): DistilledLesson[] {
+  if (!result.passed) {
+    throw new Error(
+      `FearSetResult ${result.id} did not pass the DanteForge gate — cannot distill.`,
+    );
+  }
+
+  const lessons: DistilledLesson[] = [];
+  const baseScore = Math.max(0.5, Math.min(1, opts.trustScore ?? result.robustnessScore?.overall ?? 0.75));
+  const now = new Date().toISOString();
+
+  // ── One skill per substantive column ──
+  for (const column of result.columns) {
+    if (column.rawOutput.trim().length === 0) continue;
+
+    let section: string;
+    let title: string;
+    let content: string;
+
+    switch (column.name) {
+      case "define": {
+        section = opts.section ?? "FearSet-Define";
+        const cases = column.worstCases.length > 0
+          ? `\n\nWorst cases identified:\n${column.worstCases.map((c) => `- ${c}`).join("\n")}`
+          : "";
+        title = opts.title ?? `FearSet: Worst-case definition — ${result.context.slice(0, 60)}`;
+        content = `${column.rawOutput}${cases}`;
+        break;
+      }
+      case "prevent": {
+        section = opts.section ?? "FearSet-Prevent";
+        const actions = column.preventionActions.map(
+          (a) =>
+            `- ${a.description} [mechanism: ${a.mechanism}${a.simulationStatus === "simulated" ? ", SIMULATED" : ""}]`,
+        );
+        title = opts.title ?? `FearSet: Prevention plan — ${result.context.slice(0, 60)}`;
+        content = `${column.rawOutput}\n\n### Prevention Actions\n\n${actions.join("\n")}`;
+        break;
+      }
+      case "repair": {
+        section = opts.section ?? "FearSet-Repair";
+        const plans = column.repairPlans.map(
+          (p) =>
+            `- ${p.description} (steps: ${p.steps.length}${p.simulationStatus === "simulated" ? ", SIMULATED" : ""})`,
+        );
+        title = opts.title ?? `FearSet: Repair plan — ${result.context.slice(0, 60)}`;
+        content = `${column.rawOutput}\n\n### Repair Plans\n\n${plans.join("\n")}`;
+        break;
+      }
+      default:
+        // benefits / inaction — single combined lesson
+        section = opts.section ?? "FearSet-Decision";
+        title = opts.title ?? `FearSet: Decision analysis — ${result.context.slice(0, 60)}`;
+        content = column.rawOutput;
+        break;
+    }
+
+    const candidateSkill: Skill = {
+      id: randomUUID(),
+      title,
+      content,
+      section,
+      trustScore: baseScore,
+      sourceSessionId: result.id,
+      createdAt: result.completedAt ?? now,
+      updatedAt: now,
+    };
+
+    const proposal: UpdateOperation = {
+      action: "add",
+      candidateSkill,
+      rationale: `Distilled from FearSet run ${result.id} (trigger: ${result.trigger.channel}, column: ${column.name}, gate: pass, robustness: ${result.robustnessScore?.overall.toFixed(2) ?? "?"})`,
+    };
+
+    lessons.push({ proposal, section, trustScore: baseScore });
+  }
+
+  return lessons;
 }

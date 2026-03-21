@@ -27,15 +27,16 @@ import type { CouncilTaskPacket } from "../council-types.js";
 export type SelfLaneExecutor = (
   prompt: string,
   projectRoot: string,
-  options?: { maxRounds?: number; worktreePath?: string },
+  options?: { maxRounds?: number; worktreePath?: string; abortSignal?: AbortSignal },
 ) => Promise<{ output: string; touchedFiles: string[]; success: boolean; error?: string }>;
 
 interface SelfSession {
   sessionId: string;
   packet: CouncilTaskPacket;
   startedAt: number;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "running" | "completed" | "failed" | "aborted";
   executionPromise?: Promise<void>;
+  abortController?: AbortController;
   touchedFiles?: string[];
   error?: string;
 }
@@ -80,10 +81,13 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
     if (this.executor) {
       // Real execution path: fire agent loop as fire-and-forget background Promise
       session.status = "running";
+      const ac = new AbortController();
+      session.abortController = ac;
       const prompt = this.buildTaskPrompt(packet); // inherited from BaseCouncilAdapter
       const execPromise = this.executor(prompt, packet.worktreePath, {
         maxRounds: 80,
         worktreePath: packet.worktreePath,
+        abortSignal: ac.signal,
       })
         .then((result) => {
           session.status = result.success ? "completed" : "failed";
@@ -93,7 +97,9 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
           }
         })
         .catch((err: unknown) => {
-          session.status = "failed";
+          // If the AbortController was signalled, this is an intentional cancellation
+          const isAbort = ac.signal.aborted;
+          session.status = isAbort ? "aborted" : "failed";
           session.error = err instanceof Error ? err.message : String(err);
         });
       // Store as void promise — fire-and-forget, errors handled in .catch() above
@@ -197,5 +203,12 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
   markFailed(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (session) session.status = "failed";
+  }
+
+  override async abortTask(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (session?.abortController) {
+      session.abortController.abort();
+    }
   }
 }

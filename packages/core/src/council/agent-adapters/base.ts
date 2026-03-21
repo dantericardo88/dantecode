@@ -38,6 +38,7 @@ export type AdapterStatusKind =
   | "running"
   | "completed"
   | "failed"
+  | "aborted"
   | "capped"
   | "stalled"
   | "unknown";

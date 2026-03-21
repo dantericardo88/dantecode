@@ -2715,3 +2715,274 @@ describe("Universal skill completion (skillActive)", () => {
     expect(hasReflection).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// DanteGaslight integration hook
+// ---------------------------------------------------------------------------
+
+describe("DanteGaslight integration hook", () => {
+  beforeEach(() => {
+    mockGenerateText.mockResolvedValue({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+  });
+
+  it("does nothing when config.gaslight is not set", async () => {
+    const result = await runAgentLoop("hi", makeSession(), makeConfig());
+    expect(result).toBeDefined();
+  });
+
+  it("calls maybeGaslight with the last assistant content as draft", async () => {
+    let capturedDraft: string | undefined;
+    const mockGaslight = {
+      maybeGaslight: async (opts: { draft?: string }) => {
+        capturedDraft = opts.draft;
+        return null;
+      },
+    };
+    // First round: tool call forces a full iteration so the gaslight hook is reachable
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Final assistant response.",
+      usage: { totalTokens: 20 },
+    });
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+    }));
+    expect(capturedDraft).toBe("Final assistant response.");
+  });
+
+  it("replaces last assistant message when gaslight passes with finalOutput", async () => {
+    const improvedText = "This is the improved, refined response.";
+    const mockGaslight = {
+      maybeGaslight: async () => ({
+        sessionId: "test-session-id",
+        trigger: { channel: "explicit-user", at: new Date().toISOString() },
+        iterations: [{ iteration: 1, draft: "Response text.", at: new Date().toISOString() }],
+        stopReason: "pass" as const,
+        finalOutput: improvedText,
+        finalGateDecision: "pass" as const,
+        lessonEligible: true,
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+    };
+    // Two-round mock: tool call forces a second iteration so the gaslight hook is reachable.
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+    const result = await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+    const lastAssistant = [...result.messages].reverse().find((m) => m.role === "assistant");
+    expect(lastAssistant?.content).toBe(improvedText);
+  });
+
+  it("does not modify session messages when gaslight returns fail", async () => {
+    const mockGaslight = {
+      maybeGaslight: async () => ({
+        sessionId: "test-session-id",
+        trigger: { channel: "explicit-user", at: new Date().toISOString() },
+        iterations: [{ iteration: 1, draft: "Response text.", at: new Date().toISOString() }],
+        stopReason: "budget-iterations" as const,
+        finalOutput: "Rewrite that must NOT appear.",
+        finalGateDecision: "fail" as const,
+        lessonEligible: false,
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      }),
+    };
+    // Two-round mock: tool call forces a second iteration so the gaslight hook is reachable.
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+    const result = await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+    const lastAssistant = [...result.messages].reverse().find((m) => m.role === "assistant");
+    expect(lastAssistant?.content).toBe("Response text.");
+    expect(lastAssistant?.content).not.toBe("Rewrite that must NOT appear.");
+  });
+
+  // ── Structural pre-gate tests ──────────────────────────────────────────────
+  // These tests capture the onGate callback from the closure via a mock maybeGaslight,
+  // then call it directly to verify the deterministic structural check logic.
+
+  it("structural gate short-circuits on near-identical rewrite (no LLM call)", async () => {
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    // Two-round mock so the gaslight hook is reached and callbacks are wired.
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    const callsBefore = mockGenerateText.mock.calls.length;
+    // Pass the same text as the original draft → Jaccard overlap = 1.0 → structural fail
+    const result = await capturedGate!("Response text.");
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    expect(result.decision).toBe("fail");
+    expect(result.score).toBe(0.2);
+    // LLM gate must NOT have been called (structural short-circuit)
+    expect(callsAfter).toBe(callsBefore);
+  });
+
+  it("structural gate allows genuinely different rewrite to reach LLM gate", async () => {
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedGate).toBeDefined();
+
+    // Pre-load the LLM gate response (score 0.9 → pass)
+    mockGenerateText.mockResolvedValueOnce({
+      text: '{"score": 0.9}',
+      usage: { totalTokens: 10 },
+    });
+
+    const callsBefore = mockGenerateText.mock.calls.length;
+    // Completely different text — very low Jaccard overlap with "Response text."
+    const differentRewrite =
+      "This comprehensive analysis examines multiple perspectives and provides detailed evidence supporting each conclusion through rigorous examination of available data.";
+    const result = await capturedGate!(differentRewrite);
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    // Structural check passed → LLM gate was called
+    expect(callsAfter).toBeGreaterThan(callsBefore);
+    expect(result.decision).toBe("pass");
+  });
+
+  it("structural gate fails when critique concept words absent from rewrite", async () => {
+    let capturedCritique:
+      | ((sys: string, user: string) => Promise<string | null>)
+      | undefined;
+    let capturedGate:
+      | ((draft: string) => Promise<{ decision: string; score: number }>)
+      | undefined;
+
+    const mockGaslight = {
+      maybeGaslight: async (opts: {
+        draft?: string;
+        callbacks?: {
+          onCritique?: (s: string, u: string) => Promise<string | null>;
+          onGate?: (d: string) => Promise<{ decision: string; score: number }>;
+        };
+      }) => {
+        capturedCritique = opts.callbacks?.onCritique;
+        capturedGate = opts.callbacks?.onGate;
+        return null;
+      },
+    };
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Reading.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 30 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Response text.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("go deeper", makeSession(), makeConfig({
+      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      silent: true,
+    }));
+
+    expect(capturedCritique).toBeDefined();
+    expect(capturedGate).toBeDefined();
+
+    // Seed the critique closure: return JSON with high-severity concept words
+    // "authentication" and "authorization" must appear in critique points.
+    mockGenerateText.mockResolvedValueOnce({
+      text: JSON.stringify({
+        summary: "Response lacks authentication and authorization checks",
+        points: [
+          { severity: "high", description: "Missing authentication validation" },
+          { severity: "medium", description: "Authorization bypass possible" },
+        ],
+      }),
+      usage: { totalTokens: 50 },
+    });
+    await capturedCritique!("sys", "user"); // populates lastCritiquePoints closure var
+
+    // Rewrite that mentions neither "authentication" nor "authorization"
+    const rewriteIgnoringCritique =
+      "The implementation provides better performance through caching and improved algorithms.";
+    const callsBefore = mockGenerateText.mock.calls.length;
+    const result = await capturedGate!(rewriteIgnoringCritique);
+    const callsAfter = mockGenerateText.mock.calls.length;
+
+    // Structural gate must fail — no LLM gate call
+    expect(result.decision).toBe("fail");
+    expect(result.score).toBe(0.2);
+    expect(callsAfter).toBe(callsBefore);
+  });
+});

@@ -14,7 +14,7 @@ import type {
   DebugTrailConfig,
   DeleteTombstone,
 } from "./types.js";
-import { defaultConfig } from "./types.js";
+import { defaultConfig, FILE_EVENT_KINDS } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ export function scoreCompleteness(
     };
   }
 
-  const fileEventKinds = new Set(["file_write", "file_delete", "file_move", "file_restore"]);
+  const fileEventKinds = new Set(FILE_EVENT_KINDS);
 
   const missingProvenance: string[] = [];
   const snapshotGaps: string[] = [];

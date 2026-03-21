@@ -159,8 +159,10 @@ export interface AgentSessionState {
     | "frozen"
     | "completed"
     | "failed"
+    | "aborted"
     | "handed-off"
-    | "reassigned";
+    | "reassigned"
+    | "retry-pending";
   startedAt?: string;
   completedAt?: string;
   lastProgressAt?: string;
@@ -172,6 +174,16 @@ export interface AgentSessionState {
   retryCount: number;
   handoffPacketId?: string;
   errorMessage?: string;
+  /**
+   * Unix timestamp (ms) after which this "retry-pending" session may be promoted
+   * to "running". Undefined for sessions that are not pending.
+   */
+  retryAfterTs?: number;
+  /**
+   * If this session is paused for retry coordination, holds the laneId of the
+   * retry-pending session it is waiting for. Cleared on unfreeze.
+   */
+  pausedForRetry?: string;
 }
 
 // ----------------------------------------------------------------------------

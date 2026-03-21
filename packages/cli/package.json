@@ -45,6 +45,7 @@
     "@dantecode/config-types": "1.0.0",
     "@dantecode/core": "1.0.0",
     "@dantecode/dante-gaslight": "1.0.0",
+    "@dantecode/dante-sandbox": "1.0.0",
     "@dantecode/dante-skillbook": "1.0.0",
     "@dantecode/danteforge": "1.0.0",
     "@dantecode/debug-trail": "1.0.0",

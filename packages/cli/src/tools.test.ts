@@ -14,20 +14,28 @@ const {
   mockResolvePreferredShell,
   mockAutoCommit,
   mockPushBranch,
-} = vi.hoisted(() => ({
-  mockReadFile: vi.fn(),
-  mockWriteFile: vi.fn(),
-  mockMkdir: vi.fn(),
-  mockReaddir: vi.fn(),
-  mockStat: vi.fn(),
-  mockExecSync: vi.fn(),
-  mockExec: vi.fn(),
-  mockExecFile: vi.fn(),
-  mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
-  mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
-  mockAutoCommit: vi.fn(),
-  mockPushBranch: vi.fn(),
-}));
+  mockDanteSandboxIsReady,
+  mockDanteSandboxExecute,
+} = vi.hoisted(() => {
+  const mockDanteSandboxIsReady = vi.fn(() => false);
+  const mockDanteSandboxExecute = vi.fn();
+  return {
+    mockReadFile: vi.fn(),
+    mockWriteFile: vi.fn(),
+    mockMkdir: vi.fn(),
+    mockReaddir: vi.fn(),
+    mockStat: vi.fn(),
+    mockExecSync: vi.fn(),
+    mockExec: vi.fn(),
+    mockExecFile: vi.fn(),
+    mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
+    mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
+    mockAutoCommit: vi.fn(),
+    mockPushBranch: vi.fn(),
+    mockDanteSandboxIsReady,
+    mockDanteSandboxExecute,
+  };
+});
 
 vi.mock("node:fs/promises", () => ({
   readFile: (...args: unknown[]) => mockReadFile(...args),
@@ -69,6 +77,17 @@ vi.mock("@dantecode/git-engine", () => ({
   pushBranch: (...args: unknown[]) => mockPushBranch(...args),
 }));
 
+vi.mock("@dantecode/dante-sandbox", () => ({
+  DanteSandbox: {
+    isReady: () => mockDanteSandboxIsReady(),
+    execute: (...args: unknown[]) => mockDanteSandboxExecute(...args),
+  },
+  toToolResult: (result: { exitCode: number; stdout: string; stderr: string }) => ({
+    content: result.stdout || result.stderr || "(no output)",
+    isError: result.exitCode !== 0,
+  }),
+}));
+
 import { executeTool, getToolDefinitions, type CliToolExecutionContext } from "./tools.js";
 
 function makeContext(overrides: Partial<CliToolExecutionContext> = {}): CliToolExecutionContext {
@@ -104,6 +123,9 @@ describe("cli tools hardening", () => {
     mockResolvePreferredShell.mockReturnValue("/bin/bash");
     mockAutoCommit.mockReset();
     mockPushBranch.mockReset();
+    // DanteSandbox defaults: not initialized (tests can override per-test)
+    mockDanteSandboxIsReady.mockReturnValue(false);
+    mockDanteSandboxExecute.mockReset();
   });
 
   it("blocks protected writes outside explicit self-improvement mode", async () => {
@@ -237,19 +259,42 @@ describe("cli tools hardening", () => {
     expect(third.content).toContain("Third identical Edit attempt blocked");
   });
 
-  it("uses the shared preferred shell for Bash commands", async () => {
-    mockExecSync.mockReturnValue("tests passed");
-    mockResolvePreferredShell.mockReturnValue("C:\\Program Files\\Git\\bin\\bash.exe");
+  it("routes Bash commands through DanteSandbox when initialized", async () => {
+    // DanteSandbox is now mandatory — Bash routes through it, never directly via execSync.
+    mockDanteSandboxIsReady.mockReturnValue(true);
+    mockDanteSandboxExecute.mockResolvedValue({
+      exitCode: 0,
+      stdout: "tests passed",
+      stderr: "",
+      requestId: "test-id",
+      durationMs: 100,
+      timedOut: false,
+      strategy: "host",
+      sandboxed: true,
+      violations: [],
+    });
 
     const result = await executeTool("Bash", { command: "npm test" }, "/proj", makeContext());
 
     expect(result.isError).toBe(false);
-    expect(mockExecSync).toHaveBeenCalledWith(
+    expect(result.content).toContain("tests passed");
+    expect(mockDanteSandboxExecute).toHaveBeenCalledWith(
       "npm test",
-      expect.objectContaining({
-        shell: "C:\\Program Files\\Git\\bin\\bash.exe",
-      }),
+      expect.objectContaining({ cwd: "/proj", taskType: "bash" }),
     );
+    // execSync must never be called — sandbox enforcement is mandatory
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it("returns error when DanteSandbox is not initialized (fail-closed enforcement)", async () => {
+    // DanteSandbox not ready → hard error, no execSync fallback
+    mockDanteSandboxIsReady.mockReturnValue(false);
+
+    const result = await executeTool("Bash", { command: "npm test" }, "/proj", makeContext());
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("DanteSandbox is not initialized");
+    expect(mockExecSync).not.toHaveBeenCalled();
   });
 
   it("routes GitPush through git-engine with verification details", async () => {

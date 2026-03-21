@@ -60,6 +60,17 @@ export interface CouncilOrchestratorOptions {
   auditDir?: string;
   /** Whether auto-merge is allowed on high-confidence synthesis (default true). */
   allowAutoMerge?: boolean;
+  /** Max automatic retries per lane on failure or abort (default 2, 0 = disabled). */
+  maxLaneRetries?: number;
+  /**
+   * Base delay in ms for exponential retry backoff (default 2000).
+   * Set to 0 to disable backoff (immediate retry — useful in tests).
+   */
+  retryBaseDelayMs?: number;
+  /**
+   * Hard cap on backoff delay in ms (default 30_000).
+   */
+  retryMaxDelayMs?: number;
 }
 
 export interface OrchestratorStartOptions {
@@ -100,6 +111,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private readonly brain: MergeBrain;
   private readonly options: Required<CouncilOrchestratorOptions>;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
+  private _allTerminalFired = false;
 
   constructor(
     adapters: Map<AgentKind, CouncilAgentAdapter>,
@@ -114,12 +127,19 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       baseBranch: options.baseBranch ?? "main",
       auditDir: options.auditDir ?? "",
       allowAutoMerge: options.allowAutoMerge ?? true,
+      maxLaneRetries: options.maxLaneRetries ?? 2,
+      retryBaseDelayMs: options.retryBaseDelayMs ?? 2_000,
+      retryMaxDelayMs: options.retryMaxDelayMs ?? 30_000,
     };
 
     // Register all adapters in the ledger
     for (const [kind] of adapters) {
       this.ledger.register(kind);
     }
+
+    // Default safety handler: prevents Node ERR_UNHANDLED_ERROR if no external
+    // listener is attached. Callers should attach their own handler.
+    this.on("error", () => { /* intentional default no-op */ });
   }
 
   // --------------------------------------------------------------------------
@@ -139,6 +159,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     const runState = createCouncilRunState(opts.repoRoot, opts.objective, auditLogPath);
     this.runState = runState;
+    this._allTerminalFired = false;
 
     // Init router
     this.router = new CouncilRouter(this.ledger, this.adapters);
@@ -201,12 +222,13 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // Re-register active lanes with the observer
     for (const agent of state.agents) {
-      if (agent.status === "running" || agent.status === "paused") {
+      if (agent.status === "running" || agent.status === "paused" || agent.status === "retry-pending") {
         this.observer.register(agent.laneId, agent.agentKind, agent.worktreePath);
       }
     }
 
     this.status = "running";
+    this._allTerminalFired = false;
     this.observer.start();
     this.startPolling();
     await setRunStatus(repoRoot, runId, "running");
@@ -325,12 +347,35 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (!this.runState) return;
     this.stopPolling();
     this.observer?.stop();
+    // Abort any in-process agent loops before transitioning to failed (parallel).
+    await Promise.all(
+      this.runState.agents
+        .filter((s) =>
+          s.status === "running" ||
+          s.status === "idle" ||
+          s.status === "retry-pending" ||
+          s.status === "paused",
+        )
+        .map((s) => {
+          const adapter = this.adapters.get(s.agentKind);
+          const sessionId = s.sessionId ?? s.laneId;
+          return adapter
+            ? adapter.abortTask(sessionId).catch(() => { /* per-lane fault isolation */ })
+            : Promise.resolve();
+        }),
+    );
     // Use transition() when the current state allows it so state:transition is emitted.
     // Fall back to direct assignment for states outside the normal machine (e.g. idle).
     try {
       this.transition("failed");
     } catch {
+      const prev = this.status;
       this.status = "failed";
+      this.emit("state:transition", {
+        from: prev,
+        to: "failed",
+        runId: this.runState?.runId ?? "unknown",
+      });
     }
     this.emitError(reason ?? "Run aborted", "orchestrator");
     await setRunStatus(this.runState.repoRoot, this.runState.runId, "failed");
@@ -382,6 +427,18 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.emit("error", { message, context });
   }
 
+  /**
+   * Exponential backoff with ±50% jitter.
+   * Returns 0 if retryBaseDelayMs === 0 (backoff disabled).
+   * retryCount is the FINAL count on the new session (1 = first retry, 2 = second, …)
+   */
+  private _computeRetryBackoff(retryCount: number): number {
+    const base = this.options.retryBaseDelayMs;
+    if (base === 0) return 0;
+    const raw = base * Math.pow(2, retryCount - 1) * (0.5 + Math.random() * 0.5);
+    return Math.min(raw, this.options.retryMaxDelayMs);
+  }
+
   /** Start the adapter completion polling loop. Called automatically by start()/resume(). */
   private startPolling(): void {
     if (this.pollTimer) return;
@@ -427,7 +484,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
       const onAllTerminal = () => {
         this.off("lanes:all-terminal", onAllTerminal);
-        if (this.status !== "running") return;
+        if (this.status !== "running") {
+          cleanup();
+          resolve();
+          return;
+        }
         this.stopPolling();
         this.merge()
           .then((mergeResult) => {
@@ -438,7 +499,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            return this.fail(`Auto-merge error: ${msg}`);
+            return this.fail(`Auto-merge error: ${msg}`).catch(() => {
+              cleanup();
+              reject(new Error(`Council run error: ${msg}`));
+            });
           });
       };
       this.on("lanes:all-terminal", onAllTerminal);
@@ -457,7 +521,30 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private async pollAllLanes(): Promise<void> {
     if (!this.runState) return;
 
-    for (const session of this.runState.agents) {
+    // Snapshot prevents newly-appended retry sessions from being visited
+    // in the same poll cycle (fixes same-cycle retry storm — P1).
+    const sessionsThisCycle = [...this.runState.agents];
+
+    for (const session of sessionsThisCycle) {
+      // ── Promote retry-pending sessions whose backoff has elapsed ──────────
+      if (session.status === "retry-pending") {
+        if (session.retryAfterTs !== undefined && Date.now() >= session.retryAfterTs) {
+          session.status = "running";
+          session.retryAfterTs = undefined;
+          // Unfreeze lanes paused waiting for this retry lane
+          for (const other of this.runState.agents) {
+            if (other.pausedForRetry === session.laneId && other.status === "paused") {
+              other.status = "running";
+              other.pausedForRetry = undefined;
+            }
+          }
+          // Fall through — session is now "running", will be polled below
+        } else {
+          continue; // backoff not elapsed — skip this cycle
+        }
+      }
+
+      // ── Only poll running/idle lanes ──────────────────────────────────────
       if (session.status !== "running" && session.status !== "idle") continue;
 
       const adapter = this.adapters.get(session.agentKind);
@@ -477,27 +564,99 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             agentKind: session.agentKind as string,
             sessionId,
           });
-        } else if (status.status === "failed") {
-          session.status = "failed";
-          if (status.progressSummary) {
-            session.errorMessage = status.progressSummary;
+
+        } else if (status.status === "failed" || status.status === "aborted") {
+          const maxRetries = this.options.maxLaneRetries;
+          let retried = false;
+
+          if (maxRetries > 0 && session.retryCount < maxRetries && this.router) {
+            const handoffReason: "error" | "timeout" =
+              status.status === "aborted" ? "timeout" : "error";
+
+            const retryResult = await this.router
+              .reassignLane({
+                laneId: session.laneId,
+                fromAgent: session.agentKind,
+                // toAgent intentionally omitted — router tries alternatives first,
+                // falls back to same agent for single-adapter setups (P2 fix)
+                reason: handoffReason,
+                touchedFiles: session.touchedFiles ?? [],
+                diffSummary: session.errorMessage ?? `Lane ${status.status}, retrying`,
+              })
+              .catch(() => null);
+
+            if (retryResult?.success) {
+              const newSession = this.runState.agents.find(
+                (s) => s.laneId === retryResult.newLaneId,
+              );
+              if (newSession) {
+                // Carry cumulative retry count forward
+                newSession.retryCount = session.retryCount + 1;
+
+                // Apply exponential backoff (P1 fix)
+                const backoffMs = this._computeRetryBackoff(newSession.retryCount);
+                if (backoffMs > 0) {
+                  newSession.status = "retry-pending";
+                  newSession.retryAfterTs = Date.now() + backoffMs;
+                }
+
+                this.observer?.register(
+                  newSession.laneId,
+                  newSession.agentKind,
+                  newSession.worktreePath,
+                );
+
+                // P6: Freeze overlapping running lanes during retry
+                if (newSession.assignedFiles.length > 0) {
+                  const retryFiles = new Set(newSession.assignedFiles);
+                  for (const other of this.runState.agents) {
+                    if (other.laneId === newSession.laneId) continue;
+                    if (other.status !== "running") continue;
+                    if (other.assignedFiles.some((f) => retryFiles.has(f))) {
+                      other.status = "paused";
+                      other.pausedForRetry = newSession.laneId;
+                    }
+                  }
+                }
+              }
+
+              await this.persistRunState();
+              this.emitError(
+                `Lane ${session.laneId} ${status.status} — retry ` +
+                `${(session.retryCount + 1)}/${maxRetries} as ${retryResult.newLaneId}`,
+                "retry",
+              );
+              retried = true;
+            }
           }
-          await this.persistRunState();
+
+          if (!retried) {
+            session.status = status.status === "aborted" ? "aborted" : "failed";
+            if (status.progressSummary) session.errorMessage = status.progressSummary;
+            await this.persistRunState();
+          }
+
         } else if (status.status === "capped" || status.status === "stalled") {
           session.health = "soft-capped";
         }
       } catch {
-        // Per-lane fault isolation — one failing poll never blocks others
+        // Per-lane fault isolation
       }
     }
 
-    // Signal when all assigned lanes have reached a terminal state
+    // ── allTerminal check with double-emit guard (P5 fix) ─────────────────
+    // "retry-pending" and "paused" are NOT terminal — they represent active work.
     if (this.status === "running" && this.runState.agents.length > 0) {
       const allTerminal = this.runState.agents.every(
-        (s) => s.status === "completed" || s.status === "failed",
+        (s) =>
+          s.status === "completed" ||
+          s.status === "failed" ||
+          s.status === "aborted" ||
+          s.status === "handed-off",
       );
-      if (allTerminal) {
-        this.stopPolling(); // stop timer before signal so it only fires once
+      if (allTerminal && !this._allTerminalFired) {
+        this._allTerminalFired = true;
+        this.stopPolling();
         this.emit("lanes:all-terminal");
       }
     }
@@ -507,9 +666,14 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (!this.runState) return;
     try {
       await saveCouncilRun(this.runState);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.emitError(`Failed to persist run state: ${msg}`, "state-store");
+    } catch {
+      // Retry once — handles transient FS contention (Windows EBUSY, NFS locks)
+      try {
+        await saveCouncilRun(this.runState);
+      } catch (secondErr: unknown) {
+        const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
+        this.emitError(`Failed to persist run state: ${msg}`, "state-store");
+      }
     }
   }
 }

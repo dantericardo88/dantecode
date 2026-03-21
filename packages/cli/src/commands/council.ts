@@ -15,11 +15,13 @@
 //   dantecode council resume <run-id>
 // ============================================================================
 
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { exec, execSync } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { writeFile, mkdir } from "node:fs/promises";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { createWorktree, removeWorktree } from "@dantecode/git-engine";
 
 import {
   saveCouncilRun,
@@ -31,8 +33,20 @@ import {
   CodexAdapter,
   AntigravityAdapter,
   BridgeListener,
+  readOrInitializeState,
 } from "@dantecode/core";
-import type { AgentKind, CouncilRunState, CouncilAgentAdapter, SelfLaneExecutor, AgentCommandConfig } from "@dantecode/core";
+import type {
+  AgentKind,
+  CouncilRunState,
+  CouncilAgentAdapter,
+  SelfLaneExecutor,
+  AgentCommandConfig,
+  LaneAssignmentRequest,
+} from "@dantecode/core";
+import type { ContentBlock, Session, DanteCodeState } from "@dantecode/config-types";
+import { runAgentLoop } from "../agent-loop.js";
+import type { AgentLoopConfig } from "../agent-loop.js";
+
 // ANSI colors
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
@@ -42,9 +56,70 @@ const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
+// ---------------------------------------------------------------------------
+// In-process concurrency limit for self-executor lanes
+// Override via DANTE_COUNCIL_MAX_LANES env var (0 = unlimited, default 3)
+// ---------------------------------------------------------------------------
+const _MAX_CONCURRENT_LANES = (() => {
+  const raw = process.env["DANTE_COUNCIL_MAX_LANES"];
+  if (raw !== undefined) {
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 3;
+  }
+  return 3;
+})();
+let _activeLaneCount = 0;
+
 // ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+
+/**
+ * Platform-aware PID liveness probe.
+ * Windows: `process.kill(pid, 0)` never throws for dead processes, so we query
+ *   tasklist instead (conservative: returns true on exec error).
+ * Unix: signal-0 probe — ESRCH = dead, EPERM = alive but owned by another user.
+ */
+function probePidAlive(pid: number): boolean {
+  if (process.platform === "win32") {
+    try {
+      const out = execSync(
+        `tasklist /FI "PID eq ${pid}" /NH /FO CSV`,
+        { timeout: 3_000, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+      );
+      return out.includes(String(pid));
+    } catch {
+      return true; // conservative: assume alive on exec error
+    }
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: unknown) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Extract the last assistant text from session messages.
+ * Handles both string content and ContentBlock[] (text blocks only).
+ */
+function extractLastAssistantText(messages: Session["messages"]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!;
+    if (msg.role !== "assistant") continue;
+    const { content } = msg;
+    if (typeof content === "string") return content;
+    return (content as ContentBlock[])
+      .filter(
+        (b): b is ContentBlock & { type: "text"; text: string } =>
+          b.type === "text" && typeof (b as { text?: unknown }).text === "string",
+      )
+      .map((b) => b.text)
+      .join("");
+  }
+  return "";
+}
 
 function statusColor(status: string): string {
   if (status === "completed" || status === "verify-passed") return GREEN;
@@ -98,34 +173,72 @@ function findLatestRun(repoRoot: string): CouncilRunState | null {
 const execAsync = promisify(exec);
 
 /**
- * Creates a SelfLaneExecutor that spawns a child dantecode process
- * to execute council task prompts inside a lane worktree.
+ * Creates a SelfLaneExecutor that runs agent tasks in-process via runAgentLoop,
+ * avoiding the overhead and fragility of spawning a child dantecode process.
  */
 function createSelfExecutor(projectRoot: string): SelfLaneExecutor {
   return async (prompt, worktreePath, opts) => {
     const cwd = worktreePath ?? projectRoot;
-    const promptFile = join(cwd, ".dantecode", "council", "task.txt");
-    await mkdir(dirname(promptFile), { recursive: true });
-    await writeFile(promptFile, prompt, "utf-8");
+    const maxRounds = opts?.maxRounds ?? 80;
 
+    // Load state from worktree (falls back to projectRoot if worktree has no STATE.yaml)
+    let state: DanteCodeState;
     try {
-      const maxRounds = opts?.maxRounds ?? 80;
-      const bin = join(projectRoot, "node_modules/.bin/dantecode");
-      const { stdout } = await execAsync(
-        `"${bin}" --prompt-file "${promptFile}" --max-rounds ${maxRounds} --silent`,
-        { cwd, timeout: 30 * 60 * 1000, maxBuffer: 50 * 1024 * 1024 },
-      );
+      state = await readOrInitializeState(cwd);
+    } catch {
+      state = await readOrInitializeState(projectRoot);
+    }
 
+    const now = new Date().toISOString();
+    const session: Session = {
+      id: randomUUID(),
+      projectRoot: cwd,
+      messages: [],
+      activeFiles: [],
+      readOnlyFiles: [],
+      model: state.model.default,
+      createdAt: now,
+      updatedAt: now,
+      agentStack: [],
+      todoList: [],
+    };
+
+    const agentConfig: AgentLoopConfig = {
+      state,
+      verbose: false,
+      enableGit: true,
+      enableSandbox: false,
+      silent: true,
+      requiredRounds: maxRounds,
+      abortSignal: opts?.abortSignal,
+    };
+
+    if (_MAX_CONCURRENT_LANES > 0 && _activeLaneCount >= _MAX_CONCURRENT_LANES) {
+      return {
+        output: `Council lane rejected: concurrency limit reached (${_MAX_CONCURRENT_LANES} active). Retry after existing lanes complete.`,
+        touchedFiles: [],
+        success: false,
+        error: `concurrency-limit`,
+      };
+    }
+    _activeLaneCount++;
+    try {
+      await runAgentLoop(prompt, session, agentConfig);
       let touchedFiles: string[] = [];
       try {
-        const { stdout: diffOut } = await execAsync("git diff HEAD --name-only", { cwd, timeout: 10_000 });
-        touchedFiles = diffOut.split("\n").filter(Boolean);
+        const { stdout } = await execAsync("git diff HEAD --name-only", { cwd, timeout: 10_000 });
+        touchedFiles = stdout.split("\n").filter(Boolean);
       } catch { /* non-fatal */ }
-
-      return { output: stdout, touchedFiles, success: true };
+      return {
+        output: extractLastAssistantText(session.messages),
+        touchedFiles,
+        success: true,
+      };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { output: msg, touchedFiles: [], success: false, error: msg };
+    } finally {
+      _activeLaneCount--;
     }
   };
 }
@@ -177,11 +290,18 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     : ["dantecode"];
 
   const bridgeDir = args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length);
-  const watch = args.includes("--watch");
+  // --background for fire-and-forget; default is foreground
+  const background = args.includes("--background");
+
+  const timeoutSecs = parseInt(
+    args.find((a) => a.startsWith("--timeout="))?.slice("--timeout=".length) ?? "0",
+    10,
+  );
+  const timeoutMs = timeoutSecs > 0 ? timeoutSecs * 1000 : undefined;
+
   const adapters = buildAdapters(agentKinds, { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters);
 
-  // Wire error events to stderr
   orchestrator.on("error", ({ message, context }) => {
     console.error(`${RED}[council] ${context ?? "error"}: ${message}${RESET}`);
   });
@@ -196,37 +316,121 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   console.log(`  State:     ${join(projectRoot, ".dantecode", "council", runId)}`);
   console.log(``);
 
-  if (watch) {
-    console.log(`${DIM}Watching lanes — Ctrl+C to detach (run resumes in background)...${RESET}`);
-    orchestrator.on("lane:completed", ({ laneId, agentKind: kind }) => {
-      console.log(`${GREEN}[council] Lane ${laneId} (${kind}) completed${RESET}`);
+  // Auto-assign one lane per agent kind with isolated worktrees.
+  const createdWorktrees: string[] = [];
+
+  for (const agentKind of agentKinds) {
+    const wtTimestamp = Date.now();
+    const sessionId = `${runId.slice(-8)}-${agentKind}-${wtTimestamp}`;
+    const branch = `council-${runId.slice(-8)}-${agentKind}-${wtTimestamp}`;
+    let worktreePath: string;
+
+    try {
+      const result = createWorktree({
+        branch,
+        baseBranch: "HEAD",
+        sessionId,
+        directory: projectRoot,
+      });
+      worktreePath = result.directory;
+      createdWorktrees.push(worktreePath);
+      console.log(`${DIM}  Worktree: ${worktreePath}${RESET}`);
+    } catch (wtErr: unknown) {
+      const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
+      try { execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 }); } catch { /* non-fatal */ }
+      console.error(
+        `${RED}[council] Worktree creation failed for ${agentKind}: ${wtMsg}` +
+        ` — NOMA isolation disabled, agents share main repo (conflict risk)${RESET}`,
+      );
+      worktreePath = projectRoot;
+    }
+
+    const req: LaneAssignmentRequest = {
+      preferredAgent: agentKind,
+      objective,
+      worktreePath,
+      branch,
+      baseBranch: "main",
+      taskCategory: "coding",
+      ownedFiles: [],
+    };
+    const laneResult = await orchestrator.assignLane(req);
+
+    if (laneResult.accepted) {
+      console.log(`${GREEN}  Lane: ${laneResult.laneId} (${agentKind})${RESET}`);
+    } else {
+      console.warn(`${YELLOW}  Lane rejected for ${agentKind}: ${laneResult.reason ?? "unknown"}${RESET}`);
+    }
+  }
+
+  console.log(``);
+
+  if (background) {
+    orchestrator.on("lane:completed", ({ laneId, agentKind }) => {
+      console.log(`[council] Lane ${laneId} (${agentKind as string}) completed`);
     });
-    orchestrator.on("merge:complete", (result) => {
-      const decision = result.synthesis.decision;
-      const color = result.success ? GREEN : YELLOW;
-      console.log(`${color}[council] Merge complete — decision: ${decision}${RESET}`);
+    orchestrator.on("merge:complete", (r) => {
+      console.log(`[council] Merge: ${r.synthesis.decision}`);
+    });
+    const statusFile = join(projectRoot, ".dantecode", "council", runId, "bg-pid.json");
+    await writeFile(
+      statusFile,
+      JSON.stringify({ pid: process.pid, runId, startedAt: new Date().toISOString() }),
+      "utf-8",
+    );
+    console.log(`[council] Background mode — resume with: dantecode council resume ${runId}`);
+  } else {
+    orchestrator.on("lane:completed", ({ laneId, agentKind }) => {
+      console.log(`[council] Lane ${laneId} (${agentKind as string}) completed`);
+    });
+    orchestrator.on("merge:complete", (r) => {
+      console.log(`[council] Merge: ${r.synthesis.decision}`);
     });
     orchestrator.on("state:transition", ({ from, to }) => {
-      console.log(`${DIM}[council] ${from} → ${to}${RESET}`);
+      console.log(`[council] ${from} → ${to}`);
     });
-
-    const sigintHandler = async () => {
-      console.log(`\n${YELLOW}[council] Detaching — run ${runId} continues in background.${RESET}`);
-      console.log(`${DIM}Resume with: dantecode council resume ${runId}${RESET}`);
+    const onSIGINT = (): void => {
+      console.log(`\n[council] Detaching — resume with: dantecode council resume ${runId}`);
+      for (const wt of createdWorktrees) {
+        try { removeWorktree(wt); } catch { /* non-fatal */ }
+      }
       process.exit(0);
     };
-    process.on("SIGINT", sigintHandler as NodeJS.SignalsListener);
-
-    await orchestrator.watchUntilComplete();
-
-    process.off("SIGINT", sigintHandler as NodeJS.SignalsListener);
-    const finalStatus = orchestrator.currentStatus;
-    const sc = statusColor(finalStatus);
-    console.log(`\n${sc}${BOLD}Run ${runId} finished: ${finalStatus}${RESET}`);
-  } else {
-    console.log(`${DIM}Use 'dantecode council lanes' to assign tasks.${RESET}`);
-    console.log(`${DIM}Run with --watch to keep watching lane progress.${RESET}`);
+    process.once("SIGINT", onSIGINT);
+    try {
+      await orchestrator.watchUntilComplete(timeoutMs !== undefined ? { timeoutMs } : undefined);
+    } finally {
+      for (const wt of createdWorktrees) {
+        try { removeWorktree(wt); } catch { /* non-fatal */ }
+      }
+    }
+    process.off("SIGINT", onSIGINT);
+    console.log(`\n[council] Run ${runId} finished: ${orchestrator.currentStatus}`);
   }
+}
+
+/**
+ * Checks bg-pid.json for a background process and prints its liveness status.
+ * Non-fatal: absent file or unreadable data is silently ignored.
+ */
+function printBgPidStatus(repoRoot: string, runId: string): void {
+  const pidFile = join(repoRoot, ".dantecode", "council", runId, "bg-pid.json");
+  if (!existsSync(pidFile)) return;
+  try {
+    const data = JSON.parse(readFileSync(pidFile, "utf-8")) as {
+      pid?: number;
+      startedAt?: string;
+    };
+    if (typeof data.pid !== "number") return;
+    const alive = probePidAlive(data.pid);
+    const tag = alive
+      ? `${CYAN}running (pid: ${data.pid})${RESET}`
+      : `${DIM}dead/exited (pid: ${data.pid})${RESET}`;
+    console.log(
+      `  Background: ${tag}` +
+        (data.startedAt ? `  started ${data.startedAt}` : ""),
+    );
+  } catch { /* non-fatal */ }
 }
 
 async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
@@ -239,6 +443,7 @@ async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
       process.exit(1);
     }
     printRun(state);
+    printBgPidStatus(projectRoot, runId);
     return;
   }
 
@@ -254,8 +459,19 @@ async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
     const state = await tryLoadCouncilRun(projectRoot, id);
     if (state) {
       const sc = statusColor(state.status);
+      const pidFile = join(projectRoot, ".dantecode", "council", id, "bg-pid.json");
+      let bgTag = "";
+      if (existsSync(pidFile)) {
+        try {
+          const pidData = JSON.parse(readFileSync(pidFile, "utf-8")) as { pid?: number };
+          if (typeof pidData.pid === "number") {
+            const alive = probePidAlive(pidData.pid);
+            bgTag = alive ? `  ${CYAN}[bg:alive]${RESET}` : `  ${DIM}[bg:exited]${RESET}`;
+          }
+        } catch { /* non-fatal */ }
+      }
       console.log(
-        `  ${CYAN}${id}${RESET}  ${sc}${state.status}${RESET}  ${DIM}${state.objective.slice(0, 60)}${RESET}`,
+        `  ${CYAN}${id}${RESET}  ${sc}${state.status}${RESET}  ${DIM}${state.objective.slice(0, 60)}${RESET}${bgTag}`,
       );
     }
   }
@@ -408,16 +624,25 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   console.log(`  Completed lanes: ${completedLanes.map((l) => l.laneId).join(", ")}`);
   console.log(`  Mode: ${autoFlag ? GREEN + "auto" : YELLOW + "manual"}${RESET}`);
 
-  // Build a minimal orchestrator to drive the merge
   const adapters = buildAdapters(state.agents.map((a) => a.agentKind), { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters, {
     allowAutoMerge: autoFlag,
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
 
-  // Resume into the existing run state so the orchestrator can drive merge()
   try {
     await orchestrator.resume(projectRoot, state.runId);
+
+    if (orchestrator.currentStatus !== "running") {
+      console.log(
+        `${YELLOW}[council] Orchestrator is in '${orchestrator.currentStatus}' state — merge requires 'running'.${RESET}`,
+      );
+      if (state.finalSynthesis) {
+        console.log(`  Last synthesis: ${state.finalSynthesis.decision} (confidence: ${state.finalSynthesis.confidence})`);
+      }
+      return;
+    }
+
     const result = await orchestrator.merge();
 
     const sc = result.synthesis.decision === "auto-merge" ? GREEN : YELLOW;
@@ -445,7 +670,6 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
     10,
   );
 
-  // Parse --agents flag (comma-separated kinds: claude-code,codex,antigravity)
   const commandMap: Record<string, string> = {
     "claude-code": "claude",
     "codex": "codex",
@@ -479,7 +703,6 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
   const listener = new BridgeListener(bridgeDir, agentConfigs);
   listener.start();
 
-  // Handle graceful shutdown on SIGINT / SIGTERM
   const shutdown = (): void => {
     console.log(`\n${DIM}[bridge-listen] Shutting down...${RESET}`);
     listener.stop();
@@ -488,7 +711,6 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
   process.on("SIGINT", shutdown as NodeJS.SignalsListener);
   process.on("SIGTERM", shutdown as NodeJS.SignalsListener);
 
-  // Optional timeout (--timeout=<secs>)
   const timeoutMs = timeoutSecs > 0 ? timeoutSecs * 1000 : 0;
   if (timeoutMs > 0) {
     setTimeout(() => {
@@ -498,7 +720,6 @@ async function cmdBridgeListen(args: string[], projectRoot: string): Promise<voi
       process.off("SIGTERM", shutdown as NodeJS.SignalsListener);
     }, timeoutMs);
   } else {
-    // Keep process alive indefinitely (daemon mode)
     await new Promise<void>(() => {/* run forever until signal */});
   }
 }
