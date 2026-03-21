@@ -28,6 +28,9 @@ import {
   CLAUDE_WORKFLOW_MODE,
   ApproachMemory,
   formatApproachesForPrompt,
+  ReasoningChain,
+  AutonomyEngine,
+  PersistentMemory,
   globalToolScheduler,
   globalArtifactStore,
   adaptToolResult,
@@ -1705,6 +1708,47 @@ export async function runAgentLoop(
     // Non-fatal
   }
 
+  // ---- Feature: ReasoningChain (tiered Think→Critique→Act) ----
+  // Provides structured per-round thinking phases and PDSE-gated self-critique.
+  const reasoningChain = new ReasoningChain({ critiqueEveryNTurns: 5 });
+
+  // ---- Feature: AutonomyEngine (persistent goal tracking + meta-reasoning) ----
+  // Tracks goals across sessions; periodically runs meta-reasoning passes.
+  const autonomyEngine = new AutonomyEngine(session.projectRoot);
+  let autonomyResumeContext: string | undefined;
+  try {
+    autonomyResumeContext = await autonomyEngine.resume(session.id);
+  } catch {
+    // Non-fatal: goal state unavailable, continue without it
+  }
+  if (autonomyResumeContext) {
+    messages.push({
+      role: "system" as const,
+      content: `## Active Goals (AutonomyEngine)\n${autonomyResumeContext}`,
+    });
+  }
+
+  // ---- Feature: PersistentMemory (cross-session context recall) ----
+  // Retrieves top relevant memories from past sessions and injects into context.
+  const sessionPersistentMemory = new PersistentMemory(session.projectRoot);
+  let recalledMemoryText: string | undefined;
+  try {
+    await sessionPersistentMemory.load();
+    const recalled = sessionPersistentMemory.search(durablePrompt, { limit: 5 });
+    if (recalled.length > 0) {
+      const lines = recalled.map((r) => `- [${r.entry.category.toUpperCase()}] ${r.entry.content}`);
+      recalledMemoryText = lines.join("\n");
+    }
+  } catch {
+    // Non-fatal: memory recall failure should not block execution
+  }
+  if (recalledMemoryText) {
+    messages.push({
+      role: "system" as const,
+      content: `## Relevant Past Context (PersistentMemory)\n${recalledMemoryText}`,
+    });
+  }
+
   // ---- Feature: Pivot logic ----
   // Track consecutive failures with similar error signatures for strategy change.
   // This is different from the existing tier escalation — it's about changing
@@ -1802,6 +1846,50 @@ export async function runAgentLoop(
         process.stdout.write(
           `${RED}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens — use /compact or /new for fresh session]${RESET}\n`,
         );
+      }
+    }
+
+    // ---- ReasoningChain: per-round thinking phase ----
+    // Decide reasoning tier from current complexity + error state, generate a
+    // thinking phase, record it, and inject the chain history into messages.
+    {
+      const tier = reasoningChain.decideTier(lexicalComplexity, {
+        errorCount: sameErrorCount,
+        toolCalls: toolCallsThisTurn,
+      });
+      const thinkPhase = reasoningChain.think(durablePrompt, `round=${roundCounter}`, tier);
+      reasoningChain.recordStep(thinkPhase);
+      if (reasoningChain.shouldCritique()) {
+        // Lightweight critique using current PDSE proxy (no network call needed)
+        const critiquePhase = {
+          type: "critique" as const,
+          content: reasoningChain.selfCritique(thinkPhase, 0.8).recommendation,
+          timestamp: new Date().toISOString(),
+        };
+        reasoningChain.recordStep(critiquePhase);
+      }
+      const chainText = reasoningChain.formatChainForPrompt(6);
+      if (chainText) {
+        messages.push({
+          role: "system" as const,
+          content: `## Reasoning Chain (ReasoningChain)\n${chainText}`,
+        });
+      }
+    }
+
+    // ---- AutonomyEngine: meta-reasoning pass (every 15 steps) ----
+    autonomyEngine.incrementStep();
+    if (autonomyEngine.shouldRunMetaReasoning()) {
+      try {
+        const metaResult = autonomyEngine.metaReason(`round=${roundCounter}, filesModified=${filesModified}`);
+        if (metaResult.recommendation) {
+          messages.push({
+            role: "system" as const,
+            content: `## Autonomy Meta-Reasoning\n${metaResult.recommendation}`,
+          });
+        }
+      } catch {
+        // Non-fatal
       }
     }
 
@@ -3147,6 +3235,23 @@ export async function runAgentLoop(
 
   if (localSandboxBridge) {
     await localSandboxBridge.shutdown();
+  }
+
+  // ---- PersistentMemory: store session summary for future recall ----
+  if (filesModified > 0 || touchedFiles.length > 0) {
+    try {
+      const summary = `Session ${session.id}: ${durablePrompt.slice(0, 120)}. Files modified: ${filesModified}. Touched: ${touchedFiles.slice(0, 3).join(", ")}`;
+      await sessionPersistentMemory.store(summary, "context", ["session"], session.id);
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // ---- AutonomyEngine: persist goal state for next session ----
+  try {
+    await autonomyEngine.save();
+  } catch {
+    // Non-fatal
   }
 
   return session;
