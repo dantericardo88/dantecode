@@ -10,7 +10,9 @@ import {
   parseSkillBridgeManifest,
   bundleHasDanteCodeTarget,
   getDanteCodeTargetPath,
+  sanitizeSlug,
 } from "./skillbridge.js";
+import { getRiskLevel } from "../types/skillbridge.js";
 
 // ----------------------------------------------------------------------------
 // Fixtures
@@ -252,5 +254,64 @@ describe("getDanteCodeTargetPath", () => {
     const bundleDir = "/projects/my-bundle";
     const expected = join(bundleDir, "targets/dantecode", "SKILL.dc.md");
     expect(getDanteCodeTargetPath(bundleDir)).toBe(expected);
+  });
+});
+
+describe("sanitizeSlug", () => {
+  it("strips path traversal sequences (../../evil → evil)", () => {
+    expect(sanitizeSlug("../../evil")).toBe("evil");
+  });
+
+  it("converts absolute paths to hyphen-separated slug (/absolute/path → absolute-path)", () => {
+    expect(sanitizeSlug("/absolute/path")).toBe("absolute-path");
+  });
+
+  it("lowercases and replaces non-alphanumeric chars (My Skill Name! → my-skill-name)", () => {
+    expect(sanitizeSlug("My Skill Name!")).toBe("my-skill-name");
+  });
+
+  it("falls back to 'skill' when result is empty after sanitization (...)", () => {
+    expect(sanitizeSlug("...")).toBe("skill");
+  });
+
+  it("parseSkillBridgeManifest sanitizes path-traversal slug in manifest", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "sb-slug-sanitize-"));
+    try {
+      const manifest = {
+        ...VALID_MANIFEST,
+        normalizedSkill: {
+          ...VALID_MANIFEST.normalizedSkill,
+          slug: "../../evil",
+          name: "evil",
+        },
+      };
+      await writeFile(join(tmpDir, "skillbridge.json"), JSON.stringify(manifest, null, 2), "utf-8");
+      const result = await parseSkillBridgeManifest(tmpDir);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.manifest.normalizedSkill.slug).toBe("evil");
+      expect(result.manifest.normalizedSkill.slug).not.toContain("..");
+      expect(result.manifest.normalizedSkill.slug).not.toContain("/");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("getRiskLevel", () => {
+  it("maps instruction-only to low risk", () => {
+    expect(getRiskLevel("instruction-only")).toBe("low");
+  });
+
+  it("maps script-assisted to medium risk", () => {
+    expect(getRiskLevel("script-assisted")).toBe("medium");
+  });
+
+  it("maps tool-bound to medium risk", () => {
+    expect(getRiskLevel("tool-bound")).toBe("medium");
+  });
+
+  it("maps review-required to high risk", () => {
+    expect(getRiskLevel("review-required")).toBe("high");
   });
 });

@@ -16,7 +16,7 @@
 import { mkdir, copyFile, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { appendAuditEvent, readOrInitializeState, updateStateYaml } from "@dantecode/core";
-import { parseSkillBridgeManifest, bundleHasDanteCodeTarget, getDanteCodeTargetPath } from "./parsers/skillbridge.js";
+import { parseSkillBridgeManifest, bundleHasDanteCodeTarget, getDanteCodeTargetPath, sanitizeSlug } from "./parsers/skillbridge.js";
 import type { BridgeBundleMetadata, BundleBucket, SkillBridgeManifest } from "./types/skillbridge.js";
 
 // ----------------------------------------------------------------------------
@@ -124,6 +124,17 @@ export interface ImportBridgeOptions {
    * Defaults to false — red bundles are rejected by default.
    */
   allowBlocked?: boolean;
+  /**
+   * If true, overwrite an existing skill with the same slug.
+   * Defaults to false — existing skills are protected by default.
+   */
+  force?: boolean;
+  /**
+   * If true, perform all validation and bucket/overwrite checks but skip all
+   * filesystem writes (mkdir, copyFile, writeFile). Returns a result with
+   * `dryRun: true` so callers can preview what would happen without side effects.
+   */
+  dryRun?: boolean;
 }
 
 /** Result of a bridge bundle import operation. */
@@ -144,6 +155,12 @@ export interface ImportBridgeResult {
   conversionScore: number;
   /** Error message if success is false. */
   error?: string;
+  /**
+   * Present and `true` when the import was run with `dryRun: true`.
+   * No filesystem changes were made; all other fields reflect what would
+   * have been imported.
+   */
+  dryRun?: true;
 }
 
 // ----------------------------------------------------------------------------
@@ -174,6 +191,8 @@ export async function importSkillBridgeBundle(
     sessionId = "import-bridge",
     modelId = "skill-adapter",
     allowBlocked = false,
+    force = false,
+    dryRun = false,
   } = options;
 
   // Step 1: Parse manifest
@@ -225,9 +244,44 @@ export async function importSkillBridgeBundle(
     };
   }
 
+  // Step 3b: Overwrite protection
+  const destSkillFilePath = join(skillDir, "SKILL.dc.md");
+  try {
+    const existing = await stat(destSkillFilePath);
+    if (existing.isFile() && !force) {
+      return {
+        success: false,
+        slug,
+        skillDir,
+        bucket,
+        runtimeWarnings: [],
+        conversionWarnings: manifest.warnings,
+        conversionScore: manifest.verification.conversionScore,
+        error: `Skill "${slug}" already exists at ${skillDir}. Use force: true to overwrite.`,
+      };
+    }
+  } catch {
+    // SKILL.dc.md does not exist — safe to proceed
+  }
+
   // Step 4: Build capability warnings
   const runtimeWarnings = buildRuntimeWarnings(manifest);
   const conversionWarnings = manifest.warnings;
+  const conversionScore = manifest.verification.conversionScore;
+
+  // DryRun: all validation passed — return preview result without writing anything
+  if (dryRun) {
+    return {
+      success: true,
+      slug,
+      skillDir,
+      bucket,
+      conversionScore,
+      runtimeWarnings,
+      conversionWarnings,
+      dryRun: true as const,
+    };
+  }
 
   // Step 5: Create skill directory
   await mkdir(skillDir, { recursive: true });
@@ -349,7 +403,7 @@ export async function listBridgeWarnings(
   skillName: string,
   projectRoot: string,
 ): Promise<{ runtimeWarnings: string[]; conversionWarnings: string[]; bucket: BundleBucket; conversionScore: number } | null> {
-  const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const slug = sanitizeSlug(skillName);
   const warningsPath = join(projectRoot, SKILLS_BASE, slug, WARNINGS_FILENAME);
 
   let raw: string;
@@ -381,15 +435,32 @@ export async function listBridgeWarnings(
  * Validates that an imported bridge skill's SKILL.dc.md and skillbridge.json
  * are present and the manifest re-parses cleanly.
  *
+ * **Scope — structural integrity only.**
+ * This function confirms:
+ *   1. `SKILL.dc.md` exists in `.dantecode/skills/<slug>/` and is a regular file.
+ *   2. `skillbridge.json` in the same directory parses into a valid
+ *      `SkillBridgeManifest` without schema errors.
+ *
+ * It does **NOT** check:
+ *   - Content quality (instruction completeness, clarity, or usefulness).
+ *   - Anti-stub compliance (use `validateSkill` from registry.ts for that).
+ *   - Constitution adherence (also covered by `validateSkill`).
+ *   - Runtime capability compatibility with the current environment.
+ *   - Conversion score or bucket thresholds.
+ *
+ * Use this as a fast "is the import intact?" check, not as a full quality gate.
+ *
+ * For comprehensive quality validation (anti-stub, constitution, etc.), use {@link validateSkill} from the registry module after import.
+ *
  * @param skillName - The skill name or slug.
  * @param projectRoot - Absolute path to the project root.
- * @returns True if the skill is valid, false otherwise.
+ * @returns True if the skill files are structurally intact, false otherwise.
  */
 export async function validateBridgeSkill(
   skillName: string,
   projectRoot: string,
 ): Promise<boolean> {
-  const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const slug = sanitizeSlug(skillName);
   const skillDir = join(projectRoot, SKILLS_BASE, slug);
 
   // Check SKILL.dc.md exists
@@ -404,3 +475,6 @@ export async function validateBridgeSkill(
   const result = await parseSkillBridgeManifest(skillDir);
   return result.ok;
 }
+
+/** Alias for {@link validateBridgeSkill} — more descriptive name. */
+export const checkBridgeManifestIntegrity = validateBridgeSkill;

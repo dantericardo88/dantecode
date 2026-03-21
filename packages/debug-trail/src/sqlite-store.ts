@@ -69,6 +69,7 @@ export class TrailStore {
   };
   private sessions: Record<string, SessionRecord> = {};
   private ready = false;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(storageRoot: string) {
     this.paths = getStorePaths(storageRoot);
@@ -122,6 +123,15 @@ export class TrailStore {
     await writeFile(this.paths.sessionsFile, JSON.stringify(this.sessions, null, 2), "utf8");
   }
 
+  private schedulePersist(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.persistIndex().catch(() => {});
+      void this.persistSessions().catch(() => {});
+    }, 500);
+  }
+
   // -------------------------------------------------------------------------
   // Append event (hot path — <5ms target)
   // -------------------------------------------------------------------------
@@ -164,11 +174,8 @@ export class TrailStore {
     sess.lastEventAt = now;
     sess.eventCount++;
 
-    // Persist index every 50 events (async — don't await in hot path)
-    if (event.seq % 50 === 0) {
-      void this.persistIndex();
-      void this.persistSessions();
-    }
+    // Debounced persist — coalesces rapid writes into a single disk flush
+    this.schedulePersist();
   }
 
   // -------------------------------------------------------------------------
@@ -200,17 +207,24 @@ export class TrailStore {
     await this.ensureReady();
     if (!existsSync(this.paths.eventsLog)) return [];
     const raw = await readFile(this.paths.eventsLog, "utf8");
-    return raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
+    const results: TrailEvent[] = [];
+    let byteOffset = 0;
+    for (const line of raw.split("\n")) {
+      if (line.trim()) {
         try {
-          return JSON.parse(line) as TrailEvent;
+          results.push(JSON.parse(line) as TrailEvent);
         } catch {
-          return null;
+          // Append to corrupt log with byte offset for manual recovery
+          void appendFile(
+            this.paths.eventsLog + ".corrupt",
+            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
+            "utf8",
+          ).catch(() => {});
         }
-      })
-      .filter((e): e is TrailEvent => e !== null);
+      }
+      byteOffset += line.length + 1; // +1 for the \n
+    }
+    return results;
   }
 
   /** Query events by session ID. */
@@ -252,17 +266,23 @@ export class TrailStore {
     await this.ensureReady();
     if (!existsSync(this.paths.tombstonesLog)) return [];
     const raw = await readFile(this.paths.tombstonesLog, "utf8");
-    return raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
+    const results: DeleteTombstone[] = [];
+    let byteOffset = 0;
+    for (const line of raw.split("\n")) {
+      if (line.trim()) {
         try {
-          return JSON.parse(line) as DeleteTombstone;
+          results.push(JSON.parse(line) as DeleteTombstone);
         } catch {
-          return null;
+          void appendFile(
+            this.paths.tombstonesLog + ".corrupt",
+            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
+            "utf8",
+          ).catch(() => {});
         }
-      })
-      .filter((t): t is DeleteTombstone => t !== null);
+      }
+      byteOffset += line.length + 1;
+    }
+    return results;
   }
 
   // -------------------------------------------------------------------------
@@ -281,17 +301,23 @@ export class TrailStore {
     await this.ensureReady();
     if (!existsSync(this.paths.snapshotManifestLog)) return [];
     const raw = await readFile(this.paths.snapshotManifestLog, "utf8");
-    return raw
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
+    const results: FileSnapshotRecord[] = [];
+    let byteOffset = 0;
+    for (const line of raw.split("\n")) {
+      if (line.trim()) {
         try {
-          return JSON.parse(line) as FileSnapshotRecord;
+          results.push(JSON.parse(line) as FileSnapshotRecord);
         } catch {
-          return null;
+          void appendFile(
+            this.paths.snapshotManifestLog + ".corrupt",
+            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
+            "utf8",
+          ).catch(() => {});
         }
-      })
-      .filter((r): r is FileSnapshotRecord => r !== null);
+      }
+      byteOffset += line.length + 1;
+    }
+    return results;
   }
 
   /** Get session records. */
@@ -304,6 +330,34 @@ export class TrailStore {
     return this.index.lastSeq;
   }
 
+  /** Rebuild the in-memory index by re-reading the entire events JSONL. */
+  async rebuildIndex(): Promise<void> {
+    await this.ensureReady();
+    const events = await this.readAllEvents();
+    // Reset index
+    this.index = { bySession: {}, byFile: {}, byKind: {}, seqByEvent: {}, lastSeq: 0 };
+    for (const event of events) {
+      const sid = event.provenance.sessionId;
+      if (!this.index.bySession[sid]) this.index.bySession[sid] = [];
+      this.index.bySession[sid]!.push(event.id);
+      if (event.payload["filePath"] && typeof event.payload["filePath"] === "string") {
+        const fp = event.payload["filePath"] as string;
+        if (!this.index.byFile[fp]) this.index.byFile[fp] = [];
+        this.index.byFile[fp]!.push(event.id);
+      }
+      if (!this.index.byKind[event.kind]) this.index.byKind[event.kind] = [];
+      this.index.byKind[event.kind]!.push(event.id);
+      this.index.seqByEvent[event.id] = event.seq;
+      this.index.lastSeq = Math.max(this.index.lastSeq, event.seq);
+    }
+    await this.persistIndex();
+  }
+
+  /** Path to the events JSONL file (used by streaming readers). */
+  eventsLogPath(): string {
+    return this.paths.eventsLog;
+  }
+
   /** Pin a session (prevent pruning). */
   async pinSession(sessionId: string): Promise<void> {
     await this.ensureReady();
@@ -313,8 +367,12 @@ export class TrailStore {
     }
   }
 
-  /** Flush index to disk immediately. */
+  /** Flush index to disk immediately, cancelling any pending debounce timer. */
   async flush(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     await this.persistIndex();
     await this.persistSessions();
   }

@@ -4,7 +4,7 @@
 // All snapshots stored OUTSIDE the worktree.
 // ============================================================================
 
-import { readFile, writeFile, mkdir, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, access, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
@@ -14,6 +14,7 @@ import type {
   DebugTrailConfig,
 } from "./types.js";
 import { defaultConfig } from "./types.js";
+import type { PrivacyPolicy } from "./policies/privacy-policy.js";
 import { hashFile, hashContent, makeSnapshotId, makeTombstoneId } from "./hash-engine.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TombstoneRegistry } from "./state/tombstones.js";
@@ -29,10 +30,12 @@ export class FileSnapshotter {
   private initialized = false;
   // Gap 1: dedup cache — contentHash → most recently written FileSnapshotRecord
   private recentSnapshotByHash = new Map<string, FileSnapshotRecord>();
+  private privacyPolicy: PrivacyPolicy | null = null;
 
-  constructor(config?: Partial<DebugTrailConfig>) {
+  constructor(config?: Partial<DebugTrailConfig>, privacyPolicy?: PrivacyPolicy) {
     this.config = { ...defaultConfig(), ...config };
     this.store = getTrailStore(this.config.storageRoot);
+    this.privacyPolicy = privacyPolicy ?? null;
   }
 
   async init(): Promise<void> {
@@ -50,6 +53,8 @@ export class FileSnapshotter {
       this.recentSnapshotByHash.set(record.contentHash, record);
     }
     this.initialized = true;
+    // Evict stale cache entries pointing to deleted snapshot files
+    await this.reconcileDedupeCache();
   }
 
   // -------------------------------------------------------------------------
@@ -67,6 +72,9 @@ export class FileSnapshotter {
   ): Promise<FileSnapshotRecord | null> {
     await this.ensureReady();
 
+    // Privacy: path-based exclusion before any I/O (free check)
+    if (this.privacyPolicy && this.privacyPolicy.shouldExcludePath(filePath)) return null;
+
     if (!existsSync(filePath)) return null;
 
     let content: Buffer;
@@ -74,6 +82,12 @@ export class FileSnapshotter {
       content = await readFile(filePath);
     } catch {
       return null;
+    }
+
+    // Privacy: size-based + redaction checks (content already in memory)
+    if (this.privacyPolicy) {
+      const action = this.privacyPolicy.evaluateCapture(filePath, content.length);
+      if (action === "exclude" || action === "redact") return null;
     }
 
     const contentHash = hashContent(content);
@@ -89,8 +103,10 @@ export class FileSnapshotter {
     const snapshotId = makeSnapshotId(filePath, contentHash, now);
     const storagePath = this.store.snapshotPath(snapshotId);
 
-    // Write snapshot content outside worktree
-    await writeFile(storagePath, content);
+    // Write snapshot content outside worktree (atomic write-then-rename)
+    const tmpPath = storagePath + ".tmp";
+    await writeFile(tmpPath, content);
+    await rename(tmpPath, storagePath);
 
     const record: FileSnapshotRecord = {
       snapshotId,
@@ -265,6 +281,23 @@ export class FileSnapshotter {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private async reconcileDedupeCache(): Promise<void> {
+    for (const [hash, record] of this.recentSnapshotByHash) {
+      if (!existsSync(record.storagePath)) {
+        this.recentSnapshotByHash.delete(hash);
+      }
+    }
+  }
+
+  evictSnapshot(snapshotId: string): void {
+    for (const [hash, record] of this.recentSnapshotByHash) {
+      if (record.snapshotId === snapshotId) {
+        this.recentSnapshotByHash.delete(hash);
+        break;
+      }
     }
   }
 

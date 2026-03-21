@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { loadSkillRegistry, getSkill, listSkills, removeSkill, validateSkill } from "./registry.js";
+import { loadSkillRegistry, getSkill, getSkillWithBridgeMeta, listSkills, removeSkill, validateSkill } from "./registry.js";
 import { wrapSkillWithAdapter, type ParsedSkill } from "./wrap.js";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -348,6 +348,176 @@ describe("skill-adapter registry", () => {
       // Name defaults to "unnamed" when not in frontmatter
       expect(skill?.frontmatter.name).toBe("unnamed");
       expect(skill?.frontmatter.description).toBe("");
+    });
+  });
+
+  // ============================================================================
+  // getSkillWithBridgeMeta tests
+  // ============================================================================
+
+  describe("getSkillWithBridgeMeta", () => {
+    it("returns bridgeMeta populated for a skillbridge skill", async () => {
+      // Create a skillbridge skill directory with bridge-meta.json
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const skillDir = join(skillsDir, "bridge-test-skill");
+      await mkdir(skillDir, { recursive: true });
+
+      await writeFile(
+        join(skillDir, "SKILL.dc.md"),
+        [
+          "---",
+          "name: bridge-test-skill",
+          "description: A bridged test skill",
+          "import_source: skillbridge",
+          "adapter_version: '1.0.0'",
+          `wrapped_at: '${new Date().toISOString()}'`,
+          "---",
+          "",
+          "Bridge skill instructions.",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const bridgeMeta = {
+        slug: "bridge-test-skill",
+        name: "bridge-test-skill",
+        description: "A bridged test skill",
+        bundleDir: skillDir,
+        conversionScore: 0.95,
+        bucket: "green",
+        runtimeWarnings: [],
+        conversionWarnings: [],
+        importedAt: new Date().toISOString(),
+        classification: "instruction-only",
+        emitterStatuses: { dantecode: "success" },
+      };
+      await writeFile(join(skillDir, "bridge-meta.json"), JSON.stringify(bridgeMeta, null, 2), "utf-8");
+
+      const result = await getSkillWithBridgeMeta("bridge-test-skill", testDir);
+      expect(result).not.toBeNull();
+      expect(result!.bridgeMeta).toBeDefined();
+      expect(result!.bridgeMeta!.bucket).toBe("green");
+      expect(result!.bridgeMeta!.conversionScore).toBe(0.95);
+      expect(result!.bridgeMeta!.classification).toBe("instruction-only");
+    });
+
+    it("returns bridgeMeta as undefined for a non-bridge skill", async () => {
+      // Use an existing non-bridge skill from testDir setup
+      // Create a simple non-bridge skill
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const skillDir = join(skillsDir, "plain-skill");
+      await mkdir(skillDir, { recursive: true });
+
+      await writeFile(
+        join(skillDir, "SKILL.dc.md"),
+        [
+          "---",
+          "name: plain-skill",
+          "description: A plain skill",
+          "import_source: claude",
+          "adapter_version: '1.0.0'",
+          `wrapped_at: '${new Date().toISOString()}'`,
+          "---",
+          "",
+          "Plain skill instructions.",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const result = await getSkillWithBridgeMeta("plain-skill", testDir);
+      expect(result).not.toBeNull();
+      expect(result!.bridgeMeta).toBeUndefined();
+    });
+  });
+
+  // ============================================================================
+  // Regression tests — _findSkillDir refactor + bridge-meta.json loading
+  // ============================================================================
+
+  describe("regression — getSkill data structure after _findSkillDir refactor", () => {
+    it("getSkill returns all required SkillDefinition fields", async () => {
+      await createTestSkill(testDir, "code-review", testSkill);
+      const skill = await getSkill("code-review", testDir);
+      expect(skill).not.toBeNull();
+      // Core fields
+      expect(typeof skill!.frontmatter.name).toBe("string");
+      expect(typeof skill!.frontmatter.description).toBe("string");
+      expect(typeof skill!.instructions).toBe("string");
+      expect(typeof skill!.adapterVersion).toBe("string");
+      expect(typeof skill!.importSource).toBe("string");
+      expect(typeof skill!.wrappedPath).toBe("string");
+      expect(typeof skill!.sourcePath).toBe("string");
+      expect(typeof skill!.isWrapped).toBe("boolean");
+      // Verify values
+      expect(skill!.frontmatter.name).toBe("code-review");
+      expect(skill!.importSource).toBe("claude");
+      expect(skill!.isWrapped).toBe(true);
+      expect(skill!.instructions).toContain("Review the code for bugs");
+    });
+
+    it("getSkill correctly resolves skill by case-insensitive match after refactor", async () => {
+      await createTestSkill(testDir, "test-writer", secondSkill);
+      // Lookup by name from frontmatter (case differs from dir)
+      const byName = await getSkill("Test-Writer", testDir);
+      expect(byName).not.toBeNull();
+      expect(byName!.frontmatter.name).toBe("test-writer");
+      // Lookup by dir name directly
+      const byDir = await getSkill("test-writer", testDir);
+      expect(byDir).not.toBeNull();
+      expect(byDir!.wrappedPath).toContain("test-writer");
+    });
+  });
+
+  describe("regression — getSkillWithBridgeMeta loads bridge-meta.json", () => {
+    it("getSkillWithBridgeMeta returns bridgeMeta with all fields from bridge-meta.json", async () => {
+      const skillsDir = join(testDir, ".dantecode", "skills");
+      const skillDir = join(skillsDir, "meta-regression");
+      await mkdir(skillDir, { recursive: true });
+
+      await writeFile(
+        join(skillDir, "SKILL.dc.md"),
+        [
+          "---",
+          "name: meta-regression",
+          "description: Regression test skill",
+          "import_source: skillbridge",
+          "adapter_version: '1.0.0'",
+          `wrapped_at: '${new Date().toISOString()}'`,
+          "---",
+          "",
+          "Regression skill instructions.",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const bridgeMeta = {
+        slug: "meta-regression",
+        name: "meta-regression",
+        description: "Regression test skill",
+        bundleDir: skillDir,
+        conversionScore: 0.91,
+        bucket: "green",
+        runtimeWarnings: ["test warning"],
+        conversionWarnings: [],
+        importedAt: "2026-03-20T00:00:00Z",
+        classification: "tool-bound",
+        emitterStatuses: { dantecode: "success" },
+      };
+      await writeFile(
+        join(skillDir, "bridge-meta.json"),
+        JSON.stringify(bridgeMeta, null, 2),
+        "utf-8",
+      );
+
+      const result = await getSkillWithBridgeMeta("meta-regression", testDir);
+      expect(result).not.toBeNull();
+      expect(result!.bridgeMeta).toBeDefined();
+      expect(result!.bridgeMeta!.slug).toBe("meta-regression");
+      expect(result!.bridgeMeta!.conversionScore).toBe(0.91);
+      expect(result!.bridgeMeta!.bucket).toBe("green");
+      expect(result!.bridgeMeta!.runtimeWarnings).toEqual(["test warning"]);
+      expect(result!.bridgeMeta!.classification).toBe("tool-bound");
+      expect(result!.bridgeMeta!.importedAt).toBe("2026-03-20T00:00:00Z");
     });
   });
 

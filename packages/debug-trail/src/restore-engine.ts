@@ -81,7 +81,19 @@ export class RestoreEngine {
     }
 
     if (options.dryRun) {
-      return { snapshotId, restored: false, targetPath, error: "dry_run" };
+      const targetExists = existsSync(targetPath);
+      const snapshotExists = await this.snapshotter.snapshotExists(snapshotId);
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        error: "dry_run",
+        dryRunDetails: {
+          snapshotExists,
+          targetExists,
+          wouldOverwrite: targetExists,
+        },
+      };
     }
 
     // Capture current state of target before overwriting (audit trail)
@@ -120,6 +132,25 @@ export class RestoreEngine {
     const afterSnap = afterHash
       ? await this.snapshotter.captureSnapshot(targetPath, "post-restore-capture", provenance)
       : null;
+
+    // Verify content integrity: restored file hash must match snapshot record
+    const snapRecords = await (this.snapshotter as unknown as { store: { readAllSnapshotRecords(): Promise<import("./types.js").FileSnapshotRecord[]> } }).store.readAllSnapshotRecords?.() ?? [];
+    const snapRecord = snapRecords.find((r) => r.snapshotId === snapshotId);
+    if (snapRecord && afterHash && afterHash !== snapRecord.contentHash) {
+      const errEventId = await this.logger.log(
+        "file_restore",
+        "RestoreEngine",
+        `Restore hash mismatch for ${targetPath}`,
+        { snapshotId, targetPath, expected: snapRecord.contentHash, actual: afterHash, error: "hash_mismatch" },
+      );
+      return {
+        snapshotId,
+        restored: false,
+        targetPath,
+        auditEventId: errEventId,
+        error: `Content hash mismatch: expected ${snapRecord.contentHash.slice(0, 8)} got ${afterHash.slice(0, 8)}`,
+      };
+    }
 
     // Mandatory audit record
     const auditEventId = await this.logger.log(

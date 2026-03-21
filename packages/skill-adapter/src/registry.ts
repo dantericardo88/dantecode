@@ -10,6 +10,7 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { runAntiStubScanner, runConstitutionCheck } from "@dantecode/danteforge";
 import type { SkillFrontmatter, SkillDefinition } from "@dantecode/config-types";
+import type { BridgeBundleMetadata } from "./types/skillbridge.js";
 
 // ----------------------------------------------------------------------------
 // Constants
@@ -65,6 +66,11 @@ export interface SkillValidationResult {
   constitutionWarningViolations: number;
   overallPassed: boolean;
 }
+
+/** A SkillDefinition augmented with optional SkillBridge bundle metadata. */
+export type SkillDefinitionWithMeta = SkillDefinition & {
+  bridgeMeta?: BridgeBundleMetadata;
+};
 
 // ----------------------------------------------------------------------------
 // Internal Helpers
@@ -165,6 +171,78 @@ function buildSkillFrontmatter(fm: Record<string, unknown>): SkillFrontmatter {
     hidden: typeof fm["hidden"] === "boolean" ? fm["hidden"] : undefined,
     color: typeof fm["color"] === "string" ? fm["color"] : undefined,
   };
+}
+
+// ----------------------------------------------------------------------------
+// Internal: Shared Skill Locator
+// ----------------------------------------------------------------------------
+
+/**
+ * Internal data returned by `_findSkillDir` when a matching skill is located.
+ * @internal
+ */
+interface FoundSkillData {
+  skillDir: string;
+  skillFilePath: string;
+  fm: Record<string, unknown>;
+  content: string;
+}
+
+/**
+ * Shared directory-scanning logic used by both `getSkill` and
+ * `getSkillWithBridgeMeta`.
+ *
+ * Iterates over every subdirectory of `.dantecode/skills/`, reads its
+ * `SKILL.dc.md`, parses YAML frontmatter, and returns the first entry whose
+ * frontmatter `name` or directory name matches `name` (case-insensitive).
+ *
+ * When multiple skills share the same name, returns the **first match** found. Directory enumeration order is OS-dependent; ensure skill names are globally unique for deterministic behavior.
+ *
+ * @param name - The skill name to look for.
+ * @param projectRoot - Absolute path to the project root directory.
+ * @returns The matching `FoundSkillData`, or null if not found.
+ */
+async function _findSkillDir(name: string, projectRoot: string): Promise<FoundSkillData | null> {
+  const skillsDir = join(projectRoot, SKILLS_DIR);
+  const normalizedName = name.toLowerCase();
+
+  let entries: string[];
+  try {
+    entries = await readdir(skillsDir);
+  } catch {
+    return null;
+  }
+
+  for (const entry of entries) {
+    const skillDir = join(skillsDir, entry);
+
+    let entryStat;
+    try {
+      entryStat = await stat(skillDir);
+    } catch {
+      continue;
+    }
+    if (!entryStat.isDirectory()) continue;
+
+    const skillFilePath = join(skillDir, SKILL_FILENAME);
+    let content: string;
+    try {
+      content = await readFile(skillFilePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const fm = extractFrontmatter(content);
+    if (fm === null) continue;
+
+    const skillName = typeof fm["name"] === "string" ? fm["name"] : entry;
+
+    if (skillName.toLowerCase() === normalizedName || entry.toLowerCase() === normalizedName) {
+      return { skillDir, skillFilePath, fm, content };
+    }
+  }
+
+  return null;
 }
 
 // ----------------------------------------------------------------------------
@@ -286,66 +364,74 @@ export async function loadSkillRegistry(projectRoot: string): Promise<SkillRegis
  * @returns The SkillDefinition, or null if not found.
  */
 export async function getSkill(name: string, projectRoot: string): Promise<SkillDefinition | null> {
-  const skillsDir = join(projectRoot, SKILLS_DIR);
-  const normalizedName = name.toLowerCase();
+  const found = await _findSkillDir(name, projectRoot);
+  if (found === null) return null;
 
-  let entries: string[];
-  try {
-    entries = await readdir(skillsDir);
-  } catch {
-    return null;
+  const { skillFilePath, fm, content } = found;
+  const frontmatter = buildSkillFrontmatter(fm);
+  const instructions = extractInstructions(content);
+
+  const definition: SkillDefinition = {
+    frontmatter,
+    instructions,
+    sourcePath:
+      typeof fm["original_source_path"] === "string" ? fm["original_source_path"] : skillFilePath,
+    wrappedPath: skillFilePath,
+    isWrapped: true,
+    importSource: typeof fm["import_source"] === "string" ? fm["import_source"] : undefined,
+    adapterVersion: typeof fm["adapter_version"] === "string" ? fm["adapter_version"] : "unknown",
+    constitutionCheckPassed: true,
+    antiStubScanPassed: true,
+  };
+
+  return definition;
+}
+
+/**
+ * Returns a skill definition augmented with bridge metadata when available.
+ * For skillbridge-sourced skills, reads bridge-meta.json and attaches it as bridgeMeta.
+ * For non-bridge skills, returns the SkillDefinition with bridgeMeta: undefined.
+ *
+ * @param name - The name of the skill to retrieve.
+ * @param projectRoot - Absolute path to the project root directory.
+ * @returns SkillDefinitionWithMeta, or null if not found.
+ */
+export async function getSkillWithBridgeMeta(
+  name: string,
+  projectRoot: string,
+): Promise<SkillDefinitionWithMeta | null> {
+  const found = await _findSkillDir(name, projectRoot);
+  if (found === null) return null;
+
+  const { skillDir, skillFilePath, fm, content } = found;
+  const frontmatter = buildSkillFrontmatter(fm);
+  const instructions = extractInstructions(content);
+  const importSource = typeof fm["import_source"] === "string" ? fm["import_source"] : undefined;
+
+  const definition: SkillDefinitionWithMeta = {
+    frontmatter,
+    instructions,
+    sourcePath:
+      typeof fm["original_source_path"] === "string" ? fm["original_source_path"] : skillFilePath,
+    wrappedPath: skillFilePath,
+    isWrapped: true,
+    importSource,
+    adapterVersion: typeof fm["adapter_version"] === "string" ? fm["adapter_version"] : "unknown",
+    constitutionCheckPassed: true,
+    antiStubScanPassed: true,
+  };
+
+  // Augment with bridge metadata if skillbridge-sourced
+  if (importSource === "skillbridge") {
+    try {
+      const metaRaw = await readFile(join(skillDir, "bridge-meta.json"), "utf-8");
+      definition.bridgeMeta = JSON.parse(metaRaw) as BridgeBundleMetadata;
+    } catch {
+      // bridge-meta.json missing or unreadable — bridgeMeta remains undefined
+    }
   }
 
-  for (const entry of entries) {
-    const skillDir = join(skillsDir, entry);
-
-    let entryStat;
-    try {
-      entryStat = await stat(skillDir);
-    } catch {
-      continue;
-    }
-    if (!entryStat.isDirectory()) continue;
-
-    const skillFilePath = join(skillDir, SKILL_FILENAME);
-    let content: string;
-    try {
-      content = await readFile(skillFilePath, "utf-8");
-    } catch {
-      continue;
-    }
-
-    const fm = extractFrontmatter(content);
-    if (fm === null) continue;
-
-    const skillName = typeof fm["name"] === "string" ? fm["name"] : entry;
-
-    // Match by name (case-insensitive) or by directory name
-    if (skillName.toLowerCase() === normalizedName || entry.toLowerCase() === normalizedName) {
-      const frontmatter = buildSkillFrontmatter(fm);
-      const instructions = extractInstructions(content);
-
-      const definition: SkillDefinition = {
-        frontmatter,
-        instructions,
-        sourcePath:
-          typeof fm["original_source_path"] === "string"
-            ? fm["original_source_path"]
-            : skillFilePath,
-        wrappedPath: skillFilePath,
-        isWrapped: true,
-        importSource: typeof fm["import_source"] === "string" ? fm["import_source"] : undefined,
-        adapterVersion:
-          typeof fm["adapter_version"] === "string" ? fm["adapter_version"] : "unknown",
-        constitutionCheckPassed: true,
-        antiStubScanPassed: true,
-      };
-
-      return definition;
-    }
-  }
-
-  return null;
+  return definition;
 }
 
 /**

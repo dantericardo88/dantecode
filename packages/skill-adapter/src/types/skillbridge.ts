@@ -159,3 +159,29 @@ export interface BridgeBundleMetadata {
 export type SkillBridgeParseResult =
   | { ok: true; manifest: SkillBridgeManifest }
   | { ok: false; errors: string[] };
+
+// ----------------------------------------------------------------------------
+// Risk Level Utility
+// ----------------------------------------------------------------------------
+
+/**
+ * Maps a SkillClassification to its corresponding SkillRiskLevel.
+ *
+ * Classification → Risk mapping:
+ *   "instruction-only" → "low"      (pure text, no side effects)
+ *   "script-assisted"  → "medium"   (has scripts but no direct tool binding)
+ *   "tool-bound"       → "medium"   (uses tools but no review required)
+ *   "review-required"  → "high"     (flagged for manual review)
+ */
+export function getRiskLevel(classification: SkillClassification): SkillRiskLevel {
+  switch (classification) {
+    case "instruction-only":
+      return "low";
+    case "script-assisted":
+      return "medium";
+    case "tool-bound":
+      return "medium";
+    case "review-required":
+      return "high";
+  }
+}

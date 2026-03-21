@@ -190,9 +190,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // Start GitEventWatcher when events.enabled is true in STATE.yaml
   let gitEventWatcher: GitEventWatcher | null = null;
-  const eventsEnabled = (state as Record<string, unknown>)["events"] !== undefined &&
-    typeof (state as Record<string, unknown>)["events"] === "object" &&
-    ((state as Record<string, unknown>)["events"] as Record<string, unknown>)["enabled"] === true;
+  const stateAsMap = state as unknown as Record<string, unknown>;
+  const eventsEnabled = stateAsMap["events"] !== undefined &&
+    typeof stateAsMap["events"] === "object" &&
+    (stateAsMap["events"] as Record<string, unknown>)["enabled"] === true;
 
   if (eventsEnabled) {
     try {

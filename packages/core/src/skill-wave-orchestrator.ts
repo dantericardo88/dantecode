@@ -311,8 +311,11 @@ export function buildWavePrompt(
     return "All waves complete. Summarize what was accomplished.";
   }
 
-  // Inject bridge warning preamble on first wave if bridge skill
-  const bridgePreamble = bridgeWarnings ? buildBridgeWarningPreamble(bridgeWarnings) : "";
+  // Inject bridge warning preamble on first wave only if bridge skill
+  const bridgePreamble =
+    bridgeWarnings && state.currentIndex === 0
+      ? buildBridgeWarningPreamble(bridgeWarnings)
+      : "";
 
   const progress = state.completedWaves.length;
   const total = state.waves.length;
@@ -351,7 +354,10 @@ export function buildWavePrompt(
     "Do NOT proceed to the next wave — it will be provided automatically.",
   );
 
-  return bridgePreamble + parts.join("\n");
+  if (bridgePreamble.length > 0) {
+    parts.splice(2, 0, bridgePreamble); // insert after header + blank line, before content
+  }
+  return parts.join("\n");
 }
 
 /**

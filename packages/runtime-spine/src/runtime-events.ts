@@ -21,6 +21,20 @@ export const RuntimeEventKindSchema = z.enum([
   "runtime.synthesis.completed",
   "runtime.verification.passed",
   "runtime.verification.failed",
+  "skillbook.update.proposed",
+  "skillbook.update.accepted",
+  "skillbook.update.rejected",
+  "skillbook.update.review-required",
+  "skillbook.reflection.started",
+  "skillbook.reflection.completed",
+  "skillbook.loaded",
+  "skillbook.saved",
+  "gaslight.session.started",
+  "gaslight.session.completed",
+  "gaslight.critique.completed",
+  "gaslight.iteration.gated",
+  "gaslight.lesson.written",
+  "gaslight.stopped",
 ]);
 
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKindSchema>;

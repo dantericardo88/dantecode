@@ -34,6 +34,21 @@ function isString(v: unknown): v is string {
   return typeof v === "string";
 }
 
+/**
+ * Sanitizes a raw slug string to prevent path traversal and ensure
+ * filesystem-safe directory names.
+ */
+export function sanitizeSlug(raw: string): string {
+  const s = raw
+    .replace(/^[./\\]+/, "")        // strip leading dots/slashes (../../evil → evil)
+    .replace(/[/\\]/g, "-")         // path separators → hyphen
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")   // non-alnum → hyphen
+    .replace(/-{2,}/g, "-")         // collapse consecutive hyphens
+    .replace(/^-+|-+$/g, "");       // strip leading/trailing hyphens
+  return s.length > 0 ? s : "skill";
+}
+
 function parseEmitterResult(raw: unknown, key: string): EmitterResult {
   if (!isRecord(raw)) {
     return { status: "skipped", warnings: [`${key}: missing or invalid`] };
@@ -123,7 +138,7 @@ function validateManifest(raw: unknown, errors: string[]): SkillBridgeManifest |
     },
     normalizedSkill: {
       name: isString(normalizedSkill["name"]) ? normalizedSkill["name"] : "",
-      slug: isString(normalizedSkill["slug"]) ? normalizedSkill["slug"] : "",
+      slug: sanitizeSlug(isString(normalizedSkill["slug"]) ? normalizedSkill["slug"] : ""),
       description: isString(normalizedSkill["description"]) ? normalizedSkill["description"] : "",
       instructions: isString(normalizedSkill["instructions"]) ? normalizedSkill["instructions"] : "",
       supportFiles: Array.isArray(normalizedSkill["supportFiles"])

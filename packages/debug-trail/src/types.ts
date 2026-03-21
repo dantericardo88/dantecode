@@ -23,6 +23,8 @@ export interface TrailProvenance {
   parentLaneId?: string;
   /** This lane's ID. */
   laneId?: string;
+  /** Workflow ID for multi-step pipeline tracking. */
+  workflowId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +218,12 @@ export interface DebugRestoreResult {
   targetPath?: string;
   auditEventId?: string;
   error?: string;
+  dryRunDetails?: {
+    snapshotExists: boolean;
+    targetExists: boolean;
+    wouldOverwrite: boolean;
+    snapshotSizeBytes?: number;
+  };
 }
 
 export interface DebugReplayResult {
@@ -254,6 +262,22 @@ export interface DebugTrailConfig {
   maxStorageMb: number;
   /** Optional encryption passphrase. */
   encryptionKey?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Error Classes
+// ---------------------------------------------------------------------------
+
+/** Thrown by AuditLogger.log() when the underlying disk write fails. */
+export class DiskWriteError extends Error {
+  constructor(
+    public readonly eventId: string,
+    public readonly seq: number,
+    public readonly cause: unknown,
+  ) {
+    super(`DiskWriteError: event seq=${seq} id=${eventId} — ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "DiskWriteError";
+  }
 }
 
 export function defaultConfig(): DebugTrailConfig {

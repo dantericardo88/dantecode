@@ -22,11 +22,10 @@ import {
   saveCouncilRun,
   tryLoadCouncilRun,
   listCouncilRuns,
-  setRunStatus,
-  createCouncilRunState,
-  UsageLedger,
+  CouncilOrchestrator,
+  DanteCodeAdapter,
 } from "@dantecode/core";
-import type { AgentKind, CouncilRunState } from "@dantecode/core";
+import type { AgentKind, CouncilRunState, CouncilAgentAdapter } from "@dantecode/core";
 
 // ANSI colors
 const BOLD = "\x1b[1m";
@@ -90,6 +89,18 @@ function findLatestRun(repoRoot: string): CouncilRunState | null {
 // Sub-command handlers
 // ----------------------------------------------------------------------------
 
+/** Build adapters map for the requested agent kinds. Only DanteCode is wired natively. */
+function buildAdapters(agentKinds: AgentKind[]): Map<AgentKind, CouncilAgentAdapter> {
+  const map = new Map<AgentKind, CouncilAgentAdapter>();
+  for (const kind of agentKinds) {
+    if (kind === "dantecode") {
+      map.set(kind, new DanteCodeAdapter());
+    }
+    // Other adapters require a bridgeDir — omit unless --bridge-dir is provided
+  }
+  return map;
+}
+
 async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   const objectiveIdx = args.findIndex((a) => !a.startsWith("--"));
   const objective = args[objectiveIdx] ?? "Council orchestration run";
@@ -100,21 +111,22 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     ? (agentsFlag.split(",").map((a) => a.trim()) as AgentKind[])
     : ["dantecode"];
 
+  const adapters = buildAdapters(agentKinds);
+  const orchestrator = new CouncilOrchestrator(adapters);
+
+  // Wire error events to stderr
+  orchestrator.on("error", ({ message, context }) => {
+    console.error(`${RED}[council] ${context ?? "error"}: ${message}${RESET}`);
+  });
+
   const auditLogPath = join(projectRoot, ".dantecode", "council", "audit.jsonl");
-  const state = createCouncilRunState(projectRoot, objective, auditLogPath);
-
-  const ledger = new UsageLedger();
-  for (const kind of agentKinds) {
-    ledger.register(kind);
-  }
-
-  await saveCouncilRun(state);
+  const runId = await orchestrator.start({ objective, agents: agentKinds, repoRoot: projectRoot, auditLogPath });
 
   console.log(`${GREEN}${BOLD}Council run started${RESET}`);
-  console.log(`  Run ID:    ${CYAN}${state.runId}${RESET}`);
+  console.log(`  Run ID:    ${CYAN}${runId}${RESET}`);
   console.log(`  Objective: ${objective}`);
   console.log(`  Agents:    ${agentKinds.join(", ")}`);
-  console.log(`  State:     ${join(projectRoot, ".dantecode", "council", state.runId)}`);
+  console.log(`  State:     ${join(projectRoot, ".dantecode", "council", runId)}`);
   console.log(``);
   console.log(`${DIM}Use 'dantecode council lanes' to assign tasks.${RESET}`);
 }
@@ -293,17 +305,33 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
     return;
   }
 
-  await setRunStatus(projectRoot, state.runId, "merging");
-  console.log(`${CYAN}${BOLD}Merge initiated for run ${state.runId}${RESET}`);
+  console.log(`${CYAN}${BOLD}Running MergeBrain synthesis for run ${state.runId}${RESET}`);
   console.log(`  Completed lanes: ${completedLanes.map((l) => l.laneId).join(", ")}`);
-  if (autoFlag) {
-    console.log(
-      `  Mode: ${GREEN}auto (high-confidence merges will proceed automatically)${RESET}`,
-    );
-  } else {
-    console.log(`  Mode: ${YELLOW}manual (all merges require review)${RESET}`);
+  console.log(`  Mode: ${autoFlag ? GREEN + "auto" : YELLOW + "manual"}${RESET}`);
+
+  // Build a minimal orchestrator to drive the merge
+  const adapters = buildAdapters(state.agents.map((a) => a.agentKind));
+  const orchestrator = new CouncilOrchestrator(adapters, { allowAutoMerge: autoFlag });
+  orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
+
+  // Resume into the existing run state so the orchestrator can drive merge()
+  try {
+    await orchestrator.resume(projectRoot, state.runId);
+    const result = await orchestrator.merge();
+
+    const sc = result.synthesis.decision === "auto-merge" ? GREEN : YELLOW;
+    console.log(`${BOLD}Synthesis complete${RESET}`);
+    console.log(`  Decision:   ${sc}${result.synthesis.decision}${RESET}`);
+    console.log(`  Confidence: ${result.synthesis.confidence}`);
+    console.log(`  Synthesis:  ${result.synthesis.id}`);
+    if (!result.success) {
+      console.log(`${YELLOW}  Note: ${result.error}${RESET}`);
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`${RED}Merge failed: ${msg}${RESET}`);
+    process.exit(1);
   }
-  console.log(`${DIM}Use the MergeBrain API to perform synthesis.${RESET}`);
 }
 
 async function cmdVerify(_args: string[], projectRoot: string): Promise<void> {
@@ -362,14 +390,25 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     process.exit(1);
   }
 
-  if (state.status === "completed") {
-    console.log(`${YELLOW}Run ${runId} is already completed.${RESET}`);
+  if (state.status === "completed" || state.status === "failed") {
+    console.log(`${YELLOW}Run ${runId} is in terminal state: ${state.status}${RESET}`);
     return;
   }
 
-  await setRunStatus(projectRoot, runId, "running");
-  console.log(`${GREEN}${BOLD}Resumed council run${RESET}`);
-  printRun({ ...state, status: "running" });
+  const adapters = buildAdapters(state.agents.map((a) => a.agentKind));
+  const orchestrator = new CouncilOrchestrator(adapters);
+  orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
+
+  try {
+    await orchestrator.resume(projectRoot, runId);
+    console.log(`${GREEN}${BOLD}Resumed council run${RESET}`);
+    printRun({ ...state, status: "running" });
+    console.log(`${DIM}Orchestrator is active. Assign lanes and use 'council merge' when done.${RESET}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`${RED}Resume failed: ${msg}${RESET}`);
+    process.exit(1);
+  }
 }
 
 // ----------------------------------------------------------------------------

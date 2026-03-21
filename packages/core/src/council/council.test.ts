@@ -1566,23 +1566,19 @@ describe("WorktreeObserver", () => {
     expect(true).toBe(true);
   });
 
-  it("snapshotLane emits error event when worktree path is invalid", (done) => {
+  it("snapshotLane returns degraded snapshot (not null) for invalid path due to resilient helpers", async () => {
     const observer = new WorktreeObserver();
-    observer.register("lane-invalid", "codex", "/tmp/nonexistent-lane-council-test-xyz");
-
-    observer.once("error", (event) => {
-      expect(event.laneId).toBe("lane-invalid");
-      expect(event.error).toBeTruthy();
-      done();
-    });
-
-    const result = observer.snapshotLane(
+    const result = await observer.snapshotLane(
       "lane-invalid",
       "codex",
       "/tmp/nonexistent-lane-council-test-xyz",
     );
-    // snapshot should return null on error
-    expect(result).toBeNull();
+    // helpers catch git failures and return fallback values — snapshot is non-null
+    expect(result).not.toBeNull();
+    expect(result?.branch).toBe("unknown");
+    expect(result?.headCommit).toBe("unknown");
+    expect(result?.modifiedFiles).toEqual([]);
+    expect(result?.laneId).toBe("lane-invalid");
   });
 
   it("getSnapshot returns null after register (before any poll)", () => {

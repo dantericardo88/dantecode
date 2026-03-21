@@ -8,13 +8,12 @@
 // ============================================================================
 
 import { EventEmitter } from "node:events";
-import type { AgentKind, CouncilRunState, TaskCategory } from "./council-types.js";
+import type { AgentKind, CouncilRunState } from "./council-types.js";
+import { createCouncilRunState } from "./council-types.js";
 import {
-  createCouncilRunState,
   saveCouncilRun,
   tryLoadCouncilRun,
   setRunStatus,
-  appendOverlapRecord,
   appendHandoffPacket,
 } from "./council-state-store.js";
 import { UsageLedger } from "./usage-ledger.js";
@@ -135,11 +134,12 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       opts.auditLogPath ??
       `${opts.repoRoot}/.dantecode/council/audit.jsonl`;
 
-    this.runState = createCouncilRunState(opts.repoRoot, opts.objective, auditLogPath);
+    const runState = createCouncilRunState(opts.repoRoot, opts.objective, auditLogPath);
+    this.runState = runState;
 
     // Init router
     this.router = new CouncilRouter(this.ledger, this.adapters);
-    this.router.attachRun(this.runState);
+    this.router.attachRun(runState);
 
     // Init worktree observer
     this.observer = new WorktreeObserver({
@@ -162,11 +162,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       }
     });
 
-    await saveCouncilRun(this.runState);
+    await saveCouncilRun(runState);
     this.transition("running");
     this.observer.start();
 
-    return this.runState.runId;
+    return runState.runId;
   }
 
   /**
@@ -183,7 +183,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     this.runState = state;
     this.router = new CouncilRouter(this.ledger, this.adapters);
-    this.router.attachRun(this.runState);
+    this.router.attachRun(state);
 
     // Re-register agents from saved state
     for (const agent of state.agents) {

@@ -15,6 +15,24 @@ import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TrailEventIndex } from "./state/trail-index.js";
 
 // ---------------------------------------------------------------------------
+// Structured error code vocabulary
+// ---------------------------------------------------------------------------
+
+/** Structured error code vocabulary for all debug-trail engine errors. */
+export const TrailErrorCode = {
+  SNAPSHOT_NOT_FOUND: "snapshot_not_found",
+  TARGET_EXISTS: "target_exists",
+  WRITE_FAILED: "write_failed",
+  DRY_RUN: "dry_run",
+  HASH_MISMATCH: "hash_mismatch",
+  DISK_WRITE_ERROR: "disk_write_error",
+  DISPATCH_FAILED: "dispatch_failed",
+  QUOTA_EXCEEDED: "quota_exceeded",
+  PRIVACY_EXCLUDED: "privacy_excluded",
+} as const;
+export type TrailErrorCode = (typeof TrailErrorCode)[keyof typeof TrailErrorCode];
+
+// ---------------------------------------------------------------------------
 // Query types
 // ---------------------------------------------------------------------------
 
@@ -265,6 +283,12 @@ export class TrailQueryEngine {
     return this.query({ sessionId, limit, order: "asc" });
   }
 
+  /** Get the most recent error event for a session. Returns null if none. */
+  async getLatestError(sessionId?: string): Promise<import("./types.js").TrailEvent | null> {
+    const result = await this.query({ sessionId, errorsOnly: true, limit: 1, order: "desc" });
+    return result.results[0] ?? null;
+  }
+
   /** List all sessions in the trail. */
   async listSessions(): Promise<string[]> {
     await this.ensureReady();
@@ -275,6 +299,39 @@ export class TrailQueryEngine {
   async listFiles(): Promise<string[]> {
     await this.ensureReady();
     return this.index.getFiles();
+  }
+
+  /**
+   * Stream events from the JSONL file line-by-line without loading all into memory.
+   * Use for large trails (100K+ events) where readAllEvents() is too expensive.
+   */
+  async *streamEvents(
+    filter?: (e: import("./types.js").TrailEvent) => boolean,
+  ): AsyncGenerator<import("./types.js").TrailEvent> {
+    await this.ensureReady();
+    const logPath = this.store.eventsLogPath();
+    const { existsSync } = await import("node:fs");
+    if (!existsSync(logPath)) return;
+
+    const { createReadStream } = await import("node:fs");
+    const { createInterface } = await import("node:readline");
+
+    const rl = createInterface({
+      input: createReadStream(logPath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as import("./types.js").TrailEvent;
+        if (!filter || filter(event)) {
+          yield event;
+        }
+      } catch {
+        // malformed line — skip silently
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

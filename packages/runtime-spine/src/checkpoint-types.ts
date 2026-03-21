@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { RuntimeTaskPacketSchema } from "./task-packets.js";
+import { SkillbookCheckpointRefSchema } from "./skillbook-types.js";
 
 export const CheckpointSchema = z.object({
   /** Unique ID for the checkpoint. */
@@ -41,6 +42,9 @@ export const CheckpointSchema = z.object({
   
   /** ISO-8601 timestamp. */
   timestamp: z.string().datetime().default(() => new Date().toISOString()),
+
+  /** Reference to the Skillbook state at this checkpoint. */
+  skillbookRef: SkillbookCheckpointRefSchema.optional(),
 });
 
 export type Checkpoint = z.infer<typeof CheckpointSchema>;

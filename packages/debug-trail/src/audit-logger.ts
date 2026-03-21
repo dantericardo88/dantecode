@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { TrailEvent, TrailEventKind, TrailProvenance, DebugTrailConfig } from "./types.js";
-import { defaultConfig } from "./types.js";
+import { defaultConfig, DiskWriteError } from "./types.js";
 import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TrailEventIndex } from "./state/trail-index.js";
 import { SessionMap } from "./state/session-map.js";
@@ -130,11 +130,23 @@ export class AuditLogger {
     // (backward-compatible with integration tests that query a separate engine
     // immediately after logging). The queue provides the ordering guarantee and
     // `drain()` guarantees all inflight writes have completed.
-    const writePromise = this.writeQueue
+
+    // Create a settler for this write slot
+    let settleWrite!: (err?: unknown) => void;
+    const writeSettled = new Promise<void>((res, rej) => {
+      settleWrite = (err) => (err ? rej(err) : res());
+    });
+
+    // Chain onto queue: ordering guaranteed, error surfaces to caller
+    this.writeQueue = this.writeQueue
       .then(() => this.store.appendEvent(event))
-      .catch(() => {});
-    this.writeQueue = writePromise;
-    await writePromise;
+      .then(() => settleWrite(), (err) => settleWrite(err));
+
+    try {
+      await writeSettled;
+    } catch (cause) {
+      throw new DiskWriteError(id, seq, cause);
+    }
 
     // Index synchronously so in-process queries see the event immediately
     this.index.index(event);
@@ -236,6 +248,40 @@ export class AuditLogger {
   /** Log a file move event. */
   async logFileMove(from: string, to: string, hash?: string): Promise<string> {
     return this.log("file_move", "FileSystem", `File move: ${from} → ${to}`, { from, to }, { afterHash: hash });
+  }
+
+  /**
+   * Atomic wrapper: capture before-state, perform a file write, capture after-state,
+   * and log both events. Use this instead of manual before/after capture pairs.
+   */
+  async logFileWriteTransaction(
+    filePath: string,
+    perform: () => Promise<void>,
+    snapshotter: {
+      captureBeforeState(fp: string, id: string, prov: TrailProvenance): Promise<{ beforeSnapshotId: string | null; beforeHash: string | null }>;
+      captureAfterState(fp: string, id: string, prov: TrailProvenance): Promise<{ afterSnapshotId: string | null; afterHash: string | null }>;
+    },
+  ): Promise<{ eventId: string; beforeSnapshotId: string | null; afterSnapshotId: string | null }> {
+    const prov = this.getProvenance();
+    const tempId = makeTrailEventId(this.seqCounter, prov.sessionId);
+
+    const before = await snapshotter.captureBeforeState(filePath, tempId, prov);
+    await perform();
+    const after = await snapshotter.captureAfterState(filePath, tempId, prov);
+
+    const eventId = await this.logFileWrite(
+      filePath,
+      before.beforeHash ?? undefined,
+      after.afterHash ?? undefined,
+      before.beforeSnapshotId ?? undefined,
+      after.afterSnapshotId ?? undefined,
+    );
+
+    return {
+      eventId,
+      beforeSnapshotId: before.beforeSnapshotId,
+      afterSnapshotId: after.afterSnapshotId,
+    };
   }
 
   /** Log a verification event. */

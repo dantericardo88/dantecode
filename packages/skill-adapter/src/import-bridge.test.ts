@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -281,6 +281,140 @@ describe("importSkillBridgeBundle", () => {
     const result = await importSkillBridgeBundle({ bundleDir: shellBundleDir, projectRoot });
     expect(result.success).toBe(true);
     expect(result.runtimeWarnings.some((w) => /shell|bash/i.test(w))).toBe(true);
+  });
+
+  describe("path traversal protection", () => {
+    it("sanitizes path-traversal slug and writes inside project root", async () => {
+      const traversalManifest = {
+        ...GREEN_MANIFEST,
+        normalizedSkill: {
+          ...GREEN_MANIFEST.normalizedSkill,
+          slug: "../../escape",
+          name: "escape",
+        },
+      };
+      const traversalBundleDir = join(tmpRoot, "traversal-bundle");
+      await buildBundle(traversalBundleDir, traversalManifest);
+      // Fix the SKILL.dc.md for the new name
+      await writeFile(
+        join(traversalBundleDir, "targets", "dantecode", "SKILL.dc.md"),
+        `---\nname: escape\ndescription: Escape skill\nimport_source: skillbridge\nadapter_version: 1.0.0\nwrapped_at: ${new Date().toISOString()}\n---\n\nEscape skill.\n`,
+        "utf-8",
+      );
+
+      const result = await importSkillBridgeBundle({ bundleDir: traversalBundleDir, projectRoot });
+      expect(result.success).toBe(true);
+      // Slug must be sanitized — no traversal chars
+      expect(result.slug).toBe("escape");
+      expect(result.slug).not.toContain("..");
+      // skillDir must be inside project root
+      expect(result.skillDir).toContain(projectRoot);
+      expect(result.skillDir).not.toContain("..");
+    });
+  });
+
+  describe("dry-run mode", () => {
+    it("dryRun: true returns result with dryRun: true and writes NO files", async () => {
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+
+      const result = await importSkillBridgeBundle({ bundleDir, projectRoot, dryRun: true });
+
+      expect(result.success).toBe(true);
+      expect(result.dryRun).toBe(true);
+      expect(result.slug).toBe("my-skill");
+      expect(result.bucket).toBe("green");
+
+      // No skill directory should have been created
+      const skillFile = join(projectRoot, ".dantecode", "skills", "my-skill", "SKILL.dc.md");
+      await expect(readFile(skillFile, "utf-8")).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("dryRun: true with blocked (red) bundle still returns blocked error", async () => {
+      const redBundleDir = join(tmpRoot, "red-dry-bundle");
+      await buildBundle(redBundleDir, RED_MANIFEST);
+
+      const result = await importSkillBridgeBundle({
+        bundleDir: redBundleDir,
+        projectRoot,
+        dryRun: true,
+      });
+
+      // Security check fires before dryRun gate — blocked error returned
+      expect(result.success).toBe(false);
+      expect(result.bucket).toBe("red");
+      expect(result.error).toMatch(/blocked|red/i);
+    });
+
+    it("dryRun: true with existing slug and no force still returns overwrite error", async () => {
+      // First import installs the skill for real
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+      const first = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(first.success).toBe(true);
+
+      // Dry run on same slug without force — overwrite protection fires first
+      const result = await importSkillBridgeBundle({ bundleDir, projectRoot, dryRun: true });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/already exists/i);
+    });
+
+    it("dryRun: true + force: true still prevents writes", async () => {
+      // First: real import installs the skill
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+      const first = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(first.success).toBe(true);
+
+      // Get mtime before dry-run attempt
+      const skillFile = join(projectRoot, ".dantecode", "skills", "my-skill", "SKILL.dc.md");
+      const { mtimeMs: mtimeBefore } = await stat(skillFile);
+
+      // Dry-run with force: should succeed (overwrite protection bypassed by force)
+      // but NO files should be written
+      const result = await importSkillBridgeBundle({
+        bundleDir,
+        projectRoot,
+        dryRun: true,
+        force: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.dryRun).toBe(true);
+
+      // File mtime must be unchanged — no write occurred
+      const { mtimeMs: mtimeAfter } = await stat(skillFile);
+      expect(mtimeAfter).toBe(mtimeBefore);
+    });
+  });
+
+  describe("overwrite protection", () => {
+    it("returns success:false when skill already exists and force is not set", async () => {
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+      const first = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(first.success).toBe(true);
+
+      // Second import without force — should be rejected
+      const second = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(second.success).toBe(false);
+      expect(second.error).toMatch(/already exists/i);
+    });
+
+    it("returns success:false by default when force is not passed", async () => {
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+      await importSkillBridgeBundle({ bundleDir, projectRoot });
+      // No force field — defaults to false
+      const result = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(result.success).toBe(false);
+    });
+
+    it("overwrites existing skill when force: true", async () => {
+      await buildBundle(bundleDir, GREEN_MANIFEST);
+      const first = await importSkillBridgeBundle({ bundleDir, projectRoot });
+      expect(first.success).toBe(true);
+
+      const second = await importSkillBridgeBundle({ bundleDir, projectRoot, force: true });
+      expect(second.success).toBe(true);
+      expect(second.slug).toBe("my-skill");
+      expect(second.bucket).toBe("green");
+    });
   });
 });
 

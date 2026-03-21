@@ -185,19 +185,44 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
   const resolved = resolvePath(filePath, projectRoot);
 
   try {
+    // Step 1: Capture before-state (best-effort — never blocks the write)
+    let beforeSnapshotId: string | undefined;
+    let beforeHash: string | undefined;
+    let trailMod: typeof import("@dantecode/debug-trail") | null = null;
+    let trailSnapshotter: import("@dantecode/debug-trail").FileSnapshotter | null = null;
+    let trailLogger: import("@dantecode/debug-trail").AuditLogger | null = null;
+    try {
+      trailMod = await import("@dantecode/debug-trail");
+      trailLogger = trailMod.getGlobalLogger() ?? null;
+      if (trailLogger) {
+        trailSnapshotter = new trailMod.FileSnapshotter();
+        const prov = trailLogger.getProvenance();
+        const before = await trailSnapshotter.captureBeforeState(resolved, "tw-before", prov);
+        beforeSnapshotId = before.beforeSnapshotId ?? undefined;
+        beforeHash = before.beforeHash ?? undefined;
+      }
+    } catch { /* before-state is best-effort */ }
+
+    // Step 2: Actual write — always happens regardless of debug-trail state
     await mkdir(dirname(resolved), { recursive: true });
     await writeFile(resolved, content, "utf-8");
     const lineCount = content.split("\n").length;
 
-    // Always-on debug trail logging (non-blocking, fire-and-forget)
-    try {
-      const { getGlobalLogger } = await import("@dantecode/debug-trail");
-      const logger = getGlobalLogger();
-      if (logger) {
-        void logger.logFileWrite(resolved, undefined, undefined, undefined, undefined);
-      }
-    } catch {
-      // debug-trail is optional — never fail the tool
+    // Step 3: Capture after-state and log (fire-and-forget — never fails the tool)
+    if (trailLogger && trailSnapshotter) {
+      void (async () => {
+        try {
+          const prov = trailLogger!.getProvenance();
+          const after = await trailSnapshotter!.captureAfterState(resolved, "tw-after", prov);
+          await trailLogger!.logFileWrite(
+            resolved,
+            beforeHash,
+            after.afterHash ?? undefined,
+            beforeSnapshotId,
+            after.afterSnapshotId ?? undefined,
+          );
+        } catch { /* never fail the tool */ }
+      })();
     }
 
     return {
@@ -285,20 +310,44 @@ async function toolEdit(
       updated = existing.replace(oldString, newString);
     }
 
+    // Step 1: Capture before-state (file already read into `existing` — snapshot it)
+    let beforeSnapshotId: string | undefined;
+    let beforeHash: string | undefined;
+    let editTrailSnapshotter: import("@dantecode/debug-trail").FileSnapshotter | null = null;
+    let editTrailLogger: import("@dantecode/debug-trail").AuditLogger | null = null;
+    try {
+      const trailMod = await import("@dantecode/debug-trail");
+      editTrailLogger = trailMod.getGlobalLogger() ?? null;
+      if (editTrailLogger) {
+        editTrailSnapshotter = new trailMod.FileSnapshotter();
+        const prov = editTrailLogger.getProvenance();
+        const before = await editTrailSnapshotter.captureBeforeState(resolved, "te-before", prov);
+        beforeSnapshotId = before.beforeSnapshotId ?? undefined;
+        beforeHash = before.beforeHash ?? undefined;
+      }
+    } catch { /* before-state is best-effort */ }
+
+    // Step 2: Actual write
     await writeFile(resolved, updated, "utf-8");
     context?.editAttempts?.delete(attemptKey);
 
     const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
 
-    // Always-on debug trail logging (non-blocking, fire-and-forget)
-    try {
-      const { getGlobalLogger } = await import("@dantecode/debug-trail");
-      const logger = getGlobalLogger();
-      if (logger) {
-        void logger.logFileWrite(resolved, undefined, undefined, undefined, undefined);
-      }
-    } catch {
-      // debug-trail is optional — never fail the tool
+    // Step 3: Capture after-state and log (fire-and-forget — never fails the tool)
+    if (editTrailLogger && editTrailSnapshotter) {
+      void (async () => {
+        try {
+          const prov = editTrailLogger!.getProvenance();
+          const after = await editTrailSnapshotter!.captureAfterState(resolved, "te-after", prov);
+          await editTrailLogger!.logFileWrite(
+            resolved,
+            beforeHash,
+            after.afterHash ?? undefined,
+            beforeSnapshotId,
+            after.afterSnapshotId ?? undefined,
+          );
+        } catch { /* never fail the tool */ }
+      })();
     }
 
     return {

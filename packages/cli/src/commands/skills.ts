@@ -3,8 +3,10 @@
 // Sub-commands for managing skills: list, import, wrap, show, validate, remove
 // ============================================================================
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   listSkills,
   getSkill,
@@ -426,28 +428,39 @@ async function skillsRemove(args: string[], projectRoot: string): Promise<void> 
 
 /**
  * Imports a compiled SkillBridge bundle into the local project.
- * Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked]
+ * Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked] [--force] [--dry-run]
  */
 async function skillsImportBridge(args: string[], projectRoot: string): Promise<void> {
   const bundleDir = args.find((a) => !a.startsWith("--"));
   const allowBlocked = args.includes("--allow-blocked");
+  const force = args.includes("--force");
+  const dryRun = args.includes("--dry-run");
 
   if (!bundleDir) {
     process.stdout.write(
-      `${RED}Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked]${RESET}\n\n` +
+      `${RED}Usage: dantecode skills import-bridge <bundle-dir> [--allow-blocked] [--force] [--dry-run]${RESET}\n\n` +
         `${DIM}  <bundle-dir>     Path to the compiled SkillBridge bundle (contains skillbridge.json)\n` +
-        `  --allow-blocked  Import even if the bundle is classified as red (blocked)${RESET}\n`,
+        `  --allow-blocked  Import even if the bundle is classified as red (blocked)\n` +
+        `  --force          Overwrite an existing skill with the same slug\n` +
+        `  --dry-run        Preview import without writing any files${RESET}\n`,
     );
     return;
   }
 
   const resolvedBundleDir = resolve(projectRoot, bundleDir);
-  process.stdout.write(`\n${DIM}Importing SkillBridge bundle from: ${resolvedBundleDir}${RESET}\n`);
+
+  if (dryRun) {
+    process.stdout.write(`\n${YELLOW}[DRY RUN]${RESET} ${DIM}Previewing import from: ${resolvedBundleDir}${RESET}\n`);
+  } else {
+    process.stdout.write(`\n${DIM}Importing SkillBridge bundle from: ${resolvedBundleDir}${RESET}\n`);
+  }
 
   const result = await importSkillBridgeBundle({
     bundleDir: resolvedBundleDir,
     projectRoot,
     allowBlocked,
+    force,
+    dryRun,
   });
 
   if (!result.success) {
@@ -460,12 +473,22 @@ async function skillsImportBridge(args: string[], projectRoot: string): Promise<
     result.bucket === "green" ? GREEN : result.bucket === "amber" ? YELLOW : RED;
   const bucketLabel = result.bucket.toUpperCase();
 
-  process.stdout.write(
-    `\n${GREEN}Bundle imported:${RESET} ${BOLD}${result.slug}${RESET}\n` +
-      `  ${DIM}Skill dir:       ${result.skillDir}${RESET}\n` +
-      `  ${DIM}Quality bucket:  ${bucketColor}${bucketLabel}${RESET}\n` +
-      `  ${DIM}Conv. score:     ${(result.conversionScore * 100).toFixed(0)}%${RESET}\n`,
-  );
+  if (result.dryRun) {
+    process.stdout.write(
+      `\n${YELLOW}[DRY RUN]${RESET} Would import: ${BOLD}${result.slug}${RESET}\n` +
+        `  ${DIM}Skill dir:       ${result.skillDir}${RESET}\n` +
+        `  ${DIM}Quality bucket:  ${bucketColor}${bucketLabel}${RESET}\n` +
+        `  ${DIM}Conv. score:     ${(result.conversionScore * 100).toFixed(0)}%${RESET}\n` +
+        `\n${YELLOW}[DRY RUN]${RESET} ${DIM}No files were written.${RESET}\n`,
+    );
+  } else {
+    process.stdout.write(
+      `\n${GREEN}Bundle imported:${RESET} ${BOLD}${result.slug}${RESET}\n` +
+        `  ${DIM}Skill dir:       ${result.skillDir}${RESET}\n` +
+        `  ${DIM}Quality bucket:  ${bucketColor}${bucketLabel}${RESET}\n` +
+        `  ${DIM}Conv. score:     ${(result.conversionScore * 100).toFixed(0)}%${RESET}\n`,
+    );
+  }
 
   if (result.runtimeWarnings.length > 0) {
     process.stdout.write(`\n${YELLOW}Runtime warnings (${result.runtimeWarnings.length}):${RESET}\n`);
@@ -483,9 +506,11 @@ async function skillsImportBridge(args: string[], projectRoot: string): Promise<
     }
   }
 
-  process.stdout.write(
-    `\n${DIM}Use 'dantecode skills show ${result.slug}' to view the skill.${RESET}\n\n`,
-  );
+  if (!result.dryRun) {
+    process.stdout.write(
+      `\n${DIM}Use 'dantecode skills show ${result.slug}' to view the skill.${RESET}\n\n`,
+    );
+  }
 }
 
 /**
@@ -499,11 +524,18 @@ async function skillsConvert(args: string[], projectRoot: string): Promise<void>
     return idx !== -1 && args[idx + 1] ? (args[idx + 1] ?? "dantecode") : "dantecode";
   })();
 
+  // Parse --bundle-dir <path> option
+  const bundleDirIdx = args.indexOf("--bundle-dir");
+  const bundleDirOverride = bundleDirIdx !== -1 && args[bundleDirIdx + 1]
+    ? args[bundleDirIdx + 1]
+    : undefined;
+
   if (!source) {
     process.stdout.write(
       `${RED}Usage: dantecode skills convert <source> --to dantecode${RESET}\n\n` +
-        `${DIM}  <source>   Local folder, single SKILL.md, or GitHub URL\n` +
-        `  --to       Target(s): dantecode,qwen-skill,mcp (default: dantecode)${RESET}\n` +
+        `${DIM}  <source>         Local folder, single SKILL.md, or GitHub URL\n` +
+        `  --to             Target(s): dantecode,qwen-skill,mcp (default: dantecode)\n` +
+        `  --bundle-dir     Override the path to the compiled bundle directory${RESET}\n` +
         `\n${DIM}This command delegates to 'danteforge skills convert' and then imports\n` +
         `the resulting bundle via 'dantecode skills import-bridge'.${RESET}\n`,
     );
@@ -516,8 +548,6 @@ async function skillsConvert(args: string[], projectRoot: string): Promise<void>
   );
 
   // Shell out to danteforge binary for the actual compilation
-  const { execFile } = await import("node:child_process");
-  const { promisify } = await import("node:util");
   const execFileAsync = promisify(execFile);
 
   const dfArgs = ["skills", "convert", source, "--to", toTargets, "--verify"];
@@ -548,7 +578,21 @@ async function skillsConvert(args: string[], projectRoot: string): Promise<void>
       .filter(Boolean)
       .pop() ?? "skill";
   const slug = rawSlug.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  const bundleDir = join(projectRoot, ".danteforge", "converted", slug);
+  const defaultBundleDir = join(projectRoot, ".danteforge", "converted", slug);
+  const bundleDir = bundleDirOverride
+    ? resolve(projectRoot, bundleDirOverride)
+    : defaultBundleDir;
+
+  // Verify the bundle directory exists before attempting import
+  try {
+    await stat(bundleDir);
+  } catch {
+    process.stderr.write(`Bundle directory not found: ${bundleDir}\n`);
+    process.stderr.write(
+      `Hint: DanteForge may have written to a different path. Use --bundle-dir <path> to specify it.\n`,
+    );
+    process.exit(1);
+  }
 
   process.stdout.write(`\n${DIM}Importing bundle: ${bundleDir}${RESET}\n`);
   await skillsImportBridge([bundleDir], projectRoot);

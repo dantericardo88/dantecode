@@ -455,3 +455,44 @@ describe("buildWavePrompt with bridgeWarnings", () => {
     expect(prompt).not.toContain("SkillBridge Activation Notice");
   });
 });
+
+describe("buildWavePrompt — preamble position and suppression", () => {
+  const amberWarnings: BridgeActivationWarnings = {
+    skillName: "test-skill",
+    bucket: "amber",
+    conversionScore: 0.7,
+    runtimeWarnings: ["needs shell"],
+    conversionWarnings: [],
+    hasCapabilityGaps: true,
+  };
+
+  it("injects preamble on wave 1 (currentIndex === 0)", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something.\n\n## Step 2\nDo more.");
+    const state = createWaveState(waves);
+    expect(state.currentIndex).toBe(0);
+    const prompt = buildWavePrompt(state, amberWarnings);
+    expect(prompt).toContain("SkillBridge Activation Notice");
+  });
+
+  it("suppresses preamble on wave 2 (currentIndex === 1)", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something.\n\n## Step 2\nDo more.");
+    const state = createWaveState(waves);
+    advanceWave(state); // advance to wave 2
+    expect(state.currentIndex).toBe(1);
+    const prompt = buildWavePrompt(state, amberWarnings);
+    expect(prompt).not.toContain("SkillBridge Activation Notice");
+  });
+
+  it("preamble appears AFTER the ## Current Wave: header on wave 1", () => {
+    const waves = parseSkillWaves("## Step 1\nDo something.\n\n## Step 2\nDo more.");
+    const state = createWaveState(waves);
+    const prompt = buildWavePrompt(state, amberWarnings);
+
+    const headerIdx = prompt.indexOf("## Current Wave:");
+    const preambleIdx = prompt.indexOf("## SkillBridge Activation Notice");
+
+    expect(headerIdx).toBeGreaterThanOrEqual(0);
+    expect(preambleIdx).toBeGreaterThanOrEqual(0);
+    expect(preambleIdx).toBeGreaterThan(headerIdx);
+  });
+});

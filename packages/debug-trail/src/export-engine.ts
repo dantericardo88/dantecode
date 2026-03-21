@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { writeFile, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
   TrailEvent,
@@ -42,6 +43,8 @@ export function scoreCompleteness(
   events: TrailEvent[],
   tombstones: DeleteTombstone[],
   sessionId: string,
+  /** Optional: resolve a snapshotId to its storage path for existence checks. */
+  snapshotPathFn?: (snapshotId: string) => string,
 ): TrailCompletenessScore {
   const now = new Date().toISOString();
   const totalEvents = events.length;
@@ -76,9 +79,27 @@ export function scoreCompleteness(
     if (fileEventKinds.has(e.kind)) {
       totalFileEvents++;
       if (e.kind === "file_write" && e.afterSnapshotId) {
-        fileEventsWithSnapshots++;
+        // Verify the snapshot file still exists on disk (may have been pruned/deleted)
+        const snapshotExists = snapshotPathFn
+          ? existsSync(snapshotPathFn(e.afterSnapshotId))
+          : true;
+        if (snapshotExists) {
+          fileEventsWithSnapshots++;
+        } else {
+          // Snapshot ID recorded but file is gone — count as gap
+          snapshotGaps.push(e.id);
+        }
       } else if (e.kind === "file_delete" && e.beforeSnapshotId) {
-        fileEventsWithSnapshots++;
+        // Verify the before-state snapshot file still exists on disk
+        const snapshotExists = snapshotPathFn
+          ? existsSync(snapshotPathFn(e.beforeSnapshotId))
+          : true;
+        if (snapshotExists) {
+          fileEventsWithSnapshots++;
+        } else {
+          // Snapshot ID recorded but file is gone — count as gap
+          snapshotGaps.push(e.id);
+        }
       } else if (e.kind === "file_write" || e.kind === "file_delete") {
         snapshotGaps.push(e.id);
       } else {
@@ -140,9 +161,10 @@ export class ExportEngine {
 
     const sorted = events.sort((a, b) => a.seq - b.seq);
 
-    // Score completeness
+    // Score completeness — pass store's snapshotPath resolver so we can detect
+    // pruned/deleted snapshot files and count them as gaps rather than coverage.
     const completeness = options.includeCompleteness !== false
-      ? scoreCompleteness(sorted, sessionTombstones, sessionId)
+      ? scoreCompleteness(sorted, sessionTombstones, sessionId, this.store.snapshotPath.bind(this.store))
       : undefined;
 
     // Build export document
@@ -169,7 +191,7 @@ export class ExportEngine {
         tombstoneCount: sessionTombstones.length,
         completeness,
         events: sorted,
-        tombstones: options.includeTombstones !== false ? sessionTombstones : undefined,
+        tombstones: options.includeTombstones !== false ? sessionTombstones : [],
       };
       content = JSON.stringify(doc, null, 2);
     }

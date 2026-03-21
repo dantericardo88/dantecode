@@ -5,6 +5,7 @@
 // ============================================================================
 
 import type { AuditLogger } from "../audit-logger.js";
+import type { TrailStore } from "../sqlite-store.js";
 import type { TrailEvent } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -20,9 +21,14 @@ export interface CheckpointLinkage {
 }
 
 export class CheckpointerBridge {
-  private linkages: CheckpointLinkage[] = [];
+  private linkages: Array<CheckpointLinkage> = [];
 
   constructor(private readonly logger: AuditLogger) {}
+
+  /** Access the underlying TrailStore via the AuditLogger. */
+  private get store(): TrailStore {
+    return this.logger.getStore();
+  }
 
   /**
    * Register a checkpoint transition and link it to the current trail position.
@@ -50,6 +56,15 @@ export class CheckpointerBridge {
         timestamp,
       });
     }
+
+    // Log linkage to trail for persistence across restarts
+    void this.logger.log(
+      "checkpoint_transition",
+      "CheckpointerBridge",
+      `Checkpoint linkage: ${checkpointId} → ${[eventId].length} events`,
+      { checkpointLinkage: { checkpointId, eventIds: [eventId], createdAt: new Date().toISOString() } },
+      { provenance: { checkpointId } },
+    ).catch(() => {});
 
     return eventId;
   }
@@ -106,5 +121,37 @@ export class CheckpointerBridge {
    */
   checkpointForEvent(event: TrailEvent): string | null {
     return event.provenance.checkpointId ?? null;
+  }
+
+  /**
+   * Restore in-memory linkages from persisted trail events.
+   * Call this on startup to reconstruct linkages that survived a process restart.
+   */
+  async restoreLinkages(): Promise<void> {
+    try {
+      await this.store.init();
+      const allEvents = await this.store.readAllEvents();
+      const linkageEvents = allEvents.filter(
+        (e) => e.kind === "checkpoint_transition" && e.payload["checkpointLinkage"],
+      );
+      for (const event of linkageEvents) {
+        const linkage = event.payload["checkpointLinkage"] as { checkpointId: string; eventIds: string[] };
+        if (linkage?.checkpointId && Array.isArray(linkage?.eventIds)) {
+          // Only add if not already present (dedup by checkpointId)
+          const exists = this.linkages.some((l) => l.checkpointId === linkage.checkpointId);
+          if (!exists) {
+            this.linkages.push({
+              checkpointId: linkage.checkpointId,
+              sessionId: event.provenance.sessionId,
+              step: typeof event.payload["step"] === "number" ? (event.payload["step"] as number) : -1,
+              trailEventIds: linkage.eventIds,
+              timestamp: event.timestamp,
+            });
+          }
+        }
+      }
+    } catch {
+      // Restoration is best-effort — do not throw
+    }
   }
 }

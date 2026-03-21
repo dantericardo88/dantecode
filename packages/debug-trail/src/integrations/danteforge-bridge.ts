@@ -48,7 +48,7 @@ export class DanteForgeBridge {
    * Score the completeness of a session's trail.
    * Returns a PDSE-compatible trust result.
    */
-  async scoreSession(sessionId: string): Promise<TrailTrustResult> {
+  async scoreSession(sessionId: string, workflowId?: string): Promise<TrailTrustResult> {
     const events = await this.store.queryBySession(sessionId);
     const tombstones = await this.store.readAllTombstones();
     const sessionTombstones = tombstones.filter((t) => t.provenance.sessionId === sessionId);
@@ -72,11 +72,13 @@ export class DanteForgeBridge {
     const verified = trustScore >= 0.85 && issues.length === 0;
     const verifiedAt = new Date().toISOString();
 
-    // Log the verification as a trail event
-    await this.logger.logVerification(
-      "trail_completeness",
-      verified,
-      `Score: ${(trustScore * 100).toFixed(0)}%, Grade: ${pdseGrade}, Issues: ${issues.length}`,
+    // Log the verification as a trail event, including workflowId in provenance
+    await this.logger.log(
+      "verification",
+      "DanteForgeBridge",
+      `Trail completeness: ${(trustScore * 100).toFixed(0)}%, Grade: ${pdseGrade}`,
+      { sessionId, workflowId, issues, pdseGrade, trustScore },
+      { provenance: { workflowId } as Partial<import("../types.js").TrailProvenance> },
     );
 
     return {
