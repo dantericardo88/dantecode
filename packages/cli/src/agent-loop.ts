@@ -37,6 +37,7 @@ import {
   formatEvidenceSummary,
   SecurityEngine,
   SecretsScanner,
+  synthesizeConfidence,
 } from "@dantecode/core";
 import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
 import { buildWorkflowInvocationPrompt } from "@dantecode/core";
@@ -3114,6 +3115,48 @@ export async function runAgentLoop(
         // Reset for the next approach
         currentApproachDescription = "";
         currentApproachToolCalls = 0;
+      }
+
+      // ConfidenceSynthesizer: after the verification cycle, synthesize a
+      // structured confidence decision. If the decision is "block" and the
+      // same error has persisted across 2+ retries, escalate immediately and
+      // exhaust retries rather than burning more rounds on an unrecoverable state.
+      if (!verificationPassed) {
+        try {
+          const synthesis = synthesizeConfidence({
+            pdseScore: 0,           // score unknown at CLI level; use sameErrorCount as signal
+            metrics: [],
+            railFindings: [],
+            critiqueTrace: [],
+          });
+          // Only block when the same error signature has repeated enough times
+          // to indicate a genuinely unrecoverable state.
+          if (synthesis.decision === "block" && sameErrorCount >= 2) {
+            const blockMsg =
+              `[ConfidenceSynthesizer] Decision: BLOCK — same failure signature repeated ` +
+              `${sameErrorCount + 1} times with no recovery. Escalating and stopping retries.`;
+            process.stdout.write(`\n${RED}${blockMsg}${RESET}\n`);
+            toolResults.push(blockMsg);
+            verificationRetriesExhausted = true;
+          }
+        } catch {
+          // Synthesizer errors must not break the recovery loop
+        }
+      } else if (verificationPassed && config.verbose) {
+        // Verification passed — emit a synthesizer "pass" signal in verbose mode
+        try {
+          const synthesis = synthesizeConfidence({
+            pdseScore: 1.0,
+            metrics: [],
+            railFindings: [],
+            critiqueTrace: [],
+          });
+          process.stdout.write(
+            `${DIM}[ConfidenceSynthesizer] Decision: ${synthesis.decision} — continuing normally${RESET}\n`,
+          );
+        } catch {
+          // Ignore
+        }
       }
 
       if (!verificationPassed && verificationRetriesExhausted) {

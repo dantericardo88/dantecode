@@ -31,6 +31,7 @@ import {
   verifyOutput,
   VerificationHistoryStore,
   VerificationBenchmarkStore,
+  VerificationSuiteRunner,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -41,6 +42,7 @@ import type {
   VerifyOutputInput,
   WaveOrchestratorState,
   WorkflowExecutionContext,
+  ConfidenceSynthesisResult,
 } from "@dantecode/core";
 import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
 import {
@@ -1025,6 +1027,53 @@ async function verifyOutputCommand(args: string, state: ReplState): Promise<stri
       lines.push("");
       lines.push(`  ${BOLD}Warnings${RESET}`);
       lines.push(...report.warnings.map((warning) => `    ${YELLOW}- ${warning}${RESET}`));
+    }
+
+    // VerificationSuiteRunner: run a one-shot suite and display confidence decision
+    try {
+      const suiteRunner = new VerificationSuiteRunner();
+      const suiteReport = await suiteRunner.run({
+        label: `verify-output: ${shorten(input.task, 60)}`,
+        cases: [
+          {
+            id: "primary",
+            label: "Primary check",
+            kind: "custom",
+            task: input.task,
+            output: input.output,
+            ...(input.criteria ? { criteria: input.criteria } : {}),
+            ...(input.rails ? { rails: input.rails } : {}),
+          },
+        ],
+      });
+
+      const primaryResult = suiteReport.results[0];
+      if (primaryResult) {
+        const synthesis: ConfidenceSynthesisResult = primaryResult.synthesis;
+        const decisionColor =
+          synthesis.decision === "pass" ? GREEN
+          : synthesis.decision === "soft-pass" ? YELLOW
+          : RED;
+        lines.push("");
+        lines.push(`  ${BOLD}Confidence Decision${RESET}`);
+        lines.push(
+          `    Decision:   ${decisionColor}${synthesis.decision.toUpperCase()}${RESET}  ${DIM}(confidence ${(synthesis.confidence * 100).toFixed(0)}%)${RESET}`,
+        );
+        if (synthesis.reasons.length > 0) {
+          lines.push(`    Reasons:`);
+          for (const reason of synthesis.reasons.slice(0, 5)) {
+            lines.push(`      ${RED}- ${reason}${RESET}`);
+          }
+        }
+        if (synthesis.softWarnings.length > 0) {
+          lines.push(`    Warnings:`);
+          for (const warning of synthesis.softWarnings.slice(0, 3)) {
+            lines.push(`      ${YELLOW}- ${warning}${RESET}`);
+          }
+        }
+      }
+    } catch {
+      // VerificationSuiteRunner errors must not break the existing command output
     }
 
     if (telemetryWarnings.length > 0) {

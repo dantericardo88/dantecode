@@ -106,7 +106,8 @@ export type ToolName =
   | "GitHubSearch"
   | "GitHubOps"
   | "AcquireUrl"
-  | "AcquireArchive";
+  | "AcquireArchive"
+  | "GitHooksInstall";
 
 // ----------------------------------------------------------------------------
 // Path Resolution
@@ -806,6 +807,52 @@ async function toolGitPush(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `Error pushing: ${message}`, isError: true };
+  }
+}
+
+/**
+ * GitHooksInstall tool: installs DanteCode git hooks (post-commit and pre-push)
+ * into the project's .git/hooks/ directory using the GitHookHandler from @dantecode/core.
+ */
+async function toolGitHooksInstall(
+  input: Record<string, unknown>,
+  projectRoot: string,
+): Promise<ToolResult> {
+  const hooksParam = input["hooks"];
+  const hooksList: string[] = Array.isArray(hooksParam)
+    ? (hooksParam as string[])
+    : ["post-commit", "pre-push"];
+
+  try {
+    const { GitHookHandler } = await import("@dantecode/core");
+    const handler = new GitHookHandler(projectRoot);
+
+    const validHooks = ["pre-commit", "post-commit", "pre-push", "post-merge", "pre-rebase"] as const;
+    type ValidHook = typeof validHooks[number];
+    const filteredHooks: ValidHook[] = hooksList.filter(
+      (h): h is ValidHook => (validHooks as readonly string[]).includes(h),
+    );
+
+    if (filteredHooks.length === 0) {
+      return {
+        content: `Error: no valid hook types specified. Valid hooks: ${validHooks.join(", ")}`,
+        isError: true,
+      };
+    }
+
+    await handler.installHooks(filteredHooks);
+    const installed = await handler.getInstalledHooks();
+
+    return {
+      content:
+        `DanteCode git hooks installed successfully.\n` +
+        `Installed: ${filteredHooks.join(", ")}\n` +
+        `All installed hooks: ${installed.join(", ")}`,
+      isError: false,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `Error installing git hooks: ${message}`, isError: true };
   }
 }
 
@@ -1664,6 +1711,9 @@ export async function executeTool(
     case "GitPush":
       result = await toolGitPush(input, projectRoot);
       break;
+    case "GitHooksInstall":
+      result = await toolGitHooksInstall(input, projectRoot);
+      break;
     case "TodoWrite":
       result = await toolTodoWrite(input, projectRoot);
       break;
@@ -1969,6 +2019,25 @@ export function getToolDefinitions(): Array<{
           set_upstream: {
             type: "boolean",
             description: "Set upstream tracking for the branch with git push -u",
+          },
+        },
+        required: [],
+      },
+    },
+    {
+      name: "GitHooksInstall",
+      description:
+        "Install DanteCode git hooks (post-commit and pre-push by default) into .git/hooks/ " +
+        "so that git events can be forwarded to the DanteCode event engine.",
+      parameters: {
+        type: "object",
+        properties: {
+          hooks: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "List of hook types to install. Valid values: pre-commit, post-commit, pre-push, " +
+              "post-merge, pre-rebase. Defaults to ['post-commit', 'pre-push'].",
           },
         },
         required: [],
