@@ -153,7 +153,6 @@ export interface AgentSessionState {
   branch: string;
   assignedFiles: string[];
   status:
-    | "idle"
     | "running"
     | "paused"
     | "frozen"

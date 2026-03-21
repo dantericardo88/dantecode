@@ -283,7 +283,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     // Non-fatal: /memory and /compact degrade gracefully when null
   }
 
-  // --continue / -C: resume the most recent session
+  // --continue / -C: restore the most recent session from disk
   if (options.resumeFromLastSession) {
     try {
       const { SessionStore } = await import("@dantecode/core");
@@ -292,11 +292,23 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       if (sessions.length > 0) {
         const latest = sessions[0]; // list() already sorted newest-first
         if (latest) {
-          replState.pendingResumeRunId = latest.id;
-          if (!options.silent) {
-            process.stdout.write(
-              `${DIM}[--continue] Resuming session ${latest.id.slice(0, 8)}...${RESET}\n`,
-            );
+          const file = await store.load(latest.id);
+          if (file) {
+            // Restore identity and full message history into the live session
+            replState.session.id = file.id;
+            replState.session.name = file.title;
+            replState.session.createdAt = file.createdAt;
+            replState.session.messages = file.messages.map((m) => ({
+              id: randomUUID(),
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+            }));
+            if (!options.silent) {
+              process.stdout.write(
+                `${DIM}[--continue] Resumed: ${file.title}${RESET}\n`,
+              );
+            }
           }
         }
       }

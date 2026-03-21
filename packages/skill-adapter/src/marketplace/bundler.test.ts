@@ -187,14 +187,51 @@ describe("bundleSkill — manifest completeness", () => {
 
     const manifestRaw = await readFile(join(outputDir, "bundle-manifest.json"), "utf-8");
     const manifest = JSON.parse(manifestRaw) as { files: string[] };
-    // Manifest lists basenames of skill content files written before the manifest itself
+    // Manifest lists paths relative to outputDir for skill content files written before the manifest
     expect(manifest.files).toContain("SKILL.md");
     expect(manifest.files).toContain("SKILL.dc.md");
-    // scripts/foo.sh is written with full path; basename is "foo.sh"
-    expect(manifest.files).toContain("foo.sh");
+    // scripts/foo.sh is in a subdirectory — relative path must be preserved (sep varies by OS)
+    expect(manifest.files.some((f) => f === "scripts/foo.sh" || f === "scripts\\foo.sh")).toBe(true);
     // bundle-manifest.json is added to filesWritten AFTER manifest is written,
     // so it does NOT appear in manifest.files (by design)
     expect(result.filesWritten.some((f) => basename(f) === "bundle-manifest.json")).toBe(true);
+  });
+});
+
+describe("bundleSkill — manifest stores relative paths", () => {
+  let projectRoot: string;
+  let outputDir: string;
+
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "bundle-relpath-project-"));
+    outputDir = await mkdtemp(join(tmpdir(), "bundle-relpath-output-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true }).catch(() => {});
+    await rm(outputDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("A. manifest.files contains relative path 'scripts/check.sh', not bare basename 'check.sh'", async () => {
+    const skillDir = join(projectRoot, ".dantecode", "skills", "relpath-skill");
+    await mkdir(join(skillDir, "scripts"), { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), SKILL_MD_CONTENT, "utf-8");
+    await writeFile(join(skillDir, "scripts", "check.sh"), "#!/bin/sh\necho ok", "utf-8");
+
+    const result = await bundleSkill(
+      { skillName: "relpath-skill", outputPath: outputDir, includeVerification: false },
+      projectRoot,
+    );
+
+    expect(result.success).toBe(true);
+
+    const manifestRaw = await readFile(join(outputDir, "bundle-manifest.json"), "utf-8");
+    const manifest = JSON.parse(manifestRaw) as { files: string[] };
+
+    // Must contain the relative path (forward-slash on all platforms via node:path.relative)
+    expect(manifest.files.some((f) => f === "scripts/check.sh" || f === "scripts\\check.sh")).toBe(true);
+    // Must NOT contain only the bare basename
+    expect(manifest.files).not.toContain("check.sh");
   });
 });
 

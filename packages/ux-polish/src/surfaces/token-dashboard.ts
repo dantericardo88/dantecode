@@ -92,7 +92,7 @@ export function renderTokenDashboard(data: TokenUsageData, theme?: ThemeEngine):
   const lines: string[] = [];
 
   // Top border
-  lines.push(`${c.info}╭─ Token Usage ${"─".repeat(BOX_WIDTH - 14)}╮${c.reset}`);
+  lines.push(`${c.info}╭─ Token Usage ${"─".repeat(BOX_WIDTH - 12)}╮${c.reset}`);
 
   const row = (label: string, value: string): string => {
     const inner = `${c.muted}${label.padEnd(12)}${c.reset}${value}`;
@@ -125,10 +125,10 @@ export function renderTokenDashboard(data: TokenUsageData, theme?: ThemeEngine):
 
   if (toolEntries.length > 0) {
     lines.push(`${c.info}│${c.reset}${" ".repeat(BOX_WIDTH + 2)}${c.info}│${c.reset}`);
-    lines.push(`${c.info}│${c.reset} ${c.muted}By Tool:${c.reset}${" ".repeat(BOX_WIDTH - 6)}${c.info}│${c.reset}`);
+    lines.push(`${c.info}│${c.reset} ${c.muted}By Tool:${c.reset}${" ".repeat(BOX_WIDTH - 7)}${c.info}│${c.reset}`);
     for (const [tool, { calls, tokens }] of toolEntries) {
       const label = `  ${tool.padEnd(10)} ${String(calls).padStart(3)} calls   ${formatNumber(tokens)} tokens`;
-      lines.push(`${c.info}│${c.reset} ${c.muted}${label}${c.reset}${" ".repeat(Math.max(0, BOX_WIDTH - label.length - 1))}${c.info}│${c.reset}`);
+      lines.push(`${c.info}│${c.reset} ${c.muted}${label}${c.reset}${" ".repeat(Math.max(0, BOX_WIDTH - label.length + 1))}${c.info}│${c.reset}`);
     }
   }
 

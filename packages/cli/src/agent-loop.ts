@@ -2203,8 +2203,10 @@ async function _runAgentLoopCore(
       const thinkPhase = reasoningChain.think(durablePrompt, `round=${roundCounter}`, tier);
       reasoningChain.recordStep(thinkPhase);
       if (reasoningChain.shouldCritique()) {
-        // Lightweight critique using current PDSE proxy (no network call needed)
-        const critiqueResult = reasoningChain.selfCritique(thinkPhase, 0.8);
+        // P4-C1: Use same error-based PDSE proxy as recordTierOutcome (was hardcoded 0.8
+        // which is always >= threshold 0.75, making shouldEscalate permanently false)
+        const pdseProxy = sameErrorCount === 0 ? 0.9 : sameErrorCount <= 2 ? 0.75 : 0.6;
+        const critiqueResult = reasoningChain.selfCritique(thinkPhase, pdseProxy);
         const critiquePhase = {
           type: "critique" as const,
           content: critiqueResult.recommendation,
@@ -2223,6 +2225,16 @@ async function _runAgentLoopCore(
             );
             currentRoundTier = escalateTo;
             tier = escalateTo;
+            // P4-C2: sync thinkingBudget to escalated tier (was missing — wrong budget after escalation)
+            if (thinkingBudget !== undefined) {
+              const tierBudgets: Record<import("@dantecode/core").ReasoningTier, number> = {
+                quick: 1024,
+                deep: 4096,
+                expert: 10240,
+              };
+              thinkingBudget = tierBudgets[escalateTo];
+              if (config.replState) config.replState.lastThinkingBudget = thinkingBudget;
+            }
           }
         }
       }

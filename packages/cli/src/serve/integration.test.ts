@@ -366,4 +366,42 @@ describe("DanteCode HTTP Server — Integration", () => {
     const res = await httpRequest(port, "DELETE", "/api/sessions/nonexistent-id");
     expect(res.status).toBe(404);
   });
+
+  // -------------------------------------------------------------------------
+  // Session lifecycle: reuse after abort (verifies abortController is cleared)
+  // -------------------------------------------------------------------------
+
+  it("session can accept a second message after first is aborted", async () => {
+    const created = await httpRequest(
+      port,
+      "POST",
+      "/api/sessions",
+      JSON.stringify({ name: "reuse-test" }),
+    );
+    expect(created.status).toBe(200);
+    const sessionId = created.body["id"] as string;
+
+    // First message — sets abortController, returns 202
+    const first = await httpRequest(
+      port,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "first message" }),
+    );
+    expect(first.status).toBe(202);
+
+    // Abort to clear the controller
+    const abort = await httpRequest(port, "POST", `/api/sessions/${sessionId}/abort`);
+    expect(abort.status).toBe(200);
+    expect(abort.body["aborted"]).toBe(true);
+
+    // Second message should now succeed (not 409)
+    const second = await httpRequest(
+      port,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "second message" }),
+    );
+    expect(second.status).toBe(202);
+  });
 });

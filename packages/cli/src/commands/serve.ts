@@ -133,6 +133,10 @@ export async function runServeCommand(args: string[]): Promise<void> {
           opts.sessionId,
           err instanceof Error ? err.message : String(err),
         );
+      } finally {
+        // Clear the abort controller so the session can accept new messages
+        const sess = serverHandle.sessions.get(opts.sessionId);
+        if (sess) sess.abortController = undefined;
       }
     })();
   };

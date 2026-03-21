@@ -3952,7 +3952,11 @@ async function importSessionCommand(args: string, state: ReplState): Promise<str
     const contextSummary = importedMessages
       .filter((m) => m["role"] === "user" || m["role"] === "assistant")
       .slice(-20)
-      .map((m) => `[${String(m["role"])}]: ${String(m["content"] ?? "").slice(0, 500)}`)
+      .map((m) => {
+        const raw = m["content"] ?? "";
+        const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+        return `[${String(m["role"])}]: ${text.slice(0, 500)}`;
+      })
       .join("\n\n");
 
     state.session.messages.push({
@@ -4187,6 +4191,13 @@ function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | unde
     }
   }
 
+  // PRD §3.5: display distilled playbook bullets when available
+  const playbook = chain.getPlaybook();
+  const playbookSection =
+    playbook.length > 0
+      ? `  Distilled playbook (${playbook.length} bullet${playbook.length === 1 ? "" : "s"}):\n${playbook.map((b) => `    • ${b.slice(0, 100)}`).join("\n")}`
+      : "";
+
   return [
     `${BOLD}Reasoning Statistics${RESET}`,
     `  Total steps: ${steps.length}`,
@@ -4195,6 +4206,7 @@ function formatThinkStats(chain: import("@dantecode/core").ReasoningChain | unde
     `  Auto-escalations: ${escalations}`,
     `  Average PDSE: ${avg}`,
     perfLines.length > 0 ? `  Tier performance (>=3 samples):\n${perfLines.join("\n")}` : "",
+    playbookSection,
   ].filter(Boolean).join("\n");
 }
 
@@ -4210,15 +4222,15 @@ function formatThinkChain(
   const lines = [`${BOLD}Reasoning Chain (last ${steps.length} steps)${RESET}`, ""];
   for (const step of steps) {
     const icon =
-      step.phase.type === "thinking" ? ">"
-      : step.phase.type === "critique" ? "?"
-      : step.phase.type === "action" ? "!"
-      : "~";
+      step.phase.type === "thinking" ? "💭"
+      : step.phase.type === "critique" ? "🔍"
+      : step.phase.type === "action" ? "⚡"
+      : "👁";
     const pdse =
       step.phase.pdseScore !== undefined
         ? ` P:${(step.phase.pdseScore * 100).toFixed(0)}`
         : "";
-    const esc = step.escalated ? ` ${YELLOW}^escalated${RESET}` : "";
+    const esc = step.escalated ? ` ${YELLOW}↑escalated${RESET}` : "";
     lines.push(`  ${icon} #${step.stepNumber} [${step.phase.type}]${pdse}${esc}`);
     lines.push(`    ${DIM}${step.phase.content.slice(0, 120)}${RESET}`);
     if (step.rootCause) lines.push(`    ${RED}Root cause: ${step.rootCause}${RESET}`);
@@ -4700,8 +4712,6 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
     return RED + "Unknown theme: " + themeName + ". Available: " + AVAILABLE_THEMES.join(", ") + RESET;
   }
 
-  engine.setTheme(themeName as ThemeName);
-
   try {
     const stateYamlPath = join(state.projectRoot, ".dantecode", "STATE.yaml");
     const raw = await readFile(stateYamlPath, "utf8").catch(() => "");
@@ -4709,9 +4719,10 @@ async function themeCommand(args: string, state: ReplState): Promise<string> {
       ? raw.replace(/^theme:.*$/m, "theme: " + themeName)
       : raw + "\ntheme: " + themeName + "\n";
     await writeFile(stateYamlPath, updated, "utf8");
+    engine.setTheme(themeName as ThemeName);
     state.theme = themeName as ThemeName;
   } catch {
-    // Non-fatal: state.theme not updated if disk write fails
+    // Non-fatal: engine and state.theme unchanged if disk write fails
   }
 
   const c = engine.resolve().colors;

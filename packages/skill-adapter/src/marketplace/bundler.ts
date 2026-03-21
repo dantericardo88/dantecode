@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { mkdir, copyFile, readdir, stat, writeFile, readFile } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, relative } from "node:path";
 import type { CatalogEntry } from "./catalog.js";
 
 // ----------------------------------------------------------------------------
@@ -233,7 +233,7 @@ export async function bundleSkill(
     name: options.skillName,
     version,
     bundledAt: new Date().toISOString(),
-    files: filesWritten.map((f) => basename(f)),
+    files: filesWritten.map((f) => relative(options.outputPath, f)),
   };
 
   try {

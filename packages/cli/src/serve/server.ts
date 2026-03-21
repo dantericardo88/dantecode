@@ -17,7 +17,7 @@ import { SessionEventEmitter } from "./session-emitter.js";
 import { createSSEStream } from "./sse-stream.js";
 import { checkAuth, unauthorizedResponse } from "./auth.js";
 import type { AuthConfig } from "./auth.js";
-import type { ServerContext, AgentRunnerOpts } from "./routes.js";
+import type { ServerContext, AgentRunnerOpts, SessionRecord } from "./routes.js";
 
 const VERSION = "1.0.0";
 
@@ -58,6 +58,8 @@ export interface DanteCodeServer {
   url: string;
   /** The session event emitter — use to subscribe to real-time agent events. */
   sessionEmitter: SessionEventEmitter;
+  /** Live session map — readable by agentRunner to clear abortController on completion. */
+  sessions: Map<string, SessionRecord>;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +293,7 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
     port: actualPort,
     url,
     sessionEmitter,
+    sessions: context.sessions,
     stop(): Promise<void> {
       return new Promise<void>((resolve, reject) => {
         server.close((err) => {

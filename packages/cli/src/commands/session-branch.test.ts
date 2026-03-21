@@ -287,3 +287,50 @@ describe("/name command", () => {
     expect(saved.title).toBe("persisted-name");
   });
 });
+
+// ---------------------------------------------------------------------------
+// --continue flag: session restore pathway (D10 fix verification)
+// ---------------------------------------------------------------------------
+
+describe("--continue flag: SessionStore restore pathway", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    tempDir = await mkdtemp(join(tmpdir(), "dantecode-continue-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("SessionStore.load returns the session saved via /name (D10 restore pathway)", async () => {
+    // Persist a named session to disk (as --continue would read it back)
+    const state = makeState(tempDir);
+    await routeSlashCommand("/name my-previous-session", state);
+
+    // Verify the restore pathway: SessionStore.load returns the saved file
+    const { SessionStore } = await import("@dantecode/core");
+    const store = new SessionStore(tempDir);
+    const sessions = await store.list();
+    expect(sessions.length).toBeGreaterThan(0);
+
+    const latest = sessions[0]!;
+    const file = await store.load(latest.id);
+    expect(file).not.toBeNull();
+    expect(file!.title).toBe("my-previous-session");
+    expect(file!.id).toBe(state.session.id);
+  });
+
+  it("--continue restore preserves full message count from saved session", async () => {
+    // makeSession gives 8 messages; verify all survive the save+load round-trip
+    const state = makeState(tempDir); // 8 messages
+    await routeSlashCommand("/name session-with-msgs", state);
+
+    const { SessionStore } = await import("@dantecode/core");
+    const store = new SessionStore(tempDir);
+    const file = await store.load(state.session.id);
+    expect(file).not.toBeNull();
+    expect(file!.messages.length).toBe(state.session.messages.length);
+  });
+});

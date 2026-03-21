@@ -176,10 +176,12 @@ export function renderDiff(
   let rightLine = 1;
   let currentFile = "";
   let linesWritten = 0;
+  let remainingInputLines = 0;
 
   for (let i = 0; i < lines.length; i++) {
     if (linesWritten >= maxLines) {
       truncated = true;
+      remainingInputLines = lines.length - i;
       break;
     }
 
@@ -252,8 +254,7 @@ export function renderDiff(
   }
 
   if (truncated) {
-    const remaining = lines.length - linesWritten;
-    outputLines.push(`${c.muted}... (${remaining} more lines truncated)${c.reset}`);
+    outputLines.push(`${c.muted}... (${remainingInputLines} more lines truncated)${c.reset}`);
   }
 
   return {

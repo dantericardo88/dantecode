@@ -1138,6 +1138,7 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   });
   orchestrator.on("budget:exhausted", (report) => {
     dashboard.updateFleet({ status: "failed" });
+    dashboard.draw();
     dashboard.clear();
     console.error(
       `${RED}[fleet] Budget exhausted — ${report.totalTokens.toLocaleString()} tokens, ` +

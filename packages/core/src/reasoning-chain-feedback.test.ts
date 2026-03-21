@@ -203,16 +203,68 @@ describe("decideTier — cost awareness", () => {
 // ---------------------------------------------------------------------------
 
 describe("getPlaybook", () => {
-  it("returns empty array when no steps have been recorded", () => {
+  it("returns empty array with no history steps", () => {
     const chain = makeChain();
     expect(chain.getPlaybook()).toEqual([]);
   });
 
-  it("returns array type after recording tier outcomes (no pdseScore on raw outcomes)", () => {
+  it("returns empty array when all steps have pdseScore below 0.85 threshold", () => {
     const chain = makeChain();
-    record(chain, "quick", 0.9, 5);
-    // recordTierOutcome does not push to history, so no scored steps exist
-    expect(Array.isArray(chain.getPlaybook())).toBe(true);
+    const phase = chain.think("Attempt that underperformed", "ctx", "quick");
+    phase.pdseScore = 0.7; // below distillPlaybook's 0.85 threshold
+    chain.recordStep(phase);
     expect(chain.getPlaybook()).toEqual([]);
+  });
+
+  it("returns bullet for step with pdseScore >= 0.85", () => {
+    const chain = makeChain();
+    const phase = chain.think("This auth debugging approach worked well", "ctx", "deep");
+    phase.pdseScore = 0.9; // above threshold
+    chain.recordStep(phase);
+    const playbook = chain.getPlaybook();
+    expect(playbook.length).toBeGreaterThanOrEqual(1);
+    expect(playbook[0]).toContain("auth debugging");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAdaptiveBias boundary: expert === deep exactly
+// ---------------------------------------------------------------------------
+
+describe("getAdaptiveBias — boundary", () => {
+  it("returns -0.05 when expert exactly equals deep (0.00 difference is still < 0.05)", () => {
+    const chain = makeChain();
+    record(chain, "quick", 0.75, 5);
+    record(chain, "deep", 0.82, 5);
+    record(chain, "expert", 0.82, 5); // exactly equal → 0.00 < 0.05 → should return -0.05
+    expect(chain.getAdaptiveBias()).toBe(-0.05);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selfCritique — escalation threshold
+// ---------------------------------------------------------------------------
+
+describe("selfCritique — shouldEscalate", () => {
+  it("shouldEscalate is true when pdseScore < autoEscalateThreshold (0.75 default)", () => {
+    const chain = makeChain(); // autoEscalateThreshold=0.75
+    const phase = chain.think("test approach", "ctx", "quick");
+    const result = chain.selfCritique(phase, 0.6); // 0.6 < 0.75
+    expect(result.shouldEscalate).toBe(true);
+    expect(result.score).toBe(0.6);
+  });
+
+  it("shouldEscalate is false when pdseScore === autoEscalateThreshold (boundary)", () => {
+    const chain = makeChain();
+    const phase = chain.think("test approach", "ctx", "quick");
+    const result = chain.selfCritique(phase, 0.75); // 0.75 is NOT < 0.75
+    expect(result.shouldEscalate).toBe(false);
+  });
+
+  it("shouldEscalate is false when pdseScore > autoEscalateThreshold", () => {
+    const chain = makeChain();
+    const phase = chain.think("test approach", "ctx", "quick");
+    const result = chain.selfCritique(phase, 0.8); // 0.8 >= 0.75
+    expect(result.shouldEscalate).toBe(false);
   });
 });

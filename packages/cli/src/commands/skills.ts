@@ -689,6 +689,11 @@ async function skillsInstall(args: string[], projectRoot: string): Promise<void>
     const t = args[tierIdx + 1] as string;
     if (t === "guardian" || t === "sentinel" || t === "sovereign") {
       tier = t;
+    } else {
+      process.stderr.write(
+        `Error: invalid --tier value "${t}". Must be one of: guardian, sentinel, sovereign\n`,
+      );
+      process.exit(1);
     }
   }
 
@@ -889,6 +894,11 @@ async function skillsImportAll(args: string[], projectRoot: string): Promise<voi
     const t = args[tierIdx + 1] as string;
     if (t === "guardian" || t === "sentinel" || t === "sovereign") {
       tier = t;
+    } else {
+      process.stderr.write(
+        `Error: invalid --tier value "${t}". Must be one of: guardian, sentinel, sovereign\n`,
+      );
+      process.exit(1);
     }
   }
 

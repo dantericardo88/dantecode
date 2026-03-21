@@ -163,7 +163,7 @@ export type { FilePatternWatcherOptions, FileChangeEvent } from "./file-pattern-
 
 // ─── Automation Agent Bridge ─────────────────────────────────────────────────
 
-export { runAutomationAgent, substitutePromptVars } from "./automation-agent-bridge.js";
+export { runAutomationAgent, substitutePromptVars, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
 export type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
 // ─── Council Conflict Scanner ───────────────────────────────────────────────

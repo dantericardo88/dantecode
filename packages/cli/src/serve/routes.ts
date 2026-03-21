@@ -109,8 +109,10 @@ function listSessions(ctx: ServerContext): RouteHandler {
 
 function getSession(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
     return ok({
       id: session.id,
       name: session.name,
@@ -122,8 +124,13 @@ function getSession(ctx: ServerContext): RouteHandler {
   };
 }
 
+const MAX_SESSIONS = 10_000;
+
 function createSession(ctx: ServerContext): RouteHandler {
   return async (req) => {
+    if (ctx.sessions.size >= MAX_SESSIONS) {
+      return { status: 429, body: { error: `Session limit reached (max ${MAX_SESSIONS})` } };
+    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const name = typeof body["name"] === "string" ? body["name"] : `Session ${ctx.sessions.size + 1}`;
     const model = typeof body["model"] === "string" ? body["model"] : ctx.model;
@@ -144,8 +151,10 @@ function createSession(ctx: ServerContext): RouteHandler {
 
 function resumeSession(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
     return ok({ id: session.id, name: session.name, resumed: true });
   };
 }
@@ -156,8 +165,10 @@ function resumeSession(ctx: ServerContext): RouteHandler {
 
 function sendMessage(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     const content = body["content"] ?? body["message"] ?? body["prompt"];
@@ -212,8 +223,10 @@ function sendMessage(ctx: ServerContext): RouteHandler {
 
 function abortGeneration(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
 
     if (session.abortController) {
       session.abortController.abort();
@@ -230,23 +243,27 @@ function abortGeneration(ctx: ServerContext): RouteHandler {
 
 function approveAction(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
     if (!session.pendingApproval) return badRequest("No pending approval for this session");
     session.pendingApproval.resolve(true);
     session.pendingApproval = undefined;
-    return ok({ approved: true, sessionId: req.params["id"] });
+    return ok({ approved: true, sessionId: id });
   };
 }
 
 function denyAction(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
     if (!session.pendingApproval) return badRequest("No pending approval for this session");
     session.pendingApproval.resolve(false);
     session.pendingApproval = undefined;
-    return ok({ denied: true, sessionId: req.params["id"] });
+    return ok({ denied: true, sessionId: id });
   };
 }
 
@@ -284,8 +301,10 @@ function switchModel(ctx: ServerContext): RouteHandler {
 
 function runSlashCommand(ctx: ServerContext): RouteHandler {
   return async (req) => {
-    const session = ctx.sessions.get(req.params["id"]!);
-    if (!session) return notFound(req.params["id"]!);
+    const id = req.params["id"]!;
+    if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
+    const session = ctx.sessions.get(id);
+    if (!session) return notFound(id);
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     const command = body["command"];
@@ -294,7 +313,7 @@ function runSlashCommand(ctx: ServerContext): RouteHandler {
     }
 
     ctx.sessionEmitter.emitStatus(session.id, `[slash] Dispatched: ${command}`);
-    return ok({ output: `Command queued: ${command}`, sessionId: req.params["id"] });
+    return ok({ output: `Command queued: ${command}`, sessionId: id });
   };
 }
 
@@ -306,6 +325,11 @@ function runVerification(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const rawFiles = Array.isArray(body["files"]) ? (body["files"] as unknown[]) : [];
+
+    // DoS guard: limit number of files before expensive per-file operations
+    if (rawFiles.length > 100) {
+      return badRequest("Too many files: max 100 per verification request");
+    }
 
     // Validate each file stays within projectRoot (path traversal prevention)
     const projectRootResolved = resolve(ctx.projectRoot);

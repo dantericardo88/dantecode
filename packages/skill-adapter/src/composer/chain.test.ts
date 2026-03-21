@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SkillChain, executeChain, resolveParams } from "./chain.js";
+import type { ChainDefinition } from "./chain.js";
 import { evaluateGate, scorePassesThreshold, selectOnFail } from "./conditional.js";
 
 // ----------------------------------------------------------------------------
@@ -370,5 +371,24 @@ describe("executeChain edge cases", () => {
     expect(result.steps[0]?.output).toBe("plain-string");
     expect(result.steps[0]?.pdseScore).toBe(90);
     expect(result.success).toBe(true);
+  });
+
+  it("all-skipped chain: success is true when all step gates have onFail: skip", async () => {
+    const def: ChainDefinition = {
+      name: "all-skip",
+      description: "",
+      steps: [
+        { skillName: "step-one", params: {}, gate: { minPdse: 999, onFail: "skip" } },
+        { skillName: "step-two", params: {}, gate: { minPdse: 999, onFail: "skip" } },
+      ],
+    };
+    const result = await executeChain(def, {
+      executeStep: async (_name: string, _params: Record<string, string>) => ({ output: "ran", pdseScore: 50 }),
+    });
+    expect(result.success).toBe(true);
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[0]?.status).toBe("skipped");
+    expect(result.steps[1]?.status).toBe("skipped");
+    expect(result.finalOutput).toContain("Gate skipped");
   });
 });

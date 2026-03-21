@@ -98,4 +98,17 @@ describe("renderTokenDashboard", () => {
     expect(output).toContain("Est. Cost");
     expect(output).toContain("$");
   });
+
+  it("all box lines have identical visible width", () => {
+    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+    const data: TokenUsageData = {
+      ...BASE_DATA,
+      byTool: { Read: { calls: 2, tokens: 500 } },
+    };
+    const output = renderTokenDashboard(data, THEME);
+    const rawLines = output.trimEnd().split("\n");
+    const widths = rawLines.map((l) => stripAnsi(l).length);
+    const unique = new Set(widths);
+    expect(unique.size).toBe(1);
+  });
 });

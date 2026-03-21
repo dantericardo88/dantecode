@@ -151,6 +151,27 @@ describe("SkillCatalog", () => {
     expect(result[0]!.name).toBe("v-skill");
   });
 
+  it("C. upsert twice with same name: save+reload yields exactly 1 entry with second description", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "catalog-dup-"));
+    try {
+      const catalog = new SkillCatalog(tmpDir);
+      await catalog.load();
+
+      catalog.upsert(makeEntry({ name: "dupe-skill", description: "first description" }));
+      catalog.upsert(makeEntry({ name: "dupe-skill", description: "second description" }));
+      await catalog.save();
+
+      const catalog2 = new SkillCatalog(tmpDir);
+      await catalog2.load();
+
+      const all = catalog2.search("");
+      expect(all.filter((e) => e.name === "dupe-skill")).toHaveLength(1);
+      expect(catalog2.get("dupe-skill")?.description).toBe("second description");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("6. save + load round-trip with real temp dir", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "catalog-test-"));
     try {

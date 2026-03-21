@@ -118,6 +118,7 @@ export class FilePatternWatcher extends EventEmitter {
   private pendingChanges: Map<string, "create" | "modify" | "delete"> = new Map();
   private changeCount = 0;
   private startedAt: string | null = null;
+  private _stopped = false;
 
   constructor(options: FilePatternWatcherOptions) {
     super();
@@ -164,6 +165,8 @@ export class FilePatternWatcher extends EventEmitter {
             changeType = "delete";
           }
         }
+        // Guard: if stop() was called while we were awaiting stat, discard this event
+        if (this._stopped) return;
         this.pendingChanges.set(fullRelative, changeType);
 
         // Debounce the emission
@@ -179,6 +182,7 @@ export class FilePatternWatcher extends EventEmitter {
   }
 
   stop(): void {
+    this._stopped = true;
     if (this.debounceTimer !== null) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;

@@ -141,6 +141,36 @@ describe("verifySkill", () => {
     expect(result.scriptSafety).toBeNull();
   });
 
+  it("12. quality boundary: 49-char instruction scores ≥20 points lower than 50-char", async () => {
+    const r49 = await verifySkill(makeSkill({ instructions: "x".repeat(49) }));
+    const r50 = await verifySkill(makeSkill({ instructions: "x".repeat(50) }));
+    expect(r49.overallScore).toBeLessThanOrEqual(r50.overallScore - 20);
+  });
+
+  it("13. quality boundary: 500-char structured instruction reaches sovereign tier", async () => {
+    const instructions = [
+      "1. Analyse the input thoroughly.",
+      "2. Apply the required transformation.",
+      "3. Validate the output against constraints.",
+      "4. Return structured result with all required fields.",
+      "Always ensure: correctness, completeness, and clarity.",
+      "Never truncate or omit required output fields.",
+      "x".repeat(400),
+    ].join("\n");
+    const result = await verifySkill(makeSkill({
+      instructions,
+      description: "A well-structured skill that performs data transformations with full validation and output constraints.",
+    }));
+    expect(result.tier).toBe("sovereign");
+    expect(result.overallScore).toBeGreaterThanOrEqual(85);
+  });
+
+  it("14. quality boundary: 201-char instruction scores higher than 200-char (length bonus at >200)", async () => {
+    const r200 = await verifySkill(makeSkill({ instructions: "x".repeat(200) }));
+    const r201 = await verifySkill(makeSkill({ instructions: "x".repeat(201) }));
+    expect(r201.overallScore).toBeGreaterThan(r200.overallScore);
+  });
+
   it("11. well-structured skill with no violations reaches sovereign tier", async () => {
     const skill = makeSkill({
       instructions: [

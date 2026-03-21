@@ -42,7 +42,8 @@ export function checkAuth(
   config: AuthConfig,
 ): boolean {
   // No password configured — allow all requests.
-  if (!config.password) return true;
+  // Explicitly check undefined/null only: an empty string IS a configured password.
+  if (config.password === undefined || config.password === null) return true;
 
   const authHeader = headers["authorization"] ?? headers["Authorization"] ?? "";
   if (!authHeader.startsWith("Basic ")) return false;

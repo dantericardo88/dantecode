@@ -152,6 +152,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private readonly _budget: FleetBudget;
   /** Set to true after the first budget:warning emission to prevent duplicate events. */
   private _budgetWarnFired = false;
+  /** Tracks lanes whose per-agent cap has already been signalled — prevents repeated events. */
+  private readonly _capExceededLanes = new Set<string>();
+  /** Counts poll cycles to enforce a maximum and prevent deadlock. */
+  private _pollCount = 0;
   /** Dynamic task redistribution engine. */
   private readonly _redistributor: TaskRedistributor;
   /** Fleet-plus configuration (nesting depth, PDSE threshold, budget). */
@@ -412,11 +416,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     // Abort any in-process agent loops before transitioning to failed (parallel).
     await Promise.all(
       this.runState.agents
-        .filter((s) =>
-          s.status === "running" ||
-          s.status === "idle" ||
-          s.status === "retry-pending" ||
-          s.status === "paused",
+        .filter(
+          (s) =>
+            s.status === "running" || s.status === "retry-pending" || s.status === "paused",
         )
         .map((s) => {
           const adapter = this.adapters.get(s.agentKind);
@@ -642,6 +644,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   /** Start the adapter completion polling loop. Called automatically by start()/resume(). */
   private startPolling(): void {
     if (this.pollTimer) return;
+    this._pollCount = 0;
     const intervalMs = this.options.pollIntervalMs;
     this.pollTimer = setInterval(() => void this.pollAllLanes(), intervalMs);
   }
@@ -730,6 +733,14 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private async pollAllLanes(): Promise<void> {
     if (!this.runState) return;
 
+    // Guard against infinite polling — fail the run if we exceed the limit.
+    const MAX_POLL_ITERATIONS = 10_000;
+    this._pollCount++;
+    if (this._pollCount >= MAX_POLL_ITERATIONS) {
+      await this.fail(`Polling limit exceeded (${MAX_POLL_ITERATIONS} iterations)`);
+      return;
+    }
+
     // Snapshot prevents newly-appended retry sessions from being visited
     // in the same poll cycle (fixes same-cycle retry storm — P1).
     const sessionsThisCycle = [...this.runState.agents];
@@ -757,8 +768,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
         }
       }
 
-      // ── Only poll running/idle lanes ──────────────────────────────────────
-      if (session.status !== "running" && session.status !== "idle") continue;
+      // ── Only poll running lanes ────────────────────────────────────────────
+      if (session.status !== "running") continue;
 
       const adapter = this.adapters.get(session.agentKind);
       if (!adapter) continue;
@@ -777,9 +788,17 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           session.tokensUsed = tokensForBudget;
           session.costUsd = costForBudget;
           const canContinue = this._budget.record(session.laneId, tokensForBudget, costForBudget);
-          if (!canContinue) {
-            // Per-agent cap exceeded — emit event; only this lane is stopped
+          // Per-agent cap path — only when fleet is NOT globally exhausted.
+          // If the fleet is exhausted, fall through to the isExhausted() check below.
+          if (!canContinue && !this._budget.isExhausted() && !this._capExceededLanes.has(session.laneId)) {
+            this._capExceededLanes.add(session.laneId);
             this.emit("budget:agent-limit", { agentId: session.laneId, report: this._budget.report() });
+            // Abort the lane — it has consumed its per-agent allocation
+            await adapter?.abortTask(sessionId).catch(() => {});
+            session.status = "failed";
+            session.errorMessage = `Per-agent token cap exceeded (${tokensForBudget} tokens)`;
+            await this.persistRunState();
+            continue;
           }
           // Emit warning exactly once when threshold is crossed
           if (this._budget.isWarning() && !this._budgetWarnFired) {
@@ -806,45 +825,57 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           });
 
           // PDSE verification (auto, fail-closed — never crashes the poll loop).
-          // Runs fire-and-forget; sets session.verificationPassed for use in merge().
-          void this.verifyLaneOutput(session.laneId).catch(() => {});
+          // Awaited so pdseScore / verificationPassed are persisted immediately after.
+          await this.verifyLaneOutput(session.laneId).catch(() => {});
+          await this.persistRunState();
 
-          // ── TaskRedistributor: offer idle lanes additional work ──────────
+          // ── TaskRedistributor: spawn a new lane using the completing agent ──
+          // When a lane finishes, check if any still-running lanes have work
+          // that can be decomposed. If so, spawn a new lane via assignLane().
           // Best-effort — never crash the run on redistribution failure.
-          if (this.runState) {
-            const idleLanes = this.runState.agents.filter(
-              (l) => l.status === "idle" && l.laneId !== session.laneId,
-            );
-            if (idleLanes.length > 0) {
-              const busyLanes = this.runState.agents
-                .filter(
-                  (l) =>
-                    (l.status === "running" || l.status === "retry-pending") &&
-                    l.laneId !== session.laneId,
-                )
-                .map((l) => ({
-                  laneId: l.laneId,
-                  agentKind: l.agentKind as string,
-                  objective: l.objective,
-                  startedAt: l.startedAt ? new Date(l.startedAt).getTime() : Date.now(),
-                  ownedFiles: l.assignedFiles,
-                }));
-              const idleLane = idleLanes[0]!;
+          if (this.runState && this.router) {
+            const busyLanes = this.runState.agents
+              .filter(
+                (l) =>
+                  (l.status === "running" || l.status === "retry-pending") &&
+                  l.laneId !== session.laneId,
+              )
+              .map((l) => ({
+                laneId: l.laneId,
+                agentKind: l.agentKind as string,
+                objective: l.objective,
+                startedAt: l.startedAt ? new Date(l.startedAt).getTime() : Date.now(),
+                ownedFiles: l.assignedFiles,
+              }));
+            if (busyLanes.length > 0) {
               try {
                 const candidate = await this._redistributor.findRedistribution(
-                  idleLane.laneId,
-                  idleLane.agentKind as string,
+                  session.laneId,
+                  session.agentKind as string,
                   busyLanes,
                 );
                 if (candidate) {
-                  this.emit("redistribution", {
-                    fromLaneId: candidate.fromLaneId,
-                    toLaneId: candidate.toLaneId,
-                    subObjective: candidate.subObjective,
-                  });
+                  // Spawn a real new lane for the sub-objective
+                  const newAssignment = await this.assignLane({
+                    objective: candidate.subObjective,
+                    taskCategory: "coding",
+                    ownedFiles: [],
+                    worktreePath: session.worktreePath,
+                    branch: `${session.branch}-redist-${Date.now()}`,
+                    baseBranch: this.options.baseBranch,
+                    preferredAgent: session.agentKind,
+                    nestingDepth: (session.nestingDepth ?? 0) + 1,
+                  }).catch(() => null);
+                  if (newAssignment?.accepted) {
+                    this.emit("redistribution", {
+                      fromLaneId: candidate.fromLaneId,
+                      toLaneId: newAssignment.laneId,
+                      subObjective: candidate.subObjective,
+                    });
+                  }
                 }
               } catch {
-                // Redistribution is best-effort
+                // Redistribution is always best-effort
               }
             }
           }

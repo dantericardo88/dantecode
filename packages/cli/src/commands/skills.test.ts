@@ -850,3 +850,92 @@ describe("skills info", () => {
     stdoutSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// install --tier validation
+// ---------------------------------------------------------------------------
+
+describe("skills install --tier validation", () => {
+  let tmpRoot: string;
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "tier-install-test-"));
+    projectRoot = join(tmpRoot, "project");
+    await mkdir(projectRoot, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("--tier with invalid value: calls process.exit(1) with helpful error message", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number | string | null) => {
+      throw new Error("process.exit called");
+    });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(
+      runSkillsCommand(["install", "/some/skill", "--tier", "legendary"], projectRoot),
+    ).rejects.toThrow("process.exit called");
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const errOutput = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(errOutput).toContain("invalid --tier value");
+    expect(errOutput).toContain("legendary");
+
+    exitSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+
+  it("--tier with valid value 'sentinel': does NOT call process.exit", async () => {
+    mockInstallSkill.mockResolvedValue({
+      success: true, name: "ok-skill",
+      installedPath: "/p/skills/ok-skill",
+      source: "/some/skill", format: "claude",
+    });
+    const exitSpy = vi.spyOn(process, "exit");
+
+    await runSkillsCommand(["install", "/some/skill", "--tier", "sentinel"], projectRoot);
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// import-all --tier validation
+// ---------------------------------------------------------------------------
+
+describe("skills import-all --tier validation", () => {
+  let tmpRoot: string;
+  let projectRoot: string;
+  let batchDir: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "tier-ia-test-"));
+    projectRoot = join(tmpRoot, "project");
+    batchDir = join(tmpRoot, "batch");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(batchDir, { recursive: true });
+    mockDetectSkillSources.mockReset();
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("import-all --tier with invalid value: calls process.exit(1)", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((_code?: number | string | null) => {
+      throw new Error("process.exit called");
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(
+      runSkillsCommand(["import-all", batchDir, "--tier", "elite"], projectRoot),
+    ).rejects.toThrow("process.exit called");
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+});
