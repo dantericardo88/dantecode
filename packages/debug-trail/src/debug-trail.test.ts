@@ -27,6 +27,7 @@ import { FileSnapshotter } from "./file-snapshotter.js";
 import { AuditLogger } from "./audit-logger.js";
 import { ReplayOrchestrator } from "./replay-orchestrator.js";
 import { TrailStore } from "./sqlite-store.js";
+import { RestoreEngine } from "./restore-engine.js";
 
 // ============================================================================
 // Test helpers
@@ -999,5 +1000,96 @@ describe("Gap fixes", () => {
 
       await rm(dir, { recursive: true });
     });
+  });
+});
+
+// ============================================================================
+// Failure path hardening
+// ============================================================================
+
+describe("Failure path hardening", () => {
+  it("logger.log() throws DiskWriteError when store.appendEvent rejects", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-fail-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, enabled: true },
+      sessionId: "sess_fail_test",
+    });
+    await logger.init();
+
+    // Monkey-patch the store's appendEvent to throw
+    const store = logger.getStore();
+    const original = store.appendEvent.bind(store);
+    store.appendEvent = async () => {
+      throw new Error("ENOSPC: no space left on device");
+    };
+
+    await expect(logger.log("tool_call", "Test", "will fail")).rejects.toThrow("DiskWriteError");
+    await expect(logger.log("tool_call", "Test", "will fail again")).rejects.toMatchObject({
+      name: "DiskWriteError",
+      seq: expect.any(Number),
+      eventId: expect.any(String),
+    });
+
+    store.appendEvent = original; // restore
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("restoreFromSnapshot returns hash_mismatch when snapshot file is corrupted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "dt-hash-"));
+    const storageRoot = join(dir, "trail");
+    const filePath = join(dir, "target.ts");
+    const restorePath = join(dir, "restored.ts");
+    await writeFile(filePath, "original content");
+
+    const snapshotter = new FileSnapshotter({ storageRoot });
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_hash" });
+    await logger.init();
+
+    const prov = logger.getProvenance();
+    const snap = await snapshotter.captureSnapshot(filePath, "hash-test", prov);
+    expect(snap).not.toBeNull();
+
+    // Corrupt the snapshot binary on disk
+    await writeFile(snap!.storagePath, "CORRUPTED DATA -- NOT ORIGINAL");
+
+    // Restore should detect the hash mismatch
+    const restoreEngine = new RestoreEngine(snapshotter, logger);
+    const result = await restoreEngine.restoreFromSnapshot(snap!.snapshotId, restorePath);
+
+    expect(result.restored).toBe(false);
+    expect(result.error).toMatch(/hash.mismatch/i);
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("rebuildIndex recovers correct lastSeq after index.json is corrupted", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-rebuild-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, enabled: true },
+      sessionId: "sess_rebuild",
+    });
+    await logger.init();
+
+    // Write 5 events (seq 0..4)
+    for (let i = 0; i < 5; i++) {
+      await logger.log("tool_call", "TestActor", `Event ${i}`);
+    }
+    await logger.flush();
+
+    // Corrupt the index.json
+    await writeFile(join(storageRoot, "index.json"), "{ corrupt json }}}");
+
+    // Create a fresh store instance (same storageRoot — bypasses singleton)
+    const freshStore = new TrailStore(storageRoot);
+    await freshStore.init(); // loads corrupted index → starts fresh (lastSeq = 0)
+    expect(freshStore.getLastSeq()).toBe(0);
+
+    // Rebuild from the JSONL source of truth
+    await freshStore.rebuildIndex();
+
+    // All 5 events recovered: seq 1..5, so lastSeq = 5
+    expect(freshStore.getLastSeq()).toBe(5);
+
+    await rm(storageRoot, { recursive: true, force: true });
   });
 });

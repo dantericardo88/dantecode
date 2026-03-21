@@ -375,6 +375,44 @@ vi.mock("@dantecode/core", () => {
       toJSON() { return {}; }
       reset() {}
     },
+    // ReasoningChain — Lane 1 wiring
+    ReasoningChain: class MockReasoningChain {
+      constructor() {}
+      decideTier() { return "basic"; }
+      think() { return { steps: [], recommendation: "" }; }
+      recordStep() {}
+      shouldCritique() { return false; }
+      selfCritique() { return { recommendation: "" }; }
+      formatChainForPrompt() { return ""; }
+    },
+    // AutonomyEngine — Lane 1 wiring
+    AutonomyEngine: class MockAutonomyEngine {
+      constructor() {}
+      resume() { return Promise.resolve(); }
+      incrementStep() {}
+      shouldRunMetaReasoning() { return false; }
+      metaReason() { return Promise.resolve(""); }
+      save() { return Promise.resolve(); }
+    },
+    // PersistentMemory — Lane 1 wiring
+    PersistentMemory: class MockPersistentMemory {
+      constructor() {}
+      load() { return Promise.resolve(); }
+      search() { return []; }
+      store() { return Promise.resolve(); }
+    },
+    // SecurityEngine — Lane 2 wiring
+    SecurityEngine: class MockSecurityEngine {
+      constructor() {}
+      checkAction() { return { allowed: true }; }
+    },
+    // SecretsScanner — Lane 2 wiring
+    SecretsScanner: class MockSecretsScanner {
+      constructor() {}
+      scan() { return { clean: true, findings: [] }; }
+    },
+    // synthesizeConfidence — Lane 4 wiring
+    synthesizeConfidence: vi.fn(() => ({ decision: "pass", confidence: 1.0, rationale: "" })),
   };
 });
 

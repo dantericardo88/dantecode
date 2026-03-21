@@ -281,6 +281,10 @@ export class GitAutomationStore {
       if (isNodeError(error, "ENOENT")) {
         return cloneState(EMPTY_STATE);
       }
+      // Treat corrupt JSON (e.g. partial write during concurrent access) as empty state
+      if (error instanceof SyntaxError) {
+        return cloneState(EMPTY_STATE);
+      }
       throw error;
     }
   }

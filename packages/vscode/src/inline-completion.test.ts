@@ -125,6 +125,16 @@ vi.mock("@dantecode/core", () => ({
     const provider = /^(llama|qwen|mistral)/i.test(model) ? "ollama" : "grok";
     return { id: `${provider}/${model}`, provider, modelId: model };
   }),
+  // FIMEngine — wired by Lane 3 into inline-completion.ts
+  FIMEngine: class MockFIMEngine {
+    constructor() {}
+    buildContext(_filePath: string, _code: string, _cursorOffset: number) {
+      return { prefix: "", suffix: "", filePath: _filePath, language: "typescript" };
+    }
+    buildPrompt(_ctx: unknown, _model: string) {
+      return "<PRE> <SUF> <MID>";
+    }
+  },
 }));
 
 let pdseScoreOverride: { overall: number; violations: { message: string }[]; passedGate: boolean } =

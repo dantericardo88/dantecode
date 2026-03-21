@@ -468,6 +468,16 @@ vi.mock("@dantecode/core", () => ({
     /\b(plan|will|executing plan|running:|created|updated|modified)\b/i.test(text),
   ),
   resolvePreferredShell: vi.fn(() => "/bin/bash"),
+  // FIMEngine — wired by Lane 3 into inline-completion.ts
+  FIMEngine: vi.fn().mockImplementation(() => ({
+    buildContext: vi.fn((_filePath: string, _code: string, _cursorOffset: number) => ({
+      prefix: "",
+      suffix: "",
+      filePath: _filePath,
+      language: "typescript",
+    })),
+    buildPrompt: vi.fn((_ctx: unknown, _model: string) => "<PRE> <SUF> <MID>"),
+  })),
 }));
 
 vi.mock("@dantecode/danteforge", () => ({
