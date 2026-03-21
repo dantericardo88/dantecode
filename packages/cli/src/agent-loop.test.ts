@@ -361,6 +361,20 @@ vi.mock("@dantecode/core", () => {
       warn() {}
       stop() {}
     },
+    // MetricsCollector — required because agent-loop.ts imports and instantiates it
+    MetricsCollector: class MockMetricsCollector {
+      constructor() {}
+      recordTiming(_name: string, _durationMs: number) {}
+      increment(_name: string, _value?: number) {}
+      observe(_name: string, _value: number) {}
+      record(_name: string, _value: number) {}
+      getCounter(_name: string) { return 0; }
+      getGauge(_name: string) { return 0; }
+      getSamples(_name: string) { return []; }
+      toPrometheus() { return ""; }
+      toJSON() { return {}; }
+      reset() {}
+    },
   };
 });
 
