@@ -11,6 +11,24 @@ import { TrailStore, getTrailStore } from "./sqlite-store.js";
 import { TrailEventIndex } from "./state/trail-index.js";
 import { SessionMap } from "./state/session-map.js";
 import { makeTrailEventId } from "./hash-engine.js";
+import { AnomalyDetector } from "./anomaly-detector.js";
+import type { AnomalyFlag } from "./anomaly-detector.js";
+
+// ---------------------------------------------------------------------------
+// Flush result
+// ---------------------------------------------------------------------------
+
+export interface FlushResult {
+  /** Anomalies detected in this flush. Empty array if none found. */
+  anomalies: AnomalyFlag[];
+  /**
+   * True when the session events buffer hit `sessionEventsBufferLimit` before flush.
+   * Events beyond the limit were persisted to disk but NOT analyzed for anomalies.
+   */
+  bufferTruncated: boolean;
+  /** Number of events analyzed in this flush call (0 if nothing new since last flush). */
+  analyzedCount: number;
+}
 
 // ---------------------------------------------------------------------------
 // Logger options
@@ -26,6 +44,10 @@ export interface AuditLoggerOptions {
   worktreePath?: string;
   /** Git branch. */
   branch?: string;
+  /** Optional anomaly detector override. Defaults to new AnomalyDetector(). */
+  anomalyDetector?: AnomalyDetector;
+  /** Callback invoked after flush() runs anomaly detection. Receives the full FlushResult. */
+  onAnomalyDetected?: (result: FlushResult) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +66,15 @@ export class AuditLogger {
   private writeQueue: Promise<void> = Promise.resolve();
   // Gap 5: callback registered by CliBridge for cache invalidation
   private onNewEvent?: () => void;
+  private anomalyDetector: AnomalyDetector;
+  // In-memory buffer of current-session events for anomaly detection (no disk read on flush)
+  private sessionEvents: TrailEvent[] = [];
+  // Cursor into sessionEvents: events[0..detectionCursor) have already been analyzed.
+  // Using a cursor (not a boolean) supports multi-lane: each flush() analyzes only new events.
+  private detectionCursor = 0;
+  // Set to true when sessionEvents hits sessionEventsBufferLimit — signals partial analysis.
+  private bufferTruncated = false;
+  private onAnomalyDetected?: (result: FlushResult) => void;
 
   constructor(options: AuditLoggerOptions = {}) {
     this.config = { ...defaultConfig(), ...options.config };
@@ -65,6 +96,8 @@ export class AuditLogger {
       worktreePath: options.worktreePath,
       branch: options.branch,
     });
+    this.anomalyDetector = options.anomalyDetector ?? new AnomalyDetector();
+    this.onAnomalyDetected = options.onAnomalyDetected;
   }
 
   // -------------------------------------------------------------------------
@@ -80,6 +113,8 @@ export class AuditLogger {
     const lastSeq = this.store.getLastSeq();
     this.seqCounter = lastSeq + 1;
     this.initialized = true;
+    this.detectionCursor = 0;
+    this.bufferTruncated = false;
   }
 
   // -------------------------------------------------------------------------
@@ -150,6 +185,13 @@ export class AuditLogger {
 
     // Index synchronously so in-process queries see the event immediately
     this.index.index(event);
+    // Buffer for anomaly detection on flush — bounded to avoid unbounded memory growth.
+    // bufferTruncated is set so flush() can surface this in FlushResult.
+    if (this.sessionEvents.length < this.config.sessionEventsBufferLimit) {
+      this.sessionEvents.push(event);
+    } else {
+      this.bufferTruncated = true;
+    }
 
     // Gap 5: notify registered listener (e.g. TrailQueryEngine.invalidateCache)
     this.onNewEvent?.();
@@ -388,6 +430,16 @@ export class AuditLogger {
     return this.store;
   }
 
+  /** Get the AnomalyDetector instance owned by this logger. */
+  getAnomalyDetector(): AnomalyDetector {
+    return this.anomalyDetector;
+  }
+
+  /** Get the in-memory session events buffer (current session only). */
+  getSessionEvents(): TrailEvent[] {
+    return [...this.sessionEvents];
+  }
+
   // -------------------------------------------------------------------------
   // Gap 5: Cache invalidation hook
   // -------------------------------------------------------------------------
@@ -406,10 +458,46 @@ export class AuditLogger {
     await this.writeQueue;
   }
 
-  async flush(): Promise<void> {
+  async flush(): Promise<FlushResult> {
     await this.drain();
+
+    // Analyze only events since the last flush (cursor-based).
+    // This supports multi-lane sessions: each flush() covers only that lane's new events,
+    // without re-analyzing events from previous lanes or triggering duplicate anomaly_flags.
+    const unanalyzed = this.sessionEvents
+      .slice(this.detectionCursor)
+      .filter((e) => e.kind !== "anomaly_flag");
+
+    let detectedAnomalies: AnomalyFlag[] = [];
+    let analyzedCount = 0;
+
+    if (unanalyzed.length > 0) {
+      // Advance cursor BEFORE logging anomaly events so those events are not re-analyzed
+      this.detectionCursor = this.sessionEvents.length;
+      analyzedCount = unanalyzed.length;
+
+      try {
+        const anomalies = this.anomalyDetector.analyze(unanalyzed, this.provenance.sessionId);
+        for (const anomaly of anomalies) {
+          await this.logAnomaly(anomaly.anomalyType, anomaly.description, anomaly.relatedEventIds);
+        }
+        if (anomalies.length > 0) await this.drain();
+        detectedAnomalies = anomalies;
+      } catch {
+        // advisory — never block shutdown
+      }
+
+      const result: FlushResult = {
+        anomalies: detectedAnomalies,
+        bufferTruncated: this.bufferTruncated,
+        analyzedCount,
+      };
+      this.onAnomalyDetected?.(result);
+    }
+
     await this.store.flush();
     this.sessionMap.endSession(this.provenance.sessionId);
+    return { anomalies: detectedAnomalies, bufferTruncated: this.bufferTruncated, analyzedCount };
   }
 }
 

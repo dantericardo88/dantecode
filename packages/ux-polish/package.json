@@ -33,7 +33,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",

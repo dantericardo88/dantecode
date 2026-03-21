@@ -131,6 +131,11 @@ export abstract class BaseCouncilAdapter implements CouncilAgentAdapter {
   abstract collectPatch(sessionId: string): Promise<AdapterPatch | null>;
   abstract detectRateLimit(sessionId: string): Promise<RateLimitSignal>;
 
+  /** Abort an in-progress task. Default no-op — override in adapters that support cancellation. */
+  async abortTask(_sessionId: string): Promise<void> {
+    // No-op default
+  }
+
   /** Build a standard task prompt from a packet. */
   protected buildTaskPrompt(packet: CouncilTaskPacket): string {
     const lines: string[] = [
@@ -165,11 +170,6 @@ export abstract class BaseCouncilAdapter implements CouncilAgentAdapter {
     }
 
     return lines.join("\n");
-  }
-
-  /** Default no-op abort (override for real cancellation). */
-  async abortTask(_sessionId: string): Promise<void> {
-    // No-op by default
   }
 
   /**

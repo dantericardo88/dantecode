@@ -1093,3 +1093,950 @@ describe("Failure path hardening", () => {
     await rm(storageRoot, { recursive: true, force: true });
   });
 });
+
+// ============================================================================
+// Round 4 fixes
+// ============================================================================
+
+describe("Round 4 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 3: evaluateCapture respects maxSnapshotBytes config
+  // -------------------------------------------------------------------------
+
+  it("evaluateCapture excludes files over custom maxSnapshotBytes limit", () => {
+    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 }); // 1KB limit
+    expect(policy.evaluateCapture("src/big.ts", 2000)).toBe("exclude");
+  });
+
+  it("evaluateCapture allows files below custom maxSnapshotBytes limit", () => {
+    const policy = new PrivacyPolicy({ maxSnapshotBytes: 1024 });
+    expect(policy.evaluateCapture("src/small.ts", 500)).toBe("capture");
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 4: shouldExcludePath works on Windows backslash paths
+  // -------------------------------------------------------------------------
+
+  it("shouldExcludePath excludes Windows-style node_modules paths", () => {
+    const policy = new PrivacyPolicy();
+    expect(policy.shouldExcludePath("C:\\Users\\proj\\node_modules\\react\\index.js")).toBe(true);
+  });
+
+  it("shouldExcludePath does not exclude normal source files on Windows paths", () => {
+    const policy = new PrivacyPolicy();
+    expect(policy.shouldExcludePath("C:\\Users\\proj\\src\\auth.ts")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 5: filePathPrefix does not over-match similar file names
+  // -------------------------------------------------------------------------
+
+  it("filePathPrefix does not match files with similar but different names", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-prefix-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_prefix" });
+    await logger.init();
+    // /src/auth-utils.ts should NOT match prefix "/src/auth" (old bug: it did via startsWith)
+    await logger.logFileWrite("/src/auth-utils.ts");
+    // /src/auth/middleware.ts SHOULD match (child of /src/auth/ directory)
+    await logger.logFileWrite("/src/auth/middleware.ts");
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ filePathPrefix: "/src/auth", fileEventsOnly: true });
+
+    const paths = result.results.map((e) => e.payload["filePath"] as string);
+    // Child of the /src/auth/ directory should match
+    expect(paths).toContain("/src/auth/middleware.ts");
+    // File with similar name but NOT in /src/auth/ should NOT match
+    expect(paths).not.toContain("/src/auth-utils.ts");
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 4 Lane A: missing anomaly detectors implemented
+  // -------------------------------------------------------------------------
+
+  it("AnomalyDetector detects large_rewrite for 3+ hash-changing writes to same file", () => {
+    const detector = new AnomalyDetector();
+    const provenance = makeProvenance();
+    const baseEvent = makeEvent({ provenance });
+    const writes = [0, 1, 2].map((i) =>
+      makeEvent({
+        provenance,
+        kind: "file_write",
+        actor: "FileSystem",
+        payload: { filePath: "/src/index.ts" },
+        beforeHash: `hash_before_${i}`,
+        afterHash: `hash_after_${i}`,
+      }),
+    );
+    const flags = detector.analyze([baseEvent, ...writes], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "large_rewrite")).toBe(true);
+  });
+
+  it("AnomalyDetector detects recursive_delete for 3+ files in same directory", () => {
+    const detector = new AnomalyDetector();
+    const provenance = makeProvenance();
+    const deletions = ["/src/utils/a.ts", "/src/utils/b.ts", "/src/utils/c.ts"].map((fp) =>
+      makeEvent({
+        provenance,
+        kind: "file_delete",
+        actor: "FileSystem",
+        payload: { filePath: fp },
+      }),
+    );
+    const flags = detector.analyze(deletions, provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "recursive_delete")).toBe(true);
+  });
+
+  it("AnomalyDetector detects untracked_write for writes without preceding read", () => {
+    const detector = new AnomalyDetector({ detectUntrackedWrites: true });
+    const provenance = makeProvenance();
+    // A file_write with no preceding tool_call read for that path
+    const writeEvt = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/ghost.ts" },
+    });
+    const flags = detector.analyze([writeEvt], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(true);
+  });
+
+  it("AnomalyDetector does NOT flag write as untracked when preceded by a read tool_call", () => {
+    const detector = new AnomalyDetector();
+    const provenance = makeProvenance();
+    const readEvt = makeEvent({
+      provenance,
+      kind: "tool_call",
+      actor: "Read",
+      payload: { filePath: "/src/known.ts" },
+    });
+    const writeEvt = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/known.ts" },
+    });
+    const flags = detector.analyze([readEvt, writeEvt], provenance.sessionId);
+    expect(flags.filter((f) => f.anomalyType === "untracked_write")).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // AnomalyDetector flush integration: anomaly_flag events appear in trail
+  // -------------------------------------------------------------------------
+
+  it("flush() logs anomaly_flag events that appear in anomaliesOnly query", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-anomaly-flush-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_anomaly" });
+    await logger.init();
+
+    // Log 3 rapid deletions to trigger burst_deletion anomaly
+    for (const fp of ["/src/a.ts", "/src/b.ts", "/src/c.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    await logger.flush();
+
+    // Query for anomaly_flag events
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ anomaliesOnly: true });
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.results[0]!.kind).toBe("anomaly_flag");
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+});
+
+// ============================================================================
+// Round 5 fixes
+// ============================================================================
+
+describe("Round 5 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 1: flush() uses in-memory buffer — no duplicate anomalies on re-flush
+  // -------------------------------------------------------------------------
+
+  it("flush() called twice does not log duplicate anomaly_flag events", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r5-dedup-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r5_dedup" });
+    await logger.init();
+
+    // 3 burst deletions → burst_deletion anomaly expected on first flush
+    for (const fp of ["/src/x.ts", "/src/y.ts", "/src/z.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    await logger.flush();
+    await logger.flush(); // second flush — should be a no-op for detection
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ anomaliesOnly: true });
+    // Exactly one burst_deletion anomaly, not two
+    const burstFlags = result.results.filter((e) => {
+      const at = e.payload["anomalyType"];
+      return typeof at === "string" && at === "burst_deletion";
+    });
+    expect(burstFlags).toHaveLength(1);
+
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 3: detectRapidLoop uses smarter fingerprint
+  // -------------------------------------------------------------------------
+
+  it("detectRapidLoop does NOT fire when 5 writes target different files", () => {
+    const detector = new AnomalyDetector();
+    const provenance = makeProvenance();
+    const writes = ["/a.ts", "/b.ts", "/c.ts", "/d.ts", "/e.ts"].map((fp) =>
+      makeEvent({
+        provenance,
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: `File write: ${fp}`,
+        payload: { filePath: fp },
+      }),
+    );
+    const flags = detector.analyze(writes, provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "rapid_loop")).toBe(false);
+  });
+
+  it("detectRapidLoop DOES fire when the same file is written 5 times", () => {
+    const detector = new AnomalyDetector({ rapidLoopWindowMs: 60_000 });
+    const provenance = makeProvenance();
+    const writes = Array.from({ length: 5 }, () =>
+      makeEvent({
+        provenance,
+        kind: "file_write",
+        actor: "FileSystem",
+        summary: "File write: /src/auth.ts",
+        payload: { filePath: "/src/auth.ts" },
+      }),
+    );
+    const flags = detector.analyze(writes, provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "rapid_loop")).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 2: detectUntrackedWrite is off by default
+  // -------------------------------------------------------------------------
+
+  it("detectUntrackedWrite is OFF by default — no false positives from direct writes", () => {
+    const detector = new AnomalyDetector(); // detectUntrackedWrites: false by default
+    const provenance = makeProvenance();
+    const write = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/direct.ts" },
+    });
+    const flags = detector.analyze([write], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(false);
+  });
+
+  it("detectUntrackedWrite fires when explicitly enabled and no read precedes write", () => {
+    const detector = new AnomalyDetector({ detectUntrackedWrites: true });
+    const provenance = makeProvenance();
+    const write = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/ghost.ts" },
+    });
+    const flags = detector.analyze([write], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(true);
+  });
+});
+
+// ============================================================================
+// Round 6 fixes
+// ============================================================================
+
+describe("Round 6 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 1: AnomalyDetector.updateConfig() — mid-session reconfiguration
+  // -------------------------------------------------------------------------
+
+  it("AnomalyDetector.updateConfig() enables detectUntrackedWrites after construction", () => {
+    const detector = new AnomalyDetector(); // default: detectUntrackedWrites = false
+    const provenance = makeProvenance();
+    const write = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/ghost.ts" },
+    });
+
+    // Off by default
+    expect(detector.analyze([write], provenance.sessionId).some((f) => f.anomalyType === "untracked_write")).toBe(false);
+
+    // Enable mid-session
+    detector.updateConfig({ detectUntrackedWrites: true });
+    expect(detector.analyze([write], provenance.sessionId).some((f) => f.anomalyType === "untracked_write")).toBe(true);
+  });
+
+  it("AnomalyDetector.updateConfig() can tighten burstDeletionCount threshold", () => {
+    const detector = new AnomalyDetector({ burstDeletionCount: 5 }); // starts high
+    const provenance = makeProvenance();
+    const now = Date.now();
+    const deletions = ["/a.ts", "/b.ts", "/c.ts"].map((fp, i) =>
+      makeEvent({
+        provenance,
+        kind: "file_delete",
+        actor: "FileSystem",
+        payload: { filePath: fp },
+        timestamp: new Date(now + i * 100).toISOString(),
+      }),
+    );
+
+    // 3 deletions, threshold=5 — no flag
+    expect(detector.analyze(deletions, provenance.sessionId).some((f) => f.anomalyType === "burst_deletion")).toBe(false);
+
+    // Lower threshold mid-session
+    detector.updateConfig({ burstDeletionCount: 3 });
+    expect(detector.analyze(deletions, provenance.sessionId).some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 2: flush() returns detected AnomalyFlag[]
+  // -------------------------------------------------------------------------
+
+  it("flush() returns empty array when no anomalies detected", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-flush-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_noAnomaly" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "normal operation", {});
+    const result = await logger.flush();
+    expect(Array.isArray(result.anomalies)).toBe(true);
+    expect(result.anomalies).toHaveLength(0);
+    expect(result.analyzedCount).toBe(1);
+    expect(result.bufferTruncated).toBe(false);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("flush() returns detected anomaly flags", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-flush-flags-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_flags" });
+    await logger.init();
+
+    // 3 burst deletions triggers burst_deletion anomaly
+    for (const fp of ["/src/a.ts", "/src/b.ts", "/src/c.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    const result = await logger.flush();
+    expect(result.anomalies.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("flush() calls onAnomalyDetected callback with FlushResult", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-callback-"));
+    type FlushResult = import("./audit-logger.js").FlushResult;
+    const callbackResults: FlushResult[] = [];
+    const logger = new AuditLogger({
+      config: { storageRoot },
+      sessionId: "sess_r6_cb",
+      onAnomalyDetected: (result) => callbackResults.push(result),
+    });
+    await logger.init();
+
+    for (const fp of ["/src/x.ts", "/src/y.ts", "/src/z.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    await logger.flush();
+
+    expect(callbackResults).toHaveLength(1);
+    expect(callbackResults[0]!.anomalies.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    expect(callbackResults[0]!.analyzedCount).toBe(3);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("flush() does NOT call onAnomalyDetected on second flush (dedup guard)", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-cb-dedup-"));
+    let callCount = 0;
+    const logger = new AuditLogger({
+      config: { storageRoot },
+      sessionId: "sess_r6_cb_dedup",
+      onAnomalyDetected: () => { callCount++; },
+    });
+    await logger.init();
+    for (const fp of ["/src/x.ts", "/src/y.ts", "/src/z.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    await logger.flush();
+    await logger.flush(); // second flush — callback should NOT fire again
+    expect(callCount).toBe(1);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 3: AuditLogger exposes getAnomalyDetector() + getSessionEvents()
+  // -------------------------------------------------------------------------
+
+  it("getAnomalyDetector() returns the same AnomalyDetector instance used by flush()", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-get-detector-"));
+    const customDetector = new AnomalyDetector({ burstDeletionCount: 10 });
+    const logger = new AuditLogger({ config: { storageRoot }, anomalyDetector: customDetector });
+    await logger.init();
+    expect(logger.getAnomalyDetector()).toBe(customDetector);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("getSessionEvents() returns current session events in insertion order", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-get-events-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_events" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "event A", {});
+    await logger.log("tool_call", "Actor", "event B", {});
+    const events = logger.getSessionEvents();
+    expect(events).toHaveLength(2);
+    expect(events[0]!.summary).toBe("event A");
+    expect(events[1]!.summary).toBe("event B");
+    // Returns a copy — mutating does not affect internal state
+    events.push({} as never);
+    expect(logger.getSessionEvents()).toHaveLength(2);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 4: CliBridge.detectAnomalies() uses logger's detector + in-memory buffer
+  // -------------------------------------------------------------------------
+
+  it("CliBridge.detectAnomalies() uses in-memory session events (no extra disk read)", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-bridge-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_bridge" });
+    await logger.init();
+
+    // 3 burst deletions — all in memory, not yet flushed
+    for (const fp of ["/src/a.ts", "/src/b.ts", "/src/c.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+
+    const { CliBridge } = await import("./integrations/cli-bridge.js");
+    const bridge = new CliBridge(logger, { storageRoot });
+    const flags = await bridge.detectAnomalies();
+
+    expect(flags.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 5: streamEvents() uses cache when fresh
+  // -------------------------------------------------------------------------
+
+  it("streamEvents() yields from cache when within TTL (consistent view with query())", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-stream-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_stream" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "cached event", {});
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    // Warm the cache via query()
+    await engine.query({ limit: 10 });
+
+    const streamed: import("./types.js").TrailEvent[] = [];
+    for await (const e of engine.streamEvents()) {
+      streamed.push(e);
+    }
+    expect(streamed.some((e) => e.summary === "cached event")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("streamEvents() always reads from disk — consistent results regardless of cache state", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r6-stream-disk-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r6_disk" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "disk event", {});
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    // Call with and without cache warm — both should yield the same events from disk
+    const streamed: import("./types.js").TrailEvent[] = [];
+    for await (const e of engine.streamEvents()) {
+      streamed.push(e);
+    }
+    expect(streamed.some((e) => e.summary === "disk event")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 6: globToRegex — ** support and single * boundary
+  // -------------------------------------------------------------------------
+
+  it("globToRegex: single * does not match across path separators", () => {
+    const policy = new PrivacyPolicy({ excludePathPatterns: ["src/*.ts"] });
+    // Should match: src/auth.ts
+    expect(policy.shouldExcludePath("src/auth.ts")).toBe(true);
+    // Should NOT match: src/nested/auth.ts (crosses path boundary)
+    expect(policy.shouldExcludePath("src/nested/auth.ts")).toBe(false);
+  });
+
+  it("globToRegex: ** matches across path separators", () => {
+    const policy = new PrivacyPolicy({ excludePathPatterns: ["**/*.env"] });
+    expect(policy.shouldExcludePath("src/.env")).toBe(true);
+    expect(policy.shouldExcludePath("src/deeply/nested/.env")).toBe(true);
+    expect(policy.shouldExcludePath(".env")).toBe(true);
+  });
+
+  it("globToRegex: node_modules/ pattern matches nested paths", () => {
+    // The built-in common noise pattern 'node_modules/' should match nested paths
+    const policy = new PrivacyPolicy({ excludeCommonNoise: true });
+    expect(policy.shouldExcludePath("node_modules/lodash/index.js")).toBe(true);
+    expect(policy.shouldExcludePath("packages/core/node_modules/react/index.js")).toBe(true);
+    expect(policy.shouldExcludePath("src/components/MyComponent.ts")).toBe(false);
+  });
+
+  it("globToRegex: *.lock pattern matches .lock files but not .json files", () => {
+    const policy = new PrivacyPolicy({ excludeCommonNoise: true });
+    // yarn.lock ends in .lock — should match
+    expect(policy.shouldExcludePath("yarn.lock")).toBe(true);
+    // package-lock.json ends in .json, not .lock — correctly NOT matched by *.lock
+    expect(policy.shouldExcludePath("package-lock.json")).toBe(false);
+    // a custom lockfile
+    expect(policy.shouldExcludePath("pnpm-lock.yaml")).toBe(false); // .yaml, not .lock
+  });
+});
+
+// ============================================================================
+// Round 7 fixes
+// ============================================================================
+
+describe("Round 7 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 1: streamEvents() always reads from disk — no cache path
+  // -------------------------------------------------------------------------
+
+  it("streamEvents() reads from disk even when no cache exists", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r7-stream-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r7_stream" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "stream test event", {});
+    await logger.flush();
+
+    // Fresh engine — no cache warmed
+    const engine = new TrailQueryEngine({ storageRoot });
+    const streamed: TrailEvent[] = [];
+    for await (const e of engine.streamEvents()) {
+      streamed.push(e);
+    }
+    expect(streamed.some((e) => e.summary === "stream test event")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("streamEvents() and query() return the same events", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r7-stream-consistency-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r7_consistency" });
+    await logger.init();
+    for (let i = 0; i < 5; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const queried = await engine.query({ limit: 100, order: "asc" });
+
+    const streamed: TrailEvent[] = [];
+    for await (const e of engine.streamEvents()) {
+      streamed.push(e);
+    }
+
+    // Both should have the same event IDs (order may differ for streamed)
+    const queriedIds = new Set(queried.results.map((e) => e.id));
+    for (const e of streamed) {
+      expect(queriedIds.has(e.id)).toBe(true);
+    }
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 2: sessionEvents buffer is bounded
+  // -------------------------------------------------------------------------
+
+  it("sessionEvents buffer stops growing at sessionEventsBufferLimit", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r7-buffer-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, sessionEventsBufferLimit: 3 },
+      sessionId: "sess_r7_buffer",
+    });
+    await logger.init();
+
+    // Log 5 events — only 3 should end up in the buffer
+    for (let i = 0; i < 5; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+
+    // All 5 must be persisted to disk
+    const store = logger.getStore();
+    const allEvents = await store.readAllEvents();
+    const sessionEvents = allEvents.filter((e) => e.provenance.sessionId === "sess_r7_buffer");
+    expect(sessionEvents.length).toBeGreaterThanOrEqual(5);
+
+    // But only 3 in the in-memory buffer
+    expect(logger.getSessionEvents()).toHaveLength(3);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("sessionEvents buffer defaults to 10_000 (not exceeded in normal use)", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r7-buffer-default-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r7_default" });
+    await logger.init();
+
+    // 100 events — all should be in buffer (well under 10K limit)
+    for (let i = 0; i < 100; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+    expect(logger.getSessionEvents()).toHaveLength(100);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 3: detectUntrackedWrites auto-detection from tool_call reads
+  // -------------------------------------------------------------------------
+
+  it("detectUntrackedWrite auto-fires when tool_call reads are present but file path not in them", () => {
+    const detector = new AnomalyDetector(); // detectUntrackedWrites: false by default
+    const provenance = makeProvenance();
+
+    // A tool_call read for one file, then a write to a DIFFERENT file
+    const readEvt = makeEvent({
+      provenance,
+      kind: "tool_call",
+      actor: "Read",
+      payload: { args: { file_path: "/src/known.ts" } },
+    });
+    const writeEvt = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/ghost.ts" }, // different path — not in read set
+    });
+
+    // Since readPaths is non-empty (Read established causality), auto-detection fires
+    const flags = detector.analyze([readEvt, writeEvt], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(true);
+  });
+
+  it("detectUntrackedWrite does NOT fire when no tool_call reads exist (no causality established)", () => {
+    const detector = new AnomalyDetector(); // detectUntrackedWrites: false by default
+    const provenance = makeProvenance();
+
+    // Only a direct file_write — no tool_call events at all
+    const writeEvt = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/ghost.ts" },
+    });
+
+    // readPaths empty + config false → skip (avoids false positives from direct logFileWrite())
+    const flags = detector.analyze([writeEvt], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(false);
+  });
+
+  it("detectUntrackedWrite does NOT fire when write path matches a preceding read", () => {
+    const detector = new AnomalyDetector();
+    const provenance = makeProvenance();
+
+    const readEvt = makeEvent({
+      provenance,
+      kind: "tool_call",
+      actor: "Read",
+      payload: { args: { file_path: "/src/auth.ts" } },
+    });
+    const writeEvt = makeEvent({
+      provenance,
+      kind: "file_write",
+      actor: "FileSystem",
+      payload: { filePath: "/src/auth.ts" }, // same path — tracked
+    });
+
+    const flags = detector.analyze([readEvt, writeEvt], provenance.sessionId);
+    expect(flags.some((f) => f.anomalyType === "untracked_write")).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 4: cross-session detectAnomalies uses fresh detector config
+  // -------------------------------------------------------------------------
+
+  it("CliBridge.detectAnomalies(other_session) uses default config — not current session's mutated config", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r7-cross-session-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_current" });
+    await logger.init();
+
+    // Mutate the current session's detector to have a very tight threshold
+    logger.getAnomalyDetector().updateConfig({ burstDeletionCount: 2 });
+
+    // Log 3 deletions to a DIFFERENT session ID via a second logger
+    const logger2 = new AuditLogger({ config: { storageRoot }, sessionId: "sess_other" });
+    await logger2.init();
+    for (const fp of ["/x.ts", "/y.ts", "/z.ts"]) {
+      await logger2.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    await logger2.flush();
+
+    const { CliBridge } = await import("./integrations/cli-bridge.js");
+    const bridge = new CliBridge(logger, { storageRoot });
+
+    // Query the OTHER session — should use default config (burstDeletionCount=3), not the
+    // mutated config (burstDeletionCount=2). With default, 3 deletions still triggers burst_deletion.
+    const flags = await bridge.detectAnomalies("sess_other");
+    expect(flags.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 5: NL query parser — relative time, actor detection, dir paths
+  // -------------------------------------------------------------------------
+
+  it("parseNaturalLanguageQuery: '3 hours ago' sets afterDate correctly", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("show me errors from 3 hours ago");
+    const after = Date.now();
+    expect(q.afterDate).toBeDefined();
+    const parsed = new Date(q.afterDate!).getTime();
+    // Should be ~3 hours ago (within a few ms of test execution)
+    expect(parsed).toBeGreaterThanOrEqual(before - 3 * 3_600_000 - 100);
+    expect(parsed).toBeLessThanOrEqual(after - 3 * 3_600_000 + 100);
+  });
+
+  it("parseNaturalLanguageQuery: '30 minutes ago' sets afterDate correctly", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("what happened 30 minutes ago");
+    expect(q.afterDate).toBeDefined();
+    const parsed = new Date(q.afterDate!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before - 30 * 60_000 - 100);
+    expect(parsed).toBeLessThanOrEqual(before - 30 * 60_000 + 100);
+  });
+
+  it("parseNaturalLanguageQuery: '2 days ago' sets afterDate correctly", () => {
+    const before = Date.now();
+    const q = parseNaturalLanguageQuery("show writes from 2 days ago");
+    expect(q.afterDate).toBeDefined();
+    const parsed = new Date(q.afterDate!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before - 2 * 86_400_000 - 100);
+    expect(parsed).toBeLessThanOrEqual(before - 2 * 86_400_000 + 100);
+  });
+
+  it("parseNaturalLanguageQuery: actor detection 'by FileSystem'", () => {
+    const q = parseNaturalLanguageQuery("what was written by FileSystem today");
+    expect(q.actor).toBe("FileSystem");
+  });
+
+  it("parseNaturalLanguageQuery: actor detection 'what did Actor'", () => {
+    const q = parseNaturalLanguageQuery("what did Checkpointer do");
+    expect(q.actor).toBe("Checkpointer");
+  });
+
+  it("parseNaturalLanguageQuery: directory path sets filePathPrefix", () => {
+    const q = parseNaturalLanguageQuery("show changes in src/auth");
+    expect(q.filePathPrefix).toBe("src/auth");
+  });
+
+  it("parseNaturalLanguageQuery: expanded file extension list matches .rs files", () => {
+    const q = parseNaturalLanguageQuery("what happened to main.rs");
+    expect(q.text).toBe("main.rs");
+  });
+
+  it("parseNaturalLanguageQuery: expanded file extension list matches .go files", () => {
+    const q = parseNaturalLanguageQuery("show changes to server.go");
+    expect(q.text).toBe("server.go");
+  });
+});
+
+// ============================================================================
+// Round 8 fixes
+// ============================================================================
+
+describe("Round 8 fixes", () => {
+  // -------------------------------------------------------------------------
+  // Fix 1: FlushResult — bufferTruncated + analyzedCount observability
+  // -------------------------------------------------------------------------
+
+  it("FlushResult.bufferTruncated is true when buffer limit is exceeded", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-truncated-"));
+    const logger = new AuditLogger({
+      config: { storageRoot, sessionEventsBufferLimit: 2 },
+      sessionId: "sess_r8_trunc",
+    });
+    await logger.init();
+    // Log 5 events — buffer holds only 2
+    for (let i = 0; i < 5; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+    const result = await logger.flush();
+    expect(result.bufferTruncated).toBe(true);
+    expect(result.analyzedCount).toBe(2); // only the 2 buffered events were analyzed
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("FlushResult.bufferTruncated is false when buffer is not exceeded", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-not-truncated-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r8_notrunc" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "small event", {});
+    const result = await logger.flush();
+    expect(result.bufferTruncated).toBe(false);
+    expect(result.analyzedCount).toBe(1);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("onAnomalyDetected receives FlushResult with bufferTruncated and analyzedCount", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-cb-meta-"));
+    type FlushResult = import("./audit-logger.js").FlushResult;
+    let received: FlushResult | null = null;
+    const logger = new AuditLogger({
+      config: { storageRoot, sessionEventsBufferLimit: 2 },
+      sessionId: "sess_r8_cb_meta",
+      onAnomalyDetected: (result) => { received = result; },
+    });
+    await logger.init();
+    for (let i = 0; i < 4; i++) {
+      await logger.log("tool_call", "Actor", `event ${i}`, {});
+    }
+    await logger.flush();
+    expect(received).not.toBeNull();
+    expect(received!.bufferTruncated).toBe(true);
+    expect(received!.analyzedCount).toBe(2);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 2: Multi-lane detection cursor — each lane's flush analyzes only new events
+  // -------------------------------------------------------------------------
+
+  it("flush() after setLaneContext() analyzes the new lane's events (cursor-based)", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-multilane-"));
+    const results: import("./audit-logger.js").FlushResult[] = [];
+    const logger = new AuditLogger({
+      config: { storageRoot },
+      sessionId: "sess_r8_ml",
+      onAnomalyDetected: (r) => results.push(r),
+    });
+    await logger.init();
+
+    // Lane A: log 1 normal event, flush
+    await logger.log("tool_call", "Actor", "lane A event", {});
+    const r1 = await logger.flush();
+    expect(r1.analyzedCount).toBe(1);
+
+    // Switch to lane B and log more events — flush should analyze only lane B's events
+    logger.setLaneContext("lane_b", "lane_a");
+    await logger.log("tool_call", "Actor", "lane B event", {});
+    const r2 = await logger.flush();
+    expect(r2.analyzedCount).toBe(1); // only the 1 new event from lane B
+
+    expect(results).toHaveLength(2); // both flushes had events to analyze
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("flush() on same lane twice does not re-analyze already-analyzed events", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-nodup-cursor-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r8_nodup" });
+    await logger.init();
+    for (const fp of ["/src/a.ts", "/src/b.ts", "/src/c.ts"]) {
+      await logger.log("file_delete", "FileSystem", `Delete ${fp}`, { filePath: fp });
+    }
+    const r1 = await logger.flush();
+    expect(r1.analyzedCount).toBe(3);
+
+    const r2 = await logger.flush(); // second flush — no new events
+    expect(r2.analyzedCount).toBe(0);
+    expect(r2.anomalies).toHaveLength(0);
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 3: TrailQuery.excludeKinds, actors, excludeActor filters
+  // -------------------------------------------------------------------------
+
+  it("TrailQuery.excludeKinds filters out specified event kinds", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-excludeKinds-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r8_excl" });
+    await logger.init();
+    await logger.log("tool_call", "Actor", "normal event", {});
+    await logger.log("error", "Actor", "an error", {});
+    await logger.log("file_write", "FileSystem", "a write", {});
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ excludeKinds: ["error", "anomaly_flag"], limit: 100 });
+    const kinds = result.results.map((e) => e.kind);
+    expect(kinds).not.toContain("error");
+    expect(kinds).toContain("tool_call");
+    expect(kinds).toContain("file_write");
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("TrailQuery.actors (OR) returns events from any of the listed actors", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-actors-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r8_actors" });
+    await logger.init();
+    await logger.log("tool_call", "FileSystem", "fs event", {});
+    await logger.log("tool_call", "Checkpointer", "cp event", {});
+    await logger.log("tool_call", "AnomalyDetector", "ad event", {});
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ actors: ["FileSystem", "Checkpointer"], limit: 100 });
+    const actors = result.results.map((e) => e.actor);
+    expect(actors).toContain("FileSystem");
+    expect(actors).toContain("Checkpointer");
+    expect(actors).not.toContain("AnomalyDetector");
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  it("TrailQuery.excludeActor removes matching actor from results", async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), "dt-r8-excludeActor-"));
+    const logger = new AuditLogger({ config: { storageRoot }, sessionId: "sess_r8_excA" });
+    await logger.init();
+    await logger.log("tool_call", "FileSystem", "fs event", {});
+    await logger.log("tool_call", "Checkpointer", "cp event", {});
+    await logger.flush();
+
+    const engine = new TrailQueryEngine({ storageRoot });
+    const result = await engine.query({ excludeActor: "filesystem", limit: 100 });
+    const actors = result.results.map((e) => e.actor);
+    expect(actors).not.toContain("FileSystem");
+    expect(actors).toContain("Checkpointer");
+    await rm(storageRoot, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fix 4: NL parser — negation, OR actors, dirMatch false-positive fix
+  // -------------------------------------------------------------------------
+
+  it("parseNaturalLanguageQuery: 'everything except errors' sets excludeKinds", () => {
+    const q = parseNaturalLanguageQuery("show everything except errors");
+    expect(q.excludeKinds).toContain("error");
+    expect(q.excludeKinds).toContain("retry");
+    expect(q.errorsOnly).toBeUndefined();
+  });
+
+  it("parseNaturalLanguageQuery: 'without deletes' sets excludeKinds file_delete", () => {
+    const q = parseNaturalLanguageQuery("show all events without deletes");
+    expect(q.excludeKinds).toContain("file_delete");
+  });
+
+  it("parseNaturalLanguageQuery: 'FileSystem or Checkpointer' sets actors array", () => {
+    const q = parseNaturalLanguageQuery("show events by FileSystem or Checkpointer");
+    expect(q.actors).toEqual(["FileSystem", "Checkpointer"]);
+    expect(q.actor).toBeUndefined();
+  });
+
+  it("parseNaturalLanguageQuery: dirMatch does not false-positive on fractions", () => {
+    const q = parseNaturalLanguageQuery("update 10/20 files today");
+    expect(q.filePathPrefix).toBeUndefined();
+  });
+
+  it("parseNaturalLanguageQuery: dirMatch does not false-positive on date fractions", () => {
+    const q = parseNaturalLanguageQuery("ran 1/3 of the test suite");
+    expect(q.filePathPrefix).toBeUndefined();
+  });
+
+  it("parseNaturalLanguageQuery: 'writes excluding errors' sets both kinds and excludeKinds", () => {
+    const q = parseNaturalLanguageQuery("show writes excluding errors");
+    expect(q.kinds).toContain("file_write");
+    expect(q.excludeKinds).toContain("error");
+    expect(q.errorsOnly).toBeUndefined();
+  });
+});

@@ -74,6 +74,8 @@ type OrchestratorEvents = {
   "lane:assigned": [{ laneId: string; agentKind: AgentKind }];
   "lane:frozen": [{ laneId: string; reason: string }];
   "lane:reassigned": [{ oldLaneId: string; newLaneId: string; newAgent: AgentKind }];
+  "lane:completed": [{ laneId: string; agentKind: string; sessionId: string }];
+  "lanes:all-terminal": [];
   "overlap:detected": [{ laneA: string; laneB: string; level: number }];
   "merge:complete": [MergeBrainResult];
   "error": [{ message: string; context?: string }];
@@ -97,6 +99,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
   private readonly options: Required<CouncilOrchestratorOptions>;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     adapters: Map<AgentKind, CouncilAgentAdapter>,
@@ -128,7 +131,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
    * Transitions: idle → planning → running
    */
   async start(opts: OrchestratorStartOptions): Promise<string> {
-    this.assertTransition("planning");
+    this.transition("planning");
 
     const auditLogPath =
       opts.auditLogPath ??
@@ -165,6 +168,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     await saveCouncilRun(runState);
     this.transition("running");
     this.observer.start();
+    this.startPolling();
 
     return runState.runId;
   }
@@ -204,6 +208,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     this.status = "running";
     this.observer.start();
+    this.startPolling();
     await setRunStatus(repoRoot, runId, "running");
   }
 
@@ -254,6 +259,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.assertStatus("running");
     if (!this.runState) throw new Error("No active run state");
 
+    this.stopPolling();
     this.transition("merging");
     this.observer?.stop();
 
@@ -317,8 +323,15 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
    */
   async fail(reason?: string): Promise<void> {
     if (!this.runState) return;
+    this.stopPolling();
     this.observer?.stop();
-    this.status = "failed";
+    // Use transition() when the current state allows it so state:transition is emitted.
+    // Fall back to direct assignment for states outside the normal machine (e.g. idle).
+    try {
+      this.transition("failed");
+    } catch {
+      this.status = "failed";
+    }
     this.emitError(reason ?? "Run aborted", "orchestrator");
     await setRunStatus(this.runState.repoRoot, this.runState.runId, "failed");
   }
@@ -359,16 +372,6 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.emit("state:transition", { from, to, runId: this.runState?.runId ?? "unknown" });
   }
 
-  private assertTransition(to: CouncilLifecycleStatus): void {
-    const from = this.status;
-    const allowed = VALID_TRANSITIONS[from];
-    if (!allowed.includes(to)) {
-      throw new Error(
-        `Cannot transition to ${to} from ${from}. Current transitions: ${allowed.join(", ")}`,
-      );
-    }
-  }
-
   private assertStatus(expected: CouncilLifecycleStatus): void {
     if (this.status !== expected) {
       throw new Error(`Expected orchestrator to be in status '${expected}' but got '${this.status}'`);
@@ -377,6 +380,127 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
   private emitError(message: string, context?: string): void {
     this.emit("error", { message, context });
+  }
+
+  /** Start the adapter completion polling loop. Called automatically by start()/resume(). */
+  private startPolling(): void {
+    if (this.pollTimer) return;
+    const intervalMs = this.options.pollIntervalMs;
+    this.pollTimer = setInterval(() => void this.pollAllLanes(), intervalMs);
+  }
+
+  /** Stop the polling loop. Called by merge()/fail(). */
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  /**
+   * Keeps the process alive, polls lanes, and auto-triggers merge + complete
+   * when all lanes finish. Returns once the run reaches "completed" or "failed".
+   * Use with `--watch` flag.
+   */
+  watchUntilComplete(opts?: { timeoutMs?: number }): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (this.status === "completed" || this.status === "failed") {
+        resolve();
+        return;
+      }
+
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = () => {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+        this.off("lanes:all-terminal", onAllTerminal);
+        this.off("state:transition", onTransition);
+      };
+
+      if (opts?.timeoutMs !== undefined) {
+        timeoutHandle = setTimeout(() => {
+          cleanup();
+          void this.fail(`watchUntilComplete timed out after ${opts.timeoutMs}ms`);
+          reject(new Error(`Council run timed out after ${opts.timeoutMs}ms`));
+        }, opts.timeoutMs);
+      }
+
+      const onAllTerminal = () => {
+        this.off("lanes:all-terminal", onAllTerminal);
+        if (this.status !== "running") return;
+        this.stopPolling();
+        this.merge()
+          .then((mergeResult) => {
+            if (mergeResult.success) {
+              return this.complete();
+            }
+            return this.fail(`Merge unsuccessful: ${mergeResult.error ?? "unknown"}`);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            return this.fail(`Auto-merge error: ${msg}`);
+          });
+      };
+      this.on("lanes:all-terminal", onAllTerminal);
+
+      const onTransition = ({ to }: { from: CouncilLifecycleStatus; to: CouncilLifecycleStatus; runId: string }) => {
+        if (to === "completed" || to === "failed") {
+          cleanup();
+          resolve();
+        }
+      };
+      this.on("state:transition", onTransition);
+    });
+  }
+
+  /** Poll all running lanes for completion. Per-lane fault isolation. */
+  private async pollAllLanes(): Promise<void> {
+    if (!this.runState) return;
+
+    for (const session of this.runState.agents) {
+      if (session.status !== "running" && session.status !== "idle") continue;
+
+      const adapter = this.adapters.get(session.agentKind);
+      if (!adapter) continue;
+
+      const sessionId = session.sessionId ?? session.laneId;
+
+      try {
+        const status = await adapter.pollStatus(sessionId);
+
+        if (status.status === "completed") {
+          session.status = "completed";
+          session.completedAt = new Date().toISOString();
+          await this.persistRunState();
+          this.emit("lane:completed", {
+            laneId: session.laneId,
+            agentKind: session.agentKind as string,
+            sessionId,
+          });
+        } else if (status.status === "failed") {
+          session.status = "failed";
+          if (status.progressSummary) {
+            session.errorMessage = status.progressSummary;
+          }
+          await this.persistRunState();
+        } else if (status.status === "capped" || status.status === "stalled") {
+          session.health = "soft-capped";
+        }
+      } catch {
+        // Per-lane fault isolation — one failing poll never blocks others
+      }
+    }
+
+    // Signal when all assigned lanes have reached a terminal state
+    if (this.status === "running" && this.runState.agents.length > 0) {
+      const allTerminal = this.runState.agents.every(
+        (s) => s.status === "completed" || s.status === "failed",
+      );
+      if (allTerminal) {
+        this.stopPolling(); // stop timer before signal so it only fires once
+        this.emit("lanes:all-terminal");
+      }
+    }
   }
 
   private async persistRunState(): Promise<void> {

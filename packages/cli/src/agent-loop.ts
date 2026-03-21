@@ -1753,6 +1753,7 @@ export async function runAgentLoop(
     });
   }
 
+
   // ---- Feature: Pivot logic ----
   // Track consecutive failures with similar error signatures for strategy change.
   // This is different from the existing tier escalation — it's about changing

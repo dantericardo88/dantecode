@@ -82,7 +82,7 @@ export class DanteSkillbookIntegration {
     let rejected = 0;
 
     for (let i = 0; i < proposals.length; i++) {
-      const proposal = proposals[i];
+      const proposal = proposals[i]!;
       const decision = decisions[i] ?? "fail";
 
       if (decision === "pass") {

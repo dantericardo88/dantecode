@@ -32,14 +32,14 @@ describe("ReviewQueue", () => {
     const ok = queue.approve(item.id);
     expect(ok).toBe(true);
     expect(queue.getPending()).toHaveLength(0);
-    expect(queue.getAll()[0].status).toBe("approved");
+    expect(queue.getAll()[0]!.status).toBe("approved");
   });
 
   it("reject transitions to rejected", () => {
     const item = queue.enqueue(op);
     const ok = queue.reject(item.id);
     expect(ok).toBe(true);
-    expect(queue.getAll()[0].status).toBe("rejected");
+    expect(queue.getAll()[0]!.status).toBe("rejected");
   });
 
   it("approve returns false for unknown id", () => {

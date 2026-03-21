@@ -12,6 +12,29 @@ describe("buildGaslighterPrompt", () => {
     expect(prompt).toContain("Iteration 2");
     expect(prompt).toContain("This is a draft answer.");
   });
+
+  it("omits lessons block when priorLessons is undefined", () => {
+    const prompt = buildGaslighterPrompt("Draft.", 1);
+    expect(prompt).not.toContain("Prior Lessons");
+  });
+
+  it("omits lessons block when priorLessons is empty", () => {
+    const prompt = buildGaslighterPrompt("Draft.", 1, []);
+    expect(prompt).not.toContain("Prior Lessons");
+  });
+
+  it("includes lessons block when priorLessons provided", () => {
+    const prompt = buildGaslighterPrompt("Draft.", 1, ["Always verify claims", "Add citations"]);
+    expect(prompt).toContain("Prior Lessons from Skillbook");
+    expect(prompt).toContain("Always verify claims");
+    expect(prompt).toContain("Add citations");
+  });
+
+  it("numbers prior lessons in the block", () => {
+    const prompt = buildGaslighterPrompt("Draft.", 1, ["Lesson A", "Lesson B"]);
+    expect(prompt).toContain("1. Lesson A");
+    expect(prompt).toContain("2. Lesson B");
+  });
 });
 
 describe("parseGaslighterOutput", () => {

@@ -18,9 +18,22 @@ severity must be one of: low, medium, high`;
 
 /**
  * Build the Gaslighter prompt for a given output draft.
+ *
+ * @param draft - The output to critique.
+ * @param iteration - Current iteration number.
+ * @param priorLessons - Previously distilled lessons from the Skillbook.
+ *   When provided, the gaslighter checks whether they have been applied.
  */
-export function buildGaslighterPrompt(draft: string, iteration: number): string {
-  return `## Iteration ${iteration} — Output Draft\n\n${draft}\n\n---\n\nCritique this output. Return a JSON object with: points, summary, needsEvidenceEscalation.`;
+export function buildGaslighterPrompt(
+  draft: string,
+  iteration: number,
+  priorLessons?: string[],
+): string {
+  const lessonsBlock =
+    priorLessons && priorLessons.length > 0
+      ? `\n\n### Prior Lessons from Skillbook\n\nThe following lessons were previously learned. Check whether this draft applies them:\n${priorLessons.map((l, i) => `${i + 1}. ${l}`).join("\n")}`
+      : "";
+  return `## Iteration ${iteration} — Output Draft\n\n${draft}${lessonsBlock}\n\n---\n\nCritique this output. Return a JSON object with: points, summary, needsEvidenceEscalation.`;
 }
 
 /**

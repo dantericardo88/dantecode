@@ -68,7 +68,7 @@ describe("parseSkillManagerOutput", () => {
     const raw = `Here are my proposals:\n[{"action":"add","rationale":"useful","candidateSkill":{"id":"s2","title":"T","content":"C","section":"coding","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}]`;
     const ops = parseSkillManagerOutput(raw);
     expect(ops).toHaveLength(1);
-    expect(ops[0].action).toBe("add");
+    expect(ops[0]!.action).toBe("add");
   });
 
   it("returns [] for invalid JSON", () => {

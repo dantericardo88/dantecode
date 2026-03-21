@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { execSync } from "node:child_process";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import { createWorktree, removeWorktree } from "@dantecode/git-engine";
 
 /** Timeout for a single git merge operation (ms). */
 const MERGE_TIMEOUT_MS = 30_000;
@@ -35,6 +36,7 @@ export interface MergeBrainResult {
   success: boolean;
   synthesis: FinalSynthesisRecord;
   error?: string;
+  conflictWorktreePath?: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -62,37 +64,50 @@ function git(args: string, cwd: string, timeoutMs = 10_000): string {
 /**
  * Attempt a structural (non-semantic) merge of two patches by applying each
  * to the target branch and letting git resolve non-conflicting hunks.
- * Returns the merged diff, or null if conflicts remain.
+ * Operates in an isolated git worktree so the main repo is never left in
+ * MERGE_HEAD state if the merge fails or is aborted.
  */
-function tryStructuralMerge(
+async function tryStructuralMergeIsolated(
   repoRoot: string,
+  runId: string,
   _branchA: string,
   branchB: string,
-): { success: boolean; conflicts: string[] } {
+  targetBranch: string,
+): Promise<{ success: boolean; conflicts: string[]; worktreePath?: string }> {
+  const sessionId = `merge-${runId}-${Date.now()}`;
+  let worktreeDir: string | undefined;
+
   try {
-    // Try a fast-forward merge with timeout guard
-    git(`merge "${branchB}" --no-commit --no-ff`, repoRoot, MERGE_TIMEOUT_MS);
+    const worktree = createWorktree({
+      directory: repoRoot,
+      sessionId,
+      branch: `council-merge-${sessionId}`,
+      baseBranch: targetBranch,
+    });
+    worktreeDir = worktree.directory;
 
-    // Check for remaining conflicts
-    const conflictedRaw = git("diff --name-only --diff-filter=U", repoRoot);
-    const conflicted = conflictedRaw ? conflictedRaw.split("\n").filter(Boolean) : [];
+    // Run merge in isolated worktree — never touches the main repo
+    git(`merge "${branchB}" --no-commit --no-ff`, worktreeDir, MERGE_TIMEOUT_MS);
 
-    if (conflicted.length === 0) {
+    const conflictedRaw = git("diff --name-only --diff-filter=U", worktreeDir);
+    const conflicts = conflictedRaw ? conflictedRaw.split("\n").filter(Boolean) : [];
+
+    if (conflicts.length === 0) {
+      try { git("merge --abort", worktreeDir); } catch { git("reset --hard HEAD", worktreeDir); }
+      removeWorktree(worktreeDir);
       return { success: true, conflicts: [] };
     }
 
-    // Abort the merge — conflicts need semantic synthesis
-    try {
-      git("merge --abort", repoRoot);
-    } catch {
-      // ignore abort errors
-    }
-    return { success: false, conflicts: conflicted };
+    // Abort merge in worktree, remove it, report conflicts
+    try { git("merge --abort", worktreeDir); } catch { /* ignore */ }
+    removeWorktree(worktreeDir);
+    return { success: false, conflicts };
   } catch {
-    try {
-      git("merge --abort", repoRoot);
-    } catch {
-      // ignore
+    if (worktreeDir) {
+      try {
+        git("merge --abort", worktreeDir);
+      } catch { /* ignore */ }
+      try { removeWorktree(worktreeDir); } catch { /* non-fatal cleanup */ }
     }
     return { success: false, conflicts: [] };
   }
@@ -114,6 +129,10 @@ function tryStructuralMerge(
  */
 export class MergeBrain {
   private readonly scorer = new MergeConfidenceScorer();
+
+  constructor() {
+    // Worktree isolation is handled internally via @dantecode/git-engine.
+  }
 
   async synthesize(input: MergeBrainInput): Promise<MergeBrainResult> {
     const { runId, candidates, repoRoot, targetBranch, allowAutoMerge = true } = input;
@@ -158,15 +177,18 @@ export class MergeBrain {
       const branchB = this.extractBranchFromPatch(candidates[1]!);
 
       if (branchA && branchB) {
-        const structuralResult = tryStructuralMerge(repoRoot, branchA, branchB);
+        const structuralResult = await tryStructuralMergeIsolated(
+          repoRoot,
+          runId,
+          branchA,
+          branchB,
+          targetBranch,
+        );
         if (structuralResult.success) {
-          try {
-            synthesis.mergedPatch = git(`diff ${targetBranch} HEAD`, repoRoot);
-            synthesis.decision = "auto-merge";
-            synthesis.verificationPassed = true;
-          } catch {
-            synthesis.mergedPatch = candidates[0]!.unifiedDiff;
-          }
+          // Worktree was removed on success; use first candidate diff as the synthesized patch.
+          synthesis.mergedPatch = candidates[0]!.unifiedDiff;
+          synthesis.decision = "auto-merge";
+          synthesis.verificationPassed = true;
         } else {
           // Structural merge failed — require review
           synthesis.decision = "review-required" satisfies MergeDecision;

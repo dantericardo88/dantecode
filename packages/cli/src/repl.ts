@@ -49,6 +49,8 @@ export interface ReplOptions {
   verbose: boolean;
   silent: boolean;
   configPath?: string;
+  /** Maximum tool rounds for non-interactive/one-shot mode. */
+  maxRounds?: number;
 }
 
 // ----------------------------------------------------------------------------
@@ -429,6 +431,10 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     enableSandbox: options.enableSandbox,
     silent: options.silent,
   };
+
+  if (options.maxRounds !== undefined) {
+    agentConfig.requiredRounds = options.maxRounds;
+  }
 
   if (options.enableSandbox) {
     agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);

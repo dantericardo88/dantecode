@@ -20,7 +20,7 @@ function tokenize(text: string): Set<string> {
     text
       .toLowerCase()
       .split(/\W+/)
-      .filter(t => t.length > 2),
+      .filter(t => t.length >= 2),
   );
 }
 
@@ -76,7 +76,7 @@ export function getRelevantSkills(
   const sorted = scored.sort((a, b) => b.score - a.score);
 
   // If the best score is zero, no skill is relevant — return empty.
-  if (sorted.length === 0 || sorted[0].score === 0) return [];
+  if (sorted.length === 0 || (sorted[0]?.score ?? 0) === 0) return [];
 
   return sorted
     .slice(0, limit)

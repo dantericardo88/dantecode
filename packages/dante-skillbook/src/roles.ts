@@ -6,7 +6,7 @@
  * Model routing hooks are exposed for future model-router integration.
  */
 
-import type { Skill, TaskResult, ReflectionOptions, UpdateOperation } from "./types.js";
+import type { Skill, TaskResult, UpdateOperation } from "./types.js";
 import {
   buildAgentPrompt,
   buildReflectorPrompt,
@@ -125,6 +125,3 @@ export function parseSkillManagerOutput(rawOutput: string): UpdateOperation[] {
     return [];
   }
 }
-
-// Suppress unused import warning for ReflectionOptions
-void (undefined as unknown as ReflectionOptions);

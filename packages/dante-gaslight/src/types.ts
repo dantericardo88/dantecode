@@ -98,6 +98,8 @@ export const GaslightSessionSchema = z.object({
   finalOutput: z.string().optional(),
   finalGateDecision: GaslightGateDecisionSchema.optional(),
   lessonEligible: z.boolean().default(false),
+  /** ISO timestamp set when this session has been distilled into the Skillbook. */
+  distilledAt: z.string().datetime().optional(),
   startedAt: z.string().datetime().default(() => new Date().toISOString()),
   endedAt: z.string().datetime().optional(),
 });
@@ -126,6 +128,11 @@ export interface GaslightConfig {
   policyTaskClasses: string[];
   /** Random audit rate (0-1). 0 = disabled. */
   auditRate: number;
+  /**
+   * Max sessions to keep on disk. Oldest sessions are deleted after each save.
+   * Default: 100. Set to 0 to disable cleanup.
+   */
+  maxSessions: number;
 }
 
 export const DEFAULT_GASLIGHT_CONFIG: GaslightConfig = {
@@ -138,6 +145,7 @@ export const DEFAULT_GASLIGHT_CONFIG: GaslightConfig = {
   autoTriggerThreshold: 0,
   policyTaskClasses: ["code-generation", "long-research", "plan", "patch-synthesis"],
   auditRate: 0,
+  maxSessions: 100,
 };
 
 // ────────────────────────────────────────────────────────

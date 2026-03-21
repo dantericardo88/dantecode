@@ -8,7 +8,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdir, rm, readFile } from "node:fs/promises";
+import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   createCouncilRunState,
@@ -46,8 +48,15 @@ import type { WorktreeSnapshot } from "./worktree-observer.js";
 import { WorktreeObserver } from "./worktree-observer.js";
 import { CouncilRouter } from "./council-router.js";
 import { MergeBrain } from "./merge-brain.js";
+import type { WorktreeHooks } from "./merge-brain.js";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
 import type { CouncilAgentAdapter } from "./agent-adapters/base.js";
+import { DanteCodeAdapter } from "./agent-adapters/dantecode.js";
+import type { SelfLaneExecutor } from "./agent-adapters/dantecode.js";
+import type { CouncilTaskPacket } from "./council-types.js";
+import { BridgeListener } from "./bridge-listener.js";
+import type { AgentCommandConfig, SpawnFn } from "./bridge-listener.js";
+import { CouncilOrchestrator } from "./council-orchestrator.js";
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -1927,5 +1936,745 @@ describe("council-types additional", () => {
     // Both should be valid ISO dates
     expect(new Date(state.createdAt).toISOString()).toBe(state.createdAt);
     expect(new Date(state.updatedAt).toISOString()).toBe(state.updatedAt);
+  });
+});
+
+// ============================================================================
+// Lane A — DanteCode Self-Executor (SelfLaneExecutor injection)
+// ============================================================================
+
+function makeTestPacket(overrides: Partial<CouncilTaskPacket> = {}): CouncilTaskPacket {
+  return {
+    packetId: randomUUID(),
+    runId: "run-test-1",
+    laneId: "dantecode-abc123",
+    objective: "Implement feature X",
+    taskCategory: "coding",
+    ownedFiles: ["src/foo.ts"],
+    readOnlyFiles: [],
+    forbiddenFiles: [],
+    contractDependencies: [],
+    worktreePath: "/tmp/worktree",
+    branch: "feat/x",
+    baseBranch: "main",
+    assumptions: [],
+    ...overrides,
+  };
+}
+
+describe("Lane A — DanteCodeAdapter SelfLaneExecutor", () => {
+  it("submitTask returns accepted:true with no executor (legacy path)", async () => {
+    const adapter = new DanteCodeAdapter();
+    const result = await adapter.submitTask(makeTestPacket());
+    expect(result.accepted).toBe(true);
+    expect(result.sessionId).toBeTruthy();
+  });
+
+  it("pollStatus returns running for legacy (no-executor) submitted task", async () => {
+    const adapter = new DanteCodeAdapter();
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    const status = await adapter.pollStatus(sessionId);
+    expect(status.status).toBe("running");
+  });
+
+  it("executor fires on submitTask and resolves to completed", async () => {
+    let executorCalled = false;
+    const executor: SelfLaneExecutor = async () => {
+      executorCalled = true;
+      return { output: "done", touchedFiles: ["src/foo.ts"], success: true };
+    };
+    const adapter = new DanteCodeAdapter({ executor });
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    // Allow microtasks to flush
+    await new Promise((r) => setTimeout(r, 20));
+    expect(executorCalled).toBe(true);
+    const status = await adapter.pollStatus(sessionId);
+    expect(status.status).toBe("completed");
+  });
+
+  it("pollStatus reflects executor failure via error path", async () => {
+    const executor: SelfLaneExecutor = async () => ({
+      output: "",
+      touchedFiles: [],
+      success: false,
+      error: "typecheck failed",
+    });
+    const adapter = new DanteCodeAdapter({ executor });
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    await new Promise((r) => setTimeout(r, 20));
+    const status = await adapter.pollStatus(sessionId);
+    expect(status.status).toBe("failed");
+  });
+
+  it("executor exception marks session failed", async () => {
+    const executor: SelfLaneExecutor = async () => {
+      throw new Error("unexpected crash");
+    };
+    const adapter = new DanteCodeAdapter({ executor });
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    await new Promise((r) => setTimeout(r, 20));
+    const status = await adapter.pollStatus(sessionId);
+    expect(status.status).toBe("failed");
+  });
+
+  it("collectArtifacts returns touchedFiles in logs after executor success", async () => {
+    const executor: SelfLaneExecutor = async () => ({
+      output: "done",
+      touchedFiles: ["src/foo.ts", "src/bar.ts"],
+      success: true,
+    });
+    const adapter = new DanteCodeAdapter({ executor });
+    const { sessionId } = await adapter.submitTask(makeTestPacket());
+    await new Promise((r) => setTimeout(r, 20));
+    const artifacts = await adapter.collectArtifacts(sessionId);
+    const logsJoined = artifacts.logs.join(" ");
+    expect(logsJoined).toContain("src/foo.ts");
+    expect(logsJoined).toContain("src/bar.ts");
+  });
+});
+
+// ============================================================================
+// Lane B — BridgeListener Daemon
+// ============================================================================
+
+
+function makeSpawnMock(opts: {
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  errorEvent?: Error;
+} = {}): { spawnFn: SpawnFn; calls: Array<{ cmd: string; args: string[] }> } {
+  const calls: Array<{ cmd: string; args: string[] }> = [];
+  const spawnFn: SpawnFn = (cmd, args) => {
+    calls.push({ cmd, args });
+    const emitter = new EventEmitter() as ChildProcess;
+    const stdoutEmitter = new EventEmitter();
+    const stderrEmitter = new EventEmitter();
+    Object.assign(emitter, { stdout: stdoutEmitter, stderr: stderrEmitter });
+    setImmediate(() => {
+      if (opts.stdout) stdoutEmitter.emit("data", Buffer.from(opts.stdout));
+      if (opts.stderr) stderrEmitter.emit("data", Buffer.from(opts.stderr));
+      if (opts.errorEvent) {
+        emitter.emit("error", opts.errorEvent);
+      } else {
+        emitter.emit("close", opts.exitCode ?? 0);
+      }
+    });
+    return emitter;
+  };
+  return { spawnFn, calls };
+}
+
+function makeTestPacketForBridge(laneId: string): CouncilTaskPacket {
+  return {
+    packetId: randomUUID(),
+    runId: "bridge-run-1",
+    laneId,
+    objective: "Bridge test",
+    taskCategory: "coding",
+    ownedFiles: ["src/foo.ts"],
+    readOnlyFiles: [],
+    forbiddenFiles: [],
+    contractDependencies: [],
+    worktreePath: testDir,
+    branch: "feat/bridge",
+    baseBranch: "main",
+    assumptions: [],
+  };
+}
+
+const claudeConfig: AgentCommandConfig = {
+  kind: "claude-code",
+  command: "claude",
+  args: ["--dangerously-skip-permissions"],
+};
+
+describe("Lane B — BridgeListener Daemon", () => {
+  it("stop() clears the interval without error when not started", () => {
+    const { spawnFn } = makeSpawnMock();
+    const listener = new BridgeListener(testDir, [claudeConfig], spawnFn, { pollIntervalMs: 50 });
+    expect(() => listener.stop()).not.toThrow();
+  });
+
+  it("start() is idempotent — calling twice does not start multiple timers", () => {
+    const { spawnFn } = makeSpawnMock();
+    const listener = new BridgeListener(testDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    listener.start();
+    listener.start(); // second call should be no-op
+    listener.stop();
+  });
+
+  it("start() and stop() pair clears the interval", () => {
+    const { spawnFn } = makeSpawnMock();
+    const listener = new BridgeListener(testDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    listener.start();
+    listener.stop();
+    // No assertion needed — just ensuring no error / leaked handles
+  });
+
+  it("poll() returns silently when inbox dir does not exist", async () => {
+    const { spawnFn } = makeSpawnMock();
+    const listener = new BridgeListener(testDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    await expect(listener.poll()).resolves.toBeUndefined();
+  });
+
+  it("new session triggers spawn when task.md + packet.json present", async () => {
+    const { spawnFn, calls } = makeSpawnMock({ stdout: "Agent output", exitCode: 0 });
+    const bridgeDir = join(testDir, "bridge-spawn");
+    const sessionId = "claude-code-test123";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-abc");
+    await writeFile(join(inboxDir, "task.md"), "Do the task", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    // Wait for async runSession
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0]!.cmd).toBe("claude");
+  });
+
+  it("started.lock prevents double-dispatch", async () => {
+    const { spawnFn, calls } = makeSpawnMock({ exitCode: 0 });
+    const bridgeDir = join(testDir, "bridge-lock");
+    const sessionId = "claude-code-locktest";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-xyz");
+    await writeFile(join(inboxDir, "task.md"), "Do the task", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+    await writeFile(join(inboxDir, "started.lock"), new Date().toISOString(), "utf-8");
+
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Lock was present — should not spawn
+    expect(calls.length).toBe(0);
+  });
+
+  it("done.json written with success:true on exit code 0", async () => {
+    const { spawnFn } = makeSpawnMock({ stdout: "ok", exitCode: 0 });
+    const bridgeDir = join(testDir, "bridge-done-success");
+    const sessionId = "claude-code-success1";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-s1");
+    await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
+    const raw = await readFile(donePath, "utf-8");
+    const done = JSON.parse(raw) as { success: boolean; exitCode: number };
+    expect(done.success).toBe(true);
+    expect(done.exitCode).toBe(0);
+  });
+
+  it("done.json written with success:false on non-zero exit", async () => {
+    const { spawnFn } = makeSpawnMock({ exitCode: 1 });
+    const bridgeDir = join(testDir, "bridge-done-fail");
+    const sessionId = "claude-code-fail1";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-f1");
+    await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
+    const raw = await readFile(donePath, "utf-8");
+    const done = JSON.parse(raw) as { success: boolean; exitCode: number };
+    expect(done.success).toBe(false);
+    expect(done.exitCode).toBe(1);
+  });
+
+  it("unknown agent kind writes error done.json gracefully", async () => {
+    const { spawnFn } = makeSpawnMock({ exitCode: 0 });
+    const bridgeDir = join(testDir, "bridge-unknown");
+    const sessionId = "unknown-kind-xyz";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    // laneId prefix 'unknown' doesn't match any registered agent
+    const packet = makeTestPacketForBridge("unknown-laneprefix");
+    await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    // Register two agents — disables the single-agent fallback, so 'unknown' prefix matches nothing
+    const codexConfig: AgentCommandConfig = { kind: "codex", command: "codex" };
+    const ccConfig: AgentCommandConfig = { kind: "claude-code", command: "claude" };
+    const listener = new BridgeListener(bridgeDir, [codexConfig, ccConfig], spawnFn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
+    const raw = await readFile(donePath, "utf-8");
+    const done = JSON.parse(raw) as { success: boolean };
+    expect(done.success).toBe(false);
+  });
+
+  it("env vars from AgentCommandConfig are passed to spawn", async () => {
+    const capturedEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
+    const envCapturingSpawn: SpawnFn = (_cmd, _args, opts) => {
+      capturedEnvs.push(opts.env as NodeJS.ProcessEnv | undefined);
+      const emitter = new EventEmitter() as ChildProcess;
+      const stdoutEmitter = new EventEmitter();
+      const stderrEmitter = new EventEmitter();
+      Object.assign(emitter, { stdout: stdoutEmitter, stderr: stderrEmitter });
+      setImmediate(() => emitter.emit("close", 0));
+      return emitter;
+    };
+
+    const bridgeDir = join(testDir, "bridge-env");
+    const sessionId = "claude-code-envtest";
+    const inboxDir = join(bridgeDir, "inbox", sessionId);
+    await mkdir(inboxDir, { recursive: true });
+    const packet = makeTestPacketForBridge("claude-code-env");
+    await writeFile(join(inboxDir, "task.md"), "Task", "utf-8");
+    await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
+
+    const configWithEnv: AgentCommandConfig = {
+      kind: "claude-code",
+      command: "claude",
+      env: { MY_CUSTOM_VAR: "test-value" },
+    };
+    const listener = new BridgeListener(bridgeDir, [configWithEnv], envCapturingSpawn, { pollIntervalMs: 5000 });
+    await listener.poll();
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(capturedEnvs.length).toBeGreaterThan(0);
+    expect(capturedEnvs[0]?.["MY_CUSTOM_VAR"]).toBe("test-value");
+  });
+});
+
+// ============================================================================
+// Lane C — MergeBrain WorktreeHooks Isolation
+// ============================================================================
+
+
+describe("Lane C — MergeBrain WorktreeHooks", () => {
+  it("MergeBrain constructor accepts WorktreeHooks without error", () => {
+    const hooks: WorktreeHooks = {
+      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt-branch" }),
+      removeWorktree: () => {},
+    };
+    expect(() => new MergeBrain(hooks)).not.toThrow();
+  });
+
+  it("MergeBrain constructor works without hooks (backward compat)", () => {
+    expect(() => new MergeBrain()).not.toThrow();
+    expect(() => new MergeBrain(undefined)).not.toThrow();
+  });
+
+  it("synthesize() returns valid MergeBrainResult structure with empty candidates", async () => {
+    const brain = new MergeBrain();
+    const result = await brain.synthesize({
+      runId: "test-run-c1",
+      candidates: [],
+      repoRoot: testDir,
+      targetBranch: "main",
+      allowAutoMerge: false,
+    });
+    expect(result).toHaveProperty("success");
+    expect(result).toHaveProperty("synthesis");
+    expect(result.synthesis).toHaveProperty("id");
+    expect(result.synthesis.candidateLanes).toEqual([]);
+  });
+
+  it("synthesize() with single candidate preserves candidate patch", async () => {
+    const brain = new MergeBrain();
+    const candidate: MergeCandidatePatch = {
+      laneId: "dantecode-lane1",
+      unifiedDiff: "diff --git a/foo.ts b/foo.ts\n+// added",
+      changedFiles: ["foo.ts"],
+    };
+    const result = await brain.synthesize({
+      runId: "test-run-c2",
+      candidates: [candidate],
+      repoRoot: testDir,
+      targetBranch: "main",
+      allowAutoMerge: false,
+    });
+    expect(result.synthesis.preservedCandidates["dantecode-lane1"]).toBe(candidate.unifiedDiff);
+  });
+
+  it("CouncilOrchestratorOptions.worktreeHooks accepted by constructor", () => {
+    const hooks: WorktreeHooks = {
+      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt" }),
+      removeWorktree: () => {},
+    };
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>();
+    expect(() => new CouncilOrchestrator(adapters, { worktreeHooks: hooks })).not.toThrow();
+  });
+
+  it("CouncilOrchestrator accepts worktreeHooks and stores them in options", () => {
+    const hooks: WorktreeHooks = {
+      createWorktree: () => ({ directory: "/tmp/wt", branch: "wt" }),
+      removeWorktree: () => {},
+    };
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>();
+    const orchestrator = new CouncilOrchestrator(adapters, { worktreeHooks: hooks });
+    // Indirectly verify: instance was created successfully (no throw)
+    expect(orchestrator).toBeInstanceOf(CouncilOrchestrator);
+  });
+
+  it("synthesize() with multiple different-file candidates produces valid result", async () => {
+    const brain = new MergeBrain();
+    const candidates: MergeCandidatePatch[] = [
+      {
+        laneId: "dantecode-lane-x",
+        unifiedDiff: "diff --git a/a.ts b/a.ts\n+export const x = 1;",
+        changedFiles: ["a.ts"],
+      },
+      {
+        laneId: "codex-lane-y",
+        unifiedDiff: "diff --git a/b.ts b/b.ts\n+export const y = 2;",
+        changedFiles: ["b.ts"],
+      },
+    ];
+    const result = await brain.synthesize({
+      runId: "test-run-c3",
+      candidates,
+      repoRoot: testDir,
+      targetBranch: "main",
+      allowAutoMerge: false,
+    });
+    expect(result.synthesis.candidateLanes).toContain("dantecode-lane-x");
+    expect(result.synthesis.candidateLanes).toContain("codex-lane-y");
+    expect(result.synthesis.preservedCandidates["dantecode-lane-x"]).toBeTruthy();
+    expect(result.synthesis.preservedCandidates["codex-lane-y"]).toBeTruthy();
+  });
+
+  it("synthesize() result has valid confidence bucket", async () => {
+    const brain = new MergeBrain();
+    const result = await brain.synthesize({
+      runId: "test-run-c4",
+      candidates: [],
+      repoRoot: testDir,
+      targetBranch: "main",
+    });
+    expect(["high", "medium", "low", "none"]).toContain(result.synthesis.confidence);
+  });
+});
+
+// ============================================================================
+// Lane D — Completion Poller + CouncilOrchestrator pollAllLanes
+// ============================================================================
+
+/** Create a minimal valid AgentSessionState for tests. */
+function makeAgentSession(
+  overrides: Partial<AgentSessionState> & Pick<AgentSessionState, "laneId" | "sessionId" | "status">,
+): AgentSessionState {
+  return {
+    agentKind: "dantecode",
+    adapterKind: "native-cli",
+    health: "ready",
+    worktreePath: testDir,
+    branch: "feat/test",
+    assignedFiles: [],
+    objective: "Test objective",
+    taskCategory: "coding",
+    touchedFiles: [],
+    retryCount: 0,
+    startedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/** Minimal inline adapter factory for Lane D tests. */
+function makeInlineAdapter(
+  pollStatus: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+): CouncilAgentAdapter {
+  return {
+    id: "dantecode",
+    displayName: "Mock",
+    kind: "native-cli",
+    probeAvailability: async () => ({ available: true, health: "ready" as const }),
+    estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+    submitTask: async () => ({ sessionId: randomUUID().slice(0, 12), accepted: true }),
+    pollStatus: pollStatus as CouncilAgentAdapter["pollStatus"],
+    collectArtifacts: async (sessionId: string) => ({ sessionId, files: [], logs: [] }),
+    collectPatch: async () => null,
+    detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+    abortTask: async () => { /* no-op */ },
+  };
+}
+
+type PollOrchestrator = {
+  runState: { agents: AgentSessionState[] };
+  pollAllLanes(): Promise<void>;
+  pollTimer: unknown;
+};
+
+function makeOrchestrator(
+  pollStatusFn: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+  opts: { pollIntervalMs?: number } = {},
+): CouncilOrchestrator {
+  const adapter = makeInlineAdapter(pollStatusFn);
+  const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+  return new CouncilOrchestrator(adapters, { pollIntervalMs: opts.pollIntervalMs ?? 999_999 });
+}
+
+describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
+  // Track active orchestrators so we can stop their polling timers after each test.
+  // Without this, the setInterval from startPolling() leaks across tests in the full suite,
+  // causing unhandled-error events when the interval fires after the test has completed.
+  const activeOrchestrators: CouncilOrchestrator[] = [];
+  afterEach(() => {
+    for (const o of activeOrchestrators) {
+      const oc = o as unknown as PollOrchestrator;
+      if (oc.pollTimer) {
+        clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+      }
+    }
+    activeOrchestrators.length = 0;
+  });
+  function trackOrchestrator(
+    pollStatusFn: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+    opts: { pollIntervalMs?: number } = {},
+  ): CouncilOrchestrator {
+    const o = makeOrchestrator(pollStatusFn, opts);
+    activeOrchestrators.push(o);
+    return o;
+  }
+  it("lane:completed event emitted when pollStatus returns completed", async () => {
+    let completedEvent: { laneId: string; agentKind: string; sessionId: string } | null = null;
+    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    await orchestrator.start({ objective: "Test event", agents: ["dantecode"], repoRoot: testDir });
+    orchestrator.on("lane:completed", (evt) => { completedEvent = evt; });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    state!.agents.push(makeAgentSession({ laneId: "dantecode-ev1", sessionId: "poll-session-1", status: "running" }));
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+
+    expect(completedEvent).not.toBeNull();
+    expect(completedEvent!.laneId).toBe("dantecode-ev1");
+    expect(completedEvent!.sessionId).toBe("poll-session-1");
+  });
+
+  it("session.status advances to completed after pollAllLanes with completed response", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    await orchestrator.start({ objective: "poll test", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const session = makeAgentSession({ laneId: "dantecode-s1", sessionId: "s1", status: "running" });
+    state!.agents.push(session);
+
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+    expect(session.status).toBe("completed");
+  });
+
+  it("session.status advances to failed after pollAllLanes with failed response", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "failed", progressSummary: "err" }));
+    await orchestrator.start({ objective: "poll fail", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const session = makeAgentSession({ laneId: "dantecode-s2", sessionId: "s2", status: "running" });
+    state!.agents.push(session);
+
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+    expect(session.status).toBe("failed");
+  });
+
+  it("pollAllLanes fault isolation: one throw does not block other sessions", async () => {
+    let callCount = 0;
+    const adapter = makeInlineAdapter(async (sessionId) => {
+      callCount++;
+      if (sessionId === "s3-bad") throw new Error("poll exploded");
+      return { sessionId, status: "completed" };
+    });
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    await orchestrator.start({ objective: "fault isolation", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const goodSession = makeAgentSession({ laneId: "dantecode-good", sessionId: "s3-good", status: "running" });
+    const badSession = makeAgentSession({ laneId: "dantecode-bad", sessionId: "s3-bad", status: "running" });
+    state!.agents.push(goodSession, badSession);
+
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+
+    expect(goodSession.status).toBe("completed");
+    expect(callCount).toBe(2);
+  });
+
+  it("pollAllLanes is idempotent on already-completed sessions", async () => {
+    let pollCalls = 0;
+    const orchestrator = makeOrchestrator(async (s) => { pollCalls++; return { sessionId: s, status: "completed" }; });
+    await orchestrator.start({ objective: "idempotent", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const session = makeAgentSession({ laneId: "dantecode-idem", sessionId: "s4", status: "completed" });
+    state!.agents.push(session);
+
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+    expect(pollCalls).toBe(0); // already completed — not polled
+  });
+
+  it("session.health set to soft-capped on capped pollStatus", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "capped" }));
+    await orchestrator.start({ objective: "capped", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const session = makeAgentSession({ laneId: "dantecode-cap", sessionId: "s5", status: "running" });
+    state!.agents.push(session);
+
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+    expect(session.health).toBe("soft-capped");
+  });
+
+  it("startPolling sets pollTimer; fail() clears it", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
+    orchestrator.on("error", () => {}); // suppress unhandled error from fail()
+    await orchestrator.start({ objective: "timer test", agents: ["dantecode"], repoRoot: testDir });
+
+    expect((orchestrator as unknown as PollOrchestrator).pollTimer).not.toBeNull();
+    await orchestrator.fail("test cleanup");
+    expect((orchestrator as unknown as PollOrchestrator).pollTimer).toBeNull();
+  });
+
+  it("lane:completed event payload includes laneId, agentKind, and sessionId", async () => {
+    const events: Array<{ laneId: string; agentKind: string; sessionId: string }> = [];
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    orchestrator.on("lane:completed", (evt) => events.push(evt));
+    await orchestrator.start({ objective: "payload test", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    state!.agents.push(makeAgentSession({ laneId: "dantecode-payload1", sessionId: "payload-s1", status: "running" }));
+    await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]!.laneId).toBe("dantecode-payload1");
+    expect(events[0]!.agentKind).toBe("dantecode");
+    expect(events[0]!.sessionId).toBe("payload-s1");
+  });
+
+  it("pollAllLanes skips session with no matching adapter", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
+    await orchestrator.start({ objective: "no adapter", agents: ["dantecode"], repoRoot: testDir });
+
+    const state = (orchestrator as unknown as PollOrchestrator).runState;
+    const orphanSession = makeAgentSession({ laneId: "codex-orphan", sessionId: "s7-orphan", status: "running", agentKind: "codex" });
+    state!.agents.push(orphanSession);
+
+    await expect(
+      (orchestrator as unknown as PollOrchestrator).pollAllLanes()
+    ).resolves.toBeUndefined();
+    expect(orphanSession.status).toBe("running");
+  });
+
+  it("start() call causes pollTimer to be set", async () => {
+    const orchestrator = makeOrchestrator(async (s) => ({ sessionId: s, status: "running" }));
+    orchestrator.on("error", () => {}); // suppress unhandled error from fail()
+
+    expect((orchestrator as unknown as PollOrchestrator).pollTimer).toBeNull();
+    await orchestrator.start({ objective: "start timer", agents: ["dantecode"], repoRoot: testDir });
+    expect((orchestrator as unknown as PollOrchestrator).pollTimer).not.toBeNull();
+    await orchestrator.fail("cleanup");
+  });
+});
+
+// ============================================================================
+// Lane D+ — CouncilOrchestrator watchUntilComplete integration
+// ============================================================================
+
+describe("CouncilOrchestrator watchUntilComplete", () => {
+  const FAKE_DIFF = "diff --git a/src/watch.ts b/src/watch.ts\n+export const x = 1;\n";
+
+  /** Adapter that sequences through status responses and provides a real patch on completion. */
+  function makeWatchAdapter(
+    responses: Array<"running" | "completed" | "failed">,
+  ): CouncilAgentAdapter {
+    let callIdx = 0;
+    return {
+      id: "dantecode",
+      displayName: "Mock",
+      kind: "native-cli",
+      probeAvailability: async () => ({ available: true, health: "ready" as const }),
+      estimateCapacity: async () => ({ remainingCapacity: 100, capSuspicion: "none" as const }),
+      submitTask: async () => ({ sessionId: randomUUID().slice(0, 6), accepted: true }),
+      pollStatus: async (sessionId: string) => {
+        const status = responses[Math.min(callIdx++, responses.length - 1)]!;
+        return { sessionId, status };
+      },
+      collectArtifacts: async (sessionId: string) => ({ sessionId, files: [], logs: [] }),
+      collectPatch: async (sessionId: string) => ({
+        sessionId,
+        unifiedDiff: FAKE_DIFF,
+        changedFiles: ["src/watch.ts"],
+      }),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: async () => {},
+    } as CouncilAgentAdapter;
+  }
+
+  function injectWatchSession(orchestrator: CouncilOrchestrator, sessionId: string): void {
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    state!.agents.push({
+      laneId: `dantecode-watch-${sessionId}`,
+      agentKind: "dantecode",
+      sessionId,
+      status: "running",
+      assignedFiles: ["src/watch.ts"],
+      objective: "watch test",
+      taskCategory: "coding",
+      touchedFiles: [],
+      retryCount: 0,
+      health: "ready",
+      adapterKind: "native-cli",
+      worktreePath: testDir,
+      branch: "feature/watch",
+      startedAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+    } as AgentSessionState);
+  }
+
+  it("watchUntilComplete resolves to 'completed' when all lanes succeed", async () => {
+    const adapter = makeWatchAdapter(["running", "completed"]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    await orchestrator.start({ objective: "watch success", agents: ["dantecode"], repoRoot: testDir });
+
+    injectWatchSession(orchestrator, "watch-s1");
+    await orchestrator.watchUntilComplete();
+
+    expect(orchestrator.currentStatus).toBe("completed");
+  });
+
+  it("watchUntilComplete resolves to 'failed' when all lanes fail", async () => {
+    const adapter = makeWatchAdapter(["running", "failed"]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    orchestrator.on("error", () => {}); // suppress unhandled error event from fail()
+    await orchestrator.start({ objective: "watch fail", agents: ["dantecode"], repoRoot: testDir });
+
+    injectWatchSession(orchestrator, "watch-s2");
+    await orchestrator.watchUntilComplete();
+
+    expect(orchestrator.currentStatus).toBe("failed");
+  });
+
+  it("watchUntilComplete emits lane:completed before resolving", async () => {
+    const completedIds: string[] = [];
+    const adapter = makeWatchAdapter(["completed"]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    orchestrator.on("lane:completed", (evt) => completedIds.push(evt.laneId));
+    await orchestrator.start({ objective: "watch events", agents: ["dantecode"], repoRoot: testDir });
+
+    injectWatchSession(orchestrator, "watch-s3");
+    await orchestrator.watchUntilComplete();
+
+    expect(completedIds).toHaveLength(1);
+    expect(completedIds[0]).toContain("dantecode-watch");
   });
 });

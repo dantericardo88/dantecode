@@ -20,6 +20,8 @@ import { ReplayOrchestrator } from "../replay-orchestrator.js";
 import { RestoreEngine } from "../restore-engine.js";
 import { ExportEngine } from "../export-engine.js";
 import { getTrailStore } from "../sqlite-store.js";
+import { AnomalyDetector } from "../anomaly-detector.js";
+import type { AnomalyFlag } from "../anomaly-detector.js";
 
 // ---------------------------------------------------------------------------
 // CLI Bridge — thin adapter over the core engines
@@ -142,5 +144,24 @@ export class CliBridge {
       lines.push(`[${e.seq}] ${e.kind} | ${e.actor} | ${e.summary}`);
     }
     return lines.join("\n");
+  }
+
+  /** Run anomaly detection on a session and return detected flags. */
+  async detectAnomalies(sessionId?: string): Promise<AnomalyFlag[]> {
+    const currentSessionId = this.logger.getSessionId();
+    const sid = sessionId ?? currentSessionId;
+
+    if (sid === currentSessionId) {
+      // Current session: use logger's own detector (respects any updateConfig() calls)
+      // and in-memory session buffer — zero disk reads.
+      const detector = this.logger.getAnomalyDetector();
+      const events = this.logger.getSessionEvents();
+      return detector.analyze(events.filter((e) => e.kind !== "anomaly_flag"), sid);
+    }
+
+    // Different session: use a fresh detector with default config to avoid config bleed
+    // from the current session's detector (which may have been mutated via updateConfig()).
+    const events = (await this.queryEngine.querySession(sid, 1000)).results;
+    return new AnomalyDetector().analyze(events.filter((e) => e.kind !== "anomaly_flag"), sid);
   }
 }

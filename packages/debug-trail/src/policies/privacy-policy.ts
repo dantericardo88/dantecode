@@ -68,12 +68,14 @@ export class PrivacyPolicy {
 
   /** Check if a file path should be excluded from snapshotting entirely. */
   shouldExcludePath(filePath: string): boolean {
-    return this.excludePatterns.some((re) => re.test(filePath));
+    const normalized = filePath.replace(/\\/g, "/");
+    return this.excludePatterns.some((re) => re.test(normalized));
   }
 
   /** Check if a file path's content should be redacted (capture event but not content). */
   shouldRedactContent(filePath: string): boolean {
-    return this.redactPatterns.some((re) => re.test(filePath));
+    const normalized = filePath.replace(/\\/g, "/");
+    return this.redactPatterns.some((re) => re.test(normalized));
   }
 
   /** Check if file is too large for snapshotting. */
@@ -89,8 +91,8 @@ export class PrivacyPolicy {
    */
   evaluateCapture(filePath: string, sizeBytes: number): "exclude" | "redact" | "capture" {
     if (this.shouldExcludePath(filePath)) return "exclude";
-    // Exclude very large files (>10MB) to avoid storage explosion
-    if (sizeBytes > 10 * 1024 * 1024) return "exclude";
+    // Exclude very large files to avoid storage explosion
+    if (sizeBytes > this.config.maxSnapshotBytes) return "exclude";
     if (this.shouldRedactContent(filePath)) return "redact";
     return "capture";
   }
@@ -145,10 +147,14 @@ export class PrivacyPolicy {
 // ---------------------------------------------------------------------------
 
 function globToRegex(glob: string): RegExp {
+  // Escape regex special chars (except * and ? which we handle separately)
+  // Process ** before * so we don't double-replace
   const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape special chars
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&") // escape special regex chars
+    .replace(/\*\*/g, "\x00")              // mark ** as placeholder
+    .replace(/\*/g, "[^/]*")              // single * = one path segment (no slashes)
+    .replace(/\x00/g, ".*")               // ** = any depth (including slashes)
+    .replace(/\?/g, "[^/]");              // ? = one non-separator char
   return new RegExp(escaped, "i");
 }
 

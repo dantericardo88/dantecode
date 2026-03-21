@@ -44,6 +44,13 @@ export interface AnomalyDetectorConfig {
   /** Same action repeated > N times in window. Default: 5 in 30s */
   rapidLoopCount: number;
   rapidLoopWindowMs: number;
+  /**
+   * Enable untracked_write detection. Default: false.
+   * Only meaningful when callers explicitly log tool_call events before writes
+   * (establishing read→write causality). Off by default to avoid false positives
+   * from direct logFileWrite() calls that have no preceding tool_call.
+   */
+  detectUntrackedWrites: boolean;
 }
 
 const DEFAULT_CONFIG: AnomalyDetectorConfig = {
@@ -53,6 +60,7 @@ const DEFAULT_CONFIG: AnomalyDetectorConfig = {
   errorRateThreshold: 0.3,
   rapidLoopCount: 5,
   rapidLoopWindowMs: 30_000,
+  detectUntrackedWrites: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +72,11 @@ export class AnomalyDetector {
 
   constructor(config?: Partial<AnomalyDetectorConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /** Update configuration after construction. Allows mid-session reconfiguration. */
+  updateConfig(partial: Partial<AnomalyDetectorConfig>): void {
+    this.config = { ...this.config, ...partial };
   }
 
   /**
@@ -78,6 +91,9 @@ export class AnomalyDetector {
     flags.push(...this.detectHighErrorRate(events, sessionId));
     flags.push(...this.detectMissingBeforeState(events, sessionId));
     flags.push(...this.detectPhantomCommit(events, sessionId));
+    flags.push(...this.detectLargeRewrite(events, sessionId));
+    flags.push(...this.detectRecursiveDelete(events, sessionId));
+    flags.push(...this.detectUntrackedWrite(events, sessionId));
 
     return flags;
   }
@@ -124,8 +140,10 @@ export class AnomalyDetector {
     const flags: AnomalyFlag[] = [];
     const window = this.config.rapidLoopWindowMs;
 
-    // Group by actor+kind fingerprint
-    const fingerprints = events.map((e) => `${e.actor}:${e.kind}`);
+    // Fingerprint includes operation target — different files/summaries are NOT a loop
+    const fingerprints = events.map(
+      (e) => `${e.actor}:${e.kind}:${String(e.payload["filePath"] ?? e.summary).slice(0, 60)}`,
+    );
 
     for (let i = 0; i <= fingerprints.length - this.config.rapidLoopCount; i++) {
       const fp = fingerprints[i]!;
@@ -231,6 +249,113 @@ export class AnomalyDetector {
           detectedAt: new Date().toISOString(),
           sessionId: sessionId ?? commitEvent.provenance.sessionId,
         });
+      }
+    }
+    return flags;
+  }
+
+  // -------------------------------------------------------------------------
+  // Large rewrite (file rewritten 3+ times with content changes)
+  // -------------------------------------------------------------------------
+
+  private detectLargeRewrite(events: TrailEvent[], sessionId?: string): AnomalyFlag[] {
+    // Group file_write events by filePath where beforeHash !== afterHash (both present)
+    // Flag files that have 3+ hash-changing writes
+    const writes = events.filter(
+      (e) => e.kind === "file_write" && e.beforeHash && e.afterHash && e.beforeHash !== e.afterHash,
+    );
+    const byFile = new Map<string, TrailEvent[]>();
+    for (const w of writes) {
+      const fp = String(w.payload["filePath"] ?? "unknown");
+      if (!byFile.has(fp)) byFile.set(fp, []);
+      byFile.get(fp)!.push(w);
+    }
+    const flags: AnomalyFlag[] = [];
+    for (const [fp, evts] of byFile) {
+      if (evts.length >= 3) {
+        flags.push({
+          anomalyType: "large_rewrite",
+          severity: "medium",
+          description: `File ${fp} rewritten ${evts.length} times with content changes`,
+          relatedEventIds: evts.map((e) => e.id),
+          detectedAt: new Date().toISOString(),
+          sessionId: sessionId ?? evts[0]!.provenance.sessionId,
+        });
+      }
+    }
+    return flags;
+  }
+
+  // -------------------------------------------------------------------------
+  // Recursive delete (3+ files deleted from same directory)
+  // -------------------------------------------------------------------------
+
+  private detectRecursiveDelete(events: TrailEvent[], sessionId?: string): AnomalyFlag[] {
+    // Group file_delete events by parent directory
+    // Flag directories where 3+ files deleted
+    const deletions = events.filter((e) => e.kind === "file_delete");
+    if (deletions.length < 3) return [];
+
+    const byDir = new Map<string, TrailEvent[]>();
+    for (const d of deletions) {
+      const fp = String(d.payload["filePath"] ?? "");
+      const dir = fp.replace(/[/\\][^/\\]+$/, "") || fp; // dirname
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir)!.push(d);
+    }
+    const flags: AnomalyFlag[] = [];
+    for (const [dir, evts] of byDir) {
+      if (evts.length >= 3) {
+        flags.push({
+          anomalyType: "recursive_delete",
+          severity: "high",
+          description: `${evts.length} files deleted from directory ${dir}`,
+          relatedEventIds: evts.map((e) => e.id),
+          detectedAt: new Date().toISOString(),
+          sessionId: sessionId ?? evts[0]!.provenance.sessionId,
+        });
+      }
+    }
+    return flags;
+  }
+
+  // -------------------------------------------------------------------------
+  // Untracked write (write to path never seen in a read tool call)
+  // -------------------------------------------------------------------------
+
+  private detectUntrackedWrite(events: TrailEvent[], sessionId?: string): AnomalyFlag[] {
+    // Build set of paths seen in tool_call read events
+    const readPaths = new Set<string>();
+    for (const e of events) {
+      if (e.kind === "tool_call") {
+        const direct = e.payload["filePath"];
+        if (typeof direct === "string") readPaths.add(direct);
+        const args = e.payload["args"];
+        if (args && typeof args === "object" && args !== null) {
+          const argsFilePath = (args as Record<string, unknown>)["file_path"];
+          if (typeof argsFilePath === "string") readPaths.add(argsFilePath);
+        }
+      }
+    }
+    // Auto-detect: only meaningful when callers have established tool_call → file_write
+    // causality. If no tool_call reads exist and the explicit override is off, skip to
+    // avoid false positives from direct logFileWrite() calls.
+    if (readPaths.size === 0 && !this.config.detectUntrackedWrites) return [];
+
+    const flags: AnomalyFlag[] = [];
+    for (const e of events) {
+      if (e.kind === "file_write") {
+        const fp = String(e.payload["filePath"] ?? "");
+        if (fp && !readPaths.has(fp)) {
+          flags.push({
+            anomalyType: "untracked_write",
+            severity: "medium",
+            description: `Write to ${fp} with no preceding Read tool call`,
+            relatedEventIds: [e.id],
+            detectedAt: new Date().toISOString(),
+            sessionId: sessionId ?? e.provenance.sessionId,
+          });
+        }
       }
     }
     return flags;

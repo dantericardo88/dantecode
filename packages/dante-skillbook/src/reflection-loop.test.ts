@@ -67,7 +67,7 @@ describe("runReflectionLoop", () => {
     };
     const result = await runReflectionLoop(makeResult(), [], {}, fakeLlm);
     expect(result.proposedUpdates).toHaveLength(1);
-    expect(result.proposedUpdates[0].action).toBe("add");
+    expect(result.proposedUpdates[0]!.action).toBe("add");
     expect(callCount).toBe(2);
   });
 });

@@ -30,7 +30,7 @@ describe("pruneSkills", () => {
     const skills = [makeSkill("s1", "coding", 0.9), makeSkill("s2", "coding", 0.3)];
     const result = pruneSkills(skills, { minTrustScore: 0.5 });
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("s1");
+    expect(result[0]!.id).toBe("s1");
   });
 
   it("filters by maxAgeDays", () => {

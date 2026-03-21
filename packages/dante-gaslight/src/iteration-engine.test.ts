@@ -100,3 +100,69 @@ describe("createStopController", () => {
     expect(ctrl.stopped()).toBe(true);
   });
 });
+
+describe("onLessonEligible callback", () => {
+  it("fires when session ends with pass and lessonEligible=true", async () => {
+    let capturedId: string | undefined;
+    await runIterationEngine(
+      "draft",
+      trigger,
+      {
+        onGate: async () => ({ decision: "pass" as const, score: 0.95 }),
+        onLessonEligible: (id) => { capturedId = id; },
+      },
+      { config: minConfig },
+    );
+    expect(capturedId).toBeTruthy();
+  });
+
+  it("does NOT fire when session ends without pass", async () => {
+    let called = false;
+    await runIterationEngine(
+      "draft",
+      trigger,
+      {
+        onLessonEligible: () => { called = true; },
+      },
+      { config: { ...minConfig, maxIterations: 1 } },
+    );
+    expect(called).toBe(false);
+  });
+});
+
+describe("priorLessons injection", () => {
+  it("passes priorLessons to the critique prompt", async () => {
+    const capturedPrompts: string[] = [];
+    await runIterationEngine(
+      "draft",
+      trigger,
+      {
+        onCritique: async (_sys, userPrompt) => {
+          capturedPrompts.push(userPrompt);
+          return null;
+        },
+        onGate: async () => ({ decision: "pass" as const, score: 0.95 }),
+      },
+      { config: minConfig, priorLessons: ["Always add citations"] },
+    );
+    expect(capturedPrompts[0]).toContain("Always add citations");
+    expect(capturedPrompts[0]).toContain("Prior Lessons from Skillbook");
+  });
+
+  it("omits lessons block when priorLessons not provided", async () => {
+    const capturedPrompts: string[] = [];
+    await runIterationEngine(
+      "draft",
+      trigger,
+      {
+        onCritique: async (_sys, userPrompt) => {
+          capturedPrompts.push(userPrompt);
+          return null;
+        },
+        onGate: async () => ({ decision: "pass" as const, score: 0.95 }),
+      },
+      { config: minConfig },
+    );
+    expect(capturedPrompts[0]).not.toContain("Prior Lessons");
+  });
+});

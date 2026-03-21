@@ -47,8 +47,14 @@ export interface TrailQuery {
   filePathPrefix?: string;
   /** Filter by event kind(s). */
   kinds?: TrailEventKind[];
-  /** Filter by actor name. */
+  /** Filter by actor name (case-insensitive substring). */
   actor?: string;
+  /** Multiple actor names (OR). Overrides `actor` when both are set. */
+  actors?: string[];
+  /** Exclude events from this actor (case-insensitive substring). */
+  excludeActor?: string;
+  /** Exclude events of these kinds. Applied after all positive filters. */
+  excludeKinds?: TrailEventKind[];
   /** Filter by date range (ISO-8601). */
   afterDate?: string;
   /** Filter by date range (ISO-8601). */
@@ -80,8 +86,18 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
   const lower = nl.toLowerCase();
   const query: TrailQuery = { text: nl };
 
-  // Time range detection
-  if (lower.includes("yesterday")) {
+  // Time range detection — relative expressions ("3 hours ago") then named periods
+  const relativeMatch = nl.match(/(\d+)\s*(hour|hr|minute|min|day|week)s?\s+ago/i);
+  if (relativeMatch) {
+    const amount = parseInt(relativeMatch[1]!, 10);
+    const unit = relativeMatch[2]!.toLowerCase();
+    const ms =
+      unit === "week" ? amount * 7 * 86_400_000 :
+      unit === "day"  ? amount * 86_400_000 :
+      unit === "hour" || unit === "hr" ? amount * 3_600_000 :
+      amount * 60_000; // minute / min
+    query.afterDate = new Date(Date.now() - ms).toISOString();
+  } else if (lower.includes("yesterday")) {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
@@ -103,11 +119,18 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
     query.afterDate = hourAgo.toISOString();
   }
 
-  // Event kind detection
-  if (ERROR_KEYWORDS.some((k) => lower.includes(k))) {
+  // Negation detection — specific "except/excluding/without/not <term>" patterns.
+  // These take priority over positive detection to avoid conflicting filters.
+  const negatedErrors = /\b(?:except|excluding|without|not)\s+(?:error|fail|failed|exception|crash)\w*/i.test(nl);
+  const negatedDeletes = /\b(?:except|excluding|without|not)\s+(?:delet|remov|erase)\w*/i.test(nl);
+  if (negatedErrors) query.excludeKinds = [...(query.excludeKinds ?? []), "error", "retry"];
+  if (negatedDeletes) query.excludeKinds = [...(query.excludeKinds ?? []), "file_delete"];
+
+  // Positive event kind detection (skip terms already handled by negation above)
+  if (!negatedErrors && ERROR_KEYWORDS.some((k) => lower.includes(k))) {
     query.errorsOnly = true;
   }
-  if (DELETE_KEYWORDS.some((k) => lower.includes(k))) {
+  if (!negatedDeletes && DELETE_KEYWORDS.some((k) => lower.includes(k))) {
     query.kinds = [...(query.kinds ?? []), "file_delete"];
     if (!query.errorsOnly) delete query.errorsOnly;
   }
@@ -115,14 +138,30 @@ export function parseNaturalLanguageQuery(nl: string): TrailQuery {
     query.kinds = ["file_write"];
   }
 
-  // File path extraction — look for common extensions or path patterns
-  const fileMatch = nl.match(/[\w\-./]+\.(ts|js|json|md|tsx|jsx|py|sh|yaml|yml|env)\b/i);
+  // Actor detection — multi-actor OR takes priority over single-actor match
+  const actorOrMatch = nl.match(/([A-Z][a-zA-Z]+)\s+or\s+([A-Z][a-zA-Z]+)/);
+  if (actorOrMatch?.[1] && actorOrMatch[2]) {
+    query.actors = [actorOrMatch[1], actorOrMatch[2]];
+  } else {
+    const actorMatch = nl.match(/(?:by|from|what did)\s+([A-Z][a-zA-Z]+)/);
+    if (actorMatch?.[1]) query.actor = actorMatch[1];
+  }
+
+  // File path extraction — file with extension (expanded list)
+  const fileMatch = nl.match(/[\w\-./]+\.(ts|js|json|md|tsx|jsx|py|sh|yaml|yml|env|css|html|rs|go|java|rb|php|c|cpp|h)\b/i);
   if (fileMatch?.[0]) {
     query.text = fileMatch[0];
-  } else if (query.kinds || query.errorsOnly) {
-    // Kind/error filters already narrow results — don't also apply the raw NL as a text filter
-    // (it would match nothing since event summaries don't contain the query phrase)
-    delete query.text;
+  } else {
+    // Directory path detection — slash-separated path without extension.
+    // Require first segment to start with a letter to avoid matching "10/20 files" etc.
+    const dirMatch = nl.match(/(?:^|\s)(\.\/|\/)?([a-zA-Z][\w-]*(?:\/[\w-]+)+)(?=\s|$)/);
+    if (dirMatch?.[2] && !dirMatch[2].includes("http")) {
+      query.filePathPrefix = (dirMatch[1] ?? "") + dirMatch[2];
+      delete query.text;
+    } else if (query.kinds || query.errorsOnly || query.actor || query.actors || query.excludeKinds) {
+      // Positive/negative filters already narrow results — drop raw NL text to avoid no-matches
+      delete query.text;
+    }
   }
 
   return query;
@@ -194,11 +233,12 @@ export class TrailQueryEngine {
     }
 
     if (q.filePathPrefix) {
-      results = results.filter(
-        (e) =>
-          typeof e.payload["filePath"] === "string" &&
-          (e.payload["filePath"] as string).startsWith(q.filePathPrefix!),
-      );
+      results = results.filter((e) => {
+        if (typeof e.payload["filePath"] !== "string") return false;
+        const fp = e.payload["filePath"] as string;
+        const prefix = q.filePathPrefix!;
+        return fp === prefix || fp.startsWith(prefix + "/") || fp.startsWith(prefix + "\\");
+      });
     }
 
     if (q.kinds && q.kinds.length > 0) {
@@ -206,9 +246,23 @@ export class TrailQueryEngine {
       results = results.filter((e) => kindSet.has(e.kind));
     }
 
-    if (q.actor) {
+    if (q.actors && q.actors.length > 0) {
+      results = results.filter((e) =>
+        q.actors!.some((a) => e.actor.toLowerCase().includes(a.toLowerCase())),
+      );
+    } else if (q.actor) {
       const actorLower = q.actor.toLowerCase();
       results = results.filter((e) => e.actor.toLowerCase().includes(actorLower));
+    }
+
+    if (q.excludeActor) {
+      const excLower = q.excludeActor.toLowerCase();
+      results = results.filter((e) => !e.actor.toLowerCase().includes(excLower));
+    }
+
+    if (q.excludeKinds && q.excludeKinds.length > 0) {
+      const excludeSet = new Set(q.excludeKinds);
+      results = results.filter((e) => !excludeSet.has(e.kind));
     }
 
     if (q.errorsOnly) {
@@ -302,13 +356,15 @@ export class TrailQueryEngine {
   }
 
   /**
-   * Stream events from the JSONL file line-by-line without loading all into memory.
+   * Stream events from disk line-by-line without loading all into memory.
    * Use for large trails (100K+ events) where readAllEvents() is too expensive.
+   * For in-memory filtered queries, use query() instead — it uses the cache.
    */
   async *streamEvents(
     filter?: (e: import("./types.js").TrailEvent) => boolean,
   ): AsyncGenerator<import("./types.js").TrailEvent> {
     await this.ensureReady();
+
     const logPath = this.store.eventsLogPath();
     const { existsSync } = await import("node:fs");
     if (!existsSync(logPath)) return;

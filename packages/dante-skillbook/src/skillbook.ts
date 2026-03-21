@@ -103,7 +103,7 @@ export class DanteSkillbook {
         if (!op.targetSkillId || !op.candidateSkill) return false;
         const idx = this.data.skills.findIndex(s => s.id === op.targetSkillId);
         if (idx < 0) return false;
-        const existing = this.data.skills[idx];
+        const existing = this.data.skills[idx]!;
         this.data.skills[idx] = {
           ...existing,
           content: `${existing.content}\n\n---\n\n${op.candidateSkill.content}`,

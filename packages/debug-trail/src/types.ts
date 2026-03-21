@@ -262,6 +262,12 @@ export interface DebugTrailConfig {
   maxStorageMb: number;
   /** Optional encryption passphrase. */
   encryptionKey?: string;
+  /**
+   * Maximum number of events to keep in the in-memory session buffer used for
+   * anomaly detection on flush(). Events beyond this limit are still persisted to
+   * disk but not included in detection. Default: 10_000.
+   */
+  sessionEventsBufferLimit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,5 +295,6 @@ export function defaultConfig(): DebugTrailConfig {
     compressSnapshots: true,
     compressAfterDays: 7,
     maxStorageMb: 500,
+    sessionEventsBufferLimit: 10_000,
   };
 }

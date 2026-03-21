@@ -7,3 +7,5 @@ export * from "./stats.js";
 export * from "./gaslighter-role.js";
 export * from "./iteration-engine.js";
 export * from "./integration.js";
+export * from "./lesson-distiller.js";
+export * from "./session-store.js";

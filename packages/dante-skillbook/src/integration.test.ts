@@ -111,7 +111,7 @@ describe("DanteSkillbookIntegration", () => {
     integration.applyProposals([proposal], ["review-required"]);
     const pending = integration.reviewQueue.getPending();
     expect(pending).toHaveLength(1);
-    const ok = integration.applyReviewItem(pending[0].id);
+    const ok = integration.applyReviewItem(pending[0]!.id);
     expect(ok).toBe(true);
     expect(integration.stats().totalSkills).toBe(1);
   });

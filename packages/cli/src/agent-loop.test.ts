@@ -463,6 +463,20 @@ vi.mock("@dantecode/git-engine", () => ({
   ),
 }));
 
+vi.mock("@dantecode/dante-skillbook", () => ({
+  DanteSkillbook: vi.fn().mockImplementation(() => ({
+    getSkills: vi.fn().mockReturnValue([]),
+    applyUpdate: vi.fn().mockReturnValue(false),
+    stats: vi.fn().mockReturnValue({ totalSkills: 0, sections: {}, lastUpdatedAt: "", version: "1.0.0" }),
+  })),
+  GitSkillbookStore: vi.fn().mockImplementation(() => ({
+    load: vi.fn().mockReturnValue(null),
+    save: vi.fn(),
+    exists: vi.fn().mockReturnValue(false),
+  })),
+  getRelevantSkills: vi.fn().mockReturnValue([]),
+}));
+
 vi.mock("./tools.js", () => ({
   executeTool: vi.fn().mockResolvedValue({ content: "ok", isError: false }),
   getToolDefinitions: vi.fn(() => [

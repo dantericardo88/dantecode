@@ -20,11 +20,24 @@ import type {
 } from "./base.js";
 import type { CouncilTaskPacket } from "../council-types.js";
 
+/**
+ * Executor function type for running the real DanteCode agent loop.
+ * Lane D wires in the concrete implementation at CLI startup.
+ */
+export type SelfLaneExecutor = (
+  prompt: string,
+  projectRoot: string,
+  options?: { maxRounds?: number; worktreePath?: string },
+) => Promise<{ output: string; touchedFiles: string[]; success: boolean; error?: string }>;
+
 interface SelfSession {
   sessionId: string;
   packet: CouncilTaskPacket;
   startedAt: number;
   status: "pending" | "running" | "completed" | "failed";
+  executionPromise?: Promise<void>;
+  touchedFiles?: string[];
+  error?: string;
 }
 
 /**
@@ -37,6 +50,12 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
   readonly kind = "native-cli" as const;
 
   private readonly sessions = new Map<string, SelfSession>();
+  private readonly executor?: SelfLaneExecutor;
+
+  constructor(options?: { executor?: SelfLaneExecutor }) {
+    super();
+    this.executor = options?.executor;
+  }
 
   async probeAvailability(): Promise<AdapterAvailability> {
     // DanteCode is always self-available
@@ -50,15 +69,40 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
 
   async submitTask(packet: CouncilTaskPacket): Promise<AdapterSubmission> {
     const sessionId = randomUUID().slice(0, 12);
-    this.sessions.set(sessionId, {
+    const session: SelfSession = {
       sessionId,
       packet,
       startedAt: Date.now(),
       status: "pending",
-    });
-    // Mark running immediately — actual execution is handled by the agent loop
-    const session = this.sessions.get(sessionId)!;
-    session.status = "running";
+    };
+    this.sessions.set(sessionId, session);
+
+    if (this.executor) {
+      // Real execution path: fire agent loop as fire-and-forget background Promise
+      session.status = "running";
+      const prompt = this.buildTaskPrompt(packet); // inherited from BaseCouncilAdapter
+      const execPromise = this.executor(prompt, packet.worktreePath, {
+        maxRounds: 80,
+        worktreePath: packet.worktreePath,
+      })
+        .then((result) => {
+          session.status = result.success ? "completed" : "failed";
+          session.touchedFiles = result.touchedFiles;
+          if (!result.success) {
+            session.error = result.error ?? "Executor reported failure";
+          }
+        })
+        .catch((err: unknown) => {
+          session.status = "failed";
+          session.error = err instanceof Error ? err.message : String(err);
+        });
+      // Store as void promise — fire-and-forget, errors handled in .catch() above
+      session.executionPromise = execPromise;
+    } else {
+      // Legacy path: no executor — mark running immediately; operator drives execution
+      session.status = "running";
+    }
+
     return { sessionId, accepted: true };
   }
 
@@ -67,10 +111,14 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
     if (!session) {
       return { sessionId, status: "unknown" };
     }
+
+    // When an executor is wired in, derive status directly from the session
+    // field that the Promise callbacks keep up-to-date.
     return {
       sessionId,
       status: session.status,
       lastOutputAt: new Date().toISOString(),
+      ...(session.error ? { progressSummary: `Error: ${session.error}` } : {}),
     };
   }
 
@@ -79,10 +127,18 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
     if (!session) {
       return { sessionId, files: [], logs: [] };
     }
+    const touchedFiles = session.touchedFiles ?? [];
     return {
       sessionId,
+      // files shape is { path, content }[]; touched paths are surfaced in logs
       files: [],
-      logs: [`Self-lane session ${sessionId} for run ${session.packet.runId}`],
+      logs: [
+        `Self-lane session ${sessionId} for run ${session.packet.runId}`,
+        ...(touchedFiles.length > 0
+          ? [`Touched files: ${touchedFiles.join(", ")}`]
+          : []),
+        ...(session.error ? [`Error: ${session.error}`] : []),
+      ],
     };
   }
 

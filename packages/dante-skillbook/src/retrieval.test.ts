@@ -18,7 +18,7 @@ describe("getRelevantSkills", () => {
   it("returns top-K skills by relevance", () => {
     const result = getRelevantSkills(skills, { keywords: ["null", "typescript"] }, 2);
     expect(result).toHaveLength(2);
-    expect(result[0].id).toBe("s1");
+    expect(result[0]!.id).toBe("s1");
   });
 
   it("returns by recency when no context", () => {

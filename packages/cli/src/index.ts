@@ -14,6 +14,8 @@ import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
 import { runCouncilCommand } from "./commands/council.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
+import { runGaslightCommand } from "./commands/gaslight.js";
+import { runSkillbookCommand } from "./commands/skillbook.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -51,6 +53,10 @@ interface ParsedArgs {
   showVersion: boolean;
   /** --help flag */
   showHelp: boolean;
+  /** --prompt-file <path> — read prompt from file, run non-interactively */
+  promptFile: string | undefined;
+  /** --max-rounds <n> — maximum tool rounds for non-interactive mode */
+  maxRounds: number | undefined;
 }
 
 /**
@@ -74,9 +80,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     configPath: undefined,
     showVersion: false,
     showHelp: false,
+    promptFile: undefined,
+    maxRounds: undefined,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook"]);
   let i = 0;
   let foundCommand = false;
 
@@ -138,6 +146,19 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === "--prompt-file") {
+      result.promptFile = args[i + 1];
+      i += 2;
+      continue;
+    }
+
+    if (arg === "--max-rounds") {
+      const n = parseInt(args[i + 1] ?? "", 10);
+      if (!isNaN(n) && n > 0) result.maxRounds = n;
+      i += 2;
+      continue;
+    }
+
     // Skip unknown flags
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2)) {
       // Check if this flag takes a value
@@ -181,6 +202,17 @@ function parseArgs(argv: string[]): ParsedArgs {
         if (subArg === "--silent" || subArg === "-s") {
           result.silent = true;
           i += 1;
+          continue;
+        }
+        if (subArg === "--prompt-file") {
+          result.promptFile = args[i + 1];
+          i += 2;
+          continue;
+        }
+        if (subArg === "--max-rounds") {
+          const n = parseInt(args[i + 1] ?? "", 10);
+          if (!isNaN(n) && n > 0) result.maxRounds = n;
+          i += 2;
           continue;
         }
         result.subArgs.push(subArg);
@@ -244,6 +276,7 @@ async function main(): Promise<void> {
     verbose: parsed.verbose,
     silent: parsed.silent,
     configPath: parsed.configPath,
+    maxRounds: parsed.maxRounds,
   };
 
   // Route to the appropriate command
@@ -273,12 +306,33 @@ async function main(): Promise<void> {
           dryRun: parsed.subArgs.includes("--dry-run"),
         });
         return;
+      case "gaslight":
+        await runGaslightCommand(parsed.subArgs, projectRoot);
+        return;
+      case "skillbook":
+        await runSkillbookCommand(parsed.subArgs, projectRoot);
+        return;
     }
   }
 
   // One-shot prompt mode
   if (parsed.prompt) {
     await runOneShotPrompt(parsed.prompt, replOptions);
+    return;
+  }
+
+  // --prompt-file mode: read prompt from file, run non-interactively
+  if (parsed.promptFile) {
+    const { readFile } = await import("node:fs/promises");
+    let promptText: string;
+    try {
+      promptText = await readFile(parsed.promptFile, "utf-8");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`\x1b[31mError reading prompt file: ${message}\x1b[0m\n`);
+      process.exit(1);
+    }
+    await runOneShotPrompt(promptText, replOptions);
     return;
   }
 

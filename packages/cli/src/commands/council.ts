@@ -15,8 +15,11 @@
 //   dantecode council resume <run-id>
 // ============================================================================
 
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { exec, execSync } from "node:child_process";
+import { promisify } from "node:util";
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { writeFile, mkdir } from "node:fs/promises";
 
 import {
   saveCouncilRun,
@@ -24,9 +27,12 @@ import {
   listCouncilRuns,
   CouncilOrchestrator,
   DanteCodeAdapter,
+  ClaudeCodeAdapter,
+  CodexAdapter,
+  AntigravityAdapter,
+  BridgeListener,
 } from "@dantecode/core";
-import type { AgentKind, CouncilRunState, CouncilAgentAdapter } from "@dantecode/core";
-
+import type { AgentKind, CouncilRunState, CouncilAgentAdapter, SelfLaneExecutor, AgentCommandConfig } from "@dantecode/core";
 // ANSI colors
 const BOLD = "\x1b[1m";
 const GREEN = "\x1b[32m";
@@ -89,14 +95,73 @@ function findLatestRun(repoRoot: string): CouncilRunState | null {
 // Sub-command handlers
 // ----------------------------------------------------------------------------
 
-/** Build adapters map for the requested agent kinds. Only DanteCode is wired natively. */
-function buildAdapters(agentKinds: AgentKind[]): Map<AgentKind, CouncilAgentAdapter> {
+const execAsync = promisify(exec);
+
+/**
+ * Creates a SelfLaneExecutor that spawns a child dantecode process
+ * to execute council task prompts inside a lane worktree.
+ */
+function createSelfExecutor(projectRoot: string): SelfLaneExecutor {
+  return async (prompt, worktreePath, opts) => {
+    const cwd = worktreePath ?? projectRoot;
+    const promptFile = join(cwd, ".dantecode", "council", "task.txt");
+    await mkdir(dirname(promptFile), { recursive: true });
+    await writeFile(promptFile, prompt, "utf-8");
+
+    try {
+      const maxRounds = opts?.maxRounds ?? 80;
+      const bin = join(projectRoot, "node_modules/.bin/dantecode");
+      const { stdout } = await execAsync(
+        `"${bin}" --prompt-file "${promptFile}" --max-rounds ${maxRounds}`,
+        { cwd, timeout: 30 * 60 * 1000, maxBuffer: 50 * 1024 * 1024 },
+      );
+
+      let touchedFiles: string[] = [];
+      try {
+        const { stdout: diffOut } = await execAsync("git diff HEAD --name-only", { cwd, timeout: 10_000 });
+        touchedFiles = diffOut.split("\n").filter(Boolean);
+      } catch { /* non-fatal */ }
+
+      return { output: stdout, touchedFiles, success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { output: msg, touchedFiles: [], success: false, error: msg };
+    }
+  };
+}
+
+/** Build adapters map for the requested agent kinds. */
+function buildAdapters(
+  agentKinds: AgentKind[],
+  options: { bridgeDir?: string; projectRoot?: string } = {},
+): Map<AgentKind, CouncilAgentAdapter> {
   const map = new Map<AgentKind, CouncilAgentAdapter>();
   for (const kind of agentKinds) {
-    if (kind === "dantecode") {
-      map.set(kind, new DanteCodeAdapter());
+    switch (kind) {
+      case "dantecode":
+        map.set(kind, new DanteCodeAdapter({
+          executor: options.projectRoot ? createSelfExecutor(options.projectRoot) : undefined,
+        }));
+        break;
+      case "claude-code":
+        if (options.bridgeDir) {
+          map.set(kind, new ClaudeCodeAdapter(options.bridgeDir));
+        }
+        break;
+      case "codex":
+        if (options.bridgeDir) {
+          map.set(kind, new CodexAdapter(options.bridgeDir));
+        }
+        break;
+      case "antigravity":
+        if (options.bridgeDir) {
+          map.set(kind, new AntigravityAdapter(options.bridgeDir));
+        }
+        break;
+      default:
+        // Other adapters not yet wired
+        break;
     }
-    // Other adapters require a bridgeDir — omit unless --bridge-dir is provided
   }
   return map;
 }
@@ -111,7 +176,9 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     ? (agentsFlag.split(",").map((a) => a.trim()) as AgentKind[])
     : ["dantecode"];
 
-  const adapters = buildAdapters(agentKinds);
+  const bridgeDir = args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length);
+  const watch = args.includes("--watch");
+  const adapters = buildAdapters(agentKinds, { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters);
 
   // Wire error events to stderr
@@ -128,7 +195,38 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   console.log(`  Agents:    ${agentKinds.join(", ")}`);
   console.log(`  State:     ${join(projectRoot, ".dantecode", "council", runId)}`);
   console.log(``);
-  console.log(`${DIM}Use 'dantecode council lanes' to assign tasks.${RESET}`);
+
+  if (watch) {
+    console.log(`${DIM}Watching lanes — Ctrl+C to detach (run resumes in background)...${RESET}`);
+    orchestrator.on("lane:completed", ({ laneId, agentKind: kind }) => {
+      console.log(`${GREEN}[council] Lane ${laneId} (${kind}) completed${RESET}`);
+    });
+    orchestrator.on("merge:complete", (result) => {
+      const decision = result.synthesis.decision;
+      const color = result.success ? GREEN : YELLOW;
+      console.log(`${color}[council] Merge complete — decision: ${decision}${RESET}`);
+    });
+    orchestrator.on("state:transition", ({ from, to }) => {
+      console.log(`${DIM}[council] ${from} → ${to}${RESET}`);
+    });
+
+    const sigintHandler = async () => {
+      console.log(`\n${YELLOW}[council] Detaching — run ${runId} continues in background.${RESET}`);
+      console.log(`${DIM}Resume with: dantecode council resume ${runId}${RESET}`);
+      process.exit(0);
+    };
+    process.on("SIGINT", sigintHandler as NodeJS.SignalsListener);
+
+    await orchestrator.watchUntilComplete();
+
+    process.off("SIGINT", sigintHandler as NodeJS.SignalsListener);
+    const finalStatus = orchestrator.currentStatus;
+    const sc = statusColor(finalStatus);
+    console.log(`\n${sc}${BOLD}Run ${runId} finished: ${finalStatus}${RESET}`);
+  } else {
+    console.log(`${DIM}Use 'dantecode council lanes' to assign tasks.${RESET}`);
+    console.log(`${DIM}Run with --watch to keep watching lane progress.${RESET}`);
+  }
 }
 
 async function cmdStatus(args: string[], projectRoot: string): Promise<void> {
@@ -292,6 +390,7 @@ async function cmdReassign(args: string[], projectRoot: string): Promise<void> {
 
 async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   const autoFlag = args.includes("--auto");
+  const bridgeDir = args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length);
   const state = findLatestRun(projectRoot);
 
   if (!state) {
@@ -310,8 +409,10 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   console.log(`  Mode: ${autoFlag ? GREEN + "auto" : YELLOW + "manual"}${RESET}`);
 
   // Build a minimal orchestrator to drive the merge
-  const adapters = buildAdapters(state.agents.map((a) => a.agentKind));
-  const orchestrator = new CouncilOrchestrator(adapters, { allowAutoMerge: autoFlag });
+  const adapters = buildAdapters(state.agents.map((a) => a.agentKind), { bridgeDir, projectRoot });
+  const orchestrator = new CouncilOrchestrator(adapters, {
+    allowAutoMerge: autoFlag,
+  });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
 
   // Resume into the existing run state so the orchestrator can drive merge()
@@ -334,6 +435,74 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   }
 }
 
+async function cmdBridgeListen(args: string[], projectRoot: string): Promise<void> {
+  const bridgeDir =
+    args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length) ??
+    join(projectRoot, ".dantecode", "bridge");
+
+  const timeoutSecs = parseInt(
+    args.find((a) => a.startsWith("--timeout="))?.slice("--timeout=".length) ?? "0",
+    10,
+  );
+
+  // Parse --agents flag (comma-separated kinds: claude-code,codex,antigravity)
+  const commandMap: Record<string, string> = {
+    "claude-code": "claude",
+    "codex": "codex",
+    "antigravity": "antigravity",
+  };
+
+  const agentsFlag = args.find((a) => a.startsWith("--agents="))?.slice("--agents=".length);
+  const requestedKinds = agentsFlag
+    ? agentsFlag.split(",").map((k) => k.trim()).filter(Boolean)
+    : Object.keys(commandMap);
+
+  const agentConfigs: AgentCommandConfig[] = requestedKinds
+    .filter((k) => k in commandMap)
+    .map((k) => ({
+      kind: k as AgentCommandConfig["kind"],
+      command: commandMap[k]!,
+    }));
+
+  if (agentConfigs.length === 0) {
+    console.error(
+      `${RED}No valid agent kinds specified. Use --agents=claude-code,codex,antigravity${RESET}`,
+    );
+    return;
+  }
+
+  console.log(`${CYAN}${BOLD}[bridge-listen] Watching ${bridgeDir}/inbox for sessions...${RESET}`);
+  console.log(
+    `${DIM}[bridge-listen] Agents: ${agentConfigs.map((a) => `${a.kind}(${a.command})`).join(", ")}${RESET}`,
+  );
+
+  const listener = new BridgeListener(bridgeDir, agentConfigs);
+  listener.start();
+
+  // Handle graceful shutdown on SIGINT / SIGTERM
+  const shutdown = (): void => {
+    console.log(`\n${DIM}[bridge-listen] Shutting down...${RESET}`);
+    listener.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown as NodeJS.SignalsListener);
+  process.on("SIGTERM", shutdown as NodeJS.SignalsListener);
+
+  // Optional timeout (--timeout=<secs>)
+  const timeoutMs = timeoutSecs > 0 ? timeoutSecs * 1000 : 0;
+  if (timeoutMs > 0) {
+    setTimeout(() => {
+      console.log(`${DIM}[bridge-listen] Timeout reached (${timeoutMs}ms). Stopping.${RESET}`);
+      listener.stop();
+      process.off("SIGINT", shutdown as NodeJS.SignalsListener);
+      process.off("SIGTERM", shutdown as NodeJS.SignalsListener);
+    }, timeoutMs);
+  } else {
+    // Keep process alive indefinitely (daemon mode)
+    await new Promise<void>(() => {/* run forever until signal */});
+  }
+}
+
 async function cmdVerify(_args: string[], projectRoot: string): Promise<void> {
   const state = findLatestRun(projectRoot);
   if (!state) {
@@ -342,10 +511,34 @@ async function cmdVerify(_args: string[], projectRoot: string): Promise<void> {
   }
 
   console.log(`${CYAN}${BOLD}Running verification gates for run ${state.runId}${RESET}`);
-  console.log(`${DIM}Gates: typecheck, lint, test, anti-stub, PDSE${RESET}`);
-  console.log(
-    `${YELLOW}Note: wire up verification via the council router API for full gate execution.${RESET}`,
-  );
+
+  const gates = [
+    { name: "typecheck", cmd: "npm run typecheck" },
+    { name: "test",      cmd: "npm run test" },
+  ];
+
+  let allPassed = true;
+  for (const gate of gates) {
+    process.stdout.write(`  ${gate.name}... `);
+    try {
+      execSync(gate.cmd, { cwd: projectRoot, stdio: "pipe", timeout: 300_000 });
+      console.log(`${GREEN}PASS${RESET}`);
+    } catch {
+      console.log(`${RED}FAIL${RESET}`);
+      allPassed = false;
+    }
+  }
+
+  if (allPassed && state.finalSynthesis) {
+    state.finalSynthesis.verificationPassed = true;
+    await saveCouncilRun(state);
+    console.log(`\n${GREEN}${BOLD}All verification gates passed.${RESET}`);
+  } else if (allPassed) {
+    console.log(`\n${YELLOW}Gates passed but no synthesis found. Run 'council merge' first.${RESET}`);
+  } else {
+    console.error(`\n${RED}${BOLD}Verification failed. Fix issues before pushing.${RESET}`);
+    process.exit(1);
+  }
 }
 
 async function cmdPush(_args: string[], projectRoot: string): Promise<void> {
@@ -378,11 +571,13 @@ async function cmdPush(_args: string[], projectRoot: string): Promise<void> {
 }
 
 async function cmdResume(args: string[], projectRoot: string): Promise<void> {
-  const runId = args[0];
+  const runId = args.find((a) => !a.startsWith("--"));
   if (!runId) {
     console.error(`${RED}Usage: dantecode council resume <run-id>${RESET}`);
     process.exit(1);
   }
+
+  const bridgeDir = args.find((a) => a.startsWith("--bridge-dir="))?.slice("--bridge-dir=".length);
 
   const state = await tryLoadCouncilRun(projectRoot, runId);
   if (!state) {
@@ -395,7 +590,7 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     return;
   }
 
-  const adapters = buildAdapters(state.agents.map((a) => a.agentKind));
+  const adapters = buildAdapters(state.agents.map((a) => a.agentKind), { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters);
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
 
@@ -455,6 +650,9 @@ export async function runCouncilCommand(
     case "resume":
       await cmdResume(rest, projectRoot);
       break;
+    case "bridge-listen":
+      await cmdBridgeListen(rest, projectRoot);
+      break;
     default:
       printHelp();
   }
@@ -478,4 +676,5 @@ function printHelp(): void {
   console.log(`  ${CYAN}verify${RESET}`);
   console.log(`  ${CYAN}push${RESET}`);
   console.log(`  ${CYAN}resume${RESET} <run-id>`);
+  console.log(`  ${CYAN}bridge-listen${RESET} [run-id] [--timeout=<secs>]`);
 }

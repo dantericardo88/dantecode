@@ -556,9 +556,11 @@ export type {
 } from "./council/council-orchestrator.js";
 
 export { DanteCodeAdapter } from "./council/agent-adapters/dantecode.js";
+export type { SelfLaneExecutor } from "./council/agent-adapters/dantecode.js";
 export { CodexAdapter } from "./council/agent-adapters/codex.js";
 export { ClaudeCodeAdapter } from "./council/agent-adapters/claude-code.js";
 export { AntigravityAdapter } from "./council/agent-adapters/antigravity.js";
+export { FileBridgeAdapter } from "./council/agent-adapters/file-bridge.js";
 export { BaseCouncilAdapter } from "./council/agent-adapters/base.js";
 export type {
   AdapterAvailability,
@@ -680,3 +682,8 @@ export { globalToolScheduler } from "./tool-runtime/tool-scheduler.js";
 export { VerificationBenchmarkStore } from "./verification-benchmark-store.js";
 export { VerificationHistoryStore } from "./verification-history-store.js";
 export type { VerificationHistoryKind } from "./verification-history-store.js";
+
+// ─── Bridge Listener ──────────────────────────────────────────────────────────
+
+export { BridgeListener } from "./council/bridge-listener.js";
+export type { AgentCommandConfig, BridgeListenerOptions, SpawnFn } from "./council/bridge-listener.js";

@@ -28,6 +28,11 @@ import { DEFAULT_GASLIGHT_CONFIG } from "./types.js";
 
 export interface IterationEngineOptions {
   config?: Partial<GaslightConfig>;
+  /**
+   * Prior lessons from the Skillbook to inject into each critique prompt.
+   * These are the titles/summaries of skills relevant to this task.
+   */
+  priorLessons?: string[];
 }
 
 export interface GateResult {
@@ -58,6 +63,12 @@ export interface EngineCallbacks {
    * Called when the engine stops (informational).
    */
   onStop?: (reason: StopReason, session: GaslightSession) => void;
+
+  /**
+   * Called when the session ends with lessonEligible === true.
+   * Use this to surface the session ID to the agent or user for bridging.
+   */
+  onLessonEligible?: (sessionId: string) => void;
 }
 
 /**
@@ -103,7 +114,7 @@ export async function runIterationEngine(
     if (callbacks.onCritique) {
       critiqueText = await callbacks.onCritique(
         GASLIGHTER_SYSTEM_PROMPT,
-        buildGaslighterPrompt(currentDraft, iterNum),
+        buildGaslighterPrompt(currentDraft, iterNum, options.priorLessons),
       );
     }
 
@@ -157,6 +168,10 @@ export async function runIterationEngine(
 
   if (callbacks.onStop) {
     callbacks.onStop(stopReason, session);
+  }
+
+  if (session.lessonEligible && callbacks.onLessonEligible) {
+    callbacks.onLessonEligible(session.sessionId);
   }
 
   return session;
