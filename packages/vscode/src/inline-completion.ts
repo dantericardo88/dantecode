@@ -6,9 +6,12 @@
 
 import * as vscode from "vscode";
 import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
-import { ModelRouterImpl, parseModelReference } from "@dantecode/core";
+import { ModelRouterImpl, parseModelReference, FIMEngine } from "@dantecode/core";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 import { gatherCrossFileContext } from "./cross-file-context.js";
+
+// Module-level FIMEngine instance — used to build FIM prompts via core/fim-engine.ts
+const fimEngine = new FIMEngine({ prefixLines: 60, suffixLines: 25 });
 
 const DEFAULT_DEBOUNCE_MS = 180;
 const MULTILINE_MAX_TOKENS = 512;
@@ -368,10 +371,30 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       // Cross-file context is best-effort
     }
 
-    const fimPrompt = buildFIMPrompt(
-      { prefix, suffix, language, filePath, crossFileContext },
-      multilineConfig === "always" ? true : multilineConfig === "never" ? false : undefined,
-    );
+    // Build FIM context and prompt via core FIMEngine (replaces local buildFIMPrompt).
+    // FIMEngine.buildContext() slices prefix/suffix lines, detects language from filePath.
+    // We inject crossFileContext as memoryContext and use "generic" format so the router
+    // receives a clean prefix/suffix/FIM-token prompt without model-specific encoding.
+    const fimCtx = fimEngine.buildContext(filePath, prefix + suffix, prefix.length);
+    if (crossFileContext) {
+      (fimCtx as { memoryContext?: string }).memoryContext = crossFileContext;
+    }
+    const fimPromptRaw = fimEngine.buildPrompt(fimCtx, "generic");
+    // Adapt FIMPrompt (single prompt string) → FIMPromptResult shape used by streamCompletion.
+    const fimPrompt: FIMPromptResult = {
+      systemPrompt: [
+        "You are a fill-in-the-middle code completion engine.",
+        `Language: ${language}`,
+        `File: ${filePath}`,
+        ...(crossFileContext ? ["Cross-file context:", crossFileContext] : []),
+        isMultiline
+          ? "Complete the next block of code and preserve indentation."
+          : "Complete the next span of code naturally at the cursor position.",
+        "Return ONLY the completion text with no explanations or markdown fences.",
+      ].join("\n"),
+      userPrompt: fimPromptRaw.prompt,
+      maxTokens: isMultiline ? MULTILINE_MAX_TOKENS : SINGLE_LINE_MAX_TOKENS,
+    };
 
     const modelConfig: ModelConfig = {
       provider: provider as ModelConfig["provider"],

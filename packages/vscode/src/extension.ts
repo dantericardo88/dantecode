@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
+import { OnboardingWizard } from "@dantecode/ux-polish";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
@@ -157,6 +158,24 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── First-run onboarding ──
   if (!OnboardingProvider.hasOnboarded(context)) {
     void onboardingProvider.show();
+  }
+
+  // ── UX Polish OnboardingWizard ──
+  // Runs the ux-polish OnboardingWizard on first activation to guide initial setup.
+  // Uses globalState to gate so it only runs once per install.
+  if (!context.globalState.get<boolean>("dantecode.uxOnboardingComplete")) {
+    const wizard = new OnboardingWizard({
+      stateOptions: { projectRoot },
+    });
+    if (!wizard.isComplete()) {
+      void wizard.run({ ci: process.env["CI"] === "true" }).then((result) => {
+        if (result.completed) {
+          void context.globalState.update("dantecode.uxOnboardingComplete", true);
+        }
+      });
+    } else {
+      void context.globalState.update("dantecode.uxOnboardingComplete", true);
+    }
   }
 }
 
