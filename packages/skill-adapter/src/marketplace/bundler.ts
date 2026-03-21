@@ -1,10 +1,10 @@
 // ============================================================================
 // @dantecode/skill-adapter — Skill Bundler
 // Exports installed skills as distributable directory packages.
-// Copies SKILL.md, .danteforge-adapter.json, and scripts/ to output path.
+// Copies SKILL.md, SKILL.dc.md, and scripts/ to output path.
 // ============================================================================
 
-import { mkdir, copyFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, copyFile, readdir, stat, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import type { CatalogEntry } from "./catalog.js";
 
@@ -113,7 +113,7 @@ async function copyIfExists(src: string, dest: string): Promise<string | null> {
 /**
  * Bundles an installed skill as a distributable directory package.
  *
- * Copies SKILL.md, SKILL.dc.md, .danteforge-adapter.json, optionally
+ * Copies SKILL.md, SKILL.dc.md (optional), optionally
  * .verification.json and scripts/ to the output directory. Writes a
  * bundle-manifest.json with metadata.
  *
@@ -163,8 +163,8 @@ export async function bundleSkill(
   const includeVerification = options.includeVerification !== false;
   const includeScripts = options.includeScripts !== false;
 
-  // Copy core skill files
-  const coreFiles = ["SKILL.md", "SKILL.dc.md", ".danteforge-adapter.json"];
+  // Copy core skill files (SKILL.md is required; SKILL.dc.md is optional)
+  const coreFiles = ["SKILL.md", "SKILL.dc.md"];
   for (const filename of coreFiles) {
     const dest = await copyIfExists(
       join(skillDir, filename),
@@ -205,10 +205,20 @@ export async function bundleSkill(
     }
   }
 
+  // Guard: if no real skill files were written (excluding manifest), the bundle is empty
+  if (filesWritten.filter((f) => !f.endsWith("bundle-manifest.json")).length === 0) {
+    return {
+      skillName: options.skillName,
+      outputPath: options.outputPath,
+      filesWritten: [],
+      success: false,
+      error: "Bundle is empty — no skill files were found to include",
+    };
+  }
+
   // Read version from .verification.json if available
-  let version = "0.0.0";
+  const version = "0.0.0";
   try {
-    const { readFile } = await import("node:fs/promises");
     const verificationRaw = await readFile(join(skillDir, ".verification.json"), "utf-8");
     const verificationData = JSON.parse(verificationRaw) as Record<string, unknown>;
     // Not stored in verification — use default
@@ -253,20 +263,14 @@ export async function bundleSkill(
  *
  * @param entry - The catalog entry for the skill.
  * @param outputPath - Destination directory for the bundle.
+ * @param projectRoot - Absolute project root path.
  * @returns BundleResult with list of files written.
  */
 export async function exportSkillToDirectory(
   entry: CatalogEntry,
   outputPath: string,
+  projectRoot: string,
 ): Promise<BundleResult> {
-  // Derive project root from installedPath (.dantecode/skills/<name>)
-  // installedPath is <projectRoot>/.dantecode/skills/<sanitizedName>
-  // We need to go up 3 levels: <name>/ -> skills/ -> .dantecode/ -> projectRoot
-  const parts = entry.installedPath.replace(/\\/g, "/").split("/");
-  // Remove last 3 segments: sanitizedName, skills, .dantecode
-  const projectRootParts = parts.slice(0, parts.length - 3);
-  const projectRoot = projectRootParts.join("/") || "/";
-
   return bundleSkill(
     { skillName: entry.name, outputPath },
     projectRoot,

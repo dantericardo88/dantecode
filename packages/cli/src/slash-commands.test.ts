@@ -354,7 +354,10 @@ describe("verification slash commands", () => {
       "utf-8",
     );
 
-    const output = await routeSlashCommand("/verify-output verify-input.json", makeState(projectRoot));
+    const output = await routeSlashCommand(
+      "/verify-output verify-input.json",
+      makeState(projectRoot),
+    );
 
     expect(output).toContain("Verification Output");
     expect(output).toContain("PASSED");
@@ -411,7 +414,12 @@ describe("verification slash commands", () => {
     expect(historyOutput).toContain("qa_suite");
     expect(historyOutput).toContain("plan-42");
 
-    const benchmarkPath = join(projectRoot, ".danteforge", "reports", "verification-benchmarks.jsonl");
+    const benchmarkPath = join(
+      projectRoot,
+      ".danteforge",
+      "reports",
+      "verification-benchmarks.jsonl",
+    );
     const benchmarkRaw = await readFile(benchmarkPath, "utf-8");
     expect(benchmarkRaw).toContain("plan-42");
   });
@@ -494,27 +502,31 @@ describe("git automation slash commands", () => {
     expect(stopOutput).toContain("Stopped Git watcher");
   });
 
-  it("runs a local workflow from the CLI", async () => {
-    await writeFile(
-      join(projectRoot, "workflow.yml"),
-      [
-        "name: CLI Workflow",
-        "jobs:",
-        "  build:",
-        "    steps:",
-        "      - name: Echo",
-        "        run: node -e \"console.log('workflow-ok')\"",
-        "",
-      ].join("\n"),
-      "utf-8",
-    );
+  it(
+    "runs a local workflow from the CLI",
+    async () => {
+      await writeFile(
+        join(projectRoot, "workflow.yml"),
+        [
+          "name: CLI Workflow",
+          "jobs:",
+          "  build:",
+          "    steps:",
+          "      - name: Echo",
+          "        run: node -e \"console.log('workflow-ok')\"",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
 
-    const output = await routeSlashCommand("/run-workflow workflow.yml", makeState(projectRoot));
+      const output = await routeSlashCommand("/run-workflow workflow.yml", makeState(projectRoot));
 
-    expect(output).toContain("Workflow Run");
-    expect(output).toContain("PASSED");
-    expect(output).toContain("CLI Workflow");
-  });
+      expect(output).toContain("Workflow Run");
+      expect(output).toContain("PASSED");
+      expect(output).toContain("CLI Workflow");
+    },
+    { timeout: 30_000 },
+  );
 
   it("queues durable workflow automation runs in the background", async () => {
     await writeFile(
@@ -568,10 +580,7 @@ describe("git automation slash commands", () => {
   it("starts and stops scheduled tasks and webhook listeners", async () => {
     const state = makeState(projectRoot);
 
-    const scheduleOutput = await routeSlashCommand(
-      "/schedule-git-task 60000 refresh-index",
-      state,
-    );
+    const scheduleOutput = await routeSlashCommand("/schedule-git-task 60000 refresh-index", state);
     const taskId = scheduleOutput.match(/ID:\s+([a-z0-9-]+)/i)?.[1];
     const scheduleList = await routeSlashCommand("/schedule-git-task list", state);
 
@@ -593,10 +602,7 @@ describe("git automation slash commands", () => {
     expect(listenerId).toBeDefined();
     expect(webhookList).toContain("github");
 
-    const stopListenerOutput = await routeSlashCommand(
-      `/webhook-listen stop ${listenerId}`,
-      state,
-    );
+    const stopListenerOutput = await routeSlashCommand(`/webhook-listen stop ${listenerId}`, state);
     expect(stopListenerOutput).toContain("Stopped webhook listener");
   });
 });

@@ -7,7 +7,13 @@ function makeSkill(overrides: Partial<UniversalParsedSkill> = {}): UniversalPars
     name: "test-skill",
     description: "A well-written test skill for unit testing purposes",
     instructions:
-      "You are a skilled developer. Always write complete, production-ready code. Follow best practices for error handling, testing, and documentation. Ensure all edge cases are covered and code is thoroughly tested.",
+      "You are a skilled developer. Always write complete, production-ready code.\n" +
+      "1. Follow best practices for error handling, testing, and validation.\n" +
+      "2. Ensure all edge cases are covered and code is thoroughly tested.\n" +
+      "3. Document every function and module clearly.\n" +
+      "- Use type-safe patterns and must validate all inputs.\n" +
+      "\n```typescript\n// Example: validate input\nfunction validate(input: unknown): boolean { return input !== null; }\n```\n" +
+      "\nYou must verify all changes before committing. Testing is mandatory.",
     source: "claude",
     sourcePath: "/test/SKILL.md",
     ...overrides,
@@ -133,5 +139,26 @@ describe("verifySkill", () => {
     const skill = makeSkill({ scripts: ["/some/script.sh"] });
     const result = await verifySkill(skill, { checkScripts: false });
     expect(result.scriptSafety).toBeNull();
+  });
+
+  it("11. well-structured skill with no violations reaches sovereign tier", async () => {
+    const skill = makeSkill({
+      instructions: [
+        "1. First, validate all input parameters before processing.",
+        "2. Always test the connection before running commands.",
+        "3. Never skip error handling.",
+        "4. Use the following pattern:",
+        "```typescript",
+        "const result = await verifyAndExecute(params);",
+        "if (!result.success) throw new Error(result.error);",
+        "```",
+        "5. Must complete within the timeout budget.",
+        "This skill must always verify its outputs before returning.",
+        "Ensure tests pass before considering the task complete.",
+      ].join("\n"),
+    });
+    const result = await verifySkill(skill, { tier: "sovereign" });
+    expect(result.tier).toBe("sovereign");
+    expect(result.overallScore).toBeGreaterThanOrEqual(85);
   });
 });

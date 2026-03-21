@@ -93,6 +93,64 @@ describe("SkillCatalog", () => {
     expect(removedAgain).toBe(false);
   });
 
+  it("5b. filterByTier('guardian') returns only guardian entries", () => {
+    const catalog = new SkillCatalog("/fake/root");
+    catalog.upsert(makeEntry({ name: "g-skill", verificationTier: "guardian" }));
+    catalog.upsert(makeEntry({ name: "s-skill", verificationTier: "sentinel" }));
+    catalog.upsert(makeEntry({ name: "v-skill", verificationTier: "sovereign" }));
+
+    const result = catalog.filterByTier("guardian");
+    expect(result.length).toBe(1);
+    expect(result[0]!.name).toBe("g-skill");
+  });
+
+  it("5c. filterByTier('sovereign') returns only sovereign entries", () => {
+    const catalog = new SkillCatalog("/fake/root");
+    catalog.upsert(makeEntry({ name: "g-skill", verificationTier: "guardian" }));
+    catalog.upsert(makeEntry({ name: "s-skill", verificationTier: "sentinel" }));
+    catalog.upsert(makeEntry({ name: "v-skill", verificationTier: "sovereign" }));
+
+    const result = catalog.filterByTier("sovereign");
+    expect(result.length).toBe(1);
+    expect(result[0]!.name).toBe("v-skill");
+  });
+
+  it("5d. filterByTierMinimum('sentinel') returns sentinel + sovereign entries", () => {
+    const catalog = new SkillCatalog("/fake/root");
+    catalog.upsert(makeEntry({ name: "g-skill", verificationTier: "guardian" }));
+    catalog.upsert(makeEntry({ name: "s-skill", verificationTier: "sentinel" }));
+    catalog.upsert(makeEntry({ name: "v-skill", verificationTier: "sovereign" }));
+
+    const result = catalog.filterByTierMinimum("sentinel");
+    expect(result.length).toBe(2);
+    const names = result.map((e) => e.name).sort();
+    expect(names).toEqual(["s-skill", "v-skill"]);
+  });
+
+  it("5e. filterByTierMinimum('guardian') returns all entries that have a tier", () => {
+    const catalog = new SkillCatalog("/fake/root");
+    catalog.upsert(makeEntry({ name: "g-skill", verificationTier: "guardian" }));
+    catalog.upsert(makeEntry({ name: "s-skill", verificationTier: "sentinel" }));
+    catalog.upsert(makeEntry({ name: "v-skill", verificationTier: "sovereign" }));
+    catalog.upsert(makeEntry({ name: "no-tier", verificationTier: undefined }));
+
+    const result = catalog.filterByTierMinimum("guardian");
+    expect(result.length).toBe(3);
+    const names = result.map((e) => e.name).sort();
+    expect(names).toEqual(["g-skill", "s-skill", "v-skill"]);
+  });
+
+  it("5f. filterByTierMinimum('sovereign') returns only sovereign entries", () => {
+    const catalog = new SkillCatalog("/fake/root");
+    catalog.upsert(makeEntry({ name: "g-skill", verificationTier: "guardian" }));
+    catalog.upsert(makeEntry({ name: "s-skill", verificationTier: "sentinel" }));
+    catalog.upsert(makeEntry({ name: "v-skill", verificationTier: "sovereign" }));
+
+    const result = catalog.filterByTierMinimum("sovereign");
+    expect(result.length).toBe(1);
+    expect(result[0]!.name).toBe("v-skill");
+  });
+
   it("6. save + load round-trip with real temp dir", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "catalog-test-"));
     try {

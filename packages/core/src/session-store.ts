@@ -4,7 +4,7 @@
 // Replaces VS Code globalState for portable, cross-tool session storage.
 // ============================================================================
 
-import { readFile, writeFile, readdir, mkdir, unlink } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, unlink, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChatSessionFile, Session } from "@dantecode/config-types";
 
@@ -48,11 +48,13 @@ export class SessionStore {
     await mkdir(this.runtimeSessionsDir, { recursive: true });
   }
 
-  /** Save a chat session to disk. */
+  /** Save a chat session to disk (atomic write via tmp+rename). */
   async save(session: ChatSessionFile): Promise<void> {
     await this.ensureDir();
     const filePath = join(this.sessionsDir, `${session.id}.json`);
-    await writeFile(filePath, JSON.stringify(session, null, 2), "utf-8");
+    const tmpPath = `${filePath}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(session, null, 2), "utf-8");
+    await rename(tmpPath, filePath);
   }
 
   /** Load a chat session by ID. Returns null if not found. */
@@ -66,11 +68,13 @@ export class SessionStore {
     }
   }
 
-  /** Save a full runtime session snapshot for durable resume. */
+  /** Save a full runtime session snapshot for durable resume (atomic write via tmp+rename). */
   async saveRuntimeSession(id: string, session: Session): Promise<void> {
     await this.ensureRuntimeDir();
     const filePath = join(this.runtimeSessionsDir, `${id}.json`);
-    await writeFile(filePath, JSON.stringify(session, null, 2), "utf-8");
+    const tmpPath = `${filePath}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(session, null, 2), "utf-8");
+    await rename(tmpPath, filePath);
   }
 
   /** Load a full runtime session snapshot by durable run ID. */

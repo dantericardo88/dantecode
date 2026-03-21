@@ -2,7 +2,7 @@
 // fleet-dashboard.test.ts — Unit tests for FleetDashboard + renderFleetDashboard
 // ============================================================================
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderFleetDashboard, FleetDashboard, formatDuration } from "./fleet-dashboard.js";
 import type { FleetDashboardState, FleetLaneDisplay } from "./fleet-dashboard.js";
 
@@ -176,6 +176,95 @@ describe("FleetDashboard", () => {
     const state = dashboard.getState();
     state.totalTokens = 999;
     expect(dashboard.getState().totalTokens).toBe(100);
+  });
+});
+
+describe("event-handler integration", () => {
+  it("lane:retry-pending updates status=retrying with retry count hint", () => {
+    const dashboard = new FleetDashboard(
+      makeState({ lanes: [makeLane({ laneId: "l1", agentName: "worker", status: "running" })] }),
+      { enabled: false },
+    );
+    dashboard.updateLane("l1", { status: "retrying", progressHint: "retry #2" });
+    const state = dashboard.getState();
+    expect(state.lanes[0]!.status).toBe("retrying");
+    expect(state.lanes[0]!.progressHint).toBe("retry #2");
+  });
+
+  it("lane:paused updates status=pending with conflict hint", () => {
+    const dashboard = new FleetDashboard(
+      makeState({ lanes: [makeLane({ laneId: "l1", agentName: "worker", status: "running" })] }),
+      { enabled: false },
+    );
+    dashboard.updateLane("l1", { status: "pending", progressHint: "paused (conflict)" });
+    const state = dashboard.getState();
+    expect(state.lanes[0]!.status).toBe("pending");
+    expect(state.lanes[0]!.progressHint).toBe("paused (conflict)");
+  });
+
+  it("lane:resumed clears progressHint and restores status=running", () => {
+    const dashboard = new FleetDashboard(
+      makeState({
+        lanes: [
+          makeLane({ laneId: "l1", agentName: "worker", status: "pending", progressHint: "paused (conflict)" }),
+        ],
+      }),
+      { enabled: false },
+    );
+    dashboard.updateLane("l1", { status: "running", progressHint: undefined });
+    const state = dashboard.getState();
+    expect(state.lanes[0]!.status).toBe("running");
+    expect(state.lanes[0]!.progressHint).toBeUndefined();
+  });
+
+  it("draw() with shrinking render updates lastLineCount to new (smaller) count", () => {
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const fiveLanes = Array.from({ length: 5 }, (_, i) =>
+        makeLane({ laneId: `l${i}`, agentName: `worker${i}` }),
+      );
+      const dashboard = new FleetDashboard(makeState({ lanes: fiveLanes }), { enabled: true });
+      dashboard.draw();
+      const firstCount = (dashboard as unknown as { lastLineCount: number }).lastLineCount;
+      expect(firstCount).toBeGreaterThan(0);
+
+      // Shrink to 2 lanes via internal state
+      (dashboard as unknown as { state: FleetDashboardState }).state.lanes = fiveLanes.slice(0, 2);
+      spy.mockClear();
+      dashboard.draw();
+
+      const secondCount = (dashboard as unknown as { lastLineCount: number }).lastLineCount;
+      expect(secondCount).toBeLessThan(firstCount);
+      // CURSOR_UP to start of previous render must have been emitted
+      const written = spy.mock.calls.map((c) => String(c[0]));
+      expect(written.some((w) => w.includes(`\x1b[${firstCount}A`))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("clear() resets lastLineCount to 0 so next draw does not emit stale CURSOR_UP", () => {
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const dashboard = new FleetDashboard(
+        makeState({ lanes: [makeLane({ laneId: "l1", agentName: "worker" })] }),
+        { enabled: true },
+      );
+      dashboard.draw();
+      expect((dashboard as unknown as { lastLineCount: number }).lastLineCount).toBeGreaterThan(0);
+
+      dashboard.clear();
+      expect((dashboard as unknown as { lastLineCount: number }).lastLineCount).toBe(0);
+
+      // After clear, draw should not emit CURSOR_UP (lastLineCount was 0)
+      spy.mockClear();
+      dashboard.draw();
+      const written = spy.mock.calls.map((c) => String(c[0]));
+      // No CURSOR_UP sequences expected on first post-clear draw
+      expect(written.every((w) => !/\x1b\[\d+A/.test(w))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

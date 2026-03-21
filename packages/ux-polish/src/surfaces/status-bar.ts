@@ -110,20 +110,24 @@ export class StatusBar {
   /**
    * Write the status bar to the terminal bottom row.
    * Uses ANSI save-cursor / move / restore to avoid disrupting output.
-   * No-op if disabled or non-TTY.
+   * No-op if disabled, non-TTY, or terminal too narrow.
    */
   draw(): void {
     if (!this.enabled || !this.isTTY()) return;
 
     const rows = process.stdout.rows;
-    if (!rows || rows < 5) return;
+    const cols = process.stdout.columns;
+    if (!rows || rows < 5 || !cols || cols < 50) return;
 
     const rendered = this.render();
     if (!rendered) return;
 
-    // Save cursor, move to bottom row, clear line, write bar, restore cursor
+    // Truncate to visible width to prevent wrapping on narrow terminals
+    const truncated = truncateToVisible(rendered, cols - 2) + "\x1b[0m";
+
+    // Hide cursor → save → position → clear → write → restore → show cursor
     process.stdout.write(
-      `\x1b[s\x1b[${rows};1H\x1b[2K${rendered}\x1b[u`,
+      `\x1b[?25l\x1b[s\x1b[${rows};1H\x1b[2K${truncated}\x1b[u\x1b[?25h`,
     );
   }
 
@@ -154,9 +158,36 @@ function formatNumber(n: number): string {
 }
 
 function formatDuration(ms: number): string {
+  if (ms < 1000) return "<1s";
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   const rem = s % 60;
   return `${m}m ${rem}s`;
+}
+
+/**
+ * Truncate string to at most maxVisible visible characters, preserving ANSI escape sequences.
+ * Ensures status bar never wraps to the next terminal line.
+ */
+function truncateToVisible(s: string, maxVisible: number): string {
+  let visible = 0;
+  let result = "";
+  let i = 0;
+  while (i < s.length) {
+    // Detect ANSI SGR escape sequence (\x1b[ ... m) and copy it verbatim
+    if (s[i] === "\x1b" && s[i + 1] === "[") {
+      const end = s.indexOf("m", i + 2);
+      if (end >= 0) {
+        result += s.slice(i, end + 1);
+        i = end + 1;
+        continue;
+      }
+    }
+    if (visible >= maxVisible) break;
+    result += s[i];
+    visible++;
+    i++;
+  }
+  return result;
 }

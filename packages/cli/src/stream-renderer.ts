@@ -104,11 +104,11 @@ export class StreamRenderer {
       const RED = this.colors ? "\x1b[31m" : "";
       const tierLabel =
         this.reasoningTier === "quick"
-          ? `${CYAN}quick${RESET}`
+          ? `${CYAN}⚡ quick${RESET}`
           : this.reasoningTier === "deep"
-            ? `${YELLOW}deep${RESET}`
+            ? `${YELLOW}🧠 deep${RESET}`
             : this.reasoningTier === "expert"
-              ? `${RED}expert${RESET}`
+              ? `${RED}🔬 expert${RESET}`
               : this.reasoningTier;
       tierSuffix = ` [${tierLabel}]`;
       if (this.thinkingBudget !== undefined) {

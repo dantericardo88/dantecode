@@ -8,6 +8,8 @@ export type {
   ChainDefinition,
   StepExecutionResult,
   ChainExecutionResult,
+  StepCallbackResult,
+  ExecutionContext,
 } from "./chain.js";
 
 export { evaluateGate, scorePassesThreshold, selectOnFail } from "./conditional.js";

@@ -11,7 +11,7 @@
 export interface GateEvaluation {
   passed: boolean;
   reason: string;
-  suggestedAction: "proceed" | "retry" | "stop" | "skip";
+  suggestedAction?: "retry" | "stop" | "skip";
 }
 
 export interface GateCondition {
@@ -62,7 +62,6 @@ export function evaluateGate(
   return {
     passed: true,
     reason: "Gate conditions met",
-    suggestedAction: "proceed",
   };
 }
 
@@ -88,7 +87,7 @@ export function scorePassesThreshold(score: number, threshold: number): boolean 
 export function selectOnFail(
   condition: GateCondition,
   retryCount: number,
-): "proceed" | "retry" | "stop" | "skip" {
+): "retry" | "stop" | "skip" {
   const { onFail, maxRetries = 1 } = condition;
 
   if (onFail === "retry" && retryCount < maxRetries) {

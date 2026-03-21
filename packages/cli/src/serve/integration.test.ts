@@ -275,4 +275,95 @@ describe("DanteCode HTTP Server — Integration", () => {
     expect(abortRes.body["aborted"]).toBe(true);
     expect(abortRes.body["sessionId"]).toBe(sessionId);
   });
+
+  // -------------------------------------------------------------------------
+  // Security: path traversal prevention
+  // -------------------------------------------------------------------------
+
+  it("GET /api/evidence with path-traversal sessionId returns 400", async () => {
+    // ../etc/passwd contains characters not in [a-zA-Z0-9_-]
+    const res = await httpRequest(port, "GET", "/api/evidence/..%2Fetc%2Fpasswd");
+    expect(res.status).toBe(400);
+    expect(typeof res.body["error"]).toBe("string");
+  });
+
+  it("GET /api/evidence with dotdot sessionId returns 400", async () => {
+    const res = await httpRequest(port, "GET", "/api/evidence/..");
+    expect(res.status).toBe(400);
+    expect(typeof res.body["error"]).toBe("string");
+  });
+
+  it("GET /api/evidence with valid alphanumeric sessionId returns 404 for unknown session", async () => {
+    // Valid format passes SESSION_ID_RE; reaches session-not-found check (not path-traversal check)
+    const res = await httpRequest(port, "GET", "/api/evidence/validid123");
+    expect(res.status).toBe(404);
+  });
+
+  // -------------------------------------------------------------------------
+  // Security: race condition — concurrent messages on same session
+  // -------------------------------------------------------------------------
+
+  it("concurrent POST /message on same session returns 409 on second request", async () => {
+    const created = await httpRequest(
+      port,
+      "POST",
+      "/api/sessions",
+      JSON.stringify({ name: "concurrent-test" }),
+    );
+    expect(created.status).toBe(200);
+    const sessionId = created.body["id"] as string;
+
+    // First message — sets abortController, returns 202
+    const first = await httpRequest(
+      port,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "first" }),
+    );
+    expect(first.status).toBe(202);
+
+    // Second message on same session while first is still in-flight — must get 409
+    const second = await httpRequest(
+      port,
+      "POST",
+      `/api/sessions/${sessionId}/message`,
+      JSON.stringify({ content: "concurrent" }),
+    );
+    expect(second.status).toBe(409);
+    expect(typeof second.body["error"]).toBe("string");
+  });
+
+  // -------------------------------------------------------------------------
+  // Session lifecycle: DELETE endpoint
+  // -------------------------------------------------------------------------
+
+  it("DELETE /api/sessions/:id removes the session (200 → then GET returns 404)", async () => {
+    const created = await httpRequest(
+      port,
+      "POST",
+      "/api/sessions",
+      JSON.stringify({ name: "delete-test" }),
+    );
+    expect(created.status).toBe(200);
+    const sessionId = created.body["id"] as string;
+
+    // Verify it exists
+    const before = await httpRequest(port, "GET", `/api/sessions/${sessionId}`);
+    expect(before.status).toBe(200);
+
+    // Delete it
+    const deleted = await httpRequest(port, "DELETE", `/api/sessions/${sessionId}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body["deleted"]).toBe(true);
+    expect(deleted.body["sessionId"]).toBe(sessionId);
+
+    // Verify it's gone
+    const after = await httpRequest(port, "GET", `/api/sessions/${sessionId}`);
+    expect(after.status).toBe(404);
+  });
+
+  it("DELETE /api/sessions/:id for unknown session returns 404", async () => {
+    const res = await httpRequest(port, "DELETE", "/api/sessions/nonexistent-id");
+    expect(res.status).toBe(404);
+  });
 });

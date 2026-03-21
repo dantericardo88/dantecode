@@ -6,6 +6,9 @@
 
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
+import { readFile as fsReadFile } from "node:fs/promises";
+import { join as pathJoin } from "node:path";
+
 import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { getBanner } from "./banner.js";
@@ -23,7 +26,7 @@ import {
   renderTokenDashboard,
   getThemeEngine,
 } from "@dantecode/ux-polish";
-import type { StatusBarState, PromptBuilderState, TokenUsageData } from "@dantecode/ux-polish";
+import type { StatusBarState, PromptBuilderState, TokenUsageData, ThemeName } from "@dantecode/ux-polish";
 import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
@@ -173,6 +176,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
+  if (options.sessionName) {
+    session.name = options.sessionName;
+  }
 
   // Display banner (suppressed in silent mode)
   if (!options.silent) {
@@ -180,6 +186,24 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     process.stdout.write(banner);
     void checkForUpdate("2.0.0");
   }
+
+  // Load saved theme from STATE.yaml (persisted by /theme command)
+  let savedTheme: ThemeName = "default";
+  try {
+    const stateYamlRaw = await fsReadFile(
+      pathJoin(options.projectRoot, ".dantecode", "STATE.yaml"),
+      "utf8",
+    );
+    const themeMatch = /^theme:\s*(\w+)$/m.exec(stateYamlRaw);
+    if (themeMatch?.[1]) {
+      const candidate = themeMatch[1];
+      const validThemes = ["default", "minimal", "rich", "matrix", "ocean"];
+      if (validThemes.includes(candidate)) {
+        savedTheme = candidate as ThemeName;
+        getThemeEngine().setTheme(savedTheme);
+      }
+    }
+  } catch { /* no saved theme — use default */ }
 
   // Initialize REPL state
   const replState: ReplState = {
@@ -204,7 +228,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     gaslight: null, // populated immediately after agentConfig.gaslight is created below
     memoryOrchestrator: null, // populated after DanteSandbox.setup() below
     reasoningOverrideSession: false,
-    theme: "default",
+    theme: savedTheme,
   };
 
   // Agent loop config
@@ -593,6 +617,9 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
 
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
+  if (options.sessionName) {
+    session.name = options.sessionName;
+  }
 
   // Config
   const agentConfig: AgentLoopConfig = {

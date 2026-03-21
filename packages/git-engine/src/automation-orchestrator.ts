@@ -21,14 +21,24 @@ import {
 import { getStatus, type GitStatusResult } from "./commit.js";
 import type { WorkflowOptions, WorkflowResult } from "./local-workflow-runner.js";
 import { runLocalWorkflow } from "./local-workflow-runner.js";
+import { runAutomationAgent, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
+import type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
-export interface AutomationTrigger extends StoredAutomationTrigger {}
+export type AutomationTrigger = StoredAutomationTrigger;
 
 export interface WorkflowBackgroundRequest {
   workflowPath: string;
   eventPayload?: Record<string, unknown>;
   options?: WorkflowOptions;
   trigger?: AutomationTrigger;
+  /** When set, triggers a full agent session instead of a shell workflow. */
+  agentMode?: {
+    prompt: string;
+    model?: string;
+    sandboxMode?: string;
+    verifyOutput?: boolean;
+    maxRounds?: number;
+  };
 }
 
 export interface AutoPullRequestRequest {
@@ -58,6 +68,10 @@ export interface GitAutomationOrchestratorOptions {
   scoreContent?: (content: string, projectRoot: string) => PDSEScore;
   verifyRepo?: (projectRoot: string) => RepoRootVerificationResult;
   auditLogger?: (projectRoot: string, event: AuditEventInput) => Promise<unknown>;
+  runAgent?: (
+    config: AgentBridgeConfig,
+    triggerContext: Record<string, unknown>,
+  ) => Promise<AgentBridgeResult>;
 }
 
 interface WorkflowWorkItem {
@@ -106,6 +120,10 @@ export class GitAutomationOrchestrator {
     projectRoot: string,
     event: AuditEventInput,
   ) => Promise<unknown>;
+  private readonly runAgentImpl: (
+    config: AgentBridgeConfig,
+    triggerContext: Record<string, unknown>,
+  ) => Promise<AgentBridgeResult>;
   private readonly taskToExecutionId = new Map<string, string>();
 
   constructor(options: GitAutomationOrchestratorOptions) {
@@ -137,6 +155,7 @@ export class GitAutomationOrchestrator {
     this.verifyRepoImpl =
       options.verifyRepo ?? ((projectRoot) => new RecoveryEngine().runRepoRootVerification(projectRoot));
     this.auditLoggerImpl = options.auditLogger ?? appendAuditEvent;
+    this.runAgentImpl = options.runAgent ?? runAutomationAgent;
     this.runner.setWorkFn(async (prompt: string, onProgress: (msg: string) => void, context: { task: { id: string } }) =>
       this.executeWorkItem(prompt, onProgress, context.task.id),
     );
@@ -307,6 +326,55 @@ export class GitAutomationOrchestrator {
     checkpointer: EventSourcedCheckpointer,
     onProgress: (message: string) => void,
   ): Promise<{ output: string; touchedFiles: string[] }> {
+    // Agent-mode: delegate to agent bridge instead of shell workflow
+    if (workItem.request.agentMode) {
+      const ctx: Record<string, unknown> = {
+        ...((workItem.request.eventPayload as Record<string, unknown>) ?? {}),
+        projectRoot: this.projectRoot,
+        workflowPath: workItem.request.workflowPath,
+      };
+      const bridgeResult = await this.runAgentImpl(
+        {
+          prompt: workItem.request.agentMode.prompt,
+          model: workItem.request.agentMode.model,
+          sandboxMode: workItem.request.agentMode.sandboxMode,
+          verifyOutput: workItem.request.agentMode.verifyOutput ?? true,
+          maxRounds: workItem.request.agentMode.maxRounds ?? 30,
+          projectRoot: this.projectRoot,
+        },
+        ctx,
+      );
+      onProgress(`Agent ${bridgeResult.sessionId}: ${bridgeResult.success ? "completed" : "failed"}`);
+      const completedAt = new Date().toISOString();
+      const status: StoredAutomationExecutionRecord["status"] =
+        bridgeResult.success ? "completed" : "failed";
+      const gateStatus: StoredAutomationExecutionRecord["gateStatus"] =
+        bridgeResult.pdseScore !== undefined
+          ? bridgeResult.pdseScore >= PDSE_GATE_THRESHOLD ? "passed" : "failed"
+          : "skipped";
+      await checkpointer.put(
+        { executionId: workItem.executionId, kind: workItem.kind, status, gateStatus },
+        { source: "update", step: 1 },
+      );
+      await this.updateExecution(workItem.executionId, {
+        status,
+        updatedAt: completedAt,
+        completedAt,
+        gateStatus,
+        modifiedFiles: bridgeResult.filesChanged,
+        ...(bridgeResult.pdseScore !== undefined ? { pdseScore: bridgeResult.pdseScore } : {}),
+        summary: bridgeResult.output.slice(0, 200),
+        ...(bridgeResult.error ? { error: bridgeResult.error } : {}),
+      });
+      await this.appendAutomationAudit("git_automation_run", workItem.executionId, {
+        kind: workItem.kind,
+        status,
+        sessionId: bridgeResult.sessionId,
+        filesChanged: bridgeResult.filesChanged,
+      });
+      return { output: bridgeResult.output, touchedFiles: bridgeResult.filesChanged };
+    }
+
     const beforeStatus = this.readStatusImpl(this.projectRoot);
     onProgress(`Running workflow ${workItem.request.workflowPath}`);
 

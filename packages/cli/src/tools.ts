@@ -38,6 +38,7 @@ import {
 import type { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, toToolResult as sandboxToToolResult } from "@dantecode/dante-sandbox";
 import { renderBeforeAfter, getThemeEngine } from "@dantecode/ux-polish";
+import type { DiffRenderOptions } from "@dantecode/ux-polish";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -217,12 +218,12 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
     const lineCount = content.split("\n").length;
 
     // Step 4: Render diff to terminal (TTY only, fire-and-forget)
-    if (process.stdout.isTTY && beforeContent !== undefined) {
+    // Use empty string as before content for new files so all lines show as additions.
+    if (process.stdout.isTTY) {
       try {
-        const diffResult = renderBeforeAfter(resolved, beforeContent, content, {
-          maxLines: 40,
-          theme: getThemeEngine(),
-        });
+        const effectiveBefore = beforeContent ?? "";
+        const diffOpts: DiffRenderOptions = { maxLines: 40, theme: getThemeEngine() };
+        const diffResult = renderBeforeAfter(resolved, effectiveBefore, content, diffOpts);
         if (diffResult.additions > 0 || diffResult.deletions > 0) {
           process.stdout.write(diffResult.rendered);
         }

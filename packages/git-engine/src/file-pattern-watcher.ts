@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
+import { stat } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { resolve } from "node:path";
 
@@ -152,20 +153,28 @@ export class FilePatternWatcher extends EventEmitter {
         return;
       }
 
-      // Determine change type
-      const changeType: "create" | "modify" | "delete" =
-        eventType === "rename" ? "create" : "modify";
+      // Determine change type asynchronously (rename fires for both create and delete)
+      void (async () => {
+        let changeType: "create" | "modify" | "delete" = "modify";
+        if (eventType === "rename") {
+          try {
+            await stat(resolve(this.projectRoot, fullRelative));
+            changeType = "create";
+          } catch {
+            changeType = "delete";
+          }
+        }
+        this.pendingChanges.set(fullRelative, changeType);
 
-      this.pendingChanges.set(fullRelative, changeType);
+        // Debounce the emission
+        if (this.debounceTimer !== null) {
+          clearTimeout(this.debounceTimer);
+        }
 
-      // Debounce the emission
-      if (this.debounceTimer !== null) {
-        clearTimeout(this.debounceTimer);
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        this.flushPendingChanges();
-      }, this.debounceMs);
+        this.debounceTimer = setTimeout(() => {
+          this.flushPendingChanges();
+        }, this.debounceMs);
+      })();
     });
   }
 

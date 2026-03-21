@@ -1136,6 +1136,18 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     dashboard.updateFleet({ budgetRemaining: report.budgetRemaining });
     dashboard.draw();
   });
+  orchestrator.on("budget:exhausted", (report) => {
+    dashboard.updateFleet({ status: "failed" });
+    dashboard.clear();
+    console.error(
+      `${RED}[fleet] Budget exhausted — ${report.totalTokens.toLocaleString()} tokens, ` +
+        `$${report.totalCost.toFixed(4)}${RESET}`,
+    );
+  });
+  orchestrator.on("budget:agent-limit", ({ agentId }) => {
+    dashboard.updateLane(agentId, { status: "failed", progressHint: "budget cap" });
+    dashboard.draw();
+  });
   orchestrator.on("lane:retry-pending", ({ laneId, retryCount }) => {
     dashboard.updateLane(laneId, { status: "retrying", progressHint: `retry #${retryCount}` });
     dashboard.draw();

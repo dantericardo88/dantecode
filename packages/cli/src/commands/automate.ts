@@ -38,6 +38,25 @@ import type { WebhookProvider } from "@dantecode/git-engine";
 // be stopped when an automation is removed or the process exits.
 const _activeWatchers = new Map<string, FilePatternWatcher[]>();
 
+// Tracks which automation IDs currently have an agent run in flight.
+// Prevents concurrent agent runs from the same watcher trigger.
+const _watcherRunning = new Map<string, boolean>();
+
+let _cleanupRegistered = false;
+function ensureGlobalWatcherCleanup(): void {
+  if (_cleanupRegistered) return;
+  _cleanupRegistered = true;
+  const cleanup = () => {
+    for (const [, watchers] of _activeWatchers) {
+      for (const w of watchers) {
+        try { w.stop(); } catch { /* ignore */ }
+      }
+    }
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
+}
+
 // ANSI color codes (local copies to avoid cross-file import)
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
@@ -77,7 +96,7 @@ function getOrCreateOrchestrator(state: AutomateCommandState): GitAutomationOrch
 // ─── Time Helpers ────────────────────────────────────────────────────────────
 
 function formatAge(isoDate: string): string {
-  const diffMs = Date.now() - new Date(isoDate).getTime();
+  const diffMs = Math.max(0, Date.now() - new Date(isoDate).getTime());
   const diffSec = Math.floor(diffMs / 1000);
   if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
@@ -123,7 +142,7 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
 
   if (totalActive === 0) {
     lines.push(`${DIM}│  No active automations.                                        │${RESET}`);
-    lines.push(`${DIM}│  Start one with /automate create <webhook|schedule|watch|loop>  │${RESET}`);
+    lines.push(`${DIM}│  Start one with /automate create <webhook|schedule|watch>       │${RESET}`);
   } else {
     for (const webhook of activeWebhooks) {
       const icon = TYPE_ICONS["webhook"] ?? "[webhook]";
@@ -169,6 +188,10 @@ async function buildDashboard(state: AutomateCommandState): Promise<string> {
       lines.push(
         `  ${statusColor}${exec.status.padEnd(10)}${RESET} ${exec.id} ${DIM}${exec.trigger?.label ?? exec.kind} ${age}${RESET}`,
       );
+      if (exec.error ?? exec.summary) {
+        const detail = (exec.error ?? exec.summary ?? "").slice(0, 52);
+        lines.push(`${DIM}│${RESET}      ↳ ${DIM}${detail}${RESET}`);
+      }
     }
   }
 
@@ -227,7 +250,7 @@ async function buildList(state: AutomateCommandState, typeFilter?: string): Prom
 
   if (count === 0) {
     lines.push(`  ${DIM}No automations found${typeFilter ? ` for type "${typeFilter}"` : ""}.${RESET}`);
-    lines.push(`  ${DIM}Start one with /automate create <webhook|schedule|watch|loop>${RESET}`);
+    lines.push(`  ${DIM}Start one with /automate create <webhook|schedule|watch>${RESET}`);
   }
 
   return lines.join("\n");
@@ -460,9 +483,12 @@ async function applyTemplate(
 
   watcher.on("change", (events: FileChangeEvent[]) => {
     if (!def.agentMode) return;
+    // Concurrent-run guard: skip this trigger if the previous agent run is still in-flight
+    if (_watcherRunning.get(def.id)) return;
+    _watcherRunning.set(def.id, true);
     const watchOrchestrator = getOrCreateOrchestrator(state);
-    for (const evt of events) {
-      void watchOrchestrator
+    const runAll = events.map((evt) =>
+      watchOrchestrator
         .runWorkflowInBackground({
           workflowPath: def.workflowPath ?? "",
           eventPayload: { changedFile: evt.changedFile, changeType: evt.changeType },
@@ -476,8 +502,11 @@ async function applyTemplate(
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           process.stdout.write(`${RED}[automate:${def.name}] ${msg}${RESET}\n`);
-        });
-    }
+        }),
+    );
+    void Promise.all(runAll).finally(() => {
+      _watcherRunning.set(def.id, false);
+    });
   });
 
   watcher.start();
@@ -488,8 +517,7 @@ async function applyTemplate(
   _activeWatchers.set(def.id, existing);
 
   // Clean up on process exit
-  process.once("SIGINT", () => watcher.stop());
-  process.once("SIGTERM", () => watcher.stop());
+  ensureGlobalWatcherCleanup();
 
   return [
     "",
@@ -516,7 +544,7 @@ async function createAutomation(
     return [
       `${RED}Usage: /automate create <type> [options]${RESET}`,
       ``,
-      `  Types: ${CYAN}webhook${RESET} | ${CYAN}schedule${RESET} | ${CYAN}watch${RESET} | ${CYAN}loop${RESET}`,
+      `  Types: ${CYAN}webhook${RESET} | ${CYAN}schedule${RESET} | ${CYAN}watch${RESET}`,
       ``,
       `  Examples:`,
       `    ${DIM}/automate create webhook github --port 3001${RESET}`,
@@ -661,6 +689,7 @@ async function createAutomation(
     const createExisting = _activeWatchers.get(createWatcher.snapshot().watcherId) ?? [];
     createExisting.push(createWatcher);
     _activeWatchers.set(createWatcher.snapshot().watcherId, createExisting);
+    ensureGlobalWatcherCleanup();
 
     return [
       "",
@@ -679,7 +708,7 @@ async function createAutomation(
     ].join("\n");
   }
 
-  return `${RED}Unknown automation type: "${type}". Valid types: webhook | schedule | watch | loop${RESET}`;
+  return `${RED}Unknown automation type: "${type}". Valid types: webhook | schedule | watch${RESET}`;
 }
 
 // ─── Flag Helpers ────────────────────────────────────────────────────────────
@@ -773,7 +802,7 @@ async function automateCommand(args: string, state: AutomateCommandState): Promi
         `    List automations, optionally filtered by type`,
         ``,
         `  ${CYAN}/automate create <type> [options]${RESET}`,
-        `    Create a new automation (webhook | schedule | watch | loop)`,
+        `    Create a new automation (webhook | schedule | watch)`,
         ``,
         `  ${CYAN}/automate stop <id>${RESET}`,
         `    Stop a running automation`,

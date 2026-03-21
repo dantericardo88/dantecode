@@ -1,8 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtemp, rm, writeFile, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// ---------------------------------------------------------------------------
+// Mock child_process for URL-source tests (git clone / curl)
+// ---------------------------------------------------------------------------
+vi.mock("node:child_process", () => ({
+  execFileSync: vi.fn(),
+}));
+
+import { execFileSync } from "node:child_process";
 import { installSkill } from "./installer.js";
+
+const mockExecFileSync = vi.mocked(execFileSync);
 
 // Good SKILL.md content (instructions > 200 chars, description > 10 chars)
 const GOOD_SKILL_CONTENT = `---
@@ -118,7 +129,6 @@ describe("installSkill", () => {
     expect(result.installedPath).toBeTruthy();
 
     // Check that source-link exists in install dir
-    const { stat } = await import("node:fs/promises");
     const symlinkPath = join(result.installedPath, "source-link");
     try {
       await stat(symlinkPath);
@@ -141,5 +151,149 @@ describe("installSkill", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Git URL source: cleanup on failure + timeout propagation
+// ---------------------------------------------------------------------------
+
+describe("resolveSource git cleanup", () => {
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "git-project-"));
+    // Reset mock state before each test
+    mockExecFileSync.mockReset();
+  });
+
+  afterEach(async () => {
+    await rm(projectRoot, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("7. cleans up tmpDir when git clone fails", async () => {
+    // Mock execFileSync to throw an error (simulating a failed git clone)
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error("repository not found");
+    });
+
+    const gitSource = "https://github.com/nonexistent/skill-repo.git";
+
+    const result = await installSkill(
+      { source: gitSource, verify: false },
+      projectRoot,
+    );
+
+    // The install must fail
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Git clone failed/);
+
+    // Verify the tmpDir under .dantecode/tmp was cleaned up
+    const tmpBase = join(projectRoot, ".dantecode", "tmp");
+    let tmpDirFound = false;
+    try {
+      const { readdir } = await import("node:fs/promises");
+      const entries = await readdir(tmpBase);
+      tmpDirFound = entries.length > 0;
+    } catch {
+      // tmpBase doesn't exist at all — that's fine, cleanup worked
+      tmpDirFound = false;
+    }
+    expect(tmpDirFound).toBe(false);
+  });
+
+  it("8. propagates sourceTimeout to execFileSync for git clone", async () => {
+    // Mock a successful clone then fail detection (no SKILL.md in empty dir)
+    // execFileSync will be called: first for git clone — return empty Buffer (success)
+    mockExecFileSync.mockReturnValue(Buffer.from(""));
+
+    const gitSource = "https://github.com/example/skill-repo.git";
+    const customTimeout = 15_000;
+
+    await installSkill(
+      { source: gitSource, verify: false, sourceTimeout: customTimeout },
+      projectRoot,
+    ).catch(() => {
+      // Ignore result — we just want to check execFileSync was called with timeout
+    });
+
+    // execFileSync should have been called with git clone and the custom timeout
+    const calls = mockExecFileSync.mock.calls;
+    const cloneCall = calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[]).includes("clone"),
+    );
+    expect(cloneCall).toBeDefined();
+    const opts = cloneCall?.[2] as { timeout?: number } | undefined;
+    expect(opts?.timeout).toBe(customTimeout);
+  });
+
+  it("9. uses default 30000ms timeout when sourceTimeout is not set", async () => {
+    mockExecFileSync.mockReturnValue(Buffer.from(""));
+
+    const gitSource = "https://github.com/example/skill-repo.git";
+
+    await installSkill(
+      { source: gitSource, verify: false },
+      projectRoot,
+    ).catch(() => {});
+
+    const calls = mockExecFileSync.mock.calls;
+    const cloneCall = calls.find(
+      (c) => Array.isArray(c[1]) && (c[1] as string[]).includes("clone"),
+    );
+    expect(cloneCall).toBeDefined();
+    const opts = cloneCall?.[2] as { timeout?: number } | undefined;
+    expect(opts?.timeout).toBe(30_000);
+  });
+
+  it("10. calls curl for http:// URLs and cleans up on failure", async () => {
+    // Mock curl to throw
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error("curl: (6) Could not resolve host");
+    });
+
+    const httpSource = "http://example.com/skill.tar.gz";
+
+    const result = await installSkill(
+      { source: httpSource, verify: false },
+      projectRoot,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/HTTP fetch failed/);
+
+    // execFileSync should have been called with "curl"
+    const calls = mockExecFileSync.mock.calls;
+    const curlCall = calls.find((c) => c[0] === "curl");
+    expect(curlCall).toBeDefined();
+
+    // tmpDir under .dantecode/tmp should be cleaned up
+    const tmpBase = join(projectRoot, ".dantecode", "tmp");
+    let tmpDirFound = false;
+    try {
+      const { readdir: readdirDynamic } = await import("node:fs/promises");
+      const entries = await readdirDynamic(tmpBase);
+      tmpDirFound = entries.length > 0;
+    } catch {
+      tmpDirFound = false;
+    }
+    expect(tmpDirFound).toBe(false);
+  });
+
+  it("11. cleans up tmpDir via early return when detection fails after clone", async () => {
+    // Mock git clone to succeed (empty dir, no throw)
+    mockExecFileSync.mockImplementation(() => Buffer.from(""));
+
+    // Install from git URL — clone will "succeed" but tmpDir is empty → detection fails
+    const result = await installSkill(
+      { source: "https://github.com/test/empty-repo.git", verify: false },
+      projectRoot,
+    );
+
+    expect(result.success).toBe(false);
+    // tmpDir should be cleaned up even though this was an early return, not an exception
+    const tmpBase = join(projectRoot, ".dantecode", "tmp");
+    const entries = await readdir(tmpBase).catch(() => [] as string[]);
+    expect(entries).toHaveLength(0);
   });
 });

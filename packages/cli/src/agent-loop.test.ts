@@ -54,6 +54,8 @@ vi.mock("ai", () => ({
 // Track analyzeComplexity return value so tests can override it
 let mockAnalyzeComplexityValue = 0.3;
 const mockEscalateTier = vi.fn();
+const mockIsUsingFallback = vi.fn<() => boolean>().mockReturnValue(false);
+const mockGetFallbackModelId = vi.fn<() => string | undefined>().mockReturnValue(undefined);
 
 vi.mock("@dantecode/core", () => {
   // Build a lightweight mock ModelRouterImpl that uses our mockGenerateText
@@ -120,6 +122,12 @@ vi.mock("@dantecode/core", () => {
     }
     recordRequestCost() {}
     resetSessionCost() {}
+    isUsingFallback(): boolean {
+      return mockIsUsingFallback();
+    }
+    getFallbackModelId(): string | undefined {
+      return mockGetFallbackModelId();
+    }
   }
 
   // Mock SessionStore for cross-session learning
@@ -259,23 +267,38 @@ vi.mock("@dantecode/core", () => {
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
     // Skill wave orchestrator — real implementations for integration testing
-    getCurrentWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string; instructions: string }> }) => {
-      if (state.currentIndex >= state.waves.length) return null;
-      return state.waves[state.currentIndex];
-    }),
-    advanceWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number }>; completedWaves: number[] }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return false;
-      state.completedWaves.push(current.number);
-      state.currentIndex++;
-      return state.currentIndex < state.waves.length;
-    }),
+    getCurrentWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number; title: string; instructions: string }>;
+      }) => {
+        if (state.currentIndex >= state.waves.length) return null;
+        return state.waves[state.currentIndex];
+      },
+    ),
+    advanceWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number }>;
+        completedWaves: number[];
+      }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return false;
+        state.completedWaves.push(current.number);
+        state.currentIndex++;
+        return state.currentIndex < state.waves.length;
+      },
+    ),
     recordWaveFailure: vi.fn(() => true),
-    buildWavePrompt: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return "All waves complete.";
-      return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
-    }),
+    buildWavePrompt: vi.fn(
+      (state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return "All waves complete.";
+        return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
+      },
+    ),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
     // Approach memory + prompt cache mocks
@@ -283,11 +306,19 @@ vi.mock("@dantecode/core", () => {
       async load() {}
       async save() {}
       async record() {}
-      async findSimilar() { return []; }
-      async getFailedApproaches() { return []; }
-      async getAll() { return []; }
+      async findSimilar() {
+        return [];
+      }
+      async getFailedApproaches() {
+        return [];
+      }
+      async getAll() {
+        return [];
+      }
       async clear() {}
-      get size() { return 0; }
+      get size() {
+        return 0;
+      }
     },
     formatApproachesForPrompt: vi.fn().mockReturnValue(""),
     buildWorkflowInvocationPrompt: vi.fn(() => "## Workflow Contract\nTest workflow contract."),
@@ -328,28 +359,62 @@ vi.mock("@dantecode/core", () => {
       isBlocked: vi.fn(() => ({ blocked: false })),
     },
     adaptToolResult: vi.fn(
-      (_toolName: string, _input: Record<string, unknown>, raw: { content: string; isError: boolean }) => raw,
+      (
+        _toolName: string,
+        _input: Record<string, unknown>,
+        raw: { content: string; isError: boolean },
+      ) => raw,
     ),
     formatEvidenceSummary: vi.fn(() => ""),
     // UXEngine — required because stream-renderer.ts imports it from @dantecode/core
     UXEngine: class MockUXEngine {
       constructor(_opts?: Record<string, unknown>) {}
       applyTheme() {}
-      getTheme() { return { name: "default", icons: {}, colors: {} }; }
-      getThemeName() { return "default"; }
-      listThemes() { return ["default"]; }
-      formatProgress() { return ""; }
-      formatError(msg: string) { return `Error: ${msg}`; }
-      formatSuccess(msg: string) { return `✓ ${msg}`; }
-      formatWarning(msg: string) { return `⚠ ${msg}`; }
-      formatInfo(msg: string) { return `ℹ ${msg}`; }
-      generateHint() { return ""; }
-      buildStatusLine() { return ""; }
-      stripColors(t: string) { return t; }
-      truncate(t: string) { return t; }
-      formatTable() { return ""; }
-      formatMarkdown(t: string) { return t; }
-      formatDiff() { return ""; }
+      getTheme() {
+        return { name: "default", icons: {}, colors: {} };
+      }
+      getThemeName() {
+        return "default";
+      }
+      listThemes() {
+        return ["default"];
+      }
+      formatProgress() {
+        return "";
+      }
+      formatError(msg: string) {
+        return `Error: ${msg}`;
+      }
+      formatSuccess(msg: string) {
+        return `✓ ${msg}`;
+      }
+      formatWarning(msg: string) {
+        return `⚠ ${msg}`;
+      }
+      formatInfo(msg: string) {
+        return `ℹ ${msg}`;
+      }
+      generateHint() {
+        return "";
+      }
+      buildStatusLine() {
+        return "";
+      }
+      stripColors(t: string) {
+        return t;
+      }
+      truncate(t: string) {
+        return t;
+      }
+      formatTable() {
+        return "";
+      }
+      formatMarkdown(t: string) {
+        return t;
+      }
+      formatDiff() {
+        return "";
+      }
     },
     // Spinner — also exported from ux-engine via @dantecode/core
     Spinner: class MockSpinner {
@@ -368,56 +433,100 @@ vi.mock("@dantecode/core", () => {
       increment(_name: string, _value?: number) {}
       observe(_name: string, _value: number) {}
       record(_name: string, _value: number) {}
-      getCounter(_name: string) { return 0; }
-      getGauge(_name: string) { return 0; }
-      getSamples(_name: string) { return []; }
-      toPrometheus() { return ""; }
-      toJSON() { return {}; }
+      getCounter(_name: string) {
+        return 0;
+      }
+      getGauge(_name: string) {
+        return 0;
+      }
+      getSamples(_name: string) {
+        return [];
+      }
+      toPrometheus() {
+        return "";
+      }
+      toJSON() {
+        return {};
+      }
       reset() {}
     },
     // ReasoningChain — Lane 1 wiring
     ReasoningChain: class MockReasoningChain {
       constructor() {}
-      decideTier() { return "basic"; }
-      think() { return { steps: [], recommendation: "" }; }
+      decideTier() {
+        return "basic";
+      }
+      think() {
+        return { steps: [], recommendation: "" };
+      }
       recordStep() {}
-      shouldCritique() { return false; }
-      selfCritique() { return { recommendation: "" }; }
-      formatChainForPrompt() { return ""; }
+      shouldCritique() {
+        return false;
+      }
+      selfCritique() {
+        return { recommendation: "" };
+      }
+      formatChainForPrompt() {
+        return "";
+      }
       recordTierOutcome() {}
-      getTierPerformance() { return {}; }
-      getAdaptiveBias() { return 0; }
+      getTierPerformance() {
+        return {};
+      }
+      getAdaptiveBias() {
+        return 0;
+      }
     },
     // AutonomyEngine — Lane 1 wiring
     AutonomyEngine: class MockAutonomyEngine {
       constructor() {}
-      resume() { return Promise.resolve(); }
+      resume() {
+        return Promise.resolve();
+      }
       incrementStep() {}
-      shouldRunMetaReasoning() { return false; }
-      metaReason() { return Promise.resolve(""); }
-      save() { return Promise.resolve(); }
+      shouldRunMetaReasoning() {
+        return false;
+      }
+      metaReason() {
+        return Promise.resolve("");
+      }
+      save() {
+        return Promise.resolve();
+      }
     },
     // PersistentMemory — Lane 1 wiring
     PersistentMemory: class MockPersistentMemory {
       constructor() {}
-      load() { return Promise.resolve(); }
-      search() { return []; }
-      store() { return Promise.resolve(); }
+      load() {
+        return Promise.resolve();
+      }
+      search() {
+        return [];
+      }
+      store() {
+        return Promise.resolve();
+      }
     },
     // SecurityEngine — Lane 2 wiring
     SecurityEngine: class MockSecurityEngine {
       constructor() {}
-      checkAction() { return { allowed: true }; }
+      checkAction() {
+        return { allowed: true };
+      }
     },
     // SecretsScanner — Lane 2 wiring
     SecretsScanner: class MockSecretsScanner {
       constructor() {}
-      scan() { return { clean: true, findings: [] }; }
+      scan() {
+        return { clean: true, findings: [] };
+      }
     },
     // synthesizeConfidence — Lane 4 wiring
     synthesizeConfidence: vi.fn(() => ({ decision: "pass", confidence: 1.0, rationale: "" })),
     // getCostMultiplier — cost tracking
     getCostMultiplier: vi.fn((_modelId: string) => 1.0),
+    // detectSelfImprovementContext — called when isUsingFallback() returns true
+    detectSelfImprovementContext: vi.fn((_prompt: string, _root: string, _opts?: unknown) => null),
   };
 });
 
@@ -543,7 +652,9 @@ vi.mock("@dantecode/dante-skillbook", () => ({
   DanteSkillbook: vi.fn().mockImplementation(() => ({
     getSkills: vi.fn().mockReturnValue([]),
     applyUpdate: vi.fn().mockReturnValue(false),
-    stats: vi.fn().mockReturnValue({ totalSkills: 0, sections: {}, lastUpdatedAt: "", version: "1.0.0" }),
+    stats: vi
+      .fn()
+      .mockReturnValue({ totalSkills: 0, sections: {}, lastUpdatedAt: "", version: "1.0.0" }),
   })),
   GitSkillbookStore: vi.fn().mockImplementation(() => ({
     load: vi.fn().mockReturnValue(null),
@@ -655,6 +766,8 @@ describe("runAgentLoop smoke tests", () => {
     vi.clearAllMocks();
     mockAnalyzeComplexityValue = 0.3;
     mockEscalateTier.mockReset();
+    mockIsUsingFallback.mockReturnValue(false);
+    mockGetFallbackModelId.mockReturnValue(undefined);
     mockGenerateText.mockReset();
     mockExecuteTool.mockReset();
     mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
@@ -670,9 +783,19 @@ describe("runAgentLoop smoke tests", () => {
     mockMemoryInitialize.mockResolvedValue(undefined);
     mockMemoryRecall.mockResolvedValue({ query: "", scope: "all", results: [], latencyMs: 0 });
     mockMemoryStore.mockResolvedValue({ stored: true });
-    mockMemorySummarize.mockResolvedValue({ sessionId: "test-session", summary: "", compressed: false, tokensSaved: 0 });
+    mockMemorySummarize.mockResolvedValue({
+      sessionId: "test-session",
+      summary: "",
+      compressed: false,
+      tokensSaved: 0,
+    });
     mockMemoryPrune.mockResolvedValue({ prunedCount: 0, retainedCount: 0, policy: "default" });
-    mockAuditLoggerFlush.mockResolvedValue({ anomalies: [], analyzedCount: 0, bufferTruncated: false, detection: { analyzedCount: 0, truncated: false } });
+    mockAuditLoggerFlush.mockResolvedValue({
+      anomalies: [],
+      analyzedCount: 0,
+      bufferTruncated: false,
+      detection: { analyzedCount: 0, truncated: false },
+    });
     mockSchedulerExecuteBatch.mockReset();
     mockSchedulerExecuteBatch.mockImplementation(async (toolCalls, options) => {
       const results = [];
@@ -851,15 +974,12 @@ describe("runAgentLoop smoke tests", () => {
     const session = makeSession();
     const result = await runAgentLoop("/magic push the branch", session, makeConfig());
 
-    expect(mockPersistToolCallRecords).toHaveBeenCalledWith(
-      "durable-run-1",
-      [
-        expect.objectContaining({
-          id: "tool-approval-1",
-          status: "awaiting_approval",
-        }),
-      ],
-    );
+    expect(mockPersistToolCallRecords).toHaveBeenCalledWith("durable-run-1", [
+      expect.objectContaining({
+        id: "tool-approval-1",
+        status: "awaiting_approval",
+      }),
+    ]);
     expect(mockPauseRun).toHaveBeenCalledWith(
       "durable-run-1",
       expect.objectContaining({
@@ -1009,15 +1129,12 @@ describe("runAgentLoop smoke tests", () => {
         status: "executing",
       }),
     ]);
-    expect(mockPersistToolCallRecords).toHaveBeenCalledWith(
-      "durable-run-1",
-      [
-        expect.objectContaining({
-          id: "tool-write-1",
-          status: "verifying",
-        }),
-      ],
-    );
+    expect(mockPersistToolCallRecords).toHaveBeenCalledWith("durable-run-1", [
+      expect.objectContaining({
+        id: "tool-write-1",
+        status: "verifying",
+      }),
+    ]);
   });
 
   it("pauses the durable run when a background sub-agent is launched", async () => {
@@ -2550,7 +2667,12 @@ describe("Universal skill completion (skillActive)", () => {
     });
     // Mock Read to populate readTracker (simulating real executeTool behavior)
     mockExecuteTool.mockImplementationOnce(
-      async (_name: string, input: Record<string, unknown>, projectRoot: string, context?: { readTracker?: Map<string, string> }) => {
+      async (
+        _name: string,
+        input: Record<string, unknown>,
+        projectRoot: string,
+        context?: { readTracker?: Map<string, string> },
+      ) => {
         if (context?.readTracker && input.file_path) {
           context.readTracker.set(resolve(projectRoot, input.file_path as string), "mock-hash");
         }
@@ -2769,8 +2891,9 @@ describe("Universal skill completion (skillActive)", () => {
 
   it("injects reflection checkpoint after 15 tool calls", async () => {
     // Build 15 Read tool calls as XML tool_use blocks in the model's text
-    const toolCallsXml = Array.from({ length: 15 }, (_, i) =>
-      `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
+    const toolCallsXml = Array.from(
+      { length: 15 },
+      (_, i) => `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
     ).join("\n");
 
     // First call: 15 tool calls embedded in text
@@ -2792,8 +2915,7 @@ describe("Universal skill completion (skillActive)", () => {
     const lastCallArgs = mockGenerateText.mock.calls[mockGenerateText.mock.calls.length - 1]![0];
     const allMsgs = lastCallArgs.messages as Array<{ role: string; content: string }>;
     const hasReflection = allMsgs.some(
-      (m) =>
-        typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
+      (m) => typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
     );
     expect(hasReflection).toBe(true);
   });
@@ -2833,9 +2955,13 @@ describe("DanteGaslight integration hook", () => {
       text: "Final assistant response.",
       usage: { totalTokens: 20 },
     });
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+      }),
+    );
     expect(capturedDraft).toBe("Final assistant response.");
   });
 
@@ -2863,10 +2989,14 @@ describe("DanteGaslight integration hook", () => {
       text: "Response text.",
       usage: { totalTokens: 20 },
     });
-    const result = await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    const result = await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
     const lastAssistant = [...result.messages].reverse().find((m) => m.role === "assistant");
     expect(lastAssistant?.content).toBe(improvedText);
   });
@@ -2894,10 +3024,14 @@ describe("DanteGaslight integration hook", () => {
       text: "Response text.",
       usage: { totalTokens: 20 },
     });
-    const result = await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    const result = await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
     const lastAssistant = [...result.messages].reverse().find((m) => m.role === "assistant");
     expect(lastAssistant?.content).toBe("Response text.");
     expect(lastAssistant?.content).not.toBe("Rewrite that must NOT appear.");
@@ -2908,9 +3042,7 @@ describe("DanteGaslight integration hook", () => {
   // then call it directly to verify the deterministic structural check logic.
 
   it("structural gate short-circuits on near-identical rewrite (no LLM call)", async () => {
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -2934,10 +3066,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -2953,9 +3089,7 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("structural gate allows genuinely different rewrite to reach LLM gate", async () => {
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -2978,10 +3112,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -3004,12 +3142,8 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("structural gate fails when critique concept words absent from rewrite", async () => {
-    let capturedCritique:
-      | ((sys: string, user: string) => Promise<string | null>)
-      | undefined;
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedCritique: ((sys: string, user: string) => Promise<string | null>) | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3034,10 +3168,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedCritique).toBeDefined();
     expect(capturedGate).toBeDefined();
@@ -3070,9 +3208,7 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("comparative gate parses PASS response correctly (decision: pass, score: 0.9)", async () => {
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3095,10 +3231,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -3117,9 +3257,7 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("comparative gate parses FAIL response correctly (decision: fail, score: 0.2)", async () => {
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3142,10 +3280,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -3164,12 +3306,8 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("adaptive threshold tighter for high-severity critiques (3 high → threshold 0.80)", async () => {
-    let capturedCritique:
-      | ((sys: string, user: string) => Promise<string | null>)
-      | undefined;
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedCritique: ((sys: string, user: string) => Promise<string | null>) | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3197,10 +3335,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedCritique).toBeDefined();
     expect(capturedGate).toBeDefined();
@@ -3242,9 +3384,7 @@ describe("DanteGaslight integration hook", () => {
     // adaptiveJaccardThreshold(0, 0, 0) = 0.93. 0.857 < 0.93 → Jaccard passes.
     // new-vocab-ratio with no high-severity: minRatio=0.05; ratio≈0.077 → passes.
     // No descriptions → bigram checks skipped. All structural checks pass → LLM gate called.
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3269,10 +3409,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -3296,9 +3440,7 @@ describe("DanteGaslight integration hook", () => {
   });
 
   it("repeated structural fails are stateless — each call independently returns fail with no LLM calls", async () => {
-    let capturedGate:
-      | ((draft: string) => Promise<{ decision: string; score: number }>)
-      | undefined;
+    let capturedGate: ((draft: string) => Promise<{ decision: string; score: number }>) | undefined;
 
     const mockGaslight = {
       maybeGaslight: async (opts: {
@@ -3321,10 +3463,14 @@ describe("DanteGaslight integration hook", () => {
       usage: { totalTokens: 20 },
     });
 
-    await runAgentLoop("go deeper", makeSession(), makeConfig({
-      gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
-      silent: true,
-    }));
+    await runAgentLoop(
+      "go deeper",
+      makeSession(),
+      makeConfig({
+        gaslight: mockGaslight as unknown as AgentLoopConfig["gaslight"],
+        silent: true,
+      }),
+    );
 
     expect(capturedGate).toBeDefined();
 
@@ -3355,7 +3501,11 @@ describe("FearSet enforcement gate — fearSetBlockOnNoGo", () => {
     return {
       id: "fs-nogo-1",
       context: "Deploy the new payment service",
-      trigger: { channel: "explicit-user" as const, rationale: "test", at: new Date().toISOString() },
+      trigger: {
+        channel: "explicit-user" as const,
+        rationale: "test",
+        at: new Date().toISOString(),
+      },
       mode: "llm" as const,
       columns: [],
       passed: false,
@@ -3551,6 +3701,80 @@ describe("FearSet enforcement gate — fearSetBlockOnNoGo", () => {
     expect(firstCall?.[0]).toContain("test-session");
   });
 
+  it("auto-retain payload includes toolCallCount and filesModifiedTotal", async () => {
+    // Two rounds: first produces a tool call, second produces final answer
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Working.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/a.ts"}}\n</tool_use>',
+      usage: { promptTokens: 40, completionTokens: 20, totalTokens: 60 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { promptTokens: 50, completionTokens: 10, totalTokens: 60 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("check a.ts", session, makeConfig());
+
+    // Filter to auto-retain calls specifically (key starts with "round-" and value is an object)
+    const autoRetainCalls = mockMemoryStore.mock.calls.filter(
+      (call: unknown[]) =>
+        call[2] === "session" &&
+        typeof call[0] === "string" &&
+        (call[0] as string).startsWith("round-") &&
+        typeof call[1] === "object" &&
+        call[1] !== null &&
+        !Array.isArray(call[1]),
+    );
+    expect(autoRetainCalls.length).toBeGreaterThanOrEqual(1);
+    const payload = autoRetainCalls[0]?.[1] as Record<string, unknown>;
+    expect(payload).toHaveProperty("round");
+    expect(payload).toHaveProperty("timestamp");
+    expect(payload).toHaveProperty("filesModifiedTotal");
+    expect(payload).toHaveProperty("toolCallCount");
+    expect(typeof payload["toolCallCount"]).toBe("number");
+  });
+
+  it("auto-retain failure never crashes the agent loop", async () => {
+    mockMemoryStore.mockRejectedValueOnce(new Error("Memory storage full"));
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Read the file.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/x.ts"}}\n</tool_use>',
+      usage: { promptTokens: 40, completionTokens: 20, totalTokens: 60 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { promptTokens: 50, completionTokens: 10, totalTokens: 60 },
+    });
+
+    const session = makeSession();
+    // Must complete without throwing even when memoryStore rejects
+    await expect(runAgentLoop("check x.ts", session, makeConfig())).resolves.not.toThrow();
+  });
+
+  it("auto-retain is NOT fired on round 1 (only round 2+)", async () => {
+    // Clear all mock call history so previous tests don't pollute this assertion
+    mockMemoryStore.mockClear();
+
+    // Single-round loop: no tool calls, loop ends after first turn
+    // roundCounter === 1 at the retain check → condition `roundCounter > 1` is false → skipped
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done in one round.",
+      usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("quick task", session, makeConfig());
+
+    const autoRetainCalls = mockMemoryStore.mock.calls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === "string" &&
+        (call[0] as string).startsWith("round-") &&
+        typeof call[1] === "object" &&
+        call[1] !== null &&
+        !Array.isArray(call[1]),
+    );
+    expect(autoRetainCalls).toHaveLength(0);
+  });
+
   it("auditLogger.flush is called with endSession:true at session end", async () => {
     mockGenerateText.mockResolvedValueOnce({
       text: "All done.\n[COMPLEXITY: 0.1]",
@@ -3677,6 +3901,184 @@ describe("verificationScore retry-derived fallback", () => {
       makeVerifyConfig({ gaslight: gaslight as unknown as AgentLoopConfig["gaslight"] }),
     );
     const callArg = spy.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    expect(callArg?.verificationScore).toBeCloseTo(0.20);
+    expect(callArg?.verificationScore).toBeCloseTo(0.2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fallback pipeline guard
+// ---------------------------------------------------------------------------
+
+describe("Fallback pipeline guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
+    mockIsUsingFallback.mockReturnValue(false);
+    mockGetFallbackModelId.mockReturnValue(undefined);
+    mockGenerateText.mockReset();
+    mockExecuteTool.mockReset();
+    mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
+    mockGetLatestWaitingRun.mockResolvedValue(null);
+    mockLoadSessionSnapshot.mockResolvedValue(null);
+    mockLoadResumeHint.mockResolvedValue(null);
+    mockLoadBackgroundTask.mockResolvedValue(null);
+    mockPersistPendingToolCalls.mockReset();
+    mockLoadPendingToolCalls.mockReset();
+    mockLoadPendingToolCalls.mockResolvedValue([]);
+    mockClearPendingToolCalls.mockReset();
+    mockMemoryInitialize.mockResolvedValue(undefined);
+    mockMemoryRecall.mockResolvedValue({ query: "", scope: "all", results: [], latencyMs: 0 });
+    mockMemoryStore.mockResolvedValue({ stored: true });
+    mockMemorySummarize.mockResolvedValue({
+      sessionId: "test-session",
+      summary: "",
+      compressed: false,
+      tokensSaved: 0,
+    });
+    mockMemoryPrune.mockResolvedValue({ prunedCount: 0, retainedCount: 0, policy: "default" });
+    mockAuditLoggerFlush.mockResolvedValue({
+      anomalies: [],
+      analyzedCount: 0,
+      bufferTruncated: false,
+      detection: { analyzedCount: 0, truncated: false },
+    });
+    mockSchedulerExecuteBatch.mockReset();
+    mockSchedulerExecuteBatch.mockImplementation(async (toolCalls, options) => {
+      const results = [];
+      for (const toolCall of toolCalls) {
+        const raw = await options.execute(toolCall);
+        results.push({
+          request: toolCall,
+          record: {
+            id: toolCall.id,
+            toolName: toolCall.toolName,
+            input: toolCall.input,
+            requestId: options.requestId,
+            status: raw.isError ? "error" : "success",
+            statusHistory: [],
+            createdAt: Date.now(),
+            result: raw,
+          },
+          result: raw,
+          executed: true,
+          verificationMessage: undefined,
+        });
+      }
+      return results;
+    });
+  });
+
+  it("aborts pipeline after 2 consecutive fallback rounds and emits abort message", async () => {
+    // Round 1: model responds (on fallback)
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Working on it.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    // Round 2: model responds again (still on fallback) — guard fires after this round
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Continuing work.",
+      usage: { totalTokens: 30 },
+    });
+
+    // Round 3 would be here but the guard should break before reaching it
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Should not reach this.",
+      usage: { totalTokens: 20 },
+    });
+
+    // Router reports fallback for every call
+    mockIsUsingFallback.mockReturnValue(true);
+    mockGetFallbackModelId.mockReturnValue("haiku-fallback");
+
+    // Capture stdout to verify abort message
+    const writtenChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      writtenChunks.push(String(chunk));
+      return true;
+    });
+
+    try {
+      await runAgentLoop(
+        "/magic implement the full feature",
+        makeSession(),
+        makeConfig({ silent: false }),
+      );
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+
+    // After 2 fallback rounds the loop breaks — round 3 mock should not be called
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+
+    // Abort message should have been written
+    const allOutput = writtenChunks.join("");
+    expect(allOutput).toContain("Pipeline aborted");
+    expect(allOutput).toContain("haiku-fallback");
+  });
+
+  it("does not abort when primary model recovers between fallback rounds", async () => {
+    // Strategy: 2 rounds total.
+    // Round 1 on primary (counter stays 0), round 2 on fallback (counter=1, threshold=2, no abort).
+    // A 2-round test avoids the confabulation guard that fires at roundCounter >= 3.
+
+    // Round 1: primary model, returns a tool call so loop continues
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Inspecting.\n<tool_use>\n{"name":"Read","input":{"file_path":"a.ts"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    // Round 2: fallback model — counter becomes 1 (below threshold of 2), exits cleanly
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Analysis complete — no further actions needed.",
+      usage: { totalTokens: 30 },
+    });
+
+    // isUsingFallback() is called multiple times per round, so use mockImplementation
+    // keyed to how many generate calls have been completed so far.
+    // After round 1 finishes and guard runs: calls.length === 1 → primary (false).
+    // After round 2 finishes and guard runs: calls.length === 2 → fallback (true).
+    mockIsUsingFallback.mockImplementation(() => {
+      return mockGenerateText.mock.calls.length >= 2;
+    });
+
+    mockGetFallbackModelId.mockReturnValue("haiku-fallback");
+
+    const result = await runAgentLoop(
+      "/magic implement the full feature",
+      makeSession(),
+      makeConfig({ silent: true }),
+    );
+
+    // Both rounds complete — fallback counter only reached 1, never hit threshold of 2
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+    expect(result.messages.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT abort for non-pipeline prompts even when fallback is active for 2+ rounds", async () => {
+    // Two rounds on a simple non-pipeline prompt — isPipelineWorkflow=false
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: 'Think.\n<tool_use>\n{"name":"Read","input":{"file_path":"x.ts"}}\n</tool_use>',
+        usage: { totalTokens: 30 },
+      })
+      .mockResolvedValueOnce({
+        text: "Here is your answer.",
+        usage: { totalTokens: 20 },
+      });
+    mockExecuteTool.mockResolvedValueOnce({ content: "content", isError: false });
+
+    // Router always on fallback
+    mockIsUsingFallback.mockReturnValue(true);
+    mockGetFallbackModelId.mockReturnValue("haiku-fallback");
+
+    const result = await runAgentLoop("What is 2+2?", makeSession(), makeConfig({ silent: true }));
+
+    // Both rounds complete — guard should NOT fire for non-pipeline prompts
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
   });
 });

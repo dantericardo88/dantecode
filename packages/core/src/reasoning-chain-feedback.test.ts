@@ -197,3 +197,22 @@ describe("decideTier — cost awareness", () => {
     expect(tier).toBe("expert");
   });
 });
+
+// ---------------------------------------------------------------------------
+// getPlaybook
+// ---------------------------------------------------------------------------
+
+describe("getPlaybook", () => {
+  it("returns empty array when no steps have been recorded", () => {
+    const chain = makeChain();
+    expect(chain.getPlaybook()).toEqual([]);
+  });
+
+  it("returns array type after recording tier outcomes (no pdseScore on raw outcomes)", () => {
+    const chain = makeChain();
+    record(chain, "quick", 0.9, 5);
+    // recordTierOutcome does not push to history, so no scored steps exist
+    expect(Array.isArray(chain.getPlaybook())).toBe(true);
+    expect(chain.getPlaybook()).toEqual([]);
+  });
+});

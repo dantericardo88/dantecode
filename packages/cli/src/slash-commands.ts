@@ -5054,7 +5054,10 @@ const SLASH_COMMANDS: SlashCommand[] = [
     name: "automate",
     description: "Unified automation management: dashboard, templates, create, stop, logs",
     usage: "/automate [dashboard | list | create <type> | template <name> | templates | stop <id> | logs <id>]",
-    handler: automateCommand,
+    handler: async (args: string, state: ReplState) => {
+      getGitAutomationOrchestrator(state); // pre-populate with buildAutomationAgentRunner DI
+      return automateCommand(args, state);
+    },
   },
   {
     name: "webhook-listen",

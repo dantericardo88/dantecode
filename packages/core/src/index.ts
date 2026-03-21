@@ -557,6 +557,7 @@ export { CouncilOrchestrator } from "./council/council-orchestrator.js";
 export type {
   CouncilLifecycleStatus,
   CouncilOrchestratorOptions,
+  OrchestratorEvents,
   OrchestratorStartOptions,
 } from "./council/council-orchestrator.js";
 

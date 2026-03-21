@@ -71,6 +71,8 @@ interface ParsedArgs {
   resume: boolean;
   /** --fearset-block-on-nogo: block and prompt for confirmation when FearSet returns no-go */
   fearSetBlockOnNoGo: boolean;
+  /** --name / -n — human-readable name for this session */
+  sessionName: string | undefined;
 }
 
 /**
@@ -99,6 +101,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     configRoot: undefined,
     resume: false,
     fearSetBlockOnNoGo: false,
+    sessionName: undefined,
   };
 
   const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "council", "gaslight", "skillbook", "fearset", "research", "audit", "vault", "review", "triage", "serve"]);
@@ -191,6 +194,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (arg === "--fearset-block-on-nogo") {
       result.fearSetBlockOnNoGo = true;
       i += 1;
+      continue;
+    }
+
+    if (arg === "--name" || arg === "-n") {
+      result.sessionName = args[i + 1];
+      i += 2;
       continue;
     }
 
@@ -320,6 +329,7 @@ async function main(): Promise<void> {
     configRoot: parsed.configRoot,
     resumeFromLastSession: parsed.resume,
     fearSetBlockOnNoGo: parsed.fearSetBlockOnNoGo,
+    sessionName: parsed.sessionName,
   };
 
   // Route to the appropriate command

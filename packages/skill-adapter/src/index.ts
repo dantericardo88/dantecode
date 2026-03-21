@@ -131,6 +131,8 @@ export type {
   ChainDefinition,
   StepExecutionResult,
   ChainExecutionResult,
+  StepCallbackResult,
+  ExecutionContext,
   GateEvaluation,
   GateCondition,
 } from "./composer/index.js";

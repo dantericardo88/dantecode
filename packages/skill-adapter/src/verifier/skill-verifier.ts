@@ -206,34 +206,66 @@ function checkDangerousPatterns(instructions: string): SkillFinding[] {
 // Constitutional Compliance Check
 // ----------------------------------------------------------------------------
 
-const CONSTITUTION_FORBIDDEN = [
-  "rm -rf",
-  "eval",
-  "hardcode",
-  "skip tests",
-  "ignore lint",
+const CONSTITUTION_FORBIDDEN: Array<{ pattern: RegExp; message: string }> = [
+  { pattern: /\brm\s+-rf?\b/, message: "destructive rm -rf command" },
+  { pattern: /\beval\s*\(/, message: "eval() call" },
+  { pattern: /hardcode[d]?\s+(password|secret|key|token)/i, message: "hardcoded credentials" },
+  { pattern: /skip\s+tests?/i, message: "instruction to skip tests" },
+  { pattern: /ignore\s+lint/i, message: "instruction to ignore linting" },
+  { pattern: /\bsudo\b/, message: "sudo usage" },
+  { pattern: /curl\s+.*\|\s*(ba)?sh/, message: "curl pipe to shell" },
+  { pattern: /wget\s+.*\|\s*(ba)?sh/, message: "wget pipe to shell" },
+  { pattern: /--no-verify/, message: "bypassing git hooks (--no-verify)" },
+  { pattern: /process\.env\s*\[/, message: "raw env variable access pattern" },
+  { pattern: /--force\b/, message: "force flag usage" },
+  { pattern: /ignore\s+error/i, message: "instruction to ignore errors" },
+  { pattern: /bypass\s+(security|check|guard)/i, message: "security bypass instruction" },
+];
+
+const CONSTITUTION_REQUIRED: Array<{ pattern: RegExp; description: string }> = [
+  { pattern: /\bverif(y|ication)\b/i, description: "verification step" },
+  { pattern: /\btest(s|ing)?\b/i, description: "testing requirement" },
+  { pattern: /\bvalidat(e|ion)\b/i, description: "validation step" },
 ];
 
 function checkConstitutionalCompliance(
   instructions: string,
-  constitution: string,
+  _constitution: string,
 ): SkillFinding[] {
   const findings: SkillFinding[] = [];
-  const constitutionLower = constitution.toLowerCase();
-  const instructionsLower = instructions.toLowerCase();
+  let score = 100;
 
-  for (const forbidden of CONSTITUTION_FORBIDDEN) {
-    const forbiddenLower = forbidden.toLowerCase();
-    if (
-      instructionsLower.includes(forbiddenLower) &&
-      constitutionLower.includes(forbiddenLower)
-    ) {
+  // Check forbidden patterns against instructions
+  for (const { pattern, message } of CONSTITUTION_FORBIDDEN) {
+    if (pattern.test(instructions)) {
+      score -= 20;
       findings.push({
         severity: "warning",
         category: "constitutional",
-        message: `Instructions contain "${forbidden}" which is explicitly forbidden in the project constitution`,
+        message: `Instructions contain forbidden pattern: ${message}`,
       });
     }
+  }
+
+  // Check required quality markers — deduct 5 points each when absent
+  for (const { pattern, description } of CONSTITUTION_REQUIRED) {
+    if (!pattern.test(instructions)) {
+      score -= 5;
+      findings.push({
+        severity: "info",
+        category: "constitutional",
+        message: `Instructions are missing recommended ${description}`,
+      });
+    }
+  }
+
+  // Attach score as an info finding when there are any violations
+  if (findings.length > 0) {
+    findings.push({
+      severity: "info",
+      category: "constitutional",
+      message: `Constitutional compliance score: ${Math.max(0, score)}/100`,
+    });
   }
 
   return findings;
@@ -243,16 +275,24 @@ function checkConstitutionalCompliance(
 // Quality Score
 // ----------------------------------------------------------------------------
 
-function scoreInstructionQuality(instructions: string, description: string): number {
-  let score = 85;
+function scoreInstructionQuality(instructions: string): number {
+  let score = 65; // neutral base
 
+  // Structure indicators (positive)
+  if (/^\d+\.\s/m.test(instructions)) score += 10; // numbered steps
+  if (/^[-*]\s/m.test(instructions)) score += 5;    // bullet points
+  if (/```/.test(instructions)) score += 10;         // code blocks
+  if (/\b(must|shall|should|always|never)\b/i.test(instructions)) score += 5; // constraints
   if (instructions.length > 200) score += 5;
   if (instructions.length > 500) score += 5;
-  if (description.length > 30) score += 5;
+  if (instructions.length > 1000) score += 5;
 
-  // Penalize single-sentence instructions
-  const sentences = instructions.split(/[.!?]+/).filter((s) => s.trim().length > 0);
-  if (sentences.length <= 1) score -= 10;
+  // Quality indicators (negative)
+  if (/\betc\.?\b/i.test(instructions)) score -= 5;  // vague "etc."
+  if (/do something/i.test(instructions)) score -= 10;
+  if (/handle it/i.test(instructions)) score -= 10;
+  if (instructions.split("\n").length < 3) score -= 10; // single-paragraph
+  if (instructions.length < 50) score -= 20; // too short
 
   return Math.max(0, Math.min(100, score));
 }
@@ -306,7 +346,7 @@ export async function verifySkill(
   }
 
   // 6. Quality score
-  const qualityScore = scoreInstructionQuality(skill.instructions, skill.description);
+  const qualityScore = scoreInstructionQuality(skill.instructions);
 
   // 7. Overall score
   const criticalCount = findings.filter((f) => f.severity === "critical").length;

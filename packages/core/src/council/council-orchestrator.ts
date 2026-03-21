@@ -23,7 +23,6 @@ import type { LaneAssignmentRequest, ReassignmentRequest } from "./council-route
 import { WorktreeObserver } from "./worktree-observer.js";
 import { MergeBrain } from "./merge-brain.js";
 import type { MergeBrainResult } from "./merge-brain.js";
-import { MergeConfidenceScorer } from "./merge-confidence.js";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
 import { FleetBudget } from "./fleet-budget.js";
 import type { FleetBudgetReport } from "./fleet-budget.js";
@@ -89,7 +88,7 @@ export interface OrchestratorStartOptions {
   auditLogPath?: string;
 }
 
-type OrchestratorEvents = {
+export type OrchestratorEvents = {
   "state:transition": [{ from: CouncilLifecycleStatus; to: CouncilLifecycleStatus; runId: string }];
   "lane:assigned": [{ laneId: string; agentKind: AgentKind }];
   "lane:frozen": [{ laneId: string; reason: string }];
@@ -108,6 +107,11 @@ type OrchestratorEvents = {
   "lane:verified": [{ laneId: string; pdseScore: number }];
   /** Emitted when per-lane verification produces a score below the PDSE threshold. */
   "lane:accepted-with-warning": [{ laneId: string; pdseScore: number }];
+  /**
+   * Emitted when per-lane verification finds no changes at all (score=0).
+   * The lane is marked as "failed" and excluded from merge candidates.
+   */
+  "lane:verify-failed": [{ laneId: string; score: number; findings: string[] }];
   /** Emitted when the fleet budget crosses the warning threshold. */
   "budget:warning": [FleetBudgetReport];
   /** Emitted when fleet budget is fully exhausted — all lanes aborted. */
@@ -136,7 +140,6 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private router: CouncilRouter | null = null;
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
-  private readonly _scorer: MergeConfidenceScorer;
   private readonly options: Required<CouncilOrchestratorOptions>;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
@@ -162,7 +165,6 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.adapters = adapters;
     this.ledger = new UsageLedger();
     this.brain = new MergeBrain();
-    this._scorer = new MergeConfidenceScorer();
     this._config = options.councilConfig ?? {};
     this._budget = new FleetBudget(this._config.budget ?? {});
     this._redistributor = new TaskRedistributor();
@@ -340,10 +342,15 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.transition("merging");
     this.observer?.stop();
 
-    // Collect patches from completed lanes
+    // Collect patches from completed lanes.
+    // Lanes where PDSE verification explicitly failed with zero changes
+    // (verificationPassed===false and pdseScore===0) are excluded from merge
+    // candidates — they produced no output and should not block a successful merge.
     const candidates: MergeCandidatePatch[] = [];
     for (const session of this.runState.agents) {
       if (session.status !== "completed") continue;
+      // Gate: skip lanes verified as producing no changes at all
+      if (session.verificationPassed === false && (session.pdseScore ?? 1) === 0) continue;
       const adapter = this.adapters.get(session.agentKind);
       if (!adapter) continue;
 
@@ -511,42 +518,55 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     const sessionId = lane.sessionId ?? lane.laneId;
     const patch = await adapter.collectPatch(sessionId).catch(() => null);
     if (!patch || !patch.unifiedDiff) {
-      return { passed: false, score: 0, findings: ["No patch available"] };
+      // No patch at all — mark lane and emit the verify-failed gate event.
+      lane.pdseScore = 0;
+      lane.verificationPassed = false;
+      const noPatchFindings = ["No patch available"];
+      this.emit("lane:verify-failed", { laneId, score: 0, findings: noPatchFindings });
+      return { passed: false, score: 0, findings: noPatchFindings };
     }
 
-    // Score the patch using MergeConfidenceScorer (same scorer used by MergeBrain)
-    const candidate = {
-      laneId,
-      unifiedDiff: patch.unifiedDiff,
-      changedFiles: patch.changedFiles,
-      sourceBranch: patch.sourceBranch ?? lane.branch,
-    };
+    // Diff-based PDSE heuristic — avoids the always-passing scorer trap.
+    // Scoring semantics:
+    //   empty/trivial patch → 20 (fails 70 threshold) — suspicious lane
+    //   source changes, no test files → 55 (fails) — no test evidence
+    //   source + test files changed → 85 (passes) — demonstrates test-driven quality
+    const testFiles = patch.changedFiles.filter(
+      (f) => /\.(test|spec)\.(ts|js)x?$/.test(f) || /__tests__\//.test(f),
+    );
+    const hasTestEvidence = testFiles.length > 0;
+    const diffLines = patch.unifiedDiff
+      .split("\n")
+      .filter((l) => l.startsWith("+") || l.startsWith("-")).length;
+    const hasChanges = patch.changedFiles.length > 0 || diffLines > 0;
 
-    // score() requires an array — provide a single-element array for solo verification
-    const result = this._scorer.score([candidate]);
-    // Normalize 0-100 score to 0-1 for a consistent API
-    const normalizedScore = result.score / 100;
+    const rawScore = !hasChanges ? 20 : hasTestEvidence ? 85 : 55;
+    const normalizedScore = rawScore / 100;
 
     const pdseThreshold = (this._config.pdseThreshold ?? 70) / 100;
     const passed = normalizedScore >= pdseThreshold;
+
     const findings: string[] = [];
+    if (hasTestEvidence) {
+      findings.push(`Test files modified: ${testFiles.join(", ")}`);
+    } else {
+      findings.push("No test file changes detected in this patch");
+    }
     if (!passed) {
       findings.push(
-        `Confidence score ${(normalizedScore * 100).toFixed(1)} is below threshold ${(pdseThreshold * 100).toFixed(0)}`,
+        `Score ${rawScore} is below threshold ${this._config.pdseThreshold ?? 70}`,
       );
     }
-    findings.push(`Bucket: ${result.bucket}`);
-    if (result.reasoning) findings.push(result.reasoning);
 
     // Store verification result on the lane for observability
-    lane.pdseScore = normalizedScore * 100;
+    lane.pdseScore = rawScore;
     lane.verificationPassed = passed;
 
     // Emit appropriate event so dashboard can update
     if (passed) {
-      this.emit("lane:verified", { laneId, pdseScore: lane.pdseScore });
+      this.emit("lane:verified", { laneId, pdseScore: rawScore });
     } else {
-      this.emit("lane:accepted-with-warning", { laneId, pdseScore: lane.pdseScore });
+      this.emit("lane:accepted-with-warning", { laneId, pdseScore: rawScore });
     }
 
     return { passed, score: normalizedScore, findings };
@@ -756,7 +776,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           // Mirror usage onto the session for dashboard/observability
           session.tokensUsed = tokensForBudget;
           session.costUsd = costForBudget;
-          this._budget.record(session.laneId, tokensForBudget, costForBudget);
+          const canContinue = this._budget.record(session.laneId, tokensForBudget, costForBudget);
+          if (!canContinue) {
+            // Per-agent cap exceeded — emit event; only this lane is stopped
+            this.emit("budget:agent-limit", { agentId: session.laneId, report: this._budget.report() });
+          }
           // Emit warning exactly once when threshold is crossed
           if (this._budget.isWarning() && !this._budgetWarnFired) {
             this._budgetWarnFired = true;
@@ -764,6 +788,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           }
           // Hard-stop: abort the entire run when budget is fully exhausted
           if (this._budget.isExhausted()) {
+            this.emit("budget:exhausted", this._budget.report());
             await this.fail("Fleet budget exhausted");
             return;
           }
@@ -780,7 +805,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             sessionId,
           });
 
-          // PDSE verification (auto, fail-closed — never crashes the poll loop)
+          // PDSE verification (auto, fail-closed — never crashes the poll loop).
+          // Runs fire-and-forget; sets session.verificationPassed for use in merge().
           void this.verifyLaneOutput(session.laneId).catch(() => {});
 
           // ── TaskRedistributor: offer idle lanes additional work ──────────

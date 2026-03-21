@@ -134,6 +134,15 @@ export class FleetBudget {
   record(agentId: string, tokens: number, costUsd: number): boolean {
     const existing = this.state.perAgent.get(agentId) ?? { tokens: 0, cost: 0 };
 
+    // Guard against backward-moving cumulative values (caller bug or session restart).
+    // Clamp to 0 delta — never subtract from fleet totals. Warn but don't throw.
+    if (tokens < existing.tokens || costUsd < existing.cost) {
+      console.warn(
+        `[FleetBudget] cumulative regression for ${agentId}: ` +
+        `tokens ${existing.tokens}→${tokens}, cost ${existing.cost}→${costUsd}`,
+      );
+    }
+
     // Compute the delta (new cumulative − old cumulative)
     const tokenDelta = Math.max(0, tokens - existing.tokens);
     const costDelta = Math.max(0, costUsd - existing.cost);
@@ -158,12 +167,9 @@ export class FleetBudget {
     const perAgentExhausted =
       this.config.maxTokensPerAgent > 0 && tokens >= this.config.maxTokensPerAgent;
 
-    if (tokenExhausted || costExhausted) {
-      this.state.exhausted = true;
-    }
-
-    // Check warning threshold
-    if (!this.state.warningEmitted && !this.state.exhausted) {
+    // Check warning threshold BEFORE updating exhausted — ensures warning fires
+    // even when the same call simultaneously crosses the exhaustion boundary.
+    if (!this.state.warningEmitted) {
       const tokenWarning =
         this.config.maxTotalTokens > 0 &&
         this.state.totalTokensUsed / this.config.maxTotalTokens >= this.config.warningThreshold;
@@ -173,6 +179,10 @@ export class FleetBudget {
       if (tokenWarning || costWarning) {
         this.state.warningEmitted = true;
       }
+    }
+
+    if (tokenExhausted || costExhausted) {
+      this.state.exhausted = true;
     }
 
     // Return false if ANY limit is exceeded

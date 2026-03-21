@@ -19,7 +19,6 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
-import { UXPreferences } from "@dantecode/ux-polish";
 import {
   DEFAULT_MODEL_ID,
   MODEL_CATALOG,

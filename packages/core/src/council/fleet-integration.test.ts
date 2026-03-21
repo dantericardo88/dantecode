@@ -4,7 +4,7 @@
 // verifyLaneOutput are properly wired into CouncilOrchestrator.
 // ============================================================================
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -495,6 +495,146 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
     expect(warningCount.count).toBe(1);
   });
 
+  it("budget:exhausted event fires before orchestrator transitions to failed", async () => {
+    testDir = await makeTestDir();
+
+    const exhaustedReports: FleetBudgetReport[] = [];
+
+    const adapter = makeSequencedAdapter([{ status: "running", tokensUsed: 200, costUsd: 0.01 }]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+      councilConfig: {
+        budget: { maxTotalTokens: 100, maxTotalCostUsd: 0, maxTokensPerAgent: 0, warningThreshold: 0.8 },
+      },
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("budget:exhausted", (report) => exhaustedReports.push(report));
+
+    await orchestrator.start({ objective: "exhausted event", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "exhaust-s1");
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+
+    expect(exhaustedReports).toHaveLength(1);
+    expect(exhaustedReports[0]!.totalTokens).toBeGreaterThan(0);
+    expect(orchestrator.currentStatus).toBe("failed");
+  });
+
+  it("budget:agent-limit event fires when per-agent token cap is exceeded", async () => {
+    testDir = await makeTestDir();
+
+    const agentLimitEvents: Array<{ agentId: string; report: FleetBudgetReport }> = [];
+
+    // per-agent cap: 50 tokens; adapter reports 100 → cap exceeded
+    const adapter = makeSequencedAdapter([{ status: "running", tokensUsed: 100, costUsd: 0 }]);
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+      councilConfig: {
+        budget: { maxTotalTokens: 10_000, maxTotalCostUsd: 0, maxTokensPerAgent: 50, warningThreshold: 0.99 },
+      },
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("budget:agent-limit", (e) => agentLimitEvents.push(e));
+
+    await orchestrator.start({ objective: "agent limit event", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "limit-s1", { laneId: "dantecode-limit-s1" });
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+
+    expect(agentLimitEvents.length).toBeGreaterThanOrEqual(1);
+    expect(agentLimitEvents[0]!.agentId).toBe("dantecode-limit-s1");
+  });
+
+  it("lane:verified event fires automatically after lane completes (with test file)", async () => {
+    testDir = await makeTestDir();
+
+    const verifiedEvents: Array<{ laneId: string; pdseScore: number }> = [];
+
+    const DIFF_WITH_TEST = [
+      "diff --git a/src/auth.test.ts b/src/auth.test.ts",
+      "index 0000000..abc1234 100644",
+      "--- /dev/null",
+      "+++ b/src/auth.test.ts",
+      "@@ -0,0 +1,4 @@",
+      "+import { authenticate } from './auth.js';",
+      "+it('works', () => {",
+      "+  expect(authenticate('Bearer x')).toBe(true);",
+      "+});",
+    ].join("\n");
+
+    const adapter = makeSequencedAdapter(
+      [{ status: "completed" }],
+      { unifiedDiff: DIFF_WITH_TEST, changedFiles: ["src/auth.test.ts"] },
+    );
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:verified", (e) => verifiedEvents.push(e));
+
+    await orchestrator.start({ objective: "lane verified event", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "verify-s1", { laneId: "dantecode-verify-s1" });
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+    // verifyLaneOutput is fire-and-forget (void) — allow it to settle
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(verifiedEvents.length).toBeGreaterThanOrEqual(1);
+    expect(verifiedEvents[0]!.pdseScore).toBeGreaterThanOrEqual(70);
+  });
+
+  it("lane:accepted-with-warning fires when patch has no test files", async () => {
+    testDir = await makeTestDir();
+
+    const warningEvents: Array<{ laneId: string; pdseScore: number }> = [];
+
+    const DIFF_SOURCE_ONLY = [
+      "diff --git a/src/auth.ts b/src/auth.ts",
+      "index 0000000..abc1234 100644",
+      "--- /dev/null",
+      "+++ b/src/auth.ts",
+      "@@ -0,0 +1,3 @@",
+      "+export function authenticate(token: string): boolean {",
+      "+  return token.startsWith('Bearer ');",
+      "+}",
+    ].join("\n");
+
+    const adapter = makeSequencedAdapter(
+      [{ status: "completed" }],
+      { unifiedDiff: DIFF_SOURCE_ONLY, changedFiles: ["src/auth.ts"] },
+    );
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+    orchestrator.on("lane:accepted-with-warning", (e) => warningEvents.push(e));
+
+    await orchestrator.start({ objective: "lane accepted-with-warning", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "warn-s1", { laneId: "dantecode-warn-s1" });
+
+    const poll = orchestrator as unknown as { pollAllLanes(): Promise<void> };
+    await poll.pollAllLanes();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(warningEvents.length).toBeGreaterThanOrEqual(1);
+    expect(warningEvents[0]!.pdseScore).toBeLessThan(70);
+  });
+
   it("FleetDashboard: draw() called on lane:completed event (event wire verification)", async () => {
     testDir = await makeTestDir();
 
@@ -534,5 +674,100 @@ describe("CouncilOrchestrator — Fleet Integration", () => {
 
     expect(completedEvents).toHaveLength(1);
     expect(completedEvents[0]!.laneId).toBe("dantecode-dash-s1");
+  });
+
+  it("verifyLaneOutput gate: lane with passed=false and score=0 is excluded from merge candidates → orchestrator fails", async () => {
+    testDir = await makeTestDir();
+
+    // Adapter reports "completed" but collectPatch returns a real diff.
+    // We spy on verifyLaneOutput to simulate a lane that produced zero changes
+    // (e.g. the agent ran but wrote nothing), forcing passed=false and score=0.
+    const DIFF_SOURCE = [
+      "diff --git a/src/gate.ts b/src/gate.ts",
+      "--- /dev/null",
+      "+++ b/src/gate.ts",
+      "@@ -0,0 +1,1 @@",
+      "+export const x = 1;",
+    ].join("\n");
+
+    const adapter = makeSequencedAdapter(
+      [{ status: "completed" }],
+      { unifiedDiff: DIFF_SOURCE, changedFiles: ["src/gate.ts"] },
+    );
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    // Spy on verifyLaneOutput: synchronously mark the lane as verify-failed
+    // (verificationPassed=false, pdseScore=0) before returning the Promise.
+    // The synchronous assignment runs before the gate check in merge(), which
+    // happens before merge()'s first internal await.
+    const runState = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } });
+    vi.spyOn(orchestrator, "verifyLaneOutput").mockImplementation(async (laneId: string) => {
+      const lane = runState.runState?.agents.find((a) => a.laneId === laneId);
+      if (lane) {
+        lane.verificationPassed = false;
+        lane.pdseScore = 0;
+      }
+      orchestrator.emit("lane:verify-failed", { laneId, score: 0, findings: ["mocked: no changes"] });
+      return { passed: false, score: 0, findings: ["mocked: no changes"] };
+    });
+
+    await orchestrator.start({ objective: "gate test: fail", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "gate-s1", { laneId: "dantecode-gate-s1" });
+
+    // watchUntilComplete triggers polling → lane completes → verify spy fires → merge excludes lane
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // With 0 valid candidates, orchestrator should fail (not complete)
+    expect(orchestrator.currentStatus).toBe("failed");
+
+    vi.restoreAllMocks();
+  });
+
+  it("verifyLaneOutput gate: lane with passed=true is included in merge candidates → orchestrator completes", async () => {
+    testDir = await makeTestDir();
+
+    // Adapter provides a patch with test files → verifyLaneOutput returns score=85 (passes threshold)
+    const DIFF_WITH_TEST = [
+      "diff --git a/src/auth.test.ts b/src/auth.test.ts",
+      "index 0000000..abc1234 100644",
+      "--- /dev/null",
+      "+++ b/src/auth.test.ts",
+      "@@ -0,0 +1,4 @@",
+      "+import { authenticate } from './auth.js';",
+      "+it('works', () => {",
+      "+  expect(authenticate('Bearer x')).toBe(true);",
+      "+});",
+    ].join("\n");
+
+    const adapter = makeSequencedAdapter(
+      [{ status: "completed" }],
+      { unifiedDiff: DIFF_WITH_TEST, changedFiles: ["src/auth.test.ts"] },
+    );
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      maxLaneRetries: 0,
+    });
+    activeOrchestrators.push(orchestrator);
+    orchestrator.on("error", () => {});
+
+    await orchestrator.start({ objective: "gate test: pass", agents: ["dantecode"], repoRoot: testDir });
+    injectSession(orchestrator, "gate-pass-s1", { laneId: "dantecode-gate-pass-s1" });
+
+    // Real verifyLaneOutput runs: test file → score=85, passed=true, verificationPassed=true
+    await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
+
+    // With 1 valid candidate (test-file patch), merge succeeds → completed
+    expect(orchestrator.currentStatus).toBe("completed");
+
+    const synthesis = orchestrator.currentRunState?.finalSynthesis;
+    expect(synthesis).toBeDefined();
+    expect(synthesis!.candidateLanes).toHaveLength(1);
   });
 });

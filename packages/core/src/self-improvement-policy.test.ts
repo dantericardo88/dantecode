@@ -124,6 +124,32 @@ describe("self-improvement-policy", () => {
     });
   });
 
+  describe("detectSelfImprovementContext with usingFallbackModel", () => {
+    const root = "/fake/project";
+
+    it("returns null for /inferno when usingFallbackModel is true", () => {
+      const result = detectSelfImprovementContext("/inferno build everything", root, {
+        usingFallbackModel: true,
+      });
+      expect(result).toBeNull();
+    });
+
+    it("returns non-null for /magic when usingFallbackModel is true", () => {
+      const result = detectSelfImprovementContext("/magic fix tests", root, {
+        usingFallbackModel: true,
+      });
+      expect(result).not.toBeNull();
+      expect(result?.enabled).toBe(true);
+    });
+
+    it("returns non-null for /inferno when usingFallbackModel is false", () => {
+      const result = detectSelfImprovementContext("/inferno build everything", root, {
+        usingFallbackModel: false,
+      });
+      expect(result).not.toBeNull();
+    });
+  });
+
   describe("isRepoInternalCdChain", () => {
     it("flags repo-internal cd chains", () => {
       expect(isRepoInternalCdChain("cd packages/cli && npm test", projectRoot)).toBe(true);

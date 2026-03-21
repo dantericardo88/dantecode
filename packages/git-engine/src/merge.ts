@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { execSync } from "node:child_process";
+import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -126,7 +127,7 @@ export function attemptMerge(
   // Ensure we're on the target branch
   try {
     git(`checkout "${targetBranch}"`, repoRoot);
-  } catch (err: unknown) {
+  } catch (_err: unknown) {
     return {
       success: false,
       conflictedFiles: [],
@@ -180,7 +181,6 @@ export function applyPatch(
 
   try {
     // Write patch to a temp file
-    const { writeFileSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(join(repoRoot, ".dantecode", "council"), { recursive: true });
     writeFileSync(tmpFile, patchContent, "utf-8");
 
@@ -196,7 +196,6 @@ export function applyPatch(
     return { success: false, error: msg };
   } finally {
     try {
-      const { unlinkSync } = require("node:fs") as typeof import("node:fs");
       unlinkSync(tmpFile);
     } catch {
       // ignore cleanup failure

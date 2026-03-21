@@ -158,4 +158,83 @@ describe("TaskRedistributor", () => {
       expect(parts.length).toBeGreaterThan(1);
     });
   });
+
+  // ── Edge cases ────────────────────────────────────────────────────────────
+
+  describe("tiebreaker + edge cases", () => {
+    it("multiple undefined-completion lanes — picks earliest startedAt (longest-running)", async () => {
+      const older = busyLane({
+        laneId: "older",
+        objective: "Implement auth system and write integration tests",
+        startedAt: Date.now() - 200_000,
+        estimatedCompletion: undefined,
+      });
+      const newer = busyLane({
+        laneId: "newer",
+        objective: "Add caching layer and then add rate limiting",
+        startedAt: Date.now() - 50_000,
+        estimatedCompletion: undefined,
+      });
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [older, newer]);
+      expect(candidate).not.toBeNull();
+      // Should pick "older" (earlier startedAt), not "newer"
+      expect(candidate!.fromLaneId).toBe("older");
+    });
+
+    it("priority boundary: exactly 30_000ms elapsed → 'medium'", async () => {
+      const lane = busyLane({
+        laneId: "lane",
+        objective: "Implement feature and write tests",
+        startedAt: Date.now() - 30_000,
+        estimatedCompletion: 0.1,
+      });
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [lane]);
+      expect(candidate).not.toBeNull();
+      expect(candidate!.priority).toBe("medium");
+    });
+
+    it("priority boundary: exactly 120_000ms elapsed → 'high'", async () => {
+      const lane = busyLane({
+        laneId: "lane",
+        objective: "Implement feature and write tests",
+        startedAt: Date.now() - 120_000,
+        estimatedCompletion: 0.1,
+      });
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [lane]);
+      expect(candidate).not.toBeNull();
+      expect(candidate!.priority).toBe("high");
+    });
+
+    it("picked sub-objective is the LAST part from decomposeObjective", async () => {
+      const lane = busyLane({
+        laneId: "lane",
+        // Will split into ["Implement authentication", "write integration tests"]
+        objective: "Implement authentication and then write integration tests",
+        startedAt: Date.now() - 60_000,
+        estimatedCompletion: 0.2,
+      });
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [lane]);
+      expect(candidate).not.toBeNull();
+      expect(candidate!.subObjective).toBe("write integration tests");
+    });
+
+    it("undefined vs defined completion: undefined treated as 0% → picked over 50% lane", async () => {
+      const definedLane = busyLane({
+        laneId: "defined",
+        objective: "Implement feature A and write tests",
+        startedAt: Date.now() - 60_000,
+        estimatedCompletion: 0.5,
+      });
+      const undefinedLane = busyLane({
+        laneId: "undefined",
+        objective: "Build module B and add integration tests",
+        startedAt: Date.now() - 50_000, // slightly newer — ensures tiebreaker isn't the differentiator
+        estimatedCompletion: undefined,
+      });
+      const candidate = await redistributor.findRedistribution("idle", "dantecode", [definedLane, undefinedLane]);
+      expect(candidate).not.toBeNull();
+      // undefined → 0% → beats 50% → should pick "undefined" lane
+      expect(candidate!.fromLaneId).toBe("undefined");
+    });
+  });
 });

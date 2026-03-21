@@ -13,9 +13,10 @@ const BASE_STATE: StatusBarState = {
   sandboxMode: "workspace-write",
 };
 
-function makeTTY(isTTY: boolean, rows = 24): void {
+function makeTTY(isTTY: boolean, rows = 24, cols = 120): void {
   Object.defineProperty(process.stdout, "isTTY", { value: isTTY, configurable: true });
   Object.defineProperty(process.stdout, "rows", { value: rows, configurable: true });
+  Object.defineProperty(process.stdout, "columns", { value: cols, configurable: true });
 }
 
 describe("StatusBar", () => {
@@ -103,5 +104,32 @@ describe("StatusBar", () => {
     bar.draw();
     expect(writeSpy).not.toHaveBeenCalled();
     writeSpy.mockRestore();
+  });
+
+  it("draw() includes cursor hide and show sequences", () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const bar = new StatusBar(BASE_STATE);
+    bar.draw();
+    expect(writeSpy).toHaveBeenCalled();
+    const written = String(writeSpy.mock.calls[0]?.[0]);
+    expect(written).toContain("\x1b[?25l"); // hide cursor
+    expect(written).toContain("\x1b[?25h"); // show cursor
+    writeSpy.mockRestore();
+  });
+
+  it("draw() is a no-op when terminal is narrower than 50 columns", () => {
+    makeTTY(true, 24, 40); // narrow terminal
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const bar = new StatusBar(BASE_STATE);
+    bar.draw();
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it("formatDuration returns <1s for sub-second elapsed times", () => {
+    const bar = new StatusBar({ ...BASE_STATE, elapsedMs: 500 });
+    const rendered = bar.render();
+    expect(rendered).toContain("<1s");
+    expect(rendered).not.toContain("0s");
   });
 });

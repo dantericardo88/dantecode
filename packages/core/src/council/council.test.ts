@@ -456,9 +456,7 @@ describe("MergeConfidenceScorer", () => {
   });
 
   it("factors include all four dimensions", () => {
-    const result = scorer.score([
-      { laneId: "lane-a", unifiedDiff: "", changedFiles: [] },
-    ]);
+    const result = scorer.score([{ laneId: "lane-a", unifiedDiff: "", changedFiles: [] }]);
     expect(result.factors).toHaveProperty("structuralSafety");
     expect(result.factors).toHaveProperty("testCoverage");
     expect(result.factors).toHaveProperty("intentCompatibility");
@@ -710,7 +708,10 @@ describe("CouncilRouter", () => {
   let routerTestDir: string;
 
   beforeEach(async () => {
-    routerTestDir = join(tmpdir(), `council-router-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    routerTestDir = join(
+      tmpdir(),
+      `council-router-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     await mkdir(routerTestDir, { recursive: true });
 
     ledger = new UsageLedger();
@@ -889,7 +890,11 @@ describe("CouncilRouter", () => {
     ledger = new UsageLedger();
     ledger.register("codex");
     router = new CouncilRouter(ledger, adapters);
-    runState = createCouncilRunState(routerTestDir, "No replacement test", `${routerTestDir}/audit2.log`);
+    runState = createCouncilRunState(
+      routerTestDir,
+      "No replacement test",
+      `${routerTestDir}/audit2.log`,
+    );
     router.attachRun(runState);
 
     const first = await router.assignLane({
@@ -1032,7 +1037,10 @@ describe("MergeBrain", () => {
 
   beforeEach(async () => {
     brain = new MergeBrain();
-    mergeTmpDir = join(tmpdir(), `council-mergebrain-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mergeTmpDir = join(
+      tmpdir(),
+      `council-mergebrain-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     await mkdir(mergeTmpDir, { recursive: true });
   });
 
@@ -1175,7 +1183,10 @@ describe("HandoffEngine extended", () => {
   let handoffTmpDir: string;
 
   beforeEach(async () => {
-    handoffTmpDir = join(tmpdir(), `council-handoff-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    handoffTmpDir = join(
+      tmpdir(),
+      `council-handoff-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     await mkdir(handoffTmpDir, { recursive: true });
     engine = new HandoffEngine(handoffTmpDir);
   });
@@ -1654,7 +1665,11 @@ describe("council-events extended", () => {
   });
 
   it("createCouncilEvent produces event with valid ISO timestamp", () => {
-    const event = createCouncilEvent("council:run-completed", { runId: "r1", verificationPassed: true }, "Run done");
+    const event = createCouncilEvent(
+      "council:run-completed",
+      { runId: "r1", verificationPassed: true },
+      "Run done",
+    );
     expect(new Date(event.timestamp).toISOString()).toBe(event.timestamp);
   });
 
@@ -1677,7 +1692,10 @@ describe("CouncilRouter advanced", () => {
   let advTestDir: string;
 
   beforeEach(async () => {
-    advTestDir = join(tmpdir(), `council-router-adv-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    advTestDir = join(
+      tmpdir(),
+      `council-router-adv-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     await mkdir(advTestDir, { recursive: true });
 
     ledger = new UsageLedger();
@@ -1691,7 +1709,11 @@ describe("CouncilRouter advanced", () => {
     adapters.set("claude-code", makeMockAdapter("claude-code", true));
 
     router = new CouncilRouter(ledger, adapters);
-    runState = createCouncilRunState(advTestDir, "Advanced test objective", `${advTestDir}/audit.log`);
+    runState = createCouncilRunState(
+      advTestDir,
+      "Advanced test objective",
+      `${advTestDir}/audit.log`,
+    );
     router.attachRun(runState);
   });
 
@@ -1872,9 +1894,7 @@ describe("MergeConfidenceScorer extended", () => {
   });
 
   it("factors.structuralSafety is 1.0 for single candidate", () => {
-    const result = scorer.score([
-      { laneId: "lane-x", unifiedDiff: "", changedFiles: [] },
-    ]);
+    const result = scorer.score([{ laneId: "lane-x", unifiedDiff: "", changedFiles: [] }]);
     expect(result.factors.structuralSafety).toBe(1.0);
   });
 
@@ -2081,13 +2101,14 @@ describe("Lane A — DanteCodeAdapter SelfLaneExecutor", () => {
 // Lane B — BridgeListener Daemon
 // ============================================================================
 
-
-function makeSpawnMock(opts: {
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  errorEvent?: Error;
-} = {}): { spawnFn: SpawnFn; calls: Array<{ cmd: string; args: string[] }> } {
+function makeSpawnMock(
+  opts: {
+    exitCode?: number;
+    stdout?: string;
+    stderr?: string;
+    errorEvent?: Error;
+  } = {},
+): { spawnFn: SpawnFn; calls: Array<{ cmd: string; args: string[] }> } {
   const calls: Array<{ cmd: string; args: string[] }> = [];
   const spawnFn: SpawnFn = (cmd, args) => {
     calls.push({ cmd, args });
@@ -2172,7 +2193,9 @@ describe("Lane B — BridgeListener Daemon", () => {
     await writeFile(join(inboxDir, "task.md"), "Do the task", "utf-8");
     await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
 
-    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     // Wait for async runSession
     await new Promise((r) => setTimeout(r, 50));
@@ -2192,7 +2215,9 @@ describe("Lane B — BridgeListener Daemon", () => {
     await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
     await writeFile(join(inboxDir, "started.lock"), new Date().toISOString(), "utf-8");
 
-    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 50));
 
@@ -2210,7 +2235,9 @@ describe("Lane B — BridgeListener Daemon", () => {
     await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
     await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
 
-    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 100));
 
@@ -2231,7 +2258,9 @@ describe("Lane B — BridgeListener Daemon", () => {
     await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
     await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
 
-    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [claudeConfig], spawnFn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 100));
 
@@ -2256,7 +2285,9 @@ describe("Lane B — BridgeListener Daemon", () => {
     // Register two agents — disables the single-agent fallback, so 'unknown' prefix matches nothing
     const codexConfig: AgentCommandConfig = { kind: "codex", command: "codex" };
     const ccConfig: AgentCommandConfig = { kind: "claude-code", command: "claude" };
-    const listener = new BridgeListener(bridgeDir, [codexConfig, ccConfig], spawnFn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [codexConfig, ccConfig], spawnFn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 100));
 
@@ -2291,7 +2322,9 @@ describe("Lane B — BridgeListener Daemon", () => {
       command: "claude",
       env: { MY_CUSTOM_VAR: "test-value" },
     };
-    const listener = new BridgeListener(bridgeDir, [configWithEnv], envCapturingSpawn, { pollIntervalMs: 5000 });
+    const listener = new BridgeListener(bridgeDir, [configWithEnv], envCapturingSpawn, {
+      pollIntervalMs: 5000,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 100));
 
@@ -2323,7 +2356,10 @@ describe("Lane B — BridgeListener Daemon", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
-    const done = JSON.parse(await readFile(donePath, "utf-8")) as { success: boolean; error?: string };
+    const done = JSON.parse(await readFile(donePath, "utf-8")) as {
+      success: boolean;
+      error?: string;
+    };
     expect(done.success).toBe(false);
     expect(done.error).toContain("FATAL: connection refused");
   });
@@ -2338,17 +2374,17 @@ describe("Lane B — BridgeListener Daemon", () => {
     await writeFile(join(inboxDir, "task.md"), "Task content", "utf-8");
     await writeFile(join(inboxDir, "packet.json"), JSON.stringify(packet), "utf-8");
 
-    const listener = new BridgeListener(
-      bridgeDir,
-      [{ kind: "codex", command: "codex" }],
-      spawnFn,
-      { pollIntervalMs: 50 },
-    );
+    const listener = new BridgeListener(bridgeDir, [{ kind: "codex", command: "codex" }], spawnFn, {
+      pollIntervalMs: 50,
+    });
     await listener.poll();
     await new Promise((r) => setTimeout(r, 100));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
-    const done = JSON.parse(await readFile(donePath, "utf-8")) as { success: boolean; error?: string };
+    const done = JSON.parse(await readFile(donePath, "utf-8")) as {
+      success: boolean;
+      error?: string;
+    };
     expect(done.success).toBe(false);
     expect(done.error).toMatch(/Process exited with code 2/);
   });
@@ -2378,7 +2414,6 @@ describe("Lane B — BridgeListener Daemon", () => {
 // ============================================================================
 // Lane C — MergeBrain WorktreeHooks Isolation
 // ============================================================================
-
 
 describe("Lane C — MergeBrain WorktreeHooks", () => {
   it("MergeBrain constructor works without arguments", () => {
@@ -2481,7 +2516,8 @@ describe("Lane C — MergeBrain WorktreeHooks", () => {
 
 /** Create a minimal valid AgentSessionState for tests. */
 function makeAgentSession(
-  overrides: Partial<AgentSessionState> & Pick<AgentSessionState, "laneId" | "sessionId" | "status">,
+  overrides: Partial<AgentSessionState> &
+    Pick<AgentSessionState, "laneId" | "sessionId" | "status">,
 ): AgentSessionState {
   return {
     agentKind: "dantecode",
@@ -2501,7 +2537,9 @@ function makeAgentSession(
 
 /** Minimal inline adapter factory for Lane D tests. */
 function makeInlineAdapter(
-  pollStatus: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+  pollStatus: (
+    sessionId: string,
+  ) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
 ): CouncilAgentAdapter {
   return {
     id: "dantecode",
@@ -2514,7 +2552,9 @@ function makeInlineAdapter(
     collectArtifacts: async (sessionId: string) => ({ sessionId, files: [], logs: [] }),
     collectPatch: async () => null,
     detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
-    abortTask: async () => { /* no-op */ },
+    abortTask: async () => {
+      /* no-op */
+    },
   };
 }
 
@@ -2525,7 +2565,9 @@ type PollOrchestrator = {
 };
 
 function makeOrchestrator(
-  pollStatusFn: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+  pollStatusFn: (
+    sessionId: string,
+  ) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
   opts: { pollIntervalMs?: number } = {},
 ): CouncilOrchestrator {
   const adapter = makeInlineAdapter(pollStatusFn);
@@ -2550,7 +2592,9 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     activeOrchestrators.length = 0;
   });
   function trackOrchestrator(
-    pollStatusFn: (sessionId: string) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
+    pollStatusFn: (
+      sessionId: string,
+    ) => Promise<{ sessionId: string; status: string; progressSummary?: string }>,
     opts: { pollIntervalMs?: number } = {},
   ): CouncilOrchestrator {
     const o = makeOrchestrator(pollStatusFn, opts);
@@ -2561,10 +2605,14 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     let completedEvent: { laneId: string; agentKind: string; sessionId: string } | null = null;
     const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
     await orchestrator.start({ objective: "Test event", agents: ["dantecode"], repoRoot: testDir });
-    orchestrator.on("lane:completed", (evt) => { completedEvent = evt; });
+    orchestrator.on("lane:completed", (evt) => {
+      completedEvent = evt;
+    });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    state!.agents.push(makeAgentSession({ laneId: "dantecode-ev1", sessionId: "poll-session-1", status: "running" }));
+    state!.agents.push(
+      makeAgentSession({ laneId: "dantecode-ev1", sessionId: "poll-session-1", status: "running" }),
+    );
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
 
     expect(completedEvent).not.toBeNull();
@@ -2577,7 +2625,11 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     await orchestrator.start({ objective: "poll test", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const session = makeAgentSession({ laneId: "dantecode-s1", sessionId: "s1", status: "running" });
+    const session = makeAgentSession({
+      laneId: "dantecode-s1",
+      sessionId: "s1",
+      status: "running",
+    });
     state!.agents.push(session);
 
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
@@ -2585,11 +2637,19 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
   });
 
   it("session.status advances to failed after pollAllLanes with failed response", async () => {
-    const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "failed", progressSummary: "err" }));
+    const orchestrator = trackOrchestrator(async (s) => ({
+      sessionId: s,
+      status: "failed",
+      progressSummary: "err",
+    }));
     await orchestrator.start({ objective: "poll fail", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const session = makeAgentSession({ laneId: "dantecode-s2", sessionId: "s2", status: "running" });
+    const session = makeAgentSession({
+      laneId: "dantecode-s2",
+      sessionId: "s2",
+      status: "running",
+    });
     state!.agents.push(session);
 
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
@@ -2606,11 +2666,23 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
     activeOrchestrators.push(orchestrator);
-    await orchestrator.start({ objective: "fault isolation", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "fault isolation",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const goodSession = makeAgentSession({ laneId: "dantecode-good", sessionId: "s3-good", status: "running" });
-    const badSession = makeAgentSession({ laneId: "dantecode-bad", sessionId: "s3-bad", status: "running" });
+    const goodSession = makeAgentSession({
+      laneId: "dantecode-good",
+      sessionId: "s3-good",
+      status: "running",
+    });
+    const badSession = makeAgentSession({
+      laneId: "dantecode-bad",
+      sessionId: "s3-bad",
+      status: "running",
+    });
     state!.agents.push(goodSession, badSession);
 
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
@@ -2621,11 +2693,18 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
 
   it("pollAllLanes is idempotent on already-completed sessions", async () => {
     let pollCalls = 0;
-    const orchestrator = trackOrchestrator(async (s) => { pollCalls++; return { sessionId: s, status: "completed" }; });
+    const orchestrator = trackOrchestrator(async (s) => {
+      pollCalls++;
+      return { sessionId: s, status: "completed" };
+    });
     await orchestrator.start({ objective: "idempotent", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const session = makeAgentSession({ laneId: "dantecode-idem", sessionId: "s4", status: "completed" });
+    const session = makeAgentSession({
+      laneId: "dantecode-idem",
+      sessionId: "s4",
+      status: "completed",
+    });
     state!.agents.push(session);
 
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
@@ -2637,7 +2716,11 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     await orchestrator.start({ objective: "capped", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const session = makeAgentSession({ laneId: "dantecode-cap", sessionId: "s5", status: "running" });
+    const session = makeAgentSession({
+      laneId: "dantecode-cap",
+      sessionId: "s5",
+      status: "running",
+    });
     state!.agents.push(session);
 
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
@@ -2658,10 +2741,20 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     const events: Array<{ laneId: string; agentKind: string; sessionId: string }> = [];
     const orchestrator = trackOrchestrator(async (s) => ({ sessionId: s, status: "completed" }));
     orchestrator.on("lane:completed", (evt) => events.push(evt));
-    await orchestrator.start({ objective: "payload test", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "payload test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    state!.agents.push(makeAgentSession({ laneId: "dantecode-payload1", sessionId: "payload-s1", status: "running" }));
+    state!.agents.push(
+      makeAgentSession({
+        laneId: "dantecode-payload1",
+        sessionId: "payload-s1",
+        status: "running",
+      }),
+    );
     await (orchestrator as unknown as PollOrchestrator).pollAllLanes();
 
     expect(events).toHaveLength(1);
@@ -2675,11 +2768,16 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     await orchestrator.start({ objective: "no adapter", agents: ["dantecode"], repoRoot: testDir });
 
     const state = (orchestrator as unknown as PollOrchestrator).runState;
-    const orphanSession = makeAgentSession({ laneId: "codex-orphan", sessionId: "s7-orphan", status: "running", agentKind: "codex" });
+    const orphanSession = makeAgentSession({
+      laneId: "codex-orphan",
+      sessionId: "s7-orphan",
+      status: "running",
+      agentKind: "codex",
+    });
     state!.agents.push(orphanSession);
 
     await expect(
-      (orchestrator as unknown as PollOrchestrator).pollAllLanes()
+      (orchestrator as unknown as PollOrchestrator).pollAllLanes(),
     ).resolves.toBeUndefined();
     expect(orphanSession.status).toBe("running");
   });
@@ -2689,7 +2787,11 @@ describe("Lane D — CouncilOrchestrator pollAllLanes", () => {
     orchestrator.on("error", () => {}); // suppress unhandled error from fail()
 
     expect((orchestrator as unknown as PollOrchestrator).pollTimer).toBeNull();
-    await orchestrator.start({ objective: "start timer", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "start timer",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
     expect((orchestrator as unknown as PollOrchestrator).pollTimer).not.toBeNull();
     await orchestrator.fail("cleanup");
   });
@@ -2730,7 +2832,8 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
   }
 
   function injectWatchSession(orchestrator: CouncilOrchestrator, sessionId: string): void {
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState;
     state!.agents.push({
       laneId: `dantecode-watch-${sessionId}`,
       agentKind: "dantecode",
@@ -2754,7 +2857,11 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     const adapter = makeWatchAdapter(["running", "completed"]);
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
-    await orchestrator.start({ objective: "watch success", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "watch success",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     injectWatchSession(orchestrator, "watch-s1");
     await orchestrator.watchUntilComplete();
@@ -2781,7 +2888,11 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
     orchestrator.on("lane:completed", (evt) => completedIds.push(evt.laneId));
-    await orchestrator.start({ objective: "watch events", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "watch events",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     injectWatchSession(orchestrator, "watch-s3");
     await orchestrator.watchUntilComplete();
@@ -2796,12 +2907,14 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "timeout test", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "timeout test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
     injectWatchSession(orchestrator, "watch-timeout");
 
-    await expect(
-      orchestrator.watchUntilComplete({ timeoutMs: 50 }),
-    ).rejects.toThrow(/timed out/i);
+    await expect(orchestrator.watchUntilComplete({ timeoutMs: 50 })).rejects.toThrow(/timed out/i);
 
     expect(orchestrator.currentStatus).toBe("failed");
   });
@@ -2813,7 +2926,8 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
       pollStatus: async (sessionId: string) => {
         const count = (sessionPollCounts.get(sessionId) ?? 0) + 1;
         sessionPollCounts.set(sessionId, count);
-        if (sessionId === "multi-a" || count >= 2) return { sessionId, status: "completed" as const };
+        if (sessionId === "multi-a" || count >= 2)
+          return { sessionId, status: "completed" as const };
         return { sessionId, status: "running" as const };
       },
     };
@@ -2821,7 +2935,11 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
 
-    await orchestrator.start({ objective: "multi-lane test", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "multi-lane test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     injectWatchSession(orchestrator, "multi-a");
     injectWatchSession(orchestrator, "multi-b");
@@ -2829,7 +2947,8 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     await orchestrator.watchUntilComplete();
 
     expect(orchestrator.currentStatus).toBe("completed");
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } }).runState!;
+    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[] } })
+      .runState!;
     expect(state.agents.every((a) => a.status === "completed" || a.status === "failed")).toBe(true);
   });
 
@@ -2839,7 +2958,11 @@ describe("CouncilOrchestrator watchUntilComplete", () => {
     const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "fallback test", agents: ["dantecode"], repoRoot: testDir });
+    await orchestrator.start({
+      objective: "fallback test",
+      agents: ["dantecode"],
+      repoRoot: testDir,
+    });
 
     // Force orchestrator into "completed" state — "completed" → "failed" is invalid in the state machine
     const oc = orchestrator as unknown as { status: CouncilLifecycleStatus };
@@ -2880,7 +3003,9 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     activeOrchestratorsF.length = 0;
     // Allow any in-flight async FS ops to settle before cleanup (Windows EBUSY guard)
     await new Promise((r) => setTimeout(r, 50));
-    await rm(testDirF, { recursive: true, force: true }).catch(() => { /* best-effort */ });
+    await rm(testDirF, { recursive: true, force: true }).catch(() => {
+      /* best-effort */
+    });
   });
 
   it("DanteCodeAdapter marks session 'aborted' (not 'failed') when AbortController fires", async () => {
@@ -2932,19 +3057,34 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
         return { sessionId, status: "completed" as const };
       },
       collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
-      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      collectPatch: async (s) => ({
+        sessionId: s,
+        unifiedDiff: "diff --git a/x b/x\n+line",
+        changedFiles: ["x"],
+      }),
       detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
       abortTask: async () => {},
     };
 
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", retryAdapter]]);
-    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1, maxLaneRetries: 2 });
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 1,
+      maxLaneRetries: 2,
+    });
     activeOrchestratorsF.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "retry test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "retry test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
     state.agents.push({
       laneId: "dantecode-retry-lane",
       agentKind: "dantecode",
@@ -2998,13 +3138,24 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     };
 
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", alwaysFailAdapter]]);
-    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1, maxLaneRetries: 1 });
+    const orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 1,
+      maxLaneRetries: 1,
+    });
     activeOrchestratorsF.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "exhausted retry", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "exhausted retry",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
     state.agents.push({
       laneId: "dantecode-exhaust-lane",
       agentKind: "dantecode",
@@ -3044,7 +3195,8 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
   it("D3: retry fires in NEXT poll cycle, not the same one (backoff path exercised)", async () => {
     const FAIL_SESSION = "backoff-fail";
     const pollLog: string[] = [];
-    const retryPendingEvents: Array<{ laneId: string; retryCount: number; retryAfterTs: number }> = [];
+    const retryPendingEvents: Array<{ laneId: string; retryCount: number; retryAfterTs: number }> =
+      [];
 
     const backoffAdapter: CouncilAgentAdapter = {
       id: "dantecode",
@@ -3059,7 +3211,11 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
         return { sessionId, status: "completed" as const };
       },
       collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
-      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      collectPatch: async (s) => ({
+        sessionId: s,
+        unifiedDiff: "diff --git a/x b/x\n+line",
+        changedFiles: ["x"],
+      }),
       detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
       abortTask: async () => {},
     };
@@ -3076,9 +3232,17 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     orchestrator.on("error", () => {});
     orchestrator.on("lane:retry-pending", (evt) => retryPendingEvents.push(evt));
 
-    await orchestrator.start({ objective: "backoff test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "backoff test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
     state.agents.push({
       laneId: "dantecode-backoff-lane",
       agentKind: "dantecode",
@@ -3142,7 +3306,11 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
         return { sessionId, status: "completed" as const };
       },
       collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
-      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: [SHARED_FILE] }),
+      collectPatch: async (s) => ({
+        sessionId: s,
+        unifiedDiff: "diff --git a/x b/x\n+line",
+        changedFiles: [SHARED_FILE],
+      }),
       detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
       abortTask: async () => {},
     };
@@ -3158,11 +3326,17 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     orchestrator.on("lane:paused", (evt) => pauseEvents.push(evt));
     orchestrator.on("lane:resumed", (evt) => resumeEvents.push(evt));
 
-    await orchestrator.start({ objective: "P6 overlap test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "P6 overlap test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as {
-      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
-    }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
 
     // Lane A: will fail → retry issued with same assignedFiles
     state.agents.push({
@@ -3273,9 +3447,17 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     activeOrchestratorsF.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "multi-fail test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "multi-fail test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
     for (const laneId of ["dantecode-fail-1", "dantecode-fail-2"]) {
       state.agents.push({
         laneId,
@@ -3330,7 +3512,11 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
         return { sessionId, status: "completed" as const };
       },
       collectArtifacts: async (s) => ({ sessionId: s, files: [], logs: [] }),
-      collectPatch: async (s) => ({ sessionId: s, unifiedDiff: "diff --git a/x b/x\n+line", changedFiles: ["x"] }),
+      collectPatch: async (s) => ({
+        sessionId: s,
+        unifiedDiff: "diff --git a/x b/x\n+line",
+        changedFiles: ["x"],
+      }),
       detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
       abortTask: async () => {},
     };
@@ -3345,9 +3531,17 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     activeOrchestratorsF.push(orchestrator);
     orchestrator.on("error", () => {});
 
-    await orchestrator.start({ objective: "single-adapter test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "single-adapter test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as { runState: { agents: AgentSessionState[]; mandates: FileMandate[] } }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
     state.agents.push({
       laneId: "dantecode-single-lane",
       agentKind: "dantecode",
@@ -3430,11 +3624,17 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
     orchestrator.on("error", () => {});
     orchestrator.on("lane:resumed", (evt) => resumeEvents.push(evt));
 
-    await orchestrator.start({ objective: "chain test", agents: ["dantecode"], repoRoot: testDirF });
+    await orchestrator.start({
+      objective: "chain test",
+      agents: ["dantecode"],
+      repoRoot: testDirF,
+    });
 
-    const state = (orchestrator as unknown as {
-      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
-    }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
 
     state.agents.push({
       laneId: "dantecode-lane-a",
@@ -3536,9 +3736,11 @@ describe("Lane F — Retry Engine + Aborted Status", () => {
       repoRoot: testDirF,
     });
 
-    const state = (orchestrator as unknown as {
-      runState: { agents: AgentSessionState[] };
-    }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[] };
+      }
+    ).runState!;
 
     state.agents.push(
       {
@@ -3734,60 +3936,64 @@ describe("Lane G — Integration: real executor + real git", () => {
     await rm(testDirG, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("I1: real SelfLaneExecutor writes file → collectPatch returns actual git diff → run completes", async () => {
-    // A real executor that writes a file and stages it for git diff HEAD
-    const realExecutor: SelfLaneExecutor = async (_prompt, worktreePath) => {
-      await writeFile(join(worktreePath, "generated.ts"), "export const result = 42;\n");
-      // Stage the file: git diff HEAD shows staged changes vs the initial empty commit
-      execSync("git add generated.ts", { cwd: worktreePath, stdio: "pipe" });
-      return { output: "", success: true, touchedFiles: ["generated.ts"] };
-    };
+  it(
+    "I1: real SelfLaneExecutor writes file → collectPatch returns actual git diff → run completes",
+    async () => {
+      // A real executor that writes a file and stages it for git diff HEAD
+      const realExecutor: SelfLaneExecutor = async (_prompt, worktreePath) => {
+        await writeFile(join(worktreePath, "generated.ts"), "export const result = 42;\n");
+        // Stage the file: git diff HEAD shows staged changes vs the initial empty commit
+        execSync("git add generated.ts", { cwd: worktreePath, stdio: "pipe" });
+        return { output: "", success: true, touchedFiles: ["generated.ts"] };
+      };
 
-    const adapter = new DanteCodeAdapter({ executor: realExecutor });
-    const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
-    const orchestrator = new CouncilOrchestrator(adapters, {
-      pollIntervalMs: 20,
-      maxLaneRetries: 0,
-    });
-    activeOrchestratorsG.push(orchestrator);
-    orchestrator.on("error", () => {});
+      const adapter = new DanteCodeAdapter({ executor: realExecutor });
+      const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
+      const orchestrator = new CouncilOrchestrator(adapters, {
+        pollIntervalMs: 20,
+        maxLaneRetries: 0,
+      });
+      activeOrchestratorsG.push(orchestrator);
+      orchestrator.on("error", () => {});
 
-    await orchestrator.start({
-      objective: "Write generated.ts",
-      agents: ["dantecode"],
-      repoRoot: testDirG,
-    });
+      await orchestrator.start({
+        objective: "Write generated.ts",
+        agents: ["dantecode"],
+        repoRoot: testDirG,
+      });
 
-    const assignResult = await orchestrator.assignLane({
-      objective: "Write generated.ts",
-      taskCategory: "coding",
-      ownedFiles: ["generated.ts"],
-      worktreePath: testDirG,
-      branch: "main",
-      baseBranch: "main",
-    });
-    expect(assignResult.accepted).toBe(true);
+      const assignResult = await orchestrator.assignLane({
+        objective: "Write generated.ts",
+        taskCategory: "coding",
+        ownedFiles: ["generated.ts"],
+        worktreePath: testDirG,
+        branch: "main",
+        baseBranch: "main",
+      });
+      expect(assignResult.accepted).toBe(true);
 
-    await orchestrator.watchUntilComplete({ timeoutMs: 10_000 });
+      await orchestrator.watchUntilComplete({ timeoutMs: 10_000 });
 
-    expect(orchestrator.currentStatus).toBe("completed");
+      expect(orchestrator.currentStatus).toBe("completed");
 
-    // MergeBrain ran and produced a synthesis record from the real diff
-    const finalSynthesis = orchestrator.currentRunState?.finalSynthesis;
-    expect(finalSynthesis).toBeDefined();
-    // Single-candidate merge: decision is never "blocked" → success: true
-    expect(finalSynthesis?.mergedPatch).toContain("generated.ts");
+      // MergeBrain ran and produced a synthesis record from the real diff
+      const finalSynthesis = orchestrator.currentRunState?.finalSynthesis;
+      expect(finalSynthesis).toBeDefined();
+      // Single-candidate merge: decision is never "blocked" → success: true
+      expect(finalSynthesis?.mergedPatch).toContain("generated.ts");
 
-    // DanteCodeAdapter.collectPatch() returns the real git diff
-    const completedSession = orchestrator.currentRunState?.agents.find(
-      (s) => s.status === "completed",
-    );
-    expect(completedSession).toBeDefined();
-    const patch = await adapter.collectPatch(completedSession!.sessionId);
-    expect(patch).not.toBeNull();
-    expect(patch!.unifiedDiff).toContain("generated.ts");
-    expect(patch!.changedFiles).toContain("generated.ts");
-  });
+      // DanteCodeAdapter.collectPatch() returns the real git diff
+      const completedSession = orchestrator.currentRunState?.agents.find(
+        (s) => s.status === "completed",
+      );
+      expect(completedSession).toBeDefined();
+      const patch = await adapter.collectPatch(completedSession!.sessionId);
+      expect(patch).not.toBeNull();
+      expect(patch!.unifiedDiff).toContain("generated.ts");
+      expect(patch!.changedFiles).toContain("generated.ts");
+    },
+    { timeout: 20_000 },
+  );
 });
 
 // ============================================================================
@@ -3877,9 +4083,7 @@ describe("Lane H — Merge Blocked Path", () => {
     });
     activeOrchestratorsH.push(orchestrator);
     orchestrator.on("error", (e) => errorEvents.push(e));
-    orchestrator.on("state:transition", (t) =>
-      transitions.push({ from: t.from, to: t.to }),
-    );
+    orchestrator.on("state:transition", (t) => transitions.push({ from: t.from, to: t.to }));
 
     await orchestrator.start({
       objective: "conflict test",
@@ -3887,9 +4091,11 @@ describe("Lane H — Merge Blocked Path", () => {
       repoRoot: testDirH,
     });
 
-    const state = (orchestrator as unknown as {
-      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
-    }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
 
     state.agents.push(
       {
@@ -4052,9 +4258,11 @@ describe("Lane I — Multi-Lane Integration", () => {
       repoRoot: testDirI,
     });
 
-    const state = (orchestrator as unknown as {
-      runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
-    }).runState!;
+    const state = (
+      orchestrator as unknown as {
+        runState: { agents: AgentSessionState[]; mandates: FileMandate[] };
+      }
+    ).runState!;
 
     state.agents.push(
       {

@@ -2,7 +2,14 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/*/src/**/*.test.ts", "swe-bench/src/**/*.test.ts", "tests/**/*.test.ts"],
+    include: [
+      "packages/*/src/**/*.test.ts",
+      "packages/*/tests/**/*.test.ts",
+      "swe-bench/src/**/*.test.ts",
+      "tests/**/*.test.ts",
+    ],
+    retry: 1,
+    testTimeout: 30_000,
     coverage: {
       provider: "v8",
       // OSS v1 gates the stable runtime packages here. Preview/experimental

@@ -125,6 +125,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        theme: "default",
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -175,6 +176,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -228,6 +230,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        theme: "default",
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

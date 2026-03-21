@@ -4,6 +4,16 @@
 // When no password is configured, all requests are allowed (localhost-only).
 // ============================================================================
 
+import { timingSafeEqual } from "node:crypto";
+
+/** Constant-time string comparison to prevent timing attacks. */
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 /** Authentication configuration. */
 export interface AuthConfig {
   /** Password for HTTP Basic auth. From env DANTECODE_SERVER_PASSWORD. */
@@ -52,7 +62,7 @@ export function checkAuth(
   const password = decoded.slice(colonIdx + 1);
 
   const expectedUsername = config.username ?? "dantecode";
-  return username === expectedUsername && password === config.password;
+  return safeCompare(username, expectedUsername) && safeCompare(password, config.password ?? "");
 }
 
 /**

@@ -30,8 +30,6 @@ async function cmdExport(args: string[]): Promise<void> {
   const validFormats: ExportFormat[] = ["json", "ndjson", "markdown", "csv", "sarif"];
 
   // Parse positional args: export <format> <outputPath> [--session <id>]
-  let format: string | undefined;
-  let outputPath: string | undefined;
   let sessionId: string | undefined;
 
   const positionals: string[] = [];
@@ -47,8 +45,8 @@ async function cmdExport(args: string[]): Promise<void> {
     i += 1;
   }
 
-  format = positionals[0];
-  outputPath = positionals[1];
+  const format = positionals[0];
+  const outputPath = positionals[1];
 
   if (!format) {
     console.error(

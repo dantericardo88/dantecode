@@ -112,10 +112,14 @@ export class TaskRedistributor {
     }
 
     // Pick the lane with the most remaining work (lowest completion estimate).
-    // This maximizes the benefit of redistribution.
+    // Tiebreak: prefer the lane that has been running longest (earliest startedAt),
+    // since it is most likely to have substantial remaining work.
     const target = eligibleLanes.reduce((best, lane) => {
       const bestCompletion = best.estimatedCompletion ?? 0;
       const laneCompletion = lane.estimatedCompletion ?? 0;
+      if (laneCompletion === bestCompletion) {
+        return lane.startedAt < best.startedAt ? lane : best;
+      }
       return laneCompletion < bestCompletion ? lane : best;
     });
 
@@ -133,7 +137,7 @@ export class TaskRedistributor {
     // Determine priority based on how early the idle agent finished.
     const elapsed = Date.now() - target.startedAt;
     const priority: "high" | "medium" | "low" =
-      elapsed > 120_000 ? "high" : elapsed > 30_000 ? "medium" : "low";
+      elapsed >= 120_000 ? "high" : elapsed >= 30_000 ? "medium" : "low";
 
     // Idle agent kind is captured for future capability-tier checks.
     void idleAgentKind;

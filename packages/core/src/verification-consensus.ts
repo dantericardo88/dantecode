@@ -68,7 +68,7 @@ export function computeConsensus(
 
   const voteBreakdown: Record<ConsensusVerdict, number> = { pass: 0, warn: 0, fail: 0 };
   const weightedBreakdown: Record<ConsensusVerdict, number> = { pass: 0, warn: 0, fail: 0 };
-  let totalWeight = 0;
+  let _totalWeight = 0;
   let totalConfidence = 0;
   const blockingFindings: string[] = [];
 
@@ -77,7 +77,7 @@ export function computeConsensus(
     const confidence = clamp(vote.confidence ?? 0.5);
     voteBreakdown[vote.verdict] += 1;
     weightedBreakdown[vote.verdict] += weight * confidence;
-    totalWeight += weight;
+    _totalWeight += weight;
     totalConfidence += confidence;
     if (vote.verdict === "fail") {
       blockingFindings.push(...(vote.findings ?? []));

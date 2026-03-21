@@ -69,4 +69,33 @@ describe("renderTokenDashboard", () => {
     // No-color version should not have escape codes
     expect(noColorOutput).not.toContain("\x1b[");
   });
+
+  it("row visible width is the same with and without colors (ANSI-aware padding)", () => {
+    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+    // Get data-row lines (contain │ but not ╭ or ╰)
+    const rowFilter = (l: string) => l.includes("│") && !l.includes("╭") && !l.includes("╰");
+    const noColorRows = renderTokenDashboard(BASE_DATA, new ThemeEngine({ colors: false }))
+      .split("\n").filter(rowFilter);
+    const colorRows = renderTokenDashboard(BASE_DATA, new ThemeEngine({ colors: true }))
+      .split("\n").filter(rowFilter);
+    for (let i = 0; i < Math.min(noColorRows.length, colorRows.length); i++) {
+      const noColorWidth = noColorRows[i]!.length; // no ANSI, raw = visible
+      const colorVisibleWidth = stripAnsi(colorRows[i]!).length;
+      expect(colorVisibleWidth).toBe(noColorWidth);
+    }
+  });
+
+  it("shows cost estimate for anthropic/claude-sonnet-4-6 model", () => {
+    const data: TokenUsageData = { ...BASE_DATA, modelId: "anthropic/claude-sonnet-4-6" };
+    const output = renderTokenDashboard(data, THEME);
+    expect(output).toContain("Est. Cost");
+    expect(output).toContain("$");
+  });
+
+  it("shows cost estimate for date-suffixed haiku model ID", () => {
+    const data: TokenUsageData = { ...BASE_DATA, modelId: "anthropic/claude-haiku-4-5-20251001" };
+    const output = renderTokenDashboard(data, THEME);
+    expect(output).toContain("Est. Cost");
+    expect(output).toContain("$");
+  });
 });

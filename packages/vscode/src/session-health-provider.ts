@@ -7,7 +7,7 @@
 
 import * as vscode from "vscode";
 import { ContextualSuggestions } from "@dantecode/core";
-import type { SuggestionContext } from "@dantecode/core";
+import type { SuggestionContext, Suggestion } from "@dantecode/core";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,7 +126,7 @@ export class SessionHealthProvider implements vscode.WebviewViewProvider {
     return this._suggestions
       .suggest(ctx)
       .map(
-        (s) =>
+        (s: Suggestion) =>
           `<div class="suggestion ${s.priority}" onclick="runCmd('${_escHtml(s.command)}')">
             <span class="cmd">${_escHtml(s.command)}</span>
             <span class="reason">${_escHtml(s.reason)}</span>

@@ -133,6 +133,24 @@ export class SkillCatalog {
     return Array.from(this.entries.values()).filter((e) => e.verificationTier === tier);
   }
 
+  private static readonly TIER_ORDER: Record<string, number> = {
+    guardian: 0,
+    sentinel: 1,
+    sovereign: 2,
+  };
+
+  /**
+   * Returns entries whose verification tier meets or exceeds the given minimum tier.
+   * Entries with no verificationTier are excluded.
+   */
+  filterByTierMinimum(minimumTier: "guardian" | "sentinel" | "sovereign"): CatalogEntry[] {
+    const minLevel = SkillCatalog.TIER_ORDER[minimumTier] ?? 0;
+    return Array.from(this.entries.values()).filter((e) => {
+      if (!e.verificationTier) return false;
+      return (SkillCatalog.TIER_ORDER[e.verificationTier] ?? -1) >= minLevel;
+    });
+  }
+
   /**
    * Adds or replaces an entry by name.
    */

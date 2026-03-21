@@ -14,8 +14,8 @@ import {
 } from "./verification-rules.js";
 
 export type ApprovalDecision = VerificationRuleDecision;
-export interface ApprovalRule extends VerificationRule {}
-export interface ApprovalCheckResult extends VerificationRuleEvaluation {}
+export type ApprovalRule = VerificationRule;
+export type ApprovalCheckResult = VerificationRuleEvaluation;
 
 export interface ApprovalGatewayConfig {
   /** Whether the gateway is active (false = all auto_approve, for non-pipeline mode) */

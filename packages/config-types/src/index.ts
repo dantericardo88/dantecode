@@ -120,6 +120,8 @@ export interface Session {
   sandboxContainerId?: string;
   agentStack: AgentFrame[];
   todoList: TodoItem[];
+  /** User-assigned display name for this session (set via /name command). */
+  name?: string;
 }
 
 /** Durable execution status for long-running agent workflows. */

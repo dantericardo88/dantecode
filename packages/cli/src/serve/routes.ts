@@ -9,7 +9,10 @@
 
 import { randomBytes } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
+
+/** Session IDs must be alphanumeric + dash/underscore, max 64 chars (blocks path traversal). */
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 import type { Router, ParsedRequest, RouteResponse } from "./router.js";
 import type { SessionEventEmitter } from "./session-emitter.js";
 
@@ -162,6 +165,11 @@ function sendMessage(ctx: ServerContext): RouteHandler {
       return badRequest("Missing or empty message content");
     }
 
+    // Race condition guard: reject concurrent messages on the same session
+    if (session.abortController) {
+      return { status: 409, body: { error: "Session already has an active agent run — POST /abort first" } };
+    }
+
     const messageId = generateId();
     const ts = new Date().toISOString();
 
@@ -175,20 +183,24 @@ function sendMessage(ctx: ServerContext): RouteHandler {
     const ac = new AbortController();
     session.abortController = ac;
 
-    // Fire-and-forget: invoke agent loop if wired
-    ctx.agentRunner?.({
-      sessionId: session.id,
-      prompt: content,
-      model: session.model,
-      projectRoot: ctx.projectRoot,
-      history: session.messages.map((m) => ({ role: m.role, content: m.content })),
-      abortSignal: ac.signal,
-      onApprovalNeeded: (toolName, command, riskLevel) =>
-        new Promise<boolean>((resolve) => {
-          session.pendingApproval = { toolName, command, riskLevel, resolve };
-          ctx.sessionEmitter.emitApprovalNeeded(session.id, toolName, command, riskLevel);
-        }),
-    });
+    // Fire-and-forget: invoke agent loop if wired; catch synchronous throws
+    try {
+      ctx.agentRunner?.({
+        sessionId: session.id,
+        prompt: content,
+        model: session.model,
+        projectRoot: ctx.projectRoot,
+        history: session.messages.map((m) => ({ role: m.role, content: m.content })),
+        abortSignal: ac.signal,
+        onApprovalNeeded: (toolName, command, riskLevel) =>
+          new Promise<boolean>((resolveApproval) => {
+            session.pendingApproval = { toolName, command, riskLevel, resolve: resolveApproval };
+            ctx.sessionEmitter.emitApprovalNeeded(session.id, toolName, command, riskLevel);
+          }),
+      });
+    } catch {
+      session.abortController = undefined;
+    }
 
     return {
       status: 202,
@@ -293,10 +305,18 @@ function runSlashCommand(ctx: ServerContext): RouteHandler {
 function runVerification(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const fileList = Array.isArray(body["files"]) ? (body["files"] as string[]) : [];
+    const rawFiles = Array.isArray(body["files"]) ? (body["files"] as unknown[]) : [];
+
+    // Validate each file stays within projectRoot (path traversal prevention)
+    const projectRootResolved = resolve(ctx.projectRoot);
+    const safeFiles = rawFiles.filter((f): f is string => {
+      if (typeof f !== "string") return false;
+      const resolved = resolve(join(ctx.projectRoot, f));
+      return resolved.startsWith(projectRootResolved + sep) || resolved === projectRootResolved;
+    });
 
     // Short-circuit: empty file list returns null score immediately with no imports needed
-    if (fileList.length === 0) {
+    if (safeFiles.length === 0) {
       return ok({ projectRoot: ctx.projectRoot, files: [], pdseScore: null, findings: [] });
     }
 
@@ -312,7 +332,7 @@ function runVerification(ctx: ServerContext): RouteHandler {
       await import("@dantecode/skill-adapter");
 
     const results: VerifyResult[] = await Promise.all(
-      fileList.slice(0, 20).map(async (f): Promise<VerifyResult> => {
+      safeFiles.slice(0, 20).map(async (f): Promise<VerifyResult> => {
         try {
           const detections = await detectSkillSources(join(ctx.projectRoot, f));
           if (detections.length === 0) {
@@ -334,29 +354,62 @@ function runVerification(ctx: ServerContext): RouteHandler {
         ? results.reduce((sum, r) => sum + r.overallScore, 0) / results.length
         : null;
     const allFindings = results.flatMap((r) => r.findings);
-    return ok({ projectRoot: ctx.projectRoot, files: fileList, pdseScore: avgScore, findings: allFindings });
+    return ok({ projectRoot: ctx.projectRoot, files: safeFiles, pdseScore: avgScore, findings: allFindings });
   };
 }
 
 function getEvidence(ctx: ServerContext): RouteHandler {
   return async (req) => {
     const sessionId = req.params["sessionId"]!;
-    if (!ctx.sessions.has(sessionId)) return notFound(sessionId);
-    const evidencePath = join(
-      ctx.projectRoot,
-      ".dantecode",
-      "evidence",
-      `${sessionId}.json`,
-    );
-    let bundle: { chain: unknown[]; receipts: unknown[]; merkleRoot: string | null; seal: unknown | null } =
-      { chain: [], receipts: [], merkleRoot: null, seal: null };
-    try {
-      const raw = await fsReadFile(evidencePath, "utf-8");
-      bundle = JSON.parse(raw) as typeof bundle;
-    } catch {
-      // File doesn't exist yet — return empty bundle
+
+    // Block path traversal: sessionId must be safe alphanumeric format
+    if (!SESSION_ID_RE.test(sessionId)) {
+      return badRequest("Invalid session ID format");
     }
-    return ok({ sessionId, ...bundle });
+
+    if (!ctx.sessions.has(sessionId)) return notFound(sessionId);
+
+    const evidencePath = join(ctx.projectRoot, ".dantecode", "evidence", `${sessionId}.json`);
+
+    // Secondary confinement check: resolved path must stay inside projectRoot
+    const resolvedEvidence = resolve(evidencePath);
+    const resolvedRoot = resolve(ctx.projectRoot);
+    if (!resolvedEvidence.startsWith(resolvedRoot + sep) && resolvedEvidence !== resolvedRoot) {
+      return badRequest("Invalid path");
+    }
+
+    const emptyBundle = { chain: [], receipts: [], merkleRoot: null, seal: null };
+
+    let raw: string;
+    try {
+      raw = await fsReadFile(evidencePath, "utf-8");
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return ok({ sessionId, ...emptyBundle });
+      return { status: 500, body: { error: "Failed to read evidence file" } };
+    }
+
+    try {
+      const bundle = JSON.parse(raw) as typeof emptyBundle;
+      return ok({ sessionId, ...bundle });
+    } catch {
+      return { status: 500, body: { error: "Evidence file corrupt (JSON parse error)" } };
+    }
+  };
+}
+
+function deleteSession(ctx: ServerContext): RouteHandler {
+  return async (req) => {
+    const sessionId = req.params["id"]!;
+    if (!SESSION_ID_RE.test(sessionId)) {
+      return badRequest("Invalid session ID format");
+    }
+    const session = ctx.sessions.get(sessionId);
+    if (!session) return notFound(sessionId);
+    // Abort any in-flight agent before removing
+    session.abortController?.abort();
+    ctx.sessions.delete(sessionId);
+    return ok({ deleted: true, sessionId });
   };
 }
 
@@ -447,6 +500,7 @@ export function buildRoutes(router: Router, context: ServerContext): void {
   router.get("/api/sessions/:id", getSession(context));
   router.post("/api/sessions", createSession(context));
   router.post("/api/sessions/:id/resume", resumeSession(context));
+  router.delete("/api/sessions/:id", deleteSession(context));
 
   // Agent interaction (SSE stream is in server.ts)
   router.post("/api/sessions/:id/message", sendMessage(context));

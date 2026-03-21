@@ -40,14 +40,32 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4": { input: 3.0, output: 15.0 },
   "anthropic/claude-sonnet-4": { input: 3.0, output: 15.0 },
   "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
+  "anthropic/claude-sonnet-4-6": { input: 3.0, output: 15.0 },
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "anthropic/claude-opus-4-6": { input: 15.0, output: 75.0 },
   "claude-haiku-4-5": { input: 0.8, output: 4.0 },
+  "anthropic/claude-haiku-4-5": { input: 0.8, output: 4.0 },
   "gpt-4o": { input: 2.5, output: 10.0 },
   "gpt-4o-mini": { input: 0.15, output: 0.6 },
 };
 
+/**
+ * Fuzzy pricing lookup: exact → suffix (after /) → prefix match (first 3 dash-segments).
+ * Handles date-suffixed model IDs like "anthropic/claude-haiku-4-5-20251001".
+ */
+function findPricing(modelId: string): { input: number; output: number } | undefined {
+  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId];
+  const suffix = modelId.split("/").pop() ?? "";
+  if (MODEL_PRICING[suffix]) return MODEL_PRICING[suffix];
+  const prefix = suffix.split("-").slice(0, 3).join("-");
+  for (const key of Object.keys(MODEL_PRICING)) {
+    if (key.startsWith(prefix)) return MODEL_PRICING[key];
+  }
+  return undefined;
+}
+
 function estimateCost(modelId: string, inputTokens: number, outputTokens: number): number | undefined {
-  const pricing = MODEL_PRICING[modelId] ?? MODEL_PRICING[modelId.split("/").pop() ?? ""];
+  const pricing = findPricing(modelId);
   if (!pricing) return undefined;
   return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
 }
@@ -78,8 +96,7 @@ export function renderTokenDashboard(data: TokenUsageData, theme?: ThemeEngine):
 
   const row = (label: string, value: string): string => {
     const inner = `${c.muted}${label.padEnd(12)}${c.reset}${value}`;
-    // Pad to box width (approximate — ANSI codes don't count toward visible width)
-    return `${c.info}│${c.reset} ${inner.padEnd(BOX_WIDTH + 20)} ${c.info}│${c.reset}`;
+    return `${c.info}│${c.reset} ${padToVisible(inner, BOX_WIDTH)} ${c.info}│${c.reset}`;
   };
 
   // Model & duration
@@ -146,4 +163,24 @@ function formatDuration(ms: number): string {
 
 function boxLine(color: string, text: string, width: number, reset: string): string {
   return `${color}╭${"─".repeat(width + 2)}╮\n│ ${text.padEnd(width)} │\n╰${"─".repeat(width + 2)}╯${reset}\n`;
+}
+
+// ---------------------------------------------------------------------------
+// ANSI-aware string helpers
+// ---------------------------------------------------------------------------
+
+/** Strip SGR ANSI escape sequences to measure visible width. */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/** Visible character width (excludes ANSI escape codes). */
+function visibleWidth(s: string): number {
+  return stripAnsi(s).length;
+}
+
+/** Pad string to targetWidth visible characters (ANSI-aware). */
+function padToVisible(s: string, targetWidth: number): string {
+  const vw = visibleWidth(s);
+  return s + " ".repeat(Math.max(0, targetWidth - vw));
 }

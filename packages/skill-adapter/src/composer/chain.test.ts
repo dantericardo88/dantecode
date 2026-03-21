@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SkillChain, executeChain, resolveParams } from "./chain.js";
-import { evaluateGate, scorePassesThreshold } from "./conditional.js";
+import { evaluateGate, scorePassesThreshold, selectOnFail } from "./conditional.js";
 
 // ----------------------------------------------------------------------------
 // SkillChain construction
@@ -107,7 +107,7 @@ describe("executeChain", () => {
 
     const result = await executeChain(chain, "start-input", {
       projectRoot: "/fake",
-      executeStep: async (_skillName) => {
+      executeStep: async (_skillName: string, _input: string, _params: Record<string, string>) => {
         return outputs[callIndex++] ?? "fallback";
       },
     });
@@ -146,10 +146,10 @@ describe("executeChain", () => {
 // ----------------------------------------------------------------------------
 
 describe("evaluateGate", () => {
-  it("score above threshold → passed: true, suggestedAction: proceed", () => {
+  it("score above threshold → passed: true, suggestedAction: undefined", () => {
     const evaluation = evaluateGate(90, true, { minPdse: 85 }, 0);
     expect(evaluation.passed).toBe(true);
-    expect(evaluation.suggestedAction).toBe("proceed");
+    expect(evaluation.suggestedAction).toBeUndefined();
   });
 
   it("score below threshold with onFail: 'skip' → passed: false, suggestedAction: skip", () => {
@@ -185,5 +185,190 @@ describe("scorePassesThreshold", () => {
 
   it("returns false when score < threshold", () => {
     expect(scorePassesThreshold(70, 85)).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// selectOnFail
+// ----------------------------------------------------------------------------
+
+describe("selectOnFail", () => {
+  it("returns stop when onFail is stop", () => {
+    const result = selectOnFail({ onFail: "stop" }, 0);
+    expect(result).toBe("stop");
+  });
+
+  it("returns retry when retryCount < maxRetries", () => {
+    const result = selectOnFail({ onFail: "retry", maxRetries: 3 }, 1);
+    expect(result).toBe("retry");
+  });
+
+  it("returns stop when retryCount >= maxRetries", () => {
+    const result = selectOnFail({ onFail: "retry", maxRetries: 1 }, 1);
+    expect(result).toBe("stop");
+  });
+
+  it("returns skip when onFail is skip", () => {
+    const result = selectOnFail({ onFail: "skip" }, 0);
+    expect(result).toBe("skip");
+  });
+
+  it("defaults to stop when onFail is undefined", () => {
+    const result = selectOnFail({}, 0);
+    expect(result).toBe("stop");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// evaluateGate — requireVerification tests
+// ----------------------------------------------------------------------------
+
+describe("evaluateGate — requireVerification", () => {
+  it("fails when requireVerification is true but verified is false", () => {
+    const result = evaluateGate(95, false, { requireVerification: true }, 0);
+    expect(result.passed).toBe(false);
+    expect(result.suggestedAction).toBe("stop");
+  });
+
+  it("passes when requireVerification is true and verified is true", () => {
+    const result = evaluateGate(95, true, { requireVerification: true }, 0);
+    expect(result.passed).toBe(true);
+  });
+
+  it("fails when both minPdse and requireVerification fail", () => {
+    const result = evaluateGate(60, false, { minPdse: 80, requireVerification: true }, 0);
+    expect(result.passed).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// SkillChain.fromYAML() validation
+// ----------------------------------------------------------------------------
+
+describe("SkillChain.fromYAML() validation", () => {
+  it("throws on invalid YAML", () => {
+    expect(() => SkillChain.fromYAML("{not: valid: yaml:")).toThrow(/Invalid YAML/);
+  });
+
+  it("throws when steps array is missing", () => {
+    expect(() => SkillChain.fromYAML("name: my-chain\nparams: {}")).toThrow(/steps/);
+  });
+
+  it("round-trips a chain definition through YAML", () => {
+    const chain = new SkillChain("yaml-chain").add("skill-a", {}).add("skill-b", {});
+    const yaml = chain.toYAML();
+    const restored = SkillChain.fromYAML(yaml);
+    expect(restored.toDefinition().steps).toHaveLength(2);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Gate integration — requireVerification stops chain
+// ----------------------------------------------------------------------------
+
+describe("executeChain — gate integration with requireVerification", () => {
+  it("stops chain when requireVerification gate fails because step is not verified", async () => {
+    const chain = new SkillChain("verify-gate-chain")
+      .add("skill-a", {})
+      .addGate({ requireVerification: true, onFail: "stop" })
+      .add("skill-b", {});
+
+    const result = await executeChain(chain.toDefinition(), {
+      executeStep: async (_skillName: string, _params: Record<string, string>) => ({
+        skillName: _skillName,
+        status: "success" as const,
+        output: "done",
+        verified: false, // not verified
+      }),
+    });
+
+    // skill-b should not run because gate stops on unverified result
+    expect(result.steps.some((s) => s.skillName === "skill-b")).toBe(false);
+    expect(result.completed).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// FIX 1 + FIX 2: 2-arg executeChain threads context and respects pdseScore
+// ----------------------------------------------------------------------------
+
+describe("executeChain — 2-arg form context threading", () => {
+  it("2-arg executeChain(def, context) correctly threads context to executeStep", async () => {
+    const chain = new SkillChain("context-test").add("skill-a", { key: "val" });
+
+    const result = await executeChain(chain.toDefinition(), {
+      executeStep: async (_name: string, _params: Record<string, string>) => ({
+        output: "result",
+        verified: true,
+        pdseScore: 88,
+      }),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.steps[0]?.pdseScore).toBe(88); // Verify pdseScore is respected from callback
+  });
+});
+
+// ----------------------------------------------------------------------------
+// FIX 5 Test B: YAML round-trip for gate-only sentinel steps
+// ----------------------------------------------------------------------------
+
+describe("SkillChain — gate-only sentinel YAML round-trip", () => {
+  it("toYAML + fromYAML round-trips gate-only sentinel steps", () => {
+    const original = new SkillChain("sentinel-test");
+    original.add("skill-a", { input: "$input" });
+    original.addGate({ minPdse: 85, onFail: "stop" });
+    original.add("skill-b", {});
+    const yaml = original.toYAML();
+    const restored = SkillChain.fromYAML(yaml);
+    const def = restored.toDefinition();
+    expect(def.steps).toHaveLength(3);
+    expect(def.steps[1]!.gate?.minPdse).toBe(85);
+    expect(def.steps[1]!.skillName).toBe(""); // gate-only sentinel has empty skillName
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Edge-case tests: 0-step chains, gate-only sentinel semantics, legacy wiring
+// ----------------------------------------------------------------------------
+
+describe("executeChain edge cases", () => {
+  it("0-step chain returns success with empty finalOutput", async () => {
+    const result = await executeChain(new SkillChain("empty").toDefinition(), {});
+    expect(result.success).toBe(true);
+    expect(result.steps).toHaveLength(0);
+    expect(result.finalOutput).toBe("");
+    expect(result.totalDurationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("gate-only sentinel as first step defaults to pdseScore 60 and fails if minPdse > 60", async () => {
+    const chain = new SkillChain("first-gate");
+    chain.addGate({ minPdse: 70, onFail: "stop" });
+    const result = await executeChain(chain.toDefinition(), {});
+    expect(result.success).toBe(false);
+    expect(result.steps[0]?.status).toBe("failed");
+  });
+
+  it("legacy 3-arg form threads initialInput through executeStep", async () => {
+    let captured: string | undefined;
+    const chain = new SkillChain("legacy-input").add("skill-a", { input: "$input" });
+    await executeChain(chain, "hello-legacy", {
+      projectRoot: "/project",
+      executeStep: async (_name: string, input: string, _params: Record<string, string>) => {
+        captured = input;
+        return "done";
+      },
+    });
+    expect(captured).toBe("hello-legacy");
+  });
+
+  it("new-style executeStep returning plain string produces output with default pdseScore 90", async () => {
+    const chain = new SkillChain("str-ret").add("skill-a", {});
+    const result = await executeChain(chain.toDefinition(), {
+      executeStep: async (_name: string, _params: Record<string, string>) => "plain-string",
+    });
+    expect(result.steps[0]?.output).toBe("plain-string");
+    expect(result.steps[0]?.pdseScore).toBe(90);
+    expect(result.success).toBe(true);
   });
 });

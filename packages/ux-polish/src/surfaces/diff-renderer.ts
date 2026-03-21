@@ -17,6 +17,15 @@ import { ThemeEngine } from "../theme-engine.js";
 import type { SemanticColors } from "../types.js";
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Reject diffs larger than this to prevent DoS. */
+const MAX_DIFF_INPUT_SIZE = 5_000_000; // 5MB
+/** Cap per-side line count so DP LCS stays tractable and always correct. */
+const MAX_LINES_PER_SIDE = 800;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -80,29 +89,40 @@ export function highlightLine(line: string, fileExtension: string, theme: ThemeE
   if (!KEYWORD_PATTERNS[lang]) return line;
 
   let result = line;
+  const commentPlaceholders: string[] = [];
 
-  // Comments (must come first — greedy match prevents string/keyword coloring inside)
+  // Step 1: Extract comment regions into placeholders so strings/keywords
+  // inside comments are not double-colored.
   const commentPattern = COMMENT_PATTERNS[lang];
   if (commentPattern) {
     result = result.replace(
       new RegExp(commentPattern.source, commentPattern.flags),
-      (m) => `${c.muted}${m}${c.reset}`,
+      (m) => {
+        const idx = commentPlaceholders.length;
+        commentPlaceholders.push(`${c.muted}${m}${c.reset}`);
+        return `\x00C${idx}\x00`;
+      },
     );
   }
 
-  // Strings
+  // Step 2: Strings (only outside comment regions)
   result = result.replace(
     new RegExp(STRING_PATTERN.source, STRING_PATTERN.flags),
     (m) => `${c.success}${m}${c.reset}`,
   );
 
-  // Keywords
+  // Step 3: Keywords (only outside comment regions)
   const kwPattern = KEYWORD_PATTERNS[lang];
   if (kwPattern) {
     result = result.replace(
       new RegExp(kwPattern.source, kwPattern.flags),
       (m) => `${c.progress}${m}${c.reset}`,
     );
+  }
+
+  // Step 4: Restore comment placeholders
+  for (let i = 0; i < commentPlaceholders.length; i++) {
+    result = result.replace(`\x00C${i}\x00`, commentPlaceholders[i]!);
   }
 
   return result;
@@ -125,6 +145,16 @@ export function renderDiff(
   const compact = options.compact ?? false;
   const theme = options.theme ?? new ThemeEngine();
   const c = theme.resolve().colors;
+
+  if (unifiedDiff.length > MAX_DIFF_INPUT_SIZE) {
+    return {
+      rendered: `${c.warning}Diff skipped — input too large${c.reset}\n`,
+      additions: 0,
+      deletions: 0,
+      fileCount: 0,
+      truncated: true,
+    };
+  }
 
   if (!unifiedDiff.trim()) {
     return {
@@ -249,8 +279,42 @@ export function renderBeforeAfter(
   after: string,
   options: DiffRenderOptions = {},
 ): DiffRenderResult {
-  const unifiedDiff = generateUnifiedDiff(filePath, before, after);
-  return renderDiff(unifiedDiff, options);
+  const theme = options.theme ?? new ThemeEngine();
+  const c = theme.resolve().colors;
+
+  // DoS guard: reject excessively large inputs
+  if (before.length + after.length > MAX_DIFF_INPUT_SIZE) {
+    return {
+      rendered: `${c.warning}Diff skipped — input too large (${Math.round((before.length + after.length) / 1_000_000)}MB)${c.reset}\n`,
+      additions: 0,
+      deletions: 0,
+      fileCount: 0,
+      truncated: true,
+    };
+  }
+
+  // Line cap: truncate inputs so DP LCS is always correct and tractable.
+  // fastLCS was removed — DP only, capped at MAX_LINES_PER_SIDE per side.
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  const inputTruncated =
+    beforeLines.length > MAX_LINES_PER_SIDE || afterLines.length > MAX_LINES_PER_SIDE;
+  const effectiveBefore = inputTruncated
+    ? beforeLines.slice(0, MAX_LINES_PER_SIDE).join("\n")
+    : before;
+  const effectiveAfter = inputTruncated
+    ? afterLines.slice(0, MAX_LINES_PER_SIDE).join("\n")
+    : after;
+
+  const unifiedDiff = generateUnifiedDiff(filePath, effectiveBefore, effectiveAfter);
+  const result = renderDiff(unifiedDiff, { ...options, theme });
+
+  if (inputTruncated) {
+    const note = `${c.warning}⚠ Diff truncated — showing first ${MAX_LINES_PER_SIDE} lines per side${c.reset}\n`;
+    return { ...result, rendered: note + result.rendered, truncated: true };
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,11 +455,6 @@ function longestCommonSubsequence(a: string[], b: string[]): [number, number][] 
   const m = a.length;
   const n = b.length;
 
-  // Use space-efficient approach for large files
-  if (m > 500 || n > 500) {
-    return fastLCS(a, b);
-  }
-
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
 
   for (let i = 1; i <= m; i++) {
@@ -421,36 +480,6 @@ function longestCommonSubsequence(a: string[], b: string[]): [number, number][] 
       i--;
     } else {
       j--;
-    }
-  }
-
-  return result;
-}
-
-function fastLCS(a: string[], b: string[]): [number, number][] {
-  // For large files: use hash-based matching (simplified)
-  const bMap = new Map<string, number[]>();
-  for (let j = 0; j < b.length; j++) {
-    const line = b[j];
-    if (line === undefined) continue;
-    if (!bMap.has(line)) bMap.set(line, []);
-    bMap.get(line)!.push(j);
-  }
-
-  const result: [number, number][] = [];
-  const usedB = new Set<number>();
-
-  for (let i = 0; i < a.length; i++) {
-    const aLine = a[i];
-    if (aLine === undefined) continue;
-    const matches = bMap.get(aLine);
-    if (!matches) continue;
-    for (const j of matches) {
-      if (!usedB.has(j)) {
-        result.push([i, j]);
-        usedB.add(j);
-        break;
-      }
     }
   }
 

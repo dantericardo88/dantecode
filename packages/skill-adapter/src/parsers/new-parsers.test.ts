@@ -224,6 +224,36 @@ alwaysApply: false
       expect(result.length).toBe(2);
       expect(result.map((r) => r.name).sort()).toEqual(["rule-one", "rule-two"]);
     });
+
+    it("alwaysApply YAML boolean true parses as true", () => {
+      // YAML parser produces actual boolean true, not the string "true"
+      const content = `---\nname: bool-true-rule\nalwaysApply: true\n---\nInstructions here.`;
+      const result = parseCursorRule(content, "/rules/bool-true-rule.mdc");
+      expect(result.cursorMetadata.alwaysApply).toBe(true);
+      expect(typeof result.cursorMetadata.alwaysApply).toBe("boolean");
+    });
+
+    it("alwaysApply string \"false\" parses as false", () => {
+      const content = `---\nname: str-false-rule\nalwaysApply: "false"\n---\nInstructions here.`;
+      const result = parseCursorRule(content, "/rules/str-false-rule.mdc");
+      expect(result.cursorMetadata.alwaysApply).toBe(false);
+    });
+
+    it("globs YAML array is preserved as array with correct items", () => {
+      const content = `---\nname: glob-array-rule\nglobs:\n  - "*.ts"\n  - "*.tsx"\n---\nInstructions here.`;
+      const result = parseCursorRule(content, "/rules/glob-array-rule.mdc");
+      expect(Array.isArray(result.cursorMetadata.globs)).toBe(true);
+      expect((result.cursorMetadata.globs as string[]).length).toBe(2);
+      expect(result.cursorMetadata.globs).toContain("*.ts");
+      expect(result.cursorMetadata.globs).toContain("*.tsx");
+    });
+
+    it("no frontmatter yields alwaysApply false and globs undefined", () => {
+      const content = `Just plain instructions with no frontmatter at all.`;
+      const result = parseCursorRule(content, "/rules/no-fm-rule.mdc");
+      expect(result.cursorMetadata.alwaysApply).toBe(false);
+      expect(result.cursorMetadata.globs).toBeUndefined();
+    });
   });
 });
 

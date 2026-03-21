@@ -131,4 +131,42 @@ describe("FleetBudget", () => {
     expect(budget.isExhausted()).toBe(false);
     expect(budget.isWarning()).toBe(false);
   });
+
+  // ── Edge cases ────────────────────────────────────────────────────────────
+
+  it("decreasing cumulative values — delta clamped to 0, aggregate never decreases", () => {
+    budget.record("agent-a", 2_000, 0.2);
+    budget.record("agent-a", 1_500, 0.1); // backward — should be a no-op delta
+    const report = budget.report();
+    // Aggregate should NOT decrease
+    expect(report.totalTokens).toBe(2_000);
+    expect(report.totalCost).toBeCloseTo(0.2);
+    expect(budget.isExhausted()).toBe(false);
+  });
+
+  it("warning fires even when the same call simultaneously crosses exhaustion", () => {
+    // Go from 0 straight to 10_000 (100%) in one call — should fire warning AND exhaustion
+    budget.record("agent-a", 10_000, 0.0);
+    expect(budget.isWarning()).toBe(true);
+    expect(budget.isExhausted()).toBe(true);
+  });
+
+  it("per-agent limit returns false; other agent can still continue", () => {
+    budget.record("agent-a", 5_001, 0.1); // exceeds per-agent 5_000 limit
+    budget.record("agent-b", 1_000, 0.1);
+    // Fleet is not exhausted (only 6_001 tokens total, limit 10_000)
+    expect(budget.isExhausted()).toBe(false);
+    expect(budget.canContinue("agent-b")).toBe(true);
+    expect(budget.canContinue("agent-a")).toBe(false);
+  });
+
+  it("record returns false for per-agent limit but fleet not exhausted", () => {
+    // First call hits per-agent limit
+    const result = budget.record("agent-a", 5_001, 0.1);
+    expect(result).toBe(false);
+    // Fleet still has headroom
+    expect(budget.isExhausted()).toBe(false);
+    // A different agent can still record successfully
+    expect(budget.record("agent-b", 1_000, 0.1)).toBe(true);
+  });
 });

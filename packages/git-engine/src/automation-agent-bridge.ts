@@ -3,6 +3,9 @@
  * Imports the agent-loop runner DYNAMICALLY to avoid circular dependencies.
  */
 
+/** Minimum PDSE score for automation output to pass the DanteForge gate. */
+export const PDSE_GATE_THRESHOLD = 70;
+
 export interface AgentBridgeConfig {
   prompt: string;
   model?: string;
@@ -40,6 +43,7 @@ interface AgentRunResult {
 
 interface ForgeResult {
   aggregateScore: number;
+  error?: string;
 }
 
 export function substitutePromptVars(
@@ -207,8 +211,9 @@ async function defaultForgeRunner(
         ? scores.reduce((a, b) => a + b, 0) / scores.length
         : 85;
     return { aggregateScore };
-  } catch {
-    return { aggregateScore: 85 }; // default pass if forge unavailable
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { aggregateScore: 0, error: msg };
   }
 }
 
@@ -244,11 +249,16 @@ export async function runAutomationAgent(
     if (config.verifyOutput !== false && agentResult.filesChanged.length > 0) {
       const runForge = config.forgeRunner ?? defaultForgeRunner;
       const forgeResult = await runForge(agentResult.filesChanged, config.projectRoot);
-      result.pdseScore = forgeResult.aggregateScore;
-
-      if (forgeResult.aggregateScore < 70) {
+      if (forgeResult.error) {
         result.output +=
-          `\n\nWARNING DanteForge: Automation output scored ${forgeResult.aggregateScore}/100 (below 70 threshold). Review recommended.`;
+          `\n\nWARNING DanteForge: Verification unavailable — ${forgeResult.error}. Gate skipped.`;
+        // Leave pdseScore unset so orchestrator records gateStatus: "skipped"
+      } else {
+        result.pdseScore = forgeResult.aggregateScore;
+        if (forgeResult.aggregateScore < PDSE_GATE_THRESHOLD) {
+          result.output +=
+            `\n\nWARNING DanteForge: Automation output scored ${forgeResult.aggregateScore}/100 (below ${PDSE_GATE_THRESHOLD} threshold). Review recommended.`;
+        }
       }
     }
   } catch (error: unknown) {

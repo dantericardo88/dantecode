@@ -236,6 +236,28 @@ describe("/export command", () => {
     const result = await routeSlashCommand("/export json nonexistent-dir/out.json", state);
     expect(result).toMatch(/failed to export|error/i);
   });
+
+  it("export JSON includes session.name in envelope and filename when set (D8 proof)", async () => {
+    const state = makeState(tempDir, { name: "flagged-name" });
+    await routeSlashCommand("/export json", state);
+
+    const files = await import("node:fs/promises").then((m) => m.readdir(tempDir));
+    const jsonFile = files.find((f) => f.endsWith(".json"))!;
+    expect(jsonFile).toContain("flagged-name");
+
+    const raw = await readFile(join(tempDir, jsonFile), "utf8");
+    const data = JSON.parse(raw);
+    expect(data.session.name).toBe("flagged-name");
+  });
+
+  it("/export with no format arg defaults to JSON output", async () => {
+    const state = makeState(tempDir);
+    const result = await routeSlashCommand("/export", state);
+
+    expect(result).toMatch(/exported to:/i);
+    const files = await import("node:fs/promises").then((m) => m.readdir(tempDir));
+    expect(files.some((f) => f.endsWith(".json"))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -333,5 +355,44 @@ describe("/import command", () => {
     const state = makeState(tempDir);
     const result = await routeSlashCommand("/import", state);
     expect(result).toMatch(/usage/i);
+  });
+
+  it("/import with version 2.0.0 injects compatibility warning into messages", async () => {
+    const importFile = join(tempDir, "v2.json");
+    await import("node:fs/promises").then((m) =>
+      m.writeFile(
+        importFile,
+        JSON.stringify({
+          version: "2.0.0",
+          session: {
+            id: "v2-session",
+            messages: [{ id: "x1", role: "user", content: "Hello", timestamp: "2026-03-21T00:00:00Z" }],
+          },
+        }),
+        "utf8",
+      ),
+    );
+
+    const state = makeState(tempDir);
+    await routeSlashCommand("/import v2.json", state);
+
+    const warnMsg = state.session.messages.find(
+      (m) =>
+        m.role === "system" &&
+        typeof m.content === "string" &&
+        m.content.includes("may not be fully compatible"),
+    );
+    expect(warnMsg).toBeDefined();
+  });
+
+  it("/import with missing session key returns error", async () => {
+    const noSessionFile = join(tempDir, "no-session.json");
+    await import("node:fs/promises").then((m) =>
+      m.writeFile(noSessionFile, JSON.stringify({ version: "1.0.0" }), "utf8"),
+    );
+
+    const state = makeState(tempDir);
+    const result = await routeSlashCommand("/import no-session.json", state);
+    expect(result).toMatch(/invalid session file|missing messages/i);
   });
 });

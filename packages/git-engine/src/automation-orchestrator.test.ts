@@ -5,6 +5,7 @@ import os from "node:os";
 import { readAuditEvents } from "@dantecode/core";
 import { GitAutomationStore } from "./automation-store.js";
 import { GitAutomationOrchestrator } from "./automation-orchestrator.js";
+import type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
 describe("GitAutomationOrchestrator", () => {
   let tmpDir: string | undefined;
@@ -216,5 +217,96 @@ describe("GitAutomationOrchestrator", () => {
 
     const persisted = await new GitAutomationStore(tmpDir).listAutomationExecutions();
     expect(persisted).toHaveLength(8);
+  });
+
+  it("calls runAgent when agentMode is set on the request", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-agent-mode-"));
+
+    const mockRunAgent = vi
+      .fn<(config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult>>()
+      .mockResolvedValue({
+      sessionId: "test-session",
+      success: true,
+      output: "Agent completed the task",
+      tokensUsed: 100,
+      durationMs: 500,
+      filesChanged: ["src/foo.ts"],
+      pdseScore: 88,
+    });
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-agent",
+      modelId: "test-model",
+      maxConcurrent: 2,
+      runAgent: mockRunAgent,
+      readStatus: vi.fn().mockReturnValue({
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+      }),
+      verifyRepo: () => ({
+        passed: true,
+        failedSteps: [],
+        stepResults: [],
+      }),
+    });
+
+    const record = await orchestrator.runWorkflow({
+      workflowPath: "unused.yml",
+      agentMode: { prompt: "Fix all tests in ${projectRoot}", verifyOutput: true },
+      eventPayload: { pr_number: 42 },
+      trigger: { kind: "webhook", sourceId: "wh-1", label: "github:pr" },
+    });
+
+    expect(mockRunAgent).toHaveBeenCalledOnce();
+    expect(mockRunAgent.mock.calls[0]![0].prompt).toBe("Fix all tests in ${projectRoot}");
+    expect(record.status).toBe("completed");
+    expect(record.pdseScore).toBeCloseTo(88);
+    expect(record.gateStatus).toBe("passed");
+  });
+
+  it("sets gateStatus=failed when agent bridge returns pdseScore < 70", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-agent-gate-fail-"));
+
+    const mockRunAgent = vi
+      .fn<(config: AgentBridgeConfig, ctx: Record<string, unknown>) => Promise<AgentBridgeResult>>()
+      .mockResolvedValue({
+      sessionId: "test-session",
+      success: true,
+      output: "Done but quality low",
+      tokensUsed: 50,
+      durationMs: 200,
+      filesChanged: ["src/bad.ts"],
+      pdseScore: 55,
+    });
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-agent-gate",
+      modelId: "test-model",
+      maxConcurrent: 2,
+      runAgent: mockRunAgent,
+      readStatus: vi.fn().mockReturnValue({
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+      }),
+      verifyRepo: () => ({
+        passed: true,
+        failedSteps: [],
+        stepResults: [],
+      }),
+    });
+
+    const record = await orchestrator.runWorkflow({
+      workflowPath: "",
+      agentMode: { prompt: "Refactor", verifyOutput: true },
+    });
+
+    expect(record.status).toBe("completed");
+    expect(record.gateStatus).toBe("failed");
   });
 });

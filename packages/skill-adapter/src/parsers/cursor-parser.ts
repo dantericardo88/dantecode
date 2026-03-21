@@ -195,12 +195,20 @@ export function parseCursorRule(content: string, sourcePath: string): ParsedCurs
   const description = descriptionFromFrontmatter || extractFirstParagraph(body);
 
   const alwaysApplyRaw = rawFrontmatter["alwaysApply"];
-  const alwaysApply =
+  const alwaysApply: boolean =
     typeof alwaysApplyRaw === "boolean"
       ? alwaysApplyRaw
-      : alwaysApplyRaw === "true";
+      : typeof alwaysApplyRaw === "string"
+      ? alwaysApplyRaw.toLowerCase() === "true"
+      : false;
 
-  const globs = rawFrontmatter["globs"] as string | string[] | undefined;
+  const rawGlobs = rawFrontmatter["globs"];
+  const globs: string | string[] | undefined =
+    typeof rawGlobs === "string"
+      ? rawGlobs
+      : Array.isArray(rawGlobs)
+      ? (rawGlobs as unknown[]).filter((g): g is string => typeof g === "string")
+      : undefined;
 
   const frontmatter: SkillFrontmatter = {
     name,

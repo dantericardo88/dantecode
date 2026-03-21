@@ -185,4 +185,59 @@ describe("StreamRenderer", () => {
     r.finish();
     expect(writes.filter((w) => w === "\n")).toHaveLength(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // Tier badge tests (PRD §3.4)
+  // ---------------------------------------------------------------------------
+
+  it("tier badge: quick shows ⚡ quick in header", () => {
+    const r = new StreamRenderer({ colors: false, reasoningTier: "quick" });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).toContain("⚡ quick");
+  });
+
+  it("tier badge: deep shows 🧠 deep in header", () => {
+    const r = new StreamRenderer({ colors: false, reasoningTier: "deep" });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).toContain("🧠 deep");
+  });
+
+  it("tier badge: expert shows 🔬 expert in header", () => {
+    const r = new StreamRenderer({ colors: false, reasoningTier: "expert" });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).toContain("🔬 expert");
+  });
+
+  it("tier badge with thinkingBudget displays token count", () => {
+    const r = new StreamRenderer({
+      colors: false,
+      reasoningTier: "deep",
+      thinkingBudget: 4096,
+    });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).toContain("4,096");
+    expect(combined).toContain("thinking tokens");
+  });
+
+  it("no tier badge when reasoningTier is undefined", () => {
+    const r = new StreamRenderer({ colors: false });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).not.toContain("⚡");
+    expect(combined).not.toContain("🧠");
+    expect(combined).not.toContain("🔬");
+    expect(combined).not.toContain("[");
+  });
+
+  it("unknown tier string is displayed as-is without emoji", () => {
+    const r = new StreamRenderer({ colors: false, reasoningTier: "turbo" });
+    r.printHeader();
+    const combined = writes.join("");
+    expect(combined).toContain("[turbo]");
+    expect(combined).not.toContain("⚡");
+  });
 });

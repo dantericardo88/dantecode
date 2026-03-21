@@ -83,6 +83,29 @@ describe("renderBeforeAfter", () => {
   });
 });
 
+describe("renderBeforeAfter — edge cases", () => {
+  it("shows all lines as additions for a new file (empty before)", () => {
+    const result = renderBeforeAfter("new-file.ts", "", "line1\nline2\nline3", { theme: THEME });
+    expect(result.additions).toBeGreaterThan(0);
+    // empty string before splits to [""] → at most 1 spurious empty-line deletion
+    expect(result.deletions).toBeLessThanOrEqual(1);
+  });
+
+  it("truncates and shows warning for files > 800 lines per side", () => {
+    const big = Array.from({ length: 900 }, (_, i) => `line${i}`).join("\n");
+    const result = renderBeforeAfter("big.ts", big, big + "\nextra", { theme: THEME });
+    expect(result.truncated).toBe(true);
+    expect(result.rendered).toContain("truncated");
+  });
+
+  it("rejects inputs larger than 5MB with a DoS guard message", () => {
+    const huge = "x".repeat(3_000_000);
+    const result = renderBeforeAfter("huge.ts", huge, huge, { theme: THEME });
+    expect(result.truncated).toBe(true);
+    expect(result.rendered).toContain("Diff skipped");
+  });
+});
+
 describe("highlightLine", () => {
   it("colors TypeScript keywords", () => {
     const theme = new ThemeEngine({ theme: "default", colors: true });
@@ -103,5 +126,16 @@ describe("highlightLine", () => {
     const theme = new ThemeEngine({ theme: "default", colors: true });
     const result = highlightLine("some unknown lang content", "xyz", theme);
     expect(result).toBe("some unknown lang content");
+  });
+
+  it("does not double-color keywords inside comments", () => {
+    const theme = new ThemeEngine({ theme: "default", colors: true });
+    const c = theme.resolve().colors;
+    // "// const x" — `const` is inside a comment, should only get comment color
+    const result = highlightLine("// const x = 1;", "ts", theme);
+    // keyword color (progress) should NOT appear inside comment region
+    // The entire comment gets c.muted wrapping; c.progress should not appear
+    expect(result).not.toContain(`${c.progress}const`);
+    expect(result).toContain(c.muted); // comment color present
   });
 });

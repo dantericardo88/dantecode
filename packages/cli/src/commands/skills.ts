@@ -842,6 +842,12 @@ async function skillsExport(args: string[], projectRoot: string): Promise<void> 
 
   process.stdout.write(`\n${DIM}Exporting skill: ${skillName}${RESET}\n`);
 
+  const existing = await getSkill(skillName, projectRoot);
+  if (!existing) {
+    console.error(`Skill "${skillName}" not found in registry.`);
+    return;
+  }
+
   const result = await bundleSkill(
     {
       skillName,
@@ -954,8 +960,7 @@ async function skillsCompose(args: string[], projectRoot: string): Promise<void>
 
   let fileContent: string | null = null;
   try {
-    const { readFile: readFileFs } = await import("node:fs/promises");
-    fileContent = await readFileFs(chainFile, "utf-8");
+    fileContent = await readFile(chainFile, "utf-8");
   } catch {
     // File doesn't exist yet
   }

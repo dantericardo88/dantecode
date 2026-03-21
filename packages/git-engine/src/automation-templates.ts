@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 export interface AutomationDefinition {
   id: string;
   name: string;
-  type: "webhook" | "schedule" | "watch" | "loop";
+  type: "webhook" | "schedule" | "watch";
   config: Record<string, unknown>;
   agentMode?: {
     prompt: string;

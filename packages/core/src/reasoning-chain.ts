@@ -315,6 +315,15 @@ export class ReasoningChain {
     return unique.slice(0, 5);
   }
 
+  /**
+   * Returns distilled playbook bullets for all completed steps in history (PRD §3.5).
+   * Steps without a pdseScore are excluded (they haven't been scored yet).
+   */
+  getPlaybook(): string[] {
+    const scoredSteps = this.history.filter((s) => s.phase.pdseScore !== undefined);
+    return this.distillPlaybook(scoredSteps);
+  }
+
   // --------------------------------------------------------------------------
   // Step recording
   // --------------------------------------------------------------------------
@@ -499,16 +508,13 @@ export class ReasoningChain {
    */
   getAdaptiveBias(): number {
     const perf = this.getTierPerformance();
-    const quickAvg = perf.quick;
-    const deepAvg = perf.deep;
-    const expertAvg = perf.expert;
+    // Require both quick AND deep comparison data before adjusting bias (PRD §3.5)
+    if (perf.quick === undefined || perf.deep === undefined) return 0;
 
-    if (quickAvg !== undefined && quickAvg > 0.85) {
-      return -0.1;
-    }
-    if (expertAvg !== undefined && deepAvg !== undefined && expertAvg - deepAvg <= 0.05) {
-      return -0.05;
-    }
+    if (perf.quick > 0.85) return -0.1;
+
+    if (perf.expert !== undefined && perf.expert - perf.deep < 0.05) return -0.05;
+
     return 0;
   }
 

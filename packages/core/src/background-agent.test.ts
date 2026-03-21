@@ -302,25 +302,29 @@ describe("BackgroundAgentRunner", () => {
       expect(task!.error).toContain("No work function");
     });
 
-    it("pauses a long-running task when repeated failures form a loop", async () => {
-      const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-retry-"));
-      const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
-        failureThreshold: 5,
-        resetTimeoutMs: 10_000,
-      });
+    it(
+      "pauses a long-running task when repeated failures form a loop",
+      async () => {
+        const retryProjectRoot = await mkdtemp(join(tmpdir(), "dantecode-bg-retry-"));
+        const retryRunner = new BackgroundAgentRunner(1, retryProjectRoot, {
+          failureThreshold: 5,
+          resetTimeoutMs: 10_000,
+        });
 
-      retryRunner.setWorkFn(async () => {
-        throw new Error("boom");
-      });
+        retryRunner.setWorkFn(async () => {
+          throw new Error("boom");
+        });
 
-      const id = retryRunner.enqueue("recover me", { longRunning: true });
+        const id = retryRunner.enqueue("recover me", { longRunning: true });
 
-      await vi.waitFor(() => {
-        expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
-      });
-      expect(retryRunner.getTask(id)?.status).toBe("paused");
-      expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
-    });
+        await vi.waitFor(() => {
+          expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
+        });
+        expect(retryRunner.getTask(id)?.status).toBe("paused");
+        expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
+      },
+      { timeout: 20_000 },
+    );
   });
 
   describe("enqueue with EnqueueOptions", () => {

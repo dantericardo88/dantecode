@@ -144,12 +144,24 @@ export function parseTOML(content: string): Record<string, unknown> {
         fullValue += " " + (lines[lineIndex]!).trim();
         lineIndex++;
       }
-      i = fullValue.includes("]") ? lineIndex : i + 1;
 
-      const arrayContent = fullValue.slice(
-        fullValue.indexOf("[") + 1,
-        fullValue.lastIndexOf("]"),
-      );
+      // Safety check: if still no closing bracket, skip this entry entirely
+      if (!fullValue.includes("]")) {
+        i = lineIndex;
+        continue;
+      }
+
+      i = lineIndex;
+
+      const openIdx = fullValue.indexOf("[");
+      const closeIdx = fullValue.lastIndexOf("]");
+      // Guard: malformed value where [ appears after ] (should not happen, but be safe)
+      if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) {
+        i = i > lineIndex ? i : lineIndex;
+        continue;
+      }
+
+      const arrayContent = fullValue.slice(openIdx + 1, closeIdx);
       const items: string[] = [];
       for (const item of arrayContent.split(",")) {
         const cleaned = item.trim().replace(/^["']|["']$/g, "");
