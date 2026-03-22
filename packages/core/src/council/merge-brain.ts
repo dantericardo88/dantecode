@@ -8,8 +8,6 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { createWorktree, removeWorktree } from "@dantecode/git-engine";
-
 /** Timeout for a single git merge operation (ms). */
 const MERGE_TIMEOUT_MS = 30_000;
 import type { FinalSynthesisRecord, MergeDecision } from "./council-types.js";
@@ -18,6 +16,12 @@ import { MergeConfidenceScorer, type MergeCandidatePatch } from "./merge-confide
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
+
+/** Injected worktree operations — avoids circular dep on @dantecode/git-engine. */
+export interface WorktreeHooks {
+  createWorktree: (spec: { directory: string; sessionId: string; branch: string; baseBranch: string }) => { directory: string };
+  removeWorktree: (directory: string) => void;
+}
 
 export interface MergeBrainInput {
   runId: string;
@@ -73,12 +77,13 @@ async function tryStructuralMergeIsolated(
   _branchA: string,
   branchB: string,
   targetBranch: string,
+  hooks: WorktreeHooks,
 ): Promise<{ success: boolean; conflicts: string[]; worktreePath?: string }> {
   const sessionId = `merge-${runId}-${Date.now()}`;
   let worktreeDir: string | undefined;
 
   try {
-    const worktree = createWorktree({
+    const worktree = hooks.createWorktree({
       directory: repoRoot,
       sessionId,
       branch: `council-merge-${sessionId}`,
@@ -100,7 +105,7 @@ async function tryStructuralMergeIsolated(
       } catch {
         git(["reset", "--hard", "HEAD"], worktreeDir);
       }
-      removeWorktree(worktreeDir);
+      hooks.removeWorktree(worktreeDir);
       return { success: true, conflicts: [] };
     }
 
@@ -110,7 +115,7 @@ async function tryStructuralMergeIsolated(
     } catch {
       /* ignore */
     }
-    removeWorktree(worktreeDir);
+    hooks.removeWorktree(worktreeDir);
     return { success: false, conflicts };
   } catch {
     if (worktreeDir) {
@@ -120,7 +125,7 @@ async function tryStructuralMergeIsolated(
         /* ignore */
       }
       try {
-        removeWorktree(worktreeDir);
+        hooks.removeWorktree(worktreeDir);
       } catch {
         /* non-fatal cleanup */
       }
@@ -145,9 +150,10 @@ async function tryStructuralMergeIsolated(
  */
 export class MergeBrain {
   private readonly scorer = new MergeConfidenceScorer();
+  private readonly worktreeHooks?: WorktreeHooks;
 
-  constructor() {
-    // Worktree isolation is handled internally via @dantecode/git-engine.
+  constructor(hooks?: WorktreeHooks) {
+    this.worktreeHooks = hooks;
   }
 
   async synthesize(input: MergeBrainInput): Promise<MergeBrainResult> {
@@ -193,25 +199,32 @@ export class MergeBrain {
       const branchB = this.extractBranchFromPatch(candidates[1]!);
 
       if (branchA && branchB) {
-        const structuralResult = await tryStructuralMergeIsolated(
-          repoRoot,
-          runId,
-          branchA,
-          branchB,
-          targetBranch,
-        );
-        if (structuralResult.success) {
-          // Worktree was removed on success; use first candidate diff as the synthesized patch.
-          synthesis.mergedPatch = candidates[0]!.unifiedDiff;
-          synthesis.decision = "auto-merge";
-          synthesis.verificationPassed = true;
-        } else {
-          // Structural merge failed — require review
-          synthesis.decision = "review-required" satisfies MergeDecision;
-          synthesis.mergedPatch = this.formatConflictSummary(
-            candidates,
-            structuralResult.conflicts,
+        if (this.worktreeHooks) {
+          const structuralResult = await tryStructuralMergeIsolated(
+            repoRoot,
+            runId,
+            branchA,
+            branchB,
+            targetBranch,
+            this.worktreeHooks,
           );
+          if (structuralResult.success) {
+            // Worktree was removed on success; use first candidate diff as the synthesized patch.
+            synthesis.mergedPatch = candidates[0]!.unifiedDiff;
+            synthesis.decision = "auto-merge";
+            synthesis.verificationPassed = true;
+          } else {
+            // Structural merge failed — require review
+            synthesis.decision = "review-required" satisfies MergeDecision;
+            synthesis.mergedPatch = this.formatConflictSummary(
+              candidates,
+              structuralResult.conflicts,
+            );
+          }
+        } else {
+          // No worktree hooks — cannot attempt structural merge, require review
+          synthesis.decision = "review-required" satisfies MergeDecision;
+          synthesis.mergedPatch = this.formatConflictSummary(candidates, []);
         }
       } else {
         // No branch info — use first candidate

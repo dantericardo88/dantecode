@@ -516,7 +516,7 @@ export type {
 } from "./council/merge-confidence.js";
 
 export { MergeBrain } from "./council/merge-brain.js";
-export type { MergeBrainInput, MergeBrainResult } from "./council/merge-brain.js";
+export type { MergeBrainInput, MergeBrainResult, WorktreeHooks } from "./council/merge-brain.js";
 
 export { HandoffEngine as CouncilHandoffEngine } from "./council/handoff-engine.js";
 export type { HandoffCreationOptions, HandoffValidationResult } from "./council/handoff-engine.js";
