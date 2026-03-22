@@ -5344,7 +5344,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Build something \u2014 describe what you want in plain language",
     usage: "/magic <what to build>",
     handler: magicCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -5352,7 +5352,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run the setup wizard",
     usage: "/onboard [--force]",
     handler: onboardCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -5360,6 +5360,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Measure DanteCode readiness scores (C: User Experience, D: Distribution)",
     usage: "/score",
     handler: scoreCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5375,6 +5376,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Switch model mid-session",
     usage: "/model <id>",
     handler: modelCommand,
+    tier: 1,
     category: "core",
   },
   {
@@ -5398,6 +5400,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List files currently in context",
     usage: "/files",
     handler: filesCommand,
+    tier: 1,
     category: "core",
   },
   {
@@ -5409,13 +5412,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "git",
   },
   { name: "commit", description: "Trigger auto-commit", usage: "/commit", handler: commitCommand, tier: 1, category: "git" },
-  { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand, category: "git" },
+  { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand, tier: 2, category: "git" },
   { name: "undo", description: "Undo last file edit", usage: "/undo", handler: undoCommand, tier: 1, category: "core" },
   {
     name: "lessons",
     description: "Show project lessons",
     usage: "/lessons",
     handler: lessonsCommand,
+    tier: 2,
     category: "memory",
   },
   {
@@ -5423,6 +5427,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Save a note to .dantecode/DANTE.md (persistent project memory)",
     usage: "/remember <text>",
     handler: rememberCommand,
+    tier: 2,
     category: "memory",
   },
   {
@@ -5430,14 +5435,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run PDSE scorer on a file",
     usage: "/pdse <file>",
     handler: pdseCommand,
+    tier: 2,
     category: "verification",
   },
-  { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand, category: "verification" },
+  { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand, tier: 2, category: "verification" },
   {
     name: "verify-output",
     description: "Run structured output verification from JSON input",
     usage: "/verify-output <input.json>",
     handler: verifyOutputCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5445,6 +5452,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run the QA harness across multiple outputs from JSON input",
     usage: "/qa-suite <input.json>",
     handler: qaSuiteCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5452,6 +5460,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Aggregate critic verdicts from JSON input",
     usage: "/critic-debate <input.json>",
     handler: criticDebateCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5459,6 +5468,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Register an output verification rail from JSON input",
     usage: "/add-verification-rail <input.json>",
     handler: addVerificationRailCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5467,6 +5477,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
     handler: verificationHistoryCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5474,6 +5485,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Show recent audit log entries",
     usage: "/audit",
     handler: auditCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5492,12 +5504,13 @@ const SLASH_COMMANDS: SlashCommand[] = [
     tier: 1,
     category: "core",
   },
-  { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand, category: "core" },
+  { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand, tier: 2, category: "core" },
   {
     name: "web",
     description: "Fetch URL content into context",
     usage: "/web <url>",
     handler: webCommand,
+    tier: 2,
     category: "search",
   },
   {
@@ -5505,6 +5518,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List or activate a skill",
     usage: "/skill [name]",
     handler: skillCommand,
+    tier: 2,
     category: "skills",
   },
   {
@@ -5512,6 +5526,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List all installed skills with verification scores",
     usage: "/skills",
     handler: skillsListCommand,
+    tier: 2,
     category: "skills",
   },
   {
@@ -5519,6 +5534,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Quick install a skill from a path, git URL, or HTTP URL",
     usage: "/skill-install <source>",
     handler: skillInstallCommand,
+    tier: 2,
     category: "skills",
   },
   {
@@ -5526,6 +5542,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run DanteForge verification on an installed skill",
     usage: "/skill-verify <name>",
     handler: skillVerifyCommand,
+    tier: 2,
     category: "skills",
   },
   {
@@ -5533,6 +5550,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List available agents",
     usage: "/agents",
     handler: agentsCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5540,6 +5558,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Add file as read-only reference context",
     usage: "/read-only <file>",
     handler: readOnlyCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5555,6 +5574,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Browse, search, and manage persistent memories",
     usage: "/memory [list|search <q>|stats|forget <key>|cross-session|export [path]]",
     handler: memoryCommand,
+    tier: 2,
     category: "memory",
   },
   {
@@ -5562,6 +5582,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Name or rename the current session",
     usage: "/name <session-name>",
     handler: nameCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5569,6 +5590,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Export current session to JSON or Markdown",
     usage: "/export [json|md] [path]",
     handler: exportCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5576,6 +5598,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Import a session from JSON file",
     usage: "/import <path>",
     handler: importSessionCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5583,6 +5606,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Fork current session into a new context (preserves history)",
     usage: "/branch [name]",
     handler: branchCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5590,6 +5614,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Toggle plan-first architect mode",
     usage: "/architect",
     handler: architectCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5597,6 +5622,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Create git worktree for isolation",
     usage: "/worktree",
     handler: worktreeCommand,
+    tier: 2,
     category: "git",
   },
   {
@@ -5605,6 +5631,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
       "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
     usage: "/sandbox [status|force-docker|force-worktree|force-host|on|off]",
     handler: sandboxCommand,
+    tier: 2,
     category: "sandbox",
   },
   {
@@ -5612,6 +5639,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Toggle silent mode (compact progress only)",
     usage: "/silent",
     handler: silentCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5619,6 +5647,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--self-improve] [--silent] [--persist]",
     handler: autoforgeCommand,
+    tier: 2,
     category: "automation",
   },
   {
@@ -5626,6 +5655,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Queue a paused durable run for continuation",
     usage: "/resume [runId]",
     handler: resumeCommand,
+    tier: 2,
     category: "sessions",
   },
   {
@@ -5633,6 +5663,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List durable runs and legacy resumable sessions",
     usage: "/runs",
     handler: runsCommand,
+    tier: 2,
     category: "sessions",
   },
   {
@@ -5640,6 +5671,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
     usage: "/oss [focus-area]",
     handler: ossCommand,
+    tier: 2,
     category: "automation",
   },
   {
@@ -5647,6 +5679,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Multi-agent coordination — parallel lanes for complex tasks",
     usage: "/party [--autoforge] [--files a,b] <task>",
     handler: partyCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5654,6 +5687,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Cross-workspace workflow quick reference — what to say where",
     usage: "/postal",
     handler: postalCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5661,6 +5695,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List MCP servers and tools",
     usage: "/mcp",
     handler: mcpCommand,
+    tier: 2,
     category: "advanced",
   },
   {
@@ -5669,6 +5704,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
     handler: gitWatchCommand,
+    tier: 2,
     category: "git",
   },
   {
@@ -5676,6 +5712,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run a local GitHub-style workflow file",
     usage: "/run-workflow <workflowPath> [event.json] [--background]",
     handler: runWorkflowCommand,
+    tier: 2,
     category: "git",
   },
   {
@@ -5684,6 +5721,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
     handler: autoPrCommand,
+    tier: 2,
     category: "git",
   },
   {
@@ -5695,6 +5733,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
       getGitAutomationOrchestrator(state); // pre-populate with buildAutomationAgentRunner DI
       return automateCommand(args, state);
     },
+    tier: 2,
     category: "automation",
   },
   {
@@ -5703,6 +5742,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
     handler: webhookListenCommand,
+    tier: 2,
     category: "automation",
   },
   {
@@ -5711,6 +5751,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
     handler: scheduleGitTaskCommand,
+    tier: 2,
     category: "automation",
   },
   {
@@ -5718,6 +5759,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Background agent tasks — run, list, cancel (--pr auto-creates PR)",
     usage: "/bg [--docker] [--commit] [--pr] [--long] [task | --resume <id> | cancel <id> | clear]",
     handler: bgCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5725,6 +5767,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Start webhook server for GitHub/Slack events",
     usage: "/listen [port | status]",
     handler: listenCommand,
+    tier: 2,
     category: "automation",
   },
   {
@@ -5732,6 +5775,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Build semantic code index for the project",
     usage: "/index [--embed[=provider]]",
     handler: indexCommand,
+    tier: 2,
     category: "search",
   },
   {
@@ -5739,6 +5783,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Search code index for relevant code",
     usage: "/search <query>",
     handler: searchCommand,
+    tier: 2,
     category: "search",
   },
   {
@@ -5746,6 +5791,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Control reasoning effort tier for next prompt or entire session",
     usage: "/think [quick|deep|expert|auto] [--session] | stats | chain [N]",
     handler: thinkCommand,
+    tier: 2,
     category: "advanced",
   },
   {
@@ -5753,6 +5799,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "DanteGaslight adversarial refinement — on/off/stats/review/bridge",
     usage: "/gaslight <on|off|stats|review|bridge>",
     handler: gaslightCommand,
+    tier: 2,
     category: "advanced",
   },
   {
@@ -5760,6 +5807,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "DanteFearSet — Fear-Setting on/off/stats/review/run/bridge",
     usage: "/fearset <on|off|stats|review|run <context>|bridge>",
     handler: fearsetCommand,
+    tier: 2,
     category: "advanced",
   },
   {
@@ -5768,6 +5816,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
       "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
     usage: "/research <topic or question>",
     handler: researchSlashHandler,
+    tier: 2,
     category: "search",
   },
   {
@@ -5775,6 +5824,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Review a GitHub PR using DanteForge PDSE + constitutional verification",
     usage: "/review <PR#> [--post] [--severity=strict|normal|lenient]",
     handler: reviewCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5782,6 +5832,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Triage a GitHub issue — labels, priority, effort, relevant files",
     usage: "/triage <issue#> [--post-labels] [--no-llm]",
     handler: triageCommand,
+    tier: 2,
     category: "verification",
   },
   {
@@ -5789,6 +5840,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Approve the pending sandboxed action",
     usage: "/approve",
     handler: approveCommand,
+    tier: 2,
     category: "sandbox",
   },
   {
@@ -5796,6 +5848,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Deny the pending sandboxed action and reset policy to manual",
     usage: "/deny",
     handler: denyCommand,
+    tier: 2,
     category: "sandbox",
   },
   {
@@ -5803,6 +5856,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Add an allow rule to bypass sandbox approval for matching commands",
     usage: "/always-allow <pattern>",
     handler: alwaysAllowCommand,
+    tier: 2,
     category: "sandbox",
   },
   {
@@ -5810,6 +5864,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Launch parallel agents to solve a task using Git worktrees. Usage: /fleet <task>",
     usage: "/fleet <task>",
     handler: fleetCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5817,6 +5872,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run an autonomous task loop until condition met. Usage: /loop [--max=N] <task>",
     usage: "/loop [--max=N] <task>",
     handler: loopCommand,
+    tier: 2,
     category: "agents",
   },
   {
@@ -5824,6 +5880,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Switch terminal theme with live preview",
     usage: "/theme [name]",
     handler: themeCommand,
+    tier: 2,
     category: "core",
   },
   {
@@ -5831,6 +5888,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Show token usage and cost estimate for this session",
     usage: "/cost",
     handler: costCommand,
+    tier: 1,
     category: "core",
   },
 ];
