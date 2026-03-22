@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
+
 /** Timeout for a single git merge operation (ms). */
 const MERGE_TIMEOUT_MS = 30_000;
 import type { FinalSynthesisRecord, MergeDecision } from "./council-types.js";

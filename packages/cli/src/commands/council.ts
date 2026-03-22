@@ -311,7 +311,9 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   const timeoutMs = timeoutSecs > 0 ? timeoutSecs * 1000 : undefined;
 
   const adapters = buildAdapters(agentKinds, { bridgeDir, projectRoot });
-  const orchestrator = new CouncilOrchestrator(adapters);
+  const orchestrator = new CouncilOrchestrator(adapters, {
+    worktreeHooks: { createWorktree, removeWorktree },
+  });
 
   orchestrator.on("error", ({ message, context }) => {
     console.error(`${RED}[council] ${context ?? "error"}: ${message}${RESET}`);
@@ -677,6 +679,7 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   );
   const orchestrator = new CouncilOrchestrator(adapters, {
     allowAutoMerge: autoFlag,
+    worktreeHooks: { createWorktree, removeWorktree },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
 
@@ -874,7 +877,9 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     state.agents.map((a) => a.agentKind),
     { bridgeDir, projectRoot },
   );
-  const orchestrator = new CouncilOrchestrator(adapters);
+  const orchestrator = new CouncilOrchestrator(adapters, {
+    worktreeHooks: { createWorktree, removeWorktree },
+  });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
 
   try {
@@ -1061,7 +1066,9 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
   ];
 
   const adapters = buildAdapters(agentKinds, { projectRoot });
-  const orchestrator = new CouncilOrchestrator(adapters);
+  const orchestrator = new CouncilOrchestrator(adapters, {
+    worktreeHooks: { createWorktree, removeWorktree },
+  });
 
   orchestrator.on("error", ({ message, context }) => {
     console.error(`${RED}[fleet] ${context ?? "error"}: ${message}${RESET}`);

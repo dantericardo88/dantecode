@@ -22,7 +22,7 @@ import { CouncilRouter } from "./council-router.js";
 import type { LaneAssignmentRequest, ReassignmentRequest } from "./council-router.js";
 import { WorktreeObserver } from "./worktree-observer.js";
 import { MergeBrain } from "./merge-brain.js";
-import type { MergeBrainResult } from "./merge-brain.js";
+import type { MergeBrainResult, WorktreeHooks } from "./merge-brain.js";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
 import { FleetBudget } from "./fleet-budget.js";
 import type { FleetBudgetReport } from "./fleet-budget.js";
@@ -79,6 +79,8 @@ export interface CouncilOrchestratorOptions {
    * All fields optional — omit for unlimited/default behaviour.
    */
   councilConfig?: CouncilConfig;
+  /** Worktree create/remove callbacks for structural merge isolation. */
+  worktreeHooks?: WorktreeHooks;
 }
 
 export interface OrchestratorStartOptions {
@@ -142,7 +144,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private router: CouncilRouter | null = null;
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
-  private readonly options: Required<CouncilOrchestratorOptions>;
+  private readonly options: Required<Omit<CouncilOrchestratorOptions, "worktreeHooks">> & Pick<CouncilOrchestratorOptions, "worktreeHooks">;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
   private _allTerminalFired = false;
@@ -172,7 +174,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     super();
     this.adapters = adapters;
     this.ledger = new UsageLedger();
-    this.brain = new MergeBrain();
+    this.brain = new MergeBrain(options.worktreeHooks);
     this._config = options.councilConfig ?? {};
     this._budget = new FleetBudget(this._config.budget ?? {});
     this._redistributor = new TaskRedistributor();
@@ -185,6 +187,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       retryBaseDelayMs: options.retryBaseDelayMs ?? 2_000,
       retryMaxDelayMs: options.retryMaxDelayMs ?? 30_000,
       councilConfig: this._config,
+      worktreeHooks: options.worktreeHooks,
     };
 
     // Register all adapters in the ledger
