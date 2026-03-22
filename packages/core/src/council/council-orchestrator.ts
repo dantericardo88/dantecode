@@ -707,7 +707,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       if (opts?.timeoutMs !== undefined) {
         timeoutHandle = setTimeout(() => {
           cleanup();
-          void this.fail(`watchUntilComplete timed out after ${opts.timeoutMs}ms`);
+          this.fail(`watchUntilComplete timed out after ${opts.timeoutMs}ms`).catch(() => {});
           reject(new Error(`Council run timed out after ${opts.timeoutMs}ms`));
         }, opts.timeoutMs);
       }

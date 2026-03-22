@@ -176,6 +176,9 @@ describe("CouncilOrchestrator integration", () => {
 
     // Register watcher first, then assign lane — consistent pattern across all tests
     const watchPromise = orchestrator.watchUntilComplete({ timeoutMs: 150 });
+    // Attach a no-op catch immediately so Node.js doesn't fire unhandledRejection
+    // if the 150ms timeout fires before `rejects.toThrow()` attaches its handler.
+    watchPromise.catch(() => {});
 
     // Use the public assignLane() API — no state injection hacks
     const laneResult = await orchestrator.assignLane(

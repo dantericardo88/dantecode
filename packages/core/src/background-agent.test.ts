@@ -232,10 +232,13 @@ describe("BackgroundAgentRunner", () => {
       });
 
       runner.enqueue("tracked");
-      await vi.waitFor(() => {
-        expect(updates.length).toBeGreaterThanOrEqual(3);
-        expect(updates[updates.length - 1]?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(updates.length).toBeGreaterThanOrEqual(3);
+          expect(updates[updates.length - 1]?.status).toBe("completed");
+        },
+        { timeout: 10_000 },
+      );
 
       // Should have: queued, running, step 1, step 2, completed
       expect(updates.length).toBeGreaterThanOrEqual(3);

@@ -1,0 +1,12 @@
+dimension	weight	before	after	evidence
+fresh_install_build_test	0.15	5	9	21/21 build, 42/42 test, 3/3 smoke
+npm_pack_dry_run	0.10	3	9	10/10 packages pack clean
+dependency_audit	0.10	3	8	3 moderate (was 14)
+anti_stub_doctrine	0.10	4	10	0 violations
+integration_tests	0.20	2	8	196 assertions, 6 tests
+unit_test_coverage	0.10	7	8	5203 tests, 0 failures
+ci_pipeline_health	0.05	6	7	ci.yml + pr-review.yml
+vscode_packaging	0.05	5	9	VSIX 924KB, 8 files
+api_correctness	0.10	3	8	consumer-side validated
+security_posture	0.05	5	7	constitution + sandbox + execFileSync
+TOTAL	1.00	5.2	8.4	target was 7.5

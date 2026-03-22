@@ -171,21 +171,25 @@ export class TrailStore {
     if (!existsSync(jsonlPath)) return [];
     const raw = await readFile(jsonlPath, "utf8");
     const results: T[] = [];
+    const corruptWrites: Promise<void>[] = [];
     let byteOffset = 0;
     for (const line of raw.split("\n")) {
       if (line.trim()) {
         try {
           results.push(JSON.parse(line) as T);
         } catch {
-          void appendFile(
-            corruptPath,
-            JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
-            "utf8",
-          ).catch(() => {});
+          corruptWrites.push(
+            appendFile(
+              corruptPath,
+              JSON.stringify({ line, byteOffset, corruptedAt: new Date().toISOString() }) + "\n",
+              "utf8",
+            ).catch(() => {}),
+          );
         }
       }
       byteOffset += line.length + 1;
     }
+    await Promise.all(corruptWrites);
     return results;
   }
 
