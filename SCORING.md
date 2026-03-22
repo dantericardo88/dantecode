@@ -18,12 +18,12 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 
 | # | Dimension | Evidence | Basis | Validation needed | Score |
 |---|-----------|----------|-------|-------------------|-------|
-| B-1 | DanteForge pipeline | Compiled binary, constitutional checks, PDSE scoring | Infrastructure only | Measure PDSE accuracy vs human judgment on 50+ tasks | 8 |
-| B-2 | Anti-confabulation | 5 guard types + diff-based verification | Infrastructure only | Count confabulation catches over 100 real sessions | 8 |
-| B-3 | Evidence chain | Cryptographic primitives (hash chain, Merkle tree, receipts) | Infrastructure only | Verify chain integrity across 100+ real evidence bundles | 8 |
-| B-4 | Gaslight refinement | Bounded adversarial loop, 5 stop conditions, lesson distillation | Infrastructure only | Track improvement rate on real drafts | 8 |
-| B-5 | Run reports | Plain-language reports with verification status per entry | Infrastructure only | User survey on report clarity and actionability | 8 |
-| | **Score B average** | | | | **8.0** |
+| B-1 | DanteForge pipeline | PDSE runs on every session (agent-loop.ts:1359), constitutional checks gate all touched files | Measured (always active) | Measure PDSE accuracy vs human judgment on 50+ tasks | 8 |
+| B-2 | Anti-confabulation | 5 guard types always active: empty-response breaker, confabulation gate, write-size guard, premature-commit blocker, write-to-existing blocker | Measured (always active) | Count confabulation catches over 100 real sessions | 8 |
+| B-3 | Evidence chain | Cryptographic primitives exist (hash chain, Merkle tree, receipts, 67 tests) but package is never imported by CLI or agent-loop | Infrastructure only (orphaned) | Wire evidence-bridge into CLI hot path; then verify across 100+ bundles | 2 |
+| B-4 | Gaslight refinement | Bounded adversarial loop works when enabled, but disabled by default (requires DANTECODE_GASLIGHT=1 env var) | Infrastructure only (disabled by default) | Enable by default or measure improvement rate when manually enabled | 5 |
+| B-5 | Run reports | Plain-language reports generated only by explicit /magic, /party, /forge commands; not generated for normal REPL sessions | Measured (explicit commands only) | Generate reports for normal REPL sessions; user survey on clarity | 6 |
+| | **Score B average** | | | | **5.8** |
 
 ## Score C — User Experience
 
@@ -55,12 +55,12 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 | Score | Name | Weight | Current | Target |
 |-------|------|--------|---------|--------|
 | A | Engineering Quality | 30% | **9.3** | 8.0+ |
-| B | Verification Quality | 30% | **8.0** | 8.0+ |
+| B | Verification Quality | 30% | **5.8** | 8.0+ |
 | C | User Experience | 25% | **8.0** | 7.0+ |
 | D | Distribution | 15% | **3.6** | 5.0+ |
-| **Overall** | | | **7.7** | **7.0+** |
+| **Overall** | | | **7.1** | **7.0+** |
 
-Scores A, B, C exceed targets. Score D below target — expected for pre-launch.
+Score A exceeds target. Score B below target — evidence chain orphaned, gaslight disabled by default, run reports explicit-only. Score C exceeds target. Score D below target — expected for pre-launch.
 
 ### Evidence Basis Key
 
@@ -72,4 +72,4 @@ Scores A, B, C exceed targets. Score D below target — expected for pre-launch.
 
 Run `npm run measure:scores` to auto-measure dimensions A-1, A-2, C-3, C-6, D-1, D-4.
 
-*Last updated: 2026-03-22 — Honesty sprint*
+*Last updated: 2026-03-22 — Ship-ready sprint (Score B recalibrated)*
