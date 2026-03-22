@@ -28,8 +28,9 @@
     "smoke:install": "node scripts/smoke-install.mjs",
     "smoke:skill-import": "node scripts/smoke-skill-import.mjs",
     "smoke:provider": "node scripts/smoke-provider.mjs",
+    "smoke:external": "node scripts/smoke-external.mjs",
     "publish:dry-run": "node scripts/publish-dry-run.mjs",
-    "release:check": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:coverage && npm run smoke:cli && npm run smoke:install && npm run smoke:skill-import && npm run publish:dry-run",
+    "release:check": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:coverage && npm run smoke:cli && npm run smoke:install && npm run smoke:skill-import && npm run smoke:external && npm run publish:dry-run",
     "release:check:strict": "npm run release:check",
     "cli": "node packages/cli/dist/index.js",
     "dantecode": "node packages/cli/dist/index.js"

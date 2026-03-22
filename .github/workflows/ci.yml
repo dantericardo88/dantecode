@@ -64,6 +64,8 @@ jobs:
         run: npm run smoke:install
       - name: Run skill import smoke check
         run: npm run smoke:skill-import
+      - name: Run external project smoke check
+        run: npm run smoke:external
       - name: Upload coverage artifact
         if: matrix.node-version == '20'
         uses: actions/upload-artifact@v4
@@ -86,6 +88,7 @@ jobs:
       - run: npm run smoke:cli
       - run: npm run smoke:install
       - run: npm run smoke:skill-import
+      - run: npm run smoke:external
 
   anti-stub-self-check:
     runs-on: ubuntu-24.04

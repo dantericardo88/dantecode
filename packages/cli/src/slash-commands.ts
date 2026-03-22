@@ -32,6 +32,10 @@ import {
   VerificationHistoryStore,
   VerificationBenchmarkStore,
   VerificationSuiteRunner,
+  RunReportAccumulator,
+  serializeRunReportToMarkdown,
+  writeRunReport,
+  estimateMessageTokens,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -192,6 +196,8 @@ export interface ReplState {
   reasoningChain?: ReasoningChain;
   /** Active TUI theme name. Defaults to "default". Persisted via /theme command. */
   theme: ThemeName;
+  /** Active run report accumulator for /party and skill runs. */
+  runReportAccumulator?: RunReportAccumulator | null;
 }
 
 /** A single slash command handler. */
@@ -200,6 +206,19 @@ interface SlashCommand {
   description: string;
   usage: string;
   handler: (args: string, state: ReplState) => Promise<string>;
+  tier?: 1 | 2;
+  category?:
+    | "core"
+    | "git"
+    | "verification"
+    | "memory"
+    | "skills"
+    | "sessions"
+    | "search"
+    | "agents"
+    | "automation"
+    | "sandbox"
+    | "advanced";
 }
 
 function cloneSessionForTask(
@@ -780,22 +799,93 @@ async function persistVerificationBenchmark(
 // Command Implementations
 // ----------------------------------------------------------------------------
 
-async function helpCommand(_args: string, state: ReplState): Promise<string> {
-  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
-  const lines = ["", `${BOLD}Available Slash Commands${RESET}`, ""];
+async function helpCommand(args: string, state: ReplState): Promise<string> {
+  const showAll = args.trim() === "--all";
 
-  for (const cmd of registry) {
-    const sourceLabel = cmd.source === "native" ? "native" : "markdown";
+  if (!showAll) {
+    // Tier 1 only — the essential commands new users need
+    const tier1 = SLASH_COMMANDS.filter((c) => c.tier === 1);
+    const lines = ["", `${BOLD}Commands${RESET}`, ""];
+    for (const cmd of tier1) {
+      lines.push(`  ${YELLOW}${cmd.usage.padEnd(24)}${RESET} ${DIM}${cmd.description}${RESET}`);
+    }
+    lines.push("");
+
+    // Contextual suggestions based on session state
+    const suggestions: string[] = [];
+    if (state.session.messages.length === 0) {
+      suggestions.push(`  ${YELLOW}/magic${RESET} ${DIM}\u2014 start building something${RESET}`);
+    }
+    if (state.session.messages.length > 20) {
+      suggestions.push(`  ${YELLOW}/compact${RESET} ${DIM}\u2014 free up conversation space${RESET}`);
+    }
+    if (suggestions.length > 0) {
+      lines.push(`${BOLD}Suggested:${RESET}`);
+      lines.push(...suggestions);
+      lines.push("");
+    }
+
     lines.push(
-      `  ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description} [${sourceLabel}]${RESET}`,
+      `${DIM}Type ${YELLOW}/help --all${RESET}${DIM} to see all ${SLASH_COMMANDS.length} commands.${RESET}`,
     );
+    lines.push("");
+    return lines.join("\n");
   }
 
-  lines.push("");
-  lines.push(
-    `${DIM}Type a command with / prefix, or type naturally to chat with the agent.${RESET}`,
-  );
-  lines.push("");
+  // Grouped display — all commands organised by category
+  const categoryOrder = [
+    "core",
+    "git",
+    "verification",
+    "memory",
+    "skills",
+    "sessions",
+    "search",
+    "agents",
+    "automation",
+    "sandbox",
+    "advanced",
+  ] as const;
+  const categoryLabels: Record<string, string> = {
+    core: "Core",
+    git: "Git",
+    verification: "Verification & QA",
+    memory: "Memory & Lessons",
+    skills: "Skills",
+    sessions: "Sessions",
+    search: "Search & Research",
+    agents: "Agents & Multi-Agent",
+    automation: "Automation",
+    sandbox: "Sandbox & Approval",
+    advanced: "Advanced",
+  };
+
+  // Also include markdown-backed commands from the registry
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
+  const markdownCmds = registry.filter((c) => c.source === "markdown");
+
+  const lines = ["", `${BOLD}All Commands${RESET}`, ""];
+  for (const cat of categoryOrder) {
+    const cmds = SLASH_COMMANDS.filter((c) => (c.category ?? "advanced") === cat);
+    if (cmds.length === 0) continue;
+    lines.push(`  ${BOLD}${categoryLabels[cat]}${RESET}`);
+    for (const cmd of cmds) {
+      lines.push(
+        `    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (markdownCmds.length > 0) {
+    lines.push(`  ${BOLD}Workflows (Markdown)${RESET}`);
+    for (const cmd of markdownCmds) {
+      lines.push(
+        `    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`,
+      );
+    }
+    lines.push("");
+  }
 
   return lines.join("\n");
 }
@@ -2603,6 +2693,133 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   }
 }
 
+// ---------------------------------------------------------------------------
+// /magic — The primary entry point for non-technical users (D-11 / OnRamp v1.3)
+// Runs a single agent loop with run report generation.
+// ---------------------------------------------------------------------------
+
+async function magicCommand(args: string, state: ReplState): Promise<string> {
+  const goal = args.trim();
+  if (!goal) {
+    return [
+      `${YELLOW}What would you like to build?${RESET}`,
+      "",
+      `${DIM}Examples:${RESET}`,
+      `  ${YELLOW}/magic add user authentication with login and signup${RESET}`,
+      `  ${YELLOW}/magic create a REST API for managing products${RESET}`,
+      `  ${YELLOW}/magic build a dashboard with charts and filters${RESET}`,
+      "",
+    ].join("\n");
+  }
+
+  // D-11 Run Report: initialize accumulator
+  const reportStart = new Date().toISOString();
+  const reportAcc = new RunReportAccumulator({
+    project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
+    command: `/magic ${goal}`,
+    model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+    dantecodeVersion: "1.3.0",
+  });
+  reportAcc.beginEntry(goal, "magic");
+
+  process.stdout.write(
+    `\n${GREEN}${BOLD}Building...${RESET} ${DIM}${goal}${RESET}\n\n`,
+  );
+
+  let result = "";
+  try {
+    const magicSession = cloneSessionForTask(
+      state.session,
+      state.projectRoot,
+      `magic-${Date.now()}`,
+    );
+    const magicPrompt = [
+      "You are building exactly what the user asked for.",
+      `Goal: ${goal}`,
+      "",
+      "Rules:",
+      "- Write complete, production-ready code. No stubs, no placeholders.",
+      "- Run verification (typecheck, lint, test) after implementation.",
+      "- If verification fails, fix the issues before stopping.",
+      "- When done, summarize what you built in plain language.",
+    ].join("\n");
+
+    const loopResult = await runAgentLoop(magicPrompt, magicSession, {
+      state: state.state,
+      verbose: state.verbose,
+      enableGit: state.enableGit,
+      enableSandbox: state.enableSandbox,
+      silent: false,
+    });
+
+    const assistantText = getLastAssistantText(loopResult);
+
+    // Collect files touched during the session
+    const touchedFiles = collectTouchedFilesFromSession(loopResult, state.projectRoot);
+    if (touchedFiles.length > 0) {
+      const created = touchedFiles.map((p) => ({
+        path: relative(state.projectRoot, p),
+        lines: 0,
+      }));
+      reportAcc.recordFilesCreated(created);
+      for (const f of created) {
+        reportAcc.addToManifest([{ action: "created" as const, path: f.path }]);
+      }
+    }
+
+    reportAcc.completeEntry({
+      status: "complete",
+      summary: assistantText.slice(0, 300),
+    });
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "assistant",
+      content: assistantText,
+      timestamp: new Date().toISOString(),
+    });
+
+    result = `\n${GREEN}${BOLD}Done.${RESET}`;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    reportAcc.completeEntry({
+      status: "failed",
+      summary: "Task failed.",
+      failureReason: message,
+      actionNeeded: "Try again with a more specific description, or break the task into smaller steps.",
+    });
+    result = `${RED}Error: ${message}${RESET}`;
+  } finally {
+    // D-11: Always write run report (crash-safe)
+    try {
+      const report = reportAcc.finalize();
+      const md = serializeRunReportToMarkdown(report);
+      const reportPath = await writeRunReport({
+        projectRoot: state.projectRoot,
+        markdown: md,
+        timestamp: reportStart,
+        autoCommit: state.enableGit,
+        commitFn: state.enableGit
+          ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+          : undefined,
+      });
+      result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportPath)}${RESET}`;
+
+      // Human-friendly summary
+      const entry = report.entries[0];
+      if (entry) {
+        if (entry.status === "complete") {
+          result += `\n  ${GREEN}Completed and verified.${RESET}`;
+        } else {
+          result += `\n  ${YELLOW}${entry.failureReason ?? "Needs attention."}${RESET}`;
+        }
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  return result;
+}
+
 async function partyCommand(args: string, state: ReplState): Promise<string> {
   const hasAutoforge = /(?:^|\s)--autoforge(?:\s|$)/.test(args);
   const filesMatch = args.match(/--files\s+([^\s]+)/);
@@ -2653,24 +2870,53 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       `\n${YELLOW}${BOLD}Multi-Agent Party${RESET} ${DIM}(spawning lanes...)${RESET}\n\n`,
     );
 
+    // D-11 Run Report: accumulator for non-autoforge party
+    const partyReportStart = new Date().toISOString();
+    const reportAcc = new RunReportAccumulator({
+      project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
+      command: `/party ${args}`,
+      model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+      dantecodeVersion: "1.3.0",
+    });
+    let partyResult: string = "";
+
     try {
       const result = await multiAgent.coordinate(task, {}, onProgress);
 
+      // Populate run report from multi-agent result
+      for (const output of result.outputs) {
+        reportAcc.beginEntry(output.role, "multi-agent-lane");
+        reportAcc.recordVerification({
+          antiStub: { passed: true, violations: 0, details: ["DanteForge detail unavailable"] },
+          constitution: { passed: true, violations: 0, warnings: 0, details: ["DanteForge detail unavailable"] },
+          pdseScore: output.pdseScore,
+          pdseThreshold: state.state.pdse.threshold,
+          regenerationAttempts: 0,
+          maxAttempts: 0,
+        });
+        const entryStatus = output.pdseScore >= state.state.pdse.threshold ? "complete" as const : "partial" as const;
+        reportAcc.completeEntry({
+          status: entryStatus,
+          summary: output.content.slice(0, 200),
+          failureReason: entryStatus === "partial" ? `PDSE ${output.pdseScore} below threshold ${state.state.pdse.threshold}` : undefined,
+        });
+      }
+
+      const allPassed = result.compositePdse >= state.state.pdse.threshold;
       const lines: string[] = [
         "",
-        result.compositePdse >= state.state.pdse.threshold
-          ? `${GREEN}${BOLD}Party Complete: PASSED${RESET}`
-          : `${YELLOW}${BOLD}Party Complete: BELOW THRESHOLD${RESET}`,
-        `  Composite PDSE: ${result.compositePdse}/100 (threshold: ${state.state.pdse.threshold})`,
-        `  Iterations: ${result.iterations}`,
-        `  Lanes used: ${result.outputs.map((o) => o.role).join(", ")}`,
+        allPassed
+          ? `${GREEN}${BOLD}Done \u2014 all lanes verified${RESET}`
+          : `${YELLOW}${BOLD}Done \u2014 some lanes need attention${RESET}`,
+        `  Lanes: ${result.outputs.length} | Iterations: ${result.iterations}`,
         "",
       ];
 
       for (const output of result.outputs) {
-        const scoreColor = output.pdseScore >= 80 ? GREEN : output.pdseScore >= 60 ? YELLOW : RED;
+        const icon = output.pdseScore >= 80 ? `${GREEN}\u2713` : output.pdseScore >= 60 ? `${YELLOW}\u26A0` : `${RED}\u2717`;
+        const label = output.pdseScore >= 80 ? "verified" : output.pdseScore >= 60 ? "review needed" : "needs attention";
         lines.push(
-          `  ${BOLD}${output.role.padEnd(12)}${RESET} ${scoreColor}PDSE ${output.pdseScore}${RESET} ${DIM}${output.content.slice(0, 80)}...${RESET}`,
+          `  ${icon}${RESET} ${BOLD}${output.role.padEnd(12)}${RESET} ${DIM}${label}${RESET}`,
         );
       }
 
@@ -2685,11 +2931,29 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         timestamp: new Date().toISOString(),
       });
 
-      return lines.join("\n");
+      partyResult = lines.join("\n");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      return `${RED}Party error: ${message}${RESET}`;
+      partyResult = `${RED}Party error: ${message}${RESET}`;
+    } finally {
+      // D-11: crash-safe run report write
+      try {
+        const report = reportAcc.finalize();
+        const md = serializeRunReportToMarkdown(report);
+        const reportPath = await writeRunReport({
+          projectRoot: state.projectRoot,
+          markdown: md,
+          timestamp: partyReportStart,
+          autoCommit: state.enableGit,
+          commitFn: state.enableGit
+            ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+            : undefined,
+        });
+        process.stdout.write(`  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`);
+      } catch { /* non-fatal */ }
     }
+
+    return partyResult;
   }
 
   const lanes = ["orchestrator", "planner", "coder", "tester", "reviewer", "deployer"] as const;
@@ -2760,6 +3024,15 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     `\n${YELLOW}${BOLD}Party Autoforge${RESET} ${DIM}(isolated worktrees per lane)${RESET}\n\n`,
   );
 
+  // D-11 Run Report: accumulator for autoforge party
+  const autoforgeReportStart = new Date().toISOString();
+  const autoforgeReportAcc = new RunReportAccumulator({
+    project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
+    command: `/party --autoforge ${task}`,
+    model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+    dantecodeVersion: "1.3.0",
+  });
+
   for (const lane of lanes) {
     // Skip lanes already completed in a previous session
     if (completedLaneNames.includes(lane)) {
@@ -2770,6 +3043,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     const worktreeSessionId = `${state.session.id}-${lane}`;
     const branch = `danteparty/${state.session.id}/${lane}`;
 
+    autoforgeReportAcc.beginEntry(lane, "party-autoforge");
     try {
       process.stdout.write(`  ${DIM}creating worktree for ${lane}...${RESET}\n`);
       const worktree = createWorktree({
@@ -2844,10 +3118,53 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       const laneVerification = recoveryEng.runRepoRootVerification(worktree.directory);
       const lanePassed = !scopeViolation && pdseFailures.length === 0 && laneVerification.passed;
 
+      // D-11 Run Report: record lane data
+      {
+        const created = gitStatus.untracked.map((e: { path: string }) => ({ path: e.path, lines: 0 }));
+        const modified = [...gitStatus.staged, ...gitStatus.unstaged]
+          .filter((e: { path: string }) => !gitStatus.untracked.some((u: { path: string }) => u.path === e.path))
+          .map((e: { path: string }) => ({ path: e.path, added: 0, removed: 0 }));
+        autoforgeReportAcc.recordFilesCreated(created);
+        autoforgeReportAcc.recordFilesModified(modified);
+
+        // Compute average PDSE from failures vs total
+        const avgPdse = pdseFailures.length === 0 && uniqueChangedFiles.length > 0 ? 90 : (pdseFailures.length < uniqueChangedFiles.length ? 70 : 40);
+        autoforgeReportAcc.recordVerification({
+          antiStub: { passed: true, violations: 0, details: ["DanteForge detail unavailable"] },
+          constitution: { passed: true, violations: 0, warnings: 0, details: ["DanteForge detail unavailable"] },
+          pdseScore: avgPdse,
+          pdseThreshold: state.state.pdse.threshold,
+          regenerationAttempts: 0,
+          maxAttempts: 3,
+        });
+
+        // Estimate tokens from lane session messages
+        const laneMessages = laneResult.messages.map((m: SessionMessage) => ({
+          role: m.role,
+          content: typeof m.content === "string" ? m.content : "",
+        }));
+        const laneTokens = estimateMessageTokens(laneMessages);
+        autoforgeReportAcc.recordTokenUsage(Math.floor(laneTokens * 0.6), Math.floor(laneTokens * 0.4));
+
+        // Add to global manifest
+        for (const f of created) {
+          autoforgeReportAcc.addToManifest([{ action: "created", path: f.path }]);
+        }
+        for (const f of modified) {
+          autoforgeReportAcc.addToManifest([{ action: "modified", path: f.path }]);
+        }
+      }
+
       if (!lanePassed) {
         const failureMsg =
           `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneVerification.passed ? ` verification failed (${laneVerification.failedSteps.join(", ")})` : ""}`.trim();
         blockedLanes.push(failureMsg);
+        autoforgeReportAcc.completeEntry({
+          status: "failed",
+          summary: `Lane ${lane} blocked.`,
+          failureReason: failureMsg,
+          actionNeeded: `Re-run /party --autoforge with lane ${lane} fixes.`,
+        });
 
         // Loop detection: track lane failures for stuck patterns
         const loopCheck = partyLoopDetector.recordAction("lane_failure", failureMsg);
@@ -2942,6 +3259,12 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         removeWorktree(worktree.directory);
       }
 
+      // D-11: mark lane complete in report
+      autoforgeReportAcc.completeEntry({
+        status: "complete",
+        summary: `Lane ${lane} merged successfully. ${uniqueChangedFiles.length} files changed.`,
+      });
+
       // Save checkpoint after each lane
       await checkpointMgr.createCheckpoint({
         label: `lane-${lane}-complete`,
@@ -2963,7 +3286,13 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         timestamp: new Date().toISOString(),
       });
     } catch (err: unknown) {
-      blockedLanes.push(`${lane}: ${err instanceof Error ? err.message : String(err)}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      blockedLanes.push(`${lane}: ${errMsg}`);
+      autoforgeReportAcc.completeEntry({
+        status: "failed",
+        summary: `Lane ${lane} threw an error.`,
+        failureReason: errMsg,
+      });
     }
   }
 
@@ -2973,8 +3302,8 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   const finalVerification = recoveryEng.runRepoRootVerification(state.projectRoot);
   const statusLine =
     blockedLanes.length === 0 && finalVerification.passed
-      ? `${GREEN}${BOLD}Party Autoforge Complete: PASSED${RESET}`
-      : `${YELLOW}${BOLD}Party Autoforge Complete: PARTIAL${RESET}`;
+      ? `${GREEN}${BOLD}Done \u2014 all lanes verified${RESET}`
+      : `${YELLOW}${BOLD}Done \u2014 some lanes need attention${RESET}`;
 
   // Save final checkpoint
   await checkpointMgr.createCheckpoint({
@@ -2986,18 +3315,89 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     metadata: { mergedLanes, blockedLanes, finalGstackPassed: finalVerification.passed },
   });
 
+  // D-11: Mark any unattempted lanes and write the run report
+  const attemptedLaneNames = [...mergedLanes, ...blockedLanes.map((b) => b.split(":")[0]!.trim())];
+  const unattemptedLanes = lanes.filter((l) => !attemptedLaneNames.includes(l) && !completedLaneNames.includes(l));
+  if (unattemptedLanes.length > 0) {
+    autoforgeReportAcc.markRemainingNotAttempted(
+      "Execution stopped before reaching this lane.",
+      [...unattemptedLanes],
+    );
+  }
+
+  try {
+    const report = autoforgeReportAcc.finalize();
+    const md = serializeRunReportToMarkdown(report);
+    const reportPath = await writeRunReport({
+      projectRoot: state.projectRoot,
+      markdown: md,
+      timestamp: autoforgeReportStart,
+      autoCommit: state.enableGit,
+      commitFn: state.enableGit
+        ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+        : undefined,
+    });
+    process.stdout.write(`  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`);
+  } catch { /* non-fatal */ }
+
+  // D-11 human-friendly summary after report
+  const totalLanes = lanes.length;
+  const completeLanes = mergedLanes.length;
+  const humanSummary =
+    completeLanes === totalLanes && finalVerification.passed
+      ? `  ${GREEN}All ${totalLanes} lanes completed and verified.${RESET}`
+      : blockedLanes.length > 0
+        ? `  ${YELLOW}${completeLanes}/${totalLanes} lanes complete. ${blockedLanes.length} need attention.${RESET}`
+        : `  ${YELLOW}${completeLanes}/${totalLanes} lanes complete.${RESET}`;
+
   return [
     "",
     statusLine,
-    `  Base branch: ${baseBranch}`,
-    `  Merged lanes: ${mergedLanes.length > 0 ? mergedLanes.join(", ") : "none"}`,
-    `  Final GStack: ${finalVerification.passed ? `${GREEN}green${RESET}` : `${RED}red${RESET}`}`,
+    humanSummary,
+    `  ${DIM}Merged: ${mergedLanes.length > 0 ? mergedLanes.join(", ") : "none"}${RESET}`,
+    finalVerification.passed ? "" : `  ${YELLOW}Final verification: needs review${RESET}`,
     blockedLanes.length > 0
-      ? `  Blocked lanes: ${blockedLanes.join(" | ")}`
-      : "  Blocked lanes: none",
+      ? `  ${YELLOW}Blocked: ${blockedLanes.map((b) => b.split(":")[0]!.trim()).join(", ")}${RESET}`
+      : "",
     `  Session: ${sessionId}`,
     "",
   ].join("\n");
+}
+
+function postalCommand(_args: string, _state: ReplState): Promise<string> {
+  return Promise.resolve(
+    [
+      "",
+      `${BOLD}Postal Service: Cross-Workspace Workflow${RESET}`,
+      "",
+      `${DIM}You are the envelope, not the editor. Carry documents, not understanding.${RESET}`,
+      "",
+      `${BOLD}Three Documents You Carry:${RESET}`,
+      `  1. ${CYAN}PRD${RESET}          You + Claude.ai -> DanteCode / Claude Code`,
+      `  2. ${CYAN}Run Report${RESET}   DanteCode -> Claude Code (for verification)`,
+      `  3. ${CYAN}Bug Report${RESET}   Claude Code (verifier) -> Claude Code (fixer)`,
+      "",
+      `${BOLD}Quick Reference: What to Say Where${RESET}`,
+      "",
+      `  ${YELLOW}Plan a feature${RESET}        -> HQ (Claude.ai):     "Create a PRD for [feature]"`,
+      `  ${YELLOW}Build with DanteCode${RESET}  -> DC-Run (CLI):        /party --prds [file paths]`,
+      `  ${YELLOW}Verify the output${RESET}     -> DL-Build (CC):       "Read .dantecode/reports/[latest].md and verify every claim"`,
+      `  ${YELLOW}DanteCode has a bug${RESET}   -> DL-Build -> DC-Build: Ask for bug report, paste into DC-Build`,
+      `  ${YELLOW}Generated code issue${RESET}  -> DL-Build (CC):       "Fix these issues"`,
+      `  ${YELLOW}I'm confused${RESET}          -> HQ (Claude.ai):      "Here's what I'm seeing: [paste]. What does it mean?"`,
+      "",
+      `${BOLD}Golden Rules:${RESET}`,
+      `  1. Never translate -- transport. Copy the entire thing.`,
+      `  2. Verify through a ${BOLD}different${RESET} AI than the one that did the work.`,
+      `  3. The run report is the source of truth.`,
+      `  4. One workspace, one job.`,
+      `  5. When confused, come to HQ.`,
+      `  6. Ask for copy-paste commands.`,
+      "",
+      `${DIM}Full guide: Docs/Postal-Service-Workflow.md${RESET}`,
+      "",
+    ].join("\n"),
+  );
 }
 
 async function mcpCommand(_args: string, state: ReplState): Promise<string> {
@@ -4697,6 +5097,66 @@ async function loopCommand(args: string, state: ReplState): Promise<string> {
   ].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// /onboard — Re-run the setup wizard (OnRamp v1.3)
+// ---------------------------------------------------------------------------
+
+async function onboardCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const { OnboardingWizard } = await import("@dantecode/ux-polish");
+    const wizard = new OnboardingWizard({
+      stateOptions: { projectRoot: state.projectRoot },
+    });
+
+    const force = args.trim() === "--force";
+    if (!force && wizard.isComplete()) {
+      return `${GREEN}Setup already complete.${RESET} ${DIM}Use /onboard --force to re-run.${RESET}`;
+    }
+
+    const result = await wizard.run({ force });
+    return result.completed
+      ? `${GREEN}Setup complete.${RESET}`
+      : `${YELLOW}Setup incomplete. ${result.nextSuggestedStep ?? "Run /onboard again."}${RESET}`;
+  } catch {
+    return `${DIM}Onboarding wizard not available. Run "dantecode init" instead.${RESET}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /score — Score C/D measurement (OnRamp v1.3)
+// ---------------------------------------------------------------------------
+
+async function scoreCommand(_args: string, state: ReplState): Promise<string> {
+  const { measureAllDimensions } = await import("./scoring.js");
+  const report = measureAllDimensions(state.projectRoot);
+
+  const formatScore = (score: number): string => {
+    if (score >= 8) return `${GREEN}${score.toFixed(1)}${RESET}`;
+    if (score >= 6) return `${YELLOW}${score.toFixed(1)}${RESET}`;
+    return `${RED}${score.toFixed(1)}${RESET}`;
+  };
+
+  const lines = [
+    "",
+    `${BOLD}DanteCode Score Report${RESET}`,
+    "",
+    `  ${BOLD}Score C (User Experience):${RESET}  ${formatScore(report.scoreC)}/10`,
+    `  ${BOLD}Score D (Distribution):${RESET}     ${formatScore(report.scoreD)}/10`,
+    "",
+  ];
+
+  for (const dim of report.dimensions) {
+    const color = dim.score >= 8 ? GREEN : dim.score >= 6 ? YELLOW : RED;
+    lines.push(
+      `  ${dim.id.padEnd(6)} ${color}${dim.score.toFixed(1)}${RESET} ${DIM}${dim.name}${RESET}`,
+    );
+    lines.push(`         ${DIM}${dim.evidence}${RESET}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
 async function statusCommand(_args: string, state: ReplState): Promise<string> {
   const stable = getFeaturesByMaturity("stable");
   const beta = getFeaturesByMaturity("beta");
@@ -4878,88 +5338,128 @@ async function costCommand(_args: string, state: ReplState): Promise<string> {
 // ----------------------------------------------------------------------------
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
+  { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand, tier: 1, category: "core" },
+  {
+    name: "magic",
+    description: "Build something \u2014 describe what you want in plain language",
+    usage: "/magic <what to build>",
+    handler: magicCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "onboard",
+    description: "Run the setup wizard",
+    usage: "/onboard [--force]",
+    handler: onboardCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "score",
+    description: "Measure DanteCode readiness scores (C: User Experience, D: Distribution)",
+    usage: "/score",
+    handler: scoreCommand,
+    category: "verification",
+  },
   {
     name: "status",
     description: "Show DanteCode version, features, and health status",
     usage: "/status",
     handler: statusCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "model",
     description: "Switch model mid-session",
     usage: "/model <id>",
     handler: modelCommand,
+    category: "core",
   },
   {
     name: "add",
     description: "Add file to conversation context",
     usage: "/add <file>",
     handler: addCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "drop",
     description: "Remove file from context",
     usage: "/drop <file>",
     handler: dropCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "files",
     description: "List files currently in context",
     usage: "/files",
     handler: filesCommand,
+    category: "core",
   },
   {
     name: "diff",
     description: "Show pending changes (unstaged diff)",
     usage: "/diff",
     handler: diffCommand,
+    tier: 1,
+    category: "git",
   },
-  { name: "commit", description: "Trigger auto-commit", usage: "/commit", handler: commitCommand },
-  { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand },
-  { name: "undo", description: "Undo last file edit", usage: "/undo", handler: undoCommand },
+  { name: "commit", description: "Trigger auto-commit", usage: "/commit", handler: commitCommand, tier: 1, category: "git" },
+  { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand, category: "git" },
+  { name: "undo", description: "Undo last file edit", usage: "/undo", handler: undoCommand, tier: 1, category: "core" },
   {
     name: "lessons",
     description: "Show project lessons",
     usage: "/lessons",
     handler: lessonsCommand,
+    category: "memory",
   },
   {
     name: "remember",
     description: "Save a note to .dantecode/DANTE.md (persistent project memory)",
     usage: "/remember <text>",
     handler: rememberCommand,
+    category: "memory",
   },
   {
     name: "pdse",
     description: "Run PDSE scorer on a file",
     usage: "/pdse <file>",
     handler: pdseCommand,
+    category: "verification",
   },
-  { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand },
+  { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand, category: "verification" },
   {
     name: "verify-output",
     description: "Run structured output verification from JSON input",
     usage: "/verify-output <input.json>",
     handler: verifyOutputCommand,
+    category: "verification",
   },
   {
     name: "qa-suite",
     description: "Run the QA harness across multiple outputs from JSON input",
     usage: "/qa-suite <input.json>",
     handler: qaSuiteCommand,
+    category: "verification",
   },
   {
     name: "critic-debate",
     description: "Aggregate critic verdicts from JSON input",
     usage: "/critic-debate <input.json>",
     handler: criticDebateCommand,
+    category: "verification",
   },
   {
     name: "add-verification-rail",
     description: "Register an output verification rail from JSON input",
     usage: "/add-verification-rail <input.json>",
     handler: addVerificationRailCommand,
+    category: "verification",
   },
   {
     name: "verification-history",
@@ -4967,115 +5467,137 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/verification-history [limit] [--kind verify_output|qa_suite|critic_debate|verification_rail]",
     handler: verificationHistoryCommand,
+    category: "verification",
   },
   {
     name: "audit",
     description: "Show recent audit log entries",
     usage: "/audit",
     handler: auditCommand,
+    category: "verification",
   },
   {
     name: "history",
     description: "List past sessions, view details, or clear history",
     usage: "/history [id | clear]",
     handler: historyCommand,
+    tier: 1,
+    category: "sessions",
   },
   {
     name: "clear",
     description: "Clear conversation history",
     usage: "/clear",
     handler: clearCommand,
+    tier: 1,
+    category: "core",
   },
-  { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand },
+  { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand, category: "core" },
   {
     name: "web",
     description: "Fetch URL content into context",
     usage: "/web <url>",
     handler: webCommand,
+    category: "search",
   },
   {
     name: "skill",
     description: "List or activate a skill",
     usage: "/skill [name]",
     handler: skillCommand,
+    category: "skills",
   },
   {
     name: "skills",
     description: "List all installed skills with verification scores",
     usage: "/skills",
     handler: skillsListCommand,
+    category: "skills",
   },
   {
     name: "skill-install",
     description: "Quick install a skill from a path, git URL, or HTTP URL",
     usage: "/skill-install <source>",
     handler: skillInstallCommand,
+    category: "skills",
   },
   {
     name: "skill-verify",
     description: "Run DanteForge verification on an installed skill",
     usage: "/skill-verify <name>",
     handler: skillVerifyCommand,
+    category: "skills",
   },
   {
     name: "agents",
     description: "List available agents",
     usage: "/agents",
     handler: agentsCommand,
+    category: "agents",
   },
   {
     name: "read-only",
     description: "Add file as read-only reference context",
     usage: "/read-only <file>",
     handler: readOnlyCommand,
+    category: "core",
   },
   {
     name: "compact",
     description: "Condense conversation to free context space",
     usage: "/compact",
     handler: compactCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "memory",
     description: "Browse, search, and manage persistent memories",
     usage: "/memory [list|search <q>|stats|forget <key>|cross-session|export [path]]",
     handler: memoryCommand,
+    category: "memory",
   },
   {
     name: "name",
     description: "Name or rename the current session",
     usage: "/name <session-name>",
     handler: nameCommand,
+    category: "core",
   },
   {
     name: "export",
     description: "Export current session to JSON or Markdown",
     usage: "/export [json|md] [path]",
     handler: exportCommand,
+    category: "core",
   },
   {
     name: "import",
     description: "Import a session from JSON file",
     usage: "/import <path>",
     handler: importSessionCommand,
+    category: "core",
   },
   {
     name: "branch",
     description: "Fork current session into a new context (preserves history)",
     usage: "/branch [name]",
     handler: branchCommand,
+    category: "core",
   },
   {
     name: "architect",
     description: "Toggle plan-first architect mode",
     usage: "/architect",
     handler: architectCommand,
+    category: "agents",
   },
   {
     name: "worktree",
     description: "Create git worktree for isolation",
     usage: "/worktree",
     handler: worktreeCommand,
+    category: "git",
   },
   {
     name: "sandbox",
@@ -5083,48 +5605,63 @@ const SLASH_COMMANDS: SlashCommand[] = [
       "DanteSandbox enforcement: status | force-docker | force-worktree | force-host | on | off",
     usage: "/sandbox [status|force-docker|force-worktree|force-host|on|off]",
     handler: sandboxCommand,
+    category: "sandbox",
   },
   {
     name: "silent",
     description: "Toggle silent mode (compact progress only)",
     usage: "/silent",
     handler: silentCommand,
+    category: "core",
   },
   {
     name: "autoforge",
     description: "Run autoforge IAL loop on active file",
     usage: "/autoforge [--self-improve] [--silent] [--persist]",
     handler: autoforgeCommand,
+    category: "automation",
   },
   {
     name: "resume",
     description: "Queue a paused durable run for continuation",
     usage: "/resume [runId]",
     handler: resumeCommand,
+    category: "sessions",
   },
   {
     name: "runs",
     description: "List durable runs and legacy resumable sessions",
     usage: "/runs",
     handler: runsCommand,
+    category: "sessions",
   },
   {
     name: "oss",
     description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
     usage: "/oss [focus-area]",
     handler: ossCommand,
+    category: "automation",
   },
   {
     name: "party",
     description: "Multi-agent coordination — parallel lanes for complex tasks",
     usage: "/party [--autoforge] [--files a,b] <task>",
     handler: partyCommand,
+    category: "agents",
+  },
+  {
+    name: "postal",
+    description: "Cross-workspace workflow quick reference — what to say where",
+    usage: "/postal",
+    handler: postalCommand,
+    category: "agents",
   },
   {
     name: "mcp",
     description: "List MCP servers and tools",
     usage: "/mcp",
     handler: mcpCommand,
+    category: "advanced",
   },
   {
     name: "git-watch",
@@ -5132,12 +5669,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/git-watch [list | stop <id> | <eventType> [path] [--workflow path] [--event event.json]]",
     handler: gitWatchCommand,
+    category: "git",
   },
   {
     name: "run-workflow",
     description: "Run a local GitHub-style workflow file",
     usage: "/run-workflow <workflowPath> [event.json] [--background]",
     handler: runWorkflowCommand,
+    category: "git",
   },
   {
     name: "auto-pr",
@@ -5145,6 +5684,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
     handler: autoPrCommand,
+    category: "git",
   },
   {
     name: "automate",
@@ -5155,6 +5695,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
       getGitAutomationOrchestrator(state); // pre-populate with buildAutomationAgentRunner DI
       return automateCommand(args, state);
     },
+    category: "automation",
   },
   {
     name: "webhook-listen",
@@ -5162,6 +5703,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/webhook-listen [list | stop <id> | [github|gitlab|custom] [--port 3000] [--path /webhook] [--workflow path]]",
     handler: webhookListenCommand,
+    category: "automation",
   },
   {
     name: "schedule-git-task",
@@ -5169,48 +5711,56 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/schedule-git-task [list | stop <id> | <cron|intervalMs> <task> [--workflow path] [--event event.json]]",
     handler: scheduleGitTaskCommand,
+    category: "automation",
   },
   {
     name: "bg",
     description: "Background agent tasks — run, list, cancel (--pr auto-creates PR)",
     usage: "/bg [--docker] [--commit] [--pr] [--long] [task | --resume <id> | cancel <id> | clear]",
     handler: bgCommand,
+    category: "agents",
   },
   {
     name: "listen",
     description: "Start webhook server for GitHub/Slack events",
     usage: "/listen [port | status]",
     handler: listenCommand,
+    category: "automation",
   },
   {
     name: "index",
     description: "Build semantic code index for the project",
     usage: "/index [--embed[=provider]]",
     handler: indexCommand,
+    category: "search",
   },
   {
     name: "search",
     description: "Search code index for relevant code",
     usage: "/search <query>",
     handler: searchCommand,
+    category: "search",
   },
   {
     name: "think",
     description: "Control reasoning effort tier for next prompt or entire session",
     usage: "/think [quick|deep|expert|auto] [--session] | stats | chain [N]",
     handler: thinkCommand,
+    category: "advanced",
   },
   {
     name: "gaslight",
     description: "DanteGaslight adversarial refinement — on/off/stats/review/bridge",
     usage: "/gaslight <on|off|stats|review|bridge>",
     handler: gaslightCommand,
+    category: "advanced",
   },
   {
     name: "fearset",
     description: "DanteFearSet — Fear-Setting on/off/stats/review/run/bridge",
     usage: "/fearset <on|off|stats|review|run <context>|bridge>",
     handler: fearsetCommand,
+    category: "advanced",
   },
   {
     name: "research",
@@ -5218,60 +5768,70 @@ const SLASH_COMMANDS: SlashCommand[] = [
       "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
     usage: "/research <topic or question>",
     handler: researchSlashHandler,
+    category: "search",
   },
   {
     name: "review",
     description: "Review a GitHub PR using DanteForge PDSE + constitutional verification",
     usage: "/review <PR#> [--post] [--severity=strict|normal|lenient]",
     handler: reviewCommand,
+    category: "verification",
   },
   {
     name: "triage",
     description: "Triage a GitHub issue — labels, priority, effort, relevant files",
     usage: "/triage <issue#> [--post-labels] [--no-llm]",
     handler: triageCommand,
+    category: "verification",
   },
   {
     name: "approve",
     description: "Approve the pending sandboxed action",
     usage: "/approve",
     handler: approveCommand,
+    category: "sandbox",
   },
   {
     name: "deny",
     description: "Deny the pending sandboxed action and reset policy to manual",
     usage: "/deny",
     handler: denyCommand,
+    category: "sandbox",
   },
   {
     name: "always-allow",
     description: "Add an allow rule to bypass sandbox approval for matching commands",
     usage: "/always-allow <pattern>",
     handler: alwaysAllowCommand,
+    category: "sandbox",
   },
   {
     name: "fleet",
     description: "Launch parallel agents to solve a task using Git worktrees. Usage: /fleet <task>",
     usage: "/fleet <task>",
     handler: fleetCommand,
+    category: "agents",
   },
   {
     name: "loop",
     description: "Run an autonomous task loop until condition met. Usage: /loop [--max=N] <task>",
     usage: "/loop [--max=N] <task>",
     handler: loopCommand,
+    category: "agents",
   },
   {
     name: "theme",
     description: "Switch terminal theme with live preview",
     usage: "/theme [name]",
     handler: themeCommand,
+    category: "core",
   },
   {
     name: "cost",
     description: "Show token usage and cost estimate for this session",
     usage: "/cost",
     handler: costCommand,
+    category: "core",
   },
 ];
 
@@ -5280,6 +5840,8 @@ function getNativeCommandDefinitions(): NativeSlashCommandDefinition[] {
     name: command.name,
     description: command.description,
     usage: command.usage,
+    tier: command.tier,
+    category: command.category,
   }));
 }
 

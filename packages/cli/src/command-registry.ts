@@ -6,6 +6,8 @@ export interface NativeSlashCommandDefinition {
   name: string;
   description: string;
   usage: string;
+  tier?: 1 | 2;
+  category?: string;
 }
 
 export interface RegisteredSlashCommand extends NativeSlashCommandDefinition {

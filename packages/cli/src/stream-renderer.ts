@@ -275,13 +275,35 @@ export class StreamRenderer {
   // -------------------------------------------------------------------------
 
   private _renderFooter(opts: FinishOptions): void {
-    const parts: string[] = [];
-    if (opts.pdseScore !== undefined) parts.push(`pdse:${opts.pdseScore.toFixed(2)}`);
-    if (opts.tokens !== undefined) parts.push(`tokens:${opts.tokens}`);
-    if (opts.elapsedMs !== undefined) parts.push(`${opts.elapsedMs}ms`);
-
     const DIM = this.colors ? "\x1b[2m" : "";
+    const GREEN = this.colors ? "\x1b[32m" : "";
+    const YELLOW = this.colors ? "\x1b[33m" : "";
     const RESET = this.colors ? "\x1b[0m" : "";
-    process.stdout.write(`${DIM}[${parts.join(" | ")}]${RESET}\n`);
+
+    const parts: string[] = [];
+
+    // Human-readable verification status instead of raw PDSE score
+    if (opts.pdseScore !== undefined) {
+      if (opts.pdseScore >= 0.75) {
+        parts.push(`${GREEN}Verified${RESET}`);
+      } else if (opts.pdseScore >= 0.5) {
+        parts.push(`${YELLOW}Review recommended${RESET}`);
+      } else {
+        parts.push(`${YELLOW}Needs attention${RESET}`);
+      }
+    }
+
+    if (opts.elapsedMs !== undefined) {
+      const secs = (opts.elapsedMs / 1000).toFixed(1);
+      parts.push(`${DIM}${secs}s${RESET}`);
+    }
+
+    if (opts.tokens !== undefined) {
+      parts.push(`${DIM}${opts.tokens.toLocaleString()} tokens${RESET}`);
+    }
+
+    if (parts.length > 0) {
+      process.stdout.write(`${DIM}[${parts.join(" | ")}]${RESET}\n`);
+    }
   }
 }

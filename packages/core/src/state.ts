@@ -6,7 +6,8 @@ import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
-import type { DanteCodeState } from "@dantecode/config-types";
+import type { DanteCodeState, GStackCommand } from "@dantecode/config-types";
+import { detectProjectStack, getGStackDefaults } from "./project-detector.js";
 
 /**
  * Relative path within a project to the STATE.yaml file.
@@ -228,18 +229,70 @@ export async function writeStateYaml(projectRoot: string, state: DanteCodeState)
 // ─── Initialize ───────────────────────────────────────────────────────────────
 
 /**
+ * Options for customizing the initial STATE.yaml when calling `initializeState`.
+ * All fields are optional; when omitted, sensible defaults are used.
+ * If no `language` override is given, the project root is auto-scanned with
+ * `detectProjectStack()` and language-aware GStack defaults are applied.
+ */
+export interface InitializeStateOptions {
+  provider?: "grok" | "anthropic" | "openai" | "google" | "groq" | "ollama" | "custom";
+  modelId?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  temperature?: number;
+  supportsVision?: boolean;
+  supportsToolCalls?: boolean;
+  language?: string;
+  gstackOverrides?: GStackCommand[];
+}
+
+/**
  * Creates a default STATE.yaml for a new project.
  *
- * Uses sensible defaults for all configuration sections. The default model
- * is set to Grok (grok-3) as DanteCode's default provider choice.
+ * Uses sensible defaults for all configuration sections. When called without
+ * options, the default model is Grok (grok-3) and GStack commands default to
+ * TypeScript tooling.
+ *
+ * When `options` are provided, the model provider, language, and GStack
+ * commands can be customized. If no language is specified in options, the
+ * project root is scanned with `detectProjectStack()` to auto-detect the
+ * language and select appropriate GStack commands.
  *
  * If the `.dantecode/` directory does not exist, it is created automatically.
  *
  * @param projectRoot - Absolute path to the project root directory.
+ * @param options - Optional initialization overrides.
  * @returns The initialized DanteCodeState object.
  */
-export async function initializeState(projectRoot: string): Promise<DanteCodeState> {
+export async function initializeState(
+  projectRoot: string,
+  options?: InitializeStateOptions,
+): Promise<DanteCodeState> {
   const now = new Date().toISOString();
+
+  // Resolve model provider settings from options or defaults
+  const provider = options?.provider ?? "grok";
+  const modelId = options?.modelId ?? "grok-3";
+  const contextWindow = options?.contextWindow ?? 131072;
+  const maxTokens = options?.maxTokens ?? 8192;
+  const temperature = options?.temperature ?? 0.1;
+  const supportsVision = options?.supportsVision ?? false;
+  const supportsToolCalls = options?.supportsToolCalls ?? true;
+
+  // Resolve language and GStack commands
+  let language = options?.language ?? "";
+  let gstackCommands: GStackCommand[];
+
+  if (options?.gstackOverrides) {
+    gstackCommands = options.gstackOverrides;
+  } else {
+    // Auto-detect project stack when no explicit GStack overrides given
+    const detectedStack = detectProjectStack(projectRoot);
+    if (!language && detectedStack.language !== "unknown") {
+      language = detectedStack.language;
+    }
+    gstackCommands = getGStackDefaults(detectedStack);
+  }
 
   const defaultState: DanteCodeState = {
     version: "1.0.0",
@@ -248,13 +301,13 @@ export async function initializeState(projectRoot: string): Promise<DanteCodeSta
     updatedAt: now,
     model: {
       default: {
-        provider: "grok",
-        modelId: "grok-3",
-        maxTokens: 8192,
-        temperature: 0.1,
-        contextWindow: 131072,
-        supportsVision: false,
-        supportsToolCalls: true,
+        provider,
+        modelId,
+        maxTokens,
+        temperature,
+        contextWindow,
+        supportsVision,
+        supportsToolCalls,
       },
       fallback: [
         {
@@ -283,29 +336,7 @@ export async function initializeState(projectRoot: string): Promise<DanteCodeSta
     autoforge: {
       enabled: true,
       maxIterations: 5,
-      gstackCommands: [
-        {
-          name: "typecheck",
-          command: "npx tsc --noEmit",
-          runInSandbox: true,
-          timeoutMs: 60000,
-          failureIsSoft: false,
-        },
-        {
-          name: "lint",
-          command: "npx eslint .",
-          runInSandbox: true,
-          timeoutMs: 60000,
-          failureIsSoft: true,
-        },
-        {
-          name: "test",
-          command: "npx vitest run",
-          runInSandbox: true,
-          timeoutMs: 120000,
-          failureIsSoft: false,
-        },
-      ],
+      gstackCommands,
       lessonInjectionEnabled: true,
       abortOnSecurityViolation: true,
     },
@@ -353,7 +384,7 @@ export async function initializeState(projectRoot: string): Promise<DanteCodeSta
     },
     project: {
       name: "",
-      language: "",
+      language,
       sourceDirectories: ["src"],
       excludePatterns: [
         "node_modules/",

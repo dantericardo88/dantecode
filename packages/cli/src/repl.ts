@@ -11,7 +11,7 @@ import { join as pathJoin } from "node:path";
 
 import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
-import { getBanner } from "./banner.js";
+import { isFirstRun, getFirstRunBanner, getCompactBanner } from "./banner.js";
 import { checkForUpdate } from "./lib/auto-update.js";
 import { routeSlashCommand, isSlashCommand } from "./slash-commands.js";
 import type { ReplState } from "./slash-commands.js";
@@ -187,8 +187,30 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // Display banner (suppressed in silent mode)
   if (!options.silent) {
-    const banner = getBanner(state.model.default, options.projectRoot);
-    process.stdout.write(banner);
+    if (isFirstRun(options.projectRoot)) {
+      // OnRamp v1.3: Try to run the onboarding wizard on first run
+      let wizardRan = false;
+      try {
+        const { OnboardingWizard } = await import("@dantecode/ux-polish");
+        const wizard = new OnboardingWizard({
+          stateOptions: { projectRoot: options.projectRoot },
+        });
+        if (!wizard.isComplete()) {
+          const wizResult = await wizard.run({ ci: !!process.env["CI"] });
+          wizardRan = true;
+          if (!wizResult.completed && wizResult.nextSuggestedStep) {
+            process.stdout.write(`\n${DIM}${wizResult.nextSuggestedStep}${RESET}\n`);
+          }
+        }
+      } catch {
+        // Wizard not available — fall back to static banner
+      }
+      if (!wizardRan) {
+        process.stdout.write(getFirstRunBanner());
+      }
+    } else {
+      process.stdout.write(getCompactBanner(state.model.default) + "\n");
+    }
     void checkForUpdate("2.0.0");
   }
 

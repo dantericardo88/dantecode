@@ -234,8 +234,8 @@ describe("/party --autoforge", () => {
       makeState(projectRoot),
     );
 
-    expect(output).toContain("Party Autoforge Complete: PASSED");
-    expect(output).toContain("Merged lanes: orchestrator");
+    expect(output).toContain("Done");
+    expect(output).toContain("verified");
     expect(mockMergeWorktree).toHaveBeenCalledTimes(1);
     expect(mockRunAgentLoop).toHaveBeenCalled();
   });
@@ -275,8 +275,8 @@ describe("/party --autoforge", () => {
       makeState(projectRoot),
     );
 
-    expect(output).toContain("Party Autoforge Complete: PARTIAL");
-    expect(output).toContain("scope violation");
+    expect(output).toContain("Done");
+    expect(output).toContain("need attention");
     expect(mockMergeWorktree).not.toHaveBeenCalled();
   });
 
@@ -290,7 +290,7 @@ describe("/party --autoforge", () => {
 
     const state = makeState(projectRoot);
 
-    const help = await routeSlashCommand("/help", state);
+    const help = await routeSlashCommand("/help --all", state);
     expect(help).toContain("/inferno");
     expect(help.toLowerCase()).toContain("markdown");
 

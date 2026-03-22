@@ -4,19 +4,14 @@
 // runs the DanteForge pipeline on generated code, and streams responses.
 // ============================================================================
 
-import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ModelRouterImpl,
-  SessionStore,
   DurableRunStore,
-  BackgroundTaskStore,
   MetricsCollector,
-  estimateMessageTokens,
   getContextUtilization,
-  isProtectedWriteTarget,
   detectSelfImprovementContext,
   promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
@@ -26,9 +21,7 @@ import {
   runStartupHealthCheck,
   getCurrentWave,
   advanceWave,
-  buildWavePrompt,
   isWaveComplete,
-  CLAUDE_WORKFLOW_MODE,
   ApproachMemory,
   formatApproachesForPrompt,
   ReasoningChain,
@@ -43,12 +36,10 @@ import {
   SecretsScanner,
   synthesizeConfidence,
 } from "@dantecode/core";
-import type { WaveOrchestratorState, WorkflowExecutionContext } from "@dantecode/core";
-import { buildWorkflowInvocationPrompt } from "@dantecode/core";
+import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
+import { buildWavePrompt } from "@dantecode/core";
 import {
   recordSuccessPattern,
-  queryLessons,
-  formatLessonsForPrompt,
   detectAndRecordPatterns,
 } from "@dantecode/danteforge";
 import { runDanteForge, getWrittenFilePath } from "./danteforge-pipeline.js";
@@ -58,22 +49,13 @@ import type {
   Session,
   SessionMessage,
   DanteCodeState,
-  ModelConfig,
   SelfImprovementContext,
 } from "@dantecode/config-types";
 import {
   getStatus,
   autoCommit,
-  generateRepoMap,
-  formatRepoMapForContext,
 } from "@dantecode/git-engine";
-import {
-  executeTool,
-  getToolDefinitions,
-  type SubAgentExecutor,
-  type SubAgentOptions,
-  type SubAgentResult,
-} from "./tools.js";
+import { executeTool } from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
 import { StreamRenderer } from "./stream-renderer.js";
 import { getAISDKTools } from "./tool-schemas.js";
@@ -82,33 +64,61 @@ import { confirmDestructive } from "./confirm-flow.js";
 import { createMemoryOrchestrator, type MemoryOrchestrator } from "@dantecode/memory-engine";
 import { getGlobalLogger, type AuditLogger } from "@dantecode/debug-trail";
 
-// ----------------------------------------------------------------------------
-// ANSI Colors
-// ----------------------------------------------------------------------------
+// Extracted modules
+import {
+  CYAN, YELLOW, GREEN, RED, DIM, BOLD, RESET,
+  PROGRESS_EMIT_INTERVAL,
+  PLANNING_INSTRUCTION,
+  PIVOT_INSTRUCTION,
+  EXECUTION_CONTINUATION_PATTERN,
+  EXECUTION_WORKFLOW_PATTERN,
+  DESTRUCTIVE_GIT_RE,
+  RM_SOURCE_RE,
+  PREMATURE_SUMMARY_PATTERN,
+  GROK_CONFAB_PATTERN,
+  MAX_PIPELINE_CONTINUATION_NUDGES,
+  PIPELINE_CONTINUATION_INSTRUCTION,
+  MAX_CONSECUTIVE_EMPTY_ROUNDS,
+  MAX_CONFABULATION_NUDGES,
+  REFLECTION_CHECKPOINT_INTERVAL,
+  REFLECTION_PROMPT,
+  WRITE_SIZE_WARNING_THRESHOLD,
+  EMPTY_RESPONSE_WARNING,
+  CONFABULATION_WARNING,
+} from "./agent-loop-constants.js";
+import {
+  type ExtractedToolCall,
+  extractToolCalls,
+  jaccardWordOverlap,
+  adaptiveJaccardThreshold,
+  checkBigramCoverage,
+} from "./tool-call-parser.js";
+import {
+  getVerifyCommands,
+  type MajorEditBatchGateResult,
+  isMajorEditBatch,
+  runMajorEditBatchGate,
+  compactMessages,
+  extractClaimedFiles,
+  deriveThinkingBudget,
+  isTimeoutError,
+  buildExecutionEvidence,
+} from "./verification-pipeline.js";
+import { buildSystemPrompt } from "./context-manager.js";
+import {
+  _laneCtx,
+  backgroundTaskRegistries,
+  getBackgroundTaskRegistry,
+  extractBackgroundTaskId,
+  formatBackgroundWaitNotice,
+  getBackgroundResumeNextAction,
+  inferWorkflowName,
+  buildResumePrompt,
+  isExecutionContinuationPrompt,
+  createSubAgentExecutor,
+} from "./background-task-manager.js";
 
-const CYAN = "\x1b[36m";
-const YELLOW = "\x1b[33m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
-
-type BackgroundTaskRegistry = {
-  pending: Map<string, Promise<SubAgentResult>>;
-  store: BackgroundTaskStore;
-};
-
-const backgroundTaskRegistries = new Map<string, BackgroundTaskRegistry>();
-const autoResumingDurableRuns = new Set<string>();
-/** Per-lane AsyncLocalStorage context: isolates backgroundTaskRegistries per concurrent runAgentLoop invocation. */
-const _laneCtx = new AsyncLocalStorage<{ sessionId: string }>();
-
-type RunAgentLoopFn = (
-  prompt: string,
-  session: Session,
-  config: AgentLoopConfig,
-) => Promise<Session>;
+// Types re-exported from extracted modules are imported above.
 
 // ----------------------------------------------------------------------------
 // Types
@@ -224,1370 +234,21 @@ export interface ApproachLogEntry {
   toolCalls: number;
 }
 
-// ----------------------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------------------
+// Constants, tool call parser, verification pipeline, context manager, and
+// background task manager are now imported from extracted modules above.
 
-/** How often (in tool calls) to emit a progress line. */
-const PROGRESS_EMIT_INTERVAL = 5;
+// buildSystemPrompt is now imported from context-manager.ts
 
-/** Planning instruction injected for complex tasks. */
-const PLANNING_INSTRUCTION =
-  "Before executing, create a brief plan:\n" +
-  "1. What files need to change and why?\n" +
-  "2. What's the approach? (Read → Edit → Verify cycle)\n" +
-  "3. What could go wrong? (edge cases, breaking changes, missing imports)\n" +
-  "4. What's the verification strategy? (tests, typecheck, manual check)\n" +
-  "Then execute the plan step by step. After each major change, verify before moving on.";
+// Tool call extraction is now imported from tool-call-parser.ts
 
-/** Pivot instruction injected after 2 consecutive same-signature failures. */
-const PIVOT_INSTRUCTION =
-  "The same approach has failed twice. STOP and reconsider:\n" +
-  "- What assumption might be wrong?\n" +
-  "- Is there an alternative tool or method?\n" +
-  "- Should we read more context first?";
+// Reflection loop helpers, context compaction, background task management, and
+// sub-agent executor are now imported from extracted modules above.
 
-const EXECUTION_CONTINUATION_PATTERN = /^(?:please\s+)?(?:continue|resume|run|verify)\b/i;
-// Covers ALL DanteForge commands, not just a subset, so any model running any command
-// gets pipeline protections (guards, nudges, elevated budget).
-const EXECUTION_WORKFLOW_PATTERN =
-  /^\/(?:autoforge|party|magic|forge|verify|ship|inferno|ember|blaze|spark|oss|harvest)\b/i;
-
-/**
- * Destructive git commands that must never run during a pipeline/workflow execution.
- * These wipe untracked files or discard all in-progress changes — undoing everything
- * an agent has written. Blocked for ALL models (Grok, GPT, Claude) inside pipelines.
- *
- * NOTE: `git clean\b` matches ALL forms — `-fd`, `-d -f`, `--force`, etc. The old
- * pattern `clean\s+-[a-z]*f[a-z]*` missed space-separated flags (`-d -f`) and long
- * form (`--force`), which is why files were still being deleted.
- */
-const DESTRUCTIVE_GIT_RE =
-  /\bgit\s+(?:clean\b|checkout\s+--\s+[./]|reset\s+--(?:hard|merge)\b|stash(?:\s+push)?\b[^\n]*--include-untracked)/;
-
-/**
- * Blocks `rm -rf` (and variants) on source/package directories during pipeline execution.
- * When typecheck fails on a new package, Grok often runs `rm -rf packages/<name>` to
- * "clean up" the broken package — destroying all in-progress work just as surely as git clean.
- */
-const RM_SOURCE_RE =
-  /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\b)[^\n]*\b(?:packages|src|lib)\//;
-
-/** Detects premature wrap-up responses that should trigger pipeline continuation. */
-const PREMATURE_SUMMARY_PATTERN =
-  /(?:^|\n)\s*(?:#{1,3}\s*)?(?:summary|results?|complete|done|finished|all\s+(?:done|complete)|pipeline\s+complete|git\s+status|verification\s+results?|changes?\s+made|next\s+steps?|recommendations?)/i;
-
-/**
- * Grok-specific confabulation detector: fake verification tables, fake git status, fake PDSE
- * scores. These patterns appear when Grok narrates what it "did" without using Edit/Write tools.
- * The PREMATURE_SUMMARY_PATTERN alone doesn't catch them because Grok uses different phrasing.
- */
-const GROK_CONFAB_PATTERN =
-  /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
-
-/** Max pipeline continuation nudges before allowing the model to stop. */
-const MAX_PIPELINE_CONTINUATION_NUDGES = 3;
-
-/** Pipeline continuation instruction injected when the model stops mid-pipeline. */
-const PIPELINE_CONTINUATION_INSTRUCTION =
-  "You stopped mid-pipeline with a summary/status response, but the task is NOT complete. " +
-  "The pipeline still has remaining steps. Do NOT summarize — continue executing the next " +
-  "step immediately with tool calls. If you are unsure what step is next, re-read your " +
-  "todo list or the pipeline plan and continue from where you left off.";
-
-// ----------------------------------------------------------------------------
-// Anti-confabulation guards (Grok empty-response / phantom-completion fix)
-// ----------------------------------------------------------------------------
-
-/** Max consecutive empty responses (no text + no tool calls) before aborting. */
-const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
-
-/** Max anti-confabulation nudges (model claims completion but 0 files modified). */
-// 4 chances: Grok needs more nudges than Claude to actually start writing files
-const MAX_CONFABULATION_NUDGES = 4;
-
-// ----------------------------------------------------------------------------
-// Structured reasoning checkpoints
-// ----------------------------------------------------------------------------
-
-/** How many tool calls between automatic reflection checkpoints. */
-const REFLECTION_CHECKPOINT_INTERVAL = 15;
-
-/** Reflection prompt injected at checkpoints to force chain-of-thought reasoning. */
-const REFLECTION_PROMPT =
-  "REFLECTION CHECKPOINT: Pause and evaluate your progress.\n" +
-  "1. What have you accomplished so far?\n" +
-  "2. Are you on track to solve the original problem?\n" +
-  "3. Have you missed anything (untested edge cases, unread files, incomplete changes)?\n" +
-  "4. What is the most important next step?\n" +
-  "Continue with the most impactful action.";
-
-/** Write payload size (chars) above which a truncation warning is emitted. */
-const WRITE_SIZE_WARNING_THRESHOLD = 30_000;
-
-/** Warning injected when model returns empty response. */
-const EMPTY_RESPONSE_WARNING =
-  "You returned an empty response with no tool calls. This may indicate a compatibility " +
-  "issue. Execute the next step using a tool (Read, Edit, Write, Bash, Glob, Grep). " +
-  "If you cannot proceed, explain what is blocking you.";
-
-/**
- * Warning injected when model claims completion but no files were modified.
- * Strong language required: Grok ignores polite nudges and keeps confabulating.
- */
-const CONFABULATION_WARNING =
-  "CONFABULATION DETECTED: You have read files and/or claimed to have implemented changes, " +
-  "but ZERO files were actually written in this session (filesModified === 0). " +
-  "Running `git status` would show 0 changed files. " +
-  "\n\nDo NOT write planning text, summaries, or fake verification results. " +
-  "\nYour VERY NEXT response MUST contain a Write or Edit tool call to create/modify a real file. " +
-  "\n\nSteps to unblock:" +
-  "\n1. Pick the FIRST file from your implementation plan (e.g. a new .ts file you planned to create)" +
-  "\n2. Use the Write tool to create it with complete, production-ready code" +
-  "\n3. Only AFTER real file changes: run Bash for typecheck/lint/test" +
-  "\n\nDo NOT claim 'typecheck PASS', 'committed', 'pushed', or 'PDSE score' unless " +
-  "you actually ran those commands with the Bash tool and got real output.";
-
-// ----------------------------------------------------------------------------
-// System Prompt Builder
-// ----------------------------------------------------------------------------
-
-/**
- * Builds the system prompt sent to the model. Includes instructions for tool
- * use, the DanteForge doctrine, and project-specific context.
- */
-async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Promise<string> {
-  const toolDefs = getToolDefinitions();
-  const toolList = toolDefs.map((t) => `- ${t.name}: ${t.description}`).join("\n");
-
-  const sections: string[] = [
-    "You are DanteCode, an expert AI coding agent. You help users write, edit, debug, and maintain code.",
-    "",
-    "## Available Tools",
-    "",
-    "You can use the following tools by including tool_use blocks in your response:",
-    "",
-    toolList,
-    "",
-    "## Key Principles",
-    "",
-    "1. ALWAYS produce COMPLETE, PRODUCTION-READY code. Never use stubs, placeholders, or ellipsis.",
-    "2. Read files before editing them to understand context.",
-    "3. Use Edit for small changes, Write for new files or complete rewrites.",
-    "4. Run Bash commands to verify your changes (e.g., type-check, test, lint).",
-    "5. Be precise with file paths. Use the Glob tool to find files if unsure.",
-    "6. Explain what you are doing and why.",
-    "",
-    "## Tool Execution Protocol — Sequential Verification",
-    "",
-    "Tool calls in a single response execute ONE AT A TIME in order. Each result appears BEFORE the next tool runs.",
-    "",
-    "VERIFY BEFORE PROCEEDING — after any Bash command (git clone, npm install, mkdir), confirm it succeeded:",
-    "- After `git clone <url> <dir>`: use ListDir to verify `<dir>` exists before reading files inside it.",
-    "- After Bash commands that create directories/files: verify with ListDir before referencing them.",
-    "- After `Write <file>`: the SUCCESS result confirms the file exists. If you see ERROR, do NOT proceed as if it succeeded.",
-    "- If a tool returns an error, address it immediately. Never skip errors and continue as if they did not happen.",
-    "",
-    "## Artifact Acquisition Tools",
-    "",
-    "Prefer these over `Bash curl`/`Bash wget` when downloading files — they auto-verify the download, compute SHA-256, and register a tracked ArtifactRecord:",
-    "",
-    "- **AcquireUrl** — download any URL to a local file with size check + hash:",
-    '  `{"name":"AcquireUrl","input":{"url":"https://example.com/file.tar.gz","dest":"external/file.tar.gz"}}`',
-    "- **AcquireArchive** — download AND extract .tar.gz / .zip / .tar.bz2 archives, verifies file count:",
-    '  `{"name":"AcquireArchive","input":{"url":"https://example.com/repo.tar.gz","extract_to":"external/repo","strip_components":1}}`',
-    "",
-    "Both tools return an ArtifactID you can reference in subsequent steps. If either returns isError=true, do NOT proceed as if the file exists.",
-    "",
-    "JSON TOOL CALL FORMAT — malformed JSON causes SILENT DROPS (file never written, command never ran):",
-    '- Double quotes inside string values MUST be escaped: \\"',
-    "- Backslashes MUST be escaped: \\\\",
-    "- Real newlines inside string values MUST be \\n (not a literal newline character)",
-    '- Test JSON mentally: every { must close with }, every " must be paired.',
-    "",
-  ];
-
-  // Skill execution: when a skill is active, inject either the full Claude Workflow
-  // Mode (if wave orchestration is active) or the basic tool recipes + execution protocol.
-  if (config.skillActive) {
-    if (config.waveState && config.waveState.waves.length > 1) {
-      // Wave orchestration: inject Claude Workflow Mode + current wave prompt
-      sections.push(CLAUDE_WORKFLOW_MODE, "", buildWavePrompt(config.waveState), "");
-    } else {
-      // No wave structure detected: inject tool recipes + basic execution protocol.
-      // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations
-      // that Claude Code handles natively using Bash equivalents.
-      sections.push(
-        "## Tool Recipes for Skill Execution",
-        "",
-        "When executing skills, you may need capabilities beyond the basic tool set.",
-        "Use Bash to access these — do NOT skip steps because a dedicated tool is missing.",
-        "",
-        "### Searching GitHub",
-        "```bash",
-        'gh search repos "react state management" --limit 10 --json name,url,description,stargazersCount',
-        "```",
-        'To search code: `gh search code "pattern" --limit 10 --json path,repository`',
-        "",
-        "### Fetching Web Content",
-        "```bash",
-        "curl -sL 'https://example.com/page' | head -200",
-        "```",
-        "",
-        "### Cloning and Analyzing Repositories",
-        "```bash",
-        "git clone --depth 1 'https://github.com/org/repo.git' /tmp/oss-scan/reponame",
-        "```",
-        "Then use Glob, Grep, and Read to analyze the cloned repository.",
-        "",
-        "### GitHub API Queries",
-        "```bash",
-        "gh api repos/owner/repo --jq '.stargazers_count, .license.spdx_id'",
-        "gh api 'search/repositories?q=topic:state-management+language:typescript&sort=stars' --jq '.items[:5] | .[].full_name'",
-        "```",
-        "",
-        "## Skill Execution Protocol",
-        "",
-        "You are executing a multi-step skill workflow. Follow this protocol STRICTLY:",
-        "",
-        "1. **DECOMPOSE FIRST**: Use TodoWrite to create a numbered checklist of all steps before doing any work.",
-        "2. **READ BEFORE EDIT**: Always Read a file before modifying it. Never edit blind.",
-        "3. **ONE STEP AT A TIME**: Complete one step fully, verify it, then advance to the next.",
-        "4. **EVERY RESPONSE = TOOL CALLS**: Never respond with only text/narration. Every response MUST include at least one tool call.",
-        "5. **VERIFY EACH STEP**: After completing a step, verify with a concrete check (Read the file, run a test, check git status).",
-        "6. **UPDATE PROGRESS**: Mark each TodoWrite item as completed before starting the next.",
-        "7. **USE BASH FOR EXTERNAL OPS**: GitHub search, web fetch, repo cloning — use Bash with the recipes above.",
-        "8. **NEVER CONFABULATE**: Only claim a file was modified AFTER a successful Edit/Write tool result. Only claim tests pass AFTER a successful Bash test result.",
-        "",
-      );
-    }
-  }
-
-  // Workflow contract preamble: when a DanteForge command provides a structured
-  // WorkflowExecutionContext, inject the contract metadata (stages, failure policy,
-  // rollback policy) so all models get deterministic guidance instead of raw markdown.
-  if (config.workflowContext) {
-    const preamble = buildWorkflowInvocationPrompt(config.workflowContext);
-    sections.push(preamble, "");
-  }
-
-  sections.push("## Project Context", "", `Project root: ${session.projectRoot}`);
-
-  if (config.state.project.name) {
-    sections.push(`Project name: ${config.state.project.name}`);
-  }
-  if (config.state.project.language) {
-    sections.push(`Language: ${config.state.project.language}`);
-  }
-  if (config.state.project.framework) {
-    sections.push(`Framework: ${config.state.project.framework}`);
-  }
-
-  if (session.activeFiles.length > 0) {
-    sections.push("");
-    sections.push("## Files in Context");
-    sections.push("");
-    for (const file of session.activeFiles) {
-      sections.push(`- ${file}`);
-    }
-  }
-
-  // Repo map injection: give the model a structural overview of the project
-  try {
-    const repoMap = generateRepoMap(session.projectRoot, { maxFiles: 150 });
-    if (repoMap.length > 0) {
-      sections.push("", "## Repository Structure", "", formatRepoMapForContext(repoMap));
-    }
-  } catch {
-    // Non-fatal: repo map generation failure should not break the agent
-  }
-
-  // Lesson injection: give the model learned patterns from past sessions
-  try {
-    const lessons = await queryLessons({ projectRoot: session.projectRoot, limit: 10 });
-    if (lessons.length > 0) {
-      sections.push("", "## Learned Patterns (from past sessions)", "");
-      sections.push(formatLessonsForPrompt(lessons));
-    }
-  } catch {
-    // Non-fatal: lesson injection failure should not break the agent
-  }
-
-  // Cross-session learning: inject summaries of recent sessions for this project
-  try {
-    const sessionStore = new SessionStore(session.projectRoot);
-    const recentSummaries = await sessionStore.getRecentSummaries(3);
-    // Filter out the current session
-    const pastSummaries = recentSummaries.filter((s) => s.id !== session.id);
-    if (pastSummaries.length > 0) {
-      sections.push("", "## Recent Session Context", "");
-      for (const s of pastSummaries) {
-        const dateStr = new Date(s.date).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        });
-        sections.push(`- ${dateStr}: ${s.summary}`);
-      }
-    }
-  } catch {
-    // Non-fatal: cross-session context failure should not break the agent
-  }
-
-  // Project notes: load .dantecode/DANTE.md if it exists (similar to Claude Code's CLAUDE.md)
-  try {
-    const danteNotesPath = resolve(session.projectRoot, ".dantecode", "DANTE.md");
-    const danteNotes = await readFile(danteNotesPath, "utf-8");
-    if (danteNotes.trim().length > 0) {
-      sections.push("", "## Project Notes", "", danteNotes.trim());
-    }
-  } catch {
-    // File doesn't exist — that's fine
-  }
-
-  // First-turn complexity rating instruction (model-assisted scoring)
-  if (session.messages.length <= 1) {
-    sections.push("");
-    sections.push(
-      "On your FIRST response only, include at the very end: [COMPLEXITY: X.X] " +
-        "where X.X is your 0-1 self-assessment of task complexity. " +
-        "0.0 = trivial, 1.0 = extremely complex multi-file refactor.",
-    );
-  }
-
-  return sections.join("\n");
-}
-
-// ----------------------------------------------------------------------------
-// Tool Call Extraction
-// ----------------------------------------------------------------------------
-
-/**
- * Represents a tool call extracted from the model's response text.
- * When the model outputs structured tool_use blocks, this is how we capture them.
- * Since we are using generateText (not structured tool calling), we parse
- * tool calls from a simple XML-like format in the model's response.
- */
-interface ExtractedToolCall {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  dependsOn?: string[];
-}
-
-function escapeLiteralControlCharsInJsonStrings(payload: string): string {
-  let result = "";
-  let inString = false;
-  let escaping = false;
-
-  for (const char of payload) {
-    if (escaping) {
-      result += char;
-      escaping = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      result += char;
-      escaping = true;
-      continue;
-    }
-
-    if (char === '"') {
-      result += char;
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) {
-      if (char === "\n") {
-        result += "\\n";
-        continue;
-      }
-      if (char === "\r") {
-        result += "\\r";
-        continue;
-      }
-      if (char === "\t") {
-        result += "\\t";
-        continue;
-      }
-    }
-
-    result += char;
-  }
-
-  return result;
-}
-
-/**
- * Multiset Jaccard word-overlap [0–1]. ES2022-safe — no findLastIndex, Array.at, etc.
- * Uses frequency maps (Map<string, number>) instead of sets, so repeated words count.
- * Intersection = Σ min(countA[w], countB[w]); Union = Σ max(countA[w], countB[w]).
- * This prevents a rewrite from gaming the check by padding with repeated critique keywords.
- */
-function jaccardWordOverlap(a: string, b: string): number {
-  const tokenize = (s: string): Map<string, number> => {
-    const words = s.toLowerCase().match(/[a-z]{3,}/g) ?? [];
-    const freq = new Map<string, number>();
-    for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1);
-    return freq;
-  };
-  const freqA = tokenize(a);
-  const freqB = tokenize(b);
-  const allWords = new Set<string>([...freqA.keys(), ...freqB.keys()]);
-  if (allWords.size === 0) return 1;
-  let intersection = 0;
-  let union = 0;
-  for (const w of allWords) {
-    const cA = freqA.get(w) ?? 0;
-    const cB = freqB.get(w) ?? 0;
-    intersection += Math.min(cA, cB);
-    union += Math.max(cA, cB);
-  }
-  return union === 0 ? 1 : intersection / union;
-}
-
-/**
- * Derives an adaptive Jaccard similarity threshold from critique severity.
- * More severe critiques → lower threshold → more divergence required from the original.
- * Range: [0.72, 0.93].
- *   0 high, 0 med, 0 low → 0.93  (minor critique — small word-set change is sufficient)
- *   3 high, 0 med, 0 low → 0.80
- *   5+ high              → 0.72  (clamped minimum)
- *   0 high, 0 med, 5 low → 0.88  (all-low-severity: still tighter than default)
- */
-function adaptiveJaccardThreshold(highCount: number, medCount: number, lowCount: number): number {
-  const raw = 0.95 - highCount * 0.05 - medCount * 0.02 - lowCount * 0.01;
-  return Math.min(0.93, Math.max(0.72, raw));
-}
-
-/**
- * Bigram coverage check: for each critique point description, extract all consecutive
- * 2-word phrases (bigrams). A point is "covered" if any bigram appears verbatim in
- * the rewrite. Falls back to unigrams for single-word descriptions.
- * Returns { covered, total }.
- *
- * This is harder to game than single-word checks: the model must produce
- * the specific phrase "authentication validation" — not just the word "authentication".
- */
-function checkBigramCoverage(
-  descriptions: string[],
-  rewrite: string,
-): { covered: number; total: number } {
-  const rewriteLower = rewrite.toLowerCase();
-  let covered = 0;
-  for (const desc of descriptions) {
-    const words = desc.toLowerCase().match(/[a-z]{3,}/g) ?? [];
-    const bigrams: string[] = [];
-    for (let i = 0; i < words.length - 1; i++) {
-      bigrams.push(`${words[i]} ${words[i + 1]}`);
-    }
-    const checks = bigrams.length > 0 ? bigrams : words;
-    if (checks.some((b) => rewriteLower.includes(b))) covered++;
-  }
-  return { covered, total: descriptions.length };
-}
-
-function parseToolCallPayload(
-  payload: string,
-): { name?: string; input?: Record<string, unknown>; dependsOn?: string[] } | null {
-  try {
-    return JSON.parse(payload) as {
-      name?: string;
-      input?: Record<string, unknown>;
-      dependsOn?: string[];
-    };
-  } catch {
-    try {
-      return JSON.parse(escapeLiteralControlCharsInJsonStrings(payload)) as {
-        name?: string;
-        input?: Record<string, unknown>;
-        dependsOn?: string[];
-      };
-    } catch {
-      return null;
-    }
-  }
-}
-
-/**
- * Extracts tool calls from the model response text.
- * Looks for patterns like:
- *   <tool_use>
- *   {"name": "Read", "input": {"file_path": "..."}}
- *   </tool_use>
- *
- * Also handles JSON code blocks that look like tool calls.
- */
-function extractToolCalls(text: string): {
-  cleanText: string;
-  toolCalls: ExtractedToolCall[];
-  parseErrors: string[]; // raw content of malformed <tool_use> blocks
-} {
-  const toolCalls: ExtractedToolCall[] = [];
-  const parseErrors: string[] = [];
-  let cleanText = text;
-
-  // Pattern 1: XML-style tool use blocks
-  const xmlPattern = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = xmlPattern.exec(text)) !== null) {
-    const parsed = parseToolCallPayload(match[1]!);
-    if (parsed?.name && parsed.input) {
-      toolCalls.push({
-        id: randomUUID(),
-        name: parsed.name,
-        input: parsed.input,
-        dependsOn: Array.isArray(parsed.dependsOn)
-          ? parsed.dependsOn.filter((value): value is string => typeof value === "string")
-          : undefined,
-      });
-    } else {
-      // Capture malformed blocks so the execution loop can report them to the model
-      parseErrors.push(match[1]!.slice(0, 300).trim());
-    }
-    cleanText = cleanText.replace(match[0], "");
-  }
-
-  // Pattern 2: JSON blocks with tool call structure
-  const jsonBlockPattern =
-    /```(?:json)?\s*\n(\{[\s\S]*?"name"\s*:\s*"(?:Read|Write|Edit|Bash|Glob|Grep|GitCommit|GitPush|TodoWrite|WebSearch|WebFetch|SubAgent|GitHubSearch|AcquireUrl|AcquireArchive|GitHubOps)"[\s\S]*?\})\s*\n```/g;
-
-  while ((match = jsonBlockPattern.exec(text)) !== null) {
-    const parsed = parseToolCallPayload(match[1]!);
-    if (parsed?.name && parsed.input) {
-      toolCalls.push({
-        id: randomUUID(),
-        name: parsed.name,
-        input: parsed.input,
-        dependsOn: Array.isArray(parsed.dependsOn)
-          ? parsed.dependsOn.filter((value): value is string => typeof value === "string")
-          : undefined,
-      });
-      cleanText = cleanText.replace(match[0], "");
-    }
-  }
-
-  return { cleanText: cleanText.trim(), toolCalls, parseErrors };
-}
-
-// ----------------------------------------------------------------------------
-// Reflection Loop Helpers
-// ----------------------------------------------------------------------------
-
-/**
- * Returns the project's configured verification commands (lint, test, build).
- * Used by the reflection loop to auto-verify code changes.
- */
-function getVerifyCommands(config: AgentLoopConfig): Array<{ name: string; command: string }> {
-  const commands: Array<{ name: string; command: string }> = [];
-  const project = config.state.project;
-  if (project.lintCommand) commands.push({ name: "lint", command: project.lintCommand });
-  if (project.testCommand) commands.push({ name: "test", command: project.testCommand });
-  if (project.buildCommand) commands.push({ name: "build", command: project.buildCommand });
-  return commands;
-}
-
-const CODE_FILE_EXTENSIONS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".rb",
-  ".rs",
-  ".go",
-  ".java",
-  ".kt",
-  ".swift",
-  ".cs",
-  ".cpp",
-  ".c",
-  ".h",
-  ".hpp",
-  ".css",
-  ".scss",
-  ".html",
-  ".md",
-  ".json",
-  ".yaml",
-  ".yml",
-]);
-
-interface MajorEditBatchGateResult {
-  passed: boolean;
-  failedSteps: string[];
-}
-
-function isCodeLikeFile(filePath: string): boolean {
-  const normalized = filePath.toLowerCase();
-  return Array.from(CODE_FILE_EXTENSIONS).some((extension) => normalized.endsWith(extension));
-}
-
-function isWorktreeProjectRoot(projectRoot: string): boolean {
-  const normalized = projectRoot.replace(/\\/g, "/");
-  return normalized.includes("/.dantecode/worktrees/");
-}
-
-function isMajorEditBatch(files: string[], projectRoot: string): boolean {
-  const codeFiles = [...new Set(files.filter(isCodeLikeFile))];
-  if (codeFiles.length === 0) {
-    return false;
-  }
-
-  return (
-    codeFiles.some((filePath) => isProtectedWriteTarget(filePath, projectRoot)) ||
-    (isWorktreeProjectRoot(projectRoot) && codeFiles.length > 1)
-  );
-}
-
-async function runMajorEditBatchGate(
-  session: Session,
-  roundCounter: number,
-  config: AgentLoopConfig,
-  readTracker: Map<string, string>,
-  editAttempts: Map<string, number>,
-): Promise<MajorEditBatchGateResult> {
-  const steps = [
-    { name: "typecheck", command: "npm run typecheck" },
-    { name: "lint", command: "npm run lint" },
-    { name: "test", command: "npm test" },
-  ];
-  const failedSteps: string[] = [];
-
-  for (const step of steps) {
-    const gateResult = await executeTool("Bash", { command: step.command }, session.projectRoot, {
-      sessionId: session.id,
-      roundId: `round-${roundCounter}-gstack`,
-      sandboxEnabled: false,
-      selfImprovement: config.selfImprovement,
-      readTracker,
-      editAttempts,
-    });
-
-    if (gateResult.isError) {
-      failedSteps.push(step.name);
-    }
-  }
-
-  return {
-    passed: failedSteps.length === 0,
-    failedSteps,
-  };
-}
-
-// ----------------------------------------------------------------------------
-// Context Compaction
-// ----------------------------------------------------------------------------
-
-/**
- * Compacts messages when approaching the context window limit.
- * Three-tier strategy:
- *   Tier 1 (< 50%): No compaction.
- *   Tier 2 (50-75%): Summarize old tool results, keep tool call names.
- *   Tier 3 (> 75%): Keep first + recent 10, inject summary of dropped range.
- * (Pattern from opencode/OpenHands)
- */
-function compactMessages(
-  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
-  contextWindow: number,
-): Array<{ role: "user" | "assistant" | "system"; content: string }> {
-  const tokens = estimateMessageTokens(messages);
-
-  // Tier 1: Under 50% — no compaction needed
-  if (tokens < contextWindow * 0.5) {
-    return messages;
-  }
-
-  // Tier 2: 50-75% — summarize old tool results, keep recent 5 tool calls intact
-  if (tokens < contextWindow * 0.75) {
-    const KEEP_RECENT_TOOLS = 5;
-    let toolResultCount = 0;
-    const result: typeof messages = [];
-
-    // Walk from end to start, counting tool results
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]!;
-      const isToolResult = msg.role === "user" && msg.content.startsWith("Tool execution results:");
-
-      if (isToolResult) {
-        toolResultCount++;
-        if (toolResultCount > KEEP_RECENT_TOOLS) {
-          // Summarize old tool result to one line
-          const firstLine = msg.content.split("\n")[1] ?? "tool result";
-          result.unshift({
-            role: msg.role,
-            content: `[Summarized] ${firstLine.slice(0, 120)}`,
-          });
-          continue;
-        }
-      }
-      result.unshift(msg);
-    }
-    return result;
-  }
-
-  // Tier 3: 75-90% — summarize dropped messages (keep key facts)
-  const KEEP_RECENT = 10;
-  if (messages.length <= KEEP_RECENT + 1) {
-    return messages;
-  }
-
-  const first = messages[0]!;
-  const recent = messages.slice(-KEEP_RECENT);
-  const dropped = messages.slice(1, messages.length - KEEP_RECENT);
-
-  // Generate a structured summary of dropped messages
-  const summary = summarizeDroppedMessages(dropped);
-
-  return [
-    first,
-    {
-      role: "system" as const,
-      content: summary,
-    },
-    ...recent,
-  ];
-}
-
-/**
- * Generate a meaningful summary of dropped messages, preserving key facts
- * about what files were read, edited, and what commands were run.
- */
-function summarizeDroppedMessages(
-  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
-): string {
-  const filesRead = new Set<string>();
-  const filesEdited = new Set<string>();
-  const bashCommands: string[] = [];
-  const keyDecisions: string[] = [];
-
-  for (const msg of messages) {
-    const text = msg.content;
-
-    // Extract file reads
-    const readMatches = text.matchAll(/(?:Read|read|Reading)\s+[`"]?([^\s`"]+\.\w+)/g);
-    for (const m of readMatches) filesRead.add(m[1]!);
-
-    // Extract file edits/writes
-    const editMatches = text.matchAll(
-      /(?:Edit|Write|Edited|Wrote|Modified)\s+[`"]?([^\s`"]+\.\w+)/g,
-    );
-    for (const m of editMatches) filesEdited.add(m[1]!);
-
-    // Extract bash commands (first line only)
-    const bashMatches = text.matchAll(/(?:Bash|command|ran|execute)[:\s]+[`"]?([^\n`"]{5,80})/gi);
-    for (const m of bashMatches) {
-      if (bashCommands.length < 5) bashCommands.push(m[1]!.trim());
-    }
-
-    // Extract tool result file paths
-    const toolPathMatches = text.matchAll(/file_path[":=\s]+([^\s"',}]+\.\w+)/g);
-    for (const m of toolPathMatches) {
-      if (msg.role === "user") filesRead.add(m[1]!);
-    }
-  }
-
-  const parts = [
-    `[Context compacted: ${messages.length} earlier messages summarized]`,
-    "",
-    "## Earlier Session Activity",
-  ];
-
-  if (filesRead.size > 0) {
-    parts.push(`Files read: ${[...filesRead].slice(0, 15).join(", ")}`);
-  }
-  if (filesEdited.size > 0) {
-    parts.push(`Files modified: ${[...filesEdited].slice(0, 10).join(", ")}`);
-  }
-  if (bashCommands.length > 0) {
-    parts.push(`Commands run: ${bashCommands.join("; ")}`);
-  }
-  if (keyDecisions.length > 0) {
-    parts.push(`Key decisions: ${keyDecisions.join("; ")}`);
-  }
-
-  return parts.join("\n");
-}
-
-/**
- * Extract file paths the model claims to have modified from its response text.
- * Looks for patterns like "I updated/modified/edited <path>" or "Write to <path>".
- */
-function extractClaimedFiles(text: string): string[] {
-  const patterns = [
-    /(?:updated|modified|edited|wrote|created|changed)\s+[`"']?([^\s`"',]+\.\w{1,6})/gi,
-    /(?:Write|Edit)\s+(?:to\s+)?[`"']?([^\s`"',]+\.\w{1,6})/g,
-  ];
-  const files = new Set<string>();
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const path = match[1]!;
-      // Filter out common false positives
-      if (path.length > 3 && !path.startsWith("http") && !path.startsWith("//")) {
-        files.add(path);
-      }
-    }
-  }
-  return [...files];
-}
-
-function supportsExtendedThinking(model: ModelConfig): boolean {
-  if (typeof model.supportsExtendedThinking === "boolean") {
-    return model.supportsExtendedThinking;
-  }
-
-  return (
-    model.provider === "anthropic" ||
-    model.modelId.toLowerCase().includes("reasoning") ||
-    /^o[13]/i.test(model.modelId) ||
-    /r1/i.test(model.modelId)
-  );
-}
-
-function deriveThinkingBudget(model: ModelConfig, complexity: number): number | undefined {
-  if (!supportsExtendedThinking(model) || complexity < 0.6) {
-    return undefined;
-  }
-
-  const baseBudget =
-    model.reasoningEffort === "high" ? 8192 : model.reasoningEffort === "low" ? 2048 : 4096;
-  return Math.round(baseBudget * Math.max(1, complexity));
-}
-
-function isTimeoutError(message: string): boolean {
-  return /\b(?:timed?\s*out|timeout)\b/i.test(message);
-}
-
-function inferWorkflowName(prompt: string, config: AgentLoopConfig): string {
-  if (config.expectedWorkflow) {
-    return config.expectedWorkflow;
-  }
-
-  const slashMatch = prompt.trim().match(/^\/([a-z0-9-]+)/i);
-  if (slashMatch?.[1]) {
-    return slashMatch[1].toLowerCase();
-  }
-
-  return config.skillActive ? "skill" : "agent-loop";
-}
-
-function buildResumePrompt(
-  runId: string,
-  hint: {
-    summary?: string;
-    lastConfirmedStep?: string;
-    lastSuccessfulTool?: string;
-    nextAction?: string;
-  } | null,
-  originalPrompt: string,
-): string {
-  const lines = [`Resuming durable run ${runId}.`];
-
-  if (hint?.summary) {
-    lines.push(`Previous status: ${hint.summary}`);
-  }
-  if (hint?.lastConfirmedStep) {
-    lines.push(`Last confirmed step: ${hint.lastConfirmedStep}`);
-  }
-  if (hint?.lastSuccessfulTool) {
-    lines.push(`Last successful tool: ${hint.lastSuccessfulTool}`);
-  }
-  if (hint?.nextAction) {
-    lines.push(`Next action: ${hint.nextAction}`);
-  }
-  lines.push(
-    originalPrompt.trim().length > 0 && !/^continue$/i.test(originalPrompt.trim())
-      ? `User follow-up: ${originalPrompt.trim()}`
-      : "Continue from the last confirmed step.",
-  );
-
-  return lines.join("\n");
-}
-
-function getBackgroundTaskRegistry(projectRoot: string): BackgroundTaskRegistry {
-  const ctx = _laneCtx.getStore();
-  const key = ctx ? `${ctx.sessionId}:${projectRoot}` : projectRoot;
-  const existing = backgroundTaskRegistries.get(key);
-  if (existing) {
-    return existing;
-  }
-
-  const registry: BackgroundTaskRegistry = {
-    pending: new Map<string, Promise<SubAgentResult>>(),
-    store: new BackgroundTaskStore(projectRoot),
-  };
-  backgroundTaskRegistries.set(key, registry);
-  return registry;
-}
-
-function cloneSessionForBackgroundResume(session: Session): Session {
-  return {
-    ...session,
-    messages: [...session.messages],
-    activeFiles: [...session.activeFiles],
-    readOnlyFiles: [...session.readOnlyFiles],
-    agentStack: [...session.agentStack],
-    todoList: [...session.todoList],
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-export async function maybeAutoResumeDurableRunAfterBackgroundTask(params: {
-  durableRunId?: string;
-  workflowName?: string;
-  parentSession: Session;
-  parentConfig: AgentLoopConfig;
-  runAgentLoopImpl?: RunAgentLoopFn;
-}): Promise<boolean> {
-  if (!params.durableRunId) {
-    return false;
-  }
-
-  const resumeKey = `${params.parentSession.projectRoot}:${params.durableRunId}`;
-  if (autoResumingDurableRuns.has(resumeKey)) {
-    return false;
-  }
-
-  autoResumingDurableRuns.add(resumeKey);
-  try {
-    const resumeConfig: AgentLoopConfig = {
-      ...params.parentConfig,
-      runId: params.durableRunId,
-      resumeFrom: params.durableRunId,
-      expectedWorkflow: params.workflowName ?? params.parentConfig.expectedWorkflow,
-      silent: true,
-      onToken: undefined,
-    };
-
-    const resumeSession = cloneSessionForBackgroundResume(params.parentSession);
-    const runAgentLoopImpl = params.runAgentLoopImpl ?? runAgentLoop;
-    await runAgentLoopImpl("continue", resumeSession, resumeConfig);
-    return true;
-  } finally {
-    autoResumingDurableRuns.delete(resumeKey);
-  }
-}
-
-function extractBackgroundTaskId(text?: string): string | null {
-  if (!text) {
-    return null;
-  }
-
-  const explicitStart = text.match(/Background task started:\s*([a-z0-9-]+)/i);
-  if (explicitStart?.[1]) {
-    return explicitStart[1];
-  }
-
-  const genericMention = text.match(/background task\s+([a-z0-9-]+)/i);
-  if (genericMention?.[1]) {
-    return genericMention[1];
-  }
-
-  const statusHint = text.match(/status\s+([a-z0-9-]+)/i);
-  return statusHint?.[1] ?? null;
-}
-
-function formatBackgroundWaitNotice(runId: string, taskId: string, progress?: string): string {
-  const detail = progress?.trim() ? ` ${progress.trim()}.` : "";
-  return (
-    `Background task ${taskId} is still running.${detail} ` +
-    `Type continue or /resume ${runId} after it finishes.`
-  );
-}
-
-function getBackgroundResumeNextAction(taskId: string): string {
-  return `Wait for background task ${taskId} to finish, then continue the durable run.`;
-}
-
-function estimateBackgroundTaskDurationMs(task: {
-  createdAt: string;
-  startedAt?: string;
-  completedAt?: string;
-}): number {
-  const start = task.startedAt ?? task.createdAt;
-  const end = task.completedAt ?? task.startedAt ?? task.createdAt;
-  return Math.max(0, new Date(end).getTime() - new Date(start).getTime());
-}
-
-function buildExecutionEvidence(
-  toolName: string,
-  toolInput: Record<string, unknown>,
-  result: { isError: boolean },
-  writtenFile?: string,
-): ExecutionEvidence {
-  const timestamp = new Date().toISOString();
-  const command = typeof toolInput["command"] === "string" ? toolInput["command"] : undefined;
-  const filePath =
-    typeof toolInput["file_path"] === "string" ? toolInput["file_path"] : writtenFile;
-  const sourceUrl = typeof toolInput["url"] === "string" ? toolInput["url"] : undefined;
-
-  if (writtenFile && !result.isError) {
-    return {
-      id: randomUUID(),
-      kind: "file_write",
-      success: true,
-      label: `Updated ${writtenFile}`,
-      filePath: writtenFile,
-      timestamp,
-    };
-  }
-
-  if (
-    toolName === "Bash" &&
-    command &&
-    /\b(?:test|lint|build|typecheck|vitest|jest)\b/i.test(command)
-  ) {
-    return {
-      id: randomUUID(),
-      kind: result.isError ? "tool_result" : "verification_pass",
-      success: !result.isError,
-      label: result.isError ? `Verification failed: ${command}` : `Verified with: ${command}`,
-      command,
-      timestamp,
-    };
-  }
-
-  if (toolName === "WebFetch" || toolName === "WebSearch" || toolName === "GitHubSearch") {
-    return {
-      id: randomUUID(),
-      kind: "source_fetch",
-      success: !result.isError,
-      label: `${toolName} executed`,
-      sourceUrl,
-      timestamp,
-    };
-  }
-
-  if (toolName === "SubAgent") {
-    return {
-      id: randomUUID(),
-      kind: "agent_spawn",
-      success: !result.isError,
-      label: "Spawned sub-agent",
-      agentId: typeof toolInput["agentId"] === "string" ? toolInput["agentId"] : undefined,
-      timestamp,
-    };
-  }
-
-  if (toolName === "GitCommit" || toolName === "GitPush") {
-    return {
-      id: randomUUID(),
-      kind: "commit",
-      success: !result.isError,
-      label: `${toolName} executed`,
-      timestamp,
-    };
-  }
-
-  return {
-    id: randomUUID(),
-    kind: "tool_result",
-    success: !result.isError,
-    label: `${toolName} executed`,
-    filePath,
-    command,
-    sourceUrl,
-    timestamp,
-  };
-}
-
-function isExecutionContinuationPrompt(prompt: string, session: Session): boolean {
-  if (!EXECUTION_CONTINUATION_PATTERN.test(prompt.trim())) {
-    return false;
-  }
-
-  const priorMessages = session.messages.slice(0, -1);
-  return priorMessages.some((message) => {
-    if (message.toolUse || message.toolResult) {
-      return true;
-    }
-    // Detect skill activation system messages — any activated skill means
-    // "continue" should be treated as an execution continuation.
-    if (
-      message.role === "system" &&
-      typeof message.content === "string" &&
-      message.content.startsWith('Activated skill "')
-    ) {
-      return true;
-    }
-    return (
-      message.role === "user" &&
-      typeof message.content === "string" &&
-      EXECUTION_WORKFLOW_PATTERN.test(message.content.trim())
-    );
-  });
-}
 
 // ----------------------------------------------------------------------------
 // Main Agent Loop
 // ----------------------------------------------------------------------------
 
-/**
- * Runs the agent interaction loop for a single user turn.
- *
- * 1. Appends user message to the session
- * 2. Builds the system prompt and message history
- * 3. Sends to the model via ModelRouterImpl
- * 4. Extracts tool calls from the response
- * 5. Executes each tool call and collects results
- * 6. If tool calls were made, loops back to send results to the model
- * 7. Runs DanteForge pipeline on any code files written
- * 8. Returns the updated session
- *
- * @param prompt - The user's natural language prompt.
- * @param session - The current session state.
- * @param config - Agent loop configuration.
- * @returns The updated session with new messages.
- */
-/**
- * Creates a sub-agent executor function that can be passed to the tool
- * execution context. The executor clones the parent session and runs
- * a fresh agent loop with constrained rounds.
- */
-function createSubAgentExecutor(
-  parentSession: Session,
-  parentConfig: AgentLoopConfig,
-  runtime?: {
-    durableRunId?: string;
-    workflowName?: string;
-  },
-): SubAgentExecutor {
-  const backgroundRegistry = getBackgroundTaskRegistry(parentSession.projectRoot);
-  const backgroundTasks = backgroundRegistry.pending;
-  const backgroundTaskStore = backgroundRegistry.store;
-
-  async function executeSubAgent(
-    prompt: string,
-    projectRoot: string,
-    maxRounds: number,
-  ): Promise<SubAgentResult> {
-    const startTime = Date.now();
-
-    const childSession: Session = {
-      id: `sub-${parentSession.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`,
-      projectRoot,
-      messages: [],
-      activeFiles: [],
-      readOnlyFiles: [],
-      model: parentSession.model,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      agentStack: [
-        ...(parentSession.agentStack ?? []),
-        {
-          agentId: `subagent-${randomUUID().slice(0, 8)}`,
-          agentType: "sub-agent",
-          startedAt: new Date().toISOString(),
-          touchedFiles: [],
-          status: "running" as const,
-          subAgentIds: [],
-        },
-      ],
-      todoList: [],
-    };
-
-    const childConfig: AgentLoopConfig = {
-      ...parentConfig,
-      requiredRounds: maxRounds,
-      silent: true,
-      onToken: undefined,
-      abortSignal: parentConfig.abortSignal,
-    };
-
-    try {
-      const completedSession = await runAgentLoop(prompt, childSession, childConfig);
-
-      const assistantMsgs = completedSession.messages.filter(
-        (m: SessionMessage) => m.role === "assistant",
-      );
-      const lastMsg = assistantMsgs[assistantMsgs.length - 1];
-      const output = lastMsg?.content ?? "(no output)";
-
-      const touchedFiles: string[] = [];
-      for (const msg of completedSession.messages) {
-        if (msg.role === "assistant" && typeof msg.content === "string") {
-          const writeMatches = msg.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
-          for (const match of writeMatches) {
-            if (match[1]) touchedFiles.push(match[1]);
-          }
-        }
-      }
-
-      return {
-        output: typeof output === "string" ? output : JSON.stringify(output),
-        touchedFiles,
-        durationMs: Date.now() - startTime,
-        success: true,
-      };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        output: "",
-        touchedFiles: [],
-        durationMs: Date.now() - startTime,
-        success: false,
-        error: message,
-      };
-    }
-  }
-
-  return async (prompt: string, options?: SubAgentOptions): Promise<SubAgentResult> => {
-    const maxRounds = options?.maxRounds ?? 30;
-
-    // Handle background task status queries
-    if (prompt.startsWith("status ")) {
-      const taskId = prompt.slice(7).trim();
-      const persistedTask = await backgroundTaskStore.loadTask(taskId);
-      if (persistedTask?.status === "completed") {
-        return {
-          output: persistedTask.output ?? "(no output)",
-          touchedFiles: persistedTask.touchedFiles ?? [],
-          durationMs: estimateBackgroundTaskDurationMs(persistedTask),
-          success: true,
-        };
-      }
-      if (persistedTask?.status === "failed" || persistedTask?.status === "cancelled") {
-        return {
-          output: persistedTask.output ?? "",
-          touchedFiles: persistedTask.touchedFiles ?? [],
-          durationMs: estimateBackgroundTaskDurationMs(persistedTask),
-          success: false,
-          error: persistedTask.error ?? persistedTask.progress,
-        };
-      }
-      if (
-        persistedTask?.status === "queued" ||
-        persistedTask?.status === "running" ||
-        backgroundTasks.has(taskId)
-      ) {
-        return {
-          output: `Background task ${taskId} is still running.${persistedTask?.progress ? ` ${persistedTask.progress}.` : ""}`,
-          touchedFiles: [],
-          durationMs: 0,
-          success: true,
-        };
-      }
-      return {
-        output: `No background task found with ID: ${taskId}`,
-        touchedFiles: [],
-        durationMs: 0,
-        success: false,
-        error: "Task not found",
-      };
-    }
-
-    // Worktree isolation: create isolated branch for this agent
-    let worktreeDir: string | undefined;
-    if (options?.worktreeIsolation && parentConfig.enableGit) {
-      try {
-        const { createWorktree } = await import("@dantecode/git-engine");
-        const sessionId = `sub-${randomUUID().slice(0, 8)}`;
-        const result = createWorktree({
-          directory: parentSession.projectRoot,
-          branch: `agent-${sessionId}`,
-          baseBranch: "HEAD",
-          sessionId,
-        });
-        worktreeDir = result.directory;
-      } catch {
-        // Worktree creation failed — fall back to shared directory
-      }
-    }
-
-    const workDir = worktreeDir ?? parentSession.projectRoot;
-
-    // Background execution: queue task and return immediately
-    if (options?.background) {
-      const taskId = randomUUID().slice(0, 12);
-      const createdAt = new Date().toISOString();
-      await backgroundTaskStore.saveTask({
-        id: taskId,
-        prompt,
-        status: "queued",
-        createdAt,
-        progress: "Queued background sub-agent work",
-        touchedFiles: [],
-        worktreeDir,
-      });
-
-      const taskPromise = (async () => {
-        const startedAt = new Date().toISOString();
-        await backgroundTaskStore.saveTask({
-          id: taskId,
-          prompt,
-          status: "running",
-          createdAt,
-          startedAt,
-          progress: "Background sub-agent is running",
-          touchedFiles: [],
-          worktreeDir,
-        });
-
-        const result = await executeSubAgent(prompt, workDir, maxRounds);
-        const completedAt = new Date().toISOString();
-
-        await backgroundTaskStore.saveTask({
-          id: taskId,
-          prompt,
-          status: result.success ? "completed" : "failed",
-          createdAt,
-          startedAt,
-          completedAt,
-          progress: result.success
-            ? "Background sub-agent completed"
-            : "Background sub-agent failed",
-          output: result.output,
-          touchedFiles: result.touchedFiles,
-          error: result.error,
-          worktreeDir,
-        });
-
-        if (result.success && runtime?.durableRunId) {
-          await maybeAutoResumeDurableRunAfterBackgroundTask({
-            durableRunId: runtime.durableRunId,
-            workflowName: runtime.workflowName,
-            parentSession,
-            parentConfig,
-          });
-        }
-
-        backgroundTasks.delete(taskId);
-        // Clean up worktree after background task completes
-        if (worktreeDir) {
-          import("@dantecode/git-engine")
-            .then(({ removeWorktree }) => removeWorktree(worktreeDir!))
-            .catch(() => {});
-        }
-        return result;
-      })();
-      backgroundTasks.set(taskId, taskPromise);
-      return {
-        output: `Background task started: ${taskId}. Use SubAgent with prompt "status ${taskId}" to check progress.`,
-        touchedFiles: [],
-        durationMs: 0,
-        success: true,
-      };
-    }
-
-    // Synchronous execution with worktree cleanup
-    try {
-      return await executeSubAgent(prompt, workDir, maxRounds);
-    } finally {
-      if (worktreeDir) {
-        try {
-          const { removeWorktree } = await import("@dantecode/git-engine");
-          removeWorktree(worktreeDir);
-        } catch {
-          // Best-effort cleanup
-        }
-      }
-    }
-  };
-}
 
 // Module-level flag: run startup health check only once per process.
 let _healthCheckCompleted = false;
@@ -3011,9 +1672,10 @@ async function _runAgentLoopCore(
       if (toolCall.name === "GitCommit" || toolCall.name === "GitPush") {
         if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {
           roundMajorEditGateResult = await runMajorEditBatchGate(
-            session,
+            session.id,
+            session.projectRoot,
             roundCounter,
-            config,
+            config.selfImprovement,
             readTracker,
             editAttempts,
           );
@@ -3107,7 +1769,7 @@ async function _runAgentLoopCore(
                 subAgentExecutor: createSubAgentExecutor(session, config, {
                   durableRunId: durableRun.id,
                   workflowName,
-                }),
+                }, runAgentLoop),
                 // Pass sandboxBridge into context so toolBash() can route through it
                 // even when the tool scheduler doesn't take the useSandbox fast path.
                 sandboxBridge: activeSandboxBridge,
@@ -3386,9 +2048,10 @@ async function _runAgentLoopCore(
 
     if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {
       roundMajorEditGateResult = await runMajorEditBatchGate(
-        session,
+        session.id,
+        session.projectRoot,
         roundCounter,
-        config,
+        config.selfImprovement,
         readTracker,
         editAttempts,
       );
@@ -3414,7 +2077,7 @@ async function _runAgentLoopCore(
     // prompt so the model can fix specific issues instead of guessing.
     const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
     if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
-      const verifyCommands = getVerifyCommands(config);
+      const verifyCommands = getVerifyCommands(config.state);
       let verificationPassed = true;
       let verificationErrorSig = "";
       let verificationRetriesExhausted = false;

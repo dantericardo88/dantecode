@@ -684,10 +684,12 @@ vi.mock("./tool-schemas.js", () => ({
 // Safety module is NOT mocked — we test it for real
 
 import {
-  maybeAutoResumeDurableRunAfterBackgroundTask,
   runAgentLoop,
   type AgentLoopConfig,
 } from "./agent-loop.js";
+import {
+  maybeAutoResumeDurableRunAfterBackgroundTask,
+} from "./background-task-manager.js";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
@@ -1889,6 +1891,7 @@ describe("background durable auto-resume", () => {
       parentSession: makeSession(),
       parentConfig: makeConfig({ silent: false }),
       runAgentLoopImpl: resumeLoop,
+      runAgentLoopFallback: resumeLoop,
     });
 
     expect(resumed).toBe(true);
@@ -1912,6 +1915,7 @@ describe("background durable auto-resume", () => {
       parentSession: makeSession(),
       parentConfig: makeConfig(),
       runAgentLoopImpl: resumeLoop,
+      runAgentLoopFallback: resumeLoop,
     });
 
     expect(resumed).toBe(false);

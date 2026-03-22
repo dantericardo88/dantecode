@@ -372,13 +372,11 @@ describe("CLI banner", () => {
 
     expect(help).toContain("DanteCode");
     expect(help).toContain("USAGE");
-    expect(help).toContain("COMMANDS");
     expect(help).toContain("OPTIONS");
-    expect(help).toContain("REPL SLASH COMMANDS");
-    expect(help).toContain("init");
-    expect(help).toContain("skills");
+    expect(help).toContain("KEY COMMANDS");
     expect(help).toContain("--model");
     expect(help).toContain("--help");
+    expect(help).toContain("/magic");
     expect(help).toContain("/help");
     expect(help).toContain("/commit");
     expect(help).toContain("/diff");
@@ -404,7 +402,7 @@ describe("CLI banner", () => {
     expect(banner).toContain("v1.0.0");
     expect(banner).toContain("anthropic/claude-sonnet-4-6");
     expect(banner).toContain("/test/project");
-    expect(banner).toContain("200,000");
+    expect(banner).toContain("/magic");
   });
 
   it("getOneShotBanner returns compact format", async () => {

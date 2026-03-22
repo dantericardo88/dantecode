@@ -2,11 +2,21 @@
 // @dantecode/cli — Init Command
 // Creates the .dantecode/ directory structure with default STATE.yaml,
 // AGENTS.dc.md template, and skills/agents directories.
+// Scans for API keys, detects project language, and writes STATE.yaml
+// with language-aware GStack defaults.
 // ============================================================================
 
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { initializeState, stateYamlExists } from "@dantecode/core";
+import { createInterface } from "node:readline";
+import { execFileSync } from "node:child_process";
+import {
+  initializeState,
+  stateYamlExists,
+  detectProjectStack,
+  getGStackDefaults,
+} from "@dantecode/core";
+import type { InitializeStateOptions } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -15,9 +25,33 @@ import { initializeState, stateYamlExists } from "@dantecode/core";
 const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
+const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
+
+// ----------------------------------------------------------------------------
+// Provider Configuration
+// ----------------------------------------------------------------------------
+
+/** Maps provider names to their environment variable keys. */
+export const PROVIDER_ENV_MAP: Record<string, string[]> = {
+  anthropic: ["ANTHROPIC_API_KEY"],
+  grok: ["XAI_API_KEY", "GROK_API_KEY"],
+  openai: ["OPENAI_API_KEY"],
+  google: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+  groq: ["GROQ_API_KEY"],
+};
+
+/** Default model configurations per provider. */
+export const PROVIDER_DEFAULTS: Record<string, { modelId: string; contextWindow: number }> = {
+  anthropic: { modelId: "claude-sonnet-4-20250514", contextWindow: 200000 },
+  grok: { modelId: "grok-3", contextWindow: 131072 },
+  openai: { modelId: "gpt-4o", contextWindow: 128000 },
+  google: { modelId: "gemini-2.5-pro", contextWindow: 1048576 },
+  groq: { modelId: "llama-3.3-70b-versatile", contextWindow: 131072 },
+  ollama: { modelId: "llama3.2", contextWindow: 131072 },
+};
 
 // ----------------------------------------------------------------------------
 // AGENTS.dc.md Template
@@ -59,6 +93,65 @@ This project uses:
 `;
 
 // ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+/**
+ * Prompts the user for input via readline and returns the trimmed answer.
+ */
+export function askQuestion(prompt: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+/**
+ * Checks whether a file exists at the given path.
+ */
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Scans the environment for known API keys and returns an array of
+ * [providerName, envVarName] tuples for each detected key.
+ */
+export function scanForApiKeys(): Array<[string, string]> {
+  const found: Array<[string, string]> = [];
+  for (const [provider, envVars] of Object.entries(PROVIDER_ENV_MAP)) {
+    for (const envVar of envVars) {
+      if (process.env[envVar]) {
+        found.push([provider, envVar]);
+        break; // Only count each provider once
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Checks whether ollama is available on the system PATH.
+ */
+export function isOllamaAvailable(): boolean {
+  try {
+    const cmd = process.platform === "win32" ? "where" : "which";
+    execFileSync(cmd, ["ollama"], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Init Command
 // ----------------------------------------------------------------------------
 
@@ -71,14 +164,123 @@ This project uses:
  * - .dantecode/skills/ (skill storage directory)
  * - .dantecode/agents/ (agent definition directory)
  *
- * If STATE.yaml already exists, prompts to skip or overwrite.
+ * Scans for API keys, auto-detects project language, and writes
+ * STATE.yaml with the selected provider and language-aware GStack defaults.
  *
  * @param projectRoot - Absolute path to the project root directory.
- * @param force - If true, overwrites existing files without prompting.
+ * @param force - If true, uses first detected provider and overwrites existing files.
  */
 export async function runInitCommand(projectRoot: string, force: boolean = false): Promise<void> {
   process.stdout.write(`\n${BOLD}Initializing DanteCode project...${RESET}\n\n`);
 
+  // ── Step 1: Check for existing STATE.yaml ──────────────────────────────
+  const stateExists = await stateYamlExists(projectRoot);
+  if (stateExists && !force) {
+    process.stdout.write(
+      `${YELLOW}STATE.yaml already exists. Use --force to overwrite.${RESET}\n\n`,
+    );
+  }
+
+  // ── Step 2: Scan for API keys and select provider ──────────────────────
+  const detectedKeys = scanForApiKeys();
+  let selectedProvider: string;
+  let providerDefaults: { modelId: string; contextWindow: number };
+
+  if (detectedKeys.length === 1) {
+    // Auto-select the single detected provider
+    const [provider, envVar] = detectedKeys[0]!;
+    selectedProvider = provider;
+    providerDefaults = PROVIDER_DEFAULTS[provider]!;
+    process.stdout.write(
+      `${GREEN}Found ${provider} API key (${envVar}). Using ${providerDefaults.modelId} as default.${RESET}\n`,
+    );
+  } else if (detectedKeys.length > 1) {
+    if (force) {
+      // Force mode: use the first detected provider
+      const [provider] = detectedKeys[0]!;
+      selectedProvider = provider;
+      providerDefaults = PROVIDER_DEFAULTS[provider]!;
+      process.stdout.write(
+        `${GREEN}Force mode: using ${provider} (${providerDefaults.modelId}) as default.${RESET}\n`,
+      );
+    } else {
+      // Multiple keys: show numbered menu
+      process.stdout.write(`${CYAN}Multiple API keys detected. Select a provider:${RESET}\n\n`);
+      for (let i = 0; i < detectedKeys.length; i++) {
+        const [provider] = detectedKeys[i]!;
+        const defaults = PROVIDER_DEFAULTS[provider]!;
+        process.stdout.write(`  ${BOLD}${i + 1}${RESET}) ${provider} (${defaults.modelId})\n`);
+      }
+      process.stdout.write("\n");
+
+      const answer = await askQuestion(`${CYAN}Enter choice [1-${detectedKeys.length}]: ${RESET}`);
+      const choice = parseInt(answer, 10);
+
+      if (isNaN(choice) || choice < 1 || choice > detectedKeys.length) {
+        process.stderr.write(`${RED}Invalid choice. Aborting.${RESET}\n`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const [provider] = detectedKeys[choice - 1]!;
+      selectedProvider = provider;
+      providerDefaults = PROVIDER_DEFAULTS[provider]!;
+      process.stdout.write(
+        `${GREEN}Selected ${provider} (${providerDefaults.modelId}).${RESET}\n`,
+      );
+    }
+  } else {
+    // No API keys found — check for ollama
+    if (isOllamaAvailable()) {
+      selectedProvider = "ollama";
+      providerDefaults = PROVIDER_DEFAULTS["ollama"]!;
+      process.stdout.write(
+        `${GREEN}No API keys found, but ollama detected on PATH. Using ${providerDefaults.modelId} as default.${RESET}\n`,
+      );
+    } else {
+      process.stderr.write(`${RED}No API keys found.${RESET}\n\n`);
+      process.stderr.write(`Set one of the following environment variables:\n\n`);
+      process.stderr.write(`  ${BOLD}ANTHROPIC_API_KEY${RESET}   — Anthropic (Claude)\n`);
+      process.stderr.write(`  ${BOLD}XAI_API_KEY${RESET}        — xAI (Grok)\n`);
+      process.stderr.write(`  ${BOLD}OPENAI_API_KEY${RESET}     — OpenAI (GPT)\n`);
+      process.stderr.write(`  ${BOLD}GOOGLE_API_KEY${RESET}     — Google (Gemini)\n`);
+      process.stderr.write(`  ${BOLD}GROQ_API_KEY${RESET}       — Groq\n\n`);
+      process.stderr.write(`Or install ${BOLD}ollama${RESET} for local inference.\n\n`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // ── Step 3: Detect project language ────────────────────────────────────
+  const detectedStack = detectProjectStack(projectRoot);
+  const language = detectedStack.language !== "unknown" ? detectedStack.language : "";
+
+  if (language) {
+    process.stdout.write(
+      `${GREEN}Detected project language: ${BOLD}${language}${RESET}${GREEN}.${RESET}\n`,
+    );
+    if (detectedStack.framework) {
+      process.stdout.write(
+        `${DIM}  Framework: ${detectedStack.framework}${RESET}\n`,
+      );
+    }
+    if (detectedStack.testRunner) {
+      process.stdout.write(
+        `${DIM}  Test runner: ${detectedStack.testRunner}${RESET}\n`,
+      );
+    }
+    if (detectedStack.packageManager) {
+      process.stdout.write(
+        `${DIM}  Package manager: ${detectedStack.packageManager}${RESET}\n`,
+      );
+    }
+  } else {
+    process.stdout.write(
+      `${YELLOW}Could not auto-detect project language.${RESET}\n`,
+    );
+  }
+
+  // ── Step 4: Create directory structure ─────────────────────────────────
   const dantecodeDir = join(projectRoot, ".dantecode");
   const created: string[] = [];
   const skipped: string[] = [];
@@ -109,13 +311,20 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
     // Already exists
   }
 
-  // Create STATE.yaml
-  const stateExists = await stateYamlExists(projectRoot);
+  // ── Step 5: Write STATE.yaml ───────────────────────────────────────────
   if (stateExists && !force) {
     skipped.push(".dantecode/STATE.yaml (already exists)");
   } else {
     try {
-      await initializeState(projectRoot);
+      const gstackCommands = getGStackDefaults(detectedStack);
+      const stateOptions: InitializeStateOptions = {
+        provider: selectedProvider as InitializeStateOptions["provider"],
+        modelId: providerDefaults.modelId,
+        contextWindow: providerDefaults.contextWindow,
+        language,
+        gstackOverrides: gstackCommands,
+      };
+      await initializeState(projectRoot, stateOptions);
       created.push(".dantecode/STATE.yaml");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -163,7 +372,9 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
     }
   }
 
-  // Print summary
+  // ── Step 6: Print summary ──────────────────────────────────────────────
+  process.stdout.write("\n");
+
   if (created.length > 0) {
     process.stdout.write(`${GREEN}Created:${RESET}\n`);
     for (const item of created) {
@@ -178,18 +389,5 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
     }
   }
 
-  process.stdout.write(`\n${GREEN}${BOLD}DanteCode project initialized!${RESET}\n`);
-  process.stdout.write(`${DIM}Run 'dantecode' to start the interactive REPL.${RESET}\n\n`);
-}
-
-/**
- * Checks whether a file exists at the given path.
- */
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await stat(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+  process.stdout.write(`\n${GREEN}${BOLD}DanteCode initialized.${RESET} Type ${BOLD}dantecode${RESET} to start.\n\n`);
 }

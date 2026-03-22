@@ -104,12 +104,12 @@ describe("StreamRenderer", () => {
     expect(writes.some((w) => w === "\n")).toBe(true);
   });
 
-  // 9. finish with PDSE score renders footer
+  // 9. finish with PDSE score renders human-readable footer
   it("finish({ pdseScore }) renders PDSE footer", () => {
     const r = new StreamRenderer({ colors: false });
     r.write("data");
     r.finish({ pdseScore: 0.91 });
-    expect(writes.some((w) => w.includes("pdse:0.91"))).toBe(true);
+    expect(writes.some((w) => w.includes("Verified"))).toBe(true);
   });
 
   // 10. finish with tokens renders footer
@@ -117,7 +117,7 @@ describe("StreamRenderer", () => {
     const r = new StreamRenderer({ colors: false });
     r.write("x");
     r.finish({ tokens: 1500 });
-    expect(writes.some((w) => w.includes("tokens:1500"))).toBe(true);
+    expect(writes.some((w) => w.includes("tokens"))).toBe(true);
   });
 
   // 11. annotateToolCall — start

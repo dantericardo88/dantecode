@@ -16,10 +16,57 @@ const GREEN = "\x1b[32m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
 
+// ---------------------------------------------------------------------------
+// Human-Readable Verification Output (B5 / D-03)
+// ---------------------------------------------------------------------------
+
+export interface VerificationDetails {
+  antiStubPassed: boolean;
+  hardViolationCount: number;
+  hardViolationMessages: string[];
+  constitutionPassed: boolean;
+  constitutionCriticalCount: number;
+  constitutionWarningCount: number;
+  constitutionMessages: string[];
+  pdseScore: number;
+  pdsePassedGate: boolean;
+  pdseBreakdown?: { completeness: number; correctness: number; clarity: number; consistency: number };
+}
+
+export function formatVerificationVerdict(details: VerificationDetails, verbose: boolean): string {
+  const allPassed = details.antiStubPassed && details.constitutionPassed && details.pdsePassedGate;
+  const lines: string[] = [];
+
+  if (allPassed && details.constitutionWarningCount === 0) {
+    lines.push(`${GREEN}\u2713 Verified \u2014 no issues found${RESET}`);
+  } else if (allPassed && details.constitutionWarningCount > 0) {
+    lines.push(`${YELLOW}\u2713 Verified \u2014 ${details.constitutionWarningCount} warning(s)${RESET}`);
+  } else if (!details.antiStubPassed) {
+    const msgs = details.hardViolationMessages.slice(0, 2).join(", ");
+    lines.push(`${RED}\u26A0 Verification failed \u2014 caught ${details.hardViolationCount} stub(s): ${msgs}${RESET}`);
+  } else if (!details.constitutionPassed) {
+    const msgs = details.constitutionMessages.slice(0, 2).join(", ");
+    lines.push(`${RED}\u26A0 Verification failed \u2014 ${details.constitutionCriticalCount} policy violation(s): ${msgs}${RESET}`);
+  } else {
+    lines.push(`${RED}\u26A0 Could not fully verify \u2014 additional review needed${RESET}`);
+  }
+
+  if (verbose) {
+    lines.push(`  ${DIM}Anti-stub scan: ${details.antiStubPassed ? "PASSED" : "FAILED"} (${details.hardViolationCount} hard violations)${RESET}`);
+    lines.push(`  ${DIM}Constitution check: ${details.constitutionPassed ? "PASSED" : "FAILED"}${details.constitutionWarningCount > 0 ? ` (${details.constitutionWarningCount} warnings)` : ""}${RESET}`);
+    lines.push(`  ${DIM}PDSE score: ${details.pdseScore}/100${RESET}`);
+    if (details.pdseBreakdown) {
+      lines.push(`  ${DIM}  Completeness: ${details.pdseBreakdown.completeness} | Correctness: ${details.pdseBreakdown.correctness} | Clarity: ${details.pdseBreakdown.clarity} | Consistency: ${details.pdseBreakdown.consistency}${RESET}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 /**
  * Runs the DanteForge quality pipeline on generated code.
  * Steps: anti-stub scan -> constitution check -> PDSE score
- * Returns a summary of results.
+ * Returns a human-readable verdict via formatVerificationVerdict.
  */
 export async function runDanteForge(
   code: string,
@@ -27,68 +74,45 @@ export async function runDanteForge(
   projectRoot: string,
   verbose: boolean,
 ): Promise<{ passed: boolean; summary: string }> {
-  const summaryLines: string[] = [];
   let passed = true;
 
   // Step 1: Anti-stub scan
   const antiStub = runAntiStubScanner(code, projectRoot, filePath);
-  if (!antiStub.passed) {
-    passed = false;
-    summaryLines.push(
-      `${RED}Anti-stub scan: FAILED${RESET} (${antiStub.hardViolations.length} hard violations)`,
-    );
-    if (verbose) {
-      for (const v of antiStub.hardViolations.slice(0, 5) as Array<{
-        line?: number;
-        message: string;
-      }>) {
-        summaryLines.push(`  ${DIM}Line ${v.line ?? "?"}: ${v.message}${RESET}`);
-      }
-    }
-  } else {
-    summaryLines.push(`${GREEN}Anti-stub scan: PASSED${RESET}`);
-  }
+  if (!antiStub.passed) passed = false;
 
   // Step 2: Constitution check
   const constitution = runConstitutionCheck(code, filePath);
   const criticalViolations = constitution.violations.filter((v) => v.severity === "critical");
-  if (criticalViolations.length > 0) {
-    passed = false;
-    summaryLines.push(
-      `${RED}Constitution check: FAILED${RESET} (${criticalViolations.length} critical violations)`,
-    );
-    if (verbose) {
-      for (const v of criticalViolations.slice(0, 5) as Array<{ line?: number; message: string }>) {
-        summaryLines.push(`  ${DIM}Line ${v.line ?? "?"}: ${v.message}${RESET}`);
-      }
-    }
-  } else {
-    const warnings = constitution.violations.filter((v) => v.severity === "warning");
-    if (warnings.length > 0) {
-      summaryLines.push(
-        `${YELLOW}Constitution check: PASSED with ${warnings.length} warning(s)${RESET}`,
-      );
-    } else {
-      summaryLines.push(`${GREEN}Constitution check: PASSED${RESET}`);
-    }
-  }
+  if (criticalViolations.length > 0) passed = false;
+  const warnings = constitution.violations.filter((v) => v.severity === "warning");
 
-  // Step 3: PDSE local score (model-based scoring deferred for speed)
+  // Step 3: PDSE local score
   const pdse = runLocalPDSEScorer(code, projectRoot);
-  if (!pdse.passedGate) {
-    passed = false;
-    summaryLines.push(`${RED}PDSE score: ${pdse.overall}/100 (BELOW threshold)${RESET}`);
-  } else {
-    summaryLines.push(`${GREEN}PDSE score: ${pdse.overall}/100${RESET}`);
-  }
+  if (!pdse.passedGate) passed = false;
 
-  if (verbose) {
-    summaryLines.push(
-      `  ${DIM}Completeness: ${pdse.completeness} | Correctness: ${pdse.correctness} | Clarity: ${pdse.clarity} | Consistency: ${pdse.consistency}${RESET}`,
-    );
-  }
+  const details: VerificationDetails = {
+    antiStubPassed: antiStub.passed,
+    hardViolationCount: antiStub.hardViolations.length,
+    hardViolationMessages: (antiStub.hardViolations as Array<{ message: string }>).map((v) =>
+      v.message.slice(0, 80),
+    ),
+    constitutionPassed: criticalViolations.length === 0,
+    constitutionCriticalCount: criticalViolations.length,
+    constitutionWarningCount: warnings.length,
+    constitutionMessages: (criticalViolations as Array<{ message: string }>).map((v) =>
+      v.message.slice(0, 80),
+    ),
+    pdseScore: pdse.overall,
+    pdsePassedGate: pdse.passedGate,
+    pdseBreakdown: {
+      completeness: pdse.completeness,
+      correctness: pdse.correctness,
+      clarity: pdse.clarity,
+      consistency: pdse.consistency,
+    },
+  };
 
-  return { passed, summary: summaryLines.join("\n") };
+  return { passed, summary: formatVerificationVerdict(details, verbose) };
 }
 
 /**

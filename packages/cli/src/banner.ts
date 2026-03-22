@@ -2,6 +2,8 @@
 // @dantecode/cli — Startup Banner
 // ============================================================================
 
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { ModelConfig } from "@dantecode/config-types";
 
 /**
@@ -71,17 +73,13 @@ export function getBanner(
 
   const lines = [
     "",
-    `${CYAN}${BOLD}+==============================================================+${RESET}`,
-    `${CYAN}${BOLD}|${RESET}  ${BOLD}DanteCode v${version}${RESET} ${DIM}-- Portable Skill Runtime${RESET}             ${CYAN}${BOLD}|${RESET}`,
-    `${CYAN}${BOLD}|${RESET}  Powered by ${BOLD}DanteForge${RESET} ${DIM}+ PDSE + Autoforge IAL${RESET}              ${CYAN}${BOLD}|${RESET}`,
-    `${CYAN}${BOLD}+==============================================================+${RESET}`,
+    `${CYAN}${BOLD}DanteCode${RESET} v${version}`,
     "",
-    `  ${DIM}Model:${RESET}       ${BOLD}${modelDisplay}${RESET}`,
-    `  ${DIM}API Key:${RESET}     ${apiKeyStatus}`,
-    `  ${DIM}Project:${RESET}     ${projectRoot}`,
-    `  ${DIM}Context:${RESET}     ${model.contextWindow.toLocaleString()} tokens`,
+    `  ${DIM}Model:${RESET}     ${BOLD}${modelDisplay}${RESET}`,
+    `  ${DIM}API Key:${RESET}   ${apiKeyStatus}`,
+    `  ${DIM}Project:${RESET}   ${projectRoot}`,
     "",
-    `  ${DIM}Type${RESET} ${YELLOW}/help${RESET} ${DIM}for commands, or start typing to chat.${RESET}`,
+    `  ${DIM}Type${RESET} ${YELLOW}/magic${RESET} ${DIM}to start building, or${RESET} ${YELLOW}/help${RESET} ${DIM}for commands.${RESET}`,
     "",
   ];
 
@@ -101,62 +99,69 @@ export function getOneShotBanner(model: ModelConfig, version: string = "1.0.0"):
  */
 export function getHelpText(): string {
   return `
-${BOLD}DanteCode${RESET} - Portable Skill Runtime and Coding Agent
+${BOLD}DanteCode${RESET} \u2014 Build software by describing what you want
 
 ${BOLD}USAGE${RESET}
-  dantecode                       Start interactive REPL
-  dantecode "prompt"              One-shot: execute prompt and exit
-  dantecode <command> [options]   Run a specific command
-
-${BOLD}COMMANDS${RESET}
-  init                Initialize .dantecode/ project config
-  skills              Manage skills (list, import, wrap, show, validate, remove)
-  agent               Manage agents (list, run, create)
-  config              View/edit configuration (init, show, set, models)
-  git                 Git operations (status, log, diff)
+  dantecode                       Start interactive session
+  dantecode "prompt"              Run a single task and exit
+  dantecode init                  Set up a new project
 
 ${BOLD}OPTIONS${RESET}
-  --model <id>        Override the default model (e.g. grok/grok-3, anthropic/claude-sonnet-4-20250514)
-  --no-git            Disable git auto-commit for this session
-  --sandbox           Run commands in a sandboxed container
-  --worktree          Create a git worktree for this session
-  --verbose           Enable verbose/debug output
-  --config <path>     Use a custom config file path
+  --model <id>        Choose AI model (e.g. anthropic/claude-sonnet-4-20250514)
+  --verbose           Show detailed output
   --version           Print version and exit
   --help              Show this help message
 
-${BOLD}REPL SLASH COMMANDS${RESET}
-  /help               Show all available slash commands
-  /model <id>         Switch model mid-session
-  /add <file>         Add a file to the conversation context
-  /drop <file>        Remove a file from context
-  /files              List files currently in context
-  /diff               Show pending changes (unstaged diff)
-  /commit             Trigger an auto-commit of touched files
-  /revert             Revert the last auto-commit
-  /undo               Undo the last file edit
-  /lessons            Show project lessons from the lessons DB
-  /pdse <file>        Run PDSE scorer on a file
-  /qa                 Run GStack QA pipeline
-  /verify-output      Run structured output verification from JSON input
-  /qa-suite           Run a QA suite batch from JSON input
-  /critic-debate      Aggregate critic verdicts from JSON input
-  /add-verification-rail Register an output guardrail from JSON input
-  /verification-history Show recent verification reports and benchmarks
-  /audit              Show recent audit log entries
-  /clear              Clear the conversation history
-  /tokens             Show token usage for the current session
-  /web <url>          Fetch URL content and add to context
-  /skill <name>       Activate a skill by name
-  /agents             List available agent definitions
-  /worktree           Create a git worktree for isolated changes
-  /sandbox            Toggle sandbox mode on/off
-  /git-watch          Start, list, or stop durable Git watchers
-  /run-workflow       Run a local GitHub-style workflow file
-  /auto-pr            Create a PR with optional changeset generation
-  /webhook-listen     Start, list, or stop local webhook listeners
-  /schedule-git-task  Start, list, or stop scheduled Git tasks
+${BOLD}KEY COMMANDS${RESET}
+  /magic <goal>       Build something \u2014 describe what you want
+  /help               Show all available commands
+  /help --all         Show every command (advanced)
+  /status             Check project health and settings
+  /diff               See what changed
+  /commit             Save your changes
+  /undo               Undo the last change
+  /party <task>       Multi-agent build (advanced)
+  /compact            Free up conversation space
 
 ${DIM}Documentation: https://dantecode.dev/docs${RESET}
 `;
+}
+
+/**
+ * Checks if this is the user's first run by looking for session history.
+ */
+export function isFirstRun(projectRoot: string): boolean {
+  const sessionsDir = join(projectRoot, ".dantecode", "sessions");
+  try {
+    const entries = readdirSync(sessionsDir);
+    return entries.filter((e) => e.endsWith(".json")).length === 0;
+  } catch {
+    return true; // Directory doesn't exist => first run
+  }
+}
+
+/**
+ * Returns a welcoming first-run banner with example tasks.
+ */
+export function getFirstRunBanner(version: string = "1.0.0"): string {
+  const lines = [
+    "",
+    `${CYAN}${BOLD}Welcome to DanteCode${RESET} v${version}`,
+    "",
+    `  ${DIM}Describe what you want to build:${RESET}`,
+    `    ${YELLOW}/magic "Build a todo app with user accounts"${RESET}`,
+    `    ${YELLOW}/magic "Add search to the product catalog"${RESET}`,
+    "",
+    `  ${DIM}Or just type what you need in plain language.${RESET}`,
+    `  ${DIM}Type${RESET} ${YELLOW}/help${RESET} ${DIM}for all commands.${RESET}`,
+    "",
+  ];
+  return lines.join("\n");
+}
+
+/**
+ * Returns a compact one-line banner for subsequent runs.
+ */
+export function getCompactBanner(model: ModelConfig, version: string = "1.0.0"): string {
+  return `${CYAN}${BOLD}DanteCode${RESET} v${version} ${DIM}\u00b7${RESET} ${model.provider}/${model.modelId} ${DIM}\u00b7${RESET} ${YELLOW}/help${RESET}`;
 }

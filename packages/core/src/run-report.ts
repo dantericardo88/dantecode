@@ -1,0 +1,582 @@
+// ============================================================================
+// @dantecode/core — Run Report Types, Accumulator, and Serializer
+// D-11: Run Report Generation — The Trust Layer
+// ============================================================================
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+export type RunReportStatus = "complete" | "partial" | "failed" | "not_attempted";
+
+export interface RunReportFileCreated {
+  path: string;
+  lines: number;
+}
+
+export interface RunReportFileModified {
+  path: string;
+  added: number;
+  removed: number;
+}
+
+export interface RunReportVerification {
+  antiStub: { passed: boolean; violations: number; details: string[] };
+  constitution: {
+    passed: boolean;
+    violations: number;
+    warnings: number;
+    details: string[];
+  };
+  pdseScore: number;
+  pdseThreshold: number;
+  regenerationAttempts: number;
+  maxAttempts: number;
+}
+
+export interface RunReportTests {
+  created: number;
+  passing: number;
+  failing: number;
+}
+
+export interface RunReportEntry {
+  prdName: string;
+  prdFile: string;
+  status: RunReportStatus;
+  filesCreated: RunReportFileCreated[];
+  filesModified: RunReportFileModified[];
+  filesDeleted: string[];
+  verification: RunReportVerification;
+  tests: RunReportTests;
+  summary: string;
+  failureReason?: string;
+  actionNeeded?: string;
+  startedAt: string;
+  completedAt: string;
+  tokenUsage: { input: number; output: number };
+}
+
+export interface RunReportManifestEntry {
+  action: "created" | "modified" | "deleted";
+  path: string;
+  lines?: number;
+  diff?: string;
+}
+
+export interface RunReport {
+  project: string;
+  command: string;
+  startedAt: string;
+  completedAt: string;
+  model: { provider: string; modelId: string };
+  entries: RunReportEntry[];
+  filesManifest: RunReportManifestEntry[];
+  tokenUsage: { input: number; output: number };
+  costEstimate: number;
+  dantecodeVersion: string;
+  environment: { nodeVersion: string; os: string };
+}
+
+// ─── Cost Estimation ────────────────────────────────────────────────────────
+
+const COST_PER_1M: Record<string, { input: number; output: number }> = {
+  "claude-opus-4-6": { input: 15, output: 75 },
+  "claude-sonnet-4-6": { input: 3, output: 15 },
+  "claude-haiku-4-5-20251001": { input: 0.8, output: 4 },
+  "claude-sonnet-4-20250514": { input: 3, output: 15 },
+  "claude-3-5-sonnet-20241022": { input: 3, output: 15 },
+};
+
+export function estimateRunCost(
+  modelId: string,
+  inputTokens: number,
+  outputTokens: number,
+): number {
+  const rates = COST_PER_1M[modelId] ?? { input: 3, output: 15 };
+  return (inputTokens / 1_000_000) * rates.input + (outputTokens / 1_000_000) * rates.output;
+}
+
+// ─── Duration Formatting ────────────────────────────────────────────────────
+
+export function computeRunDuration(startedAt: string, completedAt: string): string {
+  const startMs = new Date(startedAt).getTime();
+  const endMs = new Date(completedAt).getTime();
+  const diffMs = Math.max(0, endMs - startMs);
+
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+// ─── Default Verification ───────────────────────────────────────────────────
+
+function defaultVerification(): RunReportVerification {
+  return {
+    antiStub: { passed: true, violations: 0, details: [] },
+    constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+    pdseScore: 0,
+    pdseThreshold: 85,
+    regenerationAttempts: 0,
+    maxAttempts: 0,
+  };
+}
+
+function defaultTests(): RunReportTests {
+  return { created: 0, passing: 0, failing: 0 };
+}
+
+// ─── Accumulator ────────────────────────────────────────────────────────────
+
+export interface RunReportAccumulatorOptions {
+  project: string;
+  command: string;
+  model: { provider: string; modelId: string };
+  dantecodeVersion: string;
+}
+
+export class RunReportAccumulator {
+  private report: RunReport;
+  private currentEntryIndex: number = -1;
+
+  constructor(opts: RunReportAccumulatorOptions) {
+    const now = new Date().toISOString();
+    this.report = {
+      project: opts.project,
+      command: opts.command,
+      startedAt: now,
+      completedAt: now,
+      model: opts.model,
+      entries: [],
+      filesManifest: [],
+      tokenUsage: { input: 0, output: 0 },
+      costEstimate: 0,
+      dantecodeVersion: opts.dantecodeVersion,
+      environment: {
+        nodeVersion: process.version,
+        os: `${process.platform} ${process.arch}`,
+      },
+    };
+  }
+
+  /** Start tracking a new PRD/task entry. */
+  beginEntry(prdName: string, prdFile: string): void {
+    const now = new Date().toISOString();
+    this.report.entries.push({
+      prdName,
+      prdFile,
+      status: "not_attempted",
+      filesCreated: [],
+      filesModified: [],
+      filesDeleted: [],
+      verification: defaultVerification(),
+      tests: defaultTests(),
+      summary: "",
+      startedAt: now,
+      completedAt: now,
+      tokenUsage: { input: 0, output: 0 },
+    });
+    this.currentEntryIndex = this.report.entries.length - 1;
+  }
+
+  /** Record files created for the current entry. */
+  recordFilesCreated(files: RunReportFileCreated[]): void {
+    const entry = this.currentEntry();
+    if (entry) entry.filesCreated.push(...files);
+  }
+
+  /** Record files modified for the current entry. */
+  recordFilesModified(files: RunReportFileModified[]): void {
+    const entry = this.currentEntry();
+    if (entry) entry.filesModified.push(...files);
+  }
+
+  /** Record files deleted for the current entry. */
+  recordFilesDeleted(paths: string[]): void {
+    const entry = this.currentEntry();
+    if (entry) entry.filesDeleted.push(...paths);
+  }
+
+  /** Record verification results for the current entry. */
+  recordVerification(verification: RunReportVerification): void {
+    const entry = this.currentEntry();
+    if (entry) entry.verification = verification;
+  }
+
+  /** Record test results for the current entry. */
+  recordTests(tests: RunReportTests): void {
+    const entry = this.currentEntry();
+    if (entry) entry.tests = tests;
+  }
+
+  /** Record token usage for the current entry. */
+  recordTokenUsage(input: number, output: number): void {
+    const entry = this.currentEntry();
+    if (entry) {
+      entry.tokenUsage.input += input;
+      entry.tokenUsage.output += output;
+    }
+  }
+
+  /** Complete the current entry with status and summaries. */
+  completeEntry(opts: {
+    status: RunReportStatus;
+    summary: string;
+    failureReason?: string;
+    actionNeeded?: string;
+  }): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.status = opts.status;
+    entry.summary = opts.summary;
+    entry.failureReason = opts.failureReason;
+    entry.actionNeeded = opts.actionNeeded;
+    entry.completedAt = new Date().toISOString();
+  }
+
+  /** Mark PRDs that were never started as not_attempted. */
+  markRemainingNotAttempted(reason: string, prdNames: string[]): void {
+    for (const name of prdNames) {
+      const exists = this.report.entries.some((e) => e.prdName === name);
+      if (!exists) {
+        const now = new Date().toISOString();
+        this.report.entries.push({
+          prdName: name,
+          prdFile: "",
+          status: "not_attempted",
+          filesCreated: [],
+          filesModified: [],
+          filesDeleted: [],
+          verification: defaultVerification(),
+          tests: defaultTests(),
+          summary: "",
+          actionNeeded: reason,
+          startedAt: now,
+          completedAt: now,
+          tokenUsage: { input: 0, output: 0 },
+        });
+      }
+    }
+  }
+
+  /** Add entries to the global files manifest. */
+  addToManifest(entries: RunReportManifestEntry[]): void {
+    this.report.filesManifest.push(...entries);
+  }
+
+  /** Set global token usage totals. */
+  setGlobalTokenUsage(input: number, output: number): void {
+    this.report.tokenUsage = { input, output };
+  }
+
+  /** Set cost estimate. */
+  setCostEstimate(cost: number): void {
+    this.report.costEstimate = cost;
+  }
+
+  /** Get a snapshot of the current state (for crash-safe partial writes). */
+  snapshot(): RunReport {
+    return { ...this.report, entries: [...this.report.entries] };
+  }
+
+  /** Finalize: set completedAt, compute token totals if not already set. */
+  finalize(): RunReport {
+    this.report.completedAt = new Date().toISOString();
+
+    // Sum per-entry token usage if global wasn't explicitly set
+    if (this.report.tokenUsage.input === 0 && this.report.tokenUsage.output === 0) {
+      let totalIn = 0;
+      let totalOut = 0;
+      for (const entry of this.report.entries) {
+        totalIn += entry.tokenUsage.input;
+        totalOut += entry.tokenUsage.output;
+      }
+      this.report.tokenUsage = { input: totalIn, output: totalOut };
+    }
+
+    // Compute cost if not already set
+    if (this.report.costEstimate === 0 && this.report.tokenUsage.input > 0) {
+      this.report.costEstimate = estimateRunCost(
+        this.report.model.modelId,
+        this.report.tokenUsage.input,
+        this.report.tokenUsage.output,
+      );
+    }
+
+    return { ...this.report, entries: [...this.report.entries] };
+  }
+
+  private currentEntry(): RunReportEntry | undefined {
+    return this.currentEntryIndex >= 0
+      ? this.report.entries[this.currentEntryIndex]
+      : undefined;
+  }
+}
+
+// ─── Markdown Serializer ────────────────────────────────────────────────────
+
+const STATUS_EMOJI: Record<RunReportStatus, string> = {
+  complete: "\u2705",      // ✅
+  partial: "\u26A0\uFE0F", // ⚠️
+  failed: "\u274C",        // ❌
+  not_attempted: "\u23ED\uFE0F", // ⏭️
+};
+
+const STATUS_LABEL: Record<RunReportStatus, string> = {
+  complete: "COMPLETE",
+  partial: "PARTIAL",
+  failed: "FAILED",
+  not_attempted: "NOT ATTEMPTED",
+};
+
+export function serializeRunReportToMarkdown(report: RunReport): string {
+  const lines: string[] = [];
+  const duration = computeRunDuration(report.startedAt, report.completedAt);
+  const costStr = `~$${report.costEstimate.toFixed(2)}`;
+
+  // Header
+  lines.push("# DanteCode Run Report");
+  lines.push("");
+  lines.push(`**Project:** ${report.project}`);
+  lines.push(`**Command:** ${report.command}`);
+  lines.push(`**Started:** ${report.startedAt}`);
+  lines.push(`**Completed:** ${report.completedAt}`);
+  lines.push(`**Duration:** ${duration}`);
+  lines.push(`**Model:** ${report.model.modelId} (${report.model.provider})`);
+  lines.push(
+    `**Cost estimate:** ${costStr} (input: ${formatTokens(report.tokenUsage.input)}, output: ${formatTokens(report.tokenUsage.output)})`,
+  );
+  lines.push("");
+
+  // Summary table
+  const counts = countStatuses(report.entries);
+  const total = report.entries.length;
+  const completionRate =
+    total > 0 ? Math.round((counts.complete / total) * 100) : 0;
+
+  lines.push("## Summary");
+  lines.push("");
+  lines.push("| Status | Count |");
+  lines.push("|--------|-------|");
+  lines.push(`| ${STATUS_EMOJI.complete} Complete | ${counts.complete} |`);
+  lines.push(`| ${STATUS_EMOJI.partial} Partial | ${counts.partial} |`);
+  lines.push(`| ${STATUS_EMOJI.failed} Failed | ${counts.failed} |`);
+  lines.push(`| ${STATUS_EMOJI.not_attempted} Not attempted | ${counts.not_attempted} |`);
+  lines.push(`| **Total** | **${total}** |`);
+  lines.push("");
+  lines.push(`**Completion rate: ${completionRate}% (${counts.complete}/${total})**`);
+
+  const needsAttention = report.entries
+    .filter((e) => e.status !== "complete")
+    .map((e) => e.prdName);
+  if (needsAttention.length > 0) {
+    lines.push(`**Needs attention: ${needsAttention.join(", ")}**`);
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push("");
+
+  // Per-entry sections
+  lines.push("## Task Results");
+  lines.push("");
+
+  for (const [i, entry] of report.entries.entries()) {
+    const emoji = STATUS_EMOJI[entry.status];
+    const label = STATUS_LABEL[entry.status];
+
+    lines.push(`### ${entry.prdName} ${emoji} ${label}`);
+    lines.push("");
+
+    // Files created
+    if (entry.filesCreated.length > 0) {
+      lines.push("**Files created:**");
+      for (const f of entry.filesCreated) {
+        lines.push(`- \`${f.path}\` (${f.lines} lines)`);
+      }
+      lines.push("");
+    }
+
+    // Files modified
+    if (entry.filesModified.length > 0) {
+      lines.push("**Files modified:**");
+      for (const f of entry.filesModified) {
+        lines.push(`- \`${f.path}\` \u2014 +${f.added} -${f.removed}`);
+      }
+      lines.push("");
+    }
+
+    // Files deleted
+    if (entry.filesDeleted.length > 0) {
+      lines.push("**Files deleted:**");
+      for (const f of entry.filesDeleted) {
+        lines.push(`- \`${f}\``);
+      }
+      lines.push("");
+    }
+
+    // Verification
+    lines.push("**Verification:**");
+    const v = entry.verification;
+    const antiStubIcon = v.antiStub.passed ? "\u2705" : "\u274C";
+    const constIcon = v.constitution.passed ? "\u2705" : "\u274C";
+    lines.push(`- Anti-stub: ${antiStubIcon} ${v.antiStub.passed ? "Passed" : "FAILED"} (${v.antiStub.violations} violations)`);
+    if (v.antiStub.details.length > 0) {
+      for (const d of v.antiStub.details) {
+        lines.push(`  - ${d}`);
+      }
+    }
+    lines.push(`- Constitution: ${constIcon} ${v.constitution.passed ? "Passed" : "FAILED"} (${v.constitution.violations} violations${v.constitution.warnings > 0 ? `, ${v.constitution.warnings} warnings` : ""})`);
+    if (v.constitution.details.length > 0) {
+      for (const d of v.constitution.details) {
+        lines.push(`  - ${d}`);
+      }
+    }
+    lines.push(`- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`);
+    if (v.regenerationAttempts > 0) {
+      lines.push(`- Regeneration attempts: ${v.regenerationAttempts}/${v.maxAttempts}`);
+    }
+
+    // Tests
+    const t = entry.tests;
+    if (t.created > 0) {
+      lines.push(`- Tests: ${t.created} created, ${t.passing} passing${t.failing > 0 ? `, ${t.failing} failing` : ""}`);
+    } else {
+      lines.push("- Tests: none created");
+    }
+    lines.push("");
+
+    // Summary
+    if (entry.summary) {
+      lines.push(`**What was built:** ${entry.summary}`);
+      lines.push("");
+    }
+
+    // Failure reason
+    if (entry.failureReason) {
+      lines.push(`**What went wrong:** ${entry.failureReason}`);
+      lines.push("");
+    }
+
+    // Action needed
+    if (entry.actionNeeded) {
+      lines.push(`**What needs to happen:** ${entry.actionNeeded}`);
+      lines.push("");
+    }
+
+    if (i < report.entries.length - 1) {
+      lines.push("---");
+      lines.push("");
+    }
+  }
+
+  lines.push("");
+
+  // Filesystem manifest
+  if (report.filesManifest.length > 0) {
+    lines.push("## Filesystem Manifest");
+    lines.push("");
+    lines.push("| Action | File | Lines |");
+    lines.push("|--------|------|-------|");
+    for (const f of report.filesManifest) {
+      const action = f.action.toUpperCase();
+      const lineInfo = f.lines != null ? String(f.lines) : f.diff ?? "-";
+      lines.push(`| ${action} | ${f.path} | ${lineInfo} |`);
+    }
+
+    const created = report.filesManifest.filter((f) => f.action === "created").length;
+    const modified = report.filesManifest.filter((f) => f.action === "modified").length;
+    const deleted = report.filesManifest.filter((f) => f.action === "deleted").length;
+    lines.push("");
+    lines.push(`**Total: ${created} files created, ${modified} files modified, ${deleted} files deleted**`);
+    lines.push("");
+  }
+
+  // Verification summary
+  lines.push("## Verification Summary");
+  lines.push("");
+  lines.push("| Check | Passed | Failed | Total |");
+  lines.push("|-------|--------|--------|-------|");
+
+  const attempted = report.entries.filter((e) => e.status !== "not_attempted");
+  const antiStubPassed = attempted.filter((e) => e.verification.antiStub.passed).length;
+  const constPassed = attempted.filter((e) => e.verification.constitution.passed).length;
+  const pdsePassed = attempted.filter(
+    (e) => e.verification.pdseScore >= e.verification.pdseThreshold,
+  ).length;
+  const testsPassed = attempted.filter(
+    (e) => e.tests.created > 0 && e.tests.failing === 0,
+  ).length;
+  const testsNoTests = attempted.filter((e) => e.tests.created === 0).length;
+
+  lines.push(`| Anti-stub scan | ${antiStubPassed} | ${attempted.length - antiStubPassed} | ${attempted.length} |`);
+  lines.push(`| Constitution check | ${constPassed} | ${attempted.length - constPassed} | ${attempted.length} |`);
+  lines.push(`| PDSE >= threshold | ${pdsePassed} | ${attempted.length - pdsePassed} | ${attempted.length} |`);
+  lines.push(`| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`);
+  lines.push("");
+
+  // Reproduction command
+  lines.push("## Reproduction");
+  lines.push("");
+  const reproduction = buildReproductionCommand(report);
+  lines.push(reproduction);
+  lines.push("");
+
+  // Environment
+  lines.push("## Environment");
+  lines.push("");
+  lines.push(`- DanteCode version: ${report.dantecodeVersion}`);
+  lines.push(`- Node.js: ${report.environment.nodeVersion}`);
+  lines.push(`- OS: ${report.environment.os}`);
+  lines.push(`- Provider: ${report.model.provider}`);
+  lines.push(`- Model: ${report.model.modelId}`);
+  const firstEntry = report.entries[0] as RunReportEntry | undefined;
+  lines.push(`- PDSE threshold: ${firstEntry?.verification.pdseThreshold ?? 85}`);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function countStatuses(entries: RunReportEntry[]): Record<RunReportStatus, number> {
+  const counts: Record<RunReportStatus, number> = {
+    complete: 0,
+    partial: 0,
+    failed: 0,
+    not_attempted: 0,
+  };
+  for (const e of entries) {
+    counts[e.status]++;
+  }
+  return counts;
+}
+
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M tokens`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K tokens`;
+  return `${tokens} tokens`;
+}
+
+function buildReproductionCommand(report: RunReport): string {
+  const failedEntries = report.entries.filter(
+    (e) => e.status === "failed" || e.status === "partial" || e.status === "not_attempted",
+  );
+
+  if (failedEntries.length === 0) {
+    return "All tasks completed successfully. No re-run needed.";
+  }
+
+  const prdFiles = failedEntries
+    .map((e) => e.prdFile)
+    .filter((f) => f && f !== "multi-agent-lane" && f !== "party-autoforge");
+
+  if (prdFiles.length > 0) {
+    return `To re-run failed/partial tasks:\n\`\`\`bash\ndantecode --one-shot "/party --prds ${prdFiles.join(" ")}"\n\`\`\``;
+  }
+
+  const names = failedEntries.map((e) => e.prdName).join(", ");
+  return `To re-run failed/partial tasks:\n\`\`\`bash\ndantecode --one-shot "/party ${names}"\n\`\`\``;
+}

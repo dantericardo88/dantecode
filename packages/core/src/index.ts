@@ -59,6 +59,12 @@ export {
   updateStateYaml,
   DanteCodeStateSchema,
 } from "./state.js";
+export type { InitializeStateOptions } from "./state.js";
+
+// ─── Project Detection ────────────────────────────────────────────────────────
+
+export { detectProjectStack, getGStackDefaults } from "./project-detector.js";
+export type { ProjectLanguage, DetectedStack } from "./project-detector.js";
 
 // ─── Multi-Agent ───────────────────────────────────────────────────────────────
 
@@ -724,3 +730,23 @@ export type {
   CheckRun,
   WorkflowRun,
 } from "./github-client.js";
+
+// ─── Run Report ─────────────────────────────────────────────────────────────
+
+export {
+  RunReportAccumulator,
+  serializeRunReportToMarkdown,
+  computeRunDuration,
+  estimateRunCost,
+} from "./run-report.js";
+export type {
+  RunReport,
+  RunReportEntry,
+  RunReportStatus,
+  RunReportVerification,
+  RunReportTests,
+  RunReportManifestEntry,
+  RunReportAccumulatorOptions,
+} from "./run-report.js";
+export { writeRunReport, reportFileName } from "./run-report-writer.js";
+export type { WriteRunReportOptions } from "./run-report-writer.js";
