@@ -106,6 +106,7 @@ import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
+import { getOrInitGaslight, getOrInitMemory } from "./lazy-init.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
 import { researchSlashHandler } from "./commands/research.js";
@@ -1939,9 +1940,10 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
   }
 
   // When DanteMemory is available, use semantic summarization
-  if (state.memoryOrchestrator) {
+  const mo = await getOrInitMemory(state);
+  if (mo) {
     try {
-      const sumResult = await state.memoryOrchestrator.memorySummarize(state.session.id);
+      const sumResult = await mo.memorySummarize(state.session.id);
       if (sumResult.compressed && sumResult.summary) {
         const KEEP_RECENT = 10;
         const first = state.session.messages[0]!;
@@ -1978,8 +1980,9 @@ async function compactCommand(_args: string, state: ReplState): Promise<string> 
 }
 
 async function memoryCommand(args: string, state: ReplState): Promise<string> {
-  if (!state.memoryOrchestrator) {
-    return `${DIM}DanteMemory not initialized. Restart to activate the memory engine.${RESET}`;
+  const mo = await getOrInitMemory(state);
+  if (!mo) {
+    return `${DIM}DanteMemory failed to initialize. Check disk permissions.${RESET}`;
   }
 
   const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -1988,7 +1991,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
   switch (subcommand) {
     case "list": {
       try {
-        const viz = state.memoryOrchestrator.memoryVisualize();
+        const viz = mo.memoryVisualize();
         const nodes = viz.nodes ?? [];
         const counts: Record<string, number> = {};
         for (const node of nodes) {
@@ -2012,7 +2015,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
       const query = parts.slice(1).join(" ");
       if (!query) return `${RED}Usage: /memory search <query>${RESET}`;
       try {
-        const result = await state.memoryOrchestrator.memoryRecall(query, 10);
+        const result = await mo.memoryRecall(query, 10);
         if (!result.results.length) {
           return `${DIM}No memories found for: "${query}"${RESET}`;
         }
@@ -2035,7 +2038,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
 
     case "stats": {
       try {
-        const viz = state.memoryOrchestrator.memoryVisualize();
+        const viz = mo.memoryVisualize();
         const nodes = viz.nodes ?? [];
         const edges = viz.edges ?? [];
         return [
@@ -2059,8 +2062,8 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
       const exportPath =
         parts[1] ?? `dantecode-memory-${new Date().toISOString().slice(0, 10)}.json`;
       try {
-        const viz = state.memoryOrchestrator.memoryVisualize();
-        const recallAll = await state.memoryOrchestrator.memoryRecall("*", 1000);
+        const viz = mo.memoryVisualize();
+        const recallAll = await mo.memoryRecall("*", 1000);
         const exportData = {
           version: "1.0.0",
           exportedAt: new Date().toISOString(),
@@ -2092,7 +2095,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
     case "cross-session": {
       const goal = parts.slice(1).join(" ") || undefined;
       try {
-        const result = await state.memoryOrchestrator.crossSessionRecall(goal, 5);
+        const result = await mo.crossSessionRecall(goal, 5);
         if (!result.results.length) {
           return `${DIM}No cross-session memories found${RESET}`;
         }
@@ -4740,23 +4743,18 @@ async function gaslightCommand(args: string, state: ReplState): Promise<string> 
   const parts = args.trim().split(/\s+/).filter(Boolean);
   const sub = parts[0]?.toLowerCase() ?? "";
 
-  if (!state.gaslight) {
-    return `${RED}Gaslight integration not active.${RESET}\n${DIM}The integration is always created at REPL startup. Try /gaslight on to enable.${RESET}`;
-  }
+  const gl = getOrInitGaslight(state);
 
   switch (sub) {
     case "on":
-      return state.gaslight.cmdOn();
+      return gl.cmdOn();
     case "off":
-      return state.gaslight.cmdOff();
+      return gl.cmdOff();
     case "stats":
-      return state.gaslight.cmdStats();
+      return gl.cmdStats();
     case "review":
-      return state.gaslight.cmdReview();
+      return gl.cmdReview();
     case "bridge": {
-      // Bridge is disk-based and async — delegate to the CLI command handler.
-      // Must catch: cmdBridge() throws on error (after Fix A1); process.exit was removed
-      // so errors now propagate as exceptions rather than killing the REPL process.
       try {
         await runGaslightCommand(parts, state.projectRoot);
       } catch (err: unknown) {
@@ -4786,19 +4784,17 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
   const sub = parts[0]?.toLowerCase() ?? "";
 
-  if (!state.gaslight) {
-    return `${RED}FearSet integration not active.${RESET}\n${DIM}The integration is always created at REPL startup.${RESET}`;
-  }
+  const gl = getOrInitGaslight(state);
 
   switch (sub) {
     case "on":
-      return state.gaslight.cmdFearSetOn();
+      return gl.cmdFearSetOn();
     case "off":
-      return state.gaslight.cmdFearSetOff();
+      return gl.cmdFearSetOff();
     case "stats":
-      return state.gaslight.cmdFearSetStats();
+      return gl.cmdFearSetStats();
     case "review":
-      return state.gaslight.cmdFearSetReview();
+      return gl.cmdFearSetReview();
     case "bridge": {
       try {
         await runFearsetCommand(["bridge", ...parts.slice(1)], state.projectRoot);
@@ -4814,7 +4810,7 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
         return `${RED}Usage: /fearset run <decision context>${RESET}\n${DIM}Example: /fearset run "Should we migrate to PostgreSQL?"${RESET}`;
       }
       try {
-        const result = await state.gaslight.runFearSet(context);
+        const result = await gl.runFearSet(context);
         const decColor =
           result.synthesizedRecommendation?.decision === "go"
             ? GREEN

@@ -34,10 +34,8 @@ import type {
 } from "@dantecode/ux-polish";
 import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
-import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
-import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import { DanteSandbox } from "@dantecode/dante-sandbox";
-import { createMemoryOrchestrator } from "@dantecode/memory-engine";
+import { getOrInitGaslight, tryAutoInit } from "./lazy-init.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -139,8 +137,8 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
-  // Fix 3: sync the live gaslight integration so /gaslight on/off affect the agent loop
-  agentConfig.gaslight = replState.gaslight ?? undefined;
+  // Lazy-init gaslight on first prompt submission (sync construction, no delay)
+  agentConfig.gaslight = getOrInitGaslight(replState);
   // Wire replState for /think override and reasoning feedback loop
   agentConfig.replState = replState;
 }
@@ -165,13 +163,24 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   let state: DanteCodeState;
   try {
     state = await readOrInitializeState(options.projectRoot);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `${RED}Error loading project state: ${message}${RESET}\n` +
-        `${DIM}Run 'dantecode init' to initialize a new project.${RESET}\n`,
-    );
-    process.exit(1);
+  } catch {
+    // STATE.yaml missing or invalid — try auto-init with detected API key
+    const autoState = await tryAutoInit(options.projectRoot);
+    if (autoState) {
+      state = autoState;
+      const provLabel = `${state.model.default.provider}/${state.model.default.modelId}`;
+      if (!options.silent) {
+        process.stdout.write(
+          `${DIM}Auto-initialized with ${provLabel}. Run 'dantecode init' to customize.${RESET}\n`,
+        );
+      }
+    } else {
+      process.stderr.write(
+        `${RED}No API key found and no STATE.yaml.${RESET}\n` +
+          `${DIM}Set ANTHROPIC_API_KEY, XAI_API_KEY, or OPENAI_API_KEY. Or run 'dantecode init'.${RESET}\n`,
+      );
+      process.exit(1);
+    }
   }
 
   // Apply model override if specified
@@ -254,8 +263,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
-    gaslight: null, // populated immediately after agentConfig.gaslight is created below
-    memoryOrchestrator: null, // populated after DanteSandbox.setup() below
+    gaslight: null, // lazy-init: created on first prompt or /gaslight command
+    memoryOrchestrator: null, // lazy-init: created on first /memory or /compact command
     reasoningOverrideSession: false,
     theme: savedTheme,
   };
@@ -271,31 +280,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     replState: replState,
   };
 
-  // DanteGaslight: wire the closed Gaslight→Skillbook→Gaslight feedback loop.
-  // Defaults to disabled; activate with DANTECODE_GASLIGHT=1 env var.
-  // priorLessonProvider pulls relevant Skillbook skills back into each critique
-  // prompt so the gaslighter checks whether past lessons have been applied.
-  agentConfig.gaslight = new DanteGaslightIntegration(
-    { enabled: process.env["DANTECODE_GASLIGHT"] === "1" },
-    { cwd: options.projectRoot },
-    {
-      priorLessonProvider: (draft: string) => {
-        try {
-          const skillbook = new DanteSkillbookIntegration({ cwd: options.projectRoot });
-          const keywords = draft
-            .split(/\s+/)
-            .filter((w) => w.length > 4)
-            .slice(0, 10);
-          return skillbook.getRelevantSkills({ keywords }).map((s) => s.title ?? s.id);
-        } catch {
-          return [];
-        }
-      },
-    },
-  );
-  // Fix 3: Share the live integration with replState so /gaslight on/off call
-  // setEnabled() on the same instance the agent loop uses — not a detached copy.
-  replState.gaslight = agentConfig.gaslight;
+  // DanteGaslight: deferred to first use via getOrInitGaslight() in lazy-init.ts.
+  // Constructed lazily in syncAgentLoopConfig (first prompt) or /gaslight command.
 
   // Initialize DanteSandbox enforcement engine — ALWAYS mandatory, mode="auto".
   // allowHostEscape:false = hard rejection when Docker + worktree both unavailable.
@@ -305,15 +291,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     config: { mode: "auto", allowHostEscape: false },
   });
 
-  // Initialize DanteMemory orchestrator — non-fatal if it fails.
-  // /memory and /compact degrade gracefully when null.
-  try {
-    const mo = createMemoryOrchestrator(options.projectRoot); // SYNC — no await
-    await mo.initialize();
-    replState.memoryOrchestrator = mo;
-  } catch {
-    // Non-fatal: /memory and /compact degrade gracefully when null
-  }
+  // DanteMemory: deferred to first use via getOrInitMemory() in lazy-init.ts.
+  // /memory and /compact call it lazily; null until then.
 
   // --continue / -C: restore the most recent session from disk
   if (options.resumeFromLastSession) {
