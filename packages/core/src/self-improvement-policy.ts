@@ -12,6 +12,13 @@ const DEFAULT_PROTECTED_ROOTS = [
 
 const CHAT_SELF_IMPROVEMENT_PATTERNS = [/\bself-upgrade\b/i, /\bimprove codebase\b/i];
 
+/**
+ * Pipelines safe for fallback models — have explicit human oversight.
+ * All other high-power pipelines (/inferno, /blaze, /ember, /spark, /forge,
+ * /verify, /ship, /oss, /harvest, /autoforge) are blocked on fallback models.
+ */
+const FALLBACK_SAFE_PIPELINES = /^\/(?:magic|party)\b/i;
+
 export function getProtectedRoots(projectRoot: string): string[] {
   return DEFAULT_PROTECTED_ROOTS.map((root) => resolve(projectRoot, root));
 }
@@ -50,8 +57,22 @@ export function createSelfImprovementContext(
 export function detectSelfImprovementContext(
   prompt: string,
   projectRoot: string,
+  options?: { usingFallbackModel?: boolean },
 ): SelfImprovementContext | null {
   const trimmed = prompt.trim();
+
+  // When on a fallback model, only /magic and /party retain write authorization.
+  // Weaker fallback models must not self-modify protected source paths.
+  if (options?.usingFallbackModel) {
+    if (
+      /^\/(?:magic|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest|party|autoforge)\b/i.test(
+        trimmed,
+      ) &&
+      !FALLBACK_SAFE_PIPELINES.test(trimmed)
+    ) {
+      return null;
+    }
+  }
 
   if (/^\/autoforge\b/i.test(trimmed) && /\s--self-improve\b/i.test(trimmed)) {
     return createSelfImprovementContext(projectRoot, {

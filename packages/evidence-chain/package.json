@@ -1,0 +1,40 @@
+{
+  "name": "@dantecode/evidence-chain",
+  "version": "1.0.0",
+  "description": "Cryptographic primitives for tamper-evident audit trails: hash chains, Merkle trees, receipts, evidence bundles, and certification seals.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.package.config.ts",
+    "test:coverage": "vitest run --config ../../vitest.package.config.ts --coverage",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
+    "directory": "packages/evidence-chain"
+  }
+}

@@ -117,10 +117,15 @@ describe("CLI Integration", () => {
         lastEditContent: null,
         recentToolCalls: [],
         pendingAgentPrompt: null,
+        pendingResumeRunId: null,
+        pendingExpectedWorkflow: null,
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
+        memoryOrchestrator: null,
+        theme: "default",
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -163,10 +168,15 @@ describe("CLI Integration", () => {
         lastEditContent: null,
         recentToolCalls: [],
         pendingAgentPrompt: null,
+        pendingResumeRunId: null,
+        pendingExpectedWorkflow: null,
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
+        memoryOrchestrator: null,
+        theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -212,10 +222,15 @@ describe("CLI Integration", () => {
         lastEditContent: null,
         recentToolCalls: [],
         pendingAgentPrompt: null,
+        pendingResumeRunId: null,
+        pendingExpectedWorkflow: null,
         activeAbortController: null,
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        gaslight: null,
+        memoryOrchestrator: null,
+        theme: "default",
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

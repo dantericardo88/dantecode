@@ -1,0 +1,96 @@
+name: PR Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  danteforge-review:
+    name: DanteForge Verification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run DanteForge verification action
+        uses: ./danteforge-action
+        with:
+          pdse-threshold: "70"
+          fail-on-stub: "true"
+          annotations-mode: "both"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  pr-size-check:
+    name: PR Size Check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Count changed lines
+        id: diff
+        run: |
+          ADDITIONS=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | grep -oP '\d+ insertion' | grep -oP '\d+' || echo 0)
+          DELETIONS=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1 | grep -oP '\d+ deletion' | grep -oP '\d+' || echo 0)
+          TOTAL=$((ADDITIONS + DELETIONS))
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "additions=$ADDITIONS" >> "$GITHUB_OUTPUT"
+          echo "deletions=$DELETIONS" >> "$GITHUB_OUTPUT"
+
+      - name: Report PR size
+        run: |
+          echo "PR size: +${{ steps.diff.outputs.additions }} / -${{ steps.diff.outputs.deletions }} (total: ${{ steps.diff.outputs.total }})"
+          if [ "${{ steps.diff.outputs.total }}" -gt 2000 ]; then
+            echo "::warning::Large PR detected (${{ steps.diff.outputs.total }} lines changed). Consider splitting into smaller PRs."
+          fi
+
+  typecheck-on-pr:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+  test-on-pr:
+    name: Test Suite
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Run tests
+        run: npx vitest run
+      - name: Build
+        run: npx turbo run build

@@ -6,7 +6,7 @@ import type { DiffHunk } from "@dantecode/config-types";
 // ---------------------------------------------------------------------------
 
 vi.mock("node:child_process", () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -15,7 +15,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { parseDiffHunks, getDiff, getStagedDiff, applyDiff, generateColoredHunk } from "./diff.js";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
@@ -191,21 +191,23 @@ diff src/b.ts
     });
 
     it("calls git diff without ref", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("diff output");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("diff output");
       const result = getDiff("/project");
       expect(result).toBe("diff output");
-      expect(execSync).toHaveBeenCalledWith(
-        "git diff",
+      expect(execFileSync).toHaveBeenCalledWith(
+        "git",
+        ["diff"],
         expect.objectContaining({ cwd: "/project" }),
       );
     });
 
     it("calls git diff with ref when provided", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("ref diff output");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("ref diff output");
       const result = getDiff("/project", "HEAD~2");
       expect(result).toBe("ref diff output");
-      expect(execSync).toHaveBeenCalledWith(
-        'git diff "HEAD~2"',
+      expect(execFileSync).toHaveBeenCalledWith(
+        "git",
+        ["diff", "HEAD~2"],
         expect.objectContaining({ cwd: "/project" }),
       );
     });
@@ -215,7 +217,7 @@ diff src/b.ts
         status: 1,
         stdout: "diff --git a/file.ts b/file.ts\n",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw exitOneError;
       });
       const result = getDiff("/project");
@@ -227,7 +229,7 @@ diff src/b.ts
         status: 128,
         stderr: "fatal: not a git repository",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw realError;
       });
       expect(() => getDiff("/project")).toThrow("git diff: fatal: not a git repository");
@@ -239,7 +241,7 @@ diff src/b.ts
         stderr: "",
         message: "some error",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw err;
       });
       expect(() => getDiff("/project")).toThrow("git diff: some error");
@@ -248,7 +250,7 @@ diff src/b.ts
     it("uses 'Unknown git error' when no stderr or message", () => {
       const err = Object.assign(new Error(""), { status: 2, stderr: "" });
       err.message = "";
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw err;
       });
       expect(() => getDiff("/project")).toThrow("Unknown git error");
@@ -261,11 +263,12 @@ diff src/b.ts
     });
 
     it("calls git diff --cached", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("staged diff");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("staged diff");
       const result = getStagedDiff("/project");
       expect(result).toBe("staged diff");
-      expect(execSync).toHaveBeenCalledWith(
-        "git diff --cached",
+      expect(execFileSync).toHaveBeenCalledWith(
+        "git",
+        ["diff", "--cached"],
         expect.objectContaining({ cwd: "/project" }),
       );
     });
@@ -290,7 +293,7 @@ diff src/b.ts
     };
 
     it("writes patch to temp file and runs git apply", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
 
       applyDiff(testHunk, "/project");
 
@@ -302,14 +305,16 @@ diff src/b.ts
       expect(content).toContain("+++ b/src/test.ts");
       expect(content).toContain("@@ -1,3 +1,4 @@");
 
-      expect(execSync).toHaveBeenCalledWith(
-        expect.stringContaining("git apply --allow-empty"),
+      // execFileSync("git", ["apply", "--allow-empty", tmpPath], options)
+      expect(execFileSync).toHaveBeenCalledWith(
+        "git",
+        expect.arrayContaining(["apply", "--allow-empty"]),
         expect.objectContaining({ cwd: "/project" }),
       );
     });
 
     it("ensures patch ends with newline", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
       applyDiff(testHunk, "/project");
 
       const [, content] = (writeFileSync as ReturnType<typeof vi.fn>).mock.calls[0]!;
@@ -317,7 +322,7 @@ diff src/b.ts
     });
 
     it("cleans up temp file after success", () => {
-      (execSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
+      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValueOnce("");
       applyDiff(testHunk, "/project");
 
       expect(unlinkSync).toHaveBeenCalledTimes(1);
@@ -327,7 +332,7 @@ diff src/b.ts
       const err = Object.assign(new Error("apply failed"), {
         stderr: "error: patch does not apply",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw err;
       });
 
@@ -340,7 +345,7 @@ diff src/b.ts
       const err = Object.assign(new Error("apply failed"), {
         stderr: "error",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw err;
       });
 
@@ -357,7 +362,7 @@ diff src/b.ts
       const applyError = Object.assign(new Error("apply failed"), {
         stderr: "patch error",
       });
-      (execSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      (execFileSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
         throw applyError;
       });
       (unlinkSync as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {

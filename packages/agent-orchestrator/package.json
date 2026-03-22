@@ -1,0 +1,44 @@
+{
+  "name": "@dantecode/agent-orchestrator",
+  "version": "1.0.0",
+  "description": "Dynamic subagent spawner and handoff engine for DanteCode",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.package.config.ts"
+  },
+  "dependencies": {
+    "@dantecode/runtime-spine": "1.0.0",
+    "@dantecode/core": "1.0.0",
+    "@dantecode/git-engine": "1.0.0",
+    "@dantecode/config-types": "1.0.0",
+    "@dantecode/web-research": "1.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
+    "directory": "packages/agent-orchestrator"
+  }
+}

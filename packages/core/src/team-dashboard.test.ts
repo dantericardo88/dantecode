@@ -51,6 +51,21 @@ describe("computeDashboardMetrics", () => {
     expect(m.activeDevelopers).toBe(3);
   });
 
+  it("counts verification-specific audit events in total verifications", () => {
+    const events: AuditEvent[] = [
+      makeEvent({ type: "verification_run", payload: { passed: true, pdseScore: 0.91 } }),
+      makeEvent({ type: "qa_suite_run", payload: { passed: false, averagePdseScore: 0.62 } }),
+      makeEvent({
+        type: "critic_debate_run",
+        payload: { consensus: "warn", averageConfidence: 0.7 },
+      }),
+    ];
+
+    const m = computeDashboardMetrics(events);
+
+    expect(m.totalVerifications).toBe(3);
+  });
+
   it("computes pass rate from pdse_gate_pass and pdse_gate_fail events", () => {
     const events: AuditEvent[] = [
       makeEvent({

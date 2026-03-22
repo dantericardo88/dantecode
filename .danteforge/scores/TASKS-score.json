@@ -1,0 +1,31 @@
+{
+  "artifact": "TASKS",
+  "score": 75,
+  "dimensions": {
+    "completeness": 10,
+    "clarity": 20,
+    "testability": 5,
+    "constitutionAlignment": 20,
+    "integrationFitness": 10,
+    "freshness": 10
+  },
+  "issues": [
+    {
+      "dimension": "completeness",
+      "severity": "error",
+      "message": "Missing required section or keyword: \"### Phase\""
+    },
+    {
+      "dimension": "testability",
+      "severity": "warning",
+      "message": "Only 5/22 tasks have explicit done-conditions"
+    }
+  ],
+  "remediationSuggestions": [
+    "Run: danteforge tasks — add missing required sections",
+    "Run: danteforge tasks — add acceptance criteria or done-conditions"
+  ],
+  "timestamp": "2026-03-20T10:49:34.529Z",
+  "autoforgeDecision": "warn",
+  "hasCEOReviewBonus": false
+}

@@ -52,6 +52,13 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   tier_escalation: "Tier Escalation",
   cost_update: "Cost Update",
   webhook_received: "Webhook Received",
+  git_automation_run: "Git Automation Run",
+  git_automation_gate_pass: "Git Automation Gate Passed",
+  git_automation_gate_fail: "Git Automation Gate Failed",
+  verification_run: "Verification Run",
+  qa_suite_run: "QA Suite Run",
+  critic_debate_run: "Critic Debate",
+  verification_rail_add: "Verification Rail Added",
 };
 
 /**
@@ -84,6 +91,13 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   constitution_violation: "shield",
   sandbox_start: "vm-running",
   sandbox_stop: "vm",
+  git_automation_run: "history",
+  git_automation_gate_pass: "shield",
+  git_automation_gate_fail: "error",
+  verification_run: "beaker",
+  qa_suite_run: "checklist",
+  critic_debate_run: "comment-discussion",
+  verification_rail_add: "shield",
 };
 
 /**

@@ -46,7 +46,8 @@
     "@dantecode/core": "1.0.0",
     "@dantecode/danteforge": "1.0.0",
     "@dantecode/git-engine": "1.0.0",
-    "@dantecode/skill-adapter": "1.0.0"
+    "@dantecode/skill-adapter": "1.0.0",
+    "@dantecode/ux-polish": "1.0.0"
   },
   "devDependencies": {
     "@types/vscode": "^1.95.0",
@@ -74,6 +75,16 @@
           "type": "webview",
           "id": "dantecode.auditView",
           "name": "Audit Log"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.automationView",
+          "name": "Automation"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.verificationView",
+          "name": "Verification"
         },
         {
           "id": "dantecode.repoMap",
@@ -270,6 +281,12 @@
       }
     },
     "menus": {
+      "explorer/context": [
+        {
+          "command": "dantecode.addFileToContext",
+          "group": "dantecode@1"
+        }
+      ],
       "editor/context": [
         {
           "command": "dantecode.addFileToContext",

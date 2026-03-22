@@ -12,6 +12,7 @@ import type {
   SearchResult,
 } from "./search-providers.js";
 import { createSearchProviders, loadSearchConfig } from "./search-providers.js";
+import { SemanticSearchCache } from "./search-cache.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -56,7 +57,7 @@ export interface OrchestratedSearchResult {
 }
 
 // ----------------------------------------------------------------------------
-// Cache
+// In-Memory Cache (LRU)
 // ----------------------------------------------------------------------------
 
 interface CacheEntry {
@@ -93,10 +94,19 @@ export class WebSearchOrchestrator {
   private providers: SearchProvider[];
   private config: SearchProviderConfig;
   private totalSessionCost = 0;
+  private persistentCache: SemanticSearchCache | null = null;
 
-  constructor(config?: Partial<SearchProviderConfig>, providers?: SearchProvider[]) {
+  constructor(
+    config?: Partial<SearchProviderConfig>,
+    providers?: SearchProvider[],
+    projectRoot?: string,
+  ) {
     this.config = { ...loadSearchConfig(), ...config };
     this.providers = providers ?? createSearchProviders(this.config);
+    if (projectRoot || process.cwd()) {
+      this.persistentCache = new SemanticSearchCache(projectRoot || process.cwd());
+      this.persistentCache.load().catch(() => {});
+    }
   }
 
   /** Get total cost incurred this session. */
@@ -117,6 +127,23 @@ export class WebSearchOrchestrator {
     const cacheKey = this.buildCacheKey(query, options);
     const cached = getCached(cacheKey);
     if (cached) return cached;
+
+    // Check persistent semantic cache bridging gap between sessions
+    if (this.persistentCache) {
+      const persisted = await this.persistentCache.get(query);
+      if (persisted && persisted.length > 0) {
+        const result: OrchestratedSearchResult = {
+          results: persisted.slice(0, maxResults),
+          providersUsed: ["cache"],
+          totalCost: 0,
+          iterations: 1,
+          fromCache: true,
+          query,
+        };
+        setCache(cacheKey, result);
+        return result;
+      }
+    }
 
     // If follow-up mode, use chain search
     if (options.followUp) {
@@ -156,6 +183,8 @@ export class WebSearchOrchestrator {
           };
           this.totalSessionCost += provider.costPerQuery;
           setCache(cacheKey, orchestrated);
+          if (this.persistentCache)
+            await this.persistentCache.put(query, orchestrated.results, [provider.name]);
           return orchestrated;
         } catch {
           // Fall through to multi-provider search
@@ -237,6 +266,8 @@ export class WebSearchOrchestrator {
         };
         this.totalSessionCost += ddg.costPerQuery;
         setCache(cacheKey, orchestrated);
+        if (this.persistentCache)
+          await this.persistentCache.put(query, orchestrated.results, [ddg.name]);
         return orchestrated;
       } catch {
         return {
@@ -263,6 +294,8 @@ export class WebSearchOrchestrator {
       query,
     };
     setCache(cacheKey, orchestrated);
+    if (this.persistentCache)
+      await this.persistentCache.put(query, orchestrated.results, providersUsed);
     return orchestrated;
   }
 
@@ -446,7 +479,10 @@ export class WebSearchOrchestrator {
     if (results.length === 0) return 0;
 
     const queryTokens = new Set(
-      query.toLowerCase().split(/\s+/).filter((t) => t.length > 2),
+      query
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length > 2),
     );
 
     // Factor 1: Result count (more results = higher confidence)
@@ -479,7 +515,11 @@ export class WebSearchOrchestrator {
   }
 
   /** Generate a follow-up query when initial results are insufficient. */
-  generateFollowUpQuery(originalQuery: string, currentResults: SearchResult[], iteration: number): string {
+  generateFollowUpQuery(
+    originalQuery: string,
+    currentResults: SearchResult[],
+    iteration: number,
+  ): string {
     if (currentResults.length === 0) {
       return `${originalQuery} tutorial guide`;
     }

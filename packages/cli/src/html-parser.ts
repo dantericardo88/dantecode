@@ -56,14 +56,8 @@ export function htmlToReadableText(html: string): string {
   // Add newlines around block-level elements
   const blockTags =
     "div|p|h[1-6]|hr|blockquote|pre|section|article|header|footer|nav|aside|main|ul|ol|table|tr|dd|dt|figcaption|figure|details|summary";
-  text = text.replace(
-    new RegExp(`<\\/(?:${blockTags})\\s*>`, "gi"),
-    "\n",
-  );
-  text = text.replace(
-    new RegExp(`<(?:${blockTags})\\b[^>]*>`, "gi"),
-    "\n",
-  );
+  text = text.replace(new RegExp(`<\\/(?:${blockTags})\\s*>`, "gi"), "\n");
+  text = text.replace(new RegExp(`<(?:${blockTags})\\b[^>]*>`, "gi"), "\n");
 
   // Convert table cells to spacing
   text = text.replace(/<\/t[dh]\s*>/gi, "\t");
@@ -207,8 +201,7 @@ function extractContentBlocks(html: string): ContentBlock[] {
   const blocks: ContentBlock[] = [];
 
   // Match top-level div and section blocks
-  const blockPattern =
-    /<(div|section)[^>]*>([\s\S]*?)<\/\1>/gi;
+  const blockPattern = /<(div|section)[^>]*>([\s\S]*?)<\/\1>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = blockPattern.exec(html)) !== null) {
@@ -229,11 +222,17 @@ function extractContentBlocks(html: string): ContentBlock[] {
     // Boost score for content-like class/id names
     const fullMatch = match[0]!;
     let boost = 1.0;
-    if (/(?:class|id)="[^"]*(?:content|article|post|entry|text|body|readme)[^"]*"/i.test(fullMatch)) {
+    if (
+      /(?:class|id)="[^"]*(?:content|article|post|entry|text|body|readme)[^"]*"/i.test(fullMatch)
+    ) {
       boost = 2.0;
     }
     // Penalize for non-content class/id names
-    if (/(?:class|id)="[^"]*(?:sidebar|menu|nav|widget|footer|header|ad|meta|share|social)[^"]*"/i.test(fullMatch)) {
+    if (
+      /(?:class|id)="[^"]*(?:sidebar|menu|nav|widget|footer|header|ad|meta|share|social)[^"]*"/i.test(
+        fullMatch,
+      )
+    ) {
       boost = 0.1;
     }
 
@@ -266,25 +265,16 @@ export function extractByCSS(html: string, selector: string): string | null {
   if (selector.startsWith("#")) {
     // ID selector: #my-id
     const id = escapeRegex(selector.slice(1));
-    pattern = new RegExp(
-      `<(${tagName})[^>]+id="${id}"[^>]*>`,
-      "i",
-    );
+    pattern = new RegExp(`<(${tagName})[^>]+id="${id}"[^>]*>`, "i");
   } else if (selector.startsWith(".")) {
     // Class selector: .my-class — use \b for word boundary matching
     const cls = escapeRegex(selector.slice(1));
-    pattern = new RegExp(
-      `<(${tagName})[^>]+class="[^"]*\\b${cls}\\b[^"]*"[^>]*>`,
-      "i",
-    );
+    pattern = new RegExp(`<(${tagName})[^>]+class="[^"]*\\b${cls}\\b[^"]*"[^>]*>`, "i");
   } else if (selector.includes("#")) {
     // tag#id selector
     const [tag, id] = selector.split("#");
     tagName = escapeRegex(tag!);
-    pattern = new RegExp(
-      `<(${tagName})[^>]+id="${escapeRegex(id!)}"[^>]*>`,
-      "i",
-    );
+    pattern = new RegExp(`<(${tagName})[^>]+id="${escapeRegex(id!)}"[^>]*>`, "i");
   } else if (selector.includes(".")) {
     // tag.class selector — use \b for word boundary matching
     const [tag, cls] = selector.split(".");
@@ -362,11 +352,8 @@ export function extractPageMetadata(html: string): {
 } {
   const title = extractMetaValue(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
   const description =
-    extractMetaContent(html, "description") ??
-    extractMetaProperty(html, "og:description");
-  const author =
-    extractMetaContent(html, "author") ??
-    extractMetaProperty(html, "article:author");
+    extractMetaContent(html, "description") ?? extractMetaProperty(html, "og:description");
+  const author = extractMetaContent(html, "author") ?? extractMetaProperty(html, "article:author");
   const canonical = extractLinkHref(html, "canonical");
 
   return {
@@ -385,7 +372,7 @@ function extractMetaValue(html: string, pattern: RegExp): string | null {
 function extractMetaContent(html: string, name: string): string | null {
   const pattern = new RegExp(
     `<meta[^>]+name="${escapeRegex(name)}"[^>]+content="([^"]*)"` +
-    `|<meta[^>]+content="([^"]*)"[^>]+name="${escapeRegex(name)}"`,
+      `|<meta[^>]+content="([^"]*)"[^>]+name="${escapeRegex(name)}"`,
     "i",
   );
   const match = html.match(pattern);
@@ -395,7 +382,7 @@ function extractMetaContent(html: string, name: string): string | null {
 function extractMetaProperty(html: string, property: string): string | null {
   const pattern = new RegExp(
     `<meta[^>]+property="${escapeRegex(property)}"[^>]+content="([^"]*)"` +
-    `|<meta[^>]+content="([^"]*)"[^>]+property="${escapeRegex(property)}"`,
+      `|<meta[^>]+content="([^"]*)"[^>]+property="${escapeRegex(property)}"`,
     "i",
   );
   const match = html.match(pattern);
@@ -405,7 +392,7 @@ function extractMetaProperty(html: string, property: string): string | null {
 function extractLinkHref(html: string, rel: string): string | null {
   const pattern = new RegExp(
     `<link[^>]+rel="${escapeRegex(rel)}"[^>]+href="([^"]*)"` +
-    `|<link[^>]+href="([^"]*)"[^>]+rel="${escapeRegex(rel)}"`,
+      `|<link[^>]+href="([^"]*)"[^>]+rel="${escapeRegex(rel)}"`,
     "i",
   );
   const match = html.match(pattern);

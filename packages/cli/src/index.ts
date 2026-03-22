@@ -12,7 +12,18 @@ import { runSkillsCommand } from "./commands/skills.js";
 import { runAgentCommand } from "./commands/agent.js";
 import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
+import { runCouncilCommand } from "./commands/council.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
+import { runGaslightCommand } from "./commands/gaslight.js";
+import { runSkillbookCommand } from "./commands/skillbook.js";
+import { runFearsetCommand } from "./commands/fearset.js";
+import { runResearchCommand } from "./commands/research.js";
+import { runReviewCommand } from "./commands/review.js";
+import { runTriageCommand } from "./commands/triage.js";
+import { runAuditCommand } from "./commands/audit.js";
+import { runVaultCommand } from "./commands/vault.js";
+// serve command added below in switch statement
+import { runServeCommand } from "./commands/serve.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -50,6 +61,18 @@ interface ParsedArgs {
   showVersion: boolean;
   /** --help flag */
   showHelp: boolean;
+  /** --prompt-file <path> — read prompt from file, run non-interactively */
+  promptFile: string | undefined;
+  /** --max-rounds <n> — maximum tool rounds for non-interactive mode */
+  maxRounds: number | undefined;
+  /** --config-root <path> — override config directory for non-interactive mode */
+  configRoot: string | undefined;
+  /** --continue / -C: resume the last session */
+  resume: boolean;
+  /** --fearset-block-on-nogo: block and prompt for confirmation when FearSet returns no-go */
+  fearSetBlockOnNoGo: boolean;
+  /** --name / -n — human-readable name for this session */
+  sessionName: string | undefined;
 }
 
 /**
@@ -73,9 +96,32 @@ function parseArgs(argv: string[]): ParsedArgs {
     configPath: undefined,
     showVersion: false,
     showHelp: false,
+    promptFile: undefined,
+    maxRounds: undefined,
+    configRoot: undefined,
+    resume: false,
+    fearSetBlockOnNoGo: false,
+    sessionName: undefined,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update"]);
+  const commands = new Set([
+    "init",
+    "skills",
+    "agent",
+    "config",
+    "git",
+    "self-update",
+    "council",
+    "gaslight",
+    "skillbook",
+    "fearset",
+    "research",
+    "audit",
+    "vault",
+    "review",
+    "triage",
+    "serve",
+  ]);
   let i = 0;
   let foundCommand = false;
 
@@ -137,6 +183,43 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === "--prompt-file") {
+      result.promptFile = args[i + 1];
+      i += 2;
+      continue;
+    }
+
+    if (arg === "--max-rounds") {
+      const n = parseInt(args[i + 1] ?? "", 10);
+      if (!isNaN(n) && n > 0) result.maxRounds = n;
+      i += 2;
+      continue;
+    }
+
+    if (arg === "--config-root") {
+      result.configRoot = args[i + 1];
+      i += 2;
+      continue;
+    }
+
+    if (arg === "--continue" || arg === "-C") {
+      result.resume = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--fearset-block-on-nogo") {
+      result.fearSetBlockOnNoGo = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--name" || arg === "-n") {
+      result.sessionName = args[i + 1];
+      i += 2;
+      continue;
+    }
+
     // Skip unknown flags
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2)) {
       // Check if this flag takes a value
@@ -180,6 +263,22 @@ function parseArgs(argv: string[]): ParsedArgs {
         if (subArg === "--silent" || subArg === "-s") {
           result.silent = true;
           i += 1;
+          continue;
+        }
+        if (subArg === "--prompt-file") {
+          result.promptFile = args[i + 1];
+          i += 2;
+          continue;
+        }
+        if (subArg === "--max-rounds") {
+          const n = parseInt(args[i + 1] ?? "", 10);
+          if (!isNaN(n) && n > 0) result.maxRounds = n;
+          i += 2;
+          continue;
+        }
+        if (subArg === "--config-root") {
+          result.configRoot = args[i + 1];
+          i += 2;
           continue;
         }
         result.subArgs.push(subArg);
@@ -243,6 +342,11 @@ async function main(): Promise<void> {
     verbose: parsed.verbose,
     silent: parsed.silent,
     configPath: parsed.configPath,
+    maxRounds: parsed.maxRounds,
+    configRoot: parsed.configRoot,
+    resumeFromLastSession: parsed.resume,
+    fearSetBlockOnNoGo: parsed.fearSetBlockOnNoGo,
+    sessionName: parsed.sessionName,
   };
 
   // Route to the appropriate command
@@ -263,11 +367,41 @@ async function main(): Promise<void> {
       case "git":
         await runGitCommand(parsed.subArgs, projectRoot);
         return;
+      case "council":
+        await runCouncilCommand(parsed.subArgs, projectRoot);
+        return;
       case "self-update":
         await runSelfUpdateCommand(projectRoot, {
           verbose: parsed.verbose,
           dryRun: parsed.subArgs.includes("--dry-run"),
         });
+        return;
+      case "gaslight":
+        await runGaslightCommand(parsed.subArgs, projectRoot);
+        return;
+      case "skillbook":
+        await runSkillbookCommand(parsed.subArgs, projectRoot);
+        return;
+      case "fearset":
+        await runFearsetCommand(parsed.subArgs, projectRoot);
+        return;
+      case "research":
+        await runResearchCommand(parsed.subArgs, projectRoot);
+        return;
+      case "audit":
+        await runAuditCommand(parsed.subArgs, projectRoot);
+        return;
+      case "vault":
+        await runVaultCommand(parsed.subArgs);
+        return;
+      case "review":
+        await runReviewCommand(parsed.subArgs, projectRoot);
+        return;
+      case "triage":
+        await runTriageCommand(parsed.subArgs, projectRoot);
+        return;
+      case "serve":
+        await runServeCommand(parsed.subArgs);
         return;
     }
   }
@@ -275,6 +409,21 @@ async function main(): Promise<void> {
   // One-shot prompt mode
   if (parsed.prompt) {
     await runOneShotPrompt(parsed.prompt, replOptions);
+    return;
+  }
+
+  // --prompt-file mode: read prompt from file, run non-interactively
+  if (parsed.promptFile) {
+    const { readFile } = await import("node:fs/promises");
+    let promptText: string;
+    try {
+      promptText = await readFile(parsed.promptFile, "utf-8");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`\x1b[31mError reading prompt file: ${message}\x1b[0m\n`);
+      process.exit(1);
+    }
+    await runOneShotPrompt(promptText, replOptions);
     return;
   }
 

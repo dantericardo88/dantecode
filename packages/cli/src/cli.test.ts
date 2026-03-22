@@ -23,6 +23,7 @@ interface ParsedArgs {
   configPath: string | undefined;
   showVersion: boolean;
   showHelp: boolean;
+  sessionName: string | undefined;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -40,6 +41,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     configPath: undefined,
     showVersion: false,
     showHelp: false,
+    sessionName: undefined,
   };
 
   const commands = new Set(["init", "skills", "agent", "config", "git"]);
@@ -76,6 +78,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (arg === "--config" || arg === "-c") {
       result.configPath = args[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg === "--name" || arg === "-n") {
+      result.sessionName = args[i + 1];
       i += 2;
       continue;
     }
@@ -221,6 +228,23 @@ describe("CLI argument parsing", () => {
     it("parses -c short flag", () => {
       const result = parseArgs(["node", "cli", "-c", "./custom.yaml"]);
       expect(result.configPath).toBe("./custom.yaml");
+    });
+
+    it("parses --name flag for session naming", () => {
+      const result = parseArgs(["node", "cli", "--name", "my-session"]);
+      expect(result.sessionName).toBe("my-session");
+    });
+
+    it("parses -n short flag for session naming", () => {
+      const result = parseArgs(["node", "cli", "-n", "quick-test"]);
+      expect(result.sessionName).toBe("quick-test");
+    });
+
+    it("--name coexists with other flags", () => {
+      const result = parseArgs(["node", "cli", "--name", "auth-work", "--verbose", "--no-git"]);
+      expect(result.sessionName).toBe("auth-work");
+      expect(result.verbose).toBe(true);
+      expect(result.noGit).toBe(true);
     });
   });
 

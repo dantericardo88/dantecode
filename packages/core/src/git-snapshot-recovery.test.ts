@@ -35,10 +35,10 @@ describe("GitSnapshotRecovery", () => {
   it("rolls back to a specific snapshot", () => {
     mockExec
       .mockReturnValueOnce("M  file.ts\n") // status
-      .mockReturnValueOnce("abc123\n")       // stash create
-      .mockReturnValueOnce("")               // checkout -- .
-      .mockReturnValueOnce("")               // clean -fd
-      .mockReturnValueOnce("");              // stash apply
+      .mockReturnValueOnce("abc123\n") // stash create
+      .mockReturnValueOnce("") // checkout -- .
+      .mockReturnValueOnce("") // clean -fd
+      .mockReturnValueOnce(""); // stash apply
 
     const recovery = new GitSnapshotRecovery("/project", { execSyncFn: mockExec });
     recovery.takeSnapshot("test");
@@ -60,10 +60,15 @@ describe("GitSnapshotRecovery", () => {
   it("rolls back to last good (verified) state", () => {
     // Create 3 snapshots: first verified, second not, third not
     mockExec
-      .mockReturnValueOnce("M  a.ts\n").mockReturnValueOnce("snap1\n")  // snapshot 1
-      .mockReturnValueOnce("M  b.ts\n").mockReturnValueOnce("snap2\n")  // snapshot 2
-      .mockReturnValueOnce("M  c.ts\n").mockReturnValueOnce("snap3\n")  // snapshot 3
-      .mockReturnValueOnce("").mockReturnValueOnce("").mockReturnValueOnce(""); // rollback ops
+      .mockReturnValueOnce("M  a.ts\n")
+      .mockReturnValueOnce("snap1\n") // snapshot 1
+      .mockReturnValueOnce("M  b.ts\n")
+      .mockReturnValueOnce("snap2\n") // snapshot 2
+      .mockReturnValueOnce("M  c.ts\n")
+      .mockReturnValueOnce("snap3\n") // snapshot 3
+      .mockReturnValueOnce("")
+      .mockReturnValueOnce("")
+      .mockReturnValueOnce(""); // rollback ops
 
     const recovery = new GitSnapshotRecovery("/project", { execSyncFn: mockExec });
     recovery.takeSnapshot("first");
@@ -80,9 +85,13 @@ describe("GitSnapshotRecovery", () => {
 
   it("falls back to most recent snapshot when none verified", () => {
     mockExec
-      .mockReturnValueOnce("M  a.ts\n").mockReturnValueOnce("snap1\n")
-      .mockReturnValueOnce("M  b.ts\n").mockReturnValueOnce("snap2\n")
-      .mockReturnValueOnce("").mockReturnValueOnce("").mockReturnValueOnce(""); // rollback ops
+      .mockReturnValueOnce("M  a.ts\n")
+      .mockReturnValueOnce("snap1\n")
+      .mockReturnValueOnce("M  b.ts\n")
+      .mockReturnValueOnce("snap2\n")
+      .mockReturnValueOnce("")
+      .mockReturnValueOnce("")
+      .mockReturnValueOnce(""); // rollback ops
 
     const recovery = new GitSnapshotRecovery("/project", { execSyncFn: mockExec });
     recovery.takeSnapshot("first");
@@ -153,7 +162,9 @@ describe("GitSnapshotRecovery", () => {
   it("handles git command failures gracefully", () => {
     mockExec
       .mockReturnValueOnce("M  file.ts\n") // status
-      .mockImplementationOnce(() => { throw new Error("git error"); }); // stash create fails
+      .mockImplementationOnce(() => {
+        throw new Error("git error");
+      }); // stash create fails
 
     const recovery = new GitSnapshotRecovery("/project", { execSyncFn: mockExec });
     const snapshot = recovery.takeSnapshot("fail");

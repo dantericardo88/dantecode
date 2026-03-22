@@ -7,9 +7,12 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
+import { OnboardingWizard } from "@dantecode/ux-polish";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
+import { AutomationPanelProvider } from "./automation-panel-provider.js";
+import { VerificationPanelProvider } from "./verification-panel-provider.js";
 import { DanteCodeCompletionProvider, disposeInlinePDSEDiagnostics } from "./inline-completion.js";
 import {
   createStatusBar,
@@ -30,6 +33,8 @@ import { DiffReviewProvider, type PendingDiffReview } from "./diff-review-provid
 let statusBarState: StatusBarState | undefined;
 let chatSidebarProvider: ChatSidebarProvider | undefined;
 let auditPanelProvider: AuditPanelProvider | undefined;
+let automationPanelProvider: AutomationPanelProvider | undefined;
+let verificationPanelProvider: VerificationPanelProvider | undefined;
 let completionProvider: DanteCodeCompletionProvider | undefined;
 let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
@@ -107,6 +112,22 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(auditViewRegistration);
 
+  automationPanelProvider = new AutomationPanelProvider(extensionUri);
+  const automationViewRegistration = vscode.window.registerWebviewViewProvider(
+    AutomationPanelProvider.viewType,
+    automationPanelProvider,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
+  context.subscriptions.push(automationViewRegistration);
+
+  verificationPanelProvider = new VerificationPanelProvider(extensionUri);
+  const verificationViewRegistration = vscode.window.registerWebviewViewProvider(
+    VerificationPanelProvider.viewType,
+    verificationPanelProvider,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
+  context.subscriptions.push(verificationViewRegistration);
+
   // ── Inline completion ──
   completionProvider = new DanteCodeCompletionProvider();
   const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
@@ -114,6 +135,28 @@ export function activate(context: vscode.ExtensionContext): void {
     completionProvider,
   );
   context.subscriptions.push(completionRegistration);
+
+  // ── Inline completion: cache invalidation + accept detection ──
+  const docChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (completionProvider === undefined) return;
+    // Update cursor position tracking so cache invalidation knows the current cursor line
+    const cursorLine = vscode.window.activeTextEditor?.selection.active.line ?? 0;
+    completionProvider.completionCache.updateCursorPosition(
+      event.document.uri.toString(),
+      cursorLine,
+    );
+    // Cache invalidation: clear trie entries when edit is above cursor line
+    for (const change of event.contentChanges) {
+      completionProvider.completionCache.onDocumentChange(
+        event.document.uri.toString(),
+        change.range.start.line,
+        event.document.version,
+      );
+    }
+    // Accept detection for telemetry outcome update + prefetch trigger
+    completionProvider.handleDocumentChange(event);
+  });
+  context.subscriptions.push(docChangeDisposable);
 
   // ── Status bar ──
   statusBarState = createStatusBar(context);
@@ -138,6 +181,24 @@ export function activate(context: vscode.ExtensionContext): void {
   if (!OnboardingProvider.hasOnboarded(context)) {
     void onboardingProvider.show();
   }
+
+  // ── UX Polish OnboardingWizard ──
+  // Runs the ux-polish OnboardingWizard on first activation to guide initial setup.
+  // Uses globalState to gate so it only runs once per install.
+  if (!context.globalState.get<boolean>("dantecode.uxOnboardingComplete")) {
+    const wizard = new OnboardingWizard({
+      stateOptions: { projectRoot },
+    });
+    if (!wizard.isComplete()) {
+      void wizard.run({ ci: process.env["CI"] === "true" }).then((result) => {
+        if (result.completed) {
+          void context.globalState.update("dantecode.uxOnboardingComplete", true);
+        }
+      });
+    } else {
+      void context.globalState.update("dantecode.uxOnboardingComplete", true);
+    }
+  }
 }
 
 // ─── Deactivate ──────────────────────────────────────────────────────────────
@@ -146,6 +207,8 @@ export function deactivate(): void {
   statusBarState?.item.dispose();
   chatSidebarProvider = undefined;
   auditPanelProvider = undefined;
+  automationPanelProvider = undefined;
+  verificationPanelProvider = undefined;
   completionProvider = undefined;
   checkpointManager = undefined;
   diffReviewProvider = undefined;
@@ -663,9 +726,26 @@ async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void
       name: "DanteCode Self-Update",
       cwd: installContext.repoRoot,
     });
-    terminal.sendText("node packages/cli/dist/index.js self-update --verbose");
+    // Auto-commit any local changes before self-update (self-update refuses on dirty repo).
+    // Stage tracked modifications, commit if anything changed, push, then update.
+    const autoCommitAndUpdate = [
+      `git add -u`,
+      `git diff --cached --quiet || git commit -m "chore: auto-snapshot before self-update"`,
+      `git push origin HEAD`,
+      `node packages/cli/dist/index.js self-update --verbose`,
+    ].join(" && ");
+    terminal.sendText(autoCommitAndUpdate);
     terminal.show();
-    void vscode.window.showInformationMessage("DanteCode: Repo self-update started in terminal");
+    void vscode.window
+      .showInformationMessage(
+        "DanteCode: Committing, pushing, and self-updating… Reload window when the terminal finishes.",
+        "Reload Now",
+      )
+      .then((action) => {
+        if (action === "Reload Now") {
+          void vscode.commands.executeCommand("workbench.action.reloadWindow");
+        }
+      });
     return;
   }
 

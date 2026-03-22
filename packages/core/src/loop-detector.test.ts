@@ -270,9 +270,18 @@ describe("LoopDetector", () => {
       });
 
       // Record 3 near-identical edit actions with slightly different paths
-      detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication bug in the login handler");
-      detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication issue in the login handler");
-      const result = detector.recordAction("edit", "Edit file src/components/UserProfile.tsx to fix the authentication error in the login handler");
+      detector.recordAction(
+        "edit",
+        "Edit file src/components/UserProfile.tsx to fix the authentication bug in the login handler",
+      );
+      detector.recordAction(
+        "edit",
+        "Edit file src/components/UserProfile.tsx to fix the authentication issue in the login handler",
+      );
+      const result = detector.recordAction(
+        "edit",
+        "Edit file src/components/UserProfile.tsx to fix the authentication error in the login handler",
+      );
 
       expect(result.stuck).toBe(true);
       expect(result.reason).toBe("semantic_similarity");
@@ -302,7 +311,10 @@ describe("LoopDetector", () => {
 
       detector.recordAction("continue", "please continue executing the remaining steps");
       detector.recordAction("continue", "please continue executing the remaining tasks");
-      const result = detector.recordAction("continue", "please continue executing the remaining items");
+      const result = detector.recordAction(
+        "continue",
+        "please continue executing the remaining items",
+      );
 
       expect(result.stuck).toBe(false);
     });

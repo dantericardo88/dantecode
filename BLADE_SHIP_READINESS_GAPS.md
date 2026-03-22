@@ -135,24 +135,31 @@ Ship requirement:
 
 ### 4. Sandbox mode is not actually enforced in the main runtime paths
 
-The repo contains a real sandbox package, but the main agent execution paths are still executing directly on the host.
+**STATUS: RESOLVED** — sandboxBridge now routes through `@dantecode/sandbox` when `enableSandbox=true`.
 
-Evidence:
+Resolution (Lane 2, 2026-03-20):
 
-- Repo search found no runtime usage of `@dantecode/sandbox` from CLI, VS Code, or desktop.
-- `packages/cli/src/agent-loop.ts:36-41` defines `enableSandbox`, but repo search shows it is never used inside the agent loop.
-- `packages/cli/src/tools.ts:190-197` executes Bash directly with `execSync`.
-- `packages/cli/src/slash-commands.ts:556-560` `/sandbox` only flips in-memory state text.
-- `packages/vscode/src/extension.ts:214-221` toggle sandbox only updates UI state.
+- `packages/cli/src/sandbox-bridge.ts` — `SandboxBridge.runInSandbox()` routes to `SandboxExecutor` (Docker) or `LocalExecutor` (fallback) via `@dantecode/sandbox`.
+- `packages/cli/src/agent-loop.ts` — when `config.enableSandbox` is true, a `SandboxBridge` is instantiated and used; all Bash tool calls are routed through `activeSandboxBridge.runInSandbox()` instead of `execSync`. The `sandboxBridge` is also passed into `CliToolExecutionContext` so `toolBash()` in `tools.ts` can route through it.
+- `packages/cli/src/tools.ts` — `toolBash()` now accepts `context?: CliToolExecutionContext` and routes through `context.sandboxBridge.runInSandbox()` when set, preserving `execSync` as the non-sandbox fallback.
+- `SecurityEngine` and `SecretsScanner` from `@dantecode/core` are now instantiated per-session in `agent-loop.ts` and applied to all Bash commands (SecurityEngine check) and Write content (SecretsScanner block).
 
-Impact:
+~~Evidence:~~
 
-- The product can imply isolation that it does not actually enforce.
-- This is especially risky for a coding agent product.
+~~- Repo search found no runtime usage of `@dantecode/sandbox` from CLI, VS Code, or desktop.~~
+~~- `packages/cli/src/agent-loop.ts:36-41` defines `enableSandbox`, but repo search shows it is never used inside the agent loop.~~
+~~- `packages/cli/src/tools.ts:190-197` executes Bash directly with `execSync`.~~
+~~- `packages/cli/src/slash-commands.ts:556-560` `/sandbox` only flips in-memory state text.~~
+~~- `packages/vscode/src/extension.ts:214-221` toggle sandbox only updates UI state.~~
+
+Remaining gap (not in scope for this PR):
+
+- VSCode extension sandbox toggle still only updates UI state — wiring to `SandboxBridge` in `sidebar-provider.ts` is a separate task.
 
 Ship requirement:
 
-- Either wire the sandbox package into real command execution or remove/rename the feature so the product does not overstate safety.
+- ~~Either wire the sandbox package into real command execution or remove/rename the feature so the product does not overstate safety.~~
+- Wire VSCode sandbox toggle to `SandboxBridge` for full end-to-end isolation.
 
 ### 5. Provider support is inconsistent across types, UI, and runtime
 

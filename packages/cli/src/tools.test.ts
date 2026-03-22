@@ -14,20 +14,28 @@ const {
   mockResolvePreferredShell,
   mockAutoCommit,
   mockPushBranch,
-} = vi.hoisted(() => ({
-  mockReadFile: vi.fn(),
-  mockWriteFile: vi.fn(),
-  mockMkdir: vi.fn(),
-  mockReaddir: vi.fn(),
-  mockStat: vi.fn(),
-  mockExecSync: vi.fn(),
-  mockExec: vi.fn(),
-  mockExecFile: vi.fn(),
-  mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
-  mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
-  mockAutoCommit: vi.fn(),
-  mockPushBranch: vi.fn(),
-}));
+  mockDanteSandboxIsReady,
+  mockDanteSandboxExecute,
+} = vi.hoisted(() => {
+  const mockDanteSandboxIsReady = vi.fn(() => false);
+  const mockDanteSandboxExecute = vi.fn();
+  return {
+    mockReadFile: vi.fn(),
+    mockWriteFile: vi.fn(),
+    mockMkdir: vi.fn(),
+    mockReaddir: vi.fn(),
+    mockStat: vi.fn(),
+    mockExecSync: vi.fn(),
+    mockExec: vi.fn(),
+    mockExecFile: vi.fn(),
+    mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
+    mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
+    mockAutoCommit: vi.fn(),
+    mockPushBranch: vi.fn(),
+    mockDanteSandboxIsReady,
+    mockDanteSandboxExecute,
+  };
+});
 
 vi.mock("node:fs/promises", () => ({
   readFile: (...args: unknown[]) => mockReadFile(...args),
@@ -69,6 +77,17 @@ vi.mock("@dantecode/git-engine", () => ({
   pushBranch: (...args: unknown[]) => mockPushBranch(...args),
 }));
 
+vi.mock("@dantecode/dante-sandbox", () => ({
+  DanteSandbox: {
+    isReady: () => mockDanteSandboxIsReady(),
+    execute: (...args: unknown[]) => mockDanteSandboxExecute(...args),
+  },
+  toToolResult: (result: { exitCode: number; stdout: string; stderr: string }) => ({
+    content: result.stdout || result.stderr || "(no output)",
+    isError: result.exitCode !== 0,
+  }),
+}));
+
 import { executeTool, getToolDefinitions, type CliToolExecutionContext } from "./tools.js";
 
 function makeContext(overrides: Partial<CliToolExecutionContext> = {}): CliToolExecutionContext {
@@ -104,6 +123,9 @@ describe("cli tools hardening", () => {
     mockResolvePreferredShell.mockReturnValue("/bin/bash");
     mockAutoCommit.mockReset();
     mockPushBranch.mockReset();
+    // DanteSandbox defaults: not initialized (tests can override per-test)
+    mockDanteSandboxIsReady.mockReturnValue(false);
+    mockDanteSandboxExecute.mockReset();
   });
 
   it("blocks protected writes outside explicit self-improvement mode", async () => {
@@ -237,19 +259,42 @@ describe("cli tools hardening", () => {
     expect(third.content).toContain("Third identical Edit attempt blocked");
   });
 
-  it("uses the shared preferred shell for Bash commands", async () => {
-    mockExecSync.mockReturnValue("tests passed");
-    mockResolvePreferredShell.mockReturnValue("C:\\Program Files\\Git\\bin\\bash.exe");
+  it("routes Bash commands through DanteSandbox when initialized", async () => {
+    // DanteSandbox is now mandatory — Bash routes through it, never directly via execSync.
+    mockDanteSandboxIsReady.mockReturnValue(true);
+    mockDanteSandboxExecute.mockResolvedValue({
+      exitCode: 0,
+      stdout: "tests passed",
+      stderr: "",
+      requestId: "test-id",
+      durationMs: 100,
+      timedOut: false,
+      strategy: "host",
+      sandboxed: true,
+      violations: [],
+    });
 
     const result = await executeTool("Bash", { command: "npm test" }, "/proj", makeContext());
 
     expect(result.isError).toBe(false);
-    expect(mockExecSync).toHaveBeenCalledWith(
+    expect(result.content).toContain("tests passed");
+    expect(mockDanteSandboxExecute).toHaveBeenCalledWith(
       "npm test",
-      expect.objectContaining({
-        shell: "C:\\Program Files\\Git\\bin\\bash.exe",
-      }),
+      expect.objectContaining({ cwd: "/proj", taskType: "bash" }),
     );
+    // execSync must never be called — sandbox enforcement is mandatory
+    expect(mockExecSync).not.toHaveBeenCalled();
+  });
+
+  it("returns error when DanteSandbox is not initialized (fail-closed enforcement)", async () => {
+    // DanteSandbox not ready → hard error, no execSync fallback
+    mockDanteSandboxIsReady.mockReturnValue(false);
+
+    const result = await executeTool("Bash", { command: "npm test" }, "/proj", makeContext());
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("DanteSandbox is not initialized");
+    expect(mockExecSync).not.toHaveBeenCalled();
   });
 
   it("routes GitPush through git-engine with verification details", async () => {
@@ -355,7 +400,12 @@ describe("WebSearch tool", () => {
       text: () => Promise.resolve(mockHtml),
     });
 
-    const result = await executeTool("WebSearch", { query: "fallback test" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebSearch",
+      { query: "fallback test" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(false);
     expect(result.content).toContain("https://github.com/test/repo");
   });
@@ -378,7 +428,12 @@ describe("WebSearch tool", () => {
       statusText: "Too Many Requests",
     });
 
-    const result = await executeTool("WebSearch", { query: "rate limited" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebSearch",
+      { query: "rate limited" },
+      "/proj",
+      makeContext(),
+    );
     // Multi-engine search degrades gracefully: returns no results instead of hard error
     expect(result.isError).toBe(false);
     expect(result.content).toContain("No search results");
@@ -387,7 +442,12 @@ describe("WebSearch tool", () => {
   it("handles network errors gracefully (returns no results)", async () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network timeout"));
 
-    const result = await executeTool("WebSearch", { query: "timeout test" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebSearch",
+      { query: "timeout test" },
+      "/proj",
+      makeContext(),
+    );
     // Multi-engine search degrades gracefully: returns no results instead of hard error
     expect(result.isError).toBe(false);
     expect(result.content).toContain("No search results");
@@ -404,8 +464,18 @@ describe("WebSearch tool", () => {
       text: () => Promise.resolve(mockHtml),
     });
 
-    const result1 = await executeTool("WebSearch", { query: "cache test query xyz" }, "/proj", makeContext());
-    const result2 = await executeTool("WebSearch", { query: "cache test query xyz" }, "/proj", makeContext());
+    const result1 = await executeTool(
+      "WebSearch",
+      { query: "cache test query xyz" },
+      "/proj",
+      makeContext(),
+    );
+    const result2 = await executeTool(
+      "WebSearch",
+      { query: "cache test query xyz" },
+      "/proj",
+      makeContext(),
+    );
 
     expect(result1.content).toBe(result2.content);
     // fetch should only be called once (second uses cache)
@@ -437,7 +507,12 @@ describe("WebFetch tool", () => {
   });
 
   it("rejects non-HTTP protocols", async () => {
-    const result = await executeTool("WebFetch", { url: "ftp://example.com/file" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "ftp://example.com/file" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(true);
     expect(result.content).toContain("only HTTP/HTTPS");
   });
@@ -457,7 +532,12 @@ describe("WebFetch tool", () => {
       headers: new Map([["content-type", "text/html"]]),
     });
 
-    const result = await executeTool("WebFetch", { url: "https://example.com" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://example.com" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(false);
     expect(result.content).toContain("Hello World");
     expect(result.content).toContain("test paragraph");
@@ -472,7 +552,12 @@ describe("WebFetch tool", () => {
       headers: new Map([["content-type", "application/json"]]),
     });
 
-    const result = await executeTool("WebFetch", { url: "https://api.example.com/data" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://api.example.com/data" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(false);
     expect(result.content).toContain('"name": "test"');
     expect(result.content).toContain('"value": 42');
@@ -503,7 +588,12 @@ describe("WebFetch tool", () => {
       statusText: "Not Found",
     });
 
-    const result = await executeTool("WebFetch", { url: "https://example.com/missing" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://example.com/missing" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(true);
     expect(result.content).toContain("HTTP 404");
   });
@@ -543,7 +633,12 @@ describe("WebFetch tool", () => {
       headers: new Map([["content-type", "text/html"]]),
     });
 
-    const result = await executeTool("WebFetch", { url: "https://docs.example.com" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://docs.example.com" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(false);
     expect(result.content).toContain("Title: Project Documentation");
     expect(result.content).toContain("Description: Learn how to use the project API.");
@@ -566,7 +661,12 @@ describe("WebFetch tool", () => {
       headers: new Map([["content-type", "text/html"]]),
     });
 
-    const result = await executeTool("WebFetch", { url: "https://blog.example.com/post" }, "/proj", makeContext());
+    const result = await executeTool(
+      "WebFetch",
+      { url: "https://blog.example.com/post" },
+      "/proj",
+      makeContext(),
+    );
     expect(result.isError).toBe(false);
     expect(result.content).toContain("Important Article");
     expect(result.content).toContain("main content that should be extracted");
@@ -629,6 +729,32 @@ describe("SubAgent tool", () => {
     expect(mockExecutor).toHaveBeenCalledWith("find and update files", {
       maxRounds: 30,
       background: false,
+      worktreeIsolation: false,
+    });
+  });
+
+  it("returns a truthful launch message for background sub-agents", async () => {
+    const mockExecutor = vi.fn().mockResolvedValue({
+      output:
+        'Background task started: bg-123. Use SubAgent with prompt "status bg-123" to check progress.',
+      touchedFiles: [],
+      durationMs: 0,
+      success: true,
+    });
+
+    const result = await executeTool(
+      "SubAgent",
+      { prompt: "inspect auth flow", background: true },
+      "/proj",
+      makeContext({ subAgentExecutor: mockExecutor }),
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Background task started: bg-123");
+    expect(result.content).not.toContain("completed successfully");
+    expect(mockExecutor).toHaveBeenCalledWith("inspect auth flow", {
+      maxRounds: 30,
+      background: true,
       worktreeIsolation: false,
     });
   });
@@ -748,24 +874,26 @@ describe("GitHubSearch tool", () => {
   });
 
   it("searches repos and formats results", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify([
-      {
-        name: "awesome-project",
-        url: "https://github.com/user/awesome-project",
-        description: "An awesome project",
-        stargazersCount: 1234,
-        language: "TypeScript",
-        updatedAt: "2026-03-15T00:00:00Z",
-      },
-      {
-        name: "cool-lib",
-        url: "https://github.com/user/cool-lib",
-        description: "A cool library",
-        stargazersCount: 567,
-        language: "JavaScript",
-        updatedAt: "2026-03-10T00:00:00Z",
-      },
-    ]));
+    mockExecSync.mockReturnValue(
+      JSON.stringify([
+        {
+          name: "awesome-project",
+          url: "https://github.com/user/awesome-project",
+          description: "An awesome project",
+          stargazersCount: 1234,
+          language: "TypeScript",
+          updatedAt: "2026-03-15T00:00:00Z",
+        },
+        {
+          name: "cool-lib",
+          url: "https://github.com/user/cool-lib",
+          description: "A cool library",
+          stargazersCount: 567,
+          language: "JavaScript",
+          updatedAt: "2026-03-10T00:00:00Z",
+        },
+      ]),
+    );
 
     const result = await executeTool(
       "GitHubSearch",
@@ -782,16 +910,18 @@ describe("GitHubSearch tool", () => {
   });
 
   it("searches issues with correct command", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify([
-      {
-        title: "Bug: crash on startup",
-        url: "https://github.com/user/repo/issues/42",
-        state: "OPEN",
-        repository: { nameWithOwner: "user/repo" },
-        createdAt: "2026-03-12T00:00:00Z",
-        labels: [{ name: "bug" }],
-      },
-    ]));
+    mockExecSync.mockReturnValue(
+      JSON.stringify([
+        {
+          title: "Bug: crash on startup",
+          url: "https://github.com/user/repo/issues/42",
+          state: "OPEN",
+          repository: { nameWithOwner: "user/repo" },
+          createdAt: "2026-03-12T00:00:00Z",
+          labels: [{ name: "bug" }],
+        },
+      ]),
+    );
 
     const result = await executeTool(
       "GitHubSearch",
@@ -831,12 +961,7 @@ describe("GitHubSearch tool", () => {
       throw err;
     });
 
-    const result = await executeTool(
-      "GitHubSearch",
-      { query: "test" },
-      "/proj",
-      makeContext(),
-    );
+    const result = await executeTool("GitHubSearch", { query: "test" }, "/proj", makeContext());
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("not installed");
@@ -849,12 +974,7 @@ describe("GitHubSearch tool", () => {
       throw err;
     });
 
-    const result = await executeTool(
-      "GitHubSearch",
-      { query: "test" },
-      "/proj",
-      makeContext(),
-    );
+    const result = await executeTool("GitHubSearch", { query: "test" }, "/proj", makeContext());
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("not authenticated");
@@ -889,16 +1009,18 @@ describe("GitHubOps tool", () => {
   });
 
   it("delegates search_repos to GitHubSearch", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify([
-      {
-        name: "test-repo",
-        url: "https://github.com/user/test-repo",
-        description: "A test",
-        stargazersCount: 42,
-        language: "TypeScript",
-        updatedAt: "2026-03-15T00:00:00Z",
-      },
-    ]));
+    mockExecSync.mockReturnValue(
+      JSON.stringify([
+        {
+          name: "test-repo",
+          url: "https://github.com/user/test-repo",
+          description: "A test",
+          stargazersCount: 42,
+          language: "TypeScript",
+          updatedAt: "2026-03-15T00:00:00Z",
+        },
+      ]),
+    );
 
     const result = await executeTool(
       "GitHubOps",
@@ -948,29 +1070,26 @@ describe("GitHubOps tool", () => {
   });
 
   it("returns error when create_pr missing title", async () => {
-    const result = await executeTool(
-      "GitHubOps",
-      { action: "create_pr" },
-      "/proj",
-      makeContext(),
-    );
+    const result = await executeTool("GitHubOps", { action: "create_pr" }, "/proj", makeContext());
     expect(result.isError).toBe(true);
     expect(result.content).toContain("title is required");
   });
 
   it("views a PR with structured output", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify({
-      title: "Fix bug",
-      state: "OPEN",
-      url: "https://github.com/user/repo/pull/42",
-      body: "Fixes the crash",
-      author: { login: "dev" },
-      reviewDecision: "APPROVED",
-      mergeable: "MERGEABLE",
-      additions: 10,
-      deletions: 3,
-      changedFiles: 2,
-    }));
+    mockExecSync.mockReturnValue(
+      JSON.stringify({
+        title: "Fix bug",
+        state: "OPEN",
+        url: "https://github.com/user/repo/pull/42",
+        body: "Fixes the crash",
+        author: { login: "dev" },
+        reviewDecision: "APPROVED",
+        mergeable: "MERGEABLE",
+        additions: 10,
+        deletions: 3,
+        changedFiles: 2,
+      }),
+    );
 
     const result = await executeTool(
       "GitHubOps",
@@ -1041,24 +1160,26 @@ describe("GitHubOps tool", () => {
   });
 
   it("lists open PRs", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify([
-      {
-        number: 1,
-        title: "First PR",
-        state: "OPEN",
-        url: "https://github.com/user/repo/pull/1",
-        author: { login: "dev1" },
-        headRefName: "feature-a",
-      },
-      {
-        number: 2,
-        title: "Second PR",
-        state: "OPEN",
-        url: "https://github.com/user/repo/pull/2",
-        author: { login: "dev2" },
-        headRefName: "feature-b",
-      },
-    ]));
+    mockExecSync.mockReturnValue(
+      JSON.stringify([
+        {
+          number: 1,
+          title: "First PR",
+          state: "OPEN",
+          url: "https://github.com/user/repo/pull/1",
+          author: { login: "dev1" },
+          headRefName: "feature-a",
+        },
+        {
+          number: 2,
+          title: "Second PR",
+          state: "OPEN",
+          url: "https://github.com/user/repo/pull/2",
+          author: { login: "dev2" },
+          headRefName: "feature-b",
+        },
+      ]),
+    );
 
     const result = await executeTool(
       "GitHubOps",
@@ -1078,7 +1199,12 @@ describe("GitHubOps tool", () => {
 
     const result = await executeTool(
       "GitHubOps",
-      { action: "create_issue", title: "Bug report", body: "Steps to reproduce", labels: "bug,critical" },
+      {
+        action: "create_issue",
+        title: "Bug report",
+        body: "Steps to reproduce",
+        labels: "bug,critical",
+      },
       "/proj",
       makeContext(),
     );
@@ -1132,16 +1258,18 @@ describe("GitHubOps tool", () => {
   });
 
   it("views a workflow run", async () => {
-    mockExecSync.mockReturnValue(JSON.stringify({
-      name: "CI",
-      status: "completed",
-      conclusion: "success",
-      url: "https://github.com/user/repo/actions/runs/123",
-      headBranch: "main",
-      event: "push",
-      createdAt: "2026-03-18T10:00:00Z",
-      updatedAt: "2026-03-18T10:05:00Z",
-    }));
+    mockExecSync.mockReturnValue(
+      JSON.stringify({
+        name: "CI",
+        status: "completed",
+        conclusion: "success",
+        url: "https://github.com/user/repo/actions/runs/123",
+        headBranch: "main",
+        event: "push",
+        createdAt: "2026-03-18T10:00:00Z",
+        updatedAt: "2026-03-18T10:05:00Z",
+      }),
+    );
 
     const result = await executeTool(
       "GitHubOps",

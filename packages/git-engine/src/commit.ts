@@ -2,7 +2,7 @@
 // @dantecode/git-engine — Auto-Commit System (Aider-derived)
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type { GitCommitSpec } from "@dantecode/config-types";
 
 // ----------------------------------------------------------------------------
@@ -60,12 +60,12 @@ const MAX_SUBJECT_LENGTH = 72;
 // ----------------------------------------------------------------------------
 
 /**
- * Execute a git command synchronously in the given working directory.
- * Throws with a descriptive message on failure.
+ * Execute a git command via execFileSync (no shell — injection-safe).
+ * Arguments are passed as an array so branch names/paths are never interpolated.
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -75,12 +75,12 @@ function git(args: string, cwd: string): string {
     const err = error as { stderr?: string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
     const msg = stderr || err.message || "Unknown git error";
-    throw new Error(`git ${args.split(" ")[0]}: ${msg}`);
+    throw new Error(`git ${args[0] ?? "?"}: ${msg}`);
   }
 }
 
 function getCurrentBranch(projectRoot: string): string {
-  const branch = git("rev-parse --abbrev-ref HEAD", projectRoot);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], projectRoot);
   if (!branch || branch === "HEAD") {
     throw new Error("git push: cannot infer branch from detached HEAD; pass an explicit branch");
   }
@@ -165,18 +165,20 @@ export function autoCommit(spec: GitCommitSpec, projectRoot: string): CommitResu
     const batchSize = 50;
     for (let i = 0; i < spec.files.length; i += batchSize) {
       const batch = spec.files.slice(i, i + batchSize);
-      const escaped = batch.map((f) => `"${f}"`).join(" ");
-      git(`add ${escaped}`, projectRoot);
+      // execFileSync passes each file as a separate arg — no shell quoting needed
+      git(["add", ...batch], projectRoot);
     }
   }
 
   // Build the full commit message
   const fullMessage = buildCommitMessage(spec);
 
-  // Create the commit using a stdin-fed message to avoid shell escaping issues
-  const allowEmptyFlag = spec.allowEmpty ? "--allow-empty " : "";
+  // Create the commit: feed the message via stdin to avoid shell escaping issues.
+  // execFileSync + "--file=-" reads the commit message from stdin (the input option).
+  const commitArgs = ["commit", "--file=-"];
+  if (spec.allowEmpty) commitArgs.splice(1, 0, "--allow-empty");
   try {
-    execSync(`git commit ${allowEmptyFlag}--file=-`, {
+    execFileSync("git", commitArgs, {
       cwd: projectRoot,
       encoding: "utf-8",
       input: fullMessage,
@@ -207,14 +209,14 @@ export function autoCommit(spec: GitCommitSpec, projectRoot: string): CommitResu
  * Return the SHA hash of the current HEAD commit.
  */
 export function getLastCommitHash(projectRoot: string): string {
-  return git("rev-parse HEAD", projectRoot);
+  return git(["rev-parse", "HEAD"], projectRoot);
 }
 
 /**
  * Revert the most recent commit (creates a new revert commit).
  */
 export function revertLastCommit(projectRoot: string): string {
-  return git("revert HEAD --no-edit", projectRoot);
+  return git(["revert", "HEAD", "--no-edit"], projectRoot);
 }
 
 /**
@@ -229,17 +231,19 @@ export function pushBranch(
   const branch = options.branch?.trim() || getCurrentBranch(projectRoot);
   const setUpstream = options.setUpstream === true;
   const localCommit = getLastCommitHash(projectRoot);
-  const upstreamFlag = setUpstream ? "-u " : "";
 
   let output = "";
   try {
-    output = git(`push ${upstreamFlag}${remote} ${branch}`, projectRoot);
+    const pushArgs = ["push"];
+    if (setUpstream) pushArgs.push("-u");
+    pushArgs.push(remote, branch);
+    output = git(pushArgs, projectRoot);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(formatPushError(message, remote, branch));
   }
 
-  const remoteRef = git(`ls-remote ${remote} refs/heads/${branch}`, projectRoot)
+  const remoteRef = git(["ls-remote", remote, `refs/heads/${branch}`], projectRoot)
     .split("\n")
     .find(Boolean);
 
@@ -277,7 +281,7 @@ export function pushBranch(
 export function getStatus(projectRoot: string): GitStatusResult {
   let raw: string;
   try {
-    raw = git("status --porcelain", projectRoot);
+    raw = git(["status", "--porcelain"], projectRoot);
   } catch {
     // If the command fails (e.g. not a git repo), return empty
     return { staged: [], unstaged: [], untracked: [], conflicted: [] };

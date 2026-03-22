@@ -113,13 +113,14 @@ vi.mock("./sandbox-bridge.js", () => ({
 }));
 
 import { routeSlashCommand } from "./slash-commands.js";
+import type { ReplState } from "./slash-commands.js";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
 // Test Fixtures
 // ---------------------------------------------------------------------------
 
-function makeReplState(overrides?: Record<string, unknown>) {
+function makeReplState(overrides?: Partial<ReplState>): ReplState {
   return {
     session: {
       id: "test-session",
@@ -179,10 +180,15 @@ function makeReplState(overrides?: Record<string, unknown>) {
     lastEditContent: null,
     recentToolCalls: [],
     pendingAgentPrompt: null,
+    pendingResumeRunId: null,
+    pendingExpectedWorkflow: null,
     activeAbortController: null,
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    gaslight: null,
+    memoryOrchestrator: null,
+    theme: "default",
     ...overrides,
   };
 }
