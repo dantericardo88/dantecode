@@ -34,7 +34,7 @@ const tempProject = mkdtempSync(join(tmpdir(), "dantecode-cli-smoke-"));
 
 try {
   const helpOutput = runNode([cliEntry, "--help"], repoRoot);
-  if (!helpOutput.includes("Portable Skill Runtime and Coding Agent")) {
+  if (!helpOutput.includes("Build software by describing what you want")) {
     throw new Error("CLI help output did not include the updated product description.");
   }
 

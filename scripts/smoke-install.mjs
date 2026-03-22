@@ -122,7 +122,7 @@ try {
   }
 
   const helpOutput = runNode([installedCliEntry, "--help"], projectDir);
-  if (!helpOutput.includes("Portable Skill Runtime and Coding Agent")) {
+  if (!helpOutput.includes("Build software by describing what you want")) {
     throw new Error("Installed CLI help output did not include the expected text.");
   }
 
