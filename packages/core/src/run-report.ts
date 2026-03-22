@@ -332,7 +332,7 @@ const STATUS_LABEL: Record<RunReportStatus, string> = {
   not_attempted: "NOT ATTEMPTED",
 };
 
-export function serializeRunReportToMarkdown(report: RunReport): string {
+export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean = false): string {
   const lines: string[] = [];
   const duration = computeRunDuration(report.startedAt, report.completedAt);
   const costStr = `~$${report.costEstimate.toFixed(2)}`;
@@ -345,13 +345,17 @@ export function serializeRunReportToMarkdown(report: RunReport): string {
   lines.push(`**Started:** ${report.startedAt}`);
   lines.push(`**Completed:** ${report.completedAt}`);
   lines.push(`**Duration:** ${duration}`);
-  lines.push(`**Model:** ${report.model.modelId} (${report.model.provider})`);
-  lines.push(
-    `**Cost estimate:** ${costStr} (input: ${formatTokens(report.tokenUsage.input)}, output: ${formatTokens(report.tokenUsage.output)})`,
-  );
+  if (verbose) {
+    lines.push(`**Model:** ${report.model.modelId} (${report.model.provider})`);
+    lines.push(
+      `**Cost estimate:** ${costStr} (input: ${formatTokens(report.tokenUsage.input)}, output: ${formatTokens(report.tokenUsage.output)})`,
+    );
+  } else {
+    lines.push(`**Cost:** ${costStr}`);
+  }
   lines.push("");
 
-  // Summary table
+  // Summary table (preserved for run-report-writer.ts regex compatibility)
   const counts = countStatuses(report.entries);
   const total = report.entries.length;
   const completionRate =
@@ -376,6 +380,12 @@ export function serializeRunReportToMarkdown(report: RunReport): string {
     lines.push(`**Needs attention: ${needsAttention.join(", ")}**`);
   }
   lines.push("");
+
+  // "What Needs Your Attention" — non-verbose only, aggregates action items
+  if (!verbose) {
+    renderAttentionSection(lines, report);
+  }
+
   lines.push("---");
   lines.push("");
 
@@ -418,35 +428,51 @@ export function serializeRunReportToMarkdown(report: RunReport): string {
     }
 
     // Verification
-    lines.push("**Verification:**");
-    const v = entry.verification;
-    const antiStubIcon = v.antiStub.passed ? "\u2705" : "\u274C";
-    const constIcon = v.constitution.passed ? "\u2705" : "\u274C";
-    lines.push(`- Anti-stub: ${antiStubIcon} ${v.antiStub.passed ? "Passed" : "FAILED"} (${v.antiStub.violations} violations)`);
-    if (v.antiStub.details.length > 0) {
-      for (const d of v.antiStub.details) {
-        lines.push(`  - ${d}`);
+    if (verbose) {
+      lines.push("**Verification:**");
+      const v = entry.verification;
+      const antiStubIcon = v.antiStub.passed ? "\u2705" : "\u274C";
+      const constIcon = v.constitution.passed ? "\u2705" : "\u274C";
+      lines.push(`- Anti-stub: ${antiStubIcon} ${v.antiStub.passed ? "Passed" : "FAILED"} (${v.antiStub.violations} violations)`);
+      if (v.antiStub.details.length > 0) {
+        for (const d of v.antiStub.details) {
+          lines.push(`  - ${d}`);
+        }
       }
-    }
-    lines.push(`- Constitution: ${constIcon} ${v.constitution.passed ? "Passed" : "FAILED"} (${v.constitution.violations} violations${v.constitution.warnings > 0 ? `, ${v.constitution.warnings} warnings` : ""})`);
-    if (v.constitution.details.length > 0) {
-      for (const d of v.constitution.details) {
-        lines.push(`  - ${d}`);
+      lines.push(`- Constitution: ${constIcon} ${v.constitution.passed ? "Passed" : "FAILED"} (${v.constitution.violations} violations${v.constitution.warnings > 0 ? `, ${v.constitution.warnings} warnings` : ""})`);
+      if (v.constitution.details.length > 0) {
+        for (const d of v.constitution.details) {
+          lines.push(`  - ${d}`);
+        }
       }
-    }
-    lines.push(`- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`);
-    if (v.regenerationAttempts > 0) {
-      lines.push(`- Regeneration attempts: ${v.regenerationAttempts}/${v.maxAttempts}`);
-    }
+      lines.push(`- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`);
+      if (v.regenerationAttempts > 0) {
+        lines.push(`- Regeneration attempts: ${v.regenerationAttempts}/${v.maxAttempts}`);
+      }
 
-    // Tests
-    const t = entry.tests;
-    if (t.created > 0) {
-      lines.push(`- Tests: ${t.created} created, ${t.passing} passing${t.failing > 0 ? `, ${t.failing} failing` : ""}`);
+      // Tests (verbose)
+      const t = entry.tests;
+      if (t.created > 0) {
+        lines.push(`- Tests: ${t.created} created, ${t.passing} passing${t.failing > 0 ? `, ${t.failing} failing` : ""}`);
+      } else {
+        lines.push("- Tests: none created");
+      }
+      lines.push("");
     } else {
-      lines.push("- Tests: none created");
+      // Human-friendly verification + tests
+      const vLines = humanizeVerification(entry.verification);
+      if (vLines.length > 0) {
+        for (const vl of vLines) {
+          lines.push(vl);
+        }
+        lines.push("");
+      }
+      const testLine = humanizeTests(entry.tests);
+      if (testLine) {
+        lines.push(testLine);
+        lines.push("");
+      }
     }
-    lines.push("");
 
     // Summary
     if (entry.summary) {
@@ -494,28 +520,32 @@ export function serializeRunReportToMarkdown(report: RunReport): string {
     lines.push("");
   }
 
-  // Verification summary
-  lines.push("## Verification Summary");
-  lines.push("");
-  lines.push("| Check | Passed | Failed | Total |");
-  lines.push("|-------|--------|--------|-------|");
+  // Verification summary / Quality check
+  if (verbose) {
+    lines.push("## Verification Summary");
+    lines.push("");
+    lines.push("| Check | Passed | Failed | Total |");
+    lines.push("|-------|--------|--------|-------|");
 
-  const attempted = report.entries.filter((e) => e.status !== "not_attempted");
-  const antiStubPassed = attempted.filter((e) => e.verification.antiStub.passed).length;
-  const constPassed = attempted.filter((e) => e.verification.constitution.passed).length;
-  const pdsePassed = attempted.filter(
-    (e) => e.verification.pdseScore >= e.verification.pdseThreshold,
-  ).length;
-  const testsPassed = attempted.filter(
-    (e) => e.tests.created > 0 && e.tests.failing === 0,
-  ).length;
-  const testsNoTests = attempted.filter((e) => e.tests.created === 0).length;
+    const attempted = report.entries.filter((e) => e.status !== "not_attempted");
+    const antiStubPassed = attempted.filter((e) => e.verification.antiStub.passed).length;
+    const constPassed = attempted.filter((e) => e.verification.constitution.passed).length;
+    const pdsePassed = attempted.filter(
+      (e) => e.verification.pdseScore >= e.verification.pdseThreshold,
+    ).length;
+    const testsPassed = attempted.filter(
+      (e) => e.tests.created > 0 && e.tests.failing === 0,
+    ).length;
+    const testsNoTests = attempted.filter((e) => e.tests.created === 0).length;
 
-  lines.push(`| Anti-stub scan | ${antiStubPassed} | ${attempted.length - antiStubPassed} | ${attempted.length} |`);
-  lines.push(`| Constitution check | ${constPassed} | ${attempted.length - constPassed} | ${attempted.length} |`);
-  lines.push(`| PDSE >= threshold | ${pdsePassed} | ${attempted.length - pdsePassed} | ${attempted.length} |`);
-  lines.push(`| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`);
-  lines.push("");
+    lines.push(`| Anti-stub scan | ${antiStubPassed} | ${attempted.length - antiStubPassed} | ${attempted.length} |`);
+    lines.push(`| Constitution check | ${constPassed} | ${attempted.length - constPassed} | ${attempted.length} |`);
+    lines.push(`| PDSE >= threshold | ${pdsePassed} | ${attempted.length - pdsePassed} | ${attempted.length} |`);
+    lines.push(`| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`);
+    lines.push("");
+  } else {
+    renderQualityCheck(lines, report);
+  }
 
   // Reproduction command
   lines.push("## Reproduction");
@@ -524,19 +554,127 @@ export function serializeRunReportToMarkdown(report: RunReport): string {
   lines.push(reproduction);
   lines.push("");
 
-  // Environment
-  lines.push("## Environment");
-  lines.push("");
-  lines.push(`- DanteCode version: ${report.dantecodeVersion}`);
-  lines.push(`- Node.js: ${report.environment.nodeVersion}`);
-  lines.push(`- OS: ${report.environment.os}`);
-  lines.push(`- Provider: ${report.model.provider}`);
-  lines.push(`- Model: ${report.model.modelId}`);
-  const firstEntry = report.entries[0] as RunReportEntry | undefined;
-  lines.push(`- PDSE threshold: ${firstEntry?.verification.pdseThreshold ?? 85}`);
-  lines.push("");
+  // Environment (verbose only)
+  if (verbose) {
+    lines.push("## Environment");
+    lines.push("");
+    lines.push(`- DanteCode version: ${report.dantecodeVersion}`);
+    lines.push(`- Node.js: ${report.environment.nodeVersion}`);
+    lines.push(`- OS: ${report.environment.os}`);
+    lines.push(`- Provider: ${report.model.provider}`);
+    lines.push(`- Model: ${report.model.modelId}`);
+    const firstEntry = report.entries[0] as RunReportEntry | undefined;
+    lines.push(`- PDSE threshold: ${firstEntry?.verification.pdseThreshold ?? 85}`);
+    lines.push("");
+  }
 
   return lines.join("\n");
+}
+
+// ─── Human-Friendly Helpers ─────────────────────────────────────────────────
+
+function humanizeVerification(v: RunReportVerification): string[] {
+  const allPassed = v.antiStub.passed && v.constitution.passed && v.pdseScore >= v.pdseThreshold;
+
+  if (allPassed && v.regenerationAttempts === 0) {
+    return [];
+  }
+
+  if (allPassed && v.regenerationAttempts > 0) {
+    return [`DanteCode caught ${v.regenerationAttempts} issue(s) and fixed all of them`];
+  }
+
+  const result: string[] = [];
+
+  if (!v.antiStub.passed) {
+    result.push(`Found ${v.antiStub.violations} placeholder(s) that need real code`);
+    for (const d of v.antiStub.details.slice(0, 3)) {
+      result.push(`  - ${d}`);
+    }
+  }
+
+  if (!v.constitution.passed) {
+    result.push(`${v.constitution.violations} issue(s) with project standards`);
+    for (const d of v.constitution.details.slice(0, 3)) {
+      result.push(`  - ${d}`);
+    }
+  } else if (v.constitution.warnings > 0) {
+    result.push(`${v.constitution.warnings} minor suggestion(s) for improvement`);
+  }
+
+  if (v.pdseScore < v.pdseThreshold) {
+    if (v.pdseScore >= 50) {
+      result.push("Review recommended");
+    } else {
+      result.push("Needs attention \u2014 additional review required");
+    }
+  }
+
+  if (v.regenerationAttempts > 0) {
+    result.push(`DanteCode made ${v.regenerationAttempts} fix attempt(s) but could not resolve all issues`);
+  }
+
+  return result;
+}
+
+function humanizeTests(t: RunReportTests): string | null {
+  if (t.created === 0) return null;
+  if (t.failing === 0) return `All ${t.passing} tests pass`;
+  return `${t.passing} of ${t.created} tests pass \u2014 ${t.failing} need attention`;
+}
+
+function renderAttentionSection(lines: string[], report: RunReport): void {
+  const items = report.entries.filter((e) => e.status !== "complete");
+  if (items.length === 0) return;
+
+  lines.push("## What Needs Your Attention");
+  lines.push("");
+  for (const entry of items) {
+    const reason = entry.actionNeeded ?? entry.failureReason ?? `Status: ${entry.status}`;
+    lines.push(`- **${entry.prdName}**: ${reason}`);
+  }
+  lines.push("");
+}
+
+function renderQualityCheck(lines: string[], report: RunReport): void {
+  const attempted = report.entries.filter((e) => e.status !== "not_attempted");
+  if (attempted.length === 0) {
+    lines.push("## Quality Check");
+    lines.push("");
+    lines.push("No tasks were attempted.");
+    lines.push("");
+    return;
+  }
+
+  const allVerified = attempted.every(
+    (e) => e.verification.antiStub.passed && e.verification.constitution.passed && e.verification.pdseScore >= e.verification.pdseThreshold,
+  );
+  const allTestsPass = attempted.every(
+    (e) => e.tests.created === 0 || e.tests.failing === 0,
+  );
+  const noPlaceholders = attempted.every((e) => e.verification.antiStub.passed);
+
+  lines.push("## Quality Check");
+  lines.push("");
+
+  const parts: string[] = [];
+  if (allVerified) {
+    parts.push(`All ${attempted.length} task(s) passed verification.`);
+  } else {
+    const passed = attempted.filter(
+      (e) => e.verification.antiStub.passed && e.verification.constitution.passed && e.verification.pdseScore >= e.verification.pdseThreshold,
+    ).length;
+    parts.push(`${passed} of ${attempted.length} task(s) passed all checks.`);
+  }
+  if (noPlaceholders) {
+    parts.push("No placeholder code was found.");
+  }
+  if (allTestsPass) {
+    parts.push("All tests are passing.");
+  }
+
+  lines.push(parts.join(" "));
+  lines.push("");
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

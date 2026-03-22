@@ -2793,7 +2793,7 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
     // D-11: Always write run report (crash-safe)
     try {
       const report = reportAcc.finalize();
-      const md = serializeRunReportToMarkdown(report);
+      const md = serializeRunReportToMarkdown(report, state.verbose);
       const reportPath = await writeRunReport({
         projectRoot: state.projectRoot,
         markdown: md,
@@ -2939,7 +2939,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       // D-11: crash-safe run report write
       try {
         const report = reportAcc.finalize();
-        const md = serializeRunReportToMarkdown(report);
+        const md = serializeRunReportToMarkdown(report, state.verbose);
         const reportPath = await writeRunReport({
           projectRoot: state.projectRoot,
           markdown: md,
@@ -3327,7 +3327,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
 
   try {
     const report = autoforgeReportAcc.finalize();
-    const md = serializeRunReportToMarkdown(report);
+    const md = serializeRunReportToMarkdown(report, state.verbose);
     const reportPath = await writeRunReport({
       projectRoot: state.projectRoot,
       markdown: md,

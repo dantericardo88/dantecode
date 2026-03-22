@@ -317,7 +317,7 @@ describe("serializeRunReportToMarkdown", () => {
   }
 
   it("produces valid markdown with header", () => {
-    const md = serializeRunReportToMarkdown(makeReport());
+    const md = serializeRunReportToMarkdown(makeReport(), true);
     expect(md).toContain("# DanteCode Run Report");
     expect(md).toContain("**Project:** TestProject");
     expect(md).toContain("**Command:** /party --autoforge build everything");
@@ -381,7 +381,7 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("`src/index.ts` \u2014 +5 -1");
   });
 
-  it("renders verification details", () => {
+  it("renders verification details in verbose mode", () => {
     const report = makeReport({
       entries: [
         makeEntry({
@@ -397,7 +397,7 @@ describe("serializeRunReportToMarkdown", () => {
       ],
     });
 
-    const md = serializeRunReportToMarkdown(report);
+    const md = serializeRunReportToMarkdown(report, true);
     expect(md).toContain("Anti-stub: \u274C FAILED (2 violations)");
     expect(md).toContain("empty fn at line 12");
     expect(md).toContain("PDSE: 78/100 (below threshold 85)");
@@ -437,7 +437,7 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("**Total: 1 files created, 1 files modified, 1 files deleted**");
   });
 
-  it("renders verification summary table", () => {
+  it("renders verification summary table in verbose mode", () => {
     const report = makeReport({
       entries: [
         makeEntry({ status: "complete" }),
@@ -456,7 +456,7 @@ describe("serializeRunReportToMarkdown", () => {
       ],
     });
 
-    const md = serializeRunReportToMarkdown(report);
+    const md = serializeRunReportToMarkdown(report, true);
     expect(md).toContain("## Verification Summary");
     expect(md).toContain("| Anti-stub scan | 1 | 1 | 2 |");
     expect(md).toContain("| PDSE >= threshold | 1 | 1 | 2 |");
@@ -493,8 +493,8 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("All tasks completed successfully. No re-run needed.");
   });
 
-  it("renders environment section", () => {
-    const md = serializeRunReportToMarkdown(makeReport());
+  it("renders environment section in verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport(), true);
     expect(md).toContain("## Environment");
     expect(md).toContain("- DanteCode version: 1.3.0");
     expect(md).toContain("- Node.js: v20.11.1");
@@ -506,5 +506,196 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("## Summary");
     expect(md).toContain("**Total** | **0**");
     expect(md).toContain("**Completion rate: 0% (0/0)**");
+  });
+});
+
+// ─── Human-Friendly Output (non-verbose) ────────────────────────────────────
+
+describe("serializeRunReportToMarkdown (human-friendly)", () => {
+  function makeReport(overrides?: Partial<RunReport>): RunReport {
+    return {
+      project: "TestProject",
+      command: "/party --autoforge build everything",
+      startedAt: "2026-03-22T14:30:00Z",
+      completedAt: "2026-03-22T15:45:00Z",
+      model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      entries: [],
+      filesManifest: [],
+      tokenUsage: { input: 125000, output: 89000 },
+      costEstimate: 1.71,
+      dantecodeVersion: "1.3.0",
+      environment: { nodeVersion: "v20.11.1", os: "win32 x64" },
+      ...overrides,
+    };
+  }
+
+  function makeEntry(overrides?: Partial<RunReportEntry>): RunReportEntry {
+    return {
+      prdName: "auth",
+      prdFile: "prds/01-auth.md",
+      status: "complete",
+      filesCreated: [{ path: "src/auth.ts", lines: 100 }],
+      filesModified: [{ path: "src/index.ts", added: 5, removed: 1 }],
+      filesDeleted: [],
+      verification: {
+        antiStub: { passed: true, violations: 0, details: [] },
+        constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+        pdseScore: 94,
+        pdseThreshold: 85,
+        regenerationAttempts: 0,
+        maxAttempts: 3,
+      },
+      tests: { created: 5, passing: 5, failing: 0 },
+      summary: "Built the auth feature.",
+      startedAt: "2026-03-22T14:30:00Z",
+      completedAt: "2026-03-22T14:45:00Z",
+      tokenUsage: { input: 5000, output: 3000 },
+      ...overrides,
+    };
+  }
+
+  // Anti-jargon assertions
+  it("does not contain 'Anti-stub' in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
+    expect(md).not.toContain("Anti-stub");
+  });
+
+  it("does not contain 'PDSE' or raw score in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
+    expect(md).not.toContain("PDSE");
+    expect(md).not.toContain("94/100");
+  });
+
+  it("does not contain 'Constitution' in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
+    expect(md).not.toContain("Constitution");
+  });
+
+  it("does not contain 'Regeneration' in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
+    expect(md).not.toContain("Regeneration");
+  });
+
+  it("does not contain token counts in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport());
+    expect(md).not.toContain("tokens");
+  });
+
+  it("does not contain 'Verification Summary' in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
+    expect(md).not.toContain("## Verification Summary");
+  });
+
+  it("does not contain 'Environment' section in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport());
+    expect(md).not.toContain("## Environment");
+  });
+
+  it("does not contain 'Model:' in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport());
+    expect(md).not.toContain("**Model:**");
+  });
+
+  // Positive human-friendly checks
+  it("shows 'All N tests pass' when all tests pass", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({ tests: { created: 10, passing: 10, failing: 0 } })],
+    }));
+    expect(md).toContain("All 10 tests pass");
+  });
+
+  it("shows 'N of M tests pass' when some tests fail", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({ tests: { created: 10, passing: 8, failing: 2 } })],
+    }));
+    expect(md).toContain("8 of 10 tests pass");
+    expect(md).toContain("2 need attention");
+  });
+
+  it("omits test line when no tests were created", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({ tests: { created: 0, passing: 0, failing: 0 } })],
+    }));
+    expect(md).not.toContain("tests pass");
+    expect(md).not.toContain("Tests:");
+  });
+
+  it("omits per-entry verification block for clean pass with zero regen", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry()],
+    }));
+    // Per-entry section should have no verification lines
+    expect(md).not.toContain("caught");
+    expect(md).not.toContain("Review recommended");
+    expect(md).not.toContain("Needs attention");
+    // Quality Check at the bottom is fine — it's the summary, not per-entry jargon
+    expect(md).toContain("## Quality Check");
+  });
+
+  it("shows human verdict for caught-and-fixed issues", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({
+        verification: {
+          antiStub: { passed: true, violations: 0, details: [] },
+          constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+          pdseScore: 90,
+          pdseThreshold: 85,
+          regenerationAttempts: 3,
+          maxAttempts: 3,
+        },
+      })],
+    }));
+    expect(md).toContain("caught 3 issue(s) and fixed all of them");
+  });
+
+  it("shows placeholder language for anti-stub failures", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({
+        verification: {
+          antiStub: { passed: false, violations: 2, details: ["empty fn at line 12"] },
+          constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+          pdseScore: 78,
+          pdseThreshold: 85,
+          regenerationAttempts: 0,
+          maxAttempts: 3,
+        },
+      })],
+    }));
+    expect(md).toContain("placeholder");
+    expect(md).toContain("empty fn at line 12");
+    expect(md).not.toContain("Anti-stub");
+  });
+
+  it("shows cost without token counts in non-verbose mode", () => {
+    const md = serializeRunReportToMarkdown(makeReport());
+    expect(md).toContain("~$1.71");
+    expect(md).not.toContain("input:");
+    expect(md).not.toContain("output:");
+  });
+
+  it("shows 'Quality Check' section instead of 'Verification Summary'", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry()],
+    }));
+    expect(md).toContain("## Quality Check");
+  });
+
+  it("renders 'What Needs Your Attention' for non-complete entries", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [
+        makeEntry({ status: "complete" }),
+        makeEntry({ status: "failed", prdName: "api", actionNeeded: "Implement manually." }),
+      ],
+    }));
+    expect(md).toContain("## What Needs Your Attention");
+    expect(md).toContain("api");
+    expect(md).toContain("Implement manually.");
+  });
+
+  it("omits 'What Needs Your Attention' when all tasks complete", () => {
+    const md = serializeRunReportToMarkdown(makeReport({
+      entries: [makeEntry({ status: "complete" })],
+    }));
+    expect(md).not.toContain("## What Needs Your Attention");
   });
 });
