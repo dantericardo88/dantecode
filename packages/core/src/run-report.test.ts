@@ -63,9 +63,9 @@ describe("RunReportAccumulator", () => {
     acc.beginEntry("auth", "prds/01-auth.md");
     const report = acc.snapshot();
     expect(report.entries).toHaveLength(1);
-    expect(report.entries[0].prdName).toBe("auth");
-    expect(report.entries[0].prdFile).toBe("prds/01-auth.md");
-    expect(report.entries[0].status).toBe("not_attempted");
+    expect(report.entries[0]!.prdName).toBe("auth");
+    expect(report.entries[0]!.prdFile).toBe("prds/01-auth.md");
+    expect(report.entries[0]!.status).toBe("not_attempted");
   });
 
   it("completeEntry sets status, summary, and timestamps", () => {
@@ -78,7 +78,7 @@ describe("RunReportAccumulator", () => {
       summary: "Built auth system.",
     });
 
-    const entry = acc.snapshot().entries[0];
+    const entry = acc.snapshot().entries[0]!;
     expect(entry.status).toBe("complete");
     expect(entry.summary).toBe("Built auth system.");
     expect(entry.completedAt).toBe("2026-03-22T14:45:00.000Z");
@@ -91,7 +91,7 @@ describe("RunReportAccumulator", () => {
     acc.recordFilesModified([{ path: "src/index.ts", added: 3, removed: 0 }]);
     acc.recordFilesDeleted(["src/old-auth.ts"]);
 
-    const entry = acc.snapshot().entries[0];
+    const entry = acc.snapshot().entries[0]!;
     expect(entry.filesCreated).toHaveLength(2);
     expect(entry.filesModified).toHaveLength(1);
     expect(entry.filesDeleted).toEqual(["src/old-auth.ts"]);
@@ -109,7 +109,7 @@ describe("RunReportAccumulator", () => {
       maxAttempts: 3,
     });
 
-    const v = acc.snapshot().entries[0].verification;
+    const v = acc.snapshot().entries[0]!.verification;
     expect(v.antiStub.passed).toBe(false);
     expect(v.antiStub.violations).toBe(2);
     expect(v.pdseScore).toBe(78);
@@ -121,7 +121,7 @@ describe("RunReportAccumulator", () => {
     acc.beginEntry("auth", "prds/01-auth.md");
     acc.recordTests({ created: 10, passing: 8, failing: 2 });
 
-    const t = acc.snapshot().entries[0].tests;
+    const t = acc.snapshot().entries[0]!.tests;
     expect(t.created).toBe(10);
     expect(t.passing).toBe(8);
     expect(t.failing).toBe(2);
@@ -133,7 +133,7 @@ describe("RunReportAccumulator", () => {
     acc.recordTokenUsage(1000, 500);
     acc.recordTokenUsage(2000, 1500);
 
-    const usage = acc.snapshot().entries[0].tokenUsage;
+    const usage = acc.snapshot().entries[0]!.tokenUsage;
     expect(usage.input).toBe(3000);
     expect(usage.output).toBe(2000);
   });
@@ -145,8 +145,8 @@ describe("RunReportAccumulator", () => {
 
     const report = acc.snapshot();
     expect(report.entries).toHaveLength(2);
-    expect(report.entries[0].status).toBe("complete");
-    expect(report.entries[1].status).toBe("not_attempted");
+    expect(report.entries[0]!.status).toBe("complete");
+    expect(report.entries[1]!.status).toBe("not_attempted");
   });
 
   it("finalize sets completedAt and computes totals", () => {
@@ -180,10 +180,10 @@ describe("RunReportAccumulator", () => {
 
     const report = acc.snapshot();
     expect(report.entries).toHaveLength(3);
-    expect(report.entries[1].prdName).toBe("api");
-    expect(report.entries[1].status).toBe("not_attempted");
-    expect(report.entries[1].actionNeeded).toBe("Context window exhausted");
-    expect(report.entries[2].prdName).toBe("deploy");
+    expect(report.entries[1]!.prdName).toBe("api");
+    expect(report.entries[1]!.status).toBe("not_attempted");
+    expect(report.entries[1]!.actionNeeded).toBe("Context window exhausted");
+    expect(report.entries[2]!.prdName).toBe("deploy");
   });
 
   it("markRemainingNotAttempted skips already-existing entries", () => {
@@ -193,8 +193,8 @@ describe("RunReportAccumulator", () => {
 
     const report = acc.snapshot();
     expect(report.entries).toHaveLength(2); // auth (complete) + api (not_attempted)
-    expect(report.entries[0].status).toBe("complete");
-    expect(report.entries[1].prdName).toBe("api");
+    expect(report.entries[0]!.status).toBe("complete");
+    expect(report.entries[1]!.prdName).toBe("api");
   });
 
   it("addToManifest appends to global manifest", () => {
@@ -206,8 +206,8 @@ describe("RunReportAccumulator", () => {
 
     const report = acc.snapshot();
     expect(report.filesManifest).toHaveLength(2);
-    expect(report.filesManifest[0].action).toBe("created");
-    expect(report.filesManifest[1].action).toBe("modified");
+    expect(report.filesManifest[0]!.action).toBe("created");
+    expect(report.filesManifest[1]!.action).toBe("modified");
   });
 
   it("completeEntry with failure fields", () => {
@@ -220,7 +220,7 @@ describe("RunReportAccumulator", () => {
       actionNeeded: "Implement POST/PUT/DELETE handlers manually.",
     });
 
-    const entry = acc.snapshot().entries[0];
+    const entry = acc.snapshot().entries[0]!;
     expect(entry.status).toBe("failed");
     expect(entry.failureReason).toContain("Empty function bodies");
     expect(entry.actionNeeded).toContain("Implement POST/PUT/DELETE");

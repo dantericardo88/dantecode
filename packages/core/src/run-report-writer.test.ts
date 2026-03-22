@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { writeRunReport, reportFileName } from "./run-report-writer.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";

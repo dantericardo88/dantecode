@@ -55,13 +55,13 @@ function stripAnsi(str: string): string {
 }
 
 describe("/magic command", () => {
-  let stdoutOutput: string;
+  let _stdoutOutput: string;
   const originalWrite = process.stdout.write;
 
   beforeEach(() => {
-    stdoutOutput = "";
+    _stdoutOutput = "";
     process.stdout.write = vi.fn((chunk: string | Uint8Array) => {
-      stdoutOutput += String(chunk);
+      _stdoutOutput += String(chunk);
       return true;
     }) as typeof process.stdout.write;
   });
