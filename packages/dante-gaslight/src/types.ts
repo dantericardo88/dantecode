@@ -130,13 +130,13 @@ export type GaslightSession = z.infer<typeof GaslightSessionSchema>;
 // ────────────────────────────────────────────────────────
 
 export interface GaslightConfig {
-  /** Whether the engine is globally enabled. Default: false (opt-in). */
+  /** Whether the engine is globally enabled. Default: true (enabled out of the box with safe budget). Set DANTECODE_GASLIGHT=0 to disable. */
   enabled: boolean;
-  /** Max iterations per session. Default: 5. */
+  /** Max iterations per session. Default: 3. */
   maxIterations: number;
-  /** Max total tokens per session. Default: 10000. */
+  /** Max total tokens per session. Default: 5000. */
   maxTokens: number;
-  /** Max wall-clock seconds per session. Default: 120. */
+  /** Max wall-clock seconds per session. Default: 60. */
   maxSeconds: number;
   /** DanteForge pass threshold (0-1). Default: 0.75. */
   passThreshold: number;
@@ -156,10 +156,10 @@ export interface GaslightConfig {
 }
 
 export const DEFAULT_GASLIGHT_CONFIG: GaslightConfig = {
-  enabled: false,
-  maxIterations: 5,
-  maxTokens: 10_000,
-  maxSeconds: 120,
+  enabled: true,
+  maxIterations: 3,
+  maxTokens: 5_000,
+  maxSeconds: 60,
   passThreshold: 0.75,
   confidenceThreshold: 0.9,
   autoTriggerThreshold: 0,

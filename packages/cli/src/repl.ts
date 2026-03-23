@@ -36,6 +36,7 @@ import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteSandbox } from "@dantecode/dante-sandbox";
 import { getOrInitGaslight, tryAutoInit } from "./lazy-init.js";
+import { generateSessionReport } from "./session-report.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -514,6 +515,21 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           sessionDurationMs: Date.now() - sessionStartMs,
         };
         process.stdout.write(renderTokenDashboard(tokenData, themeEngine));
+      }
+    }
+
+    // Generate session report for REPL sessions (only if files were modified)
+    if (currentRoundCount > 0) {
+      const reportPath = await generateSessionReport({
+        session: replState.session,
+        projectRoot: options.projectRoot,
+        modelId: state.model.default.modelId,
+        provider: state.model.default.provider,
+        dantecodeVersion: "1.0.0",
+        sessionDurationMs: Date.now() - sessionStartMs,
+      });
+      if (reportPath && !options.silent) {
+        process.stdout.write(`${DIM}Report saved: ${reportPath}${RESET}\n`);
       }
     }
 

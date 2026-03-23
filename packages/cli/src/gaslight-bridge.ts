@@ -354,7 +354,7 @@ export async function runGaslightBridge(
     if (gaslight.getFearSetConfig().enabled) {
       // verificationScore: gaslight gateScore when available (best signal, 0-1).
       // Falls back to retry-derived score so the weak-robustness channel fires
-      // even when gaslight is disabled (the common case — disabled by default).
+      // even when gaslight session did not produce a gate score.
       // Formula: each verify retry reduces confidence below the 0.5 trigger threshold.
       //   1 retry -> 0.35 (< 0.5, triggers weak-robustness channel)
       //   2 retries -> 0.20

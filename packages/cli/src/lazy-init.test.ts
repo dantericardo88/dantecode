@@ -158,16 +158,16 @@ describe("getOrInitGaslight", () => {
     const root = makeTempRoot("lazy-gl-env-");
     const state = makeMinimalState(root);
 
-    // Without env var — disabled by default
+    // Without env var — enabled by default (opt-out model)
     delete process.env["DANTECODE_GASLIGHT"];
     const gl1 = getOrInitGaslight(state);
-    expect((gl1 as unknown as { enabled: boolean }).enabled).toBe(false);
+    expect((gl1 as unknown as { enabled: boolean }).enabled).toBe(true);
 
-    // With env var — reset state to force re-creation
+    // With env var set to "0" — explicitly disabled
     state.gaslight = null;
-    process.env["DANTECODE_GASLIGHT"] = "1";
+    process.env["DANTECODE_GASLIGHT"] = "0";
     const gl2 = getOrInitGaslight(state);
-    expect((gl2 as unknown as { enabled: boolean }).enabled).toBe(true);
+    expect((gl2 as unknown as { enabled: boolean }).enabled).toBe(false);
 
     // Cleanup
     delete process.env["DANTECODE_GASLIGHT"];

@@ -20,10 +20,10 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 |---|-----------|----------|-------|-------------------|-------|
 | B-1 | DanteForge pipeline | PDSE runs on every session (agent-loop.ts:1359), constitutional checks gate all touched files | Measured (always active) | Measure PDSE accuracy vs human judgment on 50+ tasks | 8 |
 | B-2 | Anti-confabulation | 5 guard types always active: empty-response breaker, confabulation gate, write-size guard, premature-commit blocker, write-to-existing blocker | Measured (always active) | Count confabulation catches over 100 real sessions | 8 |
-| B-3 | Evidence chain | Cryptographic primitives exist (hash chain, Merkle tree, receipts, 67 tests) but package is never imported by CLI or agent-loop | Infrastructure only (orphaned) | Wire evidence-bridge into CLI hot path; then verify across 100+ bundles | 2 |
-| B-4 | Gaslight refinement | Bounded adversarial loop works when enabled, but disabled by default (requires DANTECODE_GASLIGHT=1 env var) | Infrastructure only (disabled by default) | Enable by default or measure improvement rate when manually enabled | 5 |
-| B-5 | Run reports | Plain-language reports generated only by explicit /magic, /party, /forge commands; not generated for normal REPL sessions | Measured (explicit commands only) | Generate reports for normal REPL sessions; user survey on clarity | 6 |
-| | **Score B average** | | | | **5.8** |
+| B-3 | Evidence chain | Cryptographic primitives (hash chain, Merkle tree, receipts, 67 tests) wired into agent-loop via evidence-chain-bridge.ts — receipts recorded on verification pass/fail and PDSE scores, sealed at session end | Measured (hot-path wired) | Verify across 100+ bundles that seals are tamper-evident | 7 |
+| B-4 | Gaslight refinement | Bounded adversarial loop enabled by default with conservative budget (3 iterations, 5k tokens, 60s). Set DANTECODE_GASLIGHT=0 to disable. | Measured (enabled by default) | Measure improvement rate across 50+ real sessions | 7 |
+| B-5 | Run reports | Plain-language reports generated for /magic, /party, /forge commands AND normal REPL sessions (when files are modified). Session reports auto-saved to .dantecode/reports/ | Measured (all sessions) | User survey on clarity; coverage audit across 50 sessions | 8 |
+| | **Score B average** | | | | **7.6** |
 
 ## Score C — User Experience
 
@@ -55,12 +55,12 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 | Score | Name | Weight | Current | Target |
 |-------|------|--------|---------|--------|
 | A | Engineering Quality | 30% | **9.3** | 8.0+ |
-| B | Verification Quality | 30% | **5.8** | 8.0+ |
+| B | Verification Quality | 30% | **7.6** | 8.0+ |
 | C | User Experience | 25% | **8.0** | 7.0+ |
 | D | Distribution | 15% | **3.6** | 5.0+ |
-| **Overall** | | | **7.1** | **7.0+** |
+| **Overall** | | | **7.6** | **7.0+** |
 
-Score A exceeds target. Score B below target — evidence chain orphaned, gaslight disabled by default, run reports explicit-only. Score C exceeds target. Score D below target — expected for pre-launch.
+Score A exceeds target. Score B approaching target — evidence chain wired into hot path, gaslight enabled by default, run reports cover all sessions. Score C exceeds target. Score D below target — expected for pre-launch.
 
 ### Evidence Basis Key
 

@@ -78,6 +78,7 @@ import {
   isExecutionContinuationPrompt,
 } from "./background-task-manager.js";
 import { resolveSessionResume, persistSessionEnd } from "./session-manager.js";
+import { createSessionEvidenceTracker, type SessionEvidenceTracker } from "./evidence-chain-bridge.js";
 
 // Types re-exported from extracted modules are imported above.
 
@@ -302,6 +303,9 @@ async function _runAgentLoopCore(
       workflow: workflowName,
     });
   }
+
+  // ---- Evidence Chain: session-scoped cryptographic audit trail ----
+  const evidenceTracker: SessionEvidenceTracker = createSessionEvidenceTracker(session.id);
 
   // Append user message
   const userMessage: SessionMessage = {
@@ -1023,6 +1027,19 @@ async function _runAgentLoopCore(
             verificationPassed = false;
             verificationRetriesExhausted = verifyRetries >= MAX_VERIFY_RETRIES;
 
+            // Evidence Chain: record verification failure receipt
+            try {
+              evidenceTracker.recordVerificationFailure(
+                vc.name,
+                vc.command,
+                "", // errorSig computed below; basic receipt captures the failure event
+                verifyRetries,
+                MAX_VERIFY_RETRIES,
+              );
+            } catch {
+              // Evidence recording is non-fatal
+            }
+
             // Self-healing: parse errors into structured format for targeted fixes
             const parsedErrors = parseVerificationErrors(vcResult.content);
             let retryMessage: string;
@@ -1107,6 +1124,14 @@ async function _runAgentLoopCore(
             lastErrorSignature = "";
             sameErrorCount = 0;
             lastConfirmedStep = `Verified ${vc.name}`;
+
+            // Evidence Chain: record verification pass receipt
+            try {
+              evidenceTracker.recordVerificationPass(vc.name, vc.command);
+            } catch {
+              // Evidence recording is non-fatal
+            }
+
             process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
           }
         } catch {
@@ -1370,6 +1395,13 @@ async function _runAgentLoopCore(
           config.verbose,
         );
         process.stdout.write(`\n${DIM}File: ${filePath}${RESET}\n${summary}\n`);
+
+        // Evidence Chain: record PDSE score receipt for each DanteForge verification
+        try {
+          evidenceTracker.recordPdseScore(filePath, passed, summary);
+        } catch {
+          // Evidence recording is non-fatal
+        }
 
         if (passed) {
           await recordSuccessPattern(

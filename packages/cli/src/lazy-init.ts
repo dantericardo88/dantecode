@@ -21,7 +21,7 @@ export function getOrInitGaslight(state: ReplState): DanteGaslightIntegration {
   if (state.gaslight) return state.gaslight;
 
   state.gaslight = new DanteGaslightIntegration(
-    { enabled: process.env["DANTECODE_GASLIGHT"] === "1" },
+    { enabled: process.env["DANTECODE_GASLIGHT"] !== "0" },
     { cwd: state.projectRoot },
     {
       priorLessonProvider: (draft: string) => {

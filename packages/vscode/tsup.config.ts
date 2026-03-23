@@ -11,5 +11,6 @@ export default defineConfig({
     "@dantecode/danteforge",
     "@dantecode/git-engine",
     "@dantecode/skill-adapter",
+    "@dantecode/ux-polish",
   ],
 });
