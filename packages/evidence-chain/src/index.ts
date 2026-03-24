@@ -24,3 +24,15 @@ export type { EvidenceBundleData } from "./evidence-bundle.js";
 // EvidenceSealer
 export { EvidenceSealer } from "./evidence-sealer.js";
 export type { CertificationSeal } from "./evidence-sealer.js";
+
+// ChainVerifier
+export { ChainVerifier } from "./chain-verifier.js";
+export type {
+  IntegrityStatus,
+  VerificationReport,
+  GapReport,
+  TamperReport,
+} from "./chain-verifier.js";
+
+// ChainExporter
+export { ChainExporter } from "./chain-exporter.js";

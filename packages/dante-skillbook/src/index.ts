@@ -9,3 +9,5 @@ export * from "./pruning.js";
 export * from "./stats.js";
 export * from "./review-queue.js";
 export * from "./integration.js";
+export * from "./skill-quality-scorer.js";
+export * from "./skill-version-manager.js";
