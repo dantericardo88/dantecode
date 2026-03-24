@@ -256,35 +256,49 @@ export class GitEventWatcher extends EventEmitter {
       return;
     }
 
+    const callback = (_eventType: string, filename: string | null): void => {
+      const timerKey = `${targetPath}:${filename ?? ""}`;
+      const existingTimer = this.timers.get(timerKey);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+
+      const timer = setTimeout(() => {
+        this.timers.delete(timerKey);
+        try {
+          const event = transform(filename);
+          if (!event) {
+            return;
+          }
+          this.recordEvent(event);
+        } catch (error: unknown) {
+          this.recordError(error);
+        }
+      }, this.debounceMs);
+
+      this.timers.set(timerKey, timer);
+    };
+
     try {
       const isDirectory = fs.statSync(targetPath).isDirectory();
-      const watcher = fs.watch(
-        targetPath,
-        { recursive: isDirectory && this.recursive },
-        (_eventType, filename) => {
-          const timerKey = `${targetPath}:${filename ?? ""}`;
-          const existingTimer = this.timers.get(timerKey);
-          if (existingTimer) {
-            clearTimeout(existingTimer);
-          }
-
-          const timer = setTimeout(() => {
-            this.timers.delete(timerKey);
-            try {
-              const event = transform(filename);
-              if (!event) {
-                return;
-              }
-              this.recordEvent(event);
-            } catch (error: unknown) {
-              this.recordError(error);
-            }
-          }, this.debounceMs);
-
-          this.timers.set(timerKey, timer);
-        },
-      );
-
+      const wantRecursive = isDirectory && this.recursive;
+      let watcher: fs.FSWatcher;
+      try {
+        watcher = fs.watch(targetPath, { recursive: wantRecursive }, callback);
+      } catch (err: unknown) {
+        // ERR_FEATURE_UNAVAILABLE_ON_PLATFORM: recursive watching not supported
+        // on this platform (e.g., Node 18 on Linux). Fall back to non-recursive.
+        if (
+          err instanceof Error &&
+          "code" in err &&
+          (err as NodeJS.ErrnoException).code === "ERR_FEATURE_UNAVAILABLE_ON_PLATFORM" &&
+          wantRecursive
+        ) {
+          watcher = fs.watch(targetPath, { recursive: false }, callback);
+        } else {
+          throw err;
+        }
+      }
       this.watchers.set(targetPath, watcher);
     } catch (error: unknown) {
       this.recordError(error);

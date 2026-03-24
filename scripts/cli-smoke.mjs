@@ -4,7 +4,8 @@
 // ============================================================================
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnNpm } from "./npm-runner.mjs";
@@ -97,8 +98,6 @@ for (const cmd of expectedCommands) {
 // ── Step 6: init command works in temp dir ─────────────────────────────
 
 test("init creates STATE.yaml", () => {
-  const { mkdtempSync, rmSync } = await import("node:fs");
-  const { tmpdir } = await import("node:os");
   const tmpDir = mkdtempSync(join(tmpdir(), "dantecode-smoke-"));
   try {
     const r = runNode([cliEntry, "init"], tmpDir);
