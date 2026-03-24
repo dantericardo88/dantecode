@@ -8,6 +8,7 @@ export default defineConfig({
       "swe-bench/src/**/*.test.ts",
       "tests/**/*.test.ts",
     ],
+    setupFiles: ["./test-setup.ts"],
     retry: 1,
     testTimeout: 30_000,
     coverage: {
