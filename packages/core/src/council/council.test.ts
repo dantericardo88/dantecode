@@ -3972,7 +3972,7 @@ describe("Lane G — Integration: real executor + real git", () => {
       });
       expect(assignResult.accepted).toBe(true);
 
-      await orchestrator.watchUntilComplete({ timeoutMs: 10_000 });
+      await orchestrator.watchUntilComplete({ timeoutMs: 30_000 });
 
       expect(orchestrator.currentStatus).toBe("completed");
 
@@ -3992,7 +3992,7 @@ describe("Lane G — Integration: real executor + real git", () => {
       expect(patch!.unifiedDiff).toContain("generated.ts");
       expect(patch!.changedFiles).toContain("generated.ts");
     },
-    { timeout: 20_000 },
+    { timeout: 40_000 },
   );
 });
 

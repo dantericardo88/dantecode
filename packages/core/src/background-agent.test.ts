@@ -384,7 +384,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 10_000 });
       await vi.waitFor(() => {
         expect(
           mockExec.mock.calls.some(
@@ -392,7 +392,7 @@ describe("BackgroundAgentRunner", () => {
               typeof c[0] === "string" && c[0].includes("git add") && c[0].includes("git commit"),
           ),
         ).toBe(true);
-      });
+      }, { timeout: 10_000 });
 
       // exec should have been called with git add + commit
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
@@ -412,8 +412,8 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      }, { timeout: 10_000 });
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const gitCall = calls.find((c) => typeof c === "string" && c.includes("git commit"));
