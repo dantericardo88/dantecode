@@ -6,10 +6,11 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import {
-  AttackPatternLibrary,
-  GaslightReport,
-} from "@dantecode/dante-gaslight";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — cross-package test import (not a runtime dep to avoid circular deps)
+import { AttackPatternLibrary, GaslightReport } from "@dantecode/dante-gaslight";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — cross-package test import
 import { SkillVersionManager } from "@dantecode/dante-skillbook";
 
 describe("E2E: Gaslight to Skillbook (real modules)", () => {
