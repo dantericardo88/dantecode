@@ -6,6 +6,8 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -52,13 +54,23 @@ const DEFAULT_CHECKPOINT_INTERVAL = 5;
  * - Automatic cleanup of old checkpoints
  * - Interval-based checkpoint scheduling
  *
- * This is intentionally in-memory only. For disk persistence,
- * use EventSourcedCheckpointer or AutoforgeCheckpointManager.
+ * Supports optional disk persistence via `persistDir`. When set,
+ * checkpoints are written to `{persistDir}/{checkpointId}.json` and
+ * reloaded on construction (surviving process restarts).
  */
 export class DurableExecution {
   private checkpoints = new Map<string, ExecutionState>();
   /** Ordered list of checkpoint IDs (oldest first). */
   private order: string[] = [];
+  /** Optional directory for disk persistence. */
+  private readonly persistDir: string | undefined;
+
+  constructor(options?: { persistDir?: string }) {
+    this.persistDir = options?.persistDir;
+    if (this.persistDir) {
+      this.loadFromDisk(this.persistDir);
+    }
+  }
 
   /**
    * Creates a checkpoint from the given execution state.
@@ -79,6 +91,7 @@ export class DurableExecution {
 
     this.checkpoints.set(checkpointId, fullState);
     this.order.push(checkpointId);
+    this.writeToDisk(checkpointId, fullState);
     return checkpointId;
   }
 
@@ -124,6 +137,7 @@ export class DurableExecution {
       const state = this.checkpoints.get(id);
       if (state && state.createdAt < cutoff) {
         this.checkpoints.delete(id);
+        this.deleteFromDisk(id);
         deleted++;
       } else {
         surviving.push(id);
@@ -153,5 +167,45 @@ export class DurableExecution {
    */
   size(): number {
     return this.checkpoints.size;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence (optional)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  private writeToDisk(id: string, state: ExecutionState): void {
+    if (!this.persistDir) return;
+    try {
+      mkdirSync(this.persistDir, { recursive: true });
+      writeFileSync(join(this.persistDir, `${id}.json`), JSON.stringify(state), "utf-8");
+    } catch {
+      // Non-fatal: disk write failure does not break in-memory operation
+    }
+  }
+
+  private deleteFromDisk(id: string): void {
+    if (!this.persistDir) return;
+    try {
+      unlinkSync(join(this.persistDir, `${id}.json`));
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private loadFromDisk(dir: string): void {
+    try {
+      if (!existsSync(dir)) return;
+      const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+      for (const file of files) {
+        const data = readFileSync(join(dir, file), "utf-8");
+        const state = JSON.parse(data) as ExecutionState;
+        if (state.checkpointId && !this.checkpoints.has(state.checkpointId)) {
+          this.checkpoints.set(state.checkpointId, state);
+          this.order.push(state.checkpointId);
+        }
+      }
+    } catch {
+      // Non-fatal: corrupted disk state does not prevent fresh operation
+    }
   }
 }

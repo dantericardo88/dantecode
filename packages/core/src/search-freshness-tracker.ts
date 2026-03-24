@@ -4,6 +4,9 @@
 // staleness detection and forced refresh. In-memory, zero dependencies.
 // ============================================================================
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -26,6 +29,8 @@ export interface FreshnessTrackerOptions {
   ttls?: Partial<Record<ContentType, number>>;
   /** Custom time provider for testing. */
   nowFn?: () => number;
+  /** Optional file path for disk persistence. */
+  persistPath?: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -55,10 +60,15 @@ export class SearchFreshnessTracker {
   private readonly entries: Map<string, TrackedEntry> = new Map();
   private readonly ttls: Record<ContentType, number>;
   private readonly nowFn: () => number;
+  private readonly persistPath: string | undefined;
 
   constructor(options?: FreshnessTrackerOptions) {
     this.ttls = { ...DEFAULT_TTLS, ...options?.ttls };
     this.nowFn = options?.nowFn ?? (() => Date.now());
+    this.persistPath = options?.persistPath;
+    if (this.persistPath) {
+      this.loadFromDisk(this.persistPath);
+    }
   }
 
   /**
@@ -78,6 +88,7 @@ export class SearchFreshnessTracker {
       contentType,
       forcedStale: false,
     });
+    this.flushToDisk();
   }
 
   /**
@@ -108,6 +119,9 @@ export class SearchFreshnessTracker {
     }
     for (const id of staleIds) {
       this.entries.delete(id);
+    }
+    if (staleIds.length > 0) {
+      this.flushToDisk();
     }
     return staleIds;
   }
@@ -147,5 +161,40 @@ export class SearchFreshnessTracker {
     if (entry.forcedStale) return true;
     const age = this.nowFn() - entry.fetchedAt;
     return age > this.ttls[entry.contentType];
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence (optional)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  private flushToDisk(): void {
+    if (!this.persistPath) return;
+    try {
+      const dir = dirname(this.persistPath);
+      mkdirSync(dir, { recursive: true });
+      const arr: TrackedEntry[] = [];
+      for (const entry of this.entries.values()) {
+        arr.push(entry);
+      }
+      writeFileSync(this.persistPath, JSON.stringify(arr), "utf-8");
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private loadFromDisk(path: string): void {
+    try {
+      if (!existsSync(path)) return;
+      const raw = readFileSync(path, "utf-8");
+      const arr = JSON.parse(raw) as TrackedEntry[];
+      if (!Array.isArray(arr)) return;
+      for (const entry of arr) {
+        if (entry.resultId) {
+          this.entries.set(entry.resultId, entry);
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
   }
 }

@@ -4,6 +4,8 @@
 // and promotion to "proven" status.
 // ============================================================================
 
+import { DimensionScorer } from "@dantecode/core";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -62,16 +64,31 @@ const MAX_USAGE_COUNT = 100;
  * - **successRate** (0-25): direct scale from success ratio.
  * - **documentationCompleteness** (0-25): direct scale from doc ratio.
  */
-export class SkillQualityScorer {
+export class SkillQualityScorer extends DimensionScorer<SkillQualityInput> {
+  constructor() {
+    super();
+  }
+
+  protected dimensionNames(): [string, string, string, string] {
+    return ["testCoverage", "usageFrequency", "successRate", "documentationCompleteness"];
+  }
+
+  protected scoreDimensions(skill: SkillQualityInput): [number, number, number, number] {
+    return [
+      this.scoreTestCoverage(skill.testCoverage),
+      this.scoreUsageFrequency(skill.usageCount),
+      this.scoreSuccessRate(skill.successRate),
+      this.scoreDocumentation(skill.documentationCompleteness),
+    ];
+  }
+
   /**
    * Score a skill across four dimensions.
    * Returns an aggregate 0-100 quality score.
    */
   score(skill: SkillQualityInput): SkillQualityScore {
-    const testCoverage = this.scoreTestCoverage(skill.testCoverage);
-    const usageFrequency = this.scoreUsageFrequency(skill.usageCount);
-    const successRate = this.scoreSuccessRate(skill.successRate);
-    const documentationCompleteness = this.scoreDocumentation(skill.documentationCompleteness);
+    const [testCoverage, usageFrequency, successRate, documentationCompleteness] =
+      this.scoreDimensions(skill);
     const total = testCoverage + usageFrequency + successRate + documentationCompleteness;
     return { testCoverage, usageFrequency, successRate, documentationCompleteness, total };
   }
@@ -92,8 +109,7 @@ export class SkillQualityScorer {
 
   /** Test coverage: direct scale of coverage ratio (0-1 -> 0-25). */
   private scoreTestCoverage(coverage: number): number {
-    const clamped = Math.max(0, Math.min(1, coverage));
-    return Math.round(clamped * 25);
+    return this.clamp25(coverage);
   }
 
   /** Usage frequency: logarithmic scale of usage count. */
@@ -106,13 +122,11 @@ export class SkillQualityScorer {
 
   /** Success rate: direct scale of success ratio (0-1 -> 0-25). */
   private scoreSuccessRate(rate: number): number {
-    const clamped = Math.max(0, Math.min(1, rate));
-    return Math.round(clamped * 25);
+    return this.clamp25(rate);
   }
 
   /** Documentation completeness: direct scale (0-1 -> 0-25). */
   private scoreDocumentation(completeness: number): number {
-    const clamped = Math.max(0, Math.min(1, completeness));
-    return Math.round(clamped * 25);
+    return this.clamp25(completeness);
   }
 }

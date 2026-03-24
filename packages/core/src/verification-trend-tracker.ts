@@ -4,6 +4,9 @@
 // and generates health reports across all verification categories.
 // ============================================================================
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -58,6 +61,14 @@ const DEFAULT_REGRESSION_THRESHOLD = 5;
  */
 export class VerificationTrendTracker {
   private data = new Map<string, DataPoint[]>();
+  private readonly persistPath: string | undefined;
+
+  constructor(options?: { persistPath?: string }) {
+    this.persistPath = options?.persistPath;
+    if (this.persistPath) {
+      this.loadFromDisk(this.persistPath);
+    }
+  }
 
   /**
    * Records a score data point for a verification category.
@@ -71,6 +82,7 @@ export class VerificationTrendTracker {
     const points = this.data.get(category) ?? [];
     points.push({ score, timestamp: ts });
     this.data.set(category, points);
+    this.flushToDisk();
   }
 
   /**
@@ -176,5 +188,39 @@ export class VerificationTrendTracker {
     }
 
     return { categories, overallHealth, regressions };
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence (optional)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  private flushToDisk(): void {
+    if (!this.persistPath) return;
+    try {
+      const dir = dirname(this.persistPath);
+      mkdirSync(dir, { recursive: true });
+      const obj: Record<string, DataPoint[]> = {};
+      for (const [k, v] of this.data) {
+        obj[k] = v;
+      }
+      writeFileSync(this.persistPath, JSON.stringify(obj), "utf-8");
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private loadFromDisk(path: string): void {
+    try {
+      if (!existsSync(path)) return;
+      const raw = readFileSync(path, "utf-8");
+      const obj = JSON.parse(raw) as Record<string, DataPoint[]>;
+      for (const [k, v] of Object.entries(obj)) {
+        if (Array.isArray(v)) {
+          this.data.set(k, v);
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
   }
 }

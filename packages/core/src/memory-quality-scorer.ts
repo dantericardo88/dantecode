@@ -4,6 +4,9 @@
 // promotion, and consolidation decisions.
 // ============================================================================
 
+import { DimensionScorer } from "./dimension-scorer.js";
+import type { DimensionScorerOptions } from "./dimension-scorer.js";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -61,11 +64,22 @@ const MAX_ACCESS_COUNT = 100;
  * - **Accuracy** (0-25): blended from `impactScore` and content length heuristic.
  * - **Utility** (0-25): logarithmic scale of `accessCount`, capped at 100.
  */
-export class MemoryQualityScorer {
-  private readonly nowFn: () => number;
+export class MemoryQualityScorer extends DimensionScorer<ScoredMemory> {
+  constructor(options?: DimensionScorerOptions) {
+    super(options);
+  }
 
-  constructor(options?: { nowFn?: () => number }) {
-    this.nowFn = options?.nowFn ?? (() => Date.now());
+  protected dimensionNames(): [string, string, string, string] {
+    return ["relevance", "freshness", "accuracy", "utility"];
+  }
+
+  protected scoreDimensions(memory: ScoredMemory): [number, number, number, number] {
+    return [
+      this.scoreRelevance(memory),
+      this.scoreFreshness(memory),
+      this.scoreAccuracy(memory),
+      this.scoreUtility(memory),
+    ];
   }
 
   /**
@@ -73,10 +87,7 @@ export class MemoryQualityScorer {
    * Returns an aggregate 0-100 quality score.
    */
   score(memory: ScoredMemory): QualityScore {
-    const relevance = this.scoreRelevance(memory);
-    const freshness = this.scoreFreshness(memory);
-    const accuracy = this.scoreAccuracy(memory);
-    const utility = this.scoreUtility(memory);
+    const [relevance, freshness, accuracy, utility] = this.scoreDimensions(memory);
     const total = relevance + freshness + accuracy + utility;
     return { relevance, freshness, accuracy, utility, total };
   }
@@ -97,8 +108,7 @@ export class MemoryQualityScorer {
 
   /** Relevance: directly derived from impactScore (0-1 -> 0-25). */
   private scoreRelevance(memory: ScoredMemory): number {
-    const clamped = Math.max(0, Math.min(1, memory.impactScore));
-    return Math.round(clamped * 25);
+    return this.clamp25(memory.impactScore);
   }
 
   /** Freshness: inverse age of lastAccessedAt, capped at MAX_AGE_MS. */

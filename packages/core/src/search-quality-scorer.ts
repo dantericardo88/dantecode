@@ -5,6 +5,8 @@
 // ============================================================================
 
 import type { SearchResult } from "./search-providers.js";
+import { DimensionScorer } from "./dimension-scorer.js";
+import type { DimensionScorerOptions } from "./dimension-scorer.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -80,19 +82,27 @@ const DOMAIN_AUTHORITY: Record<string, number> = {
  * - **relevance**: snippet length + code presence + structural cues.
  * - **citationDensity**: links, references, lists, code blocks in snippet.
  */
-export class SearchQualityScorer {
-  private readonly nowFn: () => number;
+export class SearchQualityScorer extends DimensionScorer<SearchResult> {
+  constructor(options?: DimensionScorerOptions) {
+    super(options);
+  }
 
-  constructor(options?: { nowFn?: () => number }) {
-    this.nowFn = options?.nowFn ?? (() => Date.now());
+  protected dimensionNames(): [string, string, string, string] {
+    return ["sourceAuthority", "freshness", "relevance", "citationDensity"];
+  }
+
+  protected scoreDimensions(result: SearchResult): [number, number, number, number] {
+    return [
+      this.scoreAuthority(result.url),
+      this.scoreFreshness(result.publishedDate),
+      this.scoreRelevance(result),
+      this.scoreCitationDensity(result.snippet),
+    ];
   }
 
   /** Score a single search result across four dimensions (0-100 aggregate). */
   score(result: SearchResult): SearchQualityScore {
-    const sourceAuthority = this.scoreAuthority(result.url);
-    const freshness = this.scoreFreshness(result.publishedDate);
-    const relevance = this.scoreRelevance(result);
-    const citationDensity = this.scoreCitationDensity(result.snippet);
+    const [sourceAuthority, freshness, relevance, citationDensity] = this.scoreDimensions(result);
     const total = sourceAuthority + freshness + relevance + citationDensity;
     return { sourceAuthority, freshness, relevance, citationDensity, total };
   }

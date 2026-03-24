@@ -824,6 +824,11 @@ export {
   writeAdaptationReport,
 } from "./model-adaptation-report.js";
 
+// ─── Dimension Scorer Base ────────────────────────────────────────────────────
+
+export { DimensionScorer } from "./dimension-scorer.js";
+export type { DimensionScore, DimensionScorerOptions } from "./dimension-scorer.js";
+
 // ─── Memory Quality ──────────────────────────────────────────────────────────
 
 export { MemoryQualityScorer } from "./memory-quality-scorer.js";
