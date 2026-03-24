@@ -454,3 +454,34 @@ export type {
   SearchCacheEntry,
   SearchCacheOptions,
 } from "./search-cache.js";
+
+// ─── Task Complexity Router ─────────────────────────────────────────────────
+
+export { TaskComplexityRouter } from "./task-complexity-router.js";
+export type {
+  TaskSignals,
+  ComplexityTier,
+  ModelOption,
+  RoutingDecision,
+} from "./task-complexity-router.js";
+
+// ─── Council ────────────────────────────────────────────────────────────────
+
+export { CouncilResilience } from "./council/index.js";
+export type {
+  RedistributionPlan,
+  PartialRecoveryReport,
+} from "./council/index.js";
+
+// ─── Verification Trend Tracker ─────────────────────────────────────────────
+
+export { VerificationTrendTracker } from "./verification-trend-tracker.js";
+export type {
+  TrendReport as VerificationTrendReport,
+  HealthReport as VerificationHealthReport,
+} from "./verification-trend-tracker.js";
+
+// ─── Durable Execution ──────────────────────────────────────────────────────
+
+export { DurableExecution } from "./durable-execution.js";
+export type { ExecutionState } from "./durable-execution.js";
