@@ -8,6 +8,7 @@ import {
   runLocalPDSEScorer,
   runConstitutionCheck,
 } from "@dantecode/danteforge";
+import { PRQualityChecker } from "@dantecode/core";
 
 // ANSI Colors
 const RED = "\x1b[31m";
@@ -31,6 +32,8 @@ export interface VerificationDetails {
   pdseScore: number;
   pdsePassedGate: boolean;
   pdseBreakdown?: { completeness: number; correctness: number; clarity: number; consistency: number };
+  /** PR quality score from PRQualityChecker (advisory, non-blocking). */
+  prQualityScore?: number;
 }
 
 export function formatVerificationVerdict(details: VerificationDetails, verbose: boolean): string {
@@ -58,6 +61,10 @@ export function formatVerificationVerdict(details: VerificationDetails, verbose:
     if (details.pdseBreakdown) {
       lines.push(`  ${DIM}  Completeness: ${details.pdseBreakdown.completeness} | Correctness: ${details.pdseBreakdown.correctness} | Clarity: ${details.pdseBreakdown.clarity} | Consistency: ${details.pdseBreakdown.consistency}${RESET}`);
     }
+    if (details.prQualityScore !== undefined) {
+      const prColor = details.prQualityScore >= 70 ? GREEN : YELLOW;
+      lines.push(`  ${DIM}PR quality: ${prColor}${details.prQualityScore}/100${RESET}`);
+    }
   }
 
   return lines.join("\n");
@@ -73,7 +80,7 @@ export async function runDanteForge(
   filePath: string,
   projectRoot: string,
   verbose: boolean,
-): Promise<{ passed: boolean; summary: string }> {
+): Promise<{ passed: boolean; summary: string; pdseScore: number }> {
   let passed = true;
 
   // Step 1: Anti-stub scan
@@ -112,7 +119,16 @@ export async function runDanteForge(
     },
   };
 
-  return { passed, summary: formatVerificationVerdict(details, verbose) };
+  // Step 4: PR quality check (informational, non-blocking)
+  try {
+    const prChecker = new PRQualityChecker();
+    const prReport = prChecker.check(code);
+    details.prQualityScore = prReport.score;
+  } catch {
+    // Non-fatal: PR quality check is advisory
+  }
+
+  return { passed, summary: formatVerificationVerdict(details, verbose), pdseScore: pdse.overall };
 }
 
 /**

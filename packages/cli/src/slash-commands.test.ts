@@ -134,6 +134,7 @@ function makeState(projectRoot: string): ReplState {
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    verificationTrendTracker: null,
     theme: "default",
   };
 }

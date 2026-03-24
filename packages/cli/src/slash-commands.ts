@@ -205,6 +205,8 @@ export interface ReplState {
   runReportAccumulator?: RunReportAccumulator | null;
   /** D-12: Model adaptation store for quirk detection and overrides. */
   modelAdaptationStore?: import("@dantecode/core").ModelAdaptationStore | null;
+  /** Verification trend tracker — records PDSE scores and detects regressions. */
+  verificationTrendTracker: import("@dantecode/core").VerificationTrendTracker | null;
 }
 
 /** A single slash command handler. */
@@ -5929,6 +5931,49 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: costCommand,
     tier: 1,
     category: "core",
+  },
+  {
+    name: "trend",
+    description: "Show verification score trends and regression alerts",
+    usage: "/trend [category]",
+    tier: 2,
+    category: "verification",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const { VerificationTrendTracker } = await import("@dantecode/core");
+      if (!state.verificationTrendTracker) {
+        state.verificationTrendTracker = new VerificationTrendTracker();
+      }
+      const tracker = state.verificationTrendTracker;
+
+      if (args.trim()) {
+        const trend = tracker.getTrend(args.trim());
+        if (trend.dataPoints === 0) {
+          return `No data recorded for category "${args.trim()}".`;
+        }
+        return [
+          `Category: ${trend.category}`,
+          `Current: ${trend.current}`,
+          `Average: ${trend.average}`,
+          `Trend: ${trend.trend}`,
+          `Data points: ${trend.dataPoints}`,
+        ].join("\n");
+      }
+
+      const report = tracker.generateHealthReport();
+      if (report.categories.length === 0) {
+        return "No verification data recorded yet. PDSE scores are tracked automatically during DanteForge runs.";
+      }
+      const lines = [`Verification Health: ${report.overallHealth}`];
+      if (report.regressions.length > 0) {
+        lines.push(`Regressions: ${report.regressions.join(", ")}`);
+      }
+      for (const cat of report.categories) {
+        lines.push(
+          `  ${cat.category}: ${cat.current.toFixed(1)} (${cat.trend}) -- avg ${cat.average.toFixed(1)}, ${cat.dataPoints} points`,
+        );
+      }
+      return lines.join("\n");
+    },
   },
 ];
 

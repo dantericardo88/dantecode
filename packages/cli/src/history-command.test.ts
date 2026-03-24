@@ -188,6 +188,7 @@ function makeReplState(overrides?: Partial<ReplState>): ReplState {
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    verificationTrendTracker: null,
     theme: "default",
     ...overrides,
   };

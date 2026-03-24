@@ -6,8 +6,10 @@
 
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import { GitConflictResolver } from "../git-conflict-resolver.js";
 
 /** Timeout for a single git merge operation (ms). */
 const MERGE_TIMEOUT_MS = 30_000;
@@ -221,6 +223,20 @@ export class MergeBrain {
               candidates,
               structuralResult.conflicts,
             );
+            // Post-merge conflict analysis: classify as textual vs semantic
+            if (structuralResult.conflicts.length > 0) {
+              try {
+                const conflictAnalysis = this.analyzeConflictedFiles(
+                  repoRoot,
+                  structuralResult.conflicts,
+                );
+                if (conflictAnalysis) {
+                  synthesis.mergedPatch += `\n\n${conflictAnalysis}`;
+                }
+              } catch {
+                // Non-fatal: conflict analysis is advisory
+              }
+            }
           }
         } else {
           // No worktree hooks — cannot attempt structural merge, require review
@@ -280,6 +296,52 @@ export class MergeBrain {
       `## Candidate B (Lane ${candidates[1]?.laneId ?? "unknown"}):`,
       candidates[1]?.unifiedDiff.slice(0, 1000) ?? "(no patch)",
     ].join("\n");
+  }
+
+  /**
+   * Analyze conflicted files using GitConflictResolver.
+   * Returns a human-readable summary of conflict types and auto-resolvability.
+   * Non-fatal: returns null if files cannot be read.
+   */
+  private analyzeConflictedFiles(
+    repoRoot: string,
+    conflictFiles: string[],
+  ): string | null {
+    const resolver = new GitConflictResolver();
+    const summaryLines: string[] = ["## Conflict Analysis"];
+    let totalTextual = 0;
+    let totalSemantic = 0;
+    let totalAutoResolvable = 0;
+
+    for (const file of conflictFiles) {
+      try {
+        const content = readFileSync(join(repoRoot, file), "utf-8");
+        const conflicts = resolver.detectConflicts(content);
+        if (conflicts.length === 0) continue;
+
+        const report = resolver.generateReport(conflicts);
+        totalTextual += report.textualCount;
+        totalSemantic += report.semanticCount;
+        totalAutoResolvable += report.autoResolvableCount;
+
+        summaryLines.push(
+          `- ${file}: ${report.totalConflicts} conflict(s) ` +
+          `(${report.textualCount} textual, ${report.semanticCount} semantic, ` +
+          `${report.autoResolvableCount} auto-resolvable)`,
+        );
+      } catch {
+        // File not readable (worktree already cleaned up) — skip
+      }
+    }
+
+    if (summaryLines.length === 1) return null;
+
+    summaryLines.push(
+      `\nTotal: ${totalTextual + totalSemantic} conflicts ` +
+      `(${totalAutoResolvable} auto-resolvable, ${totalSemantic} need human review)`,
+    );
+
+    return summaryLines.join("\n");
   }
 
   private async writeAuditBundle(

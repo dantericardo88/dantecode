@@ -125,6 +125,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        verificationTrendTracker: null,
         theme: "default",
       };
 
@@ -176,6 +177,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        verificationTrendTracker: null,
         theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
@@ -230,6 +232,7 @@ describe("CLI Integration", () => {
         waveState: null,
         gaslight: null,
         memoryOrchestrator: null,
+        verificationTrendTracker: null,
         theme: "default",
       };
 
