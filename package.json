@@ -33,6 +33,9 @@
     "measure:scores": "node scripts/measure-scores.mjs",
     "release:check": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:coverage && npm run smoke:cli && npm run smoke:install && npm run smoke:skill-import && npm run smoke:external && npm run publish:dry-run",
     "release:check:strict": "npm run release:check",
+    "release:gate": "node scripts/release-check.mjs",
+    "check:anti-stub": "node scripts/anti-stub-scan.mjs",
+    "check:cli-smoke": "node scripts/cli-smoke.mjs",
     "cli": "node packages/cli/dist/index.js",
     "dantecode": "node packages/cli/dist/index.js"
   },
