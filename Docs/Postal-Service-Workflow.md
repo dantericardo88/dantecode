@@ -63,6 +63,25 @@ Everything in this workflow revolves around three types of documents. You never 
 
 ---
 
+## Automatic Report Generation
+
+As of v1.3, DanteCode automatically produces run reports for `/magic`, `/party`, `/forge`, and any REPL session that modifies files. You no longer need to remember to ask for a summary — the report is written for you every time.
+
+Reports are saved to `.dantecode/reports/<timestamp>-<command>.md`. Each report contains six mandatory sections:
+
+1. **What was built** — the features, files, and PRDs that were addressed
+2. **What needs attention** — anything incomplete, skipped, or flagged by verification
+3. **Completion status** — per-PRD pass/partial/fail breakdown
+4. **Verification summary** — PDSE score, anti-stub results, and any DanteForge findings
+5. **Files changed** — every file created, modified, or deleted during the run
+6. **Reproduction** — the exact command and arguments used, so the run can be repeated
+
+Reports are crash-safe. They are written inside a `try/finally` block, so even if DanteCode fails mid-run, you still get a partial report explaining what happened before the failure. A missing report means something went wrong before the session even started — not during it.
+
+This automates what was previously a manual carry step. In the workflows below, every reference to "the run report" now points to a file that DanteCode produced automatically. You carry it to the verifier workspace (Step 3 in Workflow A) the same way as before — the only difference is that you no longer have to ask for it.
+
+---
+
 ## Workflow A: Building a Project with DanteCode
 
 This is your primary workflow. You have PRDs, you want code.

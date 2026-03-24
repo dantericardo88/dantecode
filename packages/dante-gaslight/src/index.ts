@@ -13,3 +13,19 @@ export * from "./fearset-engine.js";
 export * from "./fearset-result-store.js";
 export * from "./risk-classifier.js";
 export * from "./fearset-stats.js";
+
+// ─── Attack Patterns ─────────────────────────────────────────────────────────
+
+export {
+  AttackPatternLibrary,
+  type AttackPattern,
+  type AttackCategory,
+} from "./attack-patterns.js";
+
+// ─── Gaslight Report ─────────────────────────────────────────────────────────
+
+export {
+  GaslightReport,
+  type GaslightReportData,
+  type TrendDirection,
+} from "./gaslight-report.js";

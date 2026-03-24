@@ -47,6 +47,7 @@ export interface RunReportEntry {
   filesDeleted: string[];
   verification: RunReportVerification;
   tests: RunReportTests;
+  completionVerification?: import("./completion-verifier.js").CompletionVerification;
   summary: string;
   failureReason?: string;
   actionNeeded?: string;
@@ -212,6 +213,12 @@ export class RunReportAccumulator {
     if (entry) entry.tests = tests;
   }
 
+  /** Record completion verification for the current entry. */
+  recordCompletionVerification(verification: import("./completion-verifier.js").CompletionVerification): void {
+    const entry = this.currentEntry();
+    if (entry) entry.completionVerification = verification;
+  }
+
   /** Record token usage for the current entry. */
   recordTokenUsage(input: number, output: number): void {
     const entry = this.currentEntry();
@@ -355,13 +362,32 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   }
   lines.push("");
 
-  // Summary table (preserved for run-report-writer.ts regex compatibility)
+  // ── What was built ──────────────────────────────────────────────────────
+  lines.push("## What was built");
+  lines.push("");
+  const builtSummaries = report.entries.filter((e) => e.summary);
+  if (builtSummaries.length > 0) {
+    for (const entry of builtSummaries) {
+      const emoji = STATUS_EMOJI[entry.status];
+      lines.push(`- **${entry.prdName}** ${emoji}: ${entry.summary}`);
+    }
+  } else {
+    lines.push("No tasks produced output.");
+  }
+  lines.push("");
+
+  // ── What needs attention ──────────────────────────────────────────────
+  lines.push("## What needs attention");
+  lines.push("");
+  renderAttentionSection(lines, report);
+
+  // ── Completion status ─────────────────────────────────────────────────
   const counts = countStatuses(report.entries);
   const total = report.entries.length;
   const completionRate =
     total > 0 ? Math.round((counts.complete / total) * 100) : 0;
 
-  lines.push("## Summary");
+  lines.push("## Completion status");
   lines.push("");
   lines.push("| Status | Count |");
   lines.push("|--------|-------|");
@@ -381,16 +407,11 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   }
   lines.push("");
 
-  // "What Needs Your Attention" — non-verbose only, aggregates action items
-  if (!verbose) {
-    renderAttentionSection(lines, report);
-  }
-
   lines.push("---");
   lines.push("");
 
-  // Per-entry sections
-  lines.push("## Task Results");
+  // Per-entry detail sections
+  lines.push("### Task details");
   lines.push("");
 
   for (const [i, entry] of report.entries.entries()) {
@@ -500,10 +521,10 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
 
   lines.push("");
 
-  // Filesystem manifest
+  // Files changed
+  lines.push("## Files changed");
+  lines.push("");
   if (report.filesManifest.length > 0) {
-    lines.push("## Filesystem Manifest");
-    lines.push("");
     lines.push("| Action | File | Lines |");
     lines.push("|--------|------|-------|");
     for (const f of report.filesManifest) {
@@ -517,13 +538,15 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     const deleted = report.filesManifest.filter((f) => f.action === "deleted").length;
     lines.push("");
     lines.push(`**Total: ${created} files created, ${modified} files modified, ${deleted} files deleted**`);
-    lines.push("");
+  } else {
+    lines.push("No files were changed.");
   }
+  lines.push("");
 
-  // Verification summary / Quality check
+  // Verification summary
+  lines.push("## Verification summary");
+  lines.push("");
   if (verbose) {
-    lines.push("## Verification Summary");
-    lines.push("");
     lines.push("| Check | Passed | Failed | Total |");
     lines.push("|-------|--------|--------|-------|");
 
@@ -544,8 +567,11 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     lines.push(`| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`);
     lines.push("");
   } else {
-    renderQualityCheck(lines, report);
+    renderQualityCheckContent(lines, report);
   }
+
+  // Completion verification (if any entry has it)
+  renderCompletionVerificationSummary(lines, report);
 
   // Reproduction command
   lines.push("## Reproduction");
@@ -625,10 +651,12 @@ function humanizeTests(t: RunReportTests): string | null {
 
 function renderAttentionSection(lines: string[], report: RunReport): void {
   const items = report.entries.filter((e) => e.status !== "complete");
-  if (items.length === 0) return;
+  if (items.length === 0) {
+    lines.push("Nothing requires attention.");
+    lines.push("");
+    return;
+  }
 
-  lines.push("## What Needs Your Attention");
-  lines.push("");
   for (const entry of items) {
     const reason = entry.actionNeeded ?? entry.failureReason ?? `Status: ${entry.status}`;
     lines.push(`- **${entry.prdName}**: ${reason}`);
@@ -636,11 +664,9 @@ function renderAttentionSection(lines: string[], report: RunReport): void {
   lines.push("");
 }
 
-function renderQualityCheck(lines: string[], report: RunReport): void {
+function renderQualityCheckContent(lines: string[], report: RunReport): void {
   const attempted = report.entries.filter((e) => e.status !== "not_attempted");
   if (attempted.length === 0) {
-    lines.push("## Quality Check");
-    lines.push("");
     lines.push("No tasks were attempted.");
     lines.push("");
     return;
@@ -653,9 +679,6 @@ function renderQualityCheck(lines: string[], report: RunReport): void {
     (e) => e.tests.created === 0 || e.tests.failing === 0,
   );
   const noPlaceholders = attempted.every((e) => e.verification.antiStub.passed);
-
-  lines.push("## Quality Check");
-  lines.push("");
 
   const parts: string[] = [];
   if (allVerified) {
@@ -674,6 +697,21 @@ function renderQualityCheck(lines: string[], report: RunReport): void {
   }
 
   lines.push(parts.join(" "));
+  lines.push("");
+}
+
+function renderCompletionVerificationSummary(lines: string[], report: RunReport): void {
+  const verified = report.entries.filter((e) => e.completionVerification != null);
+  if (verified.length === 0) return;
+
+  lines.push("**Completion verification:**");
+  for (const entry of verified) {
+    const cv = entry.completionVerification!;
+    const verdictIcon = cv.verdict === "complete" ? "\u2705" : cv.verdict === "partial" ? "\u26A0\uFE0F" : "\u274C";
+    lines.push(
+      `- ${entry.prdName}: ${verdictIcon} ${cv.verdict} (confidence: ${cv.confidence}, ${cv.passed.length} passed, ${cv.failed.length} failed)`,
+    );
+  }
   lines.push("");
 }
 

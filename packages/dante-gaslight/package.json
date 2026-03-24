@@ -3,6 +3,14 @@
   "version": "1.0.0",
   "description": "DanteGaslight — bounded adversarial self-critique and iterative refinement engine for DanteCode",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
+    "directory": "packages/dante-gaslight"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,7 +23,9 @@
   "scripts": {
     "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --config ../../vitest.package.config.ts"
+    "lint": "eslint src/",
+    "test": "vitest run --config ../../vitest.package.config.ts",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@dantecode/runtime-spine": "1.0.0",
@@ -32,10 +42,5 @@
   ],
   "publishConfig": {
     "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/dantericardo88/dantecode.git",
-    "directory": "packages/dante-gaslight"
   }
 }

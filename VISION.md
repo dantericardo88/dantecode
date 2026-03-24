@@ -2,69 +2,61 @@
 
 ## Product statement
 
-DanteCode is a portable, model-agnostic skill runtime and coding agent.
+DanteCode is a coding agent built for people who cannot read code.
 
-The long-term goal is not to win by lock-in. The goal is to make coding workflows portable so developers can switch models without throwing away the skills and habits they already built.
+Most AI coding tools accelerate developers — the 5% who already know what correct code looks like. DanteCode exists for the other 95%: founders, designers, operators, and domain experts who have ideas worth building but no ability to verify whether the AI actually built them correctly.
+
+The goal is not to generate code faster. The goal is to make AI-generated code trustworthy for people who will never read it.
 
 ## Core thesis
 
-The real moat in coding agents is not just raw model intelligence. It is the accumulated library of reusable skills, prompts, workflows, and team habits around the tool.
+Code generation is a commodity. Every model can produce code. The unsolved problem is the trust gap: when a non-technical user tells an AI "build me X" and the AI says "done," the user has no way to know if it actually did the job, cut corners, or silently failed.
 
-If that layer stays vendor-locked, the best model does not necessarily win. The ecosystem with the highest switching cost wins.
+DanteCode closes that gap with machine-verified evidence. Not "trust me" — trust the verification receipt, the anti-stub scan, the PDSE score, the run report written in plain language.
 
-DanteCode exists to break that dynamic.
+The moat is verification, not generation. Any model can write a login page. Only a verification layer can tell you whether the password hashing is real or a stub that returns the input unchanged.
 
 ## Strategic position
 
 - Default provider: Grok
-- Product identity: model-agnostic
+- Product identity: model-agnostic, user-agnostic
 - Verification layer: DanteForge
-- Main wedge: Claude-style skill interoperability and portable runtime behavior
+- Main wedge: trustworthy AI output for people who cannot audit it themselves
 
-Grok is the default path because it is the clearest market gap today, not because DanteCode should become xAI-only infrastructure.
+Grok is the default because it is the clearest market gap today. Model portability matters because users should never be trapped by a provider. If your workflows, skills, and verification history only work with one model, you are locked in — and non-technical users are the least equipped to migrate when that lock-in becomes a problem.
 
 ## What DanteForge does
 
-DanteForge is the trust engine behind DanteCode:
+DanteForge is the trust engine that lets non-technical users rely on AI output:
 
-- Anti-stub enforcement
-- PDSE scoring
-- Constitution checks
-- GStack validation
-- Autoforge iteration and lessons
+- **Anti-stub enforcement**: catches functions that look complete but do nothing
+- **PDSE scoring**: a single number (0-100) that answers "did the AI actually do the work?"
+- **Constitution checks**: ensures output follows safety and quality rules
+- **GStack validation**: verifies structural correctness across the codebase
+- **Run reports**: plain-language accounting of what was built, what failed, and what needs attention
 
-The portability story only matters if the imported workflows are also trustworthy.
-
-## OSS v1 ship target
-
-Public OSS v1 is deliberately scoped:
-
-- Stable CLI install path through npm
-- Published core libraries
-- Preview VS Code extension
-- Beta desktop shell
-- Strong local validation gates
-
-It is not full GA across every surface.
+The user never reads the code. They read the report and the score. If DanteForge says the score is 85 and the report says "3 of 4 features complete, auth needs retry," that is enough to act on — no technical knowledge required.
 
 ## Principles
 
-- Portable first: favor reusable skills and capability-based abstractions over vendor-shaped assumptions.
-- Verification first: imported or generated workflows should prove themselves before landing.
-- Clean-room interoperability: translate and validate external skill formats without relying on messy provenance stories.
-- Honest surface area: stable, preview, and beta labels should reflect reality.
-- Open ecosystem gravity: make DanteCode useful enough that vendors adapt to it, not the other way around.
+- **Verification first**: every generated artifact must prove itself before being trusted. The user's confidence comes from evidence, not from the AI claiming "done."
+- **Plain-language surface**: scores, reports, and status must be legible to someone who has never opened a terminal before today.
+- **Portable by default**: skills, workflows, and verification history travel with the user across models and providers. No lock-in, ever.
+- **Honest failure reporting**: partial completions, crashes, and low-confidence results are reported explicitly. Silent failure is the enemy of non-technical users because they have no other way to detect it.
+- **Crash-safe accountability**: run reports are written even on failure. If DanteCode crashes, the user still has a record of what happened.
 
-## Non-goals for OSS v1
+## Non-goals
 
-- Full enterprise release automation
-- Zero-touch credential setup
-- Every surface held to the same release-critical bar
-- Perfect live-provider parity before the first public repo push
+- Replacing developers for complex systems architecture
+- Full enterprise release automation in v1
+- Perfect live-provider parity before the first public release
+- Marketing-grade polish over honest capability reporting
+- Building features exclusively for the 5% who already have technical fluency
 
 ## Success signals
 
-- Developers can import Claude-style skills without rebuilding them from scratch.
-- Teams can switch providers without losing workflow leverage.
-- DanteForge catches low-quality or unsafe output before it becomes trusted code.
-- The project becomes more valuable as shared skills accumulate, without forcing a single-model future.
+- A non-technical founder can run `/party` on a set of PRDs and know — from the report and score alone — whether the output is real.
+- Users can switch providers without losing their skills, workflows, or verification history.
+- DanteForge catches stubs, silent failures, and low-quality output before the user ships it.
+- The trust gap between "AI said done" and "it actually works" shrinks measurably with every release.
+- The product becomes more valuable as shared skills accumulate, without forcing a single-model future.

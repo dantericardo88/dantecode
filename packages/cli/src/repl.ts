@@ -266,9 +266,24 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     waveState: null,
     gaslight: null, // lazy-init: created on first prompt or /gaslight command
     memoryOrchestrator: null, // lazy-init: created on first /memory or /compact command
+    modelAdaptationStore: null, // D-12: lazy-init below
     reasoningOverrideSession: false,
     theme: savedTheme,
   };
+
+  // D-12A: Initialize model adaptation store + restore rate limiter (non-fatal, gated on env)
+  if (process.env.DANTE_DISABLE_MODEL_ADAPTATION !== "1") {
+    try {
+      const { ModelAdaptationStore, getGlobalAdaptationRateLimiter } = await import("@dantecode/core");
+      replState.modelAdaptationStore = new ModelAdaptationStore(options.projectRoot);
+      await replState.modelAdaptationStore.load();
+      // Restore persisted rate limiter state (D-12A Gap 3)
+      const restoredLimiter = replState.modelAdaptationStore.loadRateLimiterState();
+      getGlobalAdaptationRateLimiter(restoredLimiter);
+    } catch {
+      // Non-fatal — model adaptation is optional
+    }
+  }
 
   // Agent loop config
   const agentConfig: AgentLoopConfig = {

@@ -325,7 +325,7 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("**Model:** claude-sonnet-4-6 (anthropic)");
   });
 
-  it("renders summary table with correct counts", () => {
+  it("renders completion status table with correct counts", () => {
     const report = makeReport({
       entries: [
         makeEntry({ status: "complete", prdName: "auth" }),
@@ -337,6 +337,7 @@ describe("serializeRunReportToMarkdown", () => {
     });
 
     const md = serializeRunReportToMarkdown(report);
+    expect(md).toContain("## Completion status");
     expect(md).toContain("Complete | 2");
     expect(md).toContain("Partial | 1");
     expect(md).toContain("Failed | 1");
@@ -420,7 +421,7 @@ describe("serializeRunReportToMarkdown", () => {
     expect(md).toContain("**What needs to happen:** Implement manually.");
   });
 
-  it("renders filesystem manifest table", () => {
+  it("renders files changed table", () => {
     const report = makeReport({
       filesManifest: [
         { action: "created", path: "src/auth.ts", lines: 100 },
@@ -430,7 +431,7 @@ describe("serializeRunReportToMarkdown", () => {
     });
 
     const md = serializeRunReportToMarkdown(report);
-    expect(md).toContain("## Filesystem Manifest");
+    expect(md).toContain("## Files changed");
     expect(md).toContain("| CREATED | src/auth.ts | 100 |");
     expect(md).toContain("| MODIFIED | src/index.ts | +5 -1 |");
     expect(md).toContain("| DELETED | src/old.ts | - |");
@@ -457,7 +458,7 @@ describe("serializeRunReportToMarkdown", () => {
     });
 
     const md = serializeRunReportToMarkdown(report, true);
-    expect(md).toContain("## Verification Summary");
+    expect(md).toContain("## Verification summary");
     expect(md).toContain("| Anti-stub scan | 1 | 1 | 2 |");
     expect(md).toContain("| PDSE >= threshold | 1 | 1 | 2 |");
   });
@@ -503,9 +504,33 @@ describe("serializeRunReportToMarkdown", () => {
 
   it("handles empty entries gracefully", () => {
     const md = serializeRunReportToMarkdown(makeReport({ entries: [] }));
-    expect(md).toContain("## Summary");
+    expect(md).toContain("## Completion status");
     expect(md).toContain("**Total** | **0**");
     expect(md).toContain("**Completion rate: 0% (0/0)**");
+  });
+
+  it("contains all 6 required D-12 headings", () => {
+    const report = makeReport({
+      entries: [makeEntry()],
+      filesManifest: [{ action: "created", path: "src/auth.ts", lines: 100 }],
+    });
+    const md = serializeRunReportToMarkdown(report);
+    expect(md).toContain("## What was built");
+    expect(md).toContain("## What needs attention");
+    expect(md).toContain("## Completion status");
+    expect(md).toContain("## Verification summary");
+    expect(md).toContain("## Files changed");
+    expect(md).toContain("## Reproduction");
+  });
+
+  it("contains all 6 required D-12 headings even with empty report", () => {
+    const md = serializeRunReportToMarkdown(makeReport({ entries: [] }));
+    expect(md).toContain("## What was built");
+    expect(md).toContain("## What needs attention");
+    expect(md).toContain("## Completion status");
+    expect(md).toContain("## Verification summary");
+    expect(md).toContain("## Files changed");
+    expect(md).toContain("## Reproduction");
   });
 });
 
@@ -581,9 +606,9 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
     expect(md).not.toContain("tokens");
   });
 
-  it("does not contain 'Verification Summary' in non-verbose mode", () => {
+  it("contains 'Verification summary' in non-verbose mode", () => {
     const md = serializeRunReportToMarkdown(makeReport({ entries: [makeEntry()] }));
-    expect(md).not.toContain("## Verification Summary");
+    expect(md).toContain("## Verification summary");
   });
 
   it("does not contain 'Environment' section in non-verbose mode", () => {
@@ -627,9 +652,8 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
     // Per-entry section should have no verification lines
     expect(md).not.toContain("caught");
     expect(md).not.toContain("Review recommended");
-    expect(md).not.toContain("Needs attention");
-    // Quality Check at the bottom is fine — it's the summary, not per-entry jargon
-    expect(md).toContain("## Quality Check");
+    // Verification summary at the bottom is fine — it's the summary, not per-entry jargon
+    expect(md).toContain("## Verification summary");
   });
 
   it("shows human verdict for caught-and-fixed issues", () => {
@@ -673,29 +697,30 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
     expect(md).not.toContain("output:");
   });
 
-  it("shows 'Quality Check' section instead of 'Verification Summary'", () => {
+  it("shows 'Verification summary' heading in non-verbose mode", () => {
     const md = serializeRunReportToMarkdown(makeReport({
       entries: [makeEntry()],
     }));
-    expect(md).toContain("## Quality Check");
+    expect(md).toContain("## Verification summary");
   });
 
-  it("renders 'What Needs Your Attention' for non-complete entries", () => {
+  it("renders 'What needs attention' for non-complete entries", () => {
     const md = serializeRunReportToMarkdown(makeReport({
       entries: [
         makeEntry({ status: "complete" }),
         makeEntry({ status: "failed", prdName: "api", actionNeeded: "Implement manually." }),
       ],
     }));
-    expect(md).toContain("## What Needs Your Attention");
+    expect(md).toContain("## What needs attention");
     expect(md).toContain("api");
     expect(md).toContain("Implement manually.");
   });
 
-  it("omits 'What Needs Your Attention' when all tasks complete", () => {
+  it("shows 'Nothing requires attention' when all tasks complete", () => {
     const md = serializeRunReportToMarkdown(makeReport({
       entries: [makeEntry({ status: "complete" })],
     }));
-    expect(md).not.toContain("## What Needs Your Attention");
+    expect(md).toContain("## What needs attention");
+    expect(md).toContain("Nothing requires attention.");
   });
 });

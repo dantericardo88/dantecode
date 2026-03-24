@@ -36,6 +36,8 @@ import {
   serializeRunReportToMarkdown,
   writeRunReport,
   estimateMessageTokens,
+  verifyCompletion,
+  deriveExpectations,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -111,7 +113,9 @@ import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
 import { researchSlashHandler } from "./commands/research.js";
 import { automateCommand } from "./commands/automate.js";
+import { adaptationCommand } from "./commands/adaptation.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
+import { countSuccessfulSessions } from "./session-utils.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -199,6 +203,8 @@ export interface ReplState {
   theme: ThemeName;
   /** Active run report accumulator for /party and skill runs. */
   runReportAccumulator?: RunReportAccumulator | null;
+  /** D-12: Model adaptation store for quirk detection and overrides. */
+  modelAdaptationStore?: import("@dantecode/core").ModelAdaptationStore | null;
 }
 
 /** A single slash command handler. */
@@ -803,7 +809,11 @@ async function persistVerificationBenchmark(
 async function helpCommand(args: string, state: ReplState): Promise<string> {
   const showAll = args.trim() === "--all";
 
-  if (!showAll) {
+  // D-12: Count successful sessions for progressive disclosure unlock
+  const sessionCount = await countSuccessfulSessions(state.projectRoot);
+  const advancedUnlocked = showAll || sessionCount >= 3;
+
+  if (!advancedUnlocked) {
     // Tier 1 only — the essential commands new users need
     const tier1 = SLASH_COMMANDS.filter((c) => c.tier === 1);
     const lines = ["", `${BOLD}Commands${RESET}`, ""];
@@ -826,6 +836,11 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
       lines.push("");
     }
 
+    if (sessionCount > 0) {
+      lines.push(
+        `${DIM}${sessionCount}/3 sessions completed \u2014 ${3 - sessionCount} more to unlock all commands.${RESET}`,
+      );
+    }
     lines.push(
       `${DIM}Type ${YELLOW}/help --all${RESET}${DIM} to see all ${SLASH_COMMANDS.length} commands.${RESET}`,
     );
@@ -2775,6 +2790,16 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
       summary: assistantText.slice(0, 300),
     });
 
+    // D-12: Completion verification
+    try {
+      const entry = reportAcc.snapshot().entries[0];
+      if (entry && (entry.filesCreated.length > 0 || entry.filesModified.length > 0)) {
+        const expectations = deriveExpectations(entry);
+        const verification = await verifyCompletion(state.projectRoot, expectations);
+        reportAcc.recordCompletionVerification(verification);
+      }
+    } catch { /* non-fatal */ }
+
     state.session.messages.push({
       id: randomUUID(),
       role: "assistant",
@@ -2903,6 +2928,16 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           summary: output.content.slice(0, 200),
           failureReason: entryStatus === "partial" ? `PDSE ${output.pdseScore} below threshold ${state.state.pdse.threshold}` : undefined,
         });
+
+        // D-12: Completion verification per lane
+        try {
+          const entrySnapshot = reportAcc.snapshot().entries.at(-1);
+          if (entrySnapshot && (entrySnapshot.filesCreated.length > 0 || entrySnapshot.filesModified.length > 0)) {
+            const expectations = deriveExpectations(entrySnapshot);
+            const cvResult = await verifyCompletion(state.projectRoot, expectations);
+            reportAcc.recordCompletionVerification(cvResult);
+          }
+        } catch { /* non-fatal */ }
       }
 
       const allPassed = result.compositePdse >= state.state.pdse.threshold;
@@ -5807,6 +5842,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "advanced",
   },
   {
+    name: "adaptation",
+    description: "D-12A Model Adaptation — status/overrides/experiments/rollback/report/mode",
+    usage: "/adaptation <status|overrides|experiments|rollback|report|mode>",
+    handler: adaptationCommand,
+    tier: 2,
+    category: "advanced",
+  },
+  {
     name: "research",
     description:
       "Deep web research with synthesis and citations — searches multiple engines, fetches top sources",
@@ -5888,6 +5931,11 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "core",
   },
 ];
+
+/** Return lightweight metadata for all slash commands (for testing / introspection). */
+export function getSlashCommandsMeta(): Array<{ name: string; tier: number }> {
+  return SLASH_COMMANDS.map((c) => ({ name: c.name, tier: c.tier ?? 2 }));
+}
 
 function getNativeCommandDefinitions(): NativeSlashCommandDefinition[] {
   return SLASH_COMMANDS.map((command) => ({
