@@ -31,7 +31,7 @@
     }
   },
   "scripts": {
-    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup src/index.ts --format esm --dts --external @dantecode/danteforge --external @dantecode/core --external @dantecode/git-engine",
+    "build": "tsup src/index.ts --format esm --dts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",
@@ -41,7 +41,6 @@
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "@dantecode/config-types": "1.0.0",
-    "@octokit/rest": "^20.1.2",
     "ai": "^4.0.0",
     "yaml": "^2.7.0",
     "zod": "^3.24.0"
@@ -50,6 +49,7 @@
     "access": "public"
   },
   "devDependencies": {
+    "fast-check": "^4.6.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
