@@ -454,3 +454,64 @@ export type {
   SearchCacheEntry,
   SearchCacheOptions,
 } from "./search-cache.js";
+
+// ─── Memory Quality ──────────────────────────────────────────────────────────
+
+export { MemoryQualityScorer } from "./memory-quality-scorer.js";
+export type { ScoredMemory, QualityScore } from "./memory-quality-scorer.js";
+
+export { MemoryConsolidator } from "./memory-consolidator.js";
+export type { MemoryItem, MemoryConsolidatorOptions } from "./memory-consolidator.js";
+
+// ─── Search Quality ─────────────────────────────────────────────────────────
+
+export { SearchQualityScorer } from "./search-quality-scorer.js";
+export type { SearchQualityScore, ScoredSearchResult } from "./search-quality-scorer.js";
+
+export { SearchFreshnessTracker } from "./search-freshness-tracker.js";
+export type { FreshnessTrackerOptions } from "./search-freshness-tracker.js";
+export type { ContentType as SearchContentType } from "./search-freshness-tracker.js";
+
+// ─── Git Conflict Resolution ────────────────────────────────────────────────
+
+export { GitConflictResolver } from "./git-conflict-resolver.js";
+export type {
+  ConflictRegion,
+  Resolution,
+  ConflictReport,
+} from "./git-conflict-resolver.js";
+
+// ─── PR Quality ─────────────────────────────────────────────────────────────
+
+export { PRQualityChecker } from "./pr-quality-checker.js";
+export type {
+  CheckOptions,
+  PRSizeAnalysis,
+  PRQualityReport,
+} from "./pr-quality-checker.js";
+
+// ─── Update Rollback ────────────────────────────────────────────────────────
+
+export { UpdateRollback } from "./update-rollback.js";
+export type {
+  UpdateSnapshot,
+  UpdateHealthCheckConfig,
+  UpdateHealthCheckResult,
+  EvidenceRecord,
+  UpdateRollbackIO,
+} from "./update-rollback.js";
+
+// ─── Migration Validator ────────────────────────────────────────────────────
+
+export { MigrationValidator } from "./migration-validator.js";
+export type {
+  Migration,
+  MigrationContext,
+  SchemaDefinition,
+  SchemaField,
+  SchemaChange,
+  SchemaCompatibility,
+  DataLossRisk,
+  DataLossRiskLevel,
+  DryRunResult,
+} from "./migration-validator.js";
