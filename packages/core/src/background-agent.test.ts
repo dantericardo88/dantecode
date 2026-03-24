@@ -382,17 +382,23 @@ describe("BackgroundAgentRunner", () => {
 
       const id = runner.enqueue("add foo and bar", { autoCommit: true });
 
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      }, { timeout: 10_000 });
-      await vi.waitFor(() => {
-        expect(
-          mockExec.mock.calls.some(
-            (c: unknown[]) =>
-              typeof c[0] === "string" && c[0].includes("git add") && c[0].includes("git commit"),
-          ),
-        ).toBe(true);
-      }, { timeout: 10_000 });
+      await vi.waitFor(
+        () => {
+          expect(runner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 10_000 },
+      );
+      await vi.waitFor(
+        () => {
+          expect(
+            mockExec.mock.calls.some(
+              (c: unknown[]) =>
+                typeof c[0] === "string" && c[0].includes("git add") && c[0].includes("git commit"),
+            ),
+          ).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
 
       // exec should have been called with git add + commit
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
@@ -410,9 +416,12 @@ describe("BackgroundAgentRunner", () => {
 
       const id = runner.enqueue("no commit task");
 
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      }, { timeout: 10_000 });
+      await vi.waitFor(
+        () => {
+          expect(runner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 10_000 },
+      );
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);

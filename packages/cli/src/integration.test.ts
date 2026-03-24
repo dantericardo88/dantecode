@@ -86,7 +86,13 @@ describe("CLI Integration", () => {
 
       runner.enqueue("pass");
       runner.enqueue("fail");
-      await new Promise((r) => setTimeout(r, 100));
+      await vi.waitFor(
+        () => {
+          const tasks = runner.listTasks();
+          expect(tasks.every((t) => t.status === "completed" || t.status === "failed")).toBe(true);
+        },
+        { timeout: 10_000 },
+      );
 
       expect(runner.listTasks()).toHaveLength(2);
       const cleared = runner.clearFinished();

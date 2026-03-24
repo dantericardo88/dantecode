@@ -1,11 +1,15 @@
-import * as cheerio from "cheerio";
-
 /**
  * Advanced content cleaner for extract readability-grade text.
  * Targets main article content and strips noise.
+ *
+ * cheerio is loaded dynamically so the static import is never hoisted into
+ * the CLI bundle — this prevents a ReferenceError on Node 18 where
+ * cheerio's bundled undici references the `File` global (available globally
+ * only in Node 20+).
  */
 export class AdvancedContentCleaner {
-  clean(html: string): string {
+  async clean(html: string): Promise<string> {
+    const cheerio = await import("cheerio");
     const $ = cheerio.load(html);
 
     // Remove non-content elements
