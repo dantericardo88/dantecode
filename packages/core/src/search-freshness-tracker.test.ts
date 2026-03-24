@@ -1,4 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { SearchFreshnessTracker } from "./search-freshness-tracker.js";
 
 const NOW = 1_700_000_000_000;
@@ -78,5 +82,67 @@ describe("SearchFreshnessTracker", () => {
   it("isStale returns false for untracked resultId", () => {
     const tracker = new SearchFreshnessTracker({ nowFn: () => NOW });
     expect(tracker.isStale("nonexistent")).toBe(false);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe("disk persistence", () => {
+    let testDir: string;
+    let persistPath: string;
+
+    beforeEach(() => {
+      testDir = join(tmpdir(), `freshness-test-${randomUUID().slice(0, 8)}`);
+      mkdirSync(testDir, { recursive: true });
+      persistPath = join(testDir, "freshness.json");
+    });
+
+    afterEach(() => {
+      try {
+        rmSync(testDir, { recursive: true, force: true });
+      } catch {
+        // cleanup best-effort
+      }
+    });
+
+    it("track() persists to file", () => {
+      const t1 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      t1.track("vitest docs", "r1", NOW - ONE_HOUR, "documentation");
+      t1.track("vitest docs", "r2", NOW - 2 * ONE_HOUR, "documentation");
+
+      // New instance loads from disk
+      const t2 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      expect(t2.size).toBe(2);
+      expect(t2.has("r1")).toBe(true);
+      expect(t2.has("r2")).toBe(true);
+    });
+
+    it("isStale() works after restart", () => {
+      const t1 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      t1.track("news query", "n1", NOW - 25 * ONE_HOUR, "news");
+      t1.track("docs query", "d1", NOW - 25 * ONE_HOUR, "documentation");
+
+      // New instance loads from disk and can check staleness
+      const t2 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      expect(t2.isStale("n1")).toBe(true);  // news TTL is 24h, 25h old
+      expect(t2.isStale("d1")).toBe(false); // docs TTL is 7d, 25h old
+    });
+
+    it("evictStale() updates file on disk", () => {
+      const t1 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      t1.track("q", "fresh", NOW - ONE_HOUR, "documentation");
+      t1.track("q", "stale", NOW - SEVEN_DAYS - ONE_HOUR, "documentation");
+
+      // Evict from first instance
+      const evicted = t1.evictStale();
+      expect(evicted).toContain("stale");
+
+      // New instance should only see the fresh entry
+      const t2 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
+      expect(t2.size).toBe(1);
+      expect(t2.has("fresh")).toBe(true);
+      expect(t2.has("stale")).toBe(false);
+    });
   });
 });

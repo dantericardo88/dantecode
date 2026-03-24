@@ -2,7 +2,11 @@
 // @dantecode/core — Durable Execution Tests
 // ============================================================================
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, rmSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { DurableExecution } from "./durable-execution.js";
 
 describe("DurableExecution", () => {
@@ -170,6 +174,127 @@ describe("DurableExecution", () => {
 
     it("returns false for step 0", () => {
       expect(exec.shouldCheckpoint(0)).toBe(false);
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe("disk persistence", () => {
+    let persistDir: string;
+
+    beforeEach(() => {
+      persistDir = join(tmpdir(), `durable-exec-test-${randomUUID().slice(0, 8)}`);
+      mkdirSync(persistDir, { recursive: true });
+    });
+
+    afterEach(() => {
+      try {
+        rmSync(persistDir, { recursive: true, force: true });
+      } catch {
+        // cleanup best-effort
+      }
+    });
+
+    it("checkpoint writes to disk", () => {
+      const diskExec = new DurableExecution({ persistDir });
+      diskExec.checkpoint({
+        stepNumber: 1,
+        currentTask: "disk test",
+        partialOutput: ["hello"],
+        memoryState: { key: "val" },
+        toolCallHistory: [],
+      });
+
+      const files = readdirSync(persistDir).filter((f) => f.endsWith(".json"));
+      expect(files).toHaveLength(1);
+      expect(files[0]).toMatch(/^cp-.*\.json$/);
+    });
+
+    it("recover loads from disk after Map is empty (new instance)", () => {
+      const exec1 = new DurableExecution({ persistDir });
+      const cpId = exec1.checkpoint({
+        stepNumber: 5,
+        currentTask: "survive restart",
+        partialOutput: ["saved"],
+        memoryState: { progress: 99 },
+        toolCallHistory: [{ tool: "Bash", timestamp: 1000, success: true }],
+      });
+
+      // New instance loads from disk
+      const exec2 = new DurableExecution({ persistDir });
+      const recovered = exec2.recover(cpId);
+      expect(recovered).not.toBeNull();
+      expect(recovered!.stepNumber).toBe(5);
+      expect(recovered!.currentTask).toBe("survive restart");
+      expect(recovered!.partialOutput).toEqual(["saved"]);
+      expect(recovered!.memoryState).toEqual({ progress: 99 });
+    });
+
+    it("getLastCheckpoint finds from disk after restart (new instance same dir)", () => {
+      const realNow = Date.now;
+      const baseTime = 1_700_000_000_000;
+
+      Date.now = () => baseTime;
+      const exec1 = new DurableExecution({ persistDir });
+      exec1.checkpoint({
+        stepNumber: 1,
+        currentTask: "first",
+        partialOutput: [],
+        memoryState: {},
+        toolCallHistory: [],
+      });
+
+      Date.now = () => baseTime + 1000;
+      exec1.checkpoint({
+        stepNumber: 2,
+        currentTask: "second",
+        partialOutput: [],
+        memoryState: {},
+        toolCallHistory: [],
+      });
+      Date.now = realNow;
+
+      // New instance reloads from disk, sorted by createdAt
+      const exec2 = new DurableExecution({ persistDir });
+      expect(exec2.size()).toBe(2);
+      const last = exec2.getLastCheckpoint();
+      expect(last).not.toBeNull();
+      expect(last!.currentTask).toBe("second");
+    });
+
+    it("cleanup removes files from disk", () => {
+      const realNow = Date.now;
+      const baseTime = 1_700_000_000_000;
+
+      Date.now = () => baseTime;
+      const diskExec = new DurableExecution({ persistDir });
+      diskExec.checkpoint({
+        stepNumber: 1,
+        currentTask: "old checkpoint",
+        partialOutput: [],
+        memoryState: {},
+        toolCallHistory: [],
+      });
+
+      Date.now = () => baseTime + 60_000;
+      diskExec.checkpoint({
+        stepNumber: 2,
+        currentTask: "new checkpoint",
+        partialOutput: [],
+        memoryState: {},
+        toolCallHistory: [],
+      });
+
+      // Before cleanup: 2 files
+      expect(readdirSync(persistDir).filter((f) => f.endsWith(".json"))).toHaveLength(2);
+
+      const deleted = diskExec.cleanup(30_000);
+      Date.now = realNow;
+
+      expect(deleted).toBe(1);
+      expect(readdirSync(persistDir).filter((f) => f.endsWith(".json"))).toHaveLength(1);
     });
   });
 });

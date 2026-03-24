@@ -2,7 +2,11 @@
 // @dantecode/core — Verification Trend Tracker Tests
 // ============================================================================
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { VerificationTrendTracker } from "./verification-trend-tracker.js";
 
 describe("VerificationTrendTracker", () => {
@@ -121,6 +125,67 @@ describe("VerificationTrendTracker", () => {
       const report = tracker.generateHealthReport();
       expect(report.overallHealth).toBe("critical");
       expect(report.regressions).toContain("failing");
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Disk persistence
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe("disk persistence", () => {
+    let testDir: string;
+    let persistPath: string;
+
+    beforeEach(() => {
+      testDir = join(tmpdir(), `trend-test-${randomUUID().slice(0, 8)}`);
+      mkdirSync(testDir, { recursive: true });
+      persistPath = join(testDir, "trends.json");
+    });
+
+    afterEach(() => {
+      try {
+        rmSync(testDir, { recursive: true, force: true });
+      } catch {
+        // cleanup best-effort
+      }
+    });
+
+    it("record persists to file", () => {
+      const t1 = new VerificationTrendTracker({ persistPath });
+      t1.record("accuracy", 85, now - 2 * DAY);
+      t1.record("accuracy", 90, now - 1 * DAY);
+
+      // New instance from same path should have the data
+      const t2 = new VerificationTrendTracker({ persistPath });
+      const trend = t2.getTrend("accuracy");
+      expect(trend.dataPoints).toBe(2);
+      expect(trend.current).toBe(90);
+    });
+
+    it("new instance from same path loads existing data", () => {
+      const t1 = new VerificationTrendTracker({ persistPath });
+      t1.record("completeness", 70, now - 3 * DAY);
+      t1.record("completeness", 75, now - 2 * DAY);
+      t1.record("completeness", 80, now - 1 * DAY);
+
+      const t2 = new VerificationTrendTracker({ persistPath });
+      const trend = t2.getTrend("completeness");
+      expect(trend.dataPoints).toBe(3);
+      expect(trend.trend).toBe("improving");
+    });
+
+    it("generateHealthReport works after restart from disk", () => {
+      const t1 = new VerificationTrendTracker({ persistPath });
+      // Stable category
+      t1.record("quality", 80, now - 3 * DAY);
+      t1.record("quality", 81, now - 2 * DAY);
+      t1.record("quality", 80, now - 1 * DAY);
+
+      const t2 = new VerificationTrendTracker({ persistPath });
+      const report = t2.generateHealthReport();
+      expect(report.overallHealth).toBe("healthy");
+      expect(report.categories).toHaveLength(1);
+      expect(report.categories[0]!.category).toBe("quality");
     });
   });
 });

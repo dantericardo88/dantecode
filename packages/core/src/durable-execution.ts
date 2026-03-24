@@ -195,11 +195,19 @@ export class DurableExecution {
   private loadFromDisk(dir: string): void {
     try {
       if (!existsSync(dir)) return;
-      const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+      const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+      const states: ExecutionState[] = [];
       for (const file of files) {
         const data = readFileSync(join(dir, file), "utf-8");
         const state = JSON.parse(data) as ExecutionState;
-        if (state.checkpointId && !this.checkpoints.has(state.checkpointId)) {
+        if (state.checkpointId) {
+          states.push(state);
+        }
+      }
+      // Sort by createdAt to preserve insertion order across restarts
+      states.sort((a, b) => a.createdAt - b.createdAt);
+      for (const state of states) {
+        if (!this.checkpoints.has(state.checkpointId)) {
           this.checkpoints.set(state.checkpointId, state);
           this.order.push(state.checkpointId);
         }
