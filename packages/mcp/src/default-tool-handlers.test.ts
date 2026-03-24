@@ -140,7 +140,8 @@ describe("createDefaultToolHandlers", () => {
       expect(executions.length).toBeGreaterThanOrEqual(1);
       expect(executions[0]?.kind).toBe("workflow");
     } finally {
-      await rm(projectRoot, { recursive: true, force: true });
+      // Cleanup is best-effort — on Windows, file handles may still be open.
+      await rm(projectRoot, { recursive: true, force: true }).catch(() => {});
     }
   });
 

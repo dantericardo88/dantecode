@@ -49,7 +49,9 @@ vi.mock("@dantecode/core", () => ({
     getResetTimeoutMs: vi.fn().mockReturnValue(60000),
   })),
   LoopDetector: vi.fn().mockImplementation(() => ({
-    recordAction: vi.fn().mockReturnValue({ stuck: false, iterationCount: 1, consecutiveRepeats: 0 }),
+    recordAction: vi
+      .fn()
+      .mockReturnValue({ stuck: false, iterationCount: 1, consecutiveRepeats: 0 }),
     reset: vi.fn(),
   })),
   BackgroundTaskStore: vi.fn().mockImplementation(() => ({
@@ -65,19 +67,40 @@ vi.mock("@dantecode/core", () => ({
     getTask: vi.fn().mockReturnValue(null),
     listTasks: vi.fn().mockReturnValue([]),
     cancel: vi.fn().mockReturnValue(false),
-    getStatusCounts: vi.fn().mockReturnValue({ queued: 0, running: 0, paused: 0, completed: 0, failed: 0, cancelled: 0 }),
+    getStatusCounts: vi
+      .fn()
+      .mockReturnValue({ queued: 0, running: 0, paused: 0, completed: 0, failed: 0, cancelled: 0 }),
     hasWorkFn: vi.fn().mockReturnValue(false),
   })),
   appendAuditEvent: vi.fn(),
   readOrInitializeState: vi.fn().mockResolvedValue({
     model: {
-      default: { provider: "grok", modelId: "grok-3", maxTokens: 4096, temperature: 0.1, contextWindow: 131072, supportsVision: false, supportsToolCalls: false },
+      default: {
+        provider: "grok",
+        modelId: "grok-3",
+        maxTokens: 4096,
+        temperature: 0.1,
+        contextWindow: 131072,
+        supportsVision: false,
+        supportsToolCalls: false,
+      },
       fallback: [],
       taskOverrides: {},
     },
     project: { name: "test", language: "typescript" },
-    pdse: { threshold: 60, hardViolationsAllowed: 0, maxRegenerationAttempts: 3, weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 } },
-    autoforge: { enabled: false, maxIterations: 1, gstackCommands: [], lessonInjectionEnabled: false, abortOnSecurityViolation: false },
+    pdse: {
+      threshold: 60,
+      hardViolationsAllowed: 0,
+      maxRegenerationAttempts: 3,
+      weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 },
+    },
+    autoforge: {
+      enabled: false,
+      maxIterations: 1,
+      gstackCommands: [],
+      lessonInjectionEnabled: false,
+      abortOnSecurityViolation: false,
+    },
   }),
   DurableRunStore: vi.fn().mockImplementation(() => ({
     getLatestWaiting: vi.fn().mockResolvedValue(null),
@@ -168,7 +191,9 @@ vi.mock("@dantecode/danteforge", () => ({
   recordLesson: vi.fn().mockResolvedValue({}),
   recordPreference: vi.fn().mockResolvedValue({}),
   recordSuccessPattern: vi.fn().mockResolvedValue({}),
-  runAntiStubScanner: vi.fn().mockReturnValue({ passed: true, hardViolations: [], softViolations: [] }),
+  runAntiStubScanner: vi
+    .fn()
+    .mockReturnValue({ passed: true, hardViolations: [], softViolations: [] }),
   runConstitutionCheck: vi.fn().mockReturnValue({ passed: true, violations: [] }),
   runLocalPDSEScorer: vi.fn().mockReturnValue({ passedGate: true, overall: 80 }),
 }));
@@ -223,7 +248,8 @@ vi.mock("../../src/tools.js", () => ({
 }));
 
 // Now import the function under test
-import { maybeAutoResumeDurableRunAfterBackgroundTask, type AgentLoopConfig } from "../../src/agent-loop.js";
+import { maybeAutoResumeDurableRunAfterBackgroundTask } from "../../src/background-task-manager.js";
+import type { AgentLoopConfig } from "../../src/agent-loop.js";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------
@@ -319,11 +345,7 @@ describe("maybeAutoResumeDurableRunAfterBackgroundTask", () => {
     expect(result).toBe(true);
     expect(mockRunAgentLoop).toHaveBeenCalledOnce();
 
-    const [prompt, , config] = mockRunAgentLoop.mock.calls[0] as [
-      string,
-      Session,
-      AgentLoopConfig,
-    ];
+    const [prompt, , config] = mockRunAgentLoop.mock.calls[0] as [string, Session, AgentLoopConfig];
     expect(prompt).toBe("continue");
     expect(config.runId).toBe("run-abc123");
     expect(config.resumeFrom).toBe("run-abc123");
