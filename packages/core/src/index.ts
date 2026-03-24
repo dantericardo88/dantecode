@@ -750,3 +750,76 @@ export type {
 } from "./run-report.js";
 export { writeRunReport, reportFileName } from "./run-report-writer.js";
 export type { WriteRunReportOptions } from "./run-report-writer.js";
+
+// ─── Completion Verifier (D-12) ──────────────────────────────────────────────
+
+export { verifyCompletion, deriveExpectations, summarizeVerification } from "./completion-verifier.js";
+export type {
+  CompletionExpectation,
+  CompletionVerification,
+  CompletionVerdict,
+  ConfidenceLevel,
+  CompletionCheckResult,
+  PatternCheckResult,
+} from "./completion-verifier.js";
+
+// ─── Model Adaptation (D-12 / D-12A) ────────────────────────────────────────
+
+export { ModelAdaptationStore } from "./model-adaptation-store.js";
+export type {
+  QuirkClass,
+  QuirkObservation,
+  ModelAdaptationKey,
+  CandidateOverride,
+  ModelAdaptationSnapshot,
+  QuirkKey,
+} from "./model-adaptation-store.js";
+export type { D12ADraftInput, LegacyDraftInput } from "./model-adaptation-store.js";
+export {
+  generateId as generateAdaptationId,
+  migrateLegacyQuirkClass,
+  ALL_QUIRK_KEYS,
+  DEFAULT_EXPERIMENT_CONFIG,
+  DEFAULT_ADAPTATION_CONFIG,
+  VALID_ADAPTATION_MODES,
+  isValidAdaptationMode,
+} from "./model-adaptation-types.js";
+export type {
+  LegacyQuirkClass,
+  OverridePatch,
+  OverrideStatus,
+  WorkflowType,
+  AdaptationMode,
+  AdaptationConfig,
+  ExperimentResult,
+  ExperimentConfig,
+  ExperimentMetrics,
+  RollbackTrigger,
+  PromotionGateResult,
+  AdaptationReportData,
+  AdaptationEvent,
+  AdaptationEventKind,
+  AdaptationLogger,
+} from "./model-adaptation-types.js";
+export { detectQuirks, generateOverride, applyOverrides, observeAndAdapt, promoteOverride } from "./model-adaptation.js";
+export type { QuirkDetectionContext } from "./model-adaptation.js";
+export {
+  ExperimentRateLimiter,
+  runAdaptationExperiment,
+  average as experimentAverage,
+  createFixtureReplayRunner,
+  createDetectionBasedRunner,
+} from "./model-adaptation-experiment.js";
+export type { ExperimentRunOptions } from "./model-adaptation-experiment.js";
+export {
+  evaluatePromotionGate,
+  createRollbackOverride,
+  shouldRollback,
+} from "./model-adaptation-promotion.js";
+export { processNewDrafts, getGlobalAdaptationRateLimiter, checkPromotedOverrides } from "./model-adaptation-pipeline.js";
+export type { PipelineResult, PipelineOptions, RollbackCheckResult } from "./model-adaptation-pipeline.js";
+export {
+  generateAdaptationReport,
+  serializeAdaptationReport,
+  writeAdaptationReport,
+} from "./model-adaptation-report.js";

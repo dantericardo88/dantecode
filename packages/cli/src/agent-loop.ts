@@ -21,6 +21,8 @@ import {
   isWaveComplete,
   globalArtifactStore,
   synthesizeConfidence,
+  observeAndAdapt,
+  applyOverrides,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -331,7 +333,28 @@ async function _runAgentLoopCore(
   let localSandboxBridge: SandboxBridge | null = null;
 
   // Build system prompt
-  const systemPrompt = await buildSystemPrompt(session, config);
+  let systemPrompt = await buildSystemPrompt(session, config);
+
+  // D-12A: Apply model adaptation overrides (only in "active" mode)
+  let adaptationMode = process.env.DANTE_MODEL_ADAPTATION_MODE ?? "observe-only";
+  const adaptationDisabled = process.env.DANTE_DISABLE_MODEL_ADAPTATION === "1";
+  // Validate mode — fall back to observe-only on invalid value
+  if (!adaptationDisabled && !["observe-only", "staged", "active"].includes(adaptationMode)) {
+    process.stderr.write(
+      `[D-12A] WARNING: Invalid DANTE_MODEL_ADAPTATION_MODE="${adaptationMode}". ` +
+      `Valid values: observe-only, staged, active. Defaulting to observe-only.\n`,
+    );
+    adaptationMode = "observe-only";
+  }
+  if (!adaptationDisabled && adaptationMode === "active" && config.replState?.modelAdaptationStore) {
+    // Reload to pick up CLI approve/reject changes between rounds
+    await config.replState.modelAdaptationStore.reload();
+    const modelKey = { provider: config.state.model.default.provider, modelId: config.state.model.default.modelId };
+    const activeOverrides = config.replState.modelAdaptationStore.getActiveOverrides(modelKey);
+    if (activeOverrides.length > 0) {
+      systemPrompt = applyOverrides(systemPrompt, activeOverrides);
+    }
+  }
 
   // Convert session messages to the format expected by the AI SDK
   const messages = session.messages.map((msg) => ({
@@ -636,6 +659,70 @@ async function _runAgentLoopCore(
         const modelScore = router.extractModelComplexityRating(responseText, durablePrompt);
         if (config.verbose && modelScore !== null) {
           process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
+        }
+      }
+
+      // D-12A: Model adaptation — observe quirks (all modes except disabled)
+      if (!adaptationDisabled && config.replState?.modelAdaptationStore) {
+        const modelKey = { provider: config.state.model.default.provider, modelId: config.state.model.default.modelId };
+        const promptType = toolCalls.length > 0
+          ? ("tool-call" as const)
+          : ("implementation" as const);
+        const workflow = config.replState.activeSkill ?? config.replState.pendingExpectedWorkflow ?? "repl";
+        const adaptStore = config.replState.modelAdaptationStore;
+        try {
+          const newDrafts = await observeAndAdapt(adaptStore, responseText, {
+            modelKey,
+            promptType,
+            toolCallsInRound: toolCalls.length,
+            hadToolCalls: toolCalls.length > 0,
+            sessionId: session.id,
+            workflow: workflow as import("@dantecode/core").WorkflowType,
+            commandName: config.replState.activeSkill ?? undefined,
+            promptTemplateVersion: "1.3.0",
+          }, (event) => {
+            if (process.env.DANTECODE_DEBUG) {
+              process.stderr.write(`[D-12A] ${event.kind}${event.reason ? `: ${event.reason}` : ""}\n`);
+            }
+          });
+
+          if (newDrafts.length > 0 && adaptationMode === "staged") {
+            const { processNewDrafts, getGlobalAdaptationRateLimiter } = await import("@dantecode/core");
+            await processNewDrafts(adaptStore, newDrafts, {
+              rateLimiter: getGlobalAdaptationRateLimiter(),
+              logger: (event) => {
+                if (process.env.DANTECODE_DEBUG) {
+                  process.stderr.write(`[D-12A] ${event.kind}${event.quirkKey ? ` [${event.quirkKey}]` : ""}${event.decision ? ` → ${event.decision}` : ""}\n`);
+                }
+              },
+            });
+          }
+        } catch (err) {
+          if (process.env.DANTECODE_DEBUG) {
+            process.stderr.write(`[D-12A] pipeline error: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        }
+
+        // D-12A Gap 2: Periodic rollback check for promoted overrides (active mode only)
+        const rollbackInterval = parseInt(process.env.DANTE_ADAPTATION_ROLLBACK_CHECK_INTERVAL ?? "10", 10) || 10;
+        if (adaptationMode === "active" && roundCounter > 0 && roundCounter % rollbackInterval === 0) {
+          import("@dantecode/core").then(async ({ checkPromotedOverrides, getGlobalAdaptationRateLimiter, detectQuirks }) => {
+            const results = await checkPromotedOverrides(
+              adaptStore,
+              {
+                rateLimiter: getGlobalAdaptationRateLimiter(),
+                logger: (event) => {
+                  if (process.env.DANTECODE_DEBUG) {
+                    process.stderr.write(`[D-12A rollback] ${event.kind} ${event.quirkKey ?? ""} ${event.reason ?? ""}\n`);
+                  }
+                },
+              },
+              (response, context) => detectQuirks(response, { ...context, sessionId: session.id } as Parameters<typeof detectQuirks>[1]),
+            );
+            if (results.length > 0 && process.env.DANTECODE_DEBUG) {
+              process.stderr.write(`[D-12A] rolled back ${results.length} override(s)\n`);
+            }
+          }).catch(() => { /* non-fatal */ });
         }
       }
 
