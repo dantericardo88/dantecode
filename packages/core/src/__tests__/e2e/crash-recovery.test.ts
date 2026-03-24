@@ -1,151 +1,198 @@
-// ============================================================================
-// E2E: Crash Recovery — start -> checkpoint -> simulate crash -> recover -> verify
-// ============================================================================
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { EventSourcedCheckpointer } from "../../checkpointer.js";
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { DurableExecution } from "../../durable-execution.js";
+// ---------------------------------------------------------------------------
+// Test Suite — crash-recovery e2e with real file I/O
+// ---------------------------------------------------------------------------
 
-describe("E2E: Crash Recovery", () => {
-  let exec: DurableExecution;
+describe("Crash recovery — EventSourcedCheckpointer real file I/O", () => {
+  const tmpDirs: string[] = [];
 
-  beforeEach(() => {
-    exec = new DurableExecution();
-  });
+  function makeTmpDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "crash-recovery-e2e-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
 
-  it("recovers execution state after simulated crash", () => {
-    // Step 1: Start task and accumulate state
-    exec.checkpoint({
-      stepNumber: 1,
-      currentTask: "parse input",
-      partialOutput: ["Parsed file A"],
-      memoryState: { parsed: ["a.ts"] },
-      toolCallHistory: [
-        { tool: "Read", timestamp: Date.now(), success: true },
-      ],
-    });
-
-    exec.checkpoint({
-      stepNumber: 2,
-      currentTask: "generate code",
-      partialOutput: ["Parsed file A", "Generated code for A"],
-      memoryState: { parsed: ["a.ts"], generated: ["a.ts"] },
-      toolCallHistory: [
-        { tool: "Read", timestamp: Date.now(), success: true },
-        { tool: "Write", timestamp: Date.now(), success: true },
-      ],
-    });
-
-    // Step 2: Simulate crash — we lose runtime state but checkpoints survive
-    // (In a real scenario, checkpoints would be on disk)
-
-    // Step 3: Recover from last checkpoint
-    const recovered = exec.getLastCheckpoint();
-    expect(recovered).not.toBeNull();
-    expect(recovered!.stepNumber).toBe(2);
-    expect(recovered!.currentTask).toBe("generate code");
-    expect(recovered!.partialOutput).toEqual(["Parsed file A", "Generated code for A"]);
-    expect(recovered!.toolCallHistory).toHaveLength(2);
-  });
-
-  it("recovers from a specific checkpoint ID", () => {
-    const cp1 = exec.checkpoint({
-      stepNumber: 1,
-      currentTask: "step 1",
-      partialOutput: ["output 1"],
-      memoryState: { step: 1 },
-      toolCallHistory: [],
-    });
-
-    exec.checkpoint({
-      stepNumber: 2,
-      currentTask: "step 2 (corrupted)",
-      partialOutput: ["output 1", "corrupted output"],
-      memoryState: { step: 2, error: true },
-      toolCallHistory: [],
-    });
-
-    // Recover from first checkpoint (step 2 was corrupted)
-    const recovered = exec.recover(cp1);
-    expect(recovered).not.toBeNull();
-    expect(recovered!.stepNumber).toBe(1);
-    expect(recovered!.currentTask).toBe("step 1");
-
-    // Verify we can continue from the recovered state
-    const newId = exec.checkpoint({
-      stepNumber: 2,
-      currentTask: "step 2 (retry)",
-      partialOutput: [...recovered!.partialOutput, "corrected output"],
-      memoryState: { step: 2, retried: true },
-      toolCallHistory: recovered!.toolCallHistory,
-    });
-
-    const final = exec.recover(newId);
-    expect(final!.currentTask).toBe("step 2 (retry)");
-    expect(final!.memoryState).toEqual({ step: 2, retried: true });
-  });
-
-  it("checkpoints at configured intervals during execution", () => {
-    const stepsExecuted: number[] = [];
-    const checkpointIds: string[] = [];
-
-    // Simulate 12 steps with checkpoint every 3
-    for (let step = 1; step <= 12; step++) {
-      stepsExecuted.push(step);
-
-      if (exec.shouldCheckpoint(step, 3)) {
-        const id = exec.checkpoint({
-          stepNumber: step,
-          currentTask: `step ${step}`,
-          partialOutput: stepsExecuted.map((s) => `output-${s}`),
-          memoryState: { lastStep: step },
-          toolCallHistory: [],
-        });
-        checkpointIds.push(id);
+  afterEach(() => {
+    for (const dir of tmpDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
       }
     }
-
-    // Should have 4 checkpoints (at steps 3, 6, 9, 12)
-    expect(checkpointIds).toHaveLength(4);
-    expect(exec.size()).toBe(4);
-
-    // Last checkpoint should have all 12 outputs
-    const last = exec.getLastCheckpoint();
-    expect(last!.stepNumber).toBe(12);
-    expect(last!.partialOutput).toHaveLength(12);
+    tmpDirs.length = 0;
   });
 
-  it("cleans up old checkpoints to prevent memory leaks", () => {
-    const realNow = Date.now;
-    const baseTime = 1_700_000_000_000;
+  it("creates checkpoint files on disk", async () => {
+    const persistDir = makeTmpDir();
+    const checkpointer = new EventSourcedCheckpointer("unused", "session-1", {
+      baseDir: persistDir,
+    });
 
-    // Create 5 checkpoints at different times
-    for (let i = 0; i < 5; i++) {
-      Date.now = () => baseTime + i * 10_000; // 10 seconds apart
-      exec.checkpoint({
-        stepNumber: i + 1,
-        currentTask: `task-${i + 1}`,
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
+    await checkpointer.put(
+      { step: "init", data: { foo: "bar" } },
+      { source: "input", step: 0, triggerCommand: "/test" },
+    );
+
+    // Verify files exist on disk
+    const sessionDir = join(persistDir, "session-1");
+    expect(existsSync(sessionDir)).toBe(true);
+
+    const baseStatePath = join(sessionDir, "base_state.json");
+    expect(existsSync(baseStatePath)).toBe(true);
+
+    // Verify base_state.json contains valid JSON
+    const raw = readFileSync(baseStatePath, "utf-8");
+    const parsed = JSON.parse(raw) as { checkpoint: { channelValues: Record<string, unknown> } };
+    expect(parsed.checkpoint.channelValues.step).toBe("init");
+    expect(parsed.checkpoint.channelValues.data).toEqual({ foo: "bar" });
+  });
+
+  it("event files accumulate in the events/ directory", async () => {
+    const persistDir = makeTmpDir();
+    const checkpointer = new EventSourcedCheckpointer("unused", "session-2", {
+      baseDir: persistDir,
+    });
+
+    await checkpointer.put(
+      { status: "running" },
+      { source: "input", step: 0, triggerCommand: "/test" },
+    );
+
+    // Add incremental writes
+    await checkpointer.putWrite({
+      taskId: "task-1",
+      channel: "progress",
+      value: 25,
+      timestamp: new Date().toISOString(),
+    });
+    await checkpointer.putWrite({
+      taskId: "task-2",
+      channel: "files",
+      value: ["a.ts", "b.ts"],
+      timestamp: new Date().toISOString(),
+    });
+
+    const eventsDir = join(persistDir, "session-2", "events");
+    expect(existsSync(eventsDir)).toBe(true);
+
+    const eventFiles = readdirSync(eventsDir).filter(
+      (f) => f.startsWith("event-") && f.endsWith(".json"),
+    );
+    // 1 checkpoint event + 2 write events = 3
+    expect(eventFiles.length).toBe(3);
+  });
+
+  it("new instance recovers state from disk (simulates restart)", async () => {
+    const persistDir = makeTmpDir();
+    const sessionId = "session-recover";
+
+    // First instance: create checkpoint + writes
+    const checkpointer1 = new EventSourcedCheckpointer("unused", sessionId, {
+      baseDir: persistDir,
+    });
+
+    await checkpointer1.put(
+      { status: "running", progress: 0 },
+      { source: "input", step: 0, triggerCommand: "/autoforge" },
+    );
+
+    await checkpointer1.putWrite({
+      taskId: "task-a",
+      channel: "progress",
+      value: 50,
+      timestamp: new Date().toISOString(),
+    });
+    await checkpointer1.putWrite({
+      taskId: "task-b",
+      channel: "lastFile",
+      value: "src/index.ts",
+      timestamp: new Date().toISOString(),
+    });
+
+    // Simulate crash — throw away the first instance (no explicit shutdown)
+    // Second instance: resume from disk
+    const checkpointer2 = new EventSourcedCheckpointer("unused", sessionId, {
+      baseDir: persistDir,
+    });
+
+    const resumed = await checkpointer2.resume();
+    expect(resumed).toBeGreaterThan(0);
+
+    const tuple = await checkpointer2.getTuple();
+    expect(tuple).not.toBeNull();
+    expect(tuple!.checkpoint.channelValues.status).toBe("running");
+    expect(tuple!.pendingWrites).toHaveLength(2);
+    expect(tuple!.pendingWrites[0]!.channel).toBe("progress");
+    expect(tuple!.pendingWrites[0]!.value).toBe(50);
+    expect(tuple!.pendingWrites[1]!.channel).toBe("lastFile");
+    expect(tuple!.pendingWrites[1]!.value).toBe("src/index.ts");
+  });
+
+  it("compaction merges writes into base state and clears event log", async () => {
+    const persistDir = makeTmpDir();
+    const sessionId = "session-compact";
+
+    const checkpointer = new EventSourcedCheckpointer("unused", sessionId, {
+      baseDir: persistDir,
+      maxEventsBeforeCompaction: 5, // low threshold for testing
+    });
+
+    await checkpointer.put(
+      { counter: 0 },
+      { source: "input", step: 0, triggerCommand: "/test" },
+    );
+
+    // Add exactly 4 writes to trigger compaction at maxEvents=5.
+    // put() wrote 1 event (index 0), so writes 1-4 fill indices 1-4.
+    // Write 4 pushes nextEventIndex to 5 >= maxEvents, triggering compact().
+    for (let i = 1; i <= 4; i++) {
+      await checkpointer.putWrite({
+        taskId: `task-${i}`,
+        channel: `channel-${i}`,
+        value: i * 10,
+        timestamp: new Date().toISOString(),
       });
     }
 
-    expect(exec.size()).toBe(5);
+    // After compaction triggered by 4th write, event log should be cleared
+    const eventsDir = join(persistDir, sessionId, "events");
+    const eventFiles = readdirSync(eventsDir).filter(
+      (f) => f.startsWith("event-") && f.endsWith(".json"),
+    );
+    expect(eventFiles.length).toBe(0);
 
-    // Cleanup checkpoints older than 25 seconds (from perspective of last checkpoint)
-    Date.now = () => baseTime + 40_000;
-    const deleted = exec.cleanup(25_000);
+    // Compacted values should be merged into base_state.json
+    const baseStatePath = join(persistDir, sessionId, "base_state.json");
+    const raw = readFileSync(baseStatePath, "utf-8");
+    const parsed = JSON.parse(raw) as { checkpoint: { channelValues: Record<string, unknown> } };
 
-    Date.now = realNow;
+    expect(parsed.checkpoint.channelValues["channel-1"]).toBe(10);
+    expect(parsed.checkpoint.channelValues["channel-4"]).toBe(40);
+  });
 
-    // Checkpoints at 0, 10000 should be deleted (age > 25000 from 40000)
-    // Checkpoints at 20000, 30000, 40000 should survive
-    expect(deleted).toBe(2);
-    expect(exec.size()).toBe(3);
+  it("getTuple returns null for non-existent session", async () => {
+    const persistDir = makeTmpDir();
+    const checkpointer = new EventSourcedCheckpointer("unused", "does-not-exist", {
+      baseDir: persistDir,
+    });
 
-    // Last checkpoint should still be accessible
-    const last = exec.getLastCheckpoint();
-    expect(last).not.toBeNull();
-    expect(last!.currentTask).toBe("task-5");
+    const tuple = await checkpointer.getTuple();
+    expect(tuple).toBeNull();
+  });
+
+  it("resume returns 0 for non-existent session", async () => {
+    const persistDir = makeTmpDir();
+    const checkpointer = new EventSourcedCheckpointer("unused", "no-session", {
+      baseDir: persistDir,
+    });
+
+    const count = await checkpointer.resume();
+    expect(count).toBe(0);
   });
 });

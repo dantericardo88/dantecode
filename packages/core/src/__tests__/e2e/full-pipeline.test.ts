@@ -1,114 +1,278 @@
-// ============================================================================
-// E2E: Full Pipeline — init config -> run task -> verify output -> check audit
-// ============================================================================
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  RunReportAccumulator,
+  serializeRunReportToMarkdown,
+  estimateRunCost,
+  computeRunDuration,
+  type RunReport,
+} from "../../run-report.js";
+import { EventSourcedCheckpointer } from "../../checkpointer.js";
+import { scorePdseMetrics, type VerificationMetricScore } from "../../pdse-scorer.js";
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { TaskComplexityRouter } from "../../task-complexity-router.js";
-import { VerificationTrendTracker } from "../../verification-trend-tracker.js";
-import type { ModelOption, TaskSignals } from "../../task-complexity-router.js";
+// ---------------------------------------------------------------------------
+// Test Suite — full pipeline e2e with real file I/O
+// ---------------------------------------------------------------------------
 
-describe("E2E: Full Pipeline", () => {
-  let router: TaskComplexityRouter;
-  let tracker: VerificationTrendTracker;
+describe("Full pipeline — RunReport + Checkpointer + PDSE integration", () => {
+  const tmpDirs: string[] = [];
 
-  beforeEach(() => {
-    router = new TaskComplexityRouter();
-    tracker = new VerificationTrendTracker();
+  function makeTmpDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), "full-pipeline-e2e-"));
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  afterEach(() => {
+    for (const dir of tmpDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    }
+    tmpDirs.length = 0;
   });
 
-  it("routes a task, records verification, and checks health", () => {
-    // Step 1: Configure models
-    const models: ModelOption[] = [
-      { modelId: "grok-3-mini", provider: "grok", tier: "simple", costPerToken: 0.3 },
-      { modelId: "grok-3", provider: "grok", tier: "standard", costPerToken: 3.0 },
-      { modelId: "claude-opus-4", provider: "anthropic", tier: "complex", costPerToken: 15.0 },
+  it("RunReportAccumulator builds a complete report and serializes to markdown", () => {
+    const acc = new RunReportAccumulator({
+      project: "test-project",
+      command: "/autoforge PRD-001",
+      model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      dantecodeVersion: "0.9.0",
+    });
+
+    // Begin first entry
+    acc.beginEntry("PRD-001: Feature X", "prds/prd-001.md");
+    acc.recordFilesCreated([
+      { path: "src/feature-x.ts", lines: 120 },
+      { path: "src/feature-x.test.ts", lines: 45 },
+    ]);
+    acc.recordFilesModified([
+      { path: "src/index.ts", added: 3, removed: 0 },
+    ]);
+    acc.recordTests({ created: 5, passing: 5, failing: 0 });
+    acc.recordVerification({
+      antiStub: { passed: true, violations: 0, details: [] },
+      constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+      pdseScore: 92,
+      pdseThreshold: 85,
+      regenerationAttempts: 0,
+      maxAttempts: 3,
+    });
+    acc.recordTokenUsage(50000, 8000);
+    acc.completeEntry({
+      status: "complete",
+      summary: "Implemented Feature X with full test coverage",
+    });
+
+    // Begin second entry (failed)
+    acc.beginEntry("PRD-002: Feature Y", "prds/prd-002.md");
+    acc.recordTokenUsage(10000, 2000);
+    acc.completeEntry({
+      status: "failed",
+      summary: "Could not implement Feature Y",
+      failureReason: "TypeScript compiler errors",
+      actionNeeded: "Fix type imports in src/feature-y.ts",
+    });
+
+    // Add manifest
+    acc.addToManifest([
+      { action: "created", path: "src/feature-x.ts", lines: 120 },
+      { action: "created", path: "src/feature-x.test.ts", lines: 45 },
+      { action: "modified", path: "src/index.ts", diff: "+3 -0" },
+    ]);
+
+    const report = acc.finalize();
+
+    // Verify report structure
+    expect(report.entries).toHaveLength(2);
+    expect(report.entries[0]!.status).toBe("complete");
+    expect(report.entries[1]!.status).toBe("failed");
+    expect(report.tokenUsage.input).toBe(60000);
+    expect(report.tokenUsage.output).toBe(10000);
+    expect(report.costEstimate).toBeGreaterThan(0);
+    expect(report.filesManifest).toHaveLength(3);
+
+    // Serialize and verify markdown output
+    const md = serializeRunReportToMarkdown(report);
+    expect(md).toContain("# DanteCode Run Report");
+    expect(md).toContain("test-project");
+    expect(md).toContain("PRD-001: Feature X");
+    expect(md).toContain("COMPLETE");
+    expect(md).toContain("PRD-002: Feature Y");
+    expect(md).toContain("FAILED");
+    expect(md).toContain("TypeScript compiler errors");
+
+    // Verbose mode includes more detail
+    const mdVerbose = serializeRunReportToMarkdown(report, true);
+    expect(mdVerbose).toContain("Anti-stub");
+    expect(mdVerbose).toContain("Constitution");
+    expect(mdVerbose).toContain("PDSE");
+  });
+
+  it("report can be persisted as JSON and re-read from disk", () => {
+    const persistDir = makeTmpDir();
+
+    const acc = new RunReportAccumulator({
+      project: "persist-test",
+      command: "/party",
+      model: { provider: "anthropic", modelId: "claude-opus-4-6" },
+      dantecodeVersion: "1.0.0",
+    });
+
+    acc.beginEntry("PRD-A", "a.md");
+    acc.recordTests({ created: 3, passing: 3, failing: 0 });
+    acc.completeEntry({ status: "complete", summary: "Done" });
+
+    const report = acc.finalize();
+
+    // Write to disk
+    const reportPath = join(persistDir, "run-report.json");
+    writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+
+    // Read back
+    const raw = readFileSync(reportPath, "utf-8");
+    const loaded = JSON.parse(raw) as RunReport;
+
+    expect(loaded.project).toBe("persist-test");
+    expect(loaded.entries).toHaveLength(1);
+    expect(loaded.entries[0]!.prdName).toBe("PRD-A");
+    expect(loaded.entries[0]!.tests.passing).toBe(3);
+  });
+
+  it("PDSE scores feed into RunReport verification data", () => {
+    const metrics: VerificationMetricScore[] = [
+      { name: "faithfulness", score: 0.95, passed: true, reason: "ok" },
+      { name: "correctness", score: 0.9, passed: true, reason: "ok" },
+      { name: "hallucination", score: 0.85, passed: true, reason: "ok" },
+      { name: "completeness", score: 0.92, passed: true, reason: "ok" },
+      { name: "safety", score: 1.0, passed: true, reason: "ok" },
     ];
 
-    // Step 2: Route task
-    const signals: TaskSignals = {
-      tokenCount: 200,
-      fileCount: 2,
-      reasoningDepth: 30,
-      securitySensitivity: 10,
-      hasCodeGeneration: true,
-      hasMultiFileEdit: false,
-    };
+    const pdseResult = scorePdseMetrics(metrics);
+    expect(pdseResult.overallScore).toBeGreaterThan(0.85);
+    expect(pdseResult.passedGate).toBe(true);
 
-    const { model, decision } = router.routeTask("pipeline-test-1", signals, models);
-    expect(model).toBeDefined();
-    expect(decision.tier).toBeDefined();
+    // Use in report
+    const acc = new RunReportAccumulator({
+      project: "pdse-integration",
+      command: "/verify",
+      model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      dantecodeVersion: "0.9.0",
+    });
 
-    // Step 3: Record verification score
-    tracker.record("correctness", 85);
-    tracker.record("completeness", 90);
+    acc.beginEntry("Feature-Z", "z.md");
+    acc.recordVerification({
+      antiStub: { passed: true, violations: 0, details: [] },
+      constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+      pdseScore: Math.round(pdseResult.overallScore * 100),
+      pdseThreshold: 85,
+      regenerationAttempts: 0,
+      maxAttempts: 3,
+    });
+    acc.completeEntry({ status: "complete", summary: "Verified" });
 
-    // Step 4: Check health
-    const health = tracker.generateHealthReport();
-    expect(health.overallHealth).toBe("healthy");
-    expect(health.categories.length).toBe(2);
+    const report = acc.finalize();
+    expect(report.entries[0]!.verification.pdseScore).toBeGreaterThanOrEqual(85);
   });
 
-  it("detects regression in pipeline output quality", () => {
-    const now = Date.now();
-    const DAY = 86_400_000;
+  it("checkpointer + report accumulator simulate a full session lifecycle", async () => {
+    const persistDir = makeTmpDir();
+    const sessionId = "pipeline-session";
 
-    // Record declining scores
-    tracker.record("correctness", 95, now - 6 * DAY);
-    tracker.record("correctness", 92, now - 4 * DAY);
-    tracker.record("correctness", 88, now - 2 * DAY);
-    tracker.record("correctness", 75, now); // regression
+    // Phase 1: Init checkpoint
+    const checkpointer = new EventSourcedCheckpointer("unused", sessionId, {
+      baseDir: persistDir,
+    });
 
-    const regressed = tracker.detectRegression("correctness", 5);
-    expect(regressed).toBe(true);
+    await checkpointer.put(
+      { phase: "started", prdCount: 2 },
+      { source: "input", step: 0, triggerCommand: "/party prds/a.md prds/b.md" },
+    );
 
-    const health = tracker.generateHealthReport();
-    expect(health.regressions).toContain("correctness");
+    // Phase 2: Build report while checkpointing progress
+    const acc = new RunReportAccumulator({
+      project: "lifecycle-test",
+      command: "/party",
+      model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      dantecodeVersion: "0.9.0",
+    });
+
+    acc.beginEntry("PRD-A", "a.md");
+    acc.recordFilesCreated([{ path: "src/a.ts", lines: 50 }]);
+    acc.completeEntry({ status: "complete", summary: "A done" });
+
+    await checkpointer.putWrite({
+      taskId: "prd-a",
+      channel: "prd-a-status",
+      value: "complete",
+      timestamp: new Date().toISOString(),
+    });
+
+    acc.beginEntry("PRD-B", "b.md");
+    acc.completeEntry({
+      status: "failed",
+      summary: "B failed",
+      failureReason: "build error",
+    });
+
+    await checkpointer.putWrite({
+      taskId: "prd-b",
+      channel: "prd-b-status",
+      value: "failed",
+      timestamp: new Date().toISOString(),
+    });
+
+    // Finalize
+    const report = acc.finalize();
+    const reportPath = join(persistDir, "final-report.json");
+    writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+
+    // Phase 3: Verify everything on disk
+    const baseStatePath = join(persistDir, sessionId, "base_state.json");
+    expect(existsSync(baseStatePath)).toBe(true);
+    expect(existsSync(reportPath)).toBe(true);
+
+    const loadedReport = JSON.parse(readFileSync(reportPath, "utf-8")) as RunReport;
+    expect(loadedReport.entries).toHaveLength(2);
+    expect(loadedReport.entries[0]!.status).toBe("complete");
+    expect(loadedReport.entries[1]!.status).toBe("failed");
+
+    // Phase 4: New checkpointer instance can recover
+    const checkpointer2 = new EventSourcedCheckpointer("unused", sessionId, {
+      baseDir: persistDir,
+    });
+    const eventsReplayed = await checkpointer2.resume();
+    expect(eventsReplayed).toBeGreaterThan(0);
+
+    const tuple = await checkpointer2.getTuple();
+    expect(tuple).not.toBeNull();
+    expect(tuple!.pendingWrites).toHaveLength(2);
+    expect(tuple!.pendingWrites[0]!.value).toBe("complete");
+    expect(tuple!.pendingWrites[1]!.value).toBe("failed");
   });
 
-  it("routes and logs multiple tasks with different complexity", () => {
-    const models: ModelOption[] = [
-      { modelId: "mini", provider: "grok", tier: "simple", costPerToken: 0.3 },
-      { modelId: "standard", provider: "grok", tier: "standard", costPerToken: 3.0 },
-      { modelId: "opus", provider: "anthropic", tier: "complex", costPerToken: 15.0 },
-    ];
+  it("cost estimation produces correct values for known models", () => {
+    // claude-sonnet-4-6: $3/M input, $15/M output
+    const cost = estimateRunCost("claude-sonnet-4-6", 1_000_000, 100_000);
+    expect(cost).toBeCloseTo(3 + 1.5, 2); // $3 input + $1.5 output
 
-    // Simple task
-    const simple = router.routeTask("t1", {
-      tokenCount: 10, fileCount: 1, reasoningDepth: 0,
-      securitySensitivity: 0, hasCodeGeneration: false, hasMultiFileEdit: false,
-    }, models);
-    expect(simple.decision.tier).toBe("simple");
-
-    // Complex task
-    const complex = router.routeTask("t2", {
-      tokenCount: 5000, fileCount: 20, reasoningDepth: 90,
-      securitySensitivity: 80, hasCodeGeneration: true, hasMultiFileEdit: true,
-    }, models);
-    expect(complex.decision.tier).toBe("complex");
-
-    expect(router.getDecisions()).toHaveLength(2);
+    // claude-opus-4-6: $15/M input, $75/M output
+    const costOpus = estimateRunCost("claude-opus-4-6", 500_000, 50_000);
+    expect(costOpus).toBeCloseTo(7.5 + 3.75, 2); // $7.5 input + $3.75 output
   });
 
-  it("end-to-end: route -> verify -> health report flow", () => {
-    const models: ModelOption[] = [
-      { modelId: "mid", provider: "grok", tier: "standard", costPerToken: 3.0 },
-    ];
+  it("duration formatting handles various time ranges", () => {
+    const now = new Date();
+    const seconds30 = new Date(now.getTime() + 30_000);
+    const minutes5 = new Date(now.getTime() + 5 * 60_000 + 12_000);
+    const hours2 = new Date(now.getTime() + 2 * 3600_000 + 15 * 60_000);
 
-    // Route
-    const { decision } = router.routeTask("e2e-1", {
-      tokenCount: 300, fileCount: 3, reasoningDepth: 40,
-      securitySensitivity: 20, hasCodeGeneration: true, hasMultiFileEdit: false,
-    }, models);
-
-    // Verify (simulate passing scores)
-    tracker.record("correctness", 92);
-    tracker.record("completeness", 88);
-    tracker.record("clarity", 95);
-
-    // Health check
-    const health = tracker.generateHealthReport();
-    expect(health.overallHealth).toBe("healthy");
-    expect(health.regressions).toHaveLength(0);
-    expect(decision.selectedModel).toBe("mid");
+    expect(computeRunDuration(now.toISOString(), seconds30.toISOString())).toBe("30s");
+    expect(computeRunDuration(now.toISOString(), minutes5.toISOString())).toBe("5m 12s");
+    expect(computeRunDuration(now.toISOString(), hours2.toISOString())).toBe("2h 15m");
   });
 });
