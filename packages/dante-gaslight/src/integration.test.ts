@@ -26,8 +26,8 @@ describe("DanteGaslightIntegration", () => {
     rmSync(testDir, { recursive: true, force: true });
   });
 
-  it("starts disabled by default", () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir });
+  it("starts disabled when configured as such", () => {
+    const engine = new DanteGaslightIntegration({ enabled: false }, { cwd: testDir });
     expect(engine.getConfig().enabled).toBe(false);
   });
 
@@ -45,7 +45,7 @@ describe("DanteGaslightIntegration", () => {
   });
 
   it("maybeGaslight returns null when disabled", async () => {
-    const engine = new DanteGaslightIntegration({}, { cwd: testDir });
+    const engine = new DanteGaslightIntegration({ enabled: false }, { cwd: testDir });
     const result = await engine.maybeGaslight({ message: "go deeper", draft: "Some draft." });
     expect(result).toBeNull();
   });

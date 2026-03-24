@@ -2,7 +2,7 @@
 // @dantecode/cli — Command Docs Generator Tests
 // ============================================================================
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { CommandDocsGenerator, type DocsSlashCommand } from "./command-docs-generator.js";
 
 const SAMPLE_COMMANDS: DocsSlashCommand[] = [

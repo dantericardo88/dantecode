@@ -9,6 +9,11 @@ import {
 import { DEFAULT_GASLIGHT_CONFIG } from "./types.js";
 import type { GaslightConfig } from "./types.js";
 
+const disabledConfig: GaslightConfig = {
+  ...DEFAULT_GASLIGHT_CONFIG,
+  enabled: false,
+};
+
 const enabledConfig: GaslightConfig = {
   ...DEFAULT_GASLIGHT_CONFIG,
   enabled: true,
@@ -18,7 +23,7 @@ const enabledConfig: GaslightConfig = {
 
 describe("detectExplicitTrigger", () => {
   it("returns null when disabled", () => {
-    expect(detectExplicitTrigger("go deeper", DEFAULT_GASLIGHT_CONFIG)).toBeNull();
+    expect(detectExplicitTrigger("go deeper", disabledConfig)).toBeNull();
   });
 
   it("detects 'go deeper'", () => {
@@ -49,7 +54,7 @@ describe("detectExplicitTrigger", () => {
 
 describe("detectVerificationTrigger", () => {
   it("returns null when disabled", () => {
-    expect(detectVerificationTrigger(0.3, DEFAULT_GASLIGHT_CONFIG)).toBeNull();
+    expect(detectVerificationTrigger(0.3, disabledConfig)).toBeNull();
   });
 
   it("returns null when autoTriggerThreshold is 0", () => {
@@ -113,6 +118,6 @@ describe("detectTrigger (unified)", () => {
   });
 
   it("returns null when disabled", () => {
-    expect(detectTrigger({ message: "go deeper", config: DEFAULT_GASLIGHT_CONFIG })).toBeNull();
+    expect(detectTrigger({ message: "go deeper", config: disabledConfig })).toBeNull();
   });
 });
