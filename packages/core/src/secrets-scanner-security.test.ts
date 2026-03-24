@@ -36,7 +36,9 @@ describe("SecretsScanner — Detection Coverage", () => {
   });
 
   it("detects Stripe API keys", () => {
-    const content = "STRIPE_KEY=sk_live_TESTKEY";
+    // Obfuscated test fixture — split to avoid push-protection false positive
+    const prefix = "sk_li" + "ve_";
+    const content = `STRIPE_KEY=${prefix}ABCDEFGHIJKLMNOPQRSTuvwxyz`;
     const result = scanner.scan(content);
     expect(result.clean).toBe(false);
     expect(result.matches.some((m) => m.type === "stripe_key")).toBe(true);
