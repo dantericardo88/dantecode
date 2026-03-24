@@ -24,16 +24,14 @@ vi.mock("./agent-loop.js", () => ({
 }));
 
 vi.mock("@dantecode/danteforge", () => ({
-  runLocalPDSEScorer: vi
-    .fn()
-    .mockReturnValue({
-      overall: 92,
-      passedGate: true,
-      completeness: 90,
-      correctness: 94,
-      clarity: 90,
-      consistency: 92,
-    }),
+  runLocalPDSEScorer: vi.fn().mockReturnValue({
+    overall: 92,
+    passedGate: true,
+    completeness: 90,
+    correctness: 94,
+    clarity: 90,
+    consistency: 92,
+  }),
   runAntiStubScanner: vi.fn().mockReturnValue({ passed: true, hardViolations: [] }),
   runConstitutionCheck: vi.fn().mockReturnValue({ passed: true, violations: [] }),
   runGStack: vi.fn().mockReturnValue({ results: [] }),

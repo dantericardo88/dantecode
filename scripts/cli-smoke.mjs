@@ -80,12 +80,7 @@ test("--help shows product description", () => {
 
 // ── Step 5: Known commands appear in help ───────────────────────────────
 
-const expectedCommands = [
-  "init",
-  "config",
-  "skills",
-  "council",
-];
+const expectedCommands = ["init", "config", "skills", "council"];
 
 for (const cmd of expectedCommands) {
   test(`Command "${cmd}" appears in help output`, () => {
@@ -118,8 +113,8 @@ for (const r of results) {
   console.log(`  [${icon}] ${r.name}${r.error ? ` (${r.error})` : ""}`);
 }
 
-const passed = results.filter(r => r.passed).length;
-const failed = results.filter(r => !r.passed).length;
+const passed = results.filter((r) => r.passed).length;
+const failed = results.filter((r) => !r.passed).length;
 
 console.log(`\nPassed: ${passed}  Failed: ${failed}`);
 
