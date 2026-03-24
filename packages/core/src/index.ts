@@ -150,6 +150,16 @@ export type {
   PlanExecutorOptions,
 } from "./plan-executor.js";
 
+// ─── Plan Store ─────────────────────────────────────────────────────────────
+
+export { PlanStore } from "./plan-store.js";
+export type { StoredPlan, PlanStatus } from "./plan-store.js";
+
+// ─── Plan Renderer ──────────────────────────────────────────────────────────
+
+export { renderPlan, renderPlanStep, renderPlanSummary, complexityBadge } from "./plan-renderer.js";
+export type { PlanRenderOptions } from "./plan-renderer.js";
+
 // ─── Browser Agent ──────────────────────────────────────────────────────────
 
 export { BrowserAgent } from "./browser-agent.js";
@@ -365,6 +375,8 @@ export {
   recordWaveFailure,
   buildWavePrompt,
   isWaveComplete,
+  isValidWaveCompletion,
+  deriveWaveExpectations,
   CLAUDE_WORKFLOW_MODE,
   WAVE_COMPLETE_RE,
   buildBridgeWarningPreamble,
@@ -762,6 +774,21 @@ export type {
   CompletionCheckResult,
   PatternCheckResult,
 } from "./completion-verifier.js";
+
+// ─── Context Budget ─────────────────────────────────────────────────────────
+
+export {
+  createContextBudget,
+  checkBudget,
+  shouldTruncateToolOutput,
+  getBudgetTier,
+} from "./context-budget.js";
+export type {
+  ContextBudget,
+  ContextBudgetState,
+  BudgetTier,
+  TruncationAdvice,
+} from "./context-budget.js";
 
 // ─── Model Adaptation (D-12 / D-12A) ────────────────────────────────────────
 

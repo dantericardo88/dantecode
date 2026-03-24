@@ -300,6 +300,9 @@ vi.mock("@dantecode/core", () => {
       },
     ),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
+    isValidWaveCompletion: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
+    verifyCompletion: vi.fn(async () => ({ verdict: "complete", confidence: 1, passed: [], failed: [], summary: "ok" })),
+    deriveWaveExpectations: vi.fn(() => ({ expectedFiles: [] })),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
     // Approach memory + prompt cache mocks
     ApproachMemory: class MockApproachMemory {
@@ -2850,19 +2853,19 @@ describe("Universal skill completion (skillActive)", () => {
       maxRetries: 2,
     };
 
-    // Wave 1: model does work then signals completion
+    // Wave 1: model does work then signals completion (Write to satisfy meaningful work guard)
     mockGenerateText.mockResolvedValueOnce({
-      text: 'Reading files.\n<tool_use>\n{"name":"Read","input":{"file_path":"src/index.ts"}}\n</tool_use>',
+      text: 'Writing file.\n<tool_use>\n{"name":"Write","input":{"file_path":"src/index.ts","content":"hello"}}\n</tool_use>',
       usage: { totalTokens: 50 },
     });
-    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file written", isError: false });
 
     // Wave 1 complete signal (with tool call to verify it's mid-pipeline)
     mockGenerateText.mockResolvedValueOnce({
-      text: 'Research done. [WAVE COMPLETE]\n<tool_use>\n{"name":"Read","input":{"file_path":"src/utils.ts"}}\n</tool_use>',
+      text: 'Research done. [WAVE COMPLETE]\n<tool_use>\n{"name":"Write","input":{"file_path":"src/utils.ts","content":"utils"}}\n</tool_use>',
       usage: { totalTokens: 50 },
     });
-    mockExecuteTool.mockResolvedValueOnce({ content: "utils content", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file written", isError: false });
 
     // Wave 2: model works on next wave
     mockGenerateText.mockResolvedValueOnce({

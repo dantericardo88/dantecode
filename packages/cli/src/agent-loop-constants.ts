@@ -129,3 +129,17 @@ export const CONFABULATION_WARNING =
   "\n3. Only AFTER real file changes: run Bash for typecheck/lint/test" +
   "\n\nDo NOT claim 'typecheck PASS', 'committed', 'pushed', or 'PDSE score' unless " +
   "you actually ran those commands with the Bash tool and got real output.";
+
+/** Plan mode instruction: forces the model to output a structured plan. */
+export const PLAN_MODE_INSTRUCTION =
+  "You are in PLAN MODE. You must create a detailed execution plan BEFORE making any changes.\n\n" +
+  "Output a numbered plan with the following format for each step:\n" +
+  "1. Description of what to do\n" +
+  "   Files: path/to/file1.ts, path/to/file2.ts\n" +
+  "   Verify: npm test (or other verification command)\n" +
+  "   Depends: (step numbers this depends on, if any)\n\n" +
+  "Rules:\n" +
+  "- You may use Read, Glob, Grep, WebSearch, and WebFetch to explore the codebase\n" +
+  "- You may NOT use Write, Edit, Bash, GitCommit, or any tool that modifies files\n" +
+  "- After generating your plan, summarize it clearly for user approval\n" +
+  "- Wait for the user to approve before proceeding with any implementation";

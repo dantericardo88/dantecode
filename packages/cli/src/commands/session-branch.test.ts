@@ -145,6 +145,13 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     gaslight: null,
     memoryOrchestrator: null,
     verificationTrendTracker: null,
+    planMode: false,
+    currentPlan: null,
+    planApproved: false,
+    currentPlanId: null,
+    planExecutionInProgress: false,
+    planExecutionResult: null,
+    approvalMode: "default",
     reasoningOverrideSession: false,
     theme: "default",
   };

@@ -126,6 +126,13 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        planMode: false,
+        currentPlan: null,
+        planApproved: false,
+        currentPlanId: null,
+        planExecutionInProgress: false,
+        planExecutionResult: null,
+    approvalMode: "default",
         theme: "default",
       };
 
@@ -178,6 +185,13 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        planMode: false,
+        currentPlan: null,
+        planApproved: false,
+        currentPlanId: null,
+        planExecutionInProgress: false,
+        planExecutionResult: null,
+    approvalMode: "default",
         theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
@@ -233,6 +247,13 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        planMode: false,
+        currentPlan: null,
+        planApproved: false,
+        currentPlanId: null,
+        planExecutionInProgress: false,
+        planExecutionResult: null,
+    approvalMode: "default",
         theme: "default",
       };
 

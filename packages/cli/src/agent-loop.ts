@@ -18,12 +18,14 @@ import {
   runStartupHealthCheck,
   getCurrentWave,
   advanceWave,
-  isWaveComplete,
   globalArtifactStore,
   synthesizeConfidence,
   observeAndAdapt,
   applyOverrides,
   TaskComplexityRouter,
+  verifyCompletion,
+  deriveWaveExpectations,
+  isValidWaveCompletion,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -190,6 +192,11 @@ export interface AgentLoopConfig {
   eventEmitter?: import("./serve/session-emitter.js").SessionEventEmitter;
   /** Session ID routing key for eventEmitter. Required when eventEmitter is set. */
   eventSessionId?: string;
+  /**
+   * When true, write tools are actively gated (plan mode is in effect but
+   * the plan has not yet been approved). Set by repl.ts from ReplState.
+   */
+  planModeActive?: boolean;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -407,6 +414,9 @@ async function _runAgentLoopCore(
   // Anti-confabulation guards
   let consecutiveEmptyRounds = 0;
   let confabulationNudges = 0;
+  // Wave deliverables verification: max retries per wave before force-advancing
+  const MAX_WAVE_VERIFY_RETRIES = 2;
+  let waveVerifyRetries = 0;
   const isPipelineWorkflow =
     config.skillActive ||
     EXECUTION_WORKFLOW_PATTERN.test(durablePrompt) ||
@@ -464,11 +474,15 @@ async function _runAgentLoopCore(
   let consecutiveSameSignatureFailures = 0;
   let lastPivotErrorSignature = "";
 
+  // Per-tool error tracking: prevents infinite retries of failing tools
+  const toolErrorCounts = new Map<string, number>();
+
   // ---- Feature: Progress tracking ----
   // Simple counters emitted to the session periodically
   let toolCallsThisTurn = 0;
   let filesModified = 0;
   let testsRun = 0;
+  let bashSucceeded = 0;
   let roundCounter = 0;
   let lastMajorEditGatePassed = true;
   const readTracker = new Map<string, string>();
@@ -977,14 +991,53 @@ async function _runAgentLoopCore(
 
       // Wave completion check: if the model signals [WAVE COMPLETE] and we have
       // wave orchestration active, advance to the next wave instead of stopping.
+      // Gate: require meaningful work (file writes or successful Bash commands),
+      // not just read-only tool calls which don't constitute wave completion.
       if (
         config.waveState &&
-        isWaveComplete(responseText) &&
-        executedToolsThisTurn > 0 &&
+        isValidWaveCompletion(responseText) &&
+        (filesModified > 0 || bashSucceeded > 0) &&
         maxToolRounds > 0
       ) {
         const waveState = config.waveState;
         const completedWave = getCurrentWave(waveState);
+
+        // Verify wave deliverables before advancing
+        if (completedWave) {
+          try {
+            const waveExpectations = deriveWaveExpectations(completedWave);
+            if (waveExpectations.expectedFiles && waveExpectations.expectedFiles.length > 0) {
+              const waveVerification = await verifyCompletion(session.projectRoot, waveExpectations);
+              if (waveVerification.verdict === "failed") {
+                waveVerifyRetries++;
+                if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
+                  if (!config.silent) {
+                    process.stdout.write(
+                      `\n${RED}[wave-verify] Wave ${completedWave.number} failed (${waveVerifyRetries}/${MAX_WAVE_VERIFY_RETRIES}): ${waveVerification.summary}${RESET}\n`,
+                    );
+                  }
+                  messages.push({ role: "assistant" as const, content: responseText });
+                  messages.push({
+                    role: "user" as const,
+                    content: `WAVE VERIFICATION FAILED: ${waveVerification.summary}\n\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
+                  });
+                  continue;
+                }
+                // Max retries exceeded — force-advance with warning
+                if (!config.silent) {
+                  process.stdout.write(
+                    `\n${YELLOW}[wave-verify] Max retries exceeded — force-advancing past wave ${completedWave.number}${RESET}\n`,
+                  );
+                }
+              }
+            }
+          } catch {
+            // Non-fatal — proceed with wave advancement
+          }
+        }
+
+        // Reset wave verify retries on successful advancement
+        waveVerifyRetries = 0;
         const hasMore = advanceWave(waveState);
         if (!config.silent && completedWave) {
           process.stdout.write(
@@ -1089,7 +1142,8 @@ async function _runAgentLoopCore(
       lastSuccessfulTool, lastSuccessfulToolResult, filesModified, toolCallsThisTurn,
       executedToolsThisTurn, completedToolsThisTurn, recentToolSignatures,
       readTracker, editAttempts, lastMajorEditGatePassed, effectiveSelfImprovement,
-      securityEngine, secretsScanner, localSandboxBridge, testsRun, currentApproachToolCalls,
+      securityEngine, secretsScanner, localSandboxBridge, testsRun, bashSucceeded, currentApproachToolCalls,
+      toolErrorCounts,
     }, runAgentLoop);
     // Write back updated state
     filesModified = execResult.filesModified;
@@ -1102,6 +1156,7 @@ async function _runAgentLoopCore(
     lastMajorEditGatePassed = execResult.lastMajorEditGatePassed;
     localSandboxBridge = execResult.localSandboxBridge;
     testsRun = execResult.testsRun;
+    bashSucceeded = execResult.bashSucceeded;
     const toolResults = execResult.toolResults;
 
     if (execResult.action === "return") {
@@ -1393,31 +1448,68 @@ async function _runAgentLoopCore(
 
     // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
     // in a response that also had tool calls, advance to the next wave now.
-    if (config.waveState && isWaveComplete(responseText) && maxToolRounds > 0) {
+    // Gate: require meaningful work (file writes or successful Bash commands).
+    if (config.waveState && isValidWaveCompletion(responseText) && (filesModified > 0 || bashSucceeded > 0) && maxToolRounds > 0) {
       const waveState = config.waveState;
       const completedWave = getCurrentWave(waveState);
-      const hasMore = advanceWave(waveState);
-      if (!config.silent && completedWave) {
-        process.stdout.write(
-          `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
-        );
+
+      // Verify wave deliverables before advancing
+      let waveVerifyPassed = true;
+      if (completedWave) {
+        try {
+          const waveExpectations = deriveWaveExpectations(completedWave);
+          if (waveExpectations.expectedFiles && waveExpectations.expectedFiles.length > 0) {
+            const waveVerification = await verifyCompletion(session.projectRoot, waveExpectations);
+            if (waveVerification.verdict === "failed") {
+              waveVerifyRetries++;
+              if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
+                waveVerifyPassed = false;
+                if (!config.silent) {
+                  process.stdout.write(
+                    `\n${RED}[wave-verify] Wave ${completedWave.number} failed (${waveVerifyRetries}/${MAX_WAVE_VERIFY_RETRIES}): ${waveVerification.summary}${RESET}\n`,
+                  );
+                }
+                toolResults.push(
+                  `WAVE VERIFICATION FAILED: ${waveVerification.summary}\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
+                );
+              } else if (!config.silent) {
+                // Max retries exceeded — force-advance with warning
+                process.stdout.write(
+                  `\n${YELLOW}[wave-verify] Max retries exceeded — force-advancing past wave ${completedWave.number}${RESET}\n`,
+                );
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — proceed with wave advancement
+        }
       }
-      if (hasMore) {
-        const nextWavePrompt = buildWavePrompt(waveState);
-        toolResults.push(`SYSTEM: Wave complete. Next wave instructions:\n\n${nextWavePrompt}`);
-        if (!config.silent) {
-          const next = getCurrentWave(waveState);
+
+      if (waveVerifyPassed) {
+        waveVerifyRetries = 0;
+        const hasMore = advanceWave(waveState);
+        if (!config.silent && completedWave) {
           process.stdout.write(
-            `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+            `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
           );
         }
-        // Reset per-wave counters
-        pipelineContinuationNudges = 0;
-        confabulationNudges = 0;
-      } else if (!config.silent) {
-        process.stdout.write(
-          `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
-        );
+        if (hasMore) {
+          const nextWavePrompt = buildWavePrompt(waveState);
+          toolResults.push(`SYSTEM: Wave complete. Next wave instructions:\n\n${nextWavePrompt}`);
+          if (!config.silent) {
+            const next = getCurrentWave(waveState);
+            process.stdout.write(
+              `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+            );
+          }
+          // Reset per-wave counters
+          pipelineContinuationNudges = 0;
+          confabulationNudges = 0;
+        } else if (!config.silent) {
+          process.stdout.write(
+            `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
+          );
+        }
       }
     }
 
@@ -1468,8 +1560,9 @@ async function _runAgentLoopCore(
     metricsCollector.recordTiming("agent.round.latency", Date.now() - _roundStartMs);
   }
 
-  // Diff-based anti-confabulation: compare claimed vs actual file changes (advisory)
-  if (config.verbose && touchedFiles.length > 0) {
+  // Diff-based anti-confabulation: compare claimed vs actual file changes.
+  // Always runs (not verbose-only) — in pipeline mode, logs a red warning.
+  if (touchedFiles.length > 0) {
     const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
     if (lastAssistant) {
       const claimedFiles = extractClaimedFiles(lastAssistant.content);
@@ -1479,11 +1572,60 @@ async function _runAgentLoopCore(
           (f: string) => !actualSet.has(f.replace(/\\/g, "/")),
         );
         if (unverified.length > 0) {
+          const color = isPipelineWorkflow ? RED : YELLOW;
+          const tag = isPipelineWorkflow ? "confab-block" : "confab-diff";
           process.stdout.write(
-            `\n${YELLOW}[confab-diff] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
+            `\n${color}[${tag}] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
+          );
+          // In pipeline mode, append a retraction to the session transcript
+          // so the model's false claims are corrected in the conversation history.
+          if (isPipelineWorkflow) {
+            session.messages.push({
+              id: randomUUID(),
+              role: "assistant",
+              content: `WARNING: I claimed changes to ${unverified.length} file(s) that were not actually written: ${unverified.join(", ")}. These claims are retracted.`,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Post-loop deliverables verification: verify expected files exist on disk.
+  // For wave sessions, aggregate all wave expectations. For non-wave pipelines,
+  // verify files claimed by the model. Non-fatal — logs result, does not crash.
+  if (touchedFiles.length > 0) {
+    try {
+      let deliverableExpectedFiles: string[] = [];
+      if (config.waveState) {
+        // Aggregate expectations from all waves
+        for (const wave of config.waveState.waves) {
+          const waveExp = deriveWaveExpectations(wave);
+          if (waveExp.expectedFiles) deliverableExpectedFiles.push(...waveExp.expectedFiles);
+        }
+      } else if (isPipelineWorkflow) {
+        // Use claimed files from last assistant message
+        const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+        if (lastAssistant) {
+          deliverableExpectedFiles = extractClaimedFiles(lastAssistant.content);
+        }
+      }
+      if (deliverableExpectedFiles.length > 0) {
+        const uniqueExpected = [...new Set(deliverableExpectedFiles)];
+        const finalVerification = await verifyCompletion(session.projectRoot, {
+          expectedFiles: uniqueExpected,
+          intentDescription: "Session deliverables",
+        });
+        if (!config.silent) {
+          const vIcon = finalVerification.verdict === "complete" ? GREEN : finalVerification.verdict === "partial" ? YELLOW : RED;
+          process.stdout.write(
+            `\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`,
           );
         }
       }
+    } catch {
+      // Non-fatal
     }
   }
 

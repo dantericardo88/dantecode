@@ -81,6 +81,8 @@ export interface ReplOptions {
   fearSetBlockOnNoGo?: boolean;
   /** --name <n>: human-readable name for this session. */
   sessionName?: string;
+  /** --plan-first: auto-enter plan mode for all prompts. */
+  planFirst?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -142,6 +144,7 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.gaslight = getOrInitGaslight(replState);
   // Wire replState for /think override and reasoning feedback loop
   agentConfig.replState = replState;
+  agentConfig.planModeActive = replState.planMode && !replState.planApproved;
 }
 
 // ----------------------------------------------------------------------------
@@ -270,7 +273,19 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     verificationTrendTracker: null, // lazy-init: created on first PDSE recording or /trend command
     reasoningOverrideSession: false,
     theme: savedTheme,
+    planMode: false,
+    currentPlan: null,
+    planApproved: false,
+    currentPlanId: null,
+    planExecutionInProgress: false,
+    planExecutionResult: null,
+    approvalMode: "default",
   };
+
+  // --plan-first: automatically enter plan mode
+  if (options.planFirst) {
+    replState.planMode = true;
+  }
 
   // D-12A: Initialize model adaptation store + restore rate limiter (non-fatal, gated on env)
   if (process.env.DANTE_DISABLE_MODEL_ADAPTATION !== "1") {

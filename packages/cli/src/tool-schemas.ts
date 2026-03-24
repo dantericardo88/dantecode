@@ -274,6 +274,42 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
       }),
     },
 
+    AskUser: {
+      description:
+        "Ask the user a clarifying question and wait for their response. Use when you need more information to proceed correctly, such as confirming a design choice, choosing between approaches, or getting user preferences. Returns the user's answer as a string.",
+      parameters: z.object({
+        question: z.string().describe("The question to ask the user"),
+        options: z
+          .array(z.string())
+          .optional()
+          .describe("If provided, present as a selection menu instead of free text input"),
+        default_answer: z
+          .string()
+          .optional()
+          .describe("Default answer if user just hits Enter or in non-interactive mode"),
+      }),
+    },
+
+    Memory: {
+      description:
+        "Store or recall persistent memories. Memories persist across sessions and can be searched semantically. Use to remember important context, user preferences, project patterns, or lessons learned.",
+      parameters: z.object({
+        action: z
+          .enum(["store", "recall", "search"])
+          .describe(
+            "store: save a memory; recall: get recent memories for context; search: semantic search for specific topics",
+          ),
+        key: z.string().optional().describe("Memory key/label (required for store)"),
+        value: z.string().optional().describe("Memory content to store (required for store)"),
+        query: z.string().optional().describe("Search query (required for recall/search)"),
+        scope: z
+          .enum(["session", "project", "global"])
+          .optional()
+          .describe("Memory scope (default: project)"),
+        limit: z.number().optional().describe("Max results for recall/search (default: 5)"),
+      }),
+    },
+
     AcquireUrl: {
       description:
         "Download a file from a URL to a local path. Verifies the download (size check, SHA-256 hash), registers it as a tracked artifact, and returns the local path. Use instead of `curl` or `wget` in Bash for reliable, verified downloads.",

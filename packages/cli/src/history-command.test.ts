@@ -189,6 +189,13 @@ function makeReplState(overrides?: Partial<ReplState>): ReplState {
     gaslight: null,
     memoryOrchestrator: null,
     verificationTrendTracker: null,
+    planMode: false,
+    currentPlan: null,
+    planApproved: false,
+    currentPlanId: null,
+    planExecutionInProgress: false,
+    planExecutionResult: null,
+    approvalMode: "default",
     theme: "default",
     ...overrides,
   };

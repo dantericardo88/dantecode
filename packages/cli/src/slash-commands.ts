@@ -114,6 +114,7 @@ import { runFearsetCommand } from "./commands/fearset.js";
 import { researchSlashHandler } from "./commands/research.js";
 import { automateCommand } from "./commands/automate.js";
 import { adaptationCommand } from "./commands/adaptation.js";
+import { planCommand } from "./commands/plan.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
 
@@ -207,6 +208,20 @@ export interface ReplState {
   modelAdaptationStore?: import("@dantecode/core").ModelAdaptationStore | null;
   /** Verification trend tracker — records PDSE scores and detects regressions. */
   verificationTrendTracker: import("@dantecode/core").VerificationTrendTracker | null;
+  /** Whether plan mode is currently active. */
+  planMode: boolean;
+  /** The current plan when in plan mode, or null. */
+  currentPlan: import("@dantecode/core").ExecutionPlan | null;
+  /** Whether the current plan has been approved for execution. */
+  planApproved: boolean;
+  /** Stored plan ID for persistence (set on save). */
+  currentPlanId: string | null;
+  /** Whether PlanExecutor-driven execution is in progress. */
+  planExecutionInProgress: boolean;
+  /** Result from completed PlanExecutor execution, or null. */
+  planExecutionResult: import("@dantecode/core").PlanExecutionResult | null;
+  /** Runtime-switchable approval mode for tool execution. */
+  approvalMode: "default" | "yolo" | "auto-edit" | "plan";
 }
 
 /** A single slash command handler. */
@@ -4773,6 +4788,44 @@ async function thinkCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// Approval Mode slash command
+// ----------------------------------------------------------------------------
+
+const APPROVAL_MODES = ["default", "yolo", "auto-edit", "plan"] as const;
+type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+async function modeCommand(args: string, state: ReplState): Promise<string> {
+  const sub = args.trim().toLowerCase();
+
+  if (!sub) {
+    const lines = [
+      `${BOLD}Current approval mode:${RESET} ${state.approvalMode}`,
+      "",
+      `${BOLD}Available modes:${RESET}`,
+      `  ${GREEN}default${RESET}   — Standard approval flow (confirm destructive ops)`,
+      `  ${YELLOW}yolo${RESET}      — No confirmations (use with caution)`,
+      `  ${CYAN}auto-edit${RESET} — Auto-approve Write/Edit, confirm Bash/GitPush`,
+      `  ${RED}plan${RESET}      — Plan mode: write tools blocked, read-only analysis`,
+    ];
+    return lines.join("\n");
+  }
+
+  if (!APPROVAL_MODES.includes(sub as ApprovalMode)) {
+    return `${RED}Unknown mode "${sub}". Available: ${APPROVAL_MODES.join(", ")}${RESET}`;
+  }
+
+  state.approvalMode = sub as ApprovalMode;
+
+  if (sub === "plan") {
+    state.planMode = true;
+  } else if (state.planMode && sub !== "plan") {
+    state.planMode = false;
+  }
+
+  return `${GREEN}Approval mode set to ${BOLD}${sub}${RESET}`;
+}
+
+// ----------------------------------------------------------------------------
 // DanteGaslight slash command
 // ----------------------------------------------------------------------------
 
@@ -5828,6 +5881,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "advanced",
   },
   {
+    name: "mode",
+    description: "Switch approval mode (default, yolo, auto-edit, plan)",
+    usage: "/mode [default|yolo|auto-edit|plan]",
+    handler: modeCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
     name: "gaslight",
     description: "DanteGaslight adversarial refinement — on/off/stats/review/bridge",
     usage: "/gaslight <on|off|stats|review|bridge>",
@@ -5842,6 +5903,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: fearsetCommand,
     tier: 2,
     category: "advanced",
+  },
+  {
+    name: "plan",
+    description: "Generate, review, and approve execution plans before coding",
+    usage: "/plan <goal> | show | approve | reject | list | status",
+    handler: planCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "adaptation",

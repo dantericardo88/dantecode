@@ -23,7 +23,8 @@ import { getStatus, autoCommit } from "@dantecode/git-engine";
 import { executeTool } from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
-import { getWrittenFilePath } from "./danteforge-pipeline.js";
+import { getWrittenFilePath, getAllWrittenFilePath } from "./danteforge-pipeline.js";
+import { isPlanModeBlocked, planModeBlockedMessage } from "./plan-mode-guard.js";
 import {
   createSubAgentExecutor,
   extractBackgroundTaskId,
@@ -92,8 +93,13 @@ export interface ToolExecutionContext {
   secretsScanner: SecretsScanner;
   localSandboxBridge: SandboxBridge | null;
   testsRun: number;
+  bashSucceeded: number;
   currentApproachToolCalls: number;
+  toolErrorCounts: Map<string, number>;
 }
+
+/** Maximum times a single tool type can fail before the model is told to stop using it. */
+const MAX_PER_TOOL_ERRORS = 5;
 
 /** Result returned from the tool batch executor. */
 export interface ToolExecutionResult {
@@ -101,6 +107,7 @@ export interface ToolExecutionResult {
   toolResults: string[];
   filesModified: number;
   testsRun: number;
+  bashSucceeded: number;
   executedToolsThisTurn: number;
   toolCallsThisTurn: number;
   currentApproachToolCalls: number;
@@ -140,6 +147,7 @@ export async function executeToolBatch(
     lastMajorEditGatePassed,
     localSandboxBridge,
     testsRun,
+    bashSucceeded,
   } = ctx;
   const {
     roundCounter,
@@ -198,6 +206,13 @@ export async function executeToolBatch(
       );
       recentToolSignatures.length = 0;
       break;
+    }
+
+    // Plan mode guard: block write tools when plan is pending approval
+    if (config.planModeActive && isPlanModeBlocked(toolCall.name)) {
+      const blockMsg = planModeBlockedMessage(toolCall.name);
+      toolResults.push(blockMsg);
+      continue;
     }
 
     // Pre-tool safety hook (Ruflo/ccswarm pattern): block dangerous Bash commands
@@ -607,6 +622,7 @@ export async function executeToolBatch(
           toolResults,
           filesModified,
           testsRun,
+          bashSucceeded,
           executedToolsThisTurn,
           toolCallsThisTurn,
           currentApproachToolCalls,
@@ -646,25 +662,31 @@ export async function executeToolBatch(
         `\n\n... (truncated, ${result.content.length} total bytes)`;
     }
 
-    // Track files written for DanteForge pipeline
-    const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
-    if (writtenFile) {
-      const resolvedPath = resolve(session.projectRoot, writtenFile);
-      if (!touchedFiles.includes(resolvedPath)) {
-        touchedFiles.push(resolvedPath);
+    // Track ALL files written (config, JSON, etc.) for touchedFiles + filesModified
+    const anyWrittenFile = getAllWrittenFilePath(toolCall.name, toolCall.input);
+    if (anyWrittenFile && !result.isError) {
+      const resolvedAny = resolve(session.projectRoot, anyWrittenFile);
+      if (!touchedFiles.includes(resolvedAny)) {
+        touchedFiles.push(resolvedAny);
       }
-      if (!result.isError && (toolCall.name === "Write" || toolCall.name === "Edit")) {
-        roundWrittenFiles.push(resolvedPath);
-      }
-      // Progress tracking: count files modified
       filesModified++;
     }
 
-    // Progress tracking: count test runs (Bash commands that look like tests)
+    // Track code files only for DanteForge PDSE pipeline (roundWrittenFiles)
+    const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
+    if (writtenFile && !result.isError) {
+      const resolvedPath = resolve(session.projectRoot, writtenFile);
+      roundWrittenFiles.push(resolvedPath);
+    }
+
+    // Progress tracking: count test runs and successful Bash commands
     if (toolCall.name === "Bash") {
       const cmd = (toolCall.input["command"] as string) || "";
       if (/\b(test|jest|vitest|mocha|pytest|cargo\s+test)\b/i.test(cmd)) {
         testsRun++;
+      }
+      if (!result.isError) {
+        bashSucceeded++;
       }
     }
 
@@ -702,6 +724,25 @@ export async function executeToolBatch(
             "\n",
         );
       }
+    }
+
+    // Per-tool error tracking: prevent infinite retries of failing tools
+    if (result.isError) {
+      const errorCount = (ctx.toolErrorCounts.get(toolCall.name) ?? 0) + 1;
+      ctx.toolErrorCounts.set(toolCall.name, errorCount);
+      if (errorCount >= MAX_PER_TOOL_ERRORS) {
+        toolResults.push(
+          `SYSTEM: ${toolCall.name} has failed ${errorCount} times this session. Stop using this tool and try a different approach.`,
+        );
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${RED}[tool-limit] ${toolCall.name} hit ${MAX_PER_TOOL_ERRORS} error limit${RESET}\n`,
+          );
+        }
+      }
+    } else {
+      // Reset on success — the tool is working, transient issues resolved
+      ctx.toolErrorCounts.delete(toolCall.name);
     }
 
     toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
@@ -786,6 +827,7 @@ export async function executeToolBatch(
         toolResults,
         filesModified,
         testsRun,
+        bashSucceeded,
         executedToolsThisTurn,
         toolCallsThisTurn,
         currentApproachToolCalls,
@@ -863,6 +905,7 @@ export async function executeToolBatch(
     toolResults,
     filesModified,
     testsRun,
+    bashSucceeded,
     executedToolsThisTurn,
     toolCallsThisTurn,
     currentApproachToolCalls,

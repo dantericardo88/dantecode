@@ -5,6 +5,8 @@
 // model (Grok, GPT, etc.) follow Claude's natural step-by-step workflow.
 // ============================================================================
 
+import type { CompletionExpectation } from "./completion-verifier.js";
+
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
@@ -36,6 +38,8 @@ export interface SkillWave {
   title: string;
   /** The full instructions for this wave. */
   instructions: string;
+  /** Optional filesystem expectations for wave completion verification. */
+  expectations?: CompletionExpectation;
 }
 
 /** Tracks wave progression through a skill execution. */
@@ -355,4 +359,59 @@ export const WAVE_COMPLETE_RE = /\[WAVE\s+COMPLETE\]/i;
  */
 export function isWaveComplete(responseText: string): boolean {
   return WAVE_COMPLETE_RE.test(responseText);
+}
+
+/**
+ * Validates that [WAVE COMPLETE] appears as a terminal signal, not mid-response.
+ * Returns false if there is substantial content (>200 chars) after the signal,
+ * which indicates the model mentioned it as part of chain-of-thought, not as
+ * a genuine completion signal.
+ */
+export function isValidWaveCompletion(responseText: string): boolean {
+  const match = WAVE_COMPLETE_RE.exec(responseText);
+  if (!match) return false;
+  const afterSignal = responseText.slice(match.index + match[0].length).trim();
+  return afterSignal.length <= 200;
+}
+
+// ----------------------------------------------------------------------------
+// Wave Completion Verification
+// ----------------------------------------------------------------------------
+
+/**
+ * Derives filesystem expectations from wave instructions by scanning for
+ * file paths mentioned in the instructions text.
+ * Extracts paths from: "create/write/generate <path>", backtick-quoted paths with extensions.
+ */
+export function deriveWaveExpectations(wave: SkillWave): CompletionExpectation {
+  const expectedFiles: string[] = [];
+  const seen = new Set<string>();
+
+  // Pattern 1: "create/write/generate/add <path>" (with optional quotes/backticks)
+  const actionPattern =
+    /(?:create|write|generate|add|implement)\s+[`"']?([^\s`"',)]+\.\w{1,8})/gi;
+  let match: RegExpExecArray | null;
+  while ((match = actionPattern.exec(wave.instructions)) !== null) {
+    const file = match[1]!;
+    if (!seen.has(file)) {
+      seen.add(file);
+      expectedFiles.push(file);
+    }
+  }
+
+  // Pattern 2: backtick-quoted paths with extensions (e.g., `src/utils/helper.ts`)
+  const backtickPattern = /`([^`\s]+\.\w{1,8})`/g;
+  while ((match = backtickPattern.exec(wave.instructions)) !== null) {
+    const file = match[1]!;
+    // Filter out obvious non-file patterns
+    if (!seen.has(file) && !file.includes("(") && !file.startsWith("http")) {
+      seen.add(file);
+      expectedFiles.push(file);
+    }
+  }
+
+  return {
+    expectedFiles: expectedFiles.length > 0 ? expectedFiles : undefined,
+    intentDescription: wave.title,
+  };
 }

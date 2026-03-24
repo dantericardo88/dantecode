@@ -33,6 +33,8 @@ import type { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, toToolResult as sandboxToToolResult } from "@dantecode/dante-sandbox";
 import { renderBeforeAfter, getThemeEngine } from "@dantecode/ux-polish";
 import type { DiffRenderOptions } from "@dantecode/ux-polish";
+import { isJsonFile } from "./json-write-guard.js";
+import { validateStructuredContent } from "./structured-write-guard.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -84,6 +86,10 @@ export interface CliToolExecutionContext {
    * DanteSandbox enforcement runs regardless of whether this bridge is set.
    */
   sandboxBridge?: SandboxBridge;
+  /** Memory orchestrator for the Memory tool (set when memory-engine is initialized). */
+  memoryOrchestrator?: { memoryStore: Function; memoryRecall: Function };
+  /** Secrets scanner for gating memory store operations. */
+  secretsScanner?: { scan: (text: string) => { clean: boolean; findings?: Array<{ type: string }> } };
 }
 
 /** Supported tool names. */
@@ -102,6 +108,8 @@ export type ToolName =
   | "SubAgent"
   | "GitHubSearch"
   | "GitHubOps"
+  | "AskUser"
+  | "Memory"
   | "AcquireUrl"
   | "AcquireArchive"
   | "GitHooksInstall";
@@ -181,6 +189,23 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
 
   const resolved = resolvePath(filePath, projectRoot);
 
+  // Structured content pre-write guard: validate JSON, YAML, and TOML before writing.
+  const structCheck = validateStructuredContent(content, resolved);
+  if (!structCheck.valid) {
+    const fmt = structCheck.format ?? "structured";
+    return {
+      content: `Error: ${fmt.toUpperCase()} validation failed for ${resolved}. The content has structural issues and auto-repair failed.\nError: ${structCheck.error}\nFix the structure and retry the Write.`,
+      isError: true,
+    };
+  }
+  const effectiveContent = structCheck.content;
+  if (structCheck.repaired && process.stdout.isTTY) {
+    const fmt = structCheck.format ?? "structured";
+    process.stdout.write(
+      `\x1b[33m[${fmt}-guard] Auto-repaired ${fmt.toUpperCase()} in ${filePath}\x1b[0m\n`,
+    );
+  }
+
   try {
     // Step 1: Capture before-state (best-effort — never blocks the write)
     let beforeSnapshotId: string | undefined;
@@ -212,8 +237,21 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
 
     // Step 3: Actual write — always happens regardless of debug-trail state
     await mkdir(dirname(resolved), { recursive: true });
-    await writeFile(resolved, content, "utf-8");
-    const lineCount = content.split("\n").length;
+    await writeFile(resolved, effectiveContent, "utf-8");
+    const lineCount = effectiveContent.split("\n").length;
+
+    // Step 3b: JSON post-write verification — read back and parse to confirm integrity
+    if (isJsonFile(resolved)) {
+      try {
+        const written = await readFile(resolved, "utf-8");
+        JSON.parse(written);
+      } catch (parseErr) {
+        return {
+          content: `Error: JSON post-write verification failed for ${resolved}. File was written but is not valid JSON on disk.\nParse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+          isError: true,
+        };
+      }
+    }
 
     // Step 4: Render diff to terminal (TTY only, fire-and-forget)
     // Use empty string as before content for new files so all lines show as additions.
@@ -221,7 +259,7 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
       try {
         const effectiveBefore = beforeContent ?? "";
         const diffOpts: DiffRenderOptions = { maxLines: 100, theme: getThemeEngine() };
-        const diffResult = renderBeforeAfter(resolved, effectiveBefore, content, diffOpts);
+        const diffResult = renderBeforeAfter(resolved, effectiveBefore, effectiveContent, diffOpts);
         if (diffResult.additions > 0 || diffResult.deletions > 0) {
           process.stdout.write(diffResult.rendered);
         }
@@ -840,7 +878,23 @@ async function toolGitCommit(
 
   try {
     // Dynamic import to avoid circular dependency issues at startup
-    const { autoCommit } = await import("@dantecode/git-engine");
+    const { autoCommit, getStagedDiff } = await import("@dantecode/git-engine");
+
+    // Capture diff preview before committing (best-effort)
+    let diffPreview = "";
+    try {
+      const staged = getStagedDiff(projectRoot);
+      if (staged) {
+        const lines = staged.split("\n");
+        const MAX_PREVIEW_LINES = 50;
+        diffPreview = lines.slice(0, MAX_PREVIEW_LINES).join("\n");
+        if (lines.length > MAX_PREVIEW_LINES) {
+          diffPreview += `\n... (${lines.length - MAX_PREVIEW_LINES} more lines)`;
+        }
+      }
+    } catch {
+      // Non-fatal — diff preview is optional
+    }
 
     const result = autoCommit(
       {
@@ -853,10 +907,12 @@ async function toolGitCommit(
       projectRoot,
     );
 
-    return {
-      content: `Commit created: ${result.commitHash}\nMessage: ${result.message}\nFiles: ${result.filesCommitted.join(", ")}`,
-      isError: false,
-    };
+    let output = `Commit created: ${result.commitHash}\nMessage: ${result.message}\nFiles: ${result.filesCommitted.join(", ")}`;
+    if (diffPreview) {
+      output += `\n\nDiff preview:\n${diffPreview}`;
+    }
+
+    return { content: output, isError: false };
   } catch (err: unknown) {
     const message_ = err instanceof Error ? err.message : String(err);
     return { content: `Error committing: ${message_}`, isError: true };
@@ -1895,12 +1951,138 @@ async function toolGitHubOps(
 // Main Dispatcher
 // ----------------------------------------------------------------------------
 
+// ─── AskUser Tool ────────────────────────────────────────────────────────────
+
+async function toolAskUser(
+  input: Record<string, unknown>,
+): Promise<ToolResult> {
+  const question = input["question"] as string;
+  const options = input["options"] as string[] | undefined;
+  const defaultAnswer = input["default_answer"] as string | undefined;
+
+  if (!question) {
+    return { content: "Error: question is required", isError: true };
+  }
+
+  // Non-interactive mode: return default or a placeholder
+  if (!process.stdin.isTTY) {
+    const answer = defaultAnswer ?? "(non-interactive — no user input available)";
+    return { content: `User response: ${answer}`, isError: false };
+  }
+
+  try {
+    if (options && options.length > 0) {
+      // Present as numbered selection
+      const lines = [`\n${question}\n`];
+      options.forEach((opt, i) => lines.push(`  ${i + 1}. ${opt}`));
+      lines.push(`\nEnter number (1-${options.length})${defaultAnswer ? ` [default: ${defaultAnswer}]` : ""}: `);
+      process.stdout.write(lines.join("\n"));
+
+      const { createInterface } = await import("node:readline");
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise<string>((resolve) => {
+        rl.question("", (ans) => { rl.close(); resolve(ans.trim()); });
+      });
+
+      const idx = parseInt(answer, 10) - 1;
+      if (idx >= 0 && idx < options.length) {
+        return { content: `User selected: ${options[idx]}`, isError: false };
+      }
+      return { content: `User response: ${answer || defaultAnswer || "(no selection)"}`, isError: false };
+    }
+
+    // Free text input
+    process.stdout.write(`\n${question}${defaultAnswer ? ` [default: ${defaultAnswer}]` : ""}\n> `);
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question("", (ans) => { rl.close(); resolve(ans.trim()); });
+    });
+
+    return { content: `User response: ${answer || defaultAnswer || "(empty)"}`, isError: false };
+  } catch {
+    return { content: `User response: ${defaultAnswer ?? "(input unavailable)"}`, isError: false };
+  }
+}
+
+// ─── Memory Tool ─────────────────────────────────────────────────────────────
+
+async function toolMemory(
+  input: Record<string, unknown>,
+  _projectRoot: string,
+  context: CliToolExecutionContext,
+): Promise<ToolResult> {
+  const action = input["action"] as string;
+  const key = input["key"] as string | undefined;
+  const value = input["value"] as string | undefined;
+  const query = input["query"] as string | undefined;
+  const scope = (input["scope"] as string) ?? "project";
+  const limit = (input["limit"] as number) ?? 5;
+
+  if (!context.memoryOrchestrator) {
+    return { content: "Memory is not available in this session.", isError: true };
+  }
+
+  const orchestrator = context.memoryOrchestrator;
+
+  try {
+    switch (action) {
+      case "store": {
+        if (!key || !value) {
+          return { content: "Error: key and value are required for store action.", isError: true };
+        }
+        // Gate through secrets scanner if available
+        if (context.secretsScanner) {
+          const scanResult = context.secretsScanner.scan(value);
+          if (!scanResult.clean) {
+            return {
+              content: `Error: Memory blocked — content may contain secrets: ${scanResult.findings?.map((f: { type: string }) => f.type).join(", ") ?? "unknown"}`,
+              isError: true,
+            };
+          }
+        }
+        await orchestrator.memoryStore(key, value, scope as "session" | "project" | "global");
+        return { content: `Memory stored: "${key}" (scope: ${scope})`, isError: false };
+      }
+      case "recall": {
+        const q = query ?? key ?? "";
+        const results = await orchestrator.memoryRecall(q, limit);
+        if (!results || results.length === 0) {
+          return { content: "No memories found matching the query.", isError: false };
+        }
+        const formatted = results
+          .map((r: { key: string; value: string; score?: number }, i: number) =>
+            `${i + 1}. **${r.key}** (relevance: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 200)}`,
+          )
+          .join("\n\n");
+        return { content: `## Memory Recall Results\n\n${formatted}`, isError: false };
+      }
+      case "search": {
+        if (!query) {
+          return { content: "Error: query is required for search action.", isError: true };
+        }
+        const results = await orchestrator.memoryRecall(query, limit);
+        if (!results || results.length === 0) {
+          return { content: "No memories found matching the search query.", isError: false };
+        }
+        const formatted = results
+          .map((r: { key: string; value: string; score?: number }, i: number) =>
+            `${i + 1}. **${r.key}** (score: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 300)}`,
+          )
+          .join("\n\n");
+        return { content: `## Memory Search Results\n\n${formatted}`, isError: false };
+      }
+      default:
+        return { content: `Error: Unknown memory action "${action}". Use store, recall, or search.`, isError: true };
+    }
+  } catch (e) {
+    return { content: `Memory error: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+  }
+}
+
+// ─── Tool Execution Entry Point ──────────────────────────────────────────────
+
 /**
- * Dispatches a tool call to the appropriate handler, executes it, and returns
- * the result string. Also records the action in the audit log when possible.
- *
- * @param name - The name of the tool to execute.
- * @param input - The input parameters for the tool.
  * @param projectRoot - Absolute path to the project root directory.
  * @param sessionId - The current session ID for audit logging.
  * @param sandboxEnabled - When true, dangerous commands and out-of-root writes are blocked.
@@ -2028,6 +2210,12 @@ export async function executeTool(
       break;
     case "SubAgent":
       result = await toolSubAgent(input, projectRoot, context);
+      break;
+    case "AskUser":
+      result = await toolAskUser(input);
+      break;
+    case "Memory":
+      result = await toolMemory(input, projectRoot, context);
       break;
     case "GitHubSearch":
       result = await toolGitHubSearch(input, projectRoot);
