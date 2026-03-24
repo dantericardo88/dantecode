@@ -18,7 +18,9 @@ export async function countSuccessfulSessions(projectRoot: string): Promise<numb
         if (Array.isArray(session.messages) && session.messages.length >= 2) {
           count++;
         }
-      } catch { /* skip corrupt files */ }
+      } catch {
+        /* skip corrupt files */
+      }
     }
     return count;
   } catch {

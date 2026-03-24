@@ -13,14 +13,8 @@ import {
   buildWorkflowInvocationPrompt,
 } from "@dantecode/core";
 import type { Session } from "@dantecode/config-types";
-import {
-  queryLessons,
-  formatLessonsForPrompt,
-} from "@dantecode/danteforge";
-import {
-  generateRepoMap,
-  formatRepoMapForContext,
-} from "@dantecode/git-engine";
+import { queryLessons, formatLessonsForPrompt } from "@dantecode/danteforge";
+import { generateRepoMap, formatRepoMapForContext } from "@dantecode/git-engine";
 import { getToolDefinitions } from "./tools.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 
@@ -28,7 +22,10 @@ import type { AgentLoopConfig } from "./agent-loop.js";
  * Builds the system prompt sent to the model. Includes instructions for tool
  * use, the DanteForge doctrine, and project-specific context.
  */
-export async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Promise<string> {
+export async function buildSystemPrompt(
+  session: Session,
+  config: AgentLoopConfig,
+): Promise<string> {
   const toolDefs = getToolDefinitions();
   const toolList = toolDefs.map((t) => `- ${t.name}: ${t.description}`).join("\n");
 

@@ -67,7 +67,9 @@ export function renderPlan(plan: ExecutionPlan, options?: PlanRenderOptions): st
   // Header
   lines.push(c("Execution Plan", BOLD + CYAN, colors));
   lines.push(`Goal: ${plan.goal}`);
-  lines.push(`Steps: ${plan.steps.length} | Complexity: ${complexityBadge(plan.estimatedComplexity, colors)} (${plan.estimatedComplexity.toFixed(2)})`);
+  lines.push(
+    `Steps: ${plan.steps.length} | Complexity: ${complexityBadge(plan.estimatedComplexity, colors)} (${plan.estimatedComplexity.toFixed(2)})`,
+  );
   lines.push("");
 
   // Steps

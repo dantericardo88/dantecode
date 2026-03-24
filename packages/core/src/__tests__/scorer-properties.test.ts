@@ -7,10 +7,7 @@ import {
   type VerificationMetricName,
   type PdseWeights,
 } from "../pdse-scorer.js";
-import {
-  MergeConfidenceScorer,
-  type MergeCandidatePatch,
-} from "../council/merge-confidence.js";
+import { MergeConfidenceScorer, type MergeCandidatePatch } from "../council/merge-confidence.js";
 
 // ---------------------------------------------------------------------------
 // Arbitraries
@@ -97,14 +94,10 @@ describe("scorePdseMetrics — property-based", () => {
 
   it("passedGate is true iff overallScore >= gate", () => {
     fc.assert(
-      fc.property(
-        fullMetricsArb,
-        fc.double({ min: 0, max: 1, noNaN: true }),
-        (metrics, gate) => {
-          const result = scorePdseMetrics(metrics, { gate });
-          expect(result.passedGate).toBe(result.overallScore >= gate);
-        },
-      ),
+      fc.property(fullMetricsArb, fc.double({ min: 0, max: 1, noNaN: true }), (metrics, gate) => {
+        const result = scorePdseMetrics(metrics, { gate });
+        expect(result.passedGate).toBe(result.overallScore >= gate);
+      }),
       { numRuns: 200 },
     );
   });
@@ -155,83 +148,73 @@ describe("MergeConfidenceScorer — property-based", () => {
 
   it("score is always in [0, 100] for any candidates", () => {
     fc.assert(
-      fc.property(
-        fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }),
-        (candidates) => {
-          const result = scorer.score(candidates);
-          expect(result.score).toBeGreaterThanOrEqual(0);
-          expect(result.score).toBeLessThanOrEqual(100);
-        },
-      ),
+      fc.property(fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }), (candidates) => {
+        const result = scorer.score(candidates);
+        expect(result.score).toBeGreaterThanOrEqual(0);
+        expect(result.score).toBeLessThanOrEqual(100);
+      }),
       { numRuns: 100 },
     );
   });
 
   it("bucket is always one of high/medium/low", () => {
     fc.assert(
-      fc.property(
-        fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }),
-        (candidates) => {
-          const result = scorer.score(candidates);
-          expect(["high", "medium", "low"]).toContain(result.bucket);
-        },
-      ),
+      fc.property(fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }), (candidates) => {
+        const result = scorer.score(candidates);
+        expect(["high", "medium", "low"]).toContain(result.bucket);
+      }),
       { numRuns: 100 },
     );
   });
 
   it("decision matches bucket thresholds", () => {
     fc.assert(
-      fc.property(
-        fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }),
-        (candidates) => {
-          const result = scorer.score(candidates);
-          if (result.score >= 75) {
-            expect(result.bucket).toBe("high");
-            expect(result.decision).toBe("auto-merge");
-          } else if (result.score >= 50) {
-            expect(result.bucket).toBe("medium");
-            expect(result.decision).toBe("review-required");
-          } else {
-            expect(result.bucket).toBe("low");
-            expect(result.decision).toBe("blocked");
-          }
-        },
-      ),
+      fc.property(fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }), (candidates) => {
+        const result = scorer.score(candidates);
+        if (result.score >= 75) {
+          expect(result.bucket).toBe("high");
+          expect(result.decision).toBe("auto-merge");
+        } else if (result.score >= 50) {
+          expect(result.bucket).toBe("medium");
+          expect(result.decision).toBe("review-required");
+        } else {
+          expect(result.bucket).toBe("low");
+          expect(result.decision).toBe("blocked");
+        }
+      }),
       { numRuns: 100 },
     );
   });
 
   it("is deterministic: same candidates produce same score", () => {
     fc.assert(
-      fc.property(
-        fc.array(candidatePatchArb, { minLength: 1, maxLength: 3 }),
-        (candidates) => {
-          const a = scorer.score(candidates);
-          const b = scorer.score(candidates);
-          expect(a.score).toBe(b.score);
-          expect(a.bucket).toBe(b.bucket);
-          expect(a.decision).toBe(b.decision);
-        },
-      ),
+      fc.property(fc.array(candidatePatchArb, { minLength: 1, maxLength: 3 }), (candidates) => {
+        const a = scorer.score(candidates);
+        const b = scorer.score(candidates);
+        expect(a.score).toBe(b.score);
+        expect(a.bucket).toBe(b.bucket);
+        expect(a.decision).toBe(b.decision);
+      }),
       { numRuns: 100 },
     );
   });
 
   it("all four confidence factors are in [0, 1]", () => {
     fc.assert(
-      fc.property(
-        fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }),
-        (candidates) => {
-          const result = scorer.score(candidates);
-          const { structuralSafety, testCoverage, intentCompatibility, contractPreservation } =
-            result.factors;
-          for (const val of [structuralSafety, testCoverage, intentCompatibility, contractPreservation]) {
-            expect(val).toBeGreaterThanOrEqual(0);
-            expect(val).toBeLessThanOrEqual(1);
-          }
-        },
-      ),
+      fc.property(fc.array(candidatePatchArb, { minLength: 0, maxLength: 3 }), (candidates) => {
+        const result = scorer.score(candidates);
+        const { structuralSafety, testCoverage, intentCompatibility, contractPreservation } =
+          result.factors;
+        for (const val of [
+          structuralSafety,
+          testCoverage,
+          intentCompatibility,
+          contractPreservation,
+        ]) {
+          expect(val).toBeGreaterThanOrEqual(0);
+          expect(val).toBeLessThanOrEqual(1);
+        }
+      }),
       { numRuns: 100 },
     );
   });

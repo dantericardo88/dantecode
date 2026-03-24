@@ -45,7 +45,8 @@ const PREMATURE_SUMMARY_RE =
 const PLANNING_LANGUAGE_RE = /(?:plan|approach|strategy|steps?)\s*:/i;
 
 // Heuristic: model acknowledges tool execution (requires hadToolCalls context)
-const TOOL_ACKNOWLEDGEMENT_RE = /(?:I\s+(?:ran|executed|called|used)\s+the|(?:the|this)\s+(?:tool|command|search|query)\s+(?:returned|showed|produced|found)|running\s+the)/i;
+const TOOL_ACKNOWLEDGEMENT_RE =
+  /(?:I\s+(?:ran|executed|called|used)\s+the|(?:the|this)\s+(?:tool|command|search|query)\s+(?:returned|showed|produced|found)|running\s+the)/i;
 
 const MALFORMED_JSON_RE =
   /\{\s*"(?:name|type)"\s*:\s*"[^"]*"\s*,\s*"(?:value|args|parameters)"\s*:\s*(?=[^"{\[\d\-tn\s}])/;
@@ -55,11 +56,13 @@ const MARKDOWN_HEADER_RE = /^#{1,3}\s/m;
 const NUMBERED_STAGES_RE = /^\d+[.)]/m;
 
 // New D-12A patterns
-const SCHEMA_MISMATCH_RE = /(?:unknown\s+(?:parameter|argument|field)|unexpected\s+key|invalid\s+(?:property|field))/i;
+const SCHEMA_MISMATCH_RE =
+  /(?:unknown\s+(?:parameter|argument|field)|unexpected\s+key|invalid\s+(?:property|field))/i;
 
 const KATEX_FORMAT_RE = /(?:\$\$[^$]+\$\$|\\\[|\\\(|\\begin\{(?:equation|align|matrix)\})/;
 
-const REGENERATION_LOOP_RE = /(?:let\s+me\s+try\s+again|attempting\s+again|retrying|re-?generating)/i;
+const REGENERATION_LOOP_RE =
+  /(?:let\s+me\s+try\s+again|attempting\s+again|retrying|re-?generating)/i;
 
 // ---------------------------------------------------------------------------
 // Override templates — one per QuirkKey (NO LLM, pure template)
@@ -132,7 +135,12 @@ export function detectQuirks(
   const model = context.modelKey.modelId;
   const workflow = context.workflow ?? "repl";
 
-  const makeObs = (quirkKey: QuirkKey, tags: string[], chars: string[], confidence: number = 0.7): QuirkObservation => ({
+  const makeObs = (
+    quirkKey: QuirkKey,
+    tags: string[],
+    chars: string[],
+    confidence: number = 0.7,
+  ): QuirkObservation => ({
     id: generateId("obs"),
     quirkKey,
     provider,
@@ -163,10 +171,18 @@ export function detectQuirks(
       const lastIdx = response.lastIndexOf(lastAck);
       const afterAckContent = response.slice(lastIdx).trim();
       // Skip if after-ack content contains follow-up action verbs (not a false positive)
-      const hasFollowUpAction = /\b(fix|update|create|run|check|next|then|proceed|let me|I'll|now)\b/i.test(afterAckContent);
+      const hasFollowUpAction =
+        /\b(fix|update|create|run|check|next|then|proceed|let me|I'll|now)\b/i.test(
+          afterAckContent,
+        );
       if (afterAckContent.length < 100 && !hasFollowUpAction) {
         observations.push(
-          makeObs("stops_before_completion", ["stops-after-tool"], ["abrupt-end-after-tool-ack"], Math.min(1, 1 - afterAckContent.length / 100)),
+          makeObs(
+            "stops_before_completion",
+            ["stops-after-tool"],
+            ["abrupt-end-after-tool-ack"],
+            Math.min(1, 1 - afterAckContent.length / 100),
+          ),
         );
       }
     }
@@ -188,7 +204,12 @@ export function detectQuirks(
     const wordCount = response.split(/\s+/).filter(Boolean).length;
     if (wordCount > 1000) {
       observations.push(
-        makeObs("overly_verbose_preface", ["excessive-verbosity"], [`${wordCount}-words`], Math.min(1, wordCount / 2000)),
+        makeObs(
+          "overly_verbose_preface",
+          ["excessive-verbosity"],
+          [`${wordCount}-words`],
+          Math.min(1, wordCount / 2000),
+        ),
       );
     }
   }
@@ -222,7 +243,12 @@ export function detectQuirks(
   // 7. schema_argument_mismatch (NEW)
   if (SCHEMA_MISMATCH_RE.test(response)) {
     observations.push(
-      makeObs("schema_argument_mismatch", ["schema-mismatch"], ["unknown-parameter-reference"], 0.85),
+      makeObs(
+        "schema_argument_mismatch",
+        ["schema-mismatch"],
+        ["unknown-parameter-reference"],
+        0.85,
+      ),
     );
   }
 
@@ -238,19 +264,26 @@ export function detectQuirks(
     const matches = response.match(new RegExp(REGENERATION_LOOP_RE.source, "gi"));
     if (matches && matches.length >= 2) {
       observations.push(
-        makeObs("regeneration_trigger_pattern", ["regeneration-loop"], [`${matches.length}-retry-phrases`], Math.min(1, matches.length / 4)),
+        makeObs(
+          "regeneration_trigger_pattern",
+          ["regeneration-loop"],
+          [`${matches.length}-retry-phrases`],
+          Math.min(1, matches.length / 4),
+        ),
       );
     }
   }
 
   // 10. provider_specific_dispatch_shape — detected when tool-call context has
   // provider-specific patterns (e.g., XML tool calls, non-standard function wrapping)
-  if (
-    context.promptType === "tool-call" &&
-    (/<function_call>|<tool_use>|<invoke>/.test(response))
-  ) {
+  if (context.promptType === "tool-call" && /<function_call>|<tool_use>|<invoke>/.test(response)) {
     observations.push(
-      makeObs("provider_specific_dispatch_shape", ["non-standard-dispatch"], ["xml-tool-format"], 0.8),
+      makeObs(
+        "provider_specific_dispatch_shape",
+        ["non-standard-dispatch"],
+        ["xml-tool-format"],
+        0.8,
+      ),
     );
   }
 
@@ -291,10 +324,7 @@ export function generateOverride(
  * Extracts promptPreamble, orderingHints, and synthesisRequirements
  * from each override's patch object.
  */
-export function applyOverrides(
-  systemPrompt: string,
-  overrides: CandidateOverride[],
-): string {
+export function applyOverrides(systemPrompt: string, overrides: CandidateOverride[]): string {
   if (overrides.length === 0) return systemPrompt;
 
   const instructions: string[] = [];
@@ -358,12 +388,12 @@ export async function observeAndAdapt(
     if (count < draftThreshold) continue;
 
     // Confidence gate: only enforce when this round's detections cross the threshold
-    const thisRoundDetections = observations.filter(o => o.quirkKey === quirkKey);
+    const thisRoundDetections = observations.filter((o) => o.quirkKey === quirkKey);
     const prevCount = count - thisRoundDetections.length;
     if (prevCount < draftThreshold && thisRoundDetections.length > 0) {
-      const avgConfidence = thisRoundDetections.reduce(
-        (sum, o) => sum + (o.confidence ?? 0.7), 0
-      ) / thisRoundDetections.length;
+      const avgConfidence =
+        thisRoundDetections.reduce((sum, o) => sum + (o.confidence ?? 0.7), 0) /
+        thisRoundDetections.length;
       if (avgConfidence < confidenceGate) continue;
     }
 
@@ -372,13 +402,14 @@ export async function observeAndAdapt(
     const alreadyExists = existingOverrides.some(
       (o) =>
         o.quirkKey === quirkKey &&
-        (o.status === "draft" || o.status === "testing" || o.status === "awaiting_review" || o.status === "promoted"),
+        (o.status === "draft" ||
+          o.status === "testing" ||
+          o.status === "awaiting_review" ||
+          o.status === "promoted"),
     );
     if (alreadyExists) continue;
 
-    const observationIds = observations
-      .filter((o) => o.quirkKey === quirkKey)
-      .map((o) => o.id);
+    const observationIds = observations.filter((o) => o.quirkKey === quirkKey).map((o) => o.id);
     const draft = generateOverride(quirkKey, context.modelKey, count, observationIds);
     const created = store.addDraft(draft);
     newDrafts.push(created);
@@ -392,7 +423,9 @@ export async function observeAndAdapt(
         timestamp: new Date().toISOString(),
         reason: `Save failed: ${err instanceof Error ? err.message : String(err)}`,
       });
-    } catch { /* logger itself is non-fatal */ }
+    } catch {
+      /* logger itself is non-fatal */
+    }
   });
 
   return newDrafts;

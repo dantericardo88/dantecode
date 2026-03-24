@@ -96,7 +96,13 @@ describe("context-budget", () => {
 
     it("returns tier-specific maxChars", () => {
       // Construct a state directly to test each tier
-      const greenState = { currentTokens: 0, percent: 30, tier: "green" as const, canAddTokens: () => true, remainingBudget: () => 1000 };
+      const greenState = {
+        currentTokens: 0,
+        percent: 30,
+        tier: "green" as const,
+        canAddTokens: () => true,
+        remainingBudget: () => 1000,
+      };
       const yellowState = { ...greenState, percent: 75, tier: "yellow" as const };
       const redState = { ...greenState, percent: 85, tier: "red" as const };
       const criticalState = { ...greenState, percent: 95, tier: "critical" as const };

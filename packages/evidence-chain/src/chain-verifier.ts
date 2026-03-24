@@ -90,7 +90,9 @@ export class ChainVerifier {
     // Check genesis block
     const genesis = entries[0]!;
     if (genesis.previousHash !== GENESIS_PREV_HASH) {
-      details.push(`Genesis block has invalid previousHash: expected 64 zeros, got "${genesis.previousHash.slice(0, 16)}..."`);
+      details.push(
+        `Genesis block has invalid previousHash: expected 64 zeros, got "${genesis.previousHash.slice(0, 16)}..."`,
+      );
       firstFailurePoint = 0;
     } else {
       details.push("Genesis block previousHash: valid (64 zeros)");
@@ -108,7 +110,9 @@ export class ChainVerifier {
       const recomputedHash = this.computeBlockHash(block);
 
       if (block.hash !== recomputedHash) {
-        details.push(`Block ${i}: hash mismatch — expected ${recomputedHash.slice(0, 16)}..., got ${block.hash.slice(0, 16)}...`);
+        details.push(
+          `Block ${i}: hash mismatch — expected ${recomputedHash.slice(0, 16)}..., got ${block.hash.slice(0, 16)}...`,
+        );
         hasFailure = true;
         firstFailurePoint = firstFailurePoint ?? i;
         continue;
@@ -215,11 +219,13 @@ export class ChainVerifier {
    * Must match the HashChain._computeHash algorithm exactly.
    */
   private computeBlockHash<T>(block: HashChainBlock<T>): string {
-    return sha256(stableJSON({
-      index: block.index,
-      timestamp: block.timestamp,
-      data: block.data,
-      previousHash: block.previousHash,
-    }));
+    return sha256(
+      stableJSON({
+        index: block.index,
+        timestamp: block.timestamp,
+        data: block.data,
+        previousHash: block.previousHash,
+      }),
+    );
   }
 }

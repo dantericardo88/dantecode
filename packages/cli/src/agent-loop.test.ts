@@ -301,7 +301,13 @@ vi.mock("@dantecode/core", () => {
     ),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
     isValidWaveCompletion: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
-    verifyCompletion: vi.fn(async () => ({ verdict: "complete", confidence: 1, passed: [], failed: [], summary: "ok" })),
+    verifyCompletion: vi.fn(async () => ({
+      verdict: "complete",
+      confidence: 1,
+      passed: [],
+      failed: [],
+      summary: "ok",
+    })),
     deriveWaveExpectations: vi.fn(() => ({ expectedFiles: [] })),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
     // Approach memory + prompt cache mocks
@@ -535,21 +541,48 @@ vi.mock("@dantecode/core", () => {
     detectSelfImprovementContext: vi.fn((_prompt: string, _root: string, _opts?: unknown) => null),
     // PRQualityChecker — advisory PR quality scoring in danteforge-pipeline
     PRQualityChecker: class MockPRQualityChecker {
-      check() { return { size: { linesAdded: 0, linesRemoved: 0, isLarge: false }, antiStubViolations: [], conventionViolations: [], testsPassed: true, score: 85, blocked: false }; }
-      score(report: { score: number }) { return report.score; }
-      shouldBlock() { return false; }
+      check() {
+        return {
+          size: { linesAdded: 0, linesRemoved: 0, isLarge: false },
+          antiStubViolations: [],
+          conventionViolations: [],
+          testsPassed: true,
+          score: 85,
+          blocked: false,
+        };
+      }
+      score(report: { score: number }) {
+        return report.score;
+      }
+      shouldBlock() {
+        return false;
+      }
     },
     // TaskComplexityRouter — informational complexity classification
     TaskComplexityRouter: class MockTaskComplexityRouter {
-      computeComplexity() { return 25; }
-      classify() { return "standard"; }
-      route() { return { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 }; }
+      computeComplexity() {
+        return 25;
+      }
+      classify() {
+        return "standard";
+      }
+      route() {
+        return { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 };
+      }
       logRoutingDecision() {}
-      getDecisions() { return []; }
+      getDecisions() {
+        return [];
+      }
       routeTask() {
         return {
           model: { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 },
-          decision: { taskId: "", complexity: 25, tier: "standard", selectedModel: "mock", reason: "" },
+          decision: {
+            taskId: "",
+            complexity: 25,
+            tier: "standard",
+            selectedModel: "mock",
+            reason: "",
+          },
         };
       }
     },
@@ -709,13 +742,8 @@ vi.mock("./tool-schemas.js", () => ({
 
 // Safety module is NOT mocked — we test it for real
 
-import {
-  runAgentLoop,
-  type AgentLoopConfig,
-} from "./agent-loop.js";
-import {
-  maybeAutoResumeDurableRunAfterBackgroundTask,
-} from "./background-task-manager.js";
+import { runAgentLoop, type AgentLoopConfig } from "./agent-loop.js";
+import { maybeAutoResumeDurableRunAfterBackgroundTask } from "./background-task-manager.js";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
 
 // ---------------------------------------------------------------------------

@@ -19,9 +19,7 @@ vi.mock("node:fs/promises", () => ({
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function makeObservation(
-  overrides?: Partial<QuirkObservation>,
-): QuirkObservation {
+function makeObservation(overrides?: Partial<QuirkObservation>): QuirkObservation {
   return {
     id: "obs_1",
     quirkKey: "stops_before_completion",
@@ -37,9 +35,7 @@ function makeObservation(
   };
 }
 
-function makeOverride(
-  overrides?: Partial<CandidateOverride>,
-): CandidateOverride {
+function makeOverride(overrides?: Partial<CandidateOverride>): CandidateOverride {
   return {
     id: "ovr_1",
     provider: "anthropic",
@@ -55,9 +51,7 @@ function makeOverride(
   };
 }
 
-function makeExperiment(
-  overrides?: Partial<ExperimentResult>,
-): ExperimentResult {
+function makeExperiment(overrides?: Partial<ExperimentResult>): ExperimentResult {
   return {
     id: "exp_1",
     overrideId: "ovr_1",
@@ -113,24 +107,12 @@ describe("generateAdaptationReport", () => {
   });
 
   it("handles no experiments gracefully", () => {
-    const report = generateAdaptationReport(
-      "tool_call_format_error",
-      [],
-      makeOverride(),
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("tool_call_format_error", [], makeOverride(), [], []);
     expect(report.experimentsRun).toEqual(["No experiments have been run."]);
   });
 
   it("handles no observations gracefully", () => {
-    const report = generateAdaptationReport(
-      "skips_synthesis",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("skips_synthesis", [], null, [], []);
     expect(report.quirkDetected).toContain("Total observations: 0");
     expect(report.quirkDetected).toContain("No observations recorded.");
     expect(report.evidence).toEqual([]);
@@ -221,13 +203,7 @@ describe("generateAdaptationReport", () => {
 
   it("includes failure tags in evidence", () => {
     const obs = makeObservation({ failureTags: ["missing-json", "truncated"] });
-    const report = generateAdaptationReport(
-      "tool_call_format_error",
-      [obs],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("tool_call_format_error", [obs], null, [], []);
     expect(report.evidence[0]).toContain("tags: missing-json, truncated");
   });
 
@@ -236,26 +212,14 @@ describe("generateAdaptationReport", () => {
       pdseScore: 72,
       completionStatus: "partial",
     });
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [obs],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [obs], null, [], []);
     expect(report.evidence[0]).toContain("PDSE: 72");
     expect(report.evidence[0]).toContain("partial");
   });
 
   it("includes command name in evidence when present", () => {
     const obs = makeObservation({ commandName: "plan" });
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [obs],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [obs], null, [], []);
     expect(report.evidence[0]).toContain("(plan)");
   });
 
@@ -263,13 +227,7 @@ describe("generateAdaptationReport", () => {
     const observations = Array.from({ length: 10 }, (_, i) =>
       makeObservation({ id: `obs_${i}`, createdAt: `2026-03-23T1${i}:00:00Z` }),
     );
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      observations,
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", observations, null, [], []);
     expect(report.evidence.length).toBe(5);
   });
 
@@ -304,13 +262,7 @@ describe("generateAdaptationReport", () => {
         synthesisRequirements: ["Summarize at end"],
       },
     });
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      ovr,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [], ovr, [], []);
     expect(report.candidateOverride).toContain("Prompt preamble");
     expect(report.candidateOverride).toContain("Ordering hints");
     expect(report.candidateOverride).toContain("Tool formatting hints");
@@ -348,38 +300,20 @@ describe("serializeAdaptationReport", () => {
   });
 
   it("starts with the top-level heading", () => {
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [], null, [], []);
     const md = serializeAdaptationReport(report);
     expect(md).toMatch(/^# Model Adaptation Report\n/);
   });
 
   it("is valid markdown with reasonable length", () => {
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [], null, [], []);
     const md = serializeAdaptationReport(report);
     expect(md).toContain("# Model Adaptation Report");
     expect(md.length).toBeGreaterThan(100);
   });
 
   it("includes evidence fallback when no observations", () => {
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [], null, [], []);
     const md = serializeAdaptationReport(report);
     expect(md).toContain("No evidence recorded.");
   });
@@ -395,25 +329,10 @@ describe("writeAdaptationReport", () => {
   });
 
   it("writes report to .dantecode/reports directory", async () => {
-    const { writeFile: mockWrite, mkdir: mockMkdir } = await import(
-      "node:fs/promises"
-    );
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      null,
-      [],
-      [],
-    );
-    const filePath = await writeAdaptationReport(
-      "/project",
-      report,
-      "stops_before_completion",
-    );
-    expect(mockMkdir).toHaveBeenCalledWith(
-      expect.stringContaining("reports"),
-      { recursive: true },
-    );
+    const { writeFile: mockWrite, mkdir: mockMkdir } = await import("node:fs/promises");
+    const report = generateAdaptationReport("stops_before_completion", [], null, [], []);
+    const filePath = await writeAdaptationReport("/project", report, "stops_before_completion");
+    expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining("reports"), { recursive: true });
     expect(mockWrite).toHaveBeenCalledWith(
       expect.stringContaining("adaptation"),
       expect.stringContaining("# Model Adaptation Report"),
@@ -424,30 +343,14 @@ describe("writeAdaptationReport", () => {
   });
 
   it("sanitizes quirk key in filename", async () => {
-    const report = generateAdaptationReport(
-      "tool_call_format_error",
-      [],
-      null,
-      [],
-      [],
-    );
-    const filePath = await writeAdaptationReport(
-      "/project",
-      report,
-      "tool_call_format_error",
-    );
+    const report = generateAdaptationReport("tool_call_format_error", [], null, [], []);
+    const filePath = await writeAdaptationReport("/project", report, "tool_call_format_error");
     expect(filePath).toContain("tool_call_format_error");
     expect(filePath).not.toContain(":");
   });
 
   it("works without quirk key", async () => {
-    const report = generateAdaptationReport(
-      "tool_call_format_error",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("tool_call_format_error", [], null, [], []);
     const filePath = await writeAdaptationReport("/project", report);
     expect(filePath).toContain("adaptation");
     expect(filePath).toMatch(/adaptation\.md$/);

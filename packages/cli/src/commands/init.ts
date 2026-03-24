@@ -225,9 +225,7 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
       const [provider] = detectedKeys[choice - 1]!;
       selectedProvider = provider;
       providerDefaults = PROVIDER_DEFAULTS[provider]!;
-      process.stdout.write(
-        `${GREEN}Selected ${provider} (${providerDefaults.modelId}).${RESET}\n`,
-      );
+      process.stdout.write(`${GREEN}Selected ${provider} (${providerDefaults.modelId}).${RESET}\n`);
     }
   } else {
     // No API keys found — check for ollama
@@ -269,24 +267,16 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
       `${GREEN}Detected project language: ${BOLD}${language}${RESET}${GREEN}.${RESET}\n`,
     );
     if (detectedStack.framework) {
-      process.stdout.write(
-        `${DIM}  Framework: ${detectedStack.framework}${RESET}\n`,
-      );
+      process.stdout.write(`${DIM}  Framework: ${detectedStack.framework}${RESET}\n`);
     }
     if (detectedStack.testRunner) {
-      process.stdout.write(
-        `${DIM}  Test runner: ${detectedStack.testRunner}${RESET}\n`,
-      );
+      process.stdout.write(`${DIM}  Test runner: ${detectedStack.testRunner}${RESET}\n`);
     }
     if (detectedStack.packageManager) {
-      process.stdout.write(
-        `${DIM}  Package manager: ${detectedStack.packageManager}${RESET}\n`,
-      );
+      process.stdout.write(`${DIM}  Package manager: ${detectedStack.packageManager}${RESET}\n`);
     }
   } else {
-    process.stdout.write(
-      `${YELLOW}Could not auto-detect project language.${RESET}\n`,
-    );
+    process.stdout.write(`${YELLOW}Could not auto-detect project language.${RESET}\n`);
   }
 
   // ── Step 4: Create directory structure ─────────────────────────────────
@@ -398,5 +388,7 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
     }
   }
 
-  process.stdout.write(`\n${GREEN}${BOLD}DanteCode initialized.${RESET} Type ${BOLD}dantecode${RESET} to start.\n\n`);
+  process.stdout.write(
+    `\n${GREEN}${BOLD}DanteCode initialized.${RESET} Type ${BOLD}dantecode${RESET} to start.\n\n`,
+  );
 }

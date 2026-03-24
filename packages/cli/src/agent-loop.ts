@@ -29,10 +29,7 @@ import {
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
-import {
-  recordSuccessPattern,
-  detectAndRecordPatterns,
-} from "@dantecode/danteforge";
+import { recordSuccessPattern, detectAndRecordPatterns } from "@dantecode/danteforge";
 import { runDanteForge } from "./danteforge-pipeline.js";
 import { executeToolBatch } from "./tool-executor.js";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
@@ -53,7 +50,13 @@ import { buildPreLoopContext, injectPlanningPhase, injectRoundContext } from "./
 
 // Extracted modules
 import {
-  CYAN, YELLOW, GREEN, RED, DIM, BOLD, RESET,
+  CYAN,
+  YELLOW,
+  GREEN,
+  RED,
+  DIM,
+  BOLD,
+  RESET,
   PIVOT_INSTRUCTION,
   EXECUTION_WORKFLOW_PATTERN,
   PREMATURE_SUMMARY_PATTERN,
@@ -65,10 +68,7 @@ import {
   EMPTY_RESPONSE_WARNING,
   CONFABULATION_WARNING,
 } from "./agent-loop-constants.js";
-import {
-  type ExtractedToolCall,
-  extractToolCalls,
-} from "./tool-call-parser.js";
+import { type ExtractedToolCall, extractToolCalls } from "./tool-call-parser.js";
 import {
   getVerifyCommands,
   extractClaimedFiles,
@@ -83,7 +83,10 @@ import {
   isExecutionContinuationPrompt,
 } from "./background-task-manager.js";
 import { resolveSessionResume, persistSessionEnd } from "./session-manager.js";
-import { createSessionEvidenceTracker, type SessionEvidenceTracker } from "./evidence-chain-bridge.js";
+import {
+  createSessionEvidenceTracker,
+  type SessionEvidenceTracker,
+} from "./evidence-chain-bridge.js";
 
 // Types re-exported from extracted modules are imported above.
 
@@ -216,11 +219,9 @@ export interface ApproachLogEntry {
 // Reflection loop helpers, context compaction, background task management, and
 // sub-agent executor are now imported from extracted modules above.
 
-
 // ----------------------------------------------------------------------------
 // Main Agent Loop
 // ----------------------------------------------------------------------------
-
 
 // Module-level flag: run startup health check only once per process.
 let _healthCheckCompleted = false;
@@ -350,14 +351,21 @@ async function _runAgentLoopCore(
   if (!adaptationDisabled && !["observe-only", "staged", "active"].includes(adaptationMode)) {
     process.stderr.write(
       `[D-12A] WARNING: Invalid DANTE_MODEL_ADAPTATION_MODE="${adaptationMode}". ` +
-      `Valid values: observe-only, staged, active. Defaulting to observe-only.\n`,
+        `Valid values: observe-only, staged, active. Defaulting to observe-only.\n`,
     );
     adaptationMode = "observe-only";
   }
-  if (!adaptationDisabled && adaptationMode === "active" && config.replState?.modelAdaptationStore) {
+  if (
+    !adaptationDisabled &&
+    adaptationMode === "active" &&
+    config.replState?.modelAdaptationStore
+  ) {
     // Reload to pick up CLI approve/reject changes between rounds
     await config.replState.modelAdaptationStore.reload();
-    const modelKey = { provider: config.state.model.default.provider, modelId: config.state.model.default.modelId };
+    const modelKey = {
+      provider: config.state.model.default.provider,
+      modelId: config.state.model.default.modelId,
+    };
     const activeOverrides = config.replState.modelAdaptationStore.getActiveOverrides(modelKey);
     if (activeOverrides.length > 0) {
       systemPrompt = applyOverrides(systemPrompt, activeOverrides);
@@ -462,9 +470,7 @@ async function _runAgentLoopCore(
   const complexityTier = taskComplexityRouter.classify(taskSignals);
   if (config.verbose) {
     const complexityScore = taskComplexityRouter.computeComplexity(taskSignals);
-    emitOrWrite(
-      `${DIM}[complexity] tier=${complexityTier} score=${complexityScore}${RESET}\n`,
-    );
+    emitOrWrite(`${DIM}[complexity] tier=${complexityTier} score=${complexityScore}${RESET}\n`);
   }
 
   // ---- Feature: Pivot logic ----
@@ -502,7 +508,13 @@ async function _runAgentLoopCore(
   }
 
   // Planning phase (extracted to prompt-builder.ts)
-  injectPlanningPhase(messages, planningEnabled, lexicalComplexity, historicalFailures, !!config.silent);
+  injectPlanningPhase(
+    messages,
+    planningEnabled,
+    lexicalComplexity,
+    historicalFailures,
+    !!config.silent,
+  );
 
   while (maxToolRounds > 0) {
     // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
@@ -537,24 +549,28 @@ async function _runAgentLoopCore(
     }
 
     // Per-round context injection (extracted to prompt-builder.ts)
-    const roundCtx = await injectRoundContext(messages, {
-      roundCounter,
-      sameErrorCount,
-      toolCallsThisTurn,
-      filesModified,
-      lastSuccessfulTool,
-      lastConfirmedStep,
-      durablePrompt,
-      config,
-      reasoningChain,
-      autonomyEngine,
-      memoryOrchestrator,
-      memoryInitialized,
-      secretsScanner,
-      session,
-      thinkingBudget,
-      lexicalComplexity,
-    }, emitOrWrite);
+    const roundCtx = await injectRoundContext(
+      messages,
+      {
+        roundCounter,
+        sameErrorCount,
+        toolCallsThisTurn,
+        filesModified,
+        lastSuccessfulTool,
+        lastConfirmedStep,
+        durablePrompt,
+        config,
+        reasoningChain,
+        autonomyEngine,
+        memoryOrchestrator,
+        memoryInitialized,
+        secretsScanner,
+        session,
+        thinkingBudget,
+        lexicalComplexity,
+      },
+      emitOrWrite,
+    );
     currentRoundTier = roundCtx.currentRoundTier;
     thinkingBudget = roundCtx.thinkingBudget;
 
@@ -697,65 +713,96 @@ async function _runAgentLoopCore(
 
       // D-12A: Model adaptation — observe quirks (all modes except disabled)
       if (!adaptationDisabled && config.replState?.modelAdaptationStore) {
-        const modelKey = { provider: config.state.model.default.provider, modelId: config.state.model.default.modelId };
-        const promptType = toolCalls.length > 0
-          ? ("tool-call" as const)
-          : ("implementation" as const);
-        const workflow = config.replState.activeSkill ?? config.replState.pendingExpectedWorkflow ?? "repl";
+        const modelKey = {
+          provider: config.state.model.default.provider,
+          modelId: config.state.model.default.modelId,
+        };
+        const promptType =
+          toolCalls.length > 0 ? ("tool-call" as const) : ("implementation" as const);
+        const workflow =
+          config.replState.activeSkill ?? config.replState.pendingExpectedWorkflow ?? "repl";
         const adaptStore = config.replState.modelAdaptationStore;
         try {
-          const newDrafts = await observeAndAdapt(adaptStore, responseText, {
-            modelKey,
-            promptType,
-            toolCallsInRound: toolCalls.length,
-            hadToolCalls: toolCalls.length > 0,
-            sessionId: session.id,
-            workflow: workflow as import("@dantecode/core").WorkflowType,
-            commandName: config.replState.activeSkill ?? undefined,
-            promptTemplateVersion: "1.3.0",
-          }, (event) => {
-            if (process.env.DANTECODE_DEBUG) {
-              process.stderr.write(`[D-12A] ${event.kind}${event.reason ? `: ${event.reason}` : ""}\n`);
-            }
-          });
+          const newDrafts = await observeAndAdapt(
+            adaptStore,
+            responseText,
+            {
+              modelKey,
+              promptType,
+              toolCallsInRound: toolCalls.length,
+              hadToolCalls: toolCalls.length > 0,
+              sessionId: session.id,
+              workflow: workflow as import("@dantecode/core").WorkflowType,
+              commandName: config.replState.activeSkill ?? undefined,
+              promptTemplateVersion: "1.3.0",
+            },
+            (event) => {
+              if (process.env.DANTECODE_DEBUG) {
+                process.stderr.write(
+                  `[D-12A] ${event.kind}${event.reason ? `: ${event.reason}` : ""}\n`,
+                );
+              }
+            },
+          );
 
           if (newDrafts.length > 0 && adaptationMode === "staged") {
-            const { processNewDrafts, getGlobalAdaptationRateLimiter } = await import("@dantecode/core");
+            const { processNewDrafts, getGlobalAdaptationRateLimiter } =
+              await import("@dantecode/core");
             await processNewDrafts(adaptStore, newDrafts, {
               rateLimiter: getGlobalAdaptationRateLimiter(),
               logger: (event) => {
                 if (process.env.DANTECODE_DEBUG) {
-                  process.stderr.write(`[D-12A] ${event.kind}${event.quirkKey ? ` [${event.quirkKey}]` : ""}${event.decision ? ` → ${event.decision}` : ""}\n`);
+                  process.stderr.write(
+                    `[D-12A] ${event.kind}${event.quirkKey ? ` [${event.quirkKey}]` : ""}${event.decision ? ` → ${event.decision}` : ""}\n`,
+                  );
                 }
               },
             });
           }
         } catch (err) {
           if (process.env.DANTECODE_DEBUG) {
-            process.stderr.write(`[D-12A] pipeline error: ${err instanceof Error ? err.message : String(err)}\n`);
+            process.stderr.write(
+              `[D-12A] pipeline error: ${err instanceof Error ? err.message : String(err)}\n`,
+            );
           }
         }
 
         // D-12A Gap 2: Periodic rollback check for promoted overrides (active mode only)
-        const rollbackInterval = parseInt(process.env.DANTE_ADAPTATION_ROLLBACK_CHECK_INTERVAL ?? "10", 10) || 10;
-        if (adaptationMode === "active" && roundCounter > 0 && roundCounter % rollbackInterval === 0) {
-          import("@dantecode/core").then(async ({ checkPromotedOverrides, getGlobalAdaptationRateLimiter, detectQuirks }) => {
-            const results = await checkPromotedOverrides(
-              adaptStore,
-              {
-                rateLimiter: getGlobalAdaptationRateLimiter(),
-                logger: (event) => {
-                  if (process.env.DANTECODE_DEBUG) {
-                    process.stderr.write(`[D-12A rollback] ${event.kind} ${event.quirkKey ?? ""} ${event.reason ?? ""}\n`);
-                  }
-                },
+        const rollbackInterval =
+          parseInt(process.env.DANTE_ADAPTATION_ROLLBACK_CHECK_INTERVAL ?? "10", 10) || 10;
+        if (
+          adaptationMode === "active" &&
+          roundCounter > 0 &&
+          roundCounter % rollbackInterval === 0
+        ) {
+          import("@dantecode/core")
+            .then(
+              async ({ checkPromotedOverrides, getGlobalAdaptationRateLimiter, detectQuirks }) => {
+                const results = await checkPromotedOverrides(
+                  adaptStore,
+                  {
+                    rateLimiter: getGlobalAdaptationRateLimiter(),
+                    logger: (event) => {
+                      if (process.env.DANTECODE_DEBUG) {
+                        process.stderr.write(
+                          `[D-12A rollback] ${event.kind} ${event.quirkKey ?? ""} ${event.reason ?? ""}\n`,
+                        );
+                      }
+                    },
+                  },
+                  (response, context) =>
+                    detectQuirks(response, { ...context, sessionId: session.id } as Parameters<
+                      typeof detectQuirks
+                    >[1]),
+                );
+                if (results.length > 0 && process.env.DANTECODE_DEBUG) {
+                  process.stderr.write(`[D-12A] rolled back ${results.length} override(s)\n`);
+                }
               },
-              (response, context) => detectQuirks(response, { ...context, sessionId: session.id } as Parameters<typeof detectQuirks>[1]),
-            );
-            if (results.length > 0 && process.env.DANTECODE_DEBUG) {
-              process.stderr.write(`[D-12A] rolled back ${results.length} override(s)\n`);
-            }
-          }).catch(() => { /* non-fatal */ });
+            )
+            .catch(() => {
+              /* non-fatal */
+            });
         }
       }
 
@@ -1007,7 +1054,10 @@ async function _runAgentLoopCore(
           try {
             const waveExpectations = deriveWaveExpectations(completedWave);
             if (waveExpectations.expectedFiles && waveExpectations.expectedFiles.length > 0) {
-              const waveVerification = await verifyCompletion(session.projectRoot, waveExpectations);
+              const waveVerification = await verifyCompletion(
+                session.projectRoot,
+                waveExpectations,
+              );
               if (waveVerification.verdict === "failed") {
                 waveVerifyRetries++;
                 if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
@@ -1136,15 +1186,42 @@ async function _runAgentLoopCore(
     }
 
     // Execute tool batch (extracted to tool-executor.ts)
-    const execResult = await executeToolBatch(toolCalls, toolCallParseErrors, {
-      session, config, roundCounter, maxToolRounds, durableRun, durableRunStore, workflowName,
-      isPipelineWorkflow, touchedFiles, evidenceLedger, lastConfirmedStep,
-      lastSuccessfulTool, lastSuccessfulToolResult, filesModified, toolCallsThisTurn,
-      executedToolsThisTurn, completedToolsThisTurn, recentToolSignatures,
-      readTracker, editAttempts, lastMajorEditGatePassed, effectiveSelfImprovement,
-      securityEngine, secretsScanner, localSandboxBridge, testsRun, bashSucceeded, currentApproachToolCalls,
-      toolErrorCounts,
-    }, runAgentLoop);
+    const execResult = await executeToolBatch(
+      toolCalls,
+      toolCallParseErrors,
+      {
+        session,
+        config,
+        roundCounter,
+        maxToolRounds,
+        durableRun,
+        durableRunStore,
+        workflowName,
+        isPipelineWorkflow,
+        touchedFiles,
+        evidenceLedger,
+        lastConfirmedStep,
+        lastSuccessfulTool,
+        lastSuccessfulToolResult,
+        filesModified,
+        toolCallsThisTurn,
+        executedToolsThisTurn,
+        completedToolsThisTurn,
+        recentToolSignatures,
+        readTracker,
+        editAttempts,
+        lastMajorEditGatePassed,
+        effectiveSelfImprovement,
+        securityEngine,
+        secretsScanner,
+        localSandboxBridge,
+        testsRun,
+        bashSucceeded,
+        currentApproachToolCalls,
+        toolErrorCounts,
+      },
+      runAgentLoop,
+    );
     // Write back updated state
     filesModified = execResult.filesModified;
     toolCallsThisTurn = execResult.toolCallsThisTurn;
@@ -1449,7 +1526,12 @@ async function _runAgentLoopCore(
     // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
     // in a response that also had tool calls, advance to the next wave now.
     // Gate: require meaningful work (file writes or successful Bash commands).
-    if (config.waveState && isValidWaveCompletion(responseText) && (filesModified > 0 || bashSucceeded > 0) && maxToolRounds > 0) {
+    if (
+      config.waveState &&
+      isValidWaveCompletion(responseText) &&
+      (filesModified > 0 || bashSucceeded > 0) &&
+      maxToolRounds > 0
+    ) {
       const waveState = config.waveState;
       const completedWave = getCurrentWave(waveState);
 
@@ -1618,10 +1700,13 @@ async function _runAgentLoopCore(
           intentDescription: "Session deliverables",
         });
         if (!config.silent) {
-          const vIcon = finalVerification.verdict === "complete" ? GREEN : finalVerification.verdict === "partial" ? YELLOW : RED;
-          process.stdout.write(
-            `\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`,
-          );
+          const vIcon =
+            finalVerification.verdict === "complete"
+              ? GREEN
+              : finalVerification.verdict === "partial"
+                ? YELLOW
+                : RED;
+          process.stdout.write(`\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`);
         }
       }
     } catch {

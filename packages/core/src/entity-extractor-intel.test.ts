@@ -3,9 +3,10 @@ import { EntityExtractor } from "./entity-extractor.js";
 import type { ModelRouterImpl } from "./model-router.js";
 
 function createMockRouter(response: string | Error): ModelRouterImpl {
-  const generate = response instanceof Error
-    ? vi.fn().mockRejectedValue(response)
-    : vi.fn().mockResolvedValue(response);
+  const generate =
+    response instanceof Error
+      ? vi.fn().mockRejectedValue(response)
+      : vi.fn().mockResolvedValue(response);
 
   return { generate } as unknown as ModelRouterImpl;
 }
@@ -105,9 +106,7 @@ describe("EntityExtractor — Heuristic Fallback", () => {
   });
 
   it("passes text to the router generate method", async () => {
-    const router = createMockRouter(
-      '{"summary":"ok","entities":[],"category":"context"}',
-    );
+    const router = createMockRouter('{"summary":"ok","entities":[],"category":"context"}');
     const extractor = new EntityExtractor(router);
     await extractor.extract("Specific text content here.");
 

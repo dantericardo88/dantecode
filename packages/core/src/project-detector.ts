@@ -137,39 +137,147 @@ export function getGStackDefaults(stack: DetectedStack): GStackCommand[] {
   switch (stack.language) {
     case "typescript":
       return [
-        { name: "typecheck", command: "npx tsc --noEmit", runInSandbox: true, timeoutMs: 60000, failureIsSoft: false },
-        { name: "lint", command: "npx eslint .", runInSandbox: true, timeoutMs: 60000, failureIsSoft: true },
-        { name: "test", command: getJsTestCommand(stack.testRunner), runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
+        {
+          name: "typecheck",
+          command: "npx tsc --noEmit",
+          runInSandbox: true,
+          timeoutMs: 60000,
+          failureIsSoft: false,
+        },
+        {
+          name: "lint",
+          command: "npx eslint .",
+          runInSandbox: true,
+          timeoutMs: 60000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: getJsTestCommand(stack.testRunner),
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: false,
+        },
       ];
     case "javascript":
       return [
-        { name: "typecheck", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
-        { name: "lint", command: "npx eslint .", runInSandbox: true, timeoutMs: 60000, failureIsSoft: true },
-        { name: "test", command: getJsTestCommand(stack.testRunner), runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
+        {
+          name: "typecheck",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
+        {
+          name: "lint",
+          command: "npx eslint .",
+          runInSandbox: true,
+          timeoutMs: 60000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: getJsTestCommand(stack.testRunner),
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: false,
+        },
       ];
     case "python":
       return [
-        { name: "typecheck", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
-        { name: "lint", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
-        { name: "test", command: "pytest", runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
+        {
+          name: "typecheck",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
+        {
+          name: "lint",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: "pytest",
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: false,
+        },
       ];
     case "rust":
       return [
-        { name: "typecheck", command: "cargo check", runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
-        { name: "lint", command: "cargo clippy -- -D warnings", runInSandbox: true, timeoutMs: 120000, failureIsSoft: true },
-        { name: "test", command: "cargo test", runInSandbox: true, timeoutMs: 180000, failureIsSoft: false },
+        {
+          name: "typecheck",
+          command: "cargo check",
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: false,
+        },
+        {
+          name: "lint",
+          command: "cargo clippy -- -D warnings",
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: "cargo test",
+          runInSandbox: true,
+          timeoutMs: 180000,
+          failureIsSoft: false,
+        },
       ];
     case "go":
       return [
-        { name: "typecheck", command: "go vet ./...", runInSandbox: true, timeoutMs: 60000, failureIsSoft: false },
-        { name: "lint", command: "golangci-lint run", runInSandbox: true, timeoutMs: 60000, failureIsSoft: true },
-        { name: "test", command: "go test ./...", runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
+        {
+          name: "typecheck",
+          command: "go vet ./...",
+          runInSandbox: true,
+          timeoutMs: 60000,
+          failureIsSoft: false,
+        },
+        {
+          name: "lint",
+          command: "golangci-lint run",
+          runInSandbox: true,
+          timeoutMs: 60000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: "go test ./...",
+          runInSandbox: true,
+          timeoutMs: 120000,
+          failureIsSoft: false,
+        },
       ];
     default:
       return [
-        { name: "typecheck", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
-        { name: "lint", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
-        { name: "test", command: "true", runInSandbox: false, timeoutMs: 5000, failureIsSoft: true },
+        {
+          name: "typecheck",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
+        {
+          name: "lint",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
+        {
+          name: "test",
+          command: "true",
+          runInSandbox: false,
+          timeoutMs: 5000,
+          failureIsSoft: true,
+        },
       ];
   }
 }

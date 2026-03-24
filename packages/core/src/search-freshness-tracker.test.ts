@@ -125,7 +125,7 @@ describe("SearchFreshnessTracker", () => {
 
       // New instance loads from disk and can check staleness
       const t2 = new SearchFreshnessTracker({ nowFn: () => NOW, persistPath });
-      expect(t2.isStale("n1")).toBe(true);  // news TTL is 24h, 25h old
+      expect(t2.isStale("n1")).toBe(true); // news TTL is 24h, 25h old
       expect(t2.isStale("d1")).toBe(false); // docs TTL is 7d, 25h old
     });
 

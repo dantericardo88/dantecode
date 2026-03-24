@@ -388,8 +388,7 @@ export function deriveWaveExpectations(wave: SkillWave): CompletionExpectation {
   const seen = new Set<string>();
 
   // Pattern 1: "create/write/generate/add <path>" (with optional quotes/backticks)
-  const actionPattern =
-    /(?:create|write|generate|add|implement)\s+[`"']?([^\s`"',)]+\.\w{1,8})/gi;
+  const actionPattern = /(?:create|write|generate|add|implement)\s+[`"']?([^\s`"',)]+\.\w{1,8})/gi;
   let match: RegExpExecArray | null;
   while ((match = actionPattern.exec(wave.instructions)) !== null) {
     const file = match[1]!;

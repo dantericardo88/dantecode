@@ -10,10 +10,7 @@ import type {
 } from "./types.js";
 import { ExecutionRequestSchema } from "./types.js";
 
-function makeRequest(
-  command: string,
-  env: Record<string, string> = {},
-): ExecutionRequest {
+function makeRequest(command: string, env: Record<string, string> = {}): ExecutionRequest {
   return ExecutionRequestSchema.parse({
     id: randomUUID(),
     command,
@@ -28,17 +25,20 @@ function makeRequest(
 }
 
 function createAllowGate(): GateFn {
-  return vi.fn().mockImplementation(async (req: ExecutionRequest) => ({
-    requestId: req.id,
-    allow: true,
-    strategy: "host",
-    reason: "gate allows",
-    riskLevel: "low",
-    gateVerdict: "allow",
-    requiresConfirmation: false,
-    gateScore: 1.0,
-    at: new Date().toISOString(),
-  } satisfies SandboxDecision));
+  return vi.fn().mockImplementation(
+    async (req: ExecutionRequest) =>
+      ({
+        requestId: req.id,
+        allow: true,
+        strategy: "host",
+        reason: "gate allows",
+        riskLevel: "low",
+        gateVerdict: "allow",
+        requiresConfirmation: false,
+        gateScore: 1.0,
+        at: new Date().toISOString(),
+      }) satisfies SandboxDecision,
+  );
 }
 
 describe("Env Leakage — Environment Isolation", () => {
@@ -175,15 +175,15 @@ describe("Env Leakage — Environment Isolation", () => {
     engine.registerLayer(layer);
 
     const specialEnv = {
-      "SPECIAL_CHARS": "value;with|special&chars",
-      "QUOTES": "he said \"hello\"",
-      "NEWLINE": "line1\nline2",
+      SPECIAL_CHARS: "value;with|special&chars",
+      QUOTES: 'he said "hello"',
+      NEWLINE: "line1\nline2",
     };
     await engine.execute(makeRequest("echo test", specialEnv));
 
     expect(capturedEnv).toBeDefined();
     expect(capturedEnv!["SPECIAL_CHARS"]).toBe("value;with|special&chars");
-    expect(capturedEnv!["QUOTES"]).toBe("he said \"hello\"");
+    expect(capturedEnv!["QUOTES"]).toBe('he said "hello"');
     expect(capturedEnv!["NEWLINE"]).toBe("line1\nline2");
   });
 });

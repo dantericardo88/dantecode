@@ -5,7 +5,6 @@ import { TrailEventIndex } from "../state/trail-index.js";
 import { SessionMap } from "../state/session-map.js";
 import { AnomalyDetector } from "../anomaly-detector.js";
 
-
 function createMockLogger(): AuditLogger {
   const index = new TrailEventIndex();
   const sessionMap = new SessionMap();

@@ -6,11 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import {
-  globalToolScheduler,
-  adaptToolResult,
-  formatEvidenceSummary,
-} from "@dantecode/core";
+import { globalToolScheduler, adaptToolResult, formatEvidenceSummary } from "@dantecode/core";
 import type { SecurityEngine, SecretsScanner } from "@dantecode/core";
 import type { DurableRunStore } from "@dantecode/core";
 import type {
@@ -540,10 +536,15 @@ export async function executeToolBatch(
               selfImprovement: effectiveSelfImprovement ?? undefined,
               readTracker,
               editAttempts,
-              subAgentExecutor: createSubAgentExecutor(session, config, {
-                durableRunId: durableRun.id,
-                workflowName,
-              }, runAgentLoopFn),
+              subAgentExecutor: createSubAgentExecutor(
+                session,
+                config,
+                {
+                  durableRunId: durableRun.id,
+                  workflowName,
+                },
+                runAgentLoopFn,
+              ),
               // Pass sandboxBridge into context so toolBash() can route through it
               // even when the tool scheduler doesn't take the useSandbox fast path.
               sandboxBridge: activeSandboxBridge,
@@ -586,8 +587,7 @@ export async function executeToolBatch(
             typeof toolCall.input["file_path"] === "string"
               ? toolCall.input["file_path"]
               : undefined,
-          sourceUrl:
-            typeof toolCall.input["url"] === "string" ? toolCall.input["url"] : undefined,
+          sourceUrl: typeof toolCall.input["url"] === "string" ? toolCall.input["url"] : undefined,
           details: {
             reason: blockedReason,
             toolName: toolCall.name,
@@ -635,9 +635,7 @@ export async function executeToolBatch(
         };
       }
       if (!config.silent) {
-        process.stdout.write(
-          `\n${RED}[dtr] ${toolCall.name} blocked — ${blockedReason}${RESET}\n`,
-        );
+        process.stdout.write(`\n${RED}[dtr] ${toolCall.name} blocked — ${blockedReason}${RESET}\n`);
       }
       toolResults.push(`SYSTEM: ${toolCall.name} is blocked — ${blockedReason}.`);
       continue;
@@ -870,9 +868,7 @@ export async function executeToolBatch(
 
   // Clear silent mode progress line after tool loop
   if (config.silent && toolCalls.length > 0) {
-    process.stdout.write(
-      `\r${DIM}[${toolCalls.length}/${toolCalls.length} tools done]${RESET}\n`,
-    );
+    process.stdout.write(`\r${DIM}[${toolCalls.length}/${toolCalls.length} tools done]${RESET}\n`);
   }
 
   if (isMajorEditBatch(roundWrittenFiles, session.projectRoot) && !roundMajorEditGateResult) {

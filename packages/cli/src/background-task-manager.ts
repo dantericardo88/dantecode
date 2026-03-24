@@ -129,7 +129,11 @@ export function extractBackgroundTaskId(text?: string): string | null {
   return statusHint?.[1] ?? null;
 }
 
-export function formatBackgroundWaitNotice(runId: string, taskId: string, progress?: string): string {
+export function formatBackgroundWaitNotice(
+  runId: string,
+  taskId: string,
+  progress?: string,
+): string {
   const detail = progress?.trim() ? ` ${progress.trim()}.` : "";
   return (
     `Background task ${taskId} is still running.${detail} ` +
@@ -245,10 +249,12 @@ export function isExecutionContinuationPrompt(prompt: string, session: Session):
 export function createSubAgentExecutor(
   parentSession: Session,
   parentConfig: AgentLoopConfig,
-  runtime: {
-    durableRunId?: string;
-    workflowName?: string;
-  } | undefined,
+  runtime:
+    | {
+        durableRunId?: string;
+        workflowName?: string;
+      }
+    | undefined,
   runAgentLoopFn: RunAgentLoopFn,
 ): SubAgentExecutor {
   const backgroundRegistry = getBackgroundTaskRegistry(parentSession.projectRoot);
@@ -305,9 +311,7 @@ export function createSubAgentExecutor(
     const taskPromise = (async (): Promise<SubAgentResult> => {
       try {
         const resultSession = await runAgentLoopFn(prompt, subSession, subConfig);
-        const lastAssistant = resultSession.messages
-          .filter((m) => m.role === "assistant")
-          .pop();
+        const lastAssistant = resultSession.messages.filter((m) => m.role === "assistant").pop();
 
         const touchedFiles: string[] = [];
         for (const msg of resultSession.messages) {
@@ -371,7 +375,9 @@ export function createSubAgentExecutor(
             completedAt: new Date().toISOString(),
             output: result.output.slice(0, 2000),
             touchedFiles: result.touchedFiles,
-            progress: result.success ? "Background sub-agent completed" : "Background sub-agent failed",
+            progress: result.success
+              ? "Background sub-agent completed"
+              : "Background sub-agent failed",
           });
 
           // Try to auto-resume the parent durable run

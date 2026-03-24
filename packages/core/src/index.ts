@@ -765,7 +765,11 @@ export type { WriteRunReportOptions } from "./run-report-writer.js";
 
 // ─── Completion Verifier (D-12) ──────────────────────────────────────────────
 
-export { verifyCompletion, deriveExpectations, summarizeVerification } from "./completion-verifier.js";
+export {
+  verifyCompletion,
+  deriveExpectations,
+  summarizeVerification,
+} from "./completion-verifier.js";
 export type {
   CompletionExpectation,
   CompletionVerification,
@@ -828,7 +832,13 @@ export type {
   AdaptationEventKind,
   AdaptationLogger,
 } from "./model-adaptation-types.js";
-export { detectQuirks, generateOverride, applyOverrides, observeAndAdapt, promoteOverride } from "./model-adaptation.js";
+export {
+  detectQuirks,
+  generateOverride,
+  applyOverrides,
+  observeAndAdapt,
+  promoteOverride,
+} from "./model-adaptation.js";
 export type { QuirkDetectionContext } from "./model-adaptation.js";
 export {
   ExperimentRateLimiter,
@@ -843,8 +853,16 @@ export {
   createRollbackOverride,
   shouldRollback,
 } from "./model-adaptation-promotion.js";
-export { processNewDrafts, getGlobalAdaptationRateLimiter, checkPromotedOverrides } from "./model-adaptation-pipeline.js";
-export type { PipelineResult, PipelineOptions, RollbackCheckResult } from "./model-adaptation-pipeline.js";
+export {
+  processNewDrafts,
+  getGlobalAdaptationRateLimiter,
+  checkPromotedOverrides,
+} from "./model-adaptation-pipeline.js";
+export type {
+  PipelineResult,
+  PipelineOptions,
+  RollbackCheckResult,
+} from "./model-adaptation-pipeline.js";
 export {
   generateAdaptationReport,
   serializeAdaptationReport,
@@ -876,20 +894,12 @@ export type { ContentType as SearchContentType } from "./search-freshness-tracke
 // ─── Git Conflict Resolution ────────────────────────────────────────────────
 
 export { GitConflictResolver } from "./git-conflict-resolver.js";
-export type {
-  ConflictRegion,
-  Resolution,
-  ConflictReport,
-} from "./git-conflict-resolver.js";
+export type { ConflictRegion, Resolution, ConflictReport } from "./git-conflict-resolver.js";
 
 // ─── PR Quality ─────────────────────────────────────────────────────────────
 
 export { PRQualityChecker } from "./pr-quality-checker.js";
-export type {
-  CheckOptions,
-  PRSizeAnalysis,
-  PRQualityReport,
-} from "./pr-quality-checker.js";
+export type { CheckOptions, PRSizeAnalysis, PRQualityReport } from "./pr-quality-checker.js";
 
 // ─── Update Rollback ────────────────────────────────────────────────────────
 
@@ -930,10 +940,7 @@ export type {
 // ─── Council Resilience ─────────────────────────────────────────────────────
 
 export { CouncilResilience } from "./council/index.js";
-export type {
-  RedistributionPlan,
-  PartialRecoveryReport,
-} from "./council/index.js";
+export type { RedistributionPlan, PartialRecoveryReport } from "./council/index.js";
 
 // ─── Verification Trend Tracker ─────────────────────────────────────────────
 

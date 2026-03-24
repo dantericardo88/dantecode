@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import { RetentionPolicy } from "./retention-policy.js";
 import type { SessionRecord } from "../sqlite-store.js";
 
-function makeSessions(overrides: Record<string, Partial<SessionRecord>> = {}): Record<string, SessionRecord> {
+function makeSessions(
+  overrides: Record<string, Partial<SessionRecord>> = {},
+): Record<string, SessionRecord> {
   const now = new Date().toISOString();
   const base: Record<string, SessionRecord> = {
     "recent-sess": {

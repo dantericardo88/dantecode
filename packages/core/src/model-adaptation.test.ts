@@ -12,7 +12,12 @@ import {
 } from "./model-adaptation.js";
 import { ModelAdaptationStore } from "./model-adaptation-store.js";
 import type { ModelAdaptationKey } from "./model-adaptation-store.js";
-import type { QuirkKey, CandidateOverride, AdaptationEvent, AdaptationLogger } from "./model-adaptation-types.js";
+import type {
+  QuirkKey,
+  CandidateOverride,
+  AdaptationEvent,
+  AdaptationLogger,
+} from "./model-adaptation-types.js";
 
 // ---------------------------------------------------------------------------
 // FS mock — ModelAdaptationStore uses node:fs/promises internally
@@ -67,18 +72,16 @@ describe("detectQuirks", () => {
   it("does NOT detect stops-after-tool when hadToolCalls is false", () => {
     const response = "I ran the search command and found 3 files.";
     const results = detectQuirks(response, { ...BASE_CONTEXT, hadToolCalls: false });
-    const found = results.find(
-      (r) => r.failureTags.includes("stops-after-tool"),
-    );
+    const found = results.find((r) => r.failureTags.includes("stops-after-tool"));
     expect(found).toBeUndefined();
   });
 
   it("does NOT detect stops-after-tool when response continues after acknowledgement", () => {
-    const response = "I ran the search command and found 3 files. " + "Here is a detailed analysis of each file: ".repeat(10);
+    const response =
+      "I ran the search command and found 3 files. " +
+      "Here is a detailed analysis of each file: ".repeat(10);
     const results = detectQuirks(response, { ...BASE_CONTEXT, hadToolCalls: true });
-    const found = results.find(
-      (r) => r.failureTags.includes("stops-after-tool"),
-    );
+    const found = results.find((r) => r.failureTags.includes("stops-after-tool"));
     expect(found).toBeUndefined();
   });
 
@@ -123,7 +126,8 @@ describe("detectQuirks", () => {
   });
 
   it("detects ignores_prd_section_order for long response with stage refs but no numbers", () => {
-    const response = "X".repeat(801) + "\nWe should handle stage 1 carefully and move to step 2 after that.";
+    const response =
+      "X".repeat(801) + "\nWe should handle stage 1 carefully and move to step 2 after that.";
     const ctx = { ...BASE_CONTEXT, promptType: "implementation" as const };
     const results = detectQuirks(response, ctx);
     const found = results.find((r) => r.quirkKey === "ignores_prd_section_order");
@@ -162,7 +166,8 @@ describe("detectQuirks", () => {
   });
 
   it("detects regeneration_trigger_pattern with multiple retries", () => {
-    const response = "The build failed. Let me try again with different settings. Attempting again with a new approach.";
+    const response =
+      "The build failed. Let me try again with different settings. Attempting again with a new approach.";
     const results = detectQuirks(response, BASE_CONTEXT);
     const found = results.find((r) => r.quirkKey === "regeneration_trigger_pattern");
     expect(found).toBeDefined();
@@ -219,7 +224,10 @@ describe("detectQuirks", () => {
     const response = "Short response. In summary:";
     expect(response.length).toBeLessThan(500);
     const results = detectQuirks(response, BASE_CONTEXT);
-    const found = results.find((r) => r.quirkKey === "stops_before_completion" && r.failureTags.includes("premature-summary"));
+    const found = results.find(
+      (r) =>
+        r.quirkKey === "stops_before_completion" && r.failureTags.includes("premature-summary"),
+    );
     expect(found).toBeUndefined();
   });
 
@@ -604,7 +612,7 @@ describe("Confidence scoring", () => {
     });
 
     // Should detect stops_before_completion
-    const obs = observations.find(o => o.quirkKey === "stops_before_completion");
+    const obs = observations.find((o) => o.quirkKey === "stops_before_completion");
     expect(obs).toBeDefined();
     expect(obs!.confidence).toBeDefined();
     expect(typeof obs!.confidence).toBe("number");
@@ -622,7 +630,7 @@ describe("Confidence scoring", () => {
       toolCallsInRound: 1,
       promptType: "tool-call",
     });
-    const jsonMatch = jsonObs.find(o => o.quirkKey === "tool_call_format_error");
+    const jsonMatch = jsonObs.find((o) => o.quirkKey === "tool_call_format_error");
 
     // Trigger markdown_wrapper_issue
     const mdResponse = "# Header\n## Subheader\nContent here";
@@ -633,7 +641,7 @@ describe("Confidence scoring", () => {
       toolCallsInRound: 0,
       promptType: "tool-call",
     });
-    const mdMatch = mdObs.find(o => o.quirkKey === "markdown_wrapper_issue");
+    const mdMatch = mdObs.find((o) => o.quirkKey === "markdown_wrapper_issue");
 
     expect(jsonMatch, "tool_call_format_error should be detected").toBeDefined();
     expect(mdMatch, "markdown_wrapper_issue should be detected").toBeDefined();
@@ -657,11 +665,18 @@ describe("observeAndAdapt logger", () => {
     vi.spyOn(store, "save").mockRejectedValue(new Error("disk full"));
 
     const events: AdaptationEvent[] = [];
-    const logger: AdaptationLogger = (event) => { events.push(event); };
+    const logger: AdaptationLogger = (event) => {
+      events.push(event);
+    };
 
     // Response that triggers at least one detection (>500 chars + summary)
     const longResponse = "A".repeat(501) + "\nIn summary:";
-    await observeAndAdapt(store, longResponse, { ...BASE_CONTEXT, sessionId: "logger-test-1" }, logger);
+    await observeAndAdapt(
+      store,
+      longResponse,
+      { ...BASE_CONTEXT, sessionId: "logger-test-1" },
+      logger,
+    );
 
     const saveErrorEvent = events.find(
       (e) => e.kind === "adaptation:save_error" && e.reason?.includes("Save failed"),
@@ -673,19 +688,29 @@ describe("observeAndAdapt logger", () => {
   it("does not throw when logger itself throws on save error", async () => {
     vi.spyOn(store, "save").mockRejectedValue(new Error("disk full"));
 
-    const badLogger: AdaptationLogger = () => { throw new Error("logger broken"); };
+    const badLogger: AdaptationLogger = () => {
+      throw new Error("logger broken");
+    };
 
     const longResponse = "A".repeat(501) + "\nIn summary:";
     // Should not throw even when both save and logger fail
     await expect(
-      observeAndAdapt(store, longResponse, { ...BASE_CONTEXT, sessionId: "logger-test-2" }, badLogger),
+      observeAndAdapt(
+        store,
+        longResponse,
+        { ...BASE_CONTEXT, sessionId: "logger-test-2" },
+        badLogger,
+      ),
     ).resolves.toBeDefined();
   });
 
   it("works without logger (backward compatibility)", async () => {
     // No logger passed — should not throw
     const longResponse = "A".repeat(501) + "\nIn summary:";
-    const drafts = await observeAndAdapt(store, longResponse, { ...BASE_CONTEXT, sessionId: "logger-test-3" });
+    const drafts = await observeAndAdapt(store, longResponse, {
+      ...BASE_CONTEXT,
+      sessionId: "logger-test-3",
+    });
     expect(drafts).toBeDefined();
   });
 });
@@ -726,7 +751,8 @@ describe("observeAndAdapt — confidence gate cumulative", () => {
 describe("detectQuirks — false positive reduction", () => {
   it("does NOT detect stops_before_completion for short but correct tool response with follow-up action", () => {
     // 120 chars, contains follow-up action verb — should NOT be detected as false positive
-    const response = "I ran the search command and found 3 files. Let me now fix the issue by updating the configuration file.";
+    const response =
+      "I ran the search command and found 3 files. Let me now fix the issue by updating the configuration file.";
     const results = detectQuirks(response, { ...BASE_CONTEXT, hadToolCalls: true });
     const found = results.find(
       (r) => r.quirkKey === "stops_before_completion" && r.failureTags.includes("stops-after-tool"),
@@ -737,9 +763,7 @@ describe("detectQuirks — false positive reduction", () => {
   it("does NOT detect stops_before_completion for response with follow-up 'next' verb", () => {
     const response = "I ran the search command and found 3 files. Next I'll update them.";
     const results = detectQuirks(response, { ...BASE_CONTEXT, hadToolCalls: true });
-    const found = results.find(
-      (r) => r.failureTags.includes("stops-after-tool"),
-    );
+    const found = results.find((r) => r.failureTags.includes("stops-after-tool"));
     expect(found).toBeUndefined();
   });
 });

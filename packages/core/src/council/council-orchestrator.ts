@@ -144,7 +144,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private router: CouncilRouter | null = null;
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
-  private readonly options: Required<Omit<CouncilOrchestratorOptions, "worktreeHooks">> & Pick<CouncilOrchestratorOptions, "worktreeHooks">;
+  private readonly options: Required<Omit<CouncilOrchestratorOptions, "worktreeHooks">> &
+    Pick<CouncilOrchestratorOptions, "worktreeHooks">;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
   private _allTerminalFired = false;

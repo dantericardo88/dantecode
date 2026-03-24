@@ -19,7 +19,13 @@ import {
   renderPlanSummary,
   analyzeComplexity,
 } from "@dantecode/core";
-import type { StoredPlan, PlanExecutionResult, PlanStep, ExecutionPlan, StepExecutionResult } from "@dantecode/core";
+import type {
+  StoredPlan,
+  PlanExecutionResult,
+  PlanStep,
+  ExecutionPlan,
+  StepExecutionResult,
+} from "@dantecode/core";
 import type { ReplState } from "../slash-commands.js";
 
 // ─── ANSI ───────────────────────────────────────────────────────────────────
@@ -203,19 +209,21 @@ async function approvePlan(state: ReplState): Promise<string> {
     onStepComplete: (step: PlanStep, result: StepExecutionResult) => {
       step.status = result.success ? "completed" : "failed";
       const icon = result.success ? GREEN : RED;
-      process.stdout.write(
-        `${icon}[plan] Step ${step.id}: ${step.status}${RESET}\n`,
-      );
+      process.stdout.write(`${icon}[plan] Step ${step.id}: ${step.status}${RESET}\n`);
       // Persist progress
       if (state.currentPlanId) {
         const persistStore = new PlanStore(state.projectRoot);
-        persistStore.save({
-          plan: state.currentPlan!,
-          id: state.currentPlanId,
-          status: "approved",
-          createdAt: new Date().toISOString(),
-          sessionId: state.session.id,
-        }).catch(() => { /* non-fatal */ });
+        persistStore
+          .save({
+            plan: state.currentPlan!,
+            id: state.currentPlanId,
+            status: "approved",
+            createdAt: new Date().toISOString(),
+            sessionId: state.session.id,
+          })
+          .catch(() => {
+            /* non-fatal */
+          });
       }
     },
   });
@@ -225,19 +233,22 @@ async function approvePlan(state: ReplState): Promise<string> {
 
   // Execute the first step only — subsequent steps are driven by the REPL loop
   // via the pendingAgentPrompt chain. The PlanExecutor tracks overall state.
-  const firstStep = plan.steps.find(s => s.status === "pending");
+  const firstStep = plan.steps.find((s) => s.status === "pending");
   if (firstStep) {
-    executor.execute(plan).then((result: PlanExecutionResult) => {
-      state.planExecutionInProgress = false;
-      state.planExecutionResult = result;
-      if (state.currentPlanId) {
-        const finalStore = new PlanStore(state.projectRoot);
-        const finalStatus = result.allPassed ? "completed" : "failed";
-        finalStore.updateStatus(state.currentPlanId, finalStatus).catch(() => {});
-      }
-    }).catch(() => {
-      state.planExecutionInProgress = false;
-    });
+    executor
+      .execute(plan)
+      .then((result: PlanExecutionResult) => {
+        state.planExecutionInProgress = false;
+        state.planExecutionResult = result;
+        if (state.currentPlanId) {
+          const finalStore = new PlanStore(state.projectRoot);
+          const finalStatus = result.allPassed ? "completed" : "failed";
+          finalStore.updateStatus(state.currentPlanId, finalStatus).catch(() => {});
+        }
+      })
+      .catch(() => {
+        state.planExecutionInProgress = false;
+      });
   }
 
   return `\n${GREEN}${BOLD}Plan approved!${RESET} Structured execution started via PlanExecutor.\n${DIM}Steps will execute sequentially with dependency tracking.${RESET}`;

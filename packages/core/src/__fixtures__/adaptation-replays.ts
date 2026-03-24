@@ -89,12 +89,15 @@ export const REPLAY_FIXTURES: AdaptationReplayFixture[] = [
   },
   {
     name: "overly-verbose-preface",
-    description: "Model produces an excessively verbose response (>1000 words) in implementation context",
+    description:
+      "Model produces an excessively verbose response (>1000 words) in implementation context",
     response:
       "Let me provide a comprehensive and detailed explanation of the entire approach. " +
       "First, I want to make sure we understand the full context of what we're building here. " +
       "The architecture involves multiple layers of abstraction that need to be carefully considered. " +
-      Array(200).fill("This is additional verbose content that adds unnecessary length to the response.").join(" ") +
+      Array(200)
+        .fill("This is additional verbose content that adds unnecessary length to the response.")
+        .join(" ") +
       " Now let me actually implement the function.",
     context: {
       modelKey: BASE_KEY,
@@ -148,7 +151,8 @@ export const REPLAY_FIXTURES: AdaptationReplayFixture[] = [
   },
   {
     name: "ignores-prd-section-order",
-    description: "Model references stages/steps but doesn't number them in a long implementation response",
+    description:
+      "Model references stages/steps but doesn't number them in a long implementation response",
     response:
       "I'll implement this feature following the stage requirements. " +
       "For stage 2, we need to set up the database schema. " +
@@ -186,7 +190,8 @@ export const REPLAY_FIXTURES: AdaptationReplayFixture[] = [
   },
   {
     name: "regeneration-trigger-pattern",
-    description: "Model enters a retry loop with multiple regeneration attempts instead of diagnosing",
+    description:
+      "Model enters a retry loop with multiple regeneration attempts instead of diagnosing",
     response:
       "The build failed with exit code 1. Let me try again with the correct configuration. " +
       "The second attempt also failed. Attempting again with updated dependencies. " +

@@ -31,7 +31,12 @@ export interface VerificationDetails {
   constitutionMessages: string[];
   pdseScore: number;
   pdsePassedGate: boolean;
-  pdseBreakdown?: { completeness: number; correctness: number; clarity: number; consistency: number };
+  pdseBreakdown?: {
+    completeness: number;
+    correctness: number;
+    clarity: number;
+    consistency: number;
+  };
   /** PR quality score from PRQualityChecker (advisory, non-blocking). */
   prQualityScore?: number;
 }
@@ -43,23 +48,35 @@ export function formatVerificationVerdict(details: VerificationDetails, verbose:
   if (allPassed && details.constitutionWarningCount === 0) {
     lines.push(`${GREEN}\u2713 Verified \u2014 no issues found${RESET}`);
   } else if (allPassed && details.constitutionWarningCount > 0) {
-    lines.push(`${YELLOW}\u2713 Verified \u2014 ${details.constitutionWarningCount} warning(s)${RESET}`);
+    lines.push(
+      `${YELLOW}\u2713 Verified \u2014 ${details.constitutionWarningCount} warning(s)${RESET}`,
+    );
   } else if (!details.antiStubPassed) {
     const msgs = details.hardViolationMessages.slice(0, 2).join(", ");
-    lines.push(`${RED}\u26A0 Verification failed \u2014 caught ${details.hardViolationCount} stub(s): ${msgs}${RESET}`);
+    lines.push(
+      `${RED}\u26A0 Verification failed \u2014 caught ${details.hardViolationCount} stub(s): ${msgs}${RESET}`,
+    );
   } else if (!details.constitutionPassed) {
     const msgs = details.constitutionMessages.slice(0, 2).join(", ");
-    lines.push(`${RED}\u26A0 Verification failed \u2014 ${details.constitutionCriticalCount} policy violation(s): ${msgs}${RESET}`);
+    lines.push(
+      `${RED}\u26A0 Verification failed \u2014 ${details.constitutionCriticalCount} policy violation(s): ${msgs}${RESET}`,
+    );
   } else {
     lines.push(`${RED}\u26A0 Could not fully verify \u2014 additional review needed${RESET}`);
   }
 
   if (verbose) {
-    lines.push(`  ${DIM}Anti-stub scan: ${details.antiStubPassed ? "PASSED" : "FAILED"} (${details.hardViolationCount} hard violations)${RESET}`);
-    lines.push(`  ${DIM}Constitution check: ${details.constitutionPassed ? "PASSED" : "FAILED"}${details.constitutionWarningCount > 0 ? ` (${details.constitutionWarningCount} warnings)` : ""}${RESET}`);
+    lines.push(
+      `  ${DIM}Anti-stub scan: ${details.antiStubPassed ? "PASSED" : "FAILED"} (${details.hardViolationCount} hard violations)${RESET}`,
+    );
+    lines.push(
+      `  ${DIM}Constitution check: ${details.constitutionPassed ? "PASSED" : "FAILED"}${details.constitutionWarningCount > 0 ? ` (${details.constitutionWarningCount} warnings)` : ""}${RESET}`,
+    );
     lines.push(`  ${DIM}PDSE score: ${details.pdseScore}/100${RESET}`);
     if (details.pdseBreakdown) {
-      lines.push(`  ${DIM}  Completeness: ${details.pdseBreakdown.completeness} | Correctness: ${details.pdseBreakdown.correctness} | Clarity: ${details.pdseBreakdown.clarity} | Consistency: ${details.pdseBreakdown.consistency}${RESET}`);
+      lines.push(
+        `  ${DIM}  Completeness: ${details.pdseBreakdown.completeness} | Correctness: ${details.pdseBreakdown.correctness} | Clarity: ${details.pdseBreakdown.clarity} | Consistency: ${details.pdseBreakdown.consistency}${RESET}`,
+      );
     }
     if (details.prQualityScore !== undefined) {
       const prColor = details.prQualityScore >= 70 ? GREEN : YELLOW;

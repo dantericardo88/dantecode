@@ -39,9 +39,9 @@ export interface FreshnessTrackerOptions {
 
 /** Default TTL values by content type (milliseconds). */
 const DEFAULT_TTLS: Record<ContentType, number> = {
-  news: 24 * 60 * 60 * 1000,           // 24 hours
+  news: 24 * 60 * 60 * 1000, // 24 hours
   documentation: 7 * 24 * 60 * 60 * 1000, // 7 days
-  code: 30 * 24 * 60 * 60 * 1000,      // 30 days
+  code: 30 * 24 * 60 * 60 * 1000, // 30 days
 };
 
 // ────────────────────────────────────────────────────────────────────────────

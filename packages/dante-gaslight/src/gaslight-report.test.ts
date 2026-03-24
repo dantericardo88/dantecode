@@ -134,11 +134,7 @@ describe("GaslightReport", () => {
   describe("categoryCoverage", () => {
     it("tracks per-category stats correctly", () => {
       report.addResult(INJECTION_PATTERN, true, "OK");
-      report.addResult(
-        { ...INJECTION_PATTERN, name: "role-switch" },
-        false,
-        "Failed",
-      );
+      report.addResult({ ...INJECTION_PATTERN, name: "role-switch" }, false, "Failed");
 
       const data = report.generateReport();
       expect(data.categoryCoverage["prompt-injection"]).toEqual({

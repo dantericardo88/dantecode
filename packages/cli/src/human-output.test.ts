@@ -118,7 +118,11 @@ describe("formatVerificationVerdict (non-verbose)", () => {
 
   it("shows 'caught N stub(s)' when anti-stub fails", () => {
     const result = formatVerificationVerdict(
-      makeDetails({ antiStubPassed: false, hardViolationCount: 2, hardViolationMessages: ["empty body", "placeholder"] }),
+      makeDetails({
+        antiStubPassed: false,
+        hardViolationCount: 2,
+        hardViolationMessages: ["empty body", "placeholder"],
+      }),
       false,
     );
     const plain = stripAnsi(result);

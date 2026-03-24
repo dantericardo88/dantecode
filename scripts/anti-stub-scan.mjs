@@ -37,29 +37,49 @@ function isTestFile(name) {
 function shouldSkipLine(line) {
   const t = line.trim();
   // JSDoc / block comment continuations
-  if (t.startsWith("/**") || t.startsWith("*/") || (t.startsWith("*") && !t.startsWith("*="))) return true;
+  if (t.startsWith("/**") || t.startsWith("*/") || (t.startsWith("*") && !t.startsWith("*=")))
+    return true;
   // Single-line comments describing scanner rules
-  if (t.startsWith("//") && (/todo|fixme|tbd|placeholder|stub|implement/i.test(line))) return true;
+  if (t.startsWith("//") && /todo|fixme|tbd|placeholder|stub|implement/i.test(line)) return true;
   // Scanner rule definitions (variable names referencing stubs)
-  if (line.includes("STUB_PATTERNS") || line.includes("HARD_VIOLATION") ||
-      line.includes("SOFT_VIOLATION") || line.includes("PLACEHOLDER_PATTERNS") ||
-      line.includes("forbiddenPatterns") || line.includes("placeholderHits")) return true;
+  if (
+    line.includes("STUB_PATTERNS") ||
+    line.includes("HARD_VIOLATION") ||
+    line.includes("SOFT_VIOLATION") ||
+    line.includes("PLACEHOLDER_PATTERNS") ||
+    line.includes("forbiddenPatterns") ||
+    line.includes("placeholderHits")
+  )
+    return true;
   // Regex patterns or pattern definitions
   if (line.includes("pattern:") || line.includes("RegExp")) return true;
   // HTML/CSS placeholder attributes (legitimate UI)
-  if (line.includes("placeholder=") || line.includes("placeholder:") ||
-      line.includes("::placeholder") || line.includes(".placeholder") ||
-      line.includes("placeHolder")) return true;
+  if (
+    line.includes("placeholder=") ||
+    line.includes("placeholder:") ||
+    line.includes("::placeholder") ||
+    line.includes(".placeholder") ||
+    line.includes("placeHolder")
+  )
+    return true;
   // Explicit escape hatch
   if (line.includes("// antistub-ok")) return true;
   // Regex literals containing stub words
   if (/\/[^/]*(?:todo|fixme|tbd|placeholder|stub)[^/]*\//i.test(line)) return true;
   // String literals describing rules (documentation, not stubs)
-  if ((t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
-      (/todo|fixme|tbd|placeholder|stub/i.test(line))) return true;
+  if (
+    (t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
+    /todo|fixme|tbd|placeholder|stub/i.test(line)
+  )
+    return true;
   // Todo-list feature references (not TODO markers)
-  if (line.includes("todo list") || line.includes("todo-$") ||
-      line.includes("Todo") || line.includes(".todo")) return true;
+  if (
+    line.includes("todo list") ||
+    line.includes("todo-$") ||
+    line.includes("Todo") ||
+    line.includes(".todo")
+  )
+    return true;
   // Case statements with string literal values
   if (/^\s*case\s+['"]/.test(line)) return true;
   // createStubPattern() calls

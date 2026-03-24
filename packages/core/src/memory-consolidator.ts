@@ -64,9 +64,9 @@ export class MemoryConsolidator {
   constructor(options?: MemoryConsolidatorOptions) {
     this.mergeThreshold = options?.mergeThreshold ?? 0.6;
     this.evictionTrigger = options?.evictionTrigger ?? 0.8;
-    this.scorer = options?.scorer ?? new MemoryQualityScorer(
-      options?.nowFn ? { nowFn: options.nowFn } : undefined,
-    );
+    this.scorer =
+      options?.scorer ??
+      new MemoryQualityScorer(options?.nowFn ? { nowFn: options.nowFn } : undefined);
   }
 
   /**

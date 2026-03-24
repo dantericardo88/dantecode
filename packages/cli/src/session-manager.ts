@@ -5,15 +5,9 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
-import {
-  DurableRunStore,
-  globalToolScheduler,
-} from "@dantecode/core";
+import { DurableRunStore, globalToolScheduler } from "@dantecode/core";
 import type { PersistentMemory, AutonomyEngine } from "@dantecode/core";
-import type {
-  ExecutionEvidence,
-  Session,
-} from "@dantecode/config-types";
+import type { ExecutionEvidence, Session } from "@dantecode/config-types";
 import type { ExtractedToolCall } from "./tool-call-parser.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import type { SandboxBridge } from "./sandbox-bridge.js";

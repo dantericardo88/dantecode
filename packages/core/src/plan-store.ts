@@ -54,7 +54,10 @@ export class PlanStore {
     try {
       await mkdir(this.dir, { recursive: true });
       const entries = await readdir(this.dir);
-      const jsonFiles = entries.filter((f) => f.endsWith(".json")).sort().reverse();
+      const jsonFiles = entries
+        .filter((f) => f.endsWith(".json"))
+        .sort()
+        .reverse();
 
       const plans: StoredPlan[] = [];
       const limit = options?.limit ?? 50;

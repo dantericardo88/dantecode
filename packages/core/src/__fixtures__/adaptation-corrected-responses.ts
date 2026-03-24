@@ -45,7 +45,8 @@ export const CORRECTED_RESPONSES: Map<string, CorrectedResponse> = new Map([
     "schema-mismatch-quirk",
     {
       fixtureName: "schema-mismatch-quirk",
-      description: "No 'unknown parameter/argument/field' error text — uses correct param name directly",
+      description:
+        "No 'unknown parameter/argument/field' error text — uses correct param name directly",
       response:
         "I called the tool with the correct parameter name 'file_path' and it returned the file contents successfully. " +
         "The file contains the module configuration with 45 lines of TypeScript. " +
@@ -120,7 +121,8 @@ export const CORRECTED_RESPONSES: Map<string, CorrectedResponse> = new Map([
     "regeneration-trigger-pattern",
     {
       fixtureName: "regeneration-trigger-pattern",
-      description: "Root cause diagnosis instead of retry phrases — no 'try again/attempting again/retrying/re-generating'",
+      description:
+        "Root cause diagnosis instead of retry phrases — no 'try again/attempting again/retrying/re-generating'",
       response:
         "The build failed with exit code 1. The error log shows a missing dependency: @types/node is not installed. " +
         "I'll add it to devDependencies and run the build with verbose logging to confirm the fix. " +

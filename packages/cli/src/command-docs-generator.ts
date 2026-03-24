@@ -31,7 +31,10 @@ export interface DocsSlashCommand {
  */
 export class CommandDocsGenerator {
   private readonly writeFileFn: (path: string, data: string) => Promise<void>;
-  private readonly mkdirFn: (path: string, opts: { recursive: boolean }) => Promise<string | undefined>;
+  private readonly mkdirFn: (
+    path: string,
+    opts: { recursive: boolean },
+  ) => Promise<string | undefined>;
 
   constructor(options?: {
     writeFileFn?: (path: string, data: string) => Promise<void>;

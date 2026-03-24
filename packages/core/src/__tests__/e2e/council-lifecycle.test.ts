@@ -3,14 +3,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  MergeConfidenceScorer,
-  type MergeCandidatePatch,
-} from "../../council/merge-confidence.js";
-import {
-  OverlapDetector,
-  classifyOverlapLevel,
-} from "../../council/overlap-detector.js";
+import { MergeConfidenceScorer, type MergeCandidatePatch } from "../../council/merge-confidence.js";
+import { OverlapDetector, classifyOverlapLevel } from "../../council/overlap-detector.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

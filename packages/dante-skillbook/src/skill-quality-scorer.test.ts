@@ -59,12 +59,14 @@ describe("SkillQualityScorer", () => {
   });
 
   it("each dimension is clamped to 0-25 range", () => {
-    const extreme = scorer.score(makeSkill({
-      testCoverage: 2.0, // over 1
-      usageCount: 999,
-      successRate: 1.5,
-      documentationCompleteness: -0.5,
-    }));
+    const extreme = scorer.score(
+      makeSkill({
+        testCoverage: 2.0, // over 1
+        usageCount: 999,
+        successRate: 1.5,
+        documentationCompleteness: -0.5,
+      }),
+    );
     expect(extreme.testCoverage).toBeLessThanOrEqual(25);
     expect(extreme.usageFrequency).toBeLessThanOrEqual(25);
     expect(extreme.successRate).toBeLessThanOrEqual(25);

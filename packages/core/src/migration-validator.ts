@@ -112,7 +112,11 @@ export class MigrationValidator {
    * Runs the migration's `up` function with a dry-run context to capture
    * what changes it would make.
    */
-  dryRun(migration: Migration, oldSchema?: SchemaDefinition, newSchema?: SchemaDefinition): DryRunResult {
+  dryRun(
+    migration: Migration,
+    oldSchema?: SchemaDefinition,
+    newSchema?: SchemaDefinition,
+  ): DryRunResult {
     const ctx: MigrationContext = { changes: [], dryRun: true };
     let wouldSucceed = true;
     const risks: DataLossRisk[] = [];
@@ -205,12 +209,12 @@ export class MigrationValidator {
       }
     }
 
-    const hasBreaking = changes.some(
-      (c) => c.kind === "removed" || (c.kind === "type-changed"),
-    );
-    const backwardCompatible = !hasBreaking && !changes.some(
-      (c) => c.kind === "required-changed" && !oldFieldMap.get(c.fieldName)?.required,
-    );
+    const hasBreaking = changes.some((c) => c.kind === "removed" || c.kind === "type-changed");
+    const backwardCompatible =
+      !hasBreaking &&
+      !changes.some(
+        (c) => c.kind === "required-changed" && !oldFieldMap.get(c.fieldName)?.required,
+      );
 
     return {
       compatible: !hasBreaking,

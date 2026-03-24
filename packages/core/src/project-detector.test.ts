@@ -310,21 +310,33 @@ describe("getGStackDefaults", () => {
   });
 
   it("uses vitest when testRunner is vitest", () => {
-    const stack: DetectedStack = { language: "typescript", testRunner: "vitest", packageManager: "npm" };
+    const stack: DetectedStack = {
+      language: "typescript",
+      testRunner: "vitest",
+      packageManager: "npm",
+    };
     const commands = getGStackDefaults(stack);
     const testCmd = commands.find((c) => c.name === "test");
     expect(testCmd!.command).toBe("npx vitest run");
   });
 
   it("uses jest when testRunner is jest", () => {
-    const stack: DetectedStack = { language: "typescript", testRunner: "jest", packageManager: "npm" };
+    const stack: DetectedStack = {
+      language: "typescript",
+      testRunner: "jest",
+      packageManager: "npm",
+    };
     const commands = getGStackDefaults(stack);
     const testCmd = commands.find((c) => c.name === "test");
     expect(testCmd!.command).toBe("npx jest");
   });
 
   it("uses mocha when testRunner is mocha", () => {
-    const stack: DetectedStack = { language: "javascript", testRunner: "mocha", packageManager: "npm" };
+    const stack: DetectedStack = {
+      language: "javascript",
+      testRunner: "mocha",
+      packageManager: "npm",
+    };
     const commands = getGStackDefaults(stack);
     const testCmd = commands.find((c) => c.name === "test");
     expect(testCmd!.command).toBe("npx mocha");

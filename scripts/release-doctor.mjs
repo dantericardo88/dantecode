@@ -307,8 +307,7 @@ addCheck(
 const readinessPath = join(repoRoot, "artifacts", "readiness", "current-readiness.json");
 let readinessStatus = "BLOCKER";
 let readinessMessage = "artifacts/readiness/current-readiness.json not found.";
-let readinessNote =
-  "Run `npm run release:generate` (with GATE_* env vars from CI) to generate.";
+let readinessNote = "Run `npm run release:generate` (with GATE_* env vars from CI) to generate.";
 let readinessAction = "Run `npm run release:generate` after CI jobs complete.";
 
 if (existsSync(readinessPath)) {
@@ -332,8 +331,7 @@ if (existsSync(readinessPath)) {
       readinessStatus = "ACTION";
       readinessMessage = `Readiness: local-green / external-pending (commit ${sha}).`;
       readinessNote = "Local gates green. External gates not yet run by CI.";
-      readinessAction =
-        "Push to CI and let the update-readiness job run all gate checks.";
+      readinessAction = "Push to CI and let the update-readiness job run all gate checks.";
     } else {
       readinessStatus = "BLOCKER";
       const blockerList = Array.isArray(readiness.blockers)
@@ -341,8 +339,7 @@ if (existsSync(readinessPath)) {
         : "see artifacts/readiness/current-readiness.json";
       readinessMessage = `Readiness: blocked — ${blockerList}`;
       readinessNote = "One or more CI gates failed. Fix blockers before releasing.";
-      readinessAction =
-        "Fix failing gates, rerun CI, then `npm run release:generate` to update.";
+      readinessAction = "Fix failing gates, rerun CI, then `npm run release:generate` to update.";
     }
   } catch {
     readinessStatus = "BLOCKER";
@@ -353,14 +350,7 @@ if (existsSync(readinessPath)) {
   }
 }
 
-addCheck(
-  checks,
-  "Artifacts",
-  readinessStatus,
-  readinessMessage,
-  readinessNote,
-  readinessAction,
-);
+addCheck(checks, "Artifacts", readinessStatus, readinessMessage, readinessNote, readinessAction);
 
 const detectedProviders = detectProviderState();
 addCheck(

@@ -41,32 +41,32 @@ const DOMAIN_AUTHORITY: Record<string, number> = {
   "github.com": 0.95,
   "stackoverflow.com": 0.92,
   "developer.mozilla.org": 0.95,
-  "docs.python.org": 0.90,
+  "docs.python.org": 0.9,
   "docs.microsoft.com": 0.88,
   "learn.microsoft.com": 0.88,
-  "nodejs.org": 0.90,
+  "nodejs.org": 0.9,
   "typescriptlang.org": 0.92,
-  "react.dev": 0.90,
+  "react.dev": 0.9,
   "nextjs.org": 0.88,
   "npmjs.com": 0.85,
   "pypi.org": 0.82,
   "crates.io": 0.82,
   "pkg.go.dev": 0.85,
   "docs.rs": 0.88,
-  "arxiv.org": 0.80,
+  "arxiv.org": 0.8,
   "en.wikipedia.org": 0.75,
   "docs.docker.com": 0.85,
   "kubernetes.io": 0.88,
-  "rust-lang.org": 0.90,
+  "rust-lang.org": 0.9,
   "go.dev": 0.88,
   "angular.io": 0.85,
   "vuejs.org": 0.85,
   "svelte.dev": 0.82,
   "medium.com": 0.45,
-  "dev.to": 0.50,
+  "dev.to": 0.5,
   "hackernews.com": 0.55,
-  "reddit.com": 0.40,
-  "w3schools.com": 0.50,
+  "reddit.com": 0.4,
+  "w3schools.com": 0.5,
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -136,9 +136,7 @@ export class SearchQualityScorer extends DimensionScorer<SearchResult> {
     try {
       const hostname = new URL(url).hostname.replace(/^www\./, "");
       // Check exact match first, then check parent domain patterns
-      const authority = DOMAIN_AUTHORITY[hostname]
-        ?? this.matchSubdomain(hostname)
-        ?? 0.4; // unknown domain baseline
+      const authority = DOMAIN_AUTHORITY[hostname] ?? this.matchSubdomain(hostname) ?? 0.4; // unknown domain baseline
       return Math.round(authority * 25);
     } catch {
       return 8; // fallback for malformed URLs
@@ -148,7 +146,7 @@ export class SearchQualityScorer extends DimensionScorer<SearchResult> {
   /** Match docs.* subdomains and known patterns. */
   private matchSubdomain(hostname: string): number | undefined {
     // docs.* subdomains typically have high authority
-    if (hostname.startsWith("docs.")) return 0.80;
+    if (hostname.startsWith("docs.")) return 0.8;
     // api.* subdomains
     if (hostname.startsWith("api.")) return 0.75;
     // Check if any known domain is a suffix
@@ -165,7 +163,7 @@ export class SearchQualityScorer extends DimensionScorer<SearchResult> {
     try {
       const date = new Date(publishedDate);
       const ageMs = Math.max(0, this.nowFn() - date.getTime());
-      const ageDays = ageMs / (86_400_000);
+      const ageDays = ageMs / 86_400_000;
 
       if (ageDays < 7) return 25;
       if (ageDays < 30) return 22;

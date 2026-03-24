@@ -93,15 +93,7 @@ const COMMAND_CATEGORIES: Record<string, string> = {
 };
 
 /** Ordered categories for display. */
-const CATEGORY_ORDER = [
-  "Core",
-  "Development",
-  "Search",
-  "Security",
-  "Config",
-  "Git",
-  "Agents",
-];
+const CATEGORY_ORDER = ["Core", "Development", "Search", "Security", "Config", "Git", "Agents"];
 
 // ────────────────────────────────────────────────────────────────────────────
 // HelpSystem
@@ -231,7 +223,9 @@ export class HelpSystem {
       lines.push(`${DIM}Type /help --all to see all commands.${RESET}`);
     }
 
-    lines.push(`${GREEN}Tip:${RESET} ${DIM}Type naturally to chat, or use / commands for actions.${RESET}`);
+    lines.push(
+      `${GREEN}Tip:${RESET} ${DIM}Type naturally to chat, or use / commands for actions.${RESET}`,
+    );
     lines.push("");
 
     return lines.join("\n");

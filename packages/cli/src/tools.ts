@@ -88,11 +88,20 @@ export interface CliToolExecutionContext {
   sandboxBridge?: SandboxBridge;
   /** Memory orchestrator for the Memory tool (set when memory-engine is initialized). */
   memoryOrchestrator?: {
-    memoryStore: (key: string, value: unknown, scope: "session" | "project" | "global") => Promise<void>;
-    memoryRecall: (query: string, limit: number) => Promise<Array<{ key: string; value: string; score?: number }>>;
+    memoryStore: (
+      key: string,
+      value: unknown,
+      scope: "session" | "project" | "global",
+    ) => Promise<void>;
+    memoryRecall: (
+      query: string,
+      limit: number,
+    ) => Promise<Array<{ key: string; value: string; score?: number }>>;
   };
   /** Secrets scanner for gating memory store operations. */
-  secretsScanner?: { scan: (text: string) => { clean: boolean; findings?: Array<{ type: string }> } };
+  secretsScanner?: {
+    scan: (text: string) => { clean: boolean; findings?: Array<{ type: string }> };
+  };
 }
 
 /** Supported tool names. */
@@ -1956,9 +1965,7 @@ async function toolGitHubOps(
 
 // ─── AskUser Tool ────────────────────────────────────────────────────────────
 
-async function toolAskUser(
-  input: Record<string, unknown>,
-): Promise<ToolResult> {
+async function toolAskUser(input: Record<string, unknown>): Promise<ToolResult> {
   const question = input["question"] as string;
   const options = input["options"] as string[] | undefined;
   const defaultAnswer = input["default_answer"] as string | undefined;
@@ -1978,20 +1985,28 @@ async function toolAskUser(
       // Present as numbered selection
       const lines = [`\n${question}\n`];
       options.forEach((opt, i) => lines.push(`  ${i + 1}. ${opt}`));
-      lines.push(`\nEnter number (1-${options.length})${defaultAnswer ? ` [default: ${defaultAnswer}]` : ""}: `);
+      lines.push(
+        `\nEnter number (1-${options.length})${defaultAnswer ? ` [default: ${defaultAnswer}]` : ""}: `,
+      );
       process.stdout.write(lines.join("\n"));
 
       const { createInterface } = await import("node:readline");
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise<string>((resolve) => {
-        rl.question("", (ans) => { rl.close(); resolve(ans.trim()); });
+        rl.question("", (ans) => {
+          rl.close();
+          resolve(ans.trim());
+        });
       });
 
       const idx = parseInt(answer, 10) - 1;
       if (idx >= 0 && idx < options.length) {
         return { content: `User selected: ${options[idx]}`, isError: false };
       }
-      return { content: `User response: ${answer || defaultAnswer || "(no selection)"}`, isError: false };
+      return {
+        content: `User response: ${answer || defaultAnswer || "(no selection)"}`,
+        isError: false,
+      };
     }
 
     // Free text input
@@ -1999,7 +2014,10 @@ async function toolAskUser(
     const { createInterface } = await import("node:readline");
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
-      rl.question("", (ans) => { rl.close(); resolve(ans.trim()); });
+      rl.question("", (ans) => {
+        rl.close();
+        resolve(ans.trim());
+      });
     });
 
     return { content: `User response: ${answer || defaultAnswer || "(empty)"}`, isError: false };
@@ -2054,8 +2072,9 @@ async function toolMemory(
           return { content: "No memories found matching the query.", isError: false };
         }
         const formatted = results
-          .map((r: { key: string; value: string; score?: number }, i: number) =>
-            `${i + 1}. **${r.key}** (relevance: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 200)}`,
+          .map(
+            (r: { key: string; value: string; score?: number }, i: number) =>
+              `${i + 1}. **${r.key}** (relevance: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 200)}`,
           )
           .join("\n\n");
         return { content: `## Memory Recall Results\n\n${formatted}`, isError: false };
@@ -2069,17 +2088,24 @@ async function toolMemory(
           return { content: "No memories found matching the search query.", isError: false };
         }
         const formatted = results
-          .map((r: { key: string; value: string; score?: number }, i: number) =>
-            `${i + 1}. **${r.key}** (score: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 300)}`,
+          .map(
+            (r: { key: string; value: string; score?: number }, i: number) =>
+              `${i + 1}. **${r.key}** (score: ${r.score?.toFixed(2) ?? "n/a"})\n   ${r.value.slice(0, 300)}`,
           )
           .join("\n\n");
         return { content: `## Memory Search Results\n\n${formatted}`, isError: false };
       }
       default:
-        return { content: `Error: Unknown memory action "${action}". Use store, recall, or search.`, isError: true };
+        return {
+          content: `Error: Unknown memory action "${action}". Use store, recall, or search.`,
+          isError: true,
+        };
     }
   } catch (e) {
-    return { content: `Memory error: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+    return {
+      content: `Memory error: ${e instanceof Error ? e.message : String(e)}`,
+      isError: true,
+    };
   }
 }
 

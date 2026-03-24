@@ -3,36 +3,50 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("node:fs/promises", () => ({ stat: vi.fn(), readFile: vi.fn() }));
 
 import { stat, readFile } from "node:fs/promises";
-import { verifyCompletion, deriveExpectations, summarizeVerification } from "./completion-verifier.js";
+import {
+  verifyCompletion,
+  deriveExpectations,
+  summarizeVerification,
+} from "./completion-verifier.js";
 import type { CompletionVerification } from "./completion-verifier.js";
 import type { RunReportEntry } from "./run-report.js";
 
 const mockStat = stat as ReturnType<typeof vi.fn>;
 const mockReadFile = readFile as ReturnType<typeof vi.fn>;
 
-function fakeStat() { return { isFile: () => true }; }
+function fakeStat() {
+  return { isFile: () => true };
+}
 
 function makeEntry(overrides?: Partial<RunReportEntry>): RunReportEntry {
   return {
-    prdName: "auth", prdFile: "prds/01-auth.md", status: "complete",
+    prdName: "auth",
+    prdFile: "prds/01-auth.md",
+    status: "complete",
     filesCreated: [{ path: "src/auth.ts", lines: 100 }],
     filesModified: [{ path: "src/index.ts", added: 5, removed: 1 }],
     filesDeleted: [],
     verification: {
       antiStub: { passed: true, violations: 0, details: [] },
       constitution: { passed: true, violations: 0, warnings: 0, details: [] },
-      pdseScore: 90, pdseThreshold: 85, regenerationAttempts: 0, maxAttempts: 3,
+      pdseScore: 90,
+      pdseThreshold: 85,
+      regenerationAttempts: 0,
+      maxAttempts: 3,
     },
     tests: { created: 5, passing: 5, failing: 0 },
     summary: "Built the auth feature.",
-    startedAt: "2026-03-22T14:30:00Z", completedAt: "2026-03-22T14:45:00Z",
+    startedAt: "2026-03-22T14:30:00Z",
+    completedAt: "2026-03-22T14:45:00Z",
     tokenUsage: { input: 5000, output: 3000 },
     ...overrides,
   };
 }
 
 describe("verifyCompletion", () => {
-  beforeEach(() => { vi.resetAllMocks(); });
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
 
   it("returns complete + high confidence when all files present", async () => {
     mockStat.mockResolvedValue(fakeStat());
@@ -50,7 +64,9 @@ describe("verifyCompletion", () => {
   });
 
   it("returns partial + medium confidence when some files missing", async () => {
-    mockStat.mockResolvedValueOnce(fakeStat()).mockResolvedValueOnce(fakeStat())
+    mockStat
+      .mockResolvedValueOnce(fakeStat())
+      .mockResolvedValueOnce(fakeStat())
       .mockRejectedValueOnce(new Error("ENOENT"));
     mockReadFile.mockResolvedValueOnce("content A\nline 2\n").mockResolvedValueOnce("content B\n");
     const r = await verifyCompletion("/project", {
@@ -132,7 +148,10 @@ describe("verifyCompletion", () => {
 describe("deriveExpectations", () => {
   it("maps RunReportEntry files to expectedFiles", () => {
     const entry = makeEntry({
-      filesCreated: [{ path: "src/auth.ts", lines: 100 }, { path: "src/auth.test.ts", lines: 50 }],
+      filesCreated: [
+        { path: "src/auth.ts", lines: 100 },
+        { path: "src/auth.test.ts", lines: 50 },
+      ],
       filesModified: [{ path: "src/index.ts", added: 5, removed: 1 }],
     });
     const exp = deriveExpectations(entry);
@@ -144,15 +163,18 @@ describe("deriveExpectations", () => {
 describe("summarizeVerification", () => {
   it("produces plain-English output for mixed results", () => {
     const v: CompletionVerification = {
-      verdict: "partial", confidence: "medium",
+      verdict: "partial",
+      confidence: "medium",
       passed: ["File exists: src/auth.ts", "File exists: src/db.ts"],
-      failed: ["File missing: src/api.ts"], uncertain: [],
+      failed: ["File missing: src/api.ts"],
+      uncertain: [],
       fileChecks: [
         { file: "src/auth.ts", exists: true, hasContent: true, lines: 100 },
         { file: "src/db.ts", exists: true, hasContent: true, lines: 50 },
         { file: "src/api.ts", exists: false, hasContent: false },
       ],
-      patternChecks: [], summary: "",
+      patternChecks: [],
+      summary: "",
     };
     const text = summarizeVerification(v);
     expect(text).toContain("2/3 expected files found");
@@ -162,9 +184,14 @@ describe("summarizeVerification", () => {
 
   it("includes low confidence message when confidence is low", () => {
     const v: CompletionVerification = {
-      verdict: "failed", confidence: "low",
-      passed: [], failed: [], uncertain: ["Build a login page"],
-      fileChecks: [], patternChecks: [], summary: "",
+      verdict: "failed",
+      confidence: "low",
+      passed: [],
+      failed: [],
+      uncertain: ["Build a login page"],
+      fileChecks: [],
+      patternChecks: [],
+      summary: "",
     };
     const text = summarizeVerification(v);
     expect(text).toContain("Low confidence");

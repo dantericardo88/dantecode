@@ -26,7 +26,9 @@ import type {
 const provider = "anthropic";
 const model = "claude-opus-4";
 
-function makeObsInput(overrides?: Partial<QuirkObservation>): Omit<QuirkObservation, "id" | "createdAt"> {
+function makeObsInput(
+  overrides?: Partial<QuirkObservation>,
+): Omit<QuirkObservation, "id" | "createdAt"> {
   return {
     quirkKey: overrides?.quirkKey ?? "stops_before_completion",
     provider: overrides?.provider ?? provider,
@@ -39,7 +41,9 @@ function makeObsInput(overrides?: Partial<QuirkObservation>): Omit<QuirkObservat
   };
 }
 
-function makeDraftInput(overrides?: Partial<CandidateOverride>): Omit<CandidateOverride, "id" | "version" | "status" | "createdAt"> {
+function makeDraftInput(
+  overrides?: Partial<CandidateOverride>,
+): Omit<CandidateOverride, "id" | "version" | "status" | "createdAt"> {
   return {
     provider: overrides?.provider ?? provider,
     model: overrides?.model ?? model,
@@ -106,8 +110,15 @@ describe("ModelAdaptationStore", () => {
 
   it("countObservations filters by quirkKey, provider, and model", () => {
     const store = new ModelAdaptationStore("/project");
-    store.addObservation(makeObsInput({ quirkKey: "stops_before_completion", failureTags: ["stops_before_completion"] }));
-    store.addObservation(makeObsInput({ quirkKey: "markdown_wrapper_issue", failureTags: ["markdown_wrapper_issue"] }));
+    store.addObservation(
+      makeObsInput({
+        quirkKey: "stops_before_completion",
+        failureTags: ["stops_before_completion"],
+      }),
+    );
+    store.addObservation(
+      makeObsInput({ quirkKey: "markdown_wrapper_issue", failureTags: ["markdown_wrapper_issue"] }),
+    );
     expect(store.countObservations("stops_before_completion", provider, model)).toBe(1);
     expect(store.countObservations("markdown_wrapper_issue", provider, model)).toBe(1);
   });
@@ -121,10 +132,12 @@ describe("ModelAdaptationStore", () => {
   it("LRU eviction when observations exceed 200", () => {
     const store = new ModelAdaptationStore("/project");
     for (let i = 0; i < 205; i++) {
-      store.addObservation(makeObsInput({
-        failureTags: [`tag-${i}`],
-        evidenceRefs: [`ref-${i}`],
-      }));
+      store.addObservation(
+        makeObsInput({
+          failureTags: [`tag-${i}`],
+          evidenceRefs: [`ref-${i}`],
+        }),
+      );
     }
     const snap = store.snapshot();
     expect(snap.observations).toHaveLength(200);
@@ -198,7 +211,9 @@ describe("ModelAdaptationStore", () => {
     store.addExperiment(makeExperiment());
     await store.save();
     expect(mockWriteFile).toHaveBeenCalledTimes(1);
-    const written = JSON.parse(mockWriteFile.mock.calls[0]![1] as string) as ModelAdaptationSnapshot;
+    const written = JSON.parse(
+      mockWriteFile.mock.calls[0]![1] as string,
+    ) as ModelAdaptationSnapshot;
     expect(written.observations).toHaveLength(1);
     expect(written.overrides).toHaveLength(1);
     expect(written.experiments).toHaveLength(1);
@@ -214,7 +229,12 @@ describe("ModelAdaptationStore", () => {
   });
 
   it("load idempotent — second call is no-op", async () => {
-    const v2: ModelAdaptationSnapshot = { version: 2, observations: [], overrides: [], experiments: [] };
+    const v2: ModelAdaptationSnapshot = {
+      version: 2,
+      observations: [],
+      overrides: [],
+      experiments: [],
+    };
     mockReadFile.mockResolvedValue(JSON.stringify(v2));
     const store = new ModelAdaptationStore("/project");
     await store.load();
@@ -243,13 +263,15 @@ describe("ModelAdaptationStore", () => {
   it("load migrates v1 observations to v2 shape", async () => {
     const v1 = {
       version: 1,
-      observations: [{
-        quirkClass: "premature-summary",
-        description: "stopped early",
-        evidence: "anthropic claude-opus-4 run-1",
-        observedAt: "2026-03-20T00:00:00.000Z",
-        sessionId: "s1",
-      }],
+      observations: [
+        {
+          quirkClass: "premature-summary",
+          description: "stopped early",
+          evidence: "anthropic claude-opus-4 run-1",
+          observedAt: "2026-03-20T00:00:00.000Z",
+          sessionId: "s1",
+        },
+      ],
       overrides: [],
     };
     mockReadFile.mockResolvedValue(JSON.stringify(v1));
@@ -269,20 +291,22 @@ describe("ModelAdaptationStore", () => {
     const v1 = {
       version: 1,
       observations: [],
-      overrides: [{
-        id: "abc123",
-        key: { provider: "anthropic", modelId: "claude-opus-4" },
-        quirkClass: "tool-call-json-formatting",
-        quirkSignature: "json-fix",
-        overrideType: "tool-call-repair",
-        payload: "Fix JSON formatting",
-        version: 1,
-        evidenceCount: 3,
-        status: "promoted",
-        createdAt: "2026-03-20T00:00:00.000Z",
-        updatedAt: "2026-03-20T01:00:00.000Z",
-        promotionEvidence: { testsPass: true, smokePass: true, pdseScore: 90 },
-      }],
+      overrides: [
+        {
+          id: "abc123",
+          key: { provider: "anthropic", modelId: "claude-opus-4" },
+          quirkClass: "tool-call-json-formatting",
+          quirkSignature: "json-fix",
+          overrideType: "tool-call-repair",
+          payload: "Fix JSON formatting",
+          version: 1,
+          evidenceCount: 3,
+          status: "promoted",
+          createdAt: "2026-03-20T00:00:00.000Z",
+          updatedAt: "2026-03-20T01:00:00.000Z",
+          promotionEvidence: { testsPass: true, smokePass: true, pdseScore: 90 },
+        },
+      ],
     };
     mockReadFile.mockResolvedValue(JSON.stringify(v1));
     const store = new ModelAdaptationStore("/project");
@@ -432,19 +456,31 @@ describe("Write mutex and rate limiter persistence", () => {
   });
 
   it("loadRateLimiterState returns null when no state present", async () => {
-    (readFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(JSON.stringify({
-      version: 2, observations: [], overrides: [], experiments: [],
-    }));
+    (readFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 2,
+        observations: [],
+        overrides: [],
+        experiments: [],
+      }),
+    );
     const store = new ModelAdaptationStore("/tmp/test-mutex");
     await store.load();
     expect(store.loadRateLimiterState()).toBeNull();
   });
 
   it("loadRateLimiterState restores persisted rate limiter", async () => {
-    (readFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(JSON.stringify({
-      version: 2, observations: [], overrides: [], experiments: [],
-      rateLimiterState: { "stops_before_completion": { date: new Date().toISOString().slice(0, 10), count: 3 } },
-    }));
+    (readFile as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      JSON.stringify({
+        version: 2,
+        observations: [],
+        overrides: [],
+        experiments: [],
+        rateLimiterState: {
+          stops_before_completion: { date: new Date().toISOString().slice(0, 10), count: 3 },
+        },
+      }),
+    );
     const store = new ModelAdaptationStore("/tmp/test-mutex");
     await store.load();
     const restored = store.loadRateLimiterState();
@@ -457,7 +493,7 @@ describe("Write mutex and rate limiter persistence", () => {
     let writeCount = 0;
     (writeFile as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       writeCount++;
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
 
     // Launch 3 concurrent saves
@@ -485,7 +521,9 @@ describe("Store error logging", () => {
 
   it("error logger receives save failures", async () => {
     const errors: Array<Error | string> = [];
-    const store = new ModelAdaptationStore("/tmp/test-errlog", (err) => { errors.push(err); });
+    const store = new ModelAdaptationStore("/tmp/test-errlog", (err) => {
+      errors.push(err);
+    });
     mockWriteFile.mockRejectedValue(new Error("EPERM"));
 
     await store.save();
@@ -518,11 +556,20 @@ describe("Store error logging", () => {
     // Simulate external change (CLI approve/reject wrote new data to disk)
     const externalData = JSON.stringify({
       version: 2,
-      observations: [{
-        id: "obs_external", quirkKey: "stops_before_completion", provider: "anthropic",
-        model: "claude-sonnet-4-6", workflow: "magic", promptTemplateVersion: "1.0",
-        failureTags: [], outputCharacteristics: [], evidenceRefs: [], createdAt: "2026-03-24T00:00:00Z",
-      }],
+      observations: [
+        {
+          id: "obs_external",
+          quirkKey: "stops_before_completion",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          workflow: "magic",
+          promptTemplateVersion: "1.0",
+          failureTags: [],
+          outputCharacteristics: [],
+          evidenceRefs: [],
+          createdAt: "2026-03-24T00:00:00Z",
+        },
+      ],
       overrides: [],
       experiments: [],
     });

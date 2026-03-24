@@ -845,7 +845,9 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
       suggestions.push(`  ${YELLOW}/magic${RESET} ${DIM}\u2014 start building something${RESET}`);
     }
     if (state.session.messages.length > 20) {
-      suggestions.push(`  ${YELLOW}/compact${RESET} ${DIM}\u2014 free up conversation space${RESET}`);
+      suggestions.push(
+        `  ${YELLOW}/compact${RESET} ${DIM}\u2014 free up conversation space${RESET}`,
+      );
     }
     if (suggestions.length > 0) {
       lines.push(`${BOLD}Suggested:${RESET}`);
@@ -903,9 +905,7 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
     if (cmds.length === 0) continue;
     lines.push(`  ${BOLD}${categoryLabels[cat]}${RESET}`);
     for (const cmd of cmds) {
-      lines.push(
-        `    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`,
-      );
+      lines.push(`    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`);
     }
     lines.push("");
   }
@@ -913,9 +913,7 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
   if (markdownCmds.length > 0) {
     lines.push(`  ${BOLD}Workflows (Markdown)${RESET}`);
     for (const cmd of markdownCmds) {
-      lines.push(
-        `    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`,
-      );
+      lines.push(`    ${YELLOW}${cmd.usage.padEnd(28)}${RESET} ${DIM}${cmd.description}${RESET}`);
     }
     lines.push("");
   }
@@ -2752,14 +2750,15 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
   const reportAcc = new RunReportAccumulator({
     project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
     command: `/magic ${goal}`,
-    model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+    model: {
+      provider: state.state.model.default.provider,
+      modelId: state.state.model.default.modelId,
+    },
     dantecodeVersion: "1.3.0",
   });
   reportAcc.beginEntry(goal, "magic");
 
-  process.stdout.write(
-    `\n${GREEN}${BOLD}Building...${RESET} ${DIM}${goal}${RESET}\n\n`,
-  );
+  process.stdout.write(`\n${GREEN}${BOLD}Building...${RESET} ${DIM}${goal}${RESET}\n\n`);
 
   let result = "";
   try {
@@ -2815,7 +2814,9 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
         const verification = await verifyCompletion(state.projectRoot, expectations);
         reportAcc.recordCompletionVerification(verification);
       }
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
 
     state.session.messages.push({
       id: randomUUID(),
@@ -2831,7 +2832,8 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
       status: "failed",
       summary: "Task failed.",
       failureReason: message,
-      actionNeeded: "Try again with a more specific description, or break the task into smaller steps.",
+      actionNeeded:
+        "Try again with a more specific description, or break the task into smaller steps.",
     });
     result = `${RED}Error: ${message}${RESET}`;
   } finally {
@@ -2845,7 +2847,9 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
         timestamp: reportStart,
         autoCommit: state.enableGit,
         commitFn: state.enableGit
-          ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+          ? async (files, msg, cwd) => {
+              autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd);
+            }
           : undefined,
       });
       result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportPath)}${RESET}`;
@@ -2859,7 +2863,9 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
           result += `\n  ${YELLOW}${entry.failureReason ?? "Needs attention."}${RESET}`;
         }
       }
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
   return result;
@@ -2920,7 +2926,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     const reportAcc = new RunReportAccumulator({
       project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
       command: `/party ${args}`,
-      model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+      model: {
+        provider: state.state.model.default.provider,
+        modelId: state.state.model.default.modelId,
+      },
       dantecodeVersion: "1.3.0",
     });
     let partyResult: string = "";
@@ -2933,28 +2942,44 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         reportAcc.beginEntry(output.role, "multi-agent-lane");
         reportAcc.recordVerification({
           antiStub: { passed: true, violations: 0, details: ["DanteForge detail unavailable"] },
-          constitution: { passed: true, violations: 0, warnings: 0, details: ["DanteForge detail unavailable"] },
+          constitution: {
+            passed: true,
+            violations: 0,
+            warnings: 0,
+            details: ["DanteForge detail unavailable"],
+          },
           pdseScore: output.pdseScore,
           pdseThreshold: state.state.pdse.threshold,
           regenerationAttempts: 0,
           maxAttempts: 0,
         });
-        const entryStatus = output.pdseScore >= state.state.pdse.threshold ? "complete" as const : "partial" as const;
+        const entryStatus =
+          output.pdseScore >= state.state.pdse.threshold
+            ? ("complete" as const)
+            : ("partial" as const);
         reportAcc.completeEntry({
           status: entryStatus,
           summary: output.content.slice(0, 200),
-          failureReason: entryStatus === "partial" ? `PDSE ${output.pdseScore} below threshold ${state.state.pdse.threshold}` : undefined,
+          failureReason:
+            entryStatus === "partial"
+              ? `PDSE ${output.pdseScore} below threshold ${state.state.pdse.threshold}`
+              : undefined,
         });
 
         // D-12: Completion verification per lane
         try {
           const entrySnapshot = reportAcc.snapshot().entries.at(-1);
-          if (entrySnapshot && (entrySnapshot.filesCreated.length > 0 || entrySnapshot.filesModified.length > 0)) {
+          if (
+            entrySnapshot &&
+            (entrySnapshot.filesCreated.length > 0 || entrySnapshot.filesModified.length > 0)
+          ) {
             const expectations = deriveExpectations(entrySnapshot);
             const cvResult = await verifyCompletion(state.projectRoot, expectations);
             reportAcc.recordCompletionVerification(cvResult);
           }
-        } catch { /* non-fatal */ }
+        } catch {
+          /* non-fatal */
+        }
       }
 
       const allPassed = result.compositePdse >= state.state.pdse.threshold;
@@ -2968,8 +2993,18 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       ];
 
       for (const output of result.outputs) {
-        const icon = output.pdseScore >= 80 ? `${GREEN}\u2713` : output.pdseScore >= 60 ? `${YELLOW}\u26A0` : `${RED}\u2717`;
-        const label = output.pdseScore >= 80 ? "verified" : output.pdseScore >= 60 ? "review needed" : "needs attention";
+        const icon =
+          output.pdseScore >= 80
+            ? `${GREEN}\u2713`
+            : output.pdseScore >= 60
+              ? `${YELLOW}\u26A0`
+              : `${RED}\u2717`;
+        const label =
+          output.pdseScore >= 80
+            ? "verified"
+            : output.pdseScore >= 60
+              ? "review needed"
+              : "needs attention";
         lines.push(
           `  ${icon}${RESET} ${BOLD}${output.role.padEnd(12)}${RESET} ${DIM}${label}${RESET}`,
         );
@@ -3001,11 +3036,17 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           timestamp: partyReportStart,
           autoCommit: state.enableGit,
           commitFn: state.enableGit
-            ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+            ? async (files, msg, cwd) => {
+                autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd);
+              }
             : undefined,
         });
-        process.stdout.write(`  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`);
-      } catch { /* non-fatal */ }
+        process.stdout.write(
+          `  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`,
+        );
+      } catch {
+        /* non-fatal */
+      }
     }
 
     return partyResult;
@@ -3084,7 +3125,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   const autoforgeReportAcc = new RunReportAccumulator({
     project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
     command: `/party --autoforge ${task}`,
-    model: { provider: state.state.model.default.provider, modelId: state.state.model.default.modelId },
+    model: {
+      provider: state.state.model.default.provider,
+      modelId: state.state.model.default.modelId,
+    },
     dantecodeVersion: "1.3.0",
   });
 
@@ -3175,18 +3219,34 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
 
       // D-11 Run Report: record lane data
       {
-        const created = gitStatus.untracked.map((e: { path: string }) => ({ path: e.path, lines: 0 }));
+        const created = gitStatus.untracked.map((e: { path: string }) => ({
+          path: e.path,
+          lines: 0,
+        }));
         const modified = [...gitStatus.staged, ...gitStatus.unstaged]
-          .filter((e: { path: string }) => !gitStatus.untracked.some((u: { path: string }) => u.path === e.path))
+          .filter(
+            (e: { path: string }) =>
+              !gitStatus.untracked.some((u: { path: string }) => u.path === e.path),
+          )
           .map((e: { path: string }) => ({ path: e.path, added: 0, removed: 0 }));
         autoforgeReportAcc.recordFilesCreated(created);
         autoforgeReportAcc.recordFilesModified(modified);
 
         // Compute average PDSE from failures vs total
-        const avgPdse = pdseFailures.length === 0 && uniqueChangedFiles.length > 0 ? 90 : (pdseFailures.length < uniqueChangedFiles.length ? 70 : 40);
+        const avgPdse =
+          pdseFailures.length === 0 && uniqueChangedFiles.length > 0
+            ? 90
+            : pdseFailures.length < uniqueChangedFiles.length
+              ? 70
+              : 40;
         autoforgeReportAcc.recordVerification({
           antiStub: { passed: true, violations: 0, details: ["DanteForge detail unavailable"] },
-          constitution: { passed: true, violations: 0, warnings: 0, details: ["DanteForge detail unavailable"] },
+          constitution: {
+            passed: true,
+            violations: 0,
+            warnings: 0,
+            details: ["DanteForge detail unavailable"],
+          },
           pdseScore: avgPdse,
           pdseThreshold: state.state.pdse.threshold,
           regenerationAttempts: 0,
@@ -3199,7 +3259,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           content: typeof m.content === "string" ? m.content : "",
         }));
         const laneTokens = estimateMessageTokens(laneMessages);
-        autoforgeReportAcc.recordTokenUsage(Math.floor(laneTokens * 0.6), Math.floor(laneTokens * 0.4));
+        autoforgeReportAcc.recordTokenUsage(
+          Math.floor(laneTokens * 0.6),
+          Math.floor(laneTokens * 0.4),
+        );
 
         // Add to global manifest
         for (const f of created) {
@@ -3372,12 +3435,13 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
 
   // D-11: Mark any unattempted lanes and write the run report
   const attemptedLaneNames = [...mergedLanes, ...blockedLanes.map((b) => b.split(":")[0]!.trim())];
-  const unattemptedLanes = lanes.filter((l) => !attemptedLaneNames.includes(l) && !completedLaneNames.includes(l));
+  const unattemptedLanes = lanes.filter(
+    (l) => !attemptedLaneNames.includes(l) && !completedLaneNames.includes(l),
+  );
   if (unattemptedLanes.length > 0) {
-    autoforgeReportAcc.markRemainingNotAttempted(
-      "Execution stopped before reaching this lane.",
-      [...unattemptedLanes],
-    );
+    autoforgeReportAcc.markRemainingNotAttempted("Execution stopped before reaching this lane.", [
+      ...unattemptedLanes,
+    ]);
   }
 
   try {
@@ -3389,11 +3453,17 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       timestamp: autoforgeReportStart,
       autoCommit: state.enableGit,
       commitFn: state.enableGit
-        ? async (files, msg, cwd) => { autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd); }
+        ? async (files, msg, cwd) => {
+            autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd);
+          }
         : undefined,
     });
-    process.stdout.write(`  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`);
-  } catch { /* non-fatal */ }
+    process.stdout.write(
+      `  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`,
+    );
+  } catch {
+    /* non-fatal */
+  }
 
   // D-11 human-friendly summary after report
   const totalLanes = lanes.length;
@@ -3521,6 +3591,7 @@ async function gitWatchCommand(args: string, state: ReplState): Promise<string> 
   const targetPath = rest.join(" ").trim() || undefined;
   const eventPayload = eventFile ? await loadJsonFile(eventFile, state) : undefined;
   const watcher = watchGitEvents(eventType, targetPath, { cwd: state.projectRoot });
+  await watcher.flush();
   watcher.on("event", (event) => {
     const data = event as { type: string; data: { relativePath: string } };
     if (workflowPath) {
@@ -3916,6 +3987,7 @@ async function scheduleGitTaskCommand(args: string, state: ReplState): Promise<s
       runOnStart: false,
     },
   );
+  await task.flush();
 
   return [
     "",
@@ -5424,7 +5496,14 @@ async function costCommand(_args: string, state: ReplState): Promise<string> {
 // ----------------------------------------------------------------------------
 
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand, tier: 1, category: "core" },
+  {
+    name: "help",
+    description: "Show all slash commands",
+    usage: "/help",
+    handler: helpCommand,
+    tier: 1,
+    category: "core",
+  },
   {
     name: "magic",
     description: "Build something \u2014 describe what you want in plain language",
@@ -5497,9 +5576,30 @@ const SLASH_COMMANDS: SlashCommand[] = [
     tier: 1,
     category: "git",
   },
-  { name: "commit", description: "Trigger auto-commit", usage: "/commit", handler: commitCommand, tier: 1, category: "git" },
-  { name: "revert", description: "Revert last commit", usage: "/revert", handler: revertCommand, tier: 2, category: "git" },
-  { name: "undo", description: "Undo last file edit", usage: "/undo", handler: undoCommand, tier: 1, category: "core" },
+  {
+    name: "commit",
+    description: "Trigger auto-commit",
+    usage: "/commit",
+    handler: commitCommand,
+    tier: 1,
+    category: "git",
+  },
+  {
+    name: "revert",
+    description: "Revert last commit",
+    usage: "/revert",
+    handler: revertCommand,
+    tier: 2,
+    category: "git",
+  },
+  {
+    name: "undo",
+    description: "Undo last file edit",
+    usage: "/undo",
+    handler: undoCommand,
+    tier: 1,
+    category: "core",
+  },
   {
     name: "lessons",
     description: "Show project lessons",
@@ -5524,7 +5624,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     tier: 2,
     category: "verification",
   },
-  { name: "qa", description: "Run GStack QA pipeline", usage: "/qa", handler: qaCommand, tier: 2, category: "verification" },
+  {
+    name: "qa",
+    description: "Run GStack QA pipeline",
+    usage: "/qa",
+    handler: qaCommand,
+    tier: 2,
+    category: "verification",
+  },
   {
     name: "verify-output",
     description: "Run structured output verification from JSON input",
@@ -5590,7 +5697,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     tier: 1,
     category: "core",
   },
-  { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand, tier: 2, category: "core" },
+  {
+    name: "tokens",
+    description: "Show token usage",
+    usage: "/tokens",
+    handler: tokensCommand,
+    tier: 2,
+    category: "core",
+  },
   {
     name: "web",
     description: "Fetch URL content into context",

@@ -49,17 +49,18 @@ describe("TombstoneRegistry", () => {
   });
 
   it("bulk loads tombstones", () => {
-    const tombstones = [
-      makeTombstone({ tombstoneId: "t1" }),
-      makeTombstone({ tombstoneId: "t2" }),
-    ];
+    const tombstones = [makeTombstone({ tombstoneId: "t1" }), makeTombstone({ tombstoneId: "t2" })];
     registry.bulkLoad(tombstones);
     expect(registry.size()).toBe(2);
   });
 
   it("finds tombstones for a session", () => {
-    registry.register(makeTombstone({ tombstoneId: "ts1", provenance: { sessionId: "sa", runId: "r1" } }));
-    registry.register(makeTombstone({ tombstoneId: "ts2", provenance: { sessionId: "sb", runId: "r2" } }));
+    registry.register(
+      makeTombstone({ tombstoneId: "ts1", provenance: { sessionId: "sa", runId: "r1" } }),
+    );
+    registry.register(
+      makeTombstone({ tombstoneId: "ts2", provenance: { sessionId: "sb", runId: "r2" } }),
+    );
     const forSession = registry.forSession("sa");
     expect(forSession).toHaveLength(1);
     expect(forSession[0]!.tombstoneId).toBe("ts1");

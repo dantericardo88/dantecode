@@ -131,11 +131,7 @@ describe("E2E: Gaslight to Skillbook (real modules)", () => {
     // Step 2: Simulate defense (defend everything except edge-case "empty-input")
     for (const pattern of patterns) {
       const defended = pattern.name !== "empty-input";
-      report.addResult(
-        pattern,
-        defended,
-        defended ? "Blocked" : "Crashed on empty input",
-      );
+      report.addResult(pattern, defended, defended ? "Blocked" : "Crashed on empty input");
     }
 
     // Step 3: Generate report

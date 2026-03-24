@@ -87,7 +87,10 @@ describe("RunReportAccumulator", () => {
   it("records file operations", () => {
     const acc = makeAccumulator();
     acc.beginEntry("auth", "prds/01-auth.md");
-    acc.recordFilesCreated([{ path: "src/auth.ts", lines: 100 }, { path: "src/auth.test.ts", lines: 50 }]);
+    acc.recordFilesCreated([
+      { path: "src/auth.ts", lines: 100 },
+      { path: "src/auth.test.ts", lines: 50 },
+    ]);
     acc.recordFilesModified([{ path: "src/index.ts", added: 3, removed: 0 }]);
     acc.recordFilesDeleted(["src/old-auth.ts"]);
 
@@ -159,7 +162,7 @@ describe("RunReportAccumulator", () => {
 
     expect(report.completedAt).toBe("2026-03-22T15:30:00.000Z");
     expect(report.tokenUsage.input).toBe(10000); // 5000 * 2
-    expect(report.tokenUsage.output).toBe(6000);  // 3000 * 2
+    expect(report.tokenUsage.output).toBe(6000); // 3000 * 2
     expect(report.costEstimate).toBeGreaterThan(0);
   });
 
@@ -623,32 +626,40 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
 
   // Positive human-friendly checks
   it("shows 'All N tests pass' when all tests pass", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({ tests: { created: 10, passing: 10, failing: 0 } })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry({ tests: { created: 10, passing: 10, failing: 0 } })],
+      }),
+    );
     expect(md).toContain("All 10 tests pass");
   });
 
   it("shows 'N of M tests pass' when some tests fail", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({ tests: { created: 10, passing: 8, failing: 2 } })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry({ tests: { created: 10, passing: 8, failing: 2 } })],
+      }),
+    );
     expect(md).toContain("8 of 10 tests pass");
     expect(md).toContain("2 need attention");
   });
 
   it("omits test line when no tests were created", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({ tests: { created: 0, passing: 0, failing: 0 } })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry({ tests: { created: 0, passing: 0, failing: 0 } })],
+      }),
+    );
     expect(md).not.toContain("tests pass");
     expect(md).not.toContain("Tests:");
   });
 
   it("omits per-entry verification block for clean pass with zero regen", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry()],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry()],
+      }),
+    );
     // Per-entry section should have no verification lines
     expect(md).not.toContain("caught");
     expect(md).not.toContain("Review recommended");
@@ -657,34 +668,42 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
   });
 
   it("shows human verdict for caught-and-fixed issues", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({
-        verification: {
-          antiStub: { passed: true, violations: 0, details: [] },
-          constitution: { passed: true, violations: 0, warnings: 0, details: [] },
-          pdseScore: 90,
-          pdseThreshold: 85,
-          regenerationAttempts: 3,
-          maxAttempts: 3,
-        },
-      })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({
+            verification: {
+              antiStub: { passed: true, violations: 0, details: [] },
+              constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+              pdseScore: 90,
+              pdseThreshold: 85,
+              regenerationAttempts: 3,
+              maxAttempts: 3,
+            },
+          }),
+        ],
+      }),
+    );
     expect(md).toContain("caught 3 issue(s) and fixed all of them");
   });
 
   it("shows placeholder language for anti-stub failures", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({
-        verification: {
-          antiStub: { passed: false, violations: 2, details: ["empty fn at line 12"] },
-          constitution: { passed: true, violations: 0, warnings: 0, details: [] },
-          pdseScore: 78,
-          pdseThreshold: 85,
-          regenerationAttempts: 0,
-          maxAttempts: 3,
-        },
-      })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({
+            verification: {
+              antiStub: { passed: false, violations: 2, details: ["empty fn at line 12"] },
+              constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+              pdseScore: 78,
+              pdseThreshold: 85,
+              regenerationAttempts: 0,
+              maxAttempts: 3,
+            },
+          }),
+        ],
+      }),
+    );
     expect(md).toContain("placeholder");
     expect(md).toContain("empty fn at line 12");
     expect(md).not.toContain("Anti-stub");
@@ -698,28 +717,34 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
   });
 
   it("shows 'Verification summary' heading in non-verbose mode", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry()],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry()],
+      }),
+    );
     expect(md).toContain("## Verification summary");
   });
 
   it("renders 'What needs attention' for non-complete entries", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [
-        makeEntry({ status: "complete" }),
-        makeEntry({ status: "failed", prdName: "api", actionNeeded: "Implement manually." }),
-      ],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({ status: "complete" }),
+          makeEntry({ status: "failed", prdName: "api", actionNeeded: "Implement manually." }),
+        ],
+      }),
+    );
     expect(md).toContain("## What needs attention");
     expect(md).toContain("api");
     expect(md).toContain("Implement manually.");
   });
 
   it("shows 'Nothing requires attention' when all tasks complete", () => {
-    const md = serializeRunReportToMarkdown(makeReport({
-      entries: [makeEntry({ status: "complete" })],
-    }));
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [makeEntry({ status: "complete" })],
+      }),
+    );
     expect(md).toContain("## What needs attention");
     expect(md).toContain("Nothing requires attention.");
   });

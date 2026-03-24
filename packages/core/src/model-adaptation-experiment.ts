@@ -64,9 +64,7 @@ export class ExperimentRateLimiter {
   }
 
   /** Restore rate limiter state from serialized data. */
-  static deserialize(
-    data: Record<string, { date: string; count: number }>,
-  ): ExperimentRateLimiter {
+  static deserialize(data: Record<string, { date: string; count: number }>): ExperimentRateLimiter {
     const limiter = new ExperimentRateLimiter();
     const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
     for (const [key, value] of Object.entries(data)) {
@@ -105,17 +103,11 @@ export interface ExperimentRunOptions {
 // Default runners — detection-based, no real LLM calls (D-12A Phase 3)
 // ---------------------------------------------------------------------------
 
-async function defaultSyntheticRunner(
-  override: CandidateOverride,
-): Promise<ExperimentMetrics> {
+async function defaultSyntheticRunner(override: CandidateOverride): Promise<ExperimentMetrics> {
   try {
     const { detectQuirks } = await import("./model-adaptation.js");
-    const runner = createDetectionBasedRunner(
-      (response, context) =>
-        detectQuirks(
-          response,
-          context as unknown as Parameters<typeof detectQuirks>[1],
-        ),
+    const runner = createDetectionBasedRunner((response, context) =>
+      detectQuirks(response, context as unknown as Parameters<typeof detectQuirks>[1]),
     );
     return runner(override);
   } catch {
@@ -124,17 +116,11 @@ async function defaultSyntheticRunner(
   }
 }
 
-async function defaultReplayRunner(
-  override: CandidateOverride,
-): Promise<ExperimentMetrics> {
+async function defaultReplayRunner(override: CandidateOverride): Promise<ExperimentMetrics> {
   try {
     const { detectQuirks } = await import("./model-adaptation.js");
-    const runner = createFixtureReplayRunner(
-      (response, context) =>
-        detectQuirks(
-          response,
-          context as unknown as Parameters<typeof detectQuirks>[1],
-        ),
+    const runner = createFixtureReplayRunner((response, context) =>
+      detectQuirks(response, context as unknown as Parameters<typeof detectQuirks>[1]),
     );
     return runner(override);
   } catch {
@@ -145,12 +131,9 @@ async function defaultReplayRunner(
 async function defaultControlRunner(): Promise<ExperimentMetrics> {
   try {
     const { detectQuirks } = await import("./model-adaptation.js");
-    const { CORRECTED_RESPONSES } = await import(
-      "./__fixtures__/adaptation-corrected-responses.js"
-    );
-    const { REPLAY_FIXTURES } = await import(
-      "./__fixtures__/adaptation-replays.js"
-    );
+    const { CORRECTED_RESPONSES } =
+      await import("./__fixtures__/adaptation-corrected-responses.js");
+    const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
     // Control: run detection on corrected responses — none should trigger
     let falsePositives = 0;
@@ -165,11 +148,7 @@ async function defaultControlRunner(): Promise<ExperimentMetrics> {
         ...fixture.context,
         sessionId: `control-${corrected.fixtureName}`,
       });
-      if (
-        results.some(
-          (r: { quirkKey: string }) => r.quirkKey === fixture.expectedQuirk,
-        )
-      ) {
+      if (results.some((r: { quirkKey: string }) => r.quirkKey === fixture.expectedQuirk)) {
         falsePositives++;
       }
     }
@@ -219,24 +198,26 @@ export async function runAdaptationExperiment(
   const TIMEOUT_SENTINEL = "EXPERIMENT_TIMEOUT";
   let timeoutHandle: ReturnType<typeof setTimeout>;
   const [syntheticResult, replayResult, controlResult] = await Promise.race([
-    Promise.all([
-      syntheticRunner(override),
-      replayRunner(override),
-      controlRunner(),
-    ]),
+    Promise.all([syntheticRunner(override), replayRunner(override), controlRunner()]),
     new Promise<[ExperimentMetrics, ExperimentMetrics, ExperimentMetrics]>((_, reject) => {
       timeoutHandle = setTimeout(() => reject(new Error(TIMEOUT_SENTINEL)), timeoutMs);
     }),
-  ]).then((result) => {
-    clearTimeout(timeoutHandle!);
-    return result;
-  }).catch((err: Error) => {
-    clearTimeout(timeoutHandle!);
-    if (err.message === TIMEOUT_SENTINEL) {
-      return [fallbackMetrics, fallbackMetrics, fallbackMetrics] as [ExperimentMetrics, ExperimentMetrics, ExperimentMetrics];
-    }
-    throw err; // re-throw non-timeout errors (e.g. runner failures)
-  });
+  ])
+    .then((result) => {
+      clearTimeout(timeoutHandle!);
+      return result;
+    })
+    .catch((err: Error) => {
+      clearTimeout(timeoutHandle!);
+      if (err.message === TIMEOUT_SENTINEL) {
+        return [fallbackMetrics, fallbackMetrics, fallbackMetrics] as [
+          ExperimentMetrics,
+          ExperimentMetrics,
+          ExperimentMetrics,
+        ];
+      }
+      throw err; // re-throw non-timeout errors (e.g. runner failures)
+    });
 
   // Aggregate candidate metrics (average of synthetic + replay)
   const candidate: ExperimentMetrics = {
@@ -250,8 +231,8 @@ export async function runAdaptationExperiment(
   };
 
   // Check control regression — control dropped below baseline * controlRegressionFactor
-  const controlFactor = options?.config?.controlRegressionFactor
-    ?? DEFAULT_EXPERIMENT_CONFIG.controlRegressionFactor;
+  const controlFactor =
+    options?.config?.controlRegressionFactor ?? DEFAULT_EXPERIMENT_CONFIG.controlRegressionFactor;
   const controlRegression =
     (controlResult.pdseScore ?? 0) < (baseline.pdseScore ?? 80) * controlFactor;
 
@@ -292,9 +273,7 @@ export async function runAdaptationExperiment(
 // ---------------------------------------------------------------------------
 
 /** Average of defined numeric values. Returns undefined if none provided. */
-export function average(
-  ...values: (number | undefined)[]
-): number | undefined {
+export function average(...values: (number | undefined)[]): number | undefined {
   const defined = values.filter((v): v is number => v !== undefined);
   if (defined.length === 0) return undefined;
   return defined.reduce((a, b) => a + b, 0) / defined.length;
@@ -315,7 +294,11 @@ export function createFixtureReplayRunner(
   detectFn: (response: string, context: Record<string, unknown>) => Array<{ quirkKey: string }>,
 ): (override: CandidateOverride) => Promise<ExperimentMetrics> {
   return async (override: CandidateOverride): Promise<ExperimentMetrics> => {
-    let fixtures: Array<{ response: string; context: Record<string, unknown>; expectedQuirk: string }>;
+    let fixtures: Array<{
+      response: string;
+      context: Record<string, unknown>;
+      expectedQuirk: string;
+    }>;
     try {
       const mod = await import("./__fixtures__/adaptation-replays.js");
       fixtures = mod.REPLAY_FIXTURES ?? [];
@@ -365,7 +348,12 @@ export function createDetectionBasedRunner(
   detectFn: (response: string, context: Record<string, unknown>) => Array<{ quirkKey: string }>,
 ): (override: CandidateOverride) => Promise<ExperimentMetrics> {
   return async (override: CandidateOverride): Promise<ExperimentMetrics> => {
-    let fixtures: Array<{ name: string; response: string; context: Record<string, unknown>; expectedQuirk: string }>;
+    let fixtures: Array<{
+      name: string;
+      response: string;
+      context: Record<string, unknown>;
+      expectedQuirk: string;
+    }>;
     try {
       const mod = await import("./__fixtures__/adaptation-replays.js");
       fixtures = mod.REPLAY_FIXTURES ?? [];

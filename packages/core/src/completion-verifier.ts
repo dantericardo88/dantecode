@@ -50,13 +50,22 @@ async function checkFile(root: string, filePath: string): Promise<CompletionChec
     const info = await stat(resolve(root, filePath));
     if (!info.isFile()) return { file: filePath, exists: false, hasContent: false };
     const content = await readFile(resolve(root, filePath), "utf-8");
-    return { file: filePath, exists: true, hasContent: content.trim().length > 0, lines: content.split("\n").length };
+    return {
+      file: filePath,
+      exists: true,
+      hasContent: content.trim().length > 0,
+      lines: content.split("\n").length,
+    };
   } catch {
     return { file: filePath, exists: false, hasContent: false };
   }
 }
 
-async function checkPattern(root: string, file: string, pattern: string): Promise<PatternCheckResult> {
+async function checkPattern(
+  root: string,
+  file: string,
+  pattern: string,
+): Promise<PatternCheckResult> {
   try {
     const content = await readFile(resolve(root, file), "utf-8");
     return { file, pattern, found: new RegExp(pattern).test(content) };
@@ -85,7 +94,10 @@ function buildSummary(passed: string[], failed: string[], confidence: Confidence
   if (total === 0) return "Low confidence — insufficient evidence to verify completion.";
   const parts: string[] = [`${passed.length}/${total} checks passed.`];
   if (failed.length > 0) {
-    const items = failed.map((f) => { const m = f.match(/:\s*(.+)$/); return m ? m[1]! : f; });
+    const items = failed.map((f) => {
+      const m = f.match(/:\s*(.+)$/);
+      return m ? m[1]! : f;
+    });
     parts.push(`${failed.length} failed: ${items.join(", ")}.`);
   }
   parts.push(`Confidence: ${confidence}.`);
@@ -112,8 +124,13 @@ export async function verifyCompletion(
   if (!hasConcrete) {
     if (expectations.intentDescription) uncertain.push(expectations.intentDescription);
     return {
-      verdict: "failed", confidence: "low", passed, failed, uncertain,
-      fileChecks, patternChecks,
+      verdict: "failed",
+      confidence: "low",
+      passed,
+      failed,
+      uncertain,
+      fileChecks,
+      patternChecks,
       summary: "Low confidence — insufficient evidence to verify completion.",
     };
   }
@@ -155,8 +172,16 @@ export async function verifyCompletion(
   const verdict = computeVerdict(total, passed.length, failed.length);
   const confidence = computeConfidence(total, passed.length);
 
-  return { verdict, confidence, passed, failed, uncertain, fileChecks, patternChecks,
-    summary: buildSummary(passed, failed, confidence) };
+  return {
+    verdict,
+    confidence,
+    passed,
+    failed,
+    uncertain,
+    fileChecks,
+    patternChecks,
+    summary: buildSummary(passed, failed, confidence),
+  };
 }
 
 // ─── Derive Expectations ────────────────────────────────────────────────────
@@ -185,7 +210,9 @@ export function summarizeVerification(verification: CompletionVerification): str
 
   const missing = verification.fileChecks.filter((f) => !f.exists).map((f) => f.file);
   if (missing.length > 0) {
-    parts.push(`${missing.length} file${missing.length > 1 ? "s" : ""} missing: ${missing.join(", ")}.`);
+    parts.push(
+      `${missing.length} file${missing.length > 1 ? "s" : ""} missing: ${missing.join(", ")}.`,
+    );
   }
 
   const patsPassed = verification.patternChecks.filter((p) => p.found).length;

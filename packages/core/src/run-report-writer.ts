@@ -26,7 +26,11 @@ export interface WriteRunReportOptions {
 export function reportFileName(isoTimestamp: string, command?: string): string {
   const base = isoTimestamp.replace(/:/g, "-").replace(/\.\d+Z$/, "Z");
   if (!command) return `run-${base}.md`;
-  const suffix = command.replace(/[^a-z0-9-]/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  const suffix = command
+    .replace(/[^a-z0-9-]/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
   return `run-${base}-${suffix}.md`;
 }
 

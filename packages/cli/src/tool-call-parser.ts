@@ -101,7 +101,11 @@ export function jaccardWordOverlap(a: string, b: string): number {
  *   5+ high              → 0.72  (clamped minimum)
  *   0 high, 0 med, 5 low → 0.88  (all-low-severity: still tighter than default)
  */
-export function adaptiveJaccardThreshold(highCount: number, medCount: number, lowCount: number): number {
+export function adaptiveJaccardThreshold(
+  highCount: number,
+  medCount: number,
+  lowCount: number,
+): number {
   const raw = 0.95 - highCount * 0.05 - medCount * 0.02 - lowCount * 0.01;
   return Math.min(0.93, Math.max(0.72, raw));
 }

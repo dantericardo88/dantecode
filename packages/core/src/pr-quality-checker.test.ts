@@ -44,9 +44,9 @@ describe("PRQualityChecker", () => {
     const diff = makeDiff(["const x = 1;"]);
     const report = checker.check(diff, {
       commitMessages: [
-        "feat(core): add memory consolidator",   // valid
-        "just fixed something",                    // invalid
-        "fix: correct typo",                       // valid
+        "feat(core): add memory consolidator", // valid
+        "just fixed something", // invalid
+        "fix: correct typo", // valid
       ],
     });
     expect(report.conventionViolations.length).toBe(1);

@@ -16,7 +16,9 @@ describe("wave-completion-integrity", () => {
     it("returns false when [WAVE COMPLETE] appears mid-response with substantial content after", () => {
       const longContent = "a".repeat(300);
       expect(
-        isValidWaveCompletion(`Thinking about this... [WAVE COMPLETE] but actually I need to do more work. ${longContent}`),
+        isValidWaveCompletion(
+          `Thinking about this... [WAVE COMPLETE] but actually I need to do more work. ${longContent}`,
+        ),
       ).toBe(false);
     });
 

@@ -61,17 +61,15 @@ describe("TrailEventIndex", () => {
 
   it("performs full-text search across summary and file path", () => {
     idx.index(makeEvent({ id: "e1", summary: "compiled TypeScript" }));
-    idx.index(makeEvent({ id: "e2", summary: "ran tests", payload: { filePath: "/test/app.test.ts" } }));
+    idx.index(
+      makeEvent({ id: "e2", summary: "ran tests", payload: { filePath: "/test/app.test.ts" } }),
+    );
     expect(idx.search("typescript")).toHaveLength(1);
     expect(idx.search("test")).toHaveLength(1);
   });
 
   it("bulk indexes events", () => {
-    idx.bulkIndex([
-      makeEvent({ id: "e1" }),
-      makeEvent({ id: "e2" }),
-      makeEvent({ id: "e3" }),
-    ]);
+    idx.bulkIndex([makeEvent({ id: "e1" }), makeEvent({ id: "e2" }), makeEvent({ id: "e3" })]);
     expect(idx.size()).toBe(3);
   });
 

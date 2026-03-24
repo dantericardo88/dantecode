@@ -111,7 +111,7 @@ describe("ExperimentRateLimiter", () => {
     expect(restored.canRun("tool_call_format_error")).toBe(true);
     expect(restored.getRemainingToday("tool_call_format_error")).toBe(5);
 
-    const badData = ExperimentRateLimiter.deserialize({ "bad": { date: 123, count: "x" } as any });
+    const badData = ExperimentRateLimiter.deserialize({ bad: { date: 123, count: "x" } as any });
     expect(badData.canRun("tool_call_format_error")).toBe(true);
   });
 
@@ -128,7 +128,7 @@ describe("ExperimentRateLimiter", () => {
 
   it("deserialize rejects invalid date format", () => {
     const restored = ExperimentRateLimiter.deserialize({
-      "tool_call_format_error": { date: "not-a-date", count: 3 },
+      tool_call_format_error: { date: "not-a-date", count: 3 },
     });
     // Invalid date silently ignored — limiter behaves as fresh
     expect(restored.canRun("tool_call_format_error")).toBe(true);
@@ -138,7 +138,7 @@ describe("ExperimentRateLimiter", () => {
   it("deserialize clamps negative count to 0", () => {
     const today = new Date().toISOString().slice(0, 10);
     const restored = ExperimentRateLimiter.deserialize({
-      "tool_call_format_error": { date: today, count: -5 },
+      tool_call_format_error: { date: today, count: -5 },
     });
     // Negative count clamped to 0 — all 5 experiments available
     expect(restored.getRemainingToday("tool_call_format_error")).toBe(5);
@@ -147,7 +147,7 @@ describe("ExperimentRateLimiter", () => {
   it("deserialize clamps count above max to maxPerQuirkPerDay", () => {
     const today = new Date().toISOString().slice(0, 10);
     const restored = ExperimentRateLimiter.deserialize({
-      "tool_call_format_error": { date: today, count: 999 },
+      tool_call_format_error: { date: today, count: 999 },
     });
     // Count clamped to maxPerQuirkPerDay (5) — no experiments remaining
     expect(restored.getRemainingToday("tool_call_format_error")).toBe(0);
@@ -239,9 +239,21 @@ describe("runAdaptationExperiment", () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
-      replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.85 }),
-      controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
+      replayRunner: async () => ({
+        pdseScore: 88,
+        completionStatus: "complete",
+        successRate: 0.85,
+      }),
+      controlRunner: async () => ({
+        pdseScore: 82,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     // Candidate PDSE = average(90, 88) = 89; delta = 89 - 80 = 9 >= 5
@@ -255,10 +267,22 @@ describe("runAdaptationExperiment", () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
-      replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.85 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
+      replayRunner: async () => ({
+        pdseScore: 88,
+        completionStatus: "complete",
+        successRate: 0.85,
+      }),
       // Control dropped below 80 * 0.95 = 76
-      controlRunner: async () => ({ pdseScore: 70, completionStatus: "complete", successRate: 0.7 }),
+      controlRunner: async () => ({
+        pdseScore: 70,
+        completionStatus: "complete",
+        successRate: 0.7,
+      }),
     });
 
     expect(result.decision).toBe("reject");
@@ -271,7 +295,11 @@ describe("runAdaptationExperiment", () => {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
       syntheticTaskRunner: async () => ({ completionStatus: "failed" }),
       replayRunner: async () => ({ completionStatus: "failed" }),
-      controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+      controlRunner: async () => ({
+        pdseScore: 82,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     expect(result.decision).toBe("reject");
@@ -283,9 +311,21 @@ describe("runAdaptationExperiment", () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 83, completionStatus: "complete", successRate: 0.85 }),
-      replayRunner: async () => ({ pdseScore: 81, completionStatus: "complete", successRate: 0.82 }),
-      controlRunner: async () => ({ pdseScore: 81, completionStatus: "complete", successRate: 0.8 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 83,
+        completionStatus: "complete",
+        successRate: 0.85,
+      }),
+      replayRunner: async () => ({
+        pdseScore: 81,
+        completionStatus: "complete",
+        successRate: 0.82,
+      }),
+      controlRunner: async () => ({
+        pdseScore: 81,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     // Candidate PDSE = average(83, 81) = 82; delta = 82 - 80 = 2 (0 <= 2 < 5)
@@ -296,9 +336,17 @@ describe("runAdaptationExperiment", () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 75, completionStatus: "partial", successRate: 0.6 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 75,
+        completionStatus: "partial",
+        successRate: 0.6,
+      }),
       replayRunner: async () => ({ pdseScore: 73, completionStatus: "partial", successRate: 0.55 }),
-      controlRunner: async () => ({ pdseScore: 81, completionStatus: "complete", successRate: 0.8 }),
+      controlRunner: async () => ({
+        pdseScore: 81,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     // Candidate PDSE = average(75, 73) = 74; delta = 74 - 80 = -6 < 0
@@ -320,9 +368,17 @@ describe("runAdaptationExperiment", () => {
 
     // One partial = candidate is partial
     const result = await runAdaptationExperiment(override, {
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "partial", successRate: 0.85 }),
-      controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+      controlRunner: async () => ({
+        pdseScore: 82,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     expect(result.candidate.completionStatus).toBe("partial");
@@ -388,13 +444,13 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "formatting-quirk")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "formatting-quirk")!;
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -402,13 +458,13 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "early-stop-quirk")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "early-stop-quirk")!;
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -416,13 +472,13 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "schema-mismatch-quirk")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "schema-mismatch-quirk")!;
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -430,14 +486,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "overly-verbose-preface")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "overly-verbose-preface")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -445,14 +501,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "tool-call-format-error")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "tool-call-format-error")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -460,14 +516,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "skips-synthesis")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "skips-synthesis")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -475,14 +531,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "ignores-prd-section-order")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "ignores-prd-section-order")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -490,14 +546,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "markdown-wrapper-issue")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "markdown-wrapper-issue")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -505,14 +561,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "regeneration-trigger-pattern")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "regeneration-trigger-pattern")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 
@@ -520,14 +576,14 @@ describe("Replay fixtures trigger expected quirks", () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
 
-    const fixture = REPLAY_FIXTURES.find(f => f.name === "provider-specific-dispatch-shape")!;
+    const fixture = REPLAY_FIXTURES.find((f) => f.name === "provider-specific-dispatch-shape")!;
     expect(fixture).toBeDefined();
     const observations = detectQuirks(fixture.response, {
       ...fixture.context,
       sessionId: fixture.context.sessionId,
     });
 
-    const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
+    const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
     expect(match).toBeDefined();
   });
 });
@@ -543,7 +599,9 @@ describe("createDetectionBasedRunner", () => {
 
     // Use real detectQuirks — corrected response for katex has no KaTeX notation
     const detectFn = (response: string, context: Record<string, unknown>) =>
-      detectQuirks(response, { ...context, sessionId: "test" } as Parameters<typeof detectQuirks>[1]);
+      detectQuirks(response, { ...context, sessionId: "test" } as Parameters<
+        typeof detectQuirks
+      >[1]);
 
     const runner = createDetectionBasedRunner(detectFn);
     const override = makeOverride({
@@ -591,7 +649,8 @@ describe("createDetectionBasedRunner", () => {
   it("corrected responses do not trigger their respective quirks", async () => {
     const { detectQuirks } = await import("./model-adaptation.js");
     const { REPLAY_FIXTURES } = await import("./__fixtures__/adaptation-replays.js");
-    const { CORRECTED_RESPONSES } = await import("./__fixtures__/adaptation-corrected-responses.js");
+    const { CORRECTED_RESPONSES } =
+      await import("./__fixtures__/adaptation-corrected-responses.js");
 
     for (const fixture of REPLAY_FIXTURES) {
       const corrected = CORRECTED_RESPONSES.get(fixture.name);
@@ -600,8 +659,11 @@ describe("createDetectionBasedRunner", () => {
         ...fixture.context,
         sessionId: fixture.context.sessionId,
       });
-      const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
-      expect(match, `Corrected response for "${fixture.name}" should NOT trigger ${fixture.expectedQuirk}`).toBeUndefined();
+      const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
+      expect(
+        match,
+        `Corrected response for "${fixture.name}" should NOT trigger ${fixture.expectedQuirk}`,
+      ).toBeUndefined();
     }
   });
 
@@ -614,8 +676,11 @@ describe("createDetectionBasedRunner", () => {
         ...fixture.context,
         sessionId: fixture.context.sessionId,
       });
-      const match = observations.find(o => o.quirkKey === fixture.expectedQuirk);
-      expect(match, `Original fixture "${fixture.name}" should trigger ${fixture.expectedQuirk}`).toBeDefined();
+      const match = observations.find((o) => o.quirkKey === fixture.expectedQuirk);
+      expect(
+        match,
+        `Original fixture "${fixture.name}" should trigger ${fixture.expectedQuirk}`,
+      ).toBeDefined();
     }
   });
 });
@@ -628,7 +693,11 @@ describe("runAdaptationExperiment — control default fix", () => {
   it("undefined control PDSE triggers control regression", async () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.9 }),
       controlRunner: async () => ({ completionStatus: "failed" }), // no pdseScore
     });
@@ -638,7 +707,11 @@ describe("runAdaptationExperiment — control default fix", () => {
   it("undefined control PDSE fails smoke check", async () => {
     const override = makeOverride();
     const result = await runAdaptationExperiment(override, {
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.9 }),
       controlRunner: async () => ({ completionStatus: "failed" }), // no pdseScore
     });
@@ -657,7 +730,11 @@ describe("runAdaptationExperiment — timeout", () => {
         return { pdseScore: 95, completionStatus: "complete", successRate: 1 };
       },
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.9 }),
-      controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+      controlRunner: async () => ({
+        pdseScore: 82,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
     // Should have fallen back to baseline-equivalent metrics → delta=0 → needs_human_review (no improvement)
     expect(["reject", "needs_human_review"]).toContain(result.decision);
@@ -675,18 +752,34 @@ describe("runAdaptationExperiment — custom controlRegressionFactor", () => {
     const override = makeOverride();
     // Control PDSE = 74, baseline = 80. Default factor 0.95 → threshold = 76 → 74 < 76 = regression
     const resultDefault = await runAdaptationExperiment(override, {
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.9 }),
-      controlRunner: async () => ({ pdseScore: 74, completionStatus: "complete", successRate: 0.7 }),
+      controlRunner: async () => ({
+        pdseScore: 74,
+        completionStatus: "complete",
+        successRate: 0.7,
+      }),
     });
     expect(resultDefault.controlRegression).toBe(true);
 
     // Custom factor 0.8 → threshold = 64 → 74 > 64 = NO regression
     const resultRelaxed = await runAdaptationExperiment(override, {
       config: { controlRegressionFactor: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
       replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.9 }),
-      controlRunner: async () => ({ pdseScore: 74, completionStatus: "complete", successRate: 0.7 }),
+      controlRunner: async () => ({
+        pdseScore: 74,
+        completionStatus: "complete",
+        successRate: 0.7,
+      }),
     });
     expect(resultRelaxed.controlRegression).toBe(false);
   });

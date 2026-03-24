@@ -24,8 +24,4 @@ export {
 
 // ─── Gaslight Report ─────────────────────────────────────────────────────────
 
-export {
-  GaslightReport,
-  type GaslightReportData,
-  type TrendDirection,
-} from "./gaslight-report.js";
+export { GaslightReport, type GaslightReportData, type TrendDirection } from "./gaslight-report.js";

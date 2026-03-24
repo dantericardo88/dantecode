@@ -71,9 +71,7 @@ describe("deliverables-verification (Wave 1 integration)", () => {
       };
       const expectations = deriveWaveExpectations(wave);
       // Research waves have no file creation instructions
-      expect(
-        !expectations.expectedFiles || expectations.expectedFiles.length === 0,
-      ).toBe(true);
+      expect(!expectations.expectedFiles || expectations.expectedFiles.length === 0).toBe(true);
     });
   });
 

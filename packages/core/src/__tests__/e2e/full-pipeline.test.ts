@@ -50,9 +50,7 @@ describe("Full pipeline — RunReport + Checkpointer + PDSE integration", () => 
       { path: "src/feature-x.ts", lines: 120 },
       { path: "src/feature-x.test.ts", lines: 45 },
     ]);
-    acc.recordFilesModified([
-      { path: "src/index.ts", added: 3, removed: 0 },
-    ]);
+    acc.recordFilesModified([{ path: "src/index.ts", added: 3, removed: 0 }]);
     acc.recordTests({ created: 5, passing: 5, failing: 0 });
     acc.recordVerification({
       antiStub: { passed: true, violations: 0, details: [] },

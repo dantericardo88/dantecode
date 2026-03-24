@@ -139,10 +139,7 @@ describe("ReasoningChain — Self-Critique", () => {
   });
 
   it("identifies root cause: wrong approach", () => {
-    const critique = chain.selfCritique(
-      makeThought("Used wrong method for the task"),
-      0.6,
-    );
+    const critique = chain.selfCritique(makeThought("Used wrong method for the task"), 0.6);
     expect(critique.rootCause).toContain("wrong approach");
   });
 

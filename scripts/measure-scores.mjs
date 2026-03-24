@@ -45,7 +45,14 @@ measure("A-1", "Test Suite", () => {
   if (total === 0) throw new Error("No test results found in output");
   const failMatch = output.match(/(\d+) failed/);
   const failures = failMatch ? parseInt(failMatch[1], 10) : 0;
-  const score = failures === 0 && total > 5000 ? 10 : failures === 0 && total > 3000 ? 9 : failures === 0 ? 8 : 4;
+  const score =
+    failures === 0 && total > 5000
+      ? 10
+      : failures === 0 && total > 3000
+        ? 9
+        : failures === 0
+          ? 8
+          : 4;
   return { score, evidence: `${total} tests, ${failures} failures` };
 });
 
@@ -55,7 +62,9 @@ measure("A-2", "Type Safety", () => {
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   const taskMatch = output.match(/Tasks:\s+(\d+)\s+successful,\s+(\d+)\s+total/);
   if (result.status !== 0) throw new Error(`Typecheck failed (exit ${result.status})`);
-  const evidence = taskMatch ? `${taskMatch[1]}/${taskMatch[2]} packages clean` : "typecheck passed";
+  const evidence = taskMatch
+    ? `${taskMatch[1]}/${taskMatch[2]} packages clean`
+    : "typecheck passed";
   return { score: 10, evidence };
 });
 

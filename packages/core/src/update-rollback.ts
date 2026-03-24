@@ -55,7 +55,10 @@ export interface UpdateRollbackIO {
   /** Write content to a file. */
   writeFile: (path: string, content: string) => void;
   /** Execute a shell command. Returns { exitCode, stdout, stderr }. */
-  exec: (command: string, timeoutMs: number) => { exitCode: number; stdout: string; stderr: string };
+  exec: (
+    command: string,
+    timeoutMs: number,
+  ) => { exitCode: number; stdout: string; stderr: string };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -129,7 +132,7 @@ export class UpdateRollback {
         if (result.exitCode !== 0) {
           failures.push(
             `Command failed (exit ${result.exitCode}): ${command}` +
-            (result.stderr ? ` — ${result.stderr.slice(0, 200)}` : ""),
+              (result.stderr ? ` — ${result.stderr.slice(0, 200)}` : ""),
           );
         }
       } catch (err) {
@@ -159,10 +162,7 @@ export class UpdateRollback {
   /**
    * Record an action in the evidence chain audit log.
    */
-  recordInEvidenceChain(
-    action: "snapshot" | "rollback",
-    details: Record<string, unknown>,
-  ): void {
+  recordInEvidenceChain(action: "snapshot" | "rollback", details: Record<string, unknown>): void {
     this.evidenceLog.push({
       action,
       details: { ...details },

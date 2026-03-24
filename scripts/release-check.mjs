@@ -71,22 +71,42 @@ check(4, "Anti-stub scan", () => {
   const skipDirs = new Set(["node_modules", "dist", ".git", ".turbo", "coverage"]);
 
   function isTestFile(name) {
-    return name.endsWith(".test.ts") || name.endsWith(".test.tsx") ||
-           name.endsWith(".spec.ts") || name.endsWith(".spec.tsx");
+    return (
+      name.endsWith(".test.ts") ||
+      name.endsWith(".test.tsx") ||
+      name.endsWith(".spec.ts") ||
+      name.endsWith(".spec.tsx")
+    );
   }
 
   function shouldSkipLine(line) {
     const t = line.trim();
-    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/**") || t.startsWith("*/")) return true;
-    if (line.includes("STUB_PATTERNS") || line.includes("HARD_VIOLATION") || line.includes("forbiddenPatterns")) return true;
+    if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/**") || t.startsWith("*/"))
+      return true;
+    if (
+      line.includes("STUB_PATTERNS") ||
+      line.includes("HARD_VIOLATION") ||
+      line.includes("forbiddenPatterns")
+    )
+      return true;
     if (line.includes("pattern:") || line.includes("RegExp")) return true;
-    if (line.includes("placeholder=") || line.includes("placeholder:") || line.includes(".placeholder")) return true;
+    if (
+      line.includes("placeholder=") ||
+      line.includes("placeholder:") ||
+      line.includes(".placeholder")
+    )
+      return true;
     if (line.includes("placeHolder")) return true;
     if (line.includes("// antistub-ok")) return true;
     if (/\/[^/]*(?:todo|fixme|tbd|placeholder|stub)[^/]*\//i.test(line)) return true;
-    if ((t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
-        (line.toLowerCase().includes("todo") || line.toLowerCase().includes("fixme") ||
-         line.toLowerCase().includes("placeholder") || line.toLowerCase().includes("stub"))) return true;
+    if (
+      (t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
+      (line.toLowerCase().includes("todo") ||
+        line.toLowerCase().includes("fixme") ||
+        line.toLowerCase().includes("placeholder") ||
+        line.toLowerCase().includes("stub"))
+    )
+      return true;
     if (line.includes("todo list") || line.includes("Todo") || line.includes(".todo")) return true;
     if (t.startsWith("case") && /['"]/.test(line)) return true;
     return false;
@@ -96,13 +116,20 @@ check(4, "Anti-stub scan", () => {
 
   function scanDir(dir) {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (skipDirs.has(entry.name)) continue;
         scanDir(fullPath);
-      } else if ((entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) && !isTestFile(entry.name)) {
+      } else if (
+        (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
+        !isTestFile(entry.name)
+      ) {
         const content = readFileSync(fullPath, "utf-8");
         const lines = content.split("\n");
         for (let i = 0; i < lines.length; i++) {
@@ -117,7 +144,10 @@ check(4, "Anti-stub scan", () => {
   }
 
   scanDir(join(repoRoot, "packages"));
-  return { passed: violations === 0, detail: violations === 0 ? "no stubs found" : `${violations} violation(s)` };
+  return {
+    passed: violations === 0,
+    detail: violations === 0 ? "no stubs found" : `${violations} violation(s)`,
+  };
 });
 
 // ── Check 5: Version alignment ───────────────────────────────────────────
@@ -140,7 +170,8 @@ check(5, "Version alignment", () => {
 
   return {
     passed: mismatched.length === 0,
-    detail: mismatched.length === 0 ? `all at ${rootVersion}` : `mismatched: ${mismatched.join(", ")}`,
+    detail:
+      mismatched.length === 0 ? `all at ${rootVersion}` : `mismatched: ${mismatched.join(", ")}`,
   };
 });
 
@@ -149,7 +180,11 @@ check(5, "Version alignment", () => {
 check(6, "CLI smoke (--help)", () => {
   const cliEntry = join(repoRoot, "packages", "cli", "dist", "index.js");
   if (!existsSync(cliEntry)) return { passed: false, detail: "CLI not built" };
-  const r = spawnSync(process.execPath, [cliEntry, "--help"], { cwd: repoRoot, encoding: "utf8", timeout: 30_000 });
+  const r = spawnSync(process.execPath, [cliEntry, "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   return { passed: r.status === 0, detail: r.status === 0 ? "exits 0" : `exit ${r.status}` };
 });
 
@@ -158,10 +193,16 @@ check(6, "CLI smoke (--help)", () => {
 check(7, "CLI commands registered (17+)", () => {
   const cliEntry = join(repoRoot, "packages", "cli", "dist", "index.js");
   if (!existsSync(cliEntry)) return { passed: false, detail: "CLI not built" };
-  const r = spawnSync(process.execPath, [cliEntry, "--help"], { cwd: repoRoot, encoding: "utf8", timeout: 30_000 });
+  const r = spawnSync(process.execPath, [cliEntry, "--help"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 30_000,
+  });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   // Count lines that look like registered commands (start with / or are indented command names)
-  const commandLines = output.split("\n").filter(l => l.trim().startsWith("/") || /^\s{2,}\w+\s/.test(l));
+  const commandLines = output
+    .split("\n")
+    .filter((l) => l.trim().startsWith("/") || /^\s{2,}\w+\s/.test(l));
   const count = commandLines.length;
   return { passed: count >= 17, detail: `${count} command(s) detected` };
 });
@@ -178,7 +219,7 @@ check(8, "No circular dependencies", () => {
     const pkgPath = join(packagesDir, entry.name, "package.json");
     if (!existsSync(pkgPath)) continue;
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    const deps = Object.keys(pkg.dependencies ?? {}).filter(d => d.startsWith("@dantecode/"));
+    const deps = Object.keys(pkg.dependencies ?? {}).filter((d) => d.startsWith("@dantecode/"));
     pkgNames.set(pkg.name, deps);
   }
 
@@ -205,7 +246,10 @@ check(8, "No circular dependencies", () => {
     dfs(name);
   }
 
-  return { passed: cycles.length === 0, detail: cycles.length === 0 ? "no cycles" : cycles.join("; ") };
+  return {
+    passed: cycles.length === 0,
+    detail: cycles.length === 0 ? "no cycles" : cycles.join("; "),
+  };
 });
 
 // ── Check 9: Export verification ─────────────────────────────────────────
@@ -272,8 +316,8 @@ for (const r of results) {
   console.log(`  ${r.num.toString().padStart(2, " ")}. [${icon}] ${r.name} — ${r.detail}`);
 }
 
-const passed = results.filter(r => r.passed).length;
-const failed = results.filter(r => !r.passed).length;
+const passed = results.filter((r) => r.passed).length;
+const failed = results.filter((r) => !r.passed).length;
 
 console.log("\n" + "=".repeat(50));
 console.log(`Passed: ${passed}  Failed: ${failed}`);

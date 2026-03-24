@@ -256,9 +256,7 @@ describe("PolicyEnforcer — Policy Sets", () => {
       name: "Set Rule",
       description: "Rule from policy set",
       resourceType: "tool",
-      conditions: [
-        { field: "resource", operator: "equals", value: "dangerous-tool" },
-      ],
+      conditions: [{ field: "resource", operator: "equals", value: "dangerous-tool" }],
       effect: "deny",
       priority: 800,
       enabled: true,
@@ -310,6 +308,8 @@ describe("PolicyEnforcer — Policy Sets", () => {
       action: "exec",
     });
     // Should have stopped at the first deny (higher priority)
-    expect(decision.matchedRules.filter((r) => r.id.startsWith("first") || r.id.startsWith("second"))).toHaveLength(1);
+    expect(
+      decision.matchedRules.filter((r) => r.id.startsWith("first") || r.id.startsWith("second")),
+    ).toHaveLength(1);
   });
 });

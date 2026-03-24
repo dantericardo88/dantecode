@@ -22,7 +22,12 @@ import { MergeConfidenceScorer, type MergeCandidatePatch } from "./merge-confide
 
 /** Injected worktree operations — avoids circular dep on @dantecode/git-engine. */
 export interface WorktreeHooks {
-  createWorktree: (spec: { directory: string; sessionId: string; branch: string; baseBranch: string }) => { directory: string };
+  createWorktree: (spec: {
+    directory: string;
+    sessionId: string;
+    branch: string;
+    baseBranch: string;
+  }) => { directory: string };
   removeWorktree: (directory: string) => void;
 }
 
@@ -303,10 +308,7 @@ export class MergeBrain {
    * Returns a human-readable summary of conflict types and auto-resolvability.
    * Non-fatal: returns null if files cannot be read.
    */
-  private analyzeConflictedFiles(
-    repoRoot: string,
-    conflictFiles: string[],
-  ): string | null {
+  private analyzeConflictedFiles(repoRoot: string, conflictFiles: string[]): string | null {
     const resolver = new GitConflictResolver();
     const summaryLines: string[] = ["## Conflict Analysis"];
     let totalTextual = 0;
@@ -326,8 +328,8 @@ export class MergeBrain {
 
         summaryLines.push(
           `- ${file}: ${report.totalConflicts} conflict(s) ` +
-          `(${report.textualCount} textual, ${report.semanticCount} semantic, ` +
-          `${report.autoResolvableCount} auto-resolvable)`,
+            `(${report.textualCount} textual, ${report.semanticCount} semantic, ` +
+            `${report.autoResolvableCount} auto-resolvable)`,
         );
       } catch {
         // File not readable (worktree already cleaned up) — skip
@@ -338,7 +340,7 @@ export class MergeBrain {
 
     summaryLines.push(
       `\nTotal: ${totalTextual + totalSemantic} conflicts ` +
-      `(${totalAutoResolvable} auto-resolvable, ${totalSemantic} need human review)`,
+        `(${totalAutoResolvable} auto-resolvable, ${totalSemantic} need human review)`,
     );
 
     return summaryLines.join("\n");

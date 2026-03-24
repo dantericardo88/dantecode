@@ -41,7 +41,9 @@ const { status, commitSha, generatedAt, gates, blockers } = artifact;
 
 const ORDER = ["blocked", "local-green-external-pending", "private-ready", "public-ready"];
 const currentLevel = ORDER.indexOf(status);
-const requiredLevel = requirePublic ? ORDER.indexOf("public-ready") : ORDER.indexOf("private-ready");
+const requiredLevel = requirePublic
+  ? ORDER.indexOf("public-ready")
+  : ORDER.indexOf("private-ready");
 
 const GATE_ICON = { pass: "✓", fail: "✗", unknown: "?" };
 console.log(`\nDanteCode Readiness Check`);

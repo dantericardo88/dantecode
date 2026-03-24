@@ -29,14 +29,15 @@ describe("plan-executor-integration", () => {
         executedSteps.push(step.id);
         return { stepId: step.id, success: true, output: "ok", durationMs: 10 };
       },
-      onStepStart: (_step) => { /* noop */ },
-      onStepComplete: (step) => { completedSteps.push(step.id); },
+      onStepStart: (_step) => {
+        /* noop */
+      },
+      onStepComplete: (step) => {
+        completedSteps.push(step.id);
+      },
     });
 
-    const plan = makePlan([
-      { description: "Create file" },
-      { description: "Run tests" },
-    ]);
+    const plan = makePlan([{ description: "Create file" }, { description: "Run tests" }]);
 
     const result = await executor.execute(plan);
     expect(result.allPassed).toBe(true);
@@ -104,7 +105,12 @@ describe("plan-executor-integration", () => {
       replan: async (_failedStep, _error, _plan) => {
         replanCalled = true;
         return [
-          { id: "step-1b", description: "Alternative approach", files: [], status: "pending" as const },
+          {
+            id: "step-1b",
+            description: "Alternative approach",
+            files: [],
+            status: "pending" as const,
+          },
         ];
       },
     });
@@ -136,8 +142,12 @@ describe("plan-executor-integration", () => {
         statuses.push(`${step.id}:${step.status}`);
         return { stepId: step.id, success: true, durationMs: 5 };
       },
-      onStepStart: (step) => { statuses.push(`start:${step.id}:${step.status}`); },
-      onStepComplete: (step) => { statuses.push(`end:${step.id}:${step.status}`); },
+      onStepStart: (step) => {
+        statuses.push(`start:${step.id}:${step.status}`);
+      },
+      onStepComplete: (step) => {
+        statuses.push(`end:${step.id}:${step.status}`);
+      },
     });
 
     const plan = makePlan([{ description: "Step A" }]);

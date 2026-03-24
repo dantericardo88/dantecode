@@ -10,7 +10,13 @@ function makePlan(goal = "test goal"): ExecutionPlan {
     goal,
     steps: [
       { id: "step-1", description: "First step", files: ["a.ts"], status: "pending" },
-      { id: "step-2", description: "Second step", files: ["b.ts"], status: "pending", dependencies: ["step-1"] },
+      {
+        id: "step-2",
+        description: "Second step",
+        files: ["b.ts"],
+        status: "pending",
+        dependencies: ["step-1"],
+      },
     ],
     createdAt: new Date().toISOString(),
     estimatedComplexity: 0.5,
@@ -32,7 +38,12 @@ describe("PlanStore", () => {
 
   it("saves and loads a plan", async () => {
     const plan = makePlan();
-    const stored = { plan, id: "test-plan-1", status: "draft" as const, createdAt: new Date().toISOString() };
+    const stored = {
+      plan,
+      id: "test-plan-1",
+      status: "draft" as const,
+      createdAt: new Date().toISOString(),
+    };
     await store.save(stored);
     const loaded = await store.load("test-plan-1");
     expect(loaded).not.toBeNull();
@@ -45,8 +56,18 @@ describe("PlanStore", () => {
   });
 
   it("lists plans newest first", async () => {
-    const p1 = { plan: makePlan("first"), id: "001-first", status: "draft" as const, createdAt: "2026-01-01" };
-    const p2 = { plan: makePlan("second"), id: "002-second", status: "approved" as const, createdAt: "2026-01-02" };
+    const p1 = {
+      plan: makePlan("first"),
+      id: "001-first",
+      status: "draft" as const,
+      createdAt: "2026-01-01",
+    };
+    const p2 = {
+      plan: makePlan("second"),
+      id: "002-second",
+      status: "approved" as const,
+      createdAt: "2026-01-02",
+    };
     await store.save(p1);
     await store.save(p2);
     const list = await store.list();
@@ -56,7 +77,12 @@ describe("PlanStore", () => {
 
   it("filters by status", async () => {
     const p1 = { plan: makePlan(), id: "001-a", status: "draft" as const, createdAt: "2026-01-01" };
-    const p2 = { plan: makePlan(), id: "002-b", status: "approved" as const, createdAt: "2026-01-02" };
+    const p2 = {
+      plan: makePlan(),
+      id: "002-b",
+      status: "approved" as const,
+      createdAt: "2026-01-02",
+    };
     await store.save(p1);
     await store.save(p2);
     const drafts = await store.list({ status: "draft" });
@@ -66,14 +92,24 @@ describe("PlanStore", () => {
 
   it("respects limit", async () => {
     for (let i = 0; i < 5; i++) {
-      await store.save({ plan: makePlan(), id: `plan-${i}`, status: "draft" as const, createdAt: `2026-01-0${i + 1}` });
+      await store.save({
+        plan: makePlan(),
+        id: `plan-${i}`,
+        status: "draft" as const,
+        createdAt: `2026-01-0${i + 1}`,
+      });
     }
     const list = await store.list({ limit: 3 });
     expect(list.length).toBe(3);
   });
 
   it("updates status", async () => {
-    const stored = { plan: makePlan(), id: "update-test", status: "draft" as const, createdAt: new Date().toISOString() };
+    const stored = {
+      plan: makePlan(),
+      id: "update-test",
+      status: "draft" as const,
+      createdAt: new Date().toISOString(),
+    };
     await store.save(stored);
     await store.updateStatus("update-test", "approved");
     const loaded = await store.load("update-test");
@@ -82,7 +118,12 @@ describe("PlanStore", () => {
   });
 
   it("updates status to completed with completedAt", async () => {
-    const stored = { plan: makePlan(), id: "complete-test", status: "approved" as const, createdAt: new Date().toISOString() };
+    const stored = {
+      plan: makePlan(),
+      id: "complete-test",
+      status: "approved" as const,
+      createdAt: new Date().toISOString(),
+    };
     await store.save(stored);
     await store.updateStatus("complete-test", "completed");
     const loaded = await store.load("complete-test");

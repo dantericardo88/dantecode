@@ -98,10 +98,10 @@ export function shouldTruncateToolOutput(
   budgetState: ContextBudgetState,
 ): TruncationAdvice {
   const charLimits: Record<BudgetTier, number> = {
-    green: 50 * 1024,     // 50KB — current default
-    yellow: 10 * 1024,    // 10KB
-    red: 5 * 1024,        // 5KB
-    critical: 2 * 1024,   // 2KB
+    green: 50 * 1024, // 50KB — current default
+    yellow: 10 * 1024, // 10KB
+    red: 5 * 1024, // 5KB
+    critical: 2 * 1024, // 2KB
   };
 
   const maxChars = charLimits[budgetState.tier];

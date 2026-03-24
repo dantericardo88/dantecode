@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  isJsonFile,
-  attemptJsonRepair,
-  validateJsonContent,
-} from "./json-write-guard.js";
+import { isJsonFile, attemptJsonRepair, validateJsonContent } from "./json-write-guard.js";
 
 describe("json-write-guard", () => {
   describe("isJsonFile", () => {

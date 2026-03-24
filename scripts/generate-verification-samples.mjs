@@ -25,11 +25,8 @@ mkdirSync(outDir, { recursive: true });
 //   runAntiStubScanner  → { hardViolations[], softViolations[], passed, scannedLines }
 //   runConstitutionCheck → { passed, violations[], scannedLines, filePath }
 //   runLocalPDSEScorer  → { completeness, correctness, clarity, consistency, overall, passedGate, violations[], scoredAt, scoredBy }
-const {
-  runAntiStubScanner,
-  runConstitutionCheck,
-  runLocalPDSEScorer,
-} = await import("@dantecode/danteforge");
+const { runAntiStubScanner, runConstitutionCheck, runLocalPDSEScorer } =
+  await import("@dantecode/danteforge");
 
 function verifyCode(code, filePath) {
   const antiStub = runAntiStubScanner(code, repoRoot, filePath);
@@ -132,10 +129,7 @@ const stubSample = {
   ...stubVerdict,
 };
 
-writeFileSync(
-  resolve(outDir, "sample-stub-fail.json"),
-  JSON.stringify(stubSample, null, 2) + "\n",
-);
+writeFileSync(resolve(outDir, "sample-stub-fail.json"), JSON.stringify(stubSample, null, 2) + "\n");
 console.log(`  → passed=${stubVerdict.passed}, pdseScore=${stubVerdict.pdseScore}`);
 
 // ── Summary ──────────────────────────────────────────────────────────────────

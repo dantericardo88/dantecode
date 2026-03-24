@@ -290,7 +290,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // D-12A: Initialize model adaptation store + restore rate limiter (non-fatal, gated on env)
   if (process.env.DANTE_DISABLE_MODEL_ADAPTATION !== "1") {
     try {
-      const { ModelAdaptationStore, getGlobalAdaptationRateLimiter } = await import("@dantecode/core");
+      const { ModelAdaptationStore, getGlobalAdaptationRateLimiter } =
+        await import("@dantecode/core");
       replState.modelAdaptationStore = new ModelAdaptationStore(options.projectRoot);
       await replState.modelAdaptationStore.load();
       // Restore persisted rate limiter state (D-12A Gap 3)

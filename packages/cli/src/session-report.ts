@@ -13,12 +13,7 @@ import {
 import type { Session } from "@dantecode/config-types";
 
 // Tool names that indicate "meaningful work" (file mutations)
-const MUTATION_TOOLS = new Set([
-  "Write",
-  "Edit",
-  "GitCommit",
-  "NotebookEdit",
-]);
+const MUTATION_TOOLS = new Set(["Write", "Edit", "GitCommit", "NotebookEdit"]);
 
 interface SessionReportContext {
   session: Session;
@@ -57,19 +52,14 @@ export function shouldGenerateSessionReport(session: Session): boolean {
  *
  * Non-fatal — catches all errors internally.
  */
-export async function generateSessionReport(
-  ctx: SessionReportContext,
-): Promise<string | null> {
+export async function generateSessionReport(ctx: SessionReportContext): Promise<string | null> {
   try {
     if (!shouldGenerateSessionReport(ctx.session)) {
       return null;
     }
 
     const mutationCount = countMutationToolCalls(ctx.session);
-    const totalTokens = ctx.session.messages.reduce(
-      (sum, m) => sum + (m.tokensUsed ?? 0),
-      0,
-    );
+    const totalTokens = ctx.session.messages.reduce((sum, m) => sum + (m.tokensUsed ?? 0), 0);
     const inputTokens = Math.round(totalTokens * 0.66);
     const outputTokens = Math.round(totalTokens * 0.34);
 

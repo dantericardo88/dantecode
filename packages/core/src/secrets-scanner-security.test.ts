@@ -29,7 +29,8 @@ describe("SecretsScanner — Detection Coverage", () => {
   });
 
   it("detects private keys", () => {
-    const content = "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJBAL...\n-----END RSA PRIVATE KEY-----";
+    const content =
+      "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJBAL...\n-----END RSA PRIVATE KEY-----";
     const result = scanner.scan(content);
     expect(result.clean).toBe(false);
     expect(result.matches.some((m) => m.type === "private_key")).toBe(true);

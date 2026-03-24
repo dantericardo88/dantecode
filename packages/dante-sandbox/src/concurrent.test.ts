@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SandboxEngine } from "./sandbox-engine.js";
-import type { IsolationLayer, GateFn, AuditSink, SandboxDecision, ExecutionRequest } from "./types.js";
+import type {
+  IsolationLayer,
+  GateFn,
+  AuditSink,
+  SandboxDecision,
+  ExecutionRequest,
+} from "./types.js";
 import { ExecutionRequestSchema } from "./types.js";
 
 let callCounter = 0;
@@ -21,17 +27,20 @@ function makeRequest(label: string): ExecutionRequest {
 }
 
 function createAllowGate(): GateFn {
-  return vi.fn().mockImplementation(async (req: ExecutionRequest) => ({
-    requestId: req.id,
-    allow: true,
-    strategy: "host",
-    reason: "allowed",
-    riskLevel: "low",
-    gateVerdict: "allow",
-    requiresConfirmation: false,
-    gateScore: 1.0,
-    at: new Date().toISOString(),
-  } satisfies SandboxDecision));
+  return vi.fn().mockImplementation(
+    async (req: ExecutionRequest) =>
+      ({
+        requestId: req.id,
+        allow: true,
+        strategy: "host",
+        reason: "allowed",
+        riskLevel: "low",
+        gateVerdict: "allow",
+        requiresConfirmation: false,
+        gateScore: 1.0,
+        at: new Date().toISOString(),
+      }) satisfies SandboxDecision,
+  );
 }
 
 describe("Concurrent Sandbox Executions", () => {
@@ -134,10 +143,7 @@ describe("Concurrent Sandbox Executions", () => {
     };
     engine.registerLayer(layer);
 
-    await Promise.all([
-      engine.execute(makeRequest("cmd-a")),
-      engine.execute(makeRequest("cmd-b")),
-    ]);
+    await Promise.all([engine.execute(makeRequest("cmd-a")), engine.execute(makeRequest("cmd-b"))]);
 
     expect(auditSink).toHaveBeenCalledTimes(2);
   });

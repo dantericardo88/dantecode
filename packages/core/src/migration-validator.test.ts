@@ -65,10 +65,7 @@ describe("MigrationValidator", () => {
     const newSchema: SchemaDefinition = {
       name: "UserConfig",
       version: "1.1.0",
-      fields: [
-        ...oldSchema.fields,
-        { name: "avatar", type: "string", required: false },
-      ],
+      fields: [...oldSchema.fields, { name: "avatar", type: "string", required: false }],
     };
     const result = validator.validateSchema(oldSchema, newSchema);
     expect(result.compatible).toBe(true);
@@ -79,9 +76,7 @@ describe("MigrationValidator", () => {
     const newSchema: SchemaDefinition = {
       name: "UserConfig",
       version: "2.0.0",
-      fields: [
-        { name: "username", type: "string", required: true },
-      ],
+      fields: [{ name: "username", type: "string", required: true }],
     };
     const migration: Migration = { name: "drop-fields", version: "2.0.0", up: () => {} };
     const risks = validator.checkDataLoss(migration, oldSchema, newSchema);
@@ -90,12 +85,21 @@ describe("MigrationValidator", () => {
   });
 
   it("requireConfirmation returns true for destructive changes", () => {
-    expect(validator.requireConfirmation([
-      { level: "high", description: "drop", affectedEntity: "email", mitigation: "backup" },
-    ])).toBe(true);
-    expect(validator.requireConfirmation([
-      { level: "low", description: "no rollback", affectedEntity: "migration", mitigation: "backup" },
-    ])).toBe(false);
+    expect(
+      validator.requireConfirmation([
+        { level: "high", description: "drop", affectedEntity: "email", mitigation: "backup" },
+      ]),
+    ).toBe(true);
+    expect(
+      validator.requireConfirmation([
+        {
+          level: "low",
+          description: "no rollback",
+          affectedEntity: "migration",
+          mitigation: "backup",
+        },
+      ]),
+    ).toBe(false);
     expect(validator.requireConfirmation([])).toBe(false);
   });
 });

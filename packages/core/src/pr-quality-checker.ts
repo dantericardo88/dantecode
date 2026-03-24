@@ -63,8 +63,17 @@ const ANTI_STUB_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
 
 /** Conventional commit prefixes. */
 const CONVENTIONAL_PREFIXES = [
-  "feat", "fix", "docs", "style", "refactor", "perf", "test",
-  "build", "ci", "chore", "revert",
+  "feat",
+  "fix",
+  "docs",
+  "style",
+  "refactor",
+  "perf",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "revert",
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -87,18 +96,11 @@ export class PRQualityChecker {
   check(diff: string, options?: CheckOptions): PRQualityReport {
     const size = this.analyzeDiffSize(diff);
     const antiStubViolations = this.scanAntiStub(diff);
-    const conventionViolations = this.validateCommitConventions(
-      options?.commitMessages ?? [],
-    );
+    const conventionViolations = this.validateCommitConventions(options?.commitMessages ?? []);
     const testsPassed = options?.testsPassed ?? true;
     const blockThreshold = options?.blockThreshold ?? 70;
 
-    const score = this.computeScore(
-      size,
-      antiStubViolations,
-      conventionViolations,
-      testsPassed,
-    );
+    const score = this.computeScore(size, antiStubViolations, conventionViolations, testsPassed);
 
     return {
       size,
@@ -189,9 +191,7 @@ export class PRQualityChecker {
         `^(${CONVENTIONAL_PREFIXES.join("|")})(\\([^)]+\\))?(!)?:\\s+.+`,
       );
       if (!conventionalRe.test(firstLine)) {
-        violations.push(
-          `Non-conventional commit: "${firstLine.slice(0, 72)}"`,
-        );
+        violations.push(`Non-conventional commit: "${firstLine.slice(0, 72)}"`);
       }
 
       // Check for overly long subject line

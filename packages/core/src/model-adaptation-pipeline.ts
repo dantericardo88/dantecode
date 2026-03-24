@@ -32,12 +32,7 @@ export interface PipelineResult {
   draft: CandidateOverride;
   experiment: ExperimentResult | null;
   gateResult: PromotionGateResult | null;
-  action:
-    | "promoted"
-    | "rejected"
-    | "needs_human_review"
-    | "rate_limited"
-    | "skipped";
+  action: "promoted" | "rejected" | "needs_human_review" | "rate_limited" | "skipped";
   reason: string;
 }
 
@@ -56,7 +51,11 @@ export interface PipelineOptions {
 }
 
 function emitEvent(options: PipelineOptions, event: AdaptationEvent): void {
-  try { options.logger?.(event); } catch { /* non-fatal */ }
+  try {
+    options.logger?.(event);
+  } catch {
+    /* non-fatal */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +82,11 @@ export async function processNewDrafts(
 ): Promise<PipelineResult[]> {
   const results: PipelineResult[] = [];
 
-  emitEvent(options, { kind: "adaptation:pipeline:start", timestamp: new Date().toISOString(), detail: { draftCount: drafts.length } });
+  emitEvent(options, {
+    kind: "adaptation:pipeline:start",
+    timestamp: new Date().toISOString(),
+    detail: { draftCount: drafts.length },
+  });
 
   for (const draft of drafts) {
     // 1. Rate-limit check
@@ -95,7 +98,12 @@ export async function processNewDrafts(
         action: "rate_limited",
         reason: `Rate limit reached for quirk "${draft.quirkKey}" today`,
       });
-      emitEvent(options, { kind: "adaptation:rate_limited", quirkKey: draft.quirkKey, overrideId: draft.id, timestamp: new Date().toISOString() });
+      emitEvent(options, {
+        kind: "adaptation:rate_limited",
+        quirkKey: draft.quirkKey,
+        overrideId: draft.id,
+        timestamp: new Date().toISOString(),
+      });
       continue;
     }
 
@@ -107,18 +115,27 @@ export async function processNewDrafts(
     // 3. Run experiment (fail-safe: runner errors → skip)
     let experiment: ExperimentResult;
     try {
-      experiment = await runAdaptationExperiment(
-        draft,
-        options.experimentOptions,
-      );
+      experiment = await runAdaptationExperiment(draft, options.experimentOptions);
     } catch (err) {
       const reason = `Experiment failed: ${err instanceof Error ? err.message : String(err)}`;
-      emitEvent(options, { kind: "adaptation:experiment:complete", quirkKey: draft.quirkKey, overrideId: draft.id, timestamp: new Date().toISOString(), detail: { error: reason } });
+      emitEvent(options, {
+        kind: "adaptation:experiment:complete",
+        quirkKey: draft.quirkKey,
+        overrideId: draft.id,
+        timestamp: new Date().toISOString(),
+        detail: { error: reason },
+      });
       results.push({ draft, experiment: null, gateResult: null, action: "skipped", reason });
       continue;
     }
 
-    emitEvent(options, { kind: "adaptation:experiment:complete", quirkKey: draft.quirkKey, overrideId: draft.id, timestamp: new Date().toISOString(), detail: { decision: experiment.decision, pdseScore: experiment.candidate.pdseScore } });
+    emitEvent(options, {
+      kind: "adaptation:experiment:complete",
+      quirkKey: draft.quirkKey,
+      overrideId: draft.id,
+      timestamp: new Date().toISOString(),
+      detail: { decision: experiment.decision, pdseScore: experiment.candidate.pdseScore },
+    });
 
     // 4. Record experiment + consume rate-limit token
     if (!options.dryRun) {
@@ -172,7 +189,14 @@ export async function processNewDrafts(
       }
     }
 
-    emitEvent(options, { kind: "adaptation:gate:decision", quirkKey: draft.quirkKey, overrideId: draft.id, decision: action, reason, timestamp: new Date().toISOString() });
+    emitEvent(options, {
+      kind: "adaptation:gate:decision",
+      quirkKey: draft.quirkKey,
+      overrideId: draft.id,
+      decision: action,
+      reason,
+      timestamp: new Date().toISOString(),
+    });
 
     // 7. Persist store (non-fatal)
     if (!options.dryRun) {
@@ -188,7 +212,11 @@ export async function processNewDrafts(
     });
   }
 
-  emitEvent(options, { kind: "adaptation:pipeline:complete", timestamp: new Date().toISOString(), detail: { resultCount: results.length } });
+  emitEvent(options, {
+    kind: "adaptation:pipeline:complete",
+    timestamp: new Date().toISOString(),
+    detail: { resultCount: results.length },
+  });
 
   return results;
 }
@@ -235,9 +263,10 @@ export async function checkPromotedOverrides(
 
     // Look up the original experiment baseline for this override
     const priorExperiments = store.getExperiments(override.id);
-    const actualBaseline = priorExperiments.length > 0
-      ? priorExperiments[0]!.baseline
-      : { pdseScore: 85, completionStatus: "complete", successRate: 0.85 };
+    const actualBaseline =
+      priorExperiments.length > 0
+        ? priorExperiments[0]!.baseline
+        : { pdseScore: 85, completionStatus: "complete", successRate: 0.85 };
 
     // Build a synthetic experiment result for shouldRollback evaluation
     const syntheticExperiment: ExperimentResult = {
@@ -264,17 +293,14 @@ export async function checkPromotedOverrides(
       await store.save(options.rateLimiter).catch(() => {});
 
       // Emit event
-      emitEvent(
-        options as PipelineOptions,
-        {
-          kind: "adaptation:rollback",
-          quirkKey: override.quirkKey,
-          overrideId: override.id,
-          reason: rollbackCheck.reason,
-          timestamp: new Date().toISOString(),
-          detail: { trigger: rollbackCheck.trigger },
-        },
-      );
+      emitEvent(options as PipelineOptions, {
+        kind: "adaptation:rollback",
+        quirkKey: override.quirkKey,
+        overrideId: override.id,
+        reason: rollbackCheck.reason,
+        timestamp: new Date().toISOString(),
+        detail: { trigger: rollbackCheck.trigger },
+      });
 
       results.push({
         overrideId: override.id,

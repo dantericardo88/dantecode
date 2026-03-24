@@ -114,14 +114,12 @@ export class CouncilResilience {
    * @param totalTasks - All task IDs (completed + pending).
    * @returns A partial recovery report with completion stats.
    */
-  recoverPartialCompletion(
-    completedTasks: string[],
-    totalTasks: string[],
-  ): PartialRecoveryReport {
+  recoverPartialCompletion(completedTasks: string[], totalTasks: string[]): PartialRecoveryReport {
     const completedSet = new Set(completedTasks);
     const pending = totalTasks.filter((t) => !completedSet.has(t));
     const total = totalTasks.length;
-    const completionPercentage = total === 0 ? 100 : Math.round((completedTasks.length / total) * 100);
+    const completionPercentage =
+      total === 0 ? 100 : Math.round((completedTasks.length / total) * 100);
 
     // A council run is continuable if at least 25% of tasks succeeded
     const canContinue = completionPercentage >= 25;

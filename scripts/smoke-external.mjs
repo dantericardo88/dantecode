@@ -117,7 +117,7 @@ test("rust-project", (dir) => {
 
 test("go-project", (dir) => {
   writeFileSync(join(dir, "go.mod"), "module example.com/test\n\ngo 1.21\n");
-  writeFileSync(join(dir, "main.go"), 'package main\n\nfunc main() {}\n');
+  writeFileSync(join(dir, "main.go"), "package main\n\nfunc main() {}\n");
 
   runNode([cliEntry, "init", "--force"], dir);
 

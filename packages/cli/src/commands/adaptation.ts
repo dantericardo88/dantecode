@@ -146,7 +146,9 @@ async function adaptationExperiments(store: unknown, quirkKey?: string): Promise
     const bPdse = e.baseline.pdseScore ?? "—";
     const cPdse = e.candidate.pdseScore ?? "—";
     lines.push(`    Baseline PDSE: ${bPdse}, Candidate PDSE: ${cPdse}`);
-    lines.push(`    Smoke: ${e.smokePassed ? "pass" : "FAIL"}, Control regression: ${e.controlRegression ? "YES" : "no"}`);
+    lines.push(
+      `    Smoke: ${e.smokePassed ? "pass" : "FAIL"}, Control regression: ${e.controlRegression ? "YES" : "no"}`,
+    );
     lines.push(`    ${DIM}${e.createdAt}${RESET}`);
   }
   return lines.join("\n");
@@ -180,9 +182,14 @@ async function adaptationRollback(store: unknown, overrideId?: string): Promise<
   }
 }
 
-async function adaptationReport(store: unknown, projectRoot: string, quirkKey?: string): Promise<string> {
+async function adaptationReport(
+  store: unknown,
+  projectRoot: string,
+  quirkKey?: string,
+): Promise<string> {
   try {
-    const { generateAdaptationReport, serializeAdaptationReport, writeAdaptationReport } = await import("@dantecode/core");
+    const { generateAdaptationReport, serializeAdaptationReport, writeAdaptationReport } =
+      await import("@dantecode/core");
     const s = store as import("@dantecode/core").ModelAdaptationStore;
     const snapshot = s.snapshot();
 
@@ -242,19 +249,23 @@ async function adaptationMode(newMode?: string): Promise<string> {
 async function adaptationReview(store: unknown): Promise<string> {
   const s = store as import("@dantecode/core").ModelAdaptationStore;
   const snapshot = s.snapshot();
-  const reviewable = snapshot.overrides.filter(o => o.status === "testing" || o.status === "awaiting_review");
+  const reviewable = snapshot.overrides.filter(
+    (o) => o.status === "testing" || o.status === "awaiting_review",
+  );
   if (reviewable.length === 0) {
     return `${DIM}No overrides awaiting review.${RESET}`;
   }
   const lines = [`${BOLD}Overrides Awaiting Review${RESET}`, ""];
   for (const o of reviewable) {
-    const exps = snapshot.experiments.filter(e => e.overrideId === o.id);
+    const exps = snapshot.experiments.filter((e) => e.overrideId === o.id);
     const latest = exps[exps.length - 1];
     const badge = STATUS_BADGE[o.status] ?? `[${o.status}]`;
     lines.push(`  ${badge} ${CYAN}${o.quirkKey}${RESET} — ${o.provider}/${o.model} (${o.id})`);
     if (latest) {
       const delta = (latest.candidate.pdseScore ?? 0) - (latest.baseline.pdseScore ?? 0);
-      lines.push(`    PDSE delta: ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}, smoke: ${latest.smokePassed ? "pass" : "FAIL"}, control: ${latest.controlRegression ? "REGRESSED" : "ok"}`);
+      lines.push(
+        `    PDSE delta: ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}, smoke: ${latest.smokePassed ? "pass" : "FAIL"}, control: ${latest.controlRegression ? "REGRESSED" : "ok"}`,
+      );
       lines.push(`    Decision: ${latest.decision}`);
     }
   }
@@ -267,9 +278,10 @@ async function adaptationApprove(store: unknown, overrideId?: string): Promise<s
   if (!overrideId) return `${RED}Usage: /adaptation approve <overrideId>${RESET}`;
   const s = store as import("@dantecode/core").ModelAdaptationStore;
   const snapshot = s.snapshot();
-  const override = snapshot.overrides.find(o => o.id === overrideId);
+  const override = snapshot.overrides.find((o) => o.id === overrideId);
   if (!override) return `${RED}Override not found: ${overrideId}${RESET}`;
-  if (override.status !== "testing" && override.status !== "awaiting_review") return `${YELLOW}Override must be in testing or awaiting_review status (current: ${override.status}).${RESET}`;
+  if (override.status !== "testing" && override.status !== "awaiting_review")
+    return `${YELLOW}Override must be in testing or awaiting_review status (current: ${override.status}).${RESET}`;
   s.updateStatus(overrideId, "promoted");
   await s.save().catch(() => {});
   return `${GREEN}Approved and promoted: ${overrideId} (${override.quirkKey})${RESET}`;
@@ -279,7 +291,7 @@ async function adaptationReject(store: unknown, overrideId?: string): Promise<st
   if (!overrideId) return `${RED}Usage: /adaptation reject <overrideId>${RESET}`;
   const s = store as import("@dantecode/core").ModelAdaptationStore;
   const snapshot = s.snapshot();
-  const override = snapshot.overrides.find(o => o.id === overrideId);
+  const override = snapshot.overrides.find((o) => o.id === overrideId);
   if (!override) return `${RED}Override not found: ${overrideId}${RESET}`;
   if (override.status === "rejected") return `${YELLOW}Override already rejected.${RESET}`;
   s.updateStatus(overrideId, "rejected");
@@ -291,7 +303,7 @@ async function adaptationTest(store: unknown, overrideId?: string): Promise<stri
   if (!overrideId) return `${RED}Usage: /adaptation test <overrideId>${RESET}`;
   const s = store as import("@dantecode/core").ModelAdaptationStore;
   const snapshot = s.snapshot();
-  const override = snapshot.overrides.find(o => o.id === overrideId);
+  const override = snapshot.overrides.find((o) => o.id === overrideId);
   if (!override) return `${RED}Override not found: ${overrideId}${RESET}`;
   if (override.status !== "draft" && override.status !== "testing") {
     return `${YELLOW}Override must be in draft or testing status to test (current: ${override.status}).${RESET}`;
@@ -318,7 +330,10 @@ async function adaptationTest(store: unknown, overrideId?: string): Promise<stri
     ];
     for (const r of gate.reasons) lines.push(`    ${DIM}${r}${RESET}`);
     if (gate.requiresHumanApproval) {
-      lines.push("", `  ${YELLOW}Human approval required. Use /adaptation approve ${overrideId}${RESET}`);
+      lines.push(
+        "",
+        `  ${YELLOW}Human approval required. Use /adaptation approve ${overrideId}${RESET}`,
+      );
     }
     return lines.join("\n");
   } catch (err) {
@@ -361,7 +376,8 @@ async function adaptationDashboard(store: unknown): Promise<string> {
     lines.push("");
     lines.push(`  ${BOLD}Recent experiments:${RESET}`);
     for (const e of recent) {
-      const decisionColor = e.decision === "promote" ? GREEN : e.decision === "reject" ? RED : YELLOW;
+      const decisionColor =
+        e.decision === "promote" ? GREEN : e.decision === "reject" ? RED : YELLOW;
       const delta = (e.candidate.pdseScore ?? 0) - (e.baseline.pdseScore ?? 0);
       lines.push(
         `    ${decisionColor}[${e.decision}]${RESET} ${e.quirkKey} — PDSE ${delta >= 0 ? "+" : ""}${delta.toFixed(1)} ${DIM}${e.createdAt}${RESET}`,

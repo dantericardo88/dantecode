@@ -208,10 +208,10 @@ export class GitConflictResolver {
 
     // Superset: pick the longer version
     if (theirsNorm.includes(oursNorm)) {
-      return { resolved: conflict.theirs, strategy: "theirs", confidence: 0.80 };
+      return { resolved: conflict.theirs, strategy: "theirs", confidence: 0.8 };
     }
     if (oursNorm.includes(theirsNorm)) {
-      return { resolved: conflict.ours, strategy: "ours", confidence: 0.80 };
+      return { resolved: conflict.ours, strategy: "ours", confidence: 0.8 };
     }
 
     // High token overlap: merge by taking the longer content
@@ -219,7 +219,7 @@ export class GitConflictResolver {
     return {
       resolved: longer,
       strategy: conflict.ours.length >= conflict.theirs.length ? "ours" : "theirs",
-      confidence: 0.60,
+      confidence: 0.6,
     };
   }
 

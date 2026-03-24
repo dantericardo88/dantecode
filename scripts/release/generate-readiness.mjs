@@ -34,12 +34,12 @@ function readGate(name) {
 }
 
 const gates = {
-  typecheck:    readGate("GATE_TYPECHECK"),
-  lint:         readGate("GATE_LINT"),
-  test:         readGate("GATE_TEST"),
-  build:        readGate("GATE_BUILD"),
+  typecheck: readGate("GATE_TYPECHECK"),
+  lint: readGate("GATE_LINT"),
+  test: readGate("GATE_TEST"),
+  build: readGate("GATE_BUILD"),
   windowsSmoke: readGate("GATE_WINDOWS_SMOKE"),
-  antiStub:     readGate("GATE_ANTI_STUB"),
+  antiStub: readGate("GATE_ANTI_STUB"),
   liveProvider: readGate("GATE_LIVE_PROVIDER"),
   publishDryRun: readGate("GATE_PUBLISH_DRY_RUN"),
 };
@@ -50,7 +50,9 @@ let commitSha = process.env["GITHUB_SHA"] ?? "unknown";
 if (commitSha === "unknown") {
   try {
     commitSha = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: repoRoot, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch {
     // Not in a git repo or git not available — leave as "unknown"
@@ -72,8 +74,10 @@ for (const [name, value] of Object.entries(gates)) {
 let status;
 if (blockers.length > 0) {
   status = "blocked";
-} else if (localGates.every((g) => gates[g] === "pass") &&
-           externalGates.every((g) => gates[g] === "unknown")) {
+} else if (
+  localGates.every((g) => gates[g] === "pass") &&
+  externalGates.every((g) => gates[g] === "unknown")
+) {
   status = "local-green-external-pending";
 } else if (
   localGates.every((g) => gates[g] === "pass") &&
@@ -90,7 +94,9 @@ if (blockers.length > 0) {
 } else {
   // Some gates unknown, none failed
   status = "blocked";
-  blockers.push("CI gates have not been run. Execute: npm run release:generate with GATE_* env vars set");
+  blockers.push(
+    "CI gates have not been run. Execute: npm run release:generate with GATE_* env vars set",
+  );
 }
 
 // ── Write artifact ─────────────────────────────────────────────────────────
@@ -112,9 +118,8 @@ const mdPath = resolve(repoRoot, "artifacts/readiness/current-readiness.md");
 const gateRows = Object.entries(gates)
   .map(([name, val]) => `| ${name} | ${val} |`)
   .join("\n");
-const blockerSection = blockers.length > 0
-  ? `\n## Blockers\n\n${blockers.map((b) => `- ${b}`).join("\n")}\n`
-  : "";
+const blockerSection =
+  blockers.length > 0 ? `\n## Blockers\n\n${blockers.map((b) => `- ${b}`).join("\n")}\n` : "";
 const mdContent =
   `# DanteCode Readiness\n\n` +
   `**Status:** ${status}  \n` +
@@ -123,14 +128,15 @@ const mdContent =
   `## Gates\n\n` +
   `| Gate | Status |\n` +
   `|------|--------|\n` +
-  gateRows + "\n" +
+  gateRows +
+  "\n" +
   blockerSection;
 writeFileSync(mdPath, mdContent);
 
 // ── Print summary ─────────────────────────────────────────────────────────
 
 const STATUS_LABEL = {
-  "blocked": "\x1b[31mBLOCKED\x1b[0m",
+  blocked: "\x1b[31mBLOCKED\x1b[0m",
   "local-green-external-pending": "\x1b[33mLOCAL-GREEN / EXTERNAL-PENDING\x1b[0m",
   "private-ready": "\x1b[32mPRIVATE-READY\x1b[0m",
   "public-ready": "\x1b[32mPUBLIC-READY\x1b[0m",
@@ -140,7 +146,11 @@ console.log(`\nDanteCode Readiness — ${new Date().toISOString()}`);
 console.log(`Commit: ${commitSha.slice(0, 12)}`);
 console.log(`Status: ${STATUS_LABEL[status] ?? status}\n`);
 
-const GATE_ICON = { pass: "\x1b[32m✓\x1b[0m", fail: "\x1b[31m✗\x1b[0m", unknown: "\x1b[2m?\x1b[0m" };
+const GATE_ICON = {
+  pass: "\x1b[32m✓\x1b[0m",
+  fail: "\x1b[31m✗\x1b[0m",
+  unknown: "\x1b[2m?\x1b[0m",
+};
 for (const [name, value] of Object.entries(gates)) {
   console.log(`  ${GATE_ICON[value] ?? "?"} ${name.padEnd(14)} ${value}`);
 }

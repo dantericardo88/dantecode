@@ -15,8 +15,20 @@ const plan: ExecutionPlan = {
   goal: "Build a REST API",
   steps: [
     { id: "step-1", description: "Create models", files: ["models.ts"], status: "completed" },
-    { id: "step-2", description: "Create routes", files: ["routes.ts"], status: "in_progress", dependencies: ["step-1"] },
-    { id: "step-3", description: "Add tests", files: ["test.ts"], status: "pending", verifyCommand: "npm test" },
+    {
+      id: "step-2",
+      description: "Create routes",
+      files: ["routes.ts"],
+      status: "in_progress",
+      dependencies: ["step-1"],
+    },
+    {
+      id: "step-3",
+      description: "Add tests",
+      files: ["test.ts"],
+      status: "pending",
+      verifyCommand: "npm test",
+    },
   ],
   createdAt: "2026-03-24T00:00:00Z",
   estimatedComplexity: 0.6,

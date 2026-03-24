@@ -134,7 +134,10 @@ describe("getCompactBanner", () => {
   });
 
   it("contains provider/model info", () => {
-    const model = makeModel({ provider: "anthropic" as ModelConfig["provider"], modelId: "claude-sonnet-4-20250514" });
+    const model = makeModel({
+      provider: "anthropic" as ModelConfig["provider"],
+      modelId: "claude-sonnet-4-20250514",
+    });
     const banner = getCompactBanner(model);
     const plain = stripAnsi(banner);
     expect(plain).toContain("anthropic/claude-sonnet-4-20250514");
@@ -185,7 +188,10 @@ describe("getBanner", () => {
   });
 
   it("shows model and project info", () => {
-    const model = makeModel({ provider: "anthropic" as ModelConfig["provider"], modelId: "claude-sonnet-4-20250514" });
+    const model = makeModel({
+      provider: "anthropic" as ModelConfig["provider"],
+      modelId: "claude-sonnet-4-20250514",
+    });
     const banner = getBanner(model, "/home/user/myproject");
     const plain = stripAnsi(banner);
     expect(plain).toContain("anthropic/claude-sonnet-4-20250514");

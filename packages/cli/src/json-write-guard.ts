@@ -47,10 +47,7 @@ export interface JsonValidationResult {
  * Only validates .json files; non-JSON files pass through unchanged.
  * Returns { valid, repaired, content } where repaired is true if auto-repair was applied.
  */
-export function validateJsonContent(
-  content: string,
-  filePath: string,
-): JsonValidationResult {
+export function validateJsonContent(content: string, filePath: string): JsonValidationResult {
   if (!isJsonFile(filePath)) {
     return { valid: true, repaired: false, content };
   }

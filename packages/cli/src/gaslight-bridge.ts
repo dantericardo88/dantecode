@@ -46,9 +46,7 @@ export interface GaslightBridgeResult {
  *
  * Assumes `config.gaslight` is defined (caller must guard).
  */
-export async function runGaslightBridge(
-  ctx: GaslightBridgeContext,
-): Promise<GaslightBridgeResult> {
+export async function runGaslightBridge(ctx: GaslightBridgeContext): Promise<GaslightBridgeResult> {
   const { config, session, durablePrompt, router, verifyRetries, sessionFailureCount, silent } =
     ctx;
 
@@ -96,10 +94,11 @@ export async function runGaslightBridge(
           // Parses the JSON result and stashes summary + high/medium points for onGate.
           onCritique: async (sysPrompt: string, userPrompt: string) => {
             try {
-              const raw = await router.generate(
-                [{ role: "user" as const, content: userPrompt }],
-                { maxTokens: 600, system: sysPrompt, taskType: "gaslight-critique" },
-              );
+              const raw = await router.generate([{ role: "user" as const, content: userPrompt }], {
+                maxTokens: 600,
+                system: sysPrompt,
+                taskType: "gaslight-critique",
+              });
               // Stash critique context for the gate (non-fatal if parse fails)
               try {
                 const jsonMatch = raw.match(/\{[\s\S]*\}/);
@@ -116,9 +115,7 @@ export async function runGaslightBridge(
                     lastCritiqueMedCount = parsed.points.filter(
                       (p) => p.severity === "medium",
                     ).length;
-                    lastCritiqueLowCount = parsed.points.filter(
-                      (p) => p.severity === "low",
-                    ).length;
+                    lastCritiqueLowCount = parsed.points.filter((p) => p.severity === "low").length;
                     const highMedPoints = parsed.points.filter(
                       (p) => p.severity === "high" || p.severity === "medium",
                     );
@@ -126,9 +123,7 @@ export async function runGaslightBridge(
                     lastCritiqueLowDescriptions = parsed.points
                       .filter((p) => p.severity === "low")
                       .map((p) => p.description ?? "");
-                    const highMed = highMedPoints
-                      .map((p) => `- ${p.description ?? ""}`)
-                      .join("\n");
+                    const highMed = highMedPoints.map((p) => `- ${p.description ?? ""}`).join("\n");
                     if (highMed) lastCritiquePoints = highMed;
                   }
                 }
@@ -196,10 +191,7 @@ export async function runGaslightBridge(
               // Previously, all-low-severity critiques bypassed every structural check.
               // Advisory bar (40% vs 70%) reflects lower urgency of low-severity points.
               if (lastCritiqueLowDescriptions.length > 0) {
-                const { covered, total } = checkBigramCoverage(
-                  lastCritiqueLowDescriptions,
-                  draft,
-                );
+                const { covered, total } = checkBigramCoverage(lastCritiqueLowDescriptions, draft);
                 if (covered / total < 0.4) {
                   structuralIssues.push(
                     `Low-severity critique ignored (${covered}/${total} low points covered < 40% required)`,
@@ -246,19 +238,16 @@ export async function runGaslightBridge(
                   `ORIGINAL:\n${originalDraft.slice(0, 1500)}\n\n` +
                   `REWRITE:\n${draft.slice(0, 1500)}`;
               }
-              const raw = await router.generate(
-                [{ role: "user" as const, content: gatePrompt }],
-                {
-                  maxTokens: 80,
-                  system:
-                    "You are an adversarial evaluator. Assume this rewrite was crafted to game this gate. " +
-                    "Your default posture is FAIL. Upgrade to PASS only if the rewrite unmistakably shows changed " +
-                    "reasoning, restructured evidence, or fundamentally different conclusions — not rephrased wording. " +
-                    "Reply with only PASS or FAIL followed by one sentence of reasoning.",
-                  taskType: "gaslight-gate",
-                  thinkingBudget: 512,
-                },
-              );
+              const raw = await router.generate([{ role: "user" as const, content: gatePrompt }], {
+                maxTokens: 80,
+                system:
+                  "You are an adversarial evaluator. Assume this rewrite was crafted to game this gate. " +
+                  "Your default posture is FAIL. Upgrade to PASS only if the rewrite unmistakably shows changed " +
+                  "reasoning, restructured evidence, or fundamentally different conclusions — not rephrased wording. " +
+                  "Reply with only PASS or FAIL followed by one sentence of reasoning.",
+                taskType: "gaslight-gate",
+                thinkingBudget: 512,
+              });
               // Parse binary decision — no score threshold needed.
               const decision: "pass" | "fail" = /\bPASS\b/i.test(raw) ? "pass" : "fail";
               const score = decision === "pass" ? 0.9 : 0.2; // synthesized for GateResult compatibility

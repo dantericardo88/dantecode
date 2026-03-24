@@ -37,10 +37,9 @@ describe("writeRunReport", () => {
       timestamp: "2026-03-22T14:30:00Z",
     });
 
-    expect(mockMkdir).toHaveBeenCalledWith(
-      path.join("/test/project", ".dantecode", "reports"),
-      { recursive: true },
-    );
+    expect(mockMkdir).toHaveBeenCalledWith(path.join("/test/project", ".dantecode", "reports"), {
+      recursive: true,
+    });
     expect(mockWriteFile).toHaveBeenCalledWith(
       path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
       "# Report",

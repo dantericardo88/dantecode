@@ -33,6 +33,7 @@ export interface ScheduledTask {
   stop: () => Promise<void>;
   triggerNow: () => Promise<void>;
   snapshot: () => ScheduledTaskSnapshot;
+  flush: () => Promise<void>;
 }
 
 const ACTIVE_SCHEDULED_TASKS = new Map<string, ScheduledGitTaskRunner>();
@@ -114,6 +115,7 @@ class ScheduledGitTaskRunner {
       stop: () => this.stop(),
       triggerNow: () => this.triggerNow(),
       snapshot: () => this.snapshot(),
+      flush: () => this.pendingPersistence,
     };
   }
 

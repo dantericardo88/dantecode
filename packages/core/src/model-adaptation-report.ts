@@ -34,10 +34,7 @@ export function generateAdaptationReport(
 
   // ## Evidence — last 5 observations
   const evidence = observations.slice(-5).map((obs, i) => {
-    const tags =
-      obs.failureTags.length > 0
-        ? ` — tags: ${obs.failureTags.join(", ")}`
-        : "";
+    const tags = obs.failureTags.length > 0 ? ` — tags: ${obs.failureTags.join(", ")}` : "";
     return (
       `${i + 1}. [${obs.provider}/${obs.model}] ${obs.workflow} workflow` +
       (obs.commandName ? ` (${obs.commandName})` : "") +
@@ -57,19 +54,13 @@ export function generateAdaptationReport(
       patchParts.push(`Prompt preamble: "${override.patch.promptPreamble}"`);
     }
     if (override.patch.orderingHints?.length) {
-      patchParts.push(
-        `Ordering hints: ${override.patch.orderingHints.join("; ")}`,
-      );
+      patchParts.push(`Ordering hints: ${override.patch.orderingHints.join("; ")}`);
     }
     if (override.patch.toolFormattingHints?.length) {
-      patchParts.push(
-        `Tool formatting hints: ${override.patch.toolFormattingHints.join("; ")}`,
-      );
+      patchParts.push(`Tool formatting hints: ${override.patch.toolFormattingHints.join("; ")}`);
     }
     if (override.patch.synthesisRequirements?.length) {
-      patchParts.push(
-        `Synthesis requirements: ${override.patch.synthesisRequirements.join("; ")}`,
-      );
+      patchParts.push(`Synthesis requirements: ${override.patch.synthesisRequirements.join("; ")}`);
     }
     candidateOverride =
       `Override ID: \`${override.id}\`\nStatus: **${override.status}**\nVersion: ${override.version}\n` +
@@ -86,8 +77,7 @@ export function generateAdaptationReport(
       : experiments.map((exp, i) => {
           const baseScore = exp.baseline.pdseScore ?? "N/A";
           const candScore = exp.candidate.pdseScore ?? "N/A";
-          const delta =
-            (exp.candidate.pdseScore ?? 0) - (exp.baseline.pdseScore ?? 0);
+          const delta = (exp.candidate.pdseScore ?? 0) - (exp.baseline.pdseScore ?? 0);
           return (
             `${i + 1}. [${exp.createdAt}] PDSE: ${baseScore} → ${candScore} (delta: ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}) — ` +
             `control regression: ${exp.controlRegression ? "YES" : "no"}, smoke: ${exp.smokePassed ? "passed" : "FAILED"} — decision: **${exp.decision}**`
@@ -130,10 +120,7 @@ export function generateAdaptationReport(
       `DanteCode learned that the ${override.provider}/${override.model} model exhibits "${quirkKey}" behavior. ` +
       `A prompt adjustment was tested and improved PDSE scores, so it was promoted to active use. ` +
       `This means the model will now receive adjusted instructions to avoid this quirk.`;
-  } else if (
-    override.status === "rejected" ||
-    override.status === "rolled_back"
-  ) {
+  } else if (override.status === "rejected" || override.status === "rolled_back") {
     plainEnglish =
       `DanteCode detected "${quirkKey}" behavior from ${override.provider}/${override.model} and tested a prompt adjustment, ` +
       `but it did not improve results enough (or caused regression), so it was ${override.status === "rejected" ? "rejected" : "rolled back"}.`;
@@ -158,9 +145,7 @@ export function generateAdaptationReport(
 // Serialize to markdown with 7 required sections
 // ---------------------------------------------------------------------------
 
-export function serializeAdaptationReport(
-  report: AdaptationReportData,
-): string {
+export function serializeAdaptationReport(report: AdaptationReportData): string {
   const lines: string[] = [
     "# Model Adaptation Report",
     "",
@@ -170,9 +155,7 @@ export function serializeAdaptationReport(
     "",
     "## Evidence",
     "",
-    ...(report.evidence.length > 0
-      ? report.evidence
-      : ["No evidence recorded."]),
+    ...(report.evidence.length > 0 ? report.evidence : ["No evidence recorded."]),
     "",
     "## Candidate override",
     "",
@@ -211,9 +194,7 @@ export async function writeAdaptationReport(
     .toISOString()
     .replace(/:/g, "-")
     .replace(/\.\d+Z$/, "Z");
-  const suffix = quirkKey
-    ? `-${quirkKey.replace(/[^a-z0-9_-]/gi, "-")}`
-    : "";
+  const suffix = quirkKey ? `-${quirkKey.replace(/[^a-z0-9_-]/gi, "-")}` : "";
   const filename = `${timestamp}-adaptation${suffix}.md`;
   const reportsDir = join(projectRoot, ".dantecode", "reports");
   await mkdir(reportsDir, { recursive: true });

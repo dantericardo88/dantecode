@@ -43,11 +43,7 @@ describe("AskUser tool", () => {
   it("formats options as numbered list", () => {
     const options = ["TypeScript", "JavaScript", "Python"];
     const lines = options.map((opt, i) => `  ${i + 1}. ${opt}`);
-    expect(lines).toEqual([
-      "  1. TypeScript",
-      "  2. JavaScript",
-      "  3. Python",
-    ]);
+    expect(lines).toEqual(["  1. TypeScript", "  2. JavaScript", "  3. Python"]);
   });
 
   it("selects option by index", () => {

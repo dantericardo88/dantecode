@@ -66,7 +66,12 @@ describe("E2E Trace: agent action -> debug trail -> query -> reconstruct", () =>
     // Phase 3: Index all events
     index.bulkIndex(events);
     for (const evt of events) {
-      const kind = evt.kind === "file_write" ? "file_write" : evt.kind === "file_delete" ? "file_delete" : "other";
+      const kind =
+        evt.kind === "file_write"
+          ? "file_write"
+          : evt.kind === "file_delete"
+            ? "file_delete"
+            : "other";
       sessionMap.recordEvent("e2e-sess", kind);
     }
 

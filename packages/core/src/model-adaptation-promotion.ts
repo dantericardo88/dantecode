@@ -45,8 +45,10 @@ export function evaluatePromotionGate(
   promotionCountForFamily: number,
   config?: Partial<AdaptationConfig>,
 ): PromotionGateResult {
-  const minPdseImprovement = config?.minPdseImprovement ?? DEFAULT_ADAPTATION_CONFIG.minPdseImprovement;
-  const humanVetoThreshold = config?.humanVetoThreshold ?? DEFAULT_ADAPTATION_CONFIG.humanVetoThreshold;
+  const minPdseImprovement =
+    config?.minPdseImprovement ?? DEFAULT_ADAPTATION_CONFIG.minPdseImprovement;
+  const humanVetoThreshold =
+    config?.humanVetoThreshold ?? DEFAULT_ADAPTATION_CONFIG.humanVetoThreshold;
 
   const reasons: string[] = [];
   let canPromote = true;
@@ -64,9 +66,7 @@ export function evaluatePromotionGate(
   }
 
   // 3. PDSE improvement >= threshold
-  const pdseDelta =
-    (experiment.candidate.pdseScore ?? 0) -
-    (experiment.baseline.pdseScore ?? 0);
+  const pdseDelta = (experiment.candidate.pdseScore ?? 0) - (experiment.baseline.pdseScore ?? 0);
 
   if (pdseDelta < minPdseImprovement) {
     reasons.push(
@@ -87,8 +87,7 @@ export function evaluatePromotionGate(
   }
 
   // 5. Human veto for first N promotions per quirk family
-  const requiresHumanApproval =
-    promotionCountForFamily < humanVetoThreshold;
+  const requiresHumanApproval = promotionCountForFamily < humanVetoThreshold;
 
   if (requiresHumanApproval && canPromote) {
     reasons.push(
@@ -174,10 +173,9 @@ export function shouldRollback(
   const latest = experiments[experiments.length - 1]!;
 
   // PDSE regression — candidate dropped below rollback threshold
-  const rollbackThreshold = config?.rollbackPdseThreshold
-    ?? DEFAULT_ADAPTATION_CONFIG.rollbackPdseThreshold;
-  const pdseDelta =
-    (latest.candidate.pdseScore ?? 0) - (latest.baseline.pdseScore ?? 0);
+  const rollbackThreshold =
+    config?.rollbackPdseThreshold ?? DEFAULT_ADAPTATION_CONFIG.rollbackPdseThreshold;
+  const pdseDelta = (latest.candidate.pdseScore ?? 0) - (latest.baseline.pdseScore ?? 0);
   if (pdseDelta < rollbackThreshold) {
     return {
       shouldRollback: true,

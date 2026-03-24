@@ -143,10 +143,7 @@ describe("Crash recovery — EventSourcedCheckpointer real file I/O", () => {
       maxEventsBeforeCompaction: 5, // low threshold for testing
     });
 
-    await checkpointer.put(
-      { counter: 0 },
-      { source: "input", step: 0, triggerCommand: "/test" },
-    );
+    await checkpointer.put({ counter: 0 }, { source: "input", step: 0, triggerCommand: "/test" });
 
     // Add exactly 4 writes to trigger compaction at maxEvents=5.
     // put() wrote 1 event (index 0), so writes 1-4 fill indices 1-4.

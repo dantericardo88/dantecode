@@ -51,7 +51,11 @@ function touch(root: string, relativePath: string, content = ""): void {
   writeFileSync(fullPath, content, "utf-8");
 }
 
-function writePkg(root: string, deps: Record<string, string> = {}, devDeps: Record<string, string> = {}): void {
+function writePkg(
+  root: string,
+  deps: Record<string, string> = {},
+  devDeps: Record<string, string> = {},
+): void {
   const pkg = { name: "test-project", dependencies: deps, devDependencies: devDeps };
   touch(root, "package.json", JSON.stringify(pkg, null, 2));
 }

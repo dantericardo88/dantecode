@@ -214,7 +214,9 @@ export class RunReportAccumulator {
   }
 
   /** Record completion verification for the current entry. */
-  recordCompletionVerification(verification: import("./completion-verifier.js").CompletionVerification): void {
+  recordCompletionVerification(
+    verification: import("./completion-verifier.js").CompletionVerification,
+  ): void {
     const entry = this.currentEntry();
     if (entry) entry.completionVerification = verification;
   }
@@ -317,18 +319,16 @@ export class RunReportAccumulator {
   }
 
   private currentEntry(): RunReportEntry | undefined {
-    return this.currentEntryIndex >= 0
-      ? this.report.entries[this.currentEntryIndex]
-      : undefined;
+    return this.currentEntryIndex >= 0 ? this.report.entries[this.currentEntryIndex] : undefined;
   }
 }
 
 // ─── Markdown Serializer ────────────────────────────────────────────────────
 
 const STATUS_EMOJI: Record<RunReportStatus, string> = {
-  complete: "\u2705",      // ✅
+  complete: "\u2705", // ✅
   partial: "\u26A0\uFE0F", // ⚠️
-  failed: "\u274C",        // ❌
+  failed: "\u274C", // ❌
   not_attempted: "\u23ED\uFE0F", // ⏭️
 };
 
@@ -384,8 +384,7 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   // ── Completion status ─────────────────────────────────────────────────
   const counts = countStatuses(report.entries);
   const total = report.entries.length;
-  const completionRate =
-    total > 0 ? Math.round((counts.complete / total) * 100) : 0;
+  const completionRate = total > 0 ? Math.round((counts.complete / total) * 100) : 0;
 
   lines.push("## Completion status");
   lines.push("");
@@ -454,19 +453,25 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
       const v = entry.verification;
       const antiStubIcon = v.antiStub.passed ? "\u2705" : "\u274C";
       const constIcon = v.constitution.passed ? "\u2705" : "\u274C";
-      lines.push(`- Anti-stub: ${antiStubIcon} ${v.antiStub.passed ? "Passed" : "FAILED"} (${v.antiStub.violations} violations)`);
+      lines.push(
+        `- Anti-stub: ${antiStubIcon} ${v.antiStub.passed ? "Passed" : "FAILED"} (${v.antiStub.violations} violations)`,
+      );
       if (v.antiStub.details.length > 0) {
         for (const d of v.antiStub.details) {
           lines.push(`  - ${d}`);
         }
       }
-      lines.push(`- Constitution: ${constIcon} ${v.constitution.passed ? "Passed" : "FAILED"} (${v.constitution.violations} violations${v.constitution.warnings > 0 ? `, ${v.constitution.warnings} warnings` : ""})`);
+      lines.push(
+        `- Constitution: ${constIcon} ${v.constitution.passed ? "Passed" : "FAILED"} (${v.constitution.violations} violations${v.constitution.warnings > 0 ? `, ${v.constitution.warnings} warnings` : ""})`,
+      );
       if (v.constitution.details.length > 0) {
         for (const d of v.constitution.details) {
           lines.push(`  - ${d}`);
         }
       }
-      lines.push(`- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`);
+      lines.push(
+        `- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`,
+      );
       if (v.regenerationAttempts > 0) {
         lines.push(`- Regeneration attempts: ${v.regenerationAttempts}/${v.maxAttempts}`);
       }
@@ -474,7 +479,9 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
       // Tests (verbose)
       const t = entry.tests;
       if (t.created > 0) {
-        lines.push(`- Tests: ${t.created} created, ${t.passing} passing${t.failing > 0 ? `, ${t.failing} failing` : ""}`);
+        lines.push(
+          `- Tests: ${t.created} created, ${t.passing} passing${t.failing > 0 ? `, ${t.failing} failing` : ""}`,
+        );
       } else {
         lines.push("- Tests: none created");
       }
@@ -529,7 +536,7 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     lines.push("|--------|------|-------|");
     for (const f of report.filesManifest) {
       const action = f.action.toUpperCase();
-      const lineInfo = f.lines != null ? String(f.lines) : f.diff ?? "-";
+      const lineInfo = f.lines != null ? String(f.lines) : (f.diff ?? "-");
       lines.push(`| ${action} | ${f.path} | ${lineInfo} |`);
     }
 
@@ -537,7 +544,9 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     const modified = report.filesManifest.filter((f) => f.action === "modified").length;
     const deleted = report.filesManifest.filter((f) => f.action === "deleted").length;
     lines.push("");
-    lines.push(`**Total: ${created} files created, ${modified} files modified, ${deleted} files deleted**`);
+    lines.push(
+      `**Total: ${created} files created, ${modified} files modified, ${deleted} files deleted**`,
+    );
   } else {
     lines.push("No files were changed.");
   }
@@ -561,10 +570,18 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     ).length;
     const testsNoTests = attempted.filter((e) => e.tests.created === 0).length;
 
-    lines.push(`| Anti-stub scan | ${antiStubPassed} | ${attempted.length - antiStubPassed} | ${attempted.length} |`);
-    lines.push(`| Constitution check | ${constPassed} | ${attempted.length - constPassed} | ${attempted.length} |`);
-    lines.push(`| PDSE >= threshold | ${pdsePassed} | ${attempted.length - pdsePassed} | ${attempted.length} |`);
-    lines.push(`| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`);
+    lines.push(
+      `| Anti-stub scan | ${antiStubPassed} | ${attempted.length - antiStubPassed} | ${attempted.length} |`,
+    );
+    lines.push(
+      `| Constitution check | ${constPassed} | ${attempted.length - constPassed} | ${attempted.length} |`,
+    );
+    lines.push(
+      `| PDSE >= threshold | ${pdsePassed} | ${attempted.length - pdsePassed} | ${attempted.length} |`,
+    );
+    lines.push(
+      `| Tests passing | ${testsPassed} | ${attempted.length - testsPassed - testsNoTests} | ${attempted.length}${testsNoTests > 0 ? ` (${testsNoTests} no tests)` : ""} |`,
+    );
     lines.push("");
   } else {
     renderQualityCheckContent(lines, report);
@@ -637,7 +654,9 @@ function humanizeVerification(v: RunReportVerification): string[] {
   }
 
   if (v.regenerationAttempts > 0) {
-    result.push(`DanteCode made ${v.regenerationAttempts} fix attempt(s) but could not resolve all issues`);
+    result.push(
+      `DanteCode made ${v.regenerationAttempts} fix attempt(s) but could not resolve all issues`,
+    );
   }
 
   return result;
@@ -673,11 +692,12 @@ function renderQualityCheckContent(lines: string[], report: RunReport): void {
   }
 
   const allVerified = attempted.every(
-    (e) => e.verification.antiStub.passed && e.verification.constitution.passed && e.verification.pdseScore >= e.verification.pdseThreshold,
+    (e) =>
+      e.verification.antiStub.passed &&
+      e.verification.constitution.passed &&
+      e.verification.pdseScore >= e.verification.pdseThreshold,
   );
-  const allTestsPass = attempted.every(
-    (e) => e.tests.created === 0 || e.tests.failing === 0,
-  );
+  const allTestsPass = attempted.every((e) => e.tests.created === 0 || e.tests.failing === 0);
   const noPlaceholders = attempted.every((e) => e.verification.antiStub.passed);
 
   const parts: string[] = [];
@@ -685,7 +705,10 @@ function renderQualityCheckContent(lines: string[], report: RunReport): void {
     parts.push(`All ${attempted.length} task(s) passed verification.`);
   } else {
     const passed = attempted.filter(
-      (e) => e.verification.antiStub.passed && e.verification.constitution.passed && e.verification.pdseScore >= e.verification.pdseThreshold,
+      (e) =>
+        e.verification.antiStub.passed &&
+        e.verification.constitution.passed &&
+        e.verification.pdseScore >= e.verification.pdseThreshold,
     ).length;
     parts.push(`${passed} of ${attempted.length} task(s) passed all checks.`);
   }
@@ -707,7 +730,8 @@ function renderCompletionVerificationSummary(lines: string[], report: RunReport)
   lines.push("**Completion verification:**");
   for (const entry of verified) {
     const cv = entry.completionVerification!;
-    const verdictIcon = cv.verdict === "complete" ? "\u2705" : cv.verdict === "partial" ? "\u26A0\uFE0F" : "\u274C";
+    const verdictIcon =
+      cv.verdict === "complete" ? "\u2705" : cv.verdict === "partial" ? "\u26A0\uFE0F" : "\u274C";
     lines.push(
       `- ${entry.prdName}: ${verdictIcon} ${cv.verdict} (confidence: ${cv.confidence}, ${cv.passed.length} passed, ${cv.failed.length} failed)`,
     );

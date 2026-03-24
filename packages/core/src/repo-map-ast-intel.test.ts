@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  extractSymbolDefinitions,
-  extractImports,
-  computeFileScores,
-} from "./repo-map-ast.js";
+import { extractSymbolDefinitions, extractImports, computeFileScores } from "./repo-map-ast.js";
 
 describe("extractSymbolDefinitions — Symbol Extraction", () => {
   it("extracts function declarations", () => {

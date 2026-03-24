@@ -9,7 +9,8 @@ function makeResult(overrides: Partial<SearchResult> = {}): SearchResult {
   return {
     title: "TypeScript Monorepo Guide with Turborepo",
     url: "https://github.com/example/repo",
-    snippet: "A comprehensive guide to setting up TypeScript monorepos using turborepo and tsup for ESM builds with vitest for testing.",
+    snippet:
+      "A comprehensive guide to setting up TypeScript monorepos using turborepo and tsup for ESM builds with vitest for testing.",
     source: "web",
     ...overrides,
   };
@@ -24,8 +25,17 @@ describe("SearchQualityScorer", () => {
 
   it("filtering removes low-quality results", () => {
     const results: SearchResult[] = [
-      makeResult({ url: "https://github.com/repo", snippet: "Detailed guide to TypeScript monorepo patterns with turbo and pnpm workspaces for large-scale applications." }),
-      makeResult({ url: "https://reddit.com/r/post", snippet: "ok", title: "x", publishedDate: new Date(NOW - 800 * 86_400_000).toISOString() }),
+      makeResult({
+        url: "https://github.com/repo",
+        snippet:
+          "Detailed guide to TypeScript monorepo patterns with turbo and pnpm workspaces for large-scale applications.",
+      }),
+      makeResult({
+        url: "https://reddit.com/r/post",
+        snippet: "ok",
+        title: "x",
+        publishedDate: new Date(NOW - 800 * 86_400_000).toISOString(),
+      }),
     ];
     const filtered = scorer.filter(results, 40);
     expect(filtered.length).toBe(1);
@@ -37,7 +47,8 @@ describe("SearchQualityScorer", () => {
       makeResult({ url: "https://random-unknown.example.com/page", snippet: "short" }),
       makeResult({
         url: "https://developer.mozilla.org/docs/guide",
-        snippet: "Comprehensive MDN documentation about web APIs including `fetch`, `AbortController`, and detailed code examples.\n1. Step one\n2. Step two",
+        snippet:
+          "Comprehensive MDN documentation about web APIs including `fetch`, `AbortController`, and detailed code examples.\n1. Step one\n2. Step two",
         publishedDate: new Date(NOW - 5 * 86_400_000).toISOString(),
       }),
     ];
@@ -47,25 +58,36 @@ describe("SearchQualityScorer", () => {
   });
 
   it("freshness dimension scores recent results higher", () => {
-    const recent = scorer.score(makeResult({ publishedDate: new Date(NOW - 86_400_000).toISOString() }));
-    const old = scorer.score(makeResult({ publishedDate: new Date(NOW - 500 * 86_400_000).toISOString() }));
+    const recent = scorer.score(
+      makeResult({ publishedDate: new Date(NOW - 86_400_000).toISOString() }),
+    );
+    const old = scorer.score(
+      makeResult({ publishedDate: new Date(NOW - 500 * 86_400_000).toISOString() }),
+    );
     expect(recent.freshness).toBeGreaterThan(old.freshness);
   });
 
   it("citation-dense snippets score higher on citationDensity", () => {
-    const dense = scorer.score(makeResult({
-      snippet: "See https://example.com/api and https://example.com/docs for reference.\n```typescript\nconst x = 1;\n```\n1. First step\n2. Second step",
-    }));
+    const dense = scorer.score(
+      makeResult({
+        snippet:
+          "See https://example.com/api and https://example.com/docs for reference.\n```typescript\nconst x = 1;\n```\n1. First step\n2. Second step",
+      }),
+    );
     const sparse = scorer.score(makeResult({ snippet: "A simple sentence without references." }));
     expect(dense.citationDensity).toBeGreaterThan(sparse.citationDensity);
   });
 
   it("each dimension is clamped to 0-25", () => {
-    const result = scorer.score(makeResult({
-      url: "https://github.com/big-repo",
-      publishedDate: new Date(NOW - 1000).toISOString(),
-      snippet: "A very long snippet ".repeat(50) + "\n```code```\n1. list\n2. list\nhttps://a.com https://b.com https://c.com `inline` code",
-    }));
+    const result = scorer.score(
+      makeResult({
+        url: "https://github.com/big-repo",
+        publishedDate: new Date(NOW - 1000).toISOString(),
+        snippet:
+          "A very long snippet ".repeat(50) +
+          "\n```code```\n1. list\n2. list\nhttps://a.com https://b.com https://c.com `inline` code",
+      }),
+    );
     expect(result.sourceAuthority).toBeLessThanOrEqual(25);
     expect(result.freshness).toBeLessThanOrEqual(25);
     expect(result.relevance).toBeLessThanOrEqual(25);

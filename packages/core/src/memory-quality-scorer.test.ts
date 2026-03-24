@@ -29,7 +29,8 @@ describe("MemoryQualityScorer", () => {
       impactScore: 0.9,
       accessCount: 50,
       lastAccessedAt: NOW - 60_000, // 1 min ago
-      content: "Detailed information about monorepo configuration with turborepo and tsup for ESM builds.",
+      content:
+        "Detailed information about monorepo configuration with turborepo and tsup for ESM builds.",
     });
     const result = scorer.score(mem);
     expect(result.total).toBeGreaterThan(60);
@@ -54,7 +55,8 @@ describe("MemoryQualityScorer", () => {
       impactScore: 1.0,
       accessCount: 100,
       lastAccessedAt: NOW - 1000, // 1 second ago
-      content: "Critical architecture pattern for the council orchestrator with detailed lane assignment and merge logic.",
+      content:
+        "Critical architecture pattern for the council orchestrator with detailed lane assignment and merge logic.",
     });
     const result = scorer.score(mem);
     expect(result.total).toBeGreaterThan(80);
@@ -82,11 +84,13 @@ describe("MemoryQualityScorer", () => {
   });
 
   it("each dimension is clamped to 0-25 range", () => {
-    const extremeHigh = scorer.score(makeMemory({
-      impactScore: 5.0, // over 1
-      accessCount: 999,
-      lastAccessedAt: NOW + 100_000, // future
-    }));
+    const extremeHigh = scorer.score(
+      makeMemory({
+        impactScore: 5.0, // over 1
+        accessCount: 999,
+        lastAccessedAt: NOW + 100_000, // future
+      }),
+    );
     expect(extremeHigh.relevance).toBeLessThanOrEqual(25);
     expect(extremeHigh.freshness).toBeLessThanOrEqual(25);
     expect(extremeHigh.accuracy).toBeLessThanOrEqual(25);

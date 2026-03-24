@@ -380,7 +380,11 @@ export async function injectRoundContext(
       // PRD S3.2: sync lastThinkingBudget so /think shows the overridden budget
       if (ctx.config.replState) ctx.config.replState.lastThinkingBudget = thinkingBudget;
     }
-    const thinkPhase = ctx.reasoningChain.think(ctx.durablePrompt, `round=${ctx.roundCounter}`, tier);
+    const thinkPhase = ctx.reasoningChain.think(
+      ctx.durablePrompt,
+      `round=${ctx.roundCounter}`,
+      tier,
+    );
     ctx.reasoningChain.recordStep(thinkPhase);
     if (ctx.reasoningChain.shouldCritique()) {
       // P4-C1: Use same error-based PDSE proxy as recordTierOutcome (was hardcoded 0.8

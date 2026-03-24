@@ -5,10 +5,7 @@
 // ============================================================================
 
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  TaskComplexityRouter,
-  type ModelOption,
-} from "../../task-complexity-router.js";
+import { TaskComplexityRouter, type ModelOption } from "../../task-complexity-router.js";
 import { FleetBudget } from "../../council/fleet-budget.js";
 
 describe("E2E: Budget Enforcement (real modules)", () => {
@@ -50,7 +47,7 @@ describe("E2E: Budget Enforcement (real modules)", () => {
       expect(decision.tier).toBe("simple");
 
       // Record cumulative tokens for agent
-      const allowed = budget.record(`agent-${i}`, 2000, 0.60);
+      const allowed = budget.record(`agent-${i}`, 2000, 0.6);
       expect(allowed).toBe(true);
     }
 
@@ -73,7 +70,7 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     });
 
     // Agent A uses 5000 tokens
-    budget.record("agent-a", 5000, 1.50);
+    budget.record("agent-a", 5000, 1.5);
     expect(budget.isWarning()).toBe(false);
     expect(budget.isExhausted()).toBe(false);
 
@@ -135,7 +132,7 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     });
 
     // Agent hits per-agent limit
-    const allowed = budget.record("greedy-agent", 5000, 1.50);
+    const allowed = budget.record("greedy-agent", 5000, 1.5);
     expect(allowed).toBe(false); // Per-agent limit hit
     expect(budget.isExhausted()).toBe(false); // Fleet budget is fine
 
@@ -257,7 +254,7 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     });
 
     // Exhaust budget
-    budget.record("agent", 1000, 0.30);
+    budget.record("agent", 1000, 0.3);
     expect(budget.isExhausted()).toBe(true);
     expect(budget.isWarning()).toBe(true);
 

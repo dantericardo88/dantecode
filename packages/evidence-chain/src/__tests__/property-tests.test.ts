@@ -36,11 +36,10 @@ const alphaNestedJsonObject = fc.dictionary(
     fc.integer(),
     fc.boolean(),
     fc.constant(null),
-    fc.dictionary(
-      alphaKey,
-      fc.oneof(fc.string(), fc.integer(), fc.boolean(), fc.constant(null)),
-      { minKeys: 1, maxKeys: 5 },
-    ),
+    fc.dictionary(alphaKey, fc.oneof(fc.string(), fc.integer(), fc.boolean(), fc.constant(null)), {
+      minKeys: 1,
+      maxKeys: 5,
+    }),
     fc.array(fc.oneof(fc.string(), fc.integer(), fc.boolean()), {
       maxLength: 5,
     }),
@@ -102,10 +101,7 @@ describe("stableJSON — property-based", () => {
     fc.assert(
       fc.property(
         fc.array(
-          fc.tuple(
-            fc.string({ minLength: 1, maxLength: 10 }),
-            fc.oneof(fc.string(), fc.integer()),
-          ),
+          fc.tuple(fc.string({ minLength: 1, maxLength: 10 }), fc.oneof(fc.string(), fc.integer())),
           { minLength: 2, maxLength: 8 },
         ),
         (entries) => {
@@ -183,21 +179,26 @@ describe("hashDict — property-based", () => {
   });
 
   it("is key-order-independent", () => {
+    // hashDict contract: callers must provide unique keys per object.
+    // We normalise duplicate keys (last-write-wins via Map) before building
+    // objA/objB so the comparison is meaningful and deterministic.
     fc.assert(
       fc.property(
         fc.array(
-          fc.tuple(
-            fc.string({ minLength: 1, maxLength: 10 }),
-            fc.oneof(fc.string(), fc.integer()),
-          ),
+          fc.tuple(fc.string({ minLength: 1, maxLength: 10 }), fc.oneof(fc.string(), fc.integer())),
           { minLength: 2, maxLength: 8 },
         ),
         (entries) => {
+          // Deduplicate: last occurrence wins for both orderings
+          const unique = new Map<string, unknown>(entries);
+          fc.pre(unique.size >= 2); // need ≥2 distinct keys to test ordering
+          const uniqueEntries = [...unique.entries()];
+
           const objA: Record<string, unknown> = {};
-          for (const [k, v] of entries) objA[k] = v;
+          for (const [k, v] of uniqueEntries) objA[k] = v;
 
           const objB: Record<string, unknown> = {};
-          for (const [k, v] of [...entries].reverse()) objB[k] = v;
+          for (const [k, v] of [...uniqueEntries].reverse()) objB[k] = v;
 
           expect(hashDict(objA)).toBe(hashDict(objB));
         },
@@ -225,17 +226,14 @@ describe("hashDict — property-based", () => {
 describe("HashChain — property-based", () => {
   it("verify() returns true after appending n random blocks", () => {
     fc.assert(
-      fc.property(
-        fc.array(jsonObject, { minLength: 0, maxLength: 20 }),
-        (blocks) => {
-          const chain = new HashChain<Record<string, unknown>>({ genesis: true });
-          for (const block of blocks) {
-            chain.append(block);
-          }
-          expect(chain.verifyIntegrity()).toBe(true);
-          expect(chain.length).toBe(blocks.length + 1); // +1 for genesis
-        },
-      ),
+      fc.property(fc.array(jsonObject, { minLength: 0, maxLength: 20 }), (blocks) => {
+        const chain = new HashChain<Record<string, unknown>>({ genesis: true });
+        for (const block of blocks) {
+          chain.append(block);
+        }
+        expect(chain.verifyIntegrity()).toBe(true);
+        expect(chain.length).toBe(blocks.length + 1); // +1 for genesis
+      }),
       { numRuns: 50 },
     );
   });
@@ -287,20 +285,17 @@ describe("HashChain — property-based", () => {
 
   it("headHash changes after every append", () => {
     fc.assert(
-      fc.property(
-        fc.array(jsonObject, { minLength: 1, maxLength: 15 }),
-        (blocks) => {
-          const chain = new HashChain<Record<string, unknown>>({ genesis: true });
-          const hashes = new Set<string>();
+      fc.property(fc.array(jsonObject, { minLength: 1, maxLength: 15 }), (blocks) => {
+        const chain = new HashChain<Record<string, unknown>>({ genesis: true });
+        const hashes = new Set<string>();
+        hashes.add(chain.headHash);
+        for (const block of blocks) {
+          chain.append(block);
           hashes.add(chain.headHash);
-          for (const block of blocks) {
-            chain.append(block);
-            hashes.add(chain.headHash);
-          }
-          // Each append should produce a unique head hash
-          expect(hashes.size).toBe(blocks.length + 1);
-        },
-      ),
+        }
+        // Each append should produce a unique head hash
+        expect(hashes.size).toBe(blocks.length + 1);
+      }),
       { numRuns: 50 },
     );
   });
@@ -326,11 +321,7 @@ describe("MerkleTree — property-based", () => {
 
           for (let i = 0; i < leafHashes.length; i++) {
             const proof = tree.getProof(i);
-            const valid = MerkleTree.verifyProof(
-              leafHashes[i]!,
-              proof,
-              tree.root,
-            );
+            const valid = MerkleTree.verifyProof(leafHashes[i]!, proof, tree.root);
             expect(valid).toBe(true);
           }
         },

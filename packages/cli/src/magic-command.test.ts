@@ -10,7 +10,12 @@ vi.mock("./agent-loop.js", () => ({
     id: "test-session",
     name: null,
     messages: [
-      { id: "1", role: "assistant", content: "Built the todo app successfully.", timestamp: new Date().toISOString() },
+      {
+        id: "1",
+        role: "assistant",
+        content: "Built the todo app successfully.",
+        timestamp: new Date().toISOString(),
+      },
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -19,7 +24,16 @@ vi.mock("./agent-loop.js", () => ({
 }));
 
 vi.mock("@dantecode/danteforge", () => ({
-  runLocalPDSEScorer: vi.fn().mockReturnValue({ overall: 92, passedGate: true, completeness: 90, correctness: 94, clarity: 90, consistency: 92 }),
+  runLocalPDSEScorer: vi
+    .fn()
+    .mockReturnValue({
+      overall: 92,
+      passedGate: true,
+      completeness: 90,
+      correctness: 94,
+      clarity: 90,
+      consistency: 92,
+    }),
   runAntiStubScanner: vi.fn().mockReturnValue({ passed: true, hardViolations: [] }),
   runConstitutionCheck: vi.fn().mockReturnValue({ passed: true, violations: [] }),
   runGStack: vi.fn().mockReturnValue({ results: [] }),
@@ -40,7 +54,8 @@ vi.mock("@dantecode/core", async () => {
 });
 
 vi.mock("@dantecode/git-engine", async () => {
-  const actual = await vi.importActual<typeof import("@dantecode/git-engine")>("@dantecode/git-engine");
+  const actual =
+    await vi.importActual<typeof import("@dantecode/git-engine")>("@dantecode/git-engine");
   return {
     ...actual,
     autoCommit: vi.fn(),
@@ -103,7 +118,15 @@ function createMockState(): any {
     },
     state: {
       model: {
-        default: { provider: "anthropic", modelId: "claude-sonnet-4-20250514", maxTokens: 4096, temperature: 0.7, contextWindow: 200000, supportsVision: true, supportsToolCalls: true },
+        default: {
+          provider: "anthropic",
+          modelId: "claude-sonnet-4-20250514",
+          maxTokens: 4096,
+          temperature: 0.7,
+          contextWindow: 200000,
+          supportsVision: true,
+          supportsToolCalls: true,
+        },
         fallback: [],
       },
       pdse: { threshold: 85 },

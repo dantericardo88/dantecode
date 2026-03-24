@@ -256,9 +256,7 @@ describe("D-12.4: Model adaptation observation and candidate creation", () => {
     // Should have created a draft override with D-12A QuirkKey
     const overrides = store.getOverrides(modelKey, "draft");
     expect(overrides.length).toBeGreaterThanOrEqual(1);
-    const stopsOverride = overrides.find(
-      (o) => o.quirkKey === "stops_before_completion",
-    );
+    const stopsOverride = overrides.find((o) => o.quirkKey === "stops_before_completion");
     expect(stopsOverride).toBeDefined();
     expect(stopsOverride!.patch.promptPreamble).toContain("summarize");
   });
@@ -289,7 +287,9 @@ describe("D-12.4: Model adaptation observation and candidate creation", () => {
       pdseScore: 92,
     });
     expect(successResult).toBe(true);
-    expect(store.getActiveOverrides({ provider: "anthropic", modelId: "claude-sonnet-4-6" })).toHaveLength(1);
+    expect(
+      store.getActiveOverrides({ provider: "anthropic", modelId: "claude-sonnet-4-6" }),
+    ).toHaveLength(1);
   });
 
   it("model adaptation snapshot is serializable", () => {
@@ -359,18 +359,12 @@ describe("D-12A: Promotion gate", () => {
   });
 
   it("rejects on PDSE regression", () => {
-    const result = evaluatePromotionGate(
-      makeExperiment({ candidate: { pdseScore: 60 } }),
-      5,
-    );
+    const result = evaluatePromotionGate(makeExperiment({ candidate: { pdseScore: 60 } }), 5);
     expect(result.decision).toBe("reject");
   });
 
   it("rejects when smoke fails", () => {
-    const result = evaluatePromotionGate(
-      makeExperiment({ smokePassed: false }),
-      5,
-    );
+    const result = evaluatePromotionGate(makeExperiment({ smokePassed: false }), 5);
     expect(result.decision).toBe("reject");
   });
 });
@@ -400,13 +394,7 @@ describe("D-12A: Rollback", () => {
 
 describe("D-12A: Adaptation report", () => {
   it("report has all 7 required sections", () => {
-    const report = generateAdaptationReport(
-      "stops_before_completion",
-      [],
-      null,
-      [],
-      [],
-    );
+    const report = generateAdaptationReport("stops_before_completion", [], null, [], []);
     const md = serializeAdaptationReport(report);
     expect(md).toContain("## Quirk detected");
     expect(md).toContain("## Evidence");
@@ -463,14 +451,26 @@ describe("D-12A: Full pipeline integration", () => {
     const results = await processNewDrafts(store, drafts, {
       rateLimiter,
       experimentOptions: {
-        syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
-        replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.88 }),
-        controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+        syntheticTaskRunner: async () => ({
+          pdseScore: 90,
+          completionStatus: "complete",
+          successRate: 0.9,
+        }),
+        replayRunner: async () => ({
+          pdseScore: 88,
+          completionStatus: "complete",
+          successRate: 0.88,
+        }),
+        controlRunner: async () => ({
+          pdseScore: 82,
+          completionStatus: "complete",
+          successRate: 0.8,
+        }),
       },
     });
 
     expect(results.length).toBeGreaterThanOrEqual(1);
-    const pipeResult = results.find(r => r.draft.quirkKey === "stops_before_completion");
+    const pipeResult = results.find((r) => r.draft.quirkKey === "stops_before_completion");
     expect(pipeResult).toBeDefined();
     // First promotion for this quirk → needs_human_review
     expect(pipeResult!.action).toBe("needs_human_review");
@@ -498,9 +498,21 @@ describe("D-12A: Full pipeline integration", () => {
 
     // Record an experiment
     const experiment = await runAdaptationExperiment(draft, {
-      syntheticTaskRunner: async () => ({ pdseScore: 90, completionStatus: "complete", successRate: 0.9 }),
-      replayRunner: async () => ({ pdseScore: 88, completionStatus: "complete", successRate: 0.88 }),
-      controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 90,
+        completionStatus: "complete",
+        successRate: 0.9,
+      }),
+      replayRunner: async () => ({
+        pdseScore: 88,
+        completionStatus: "complete",
+        successRate: 0.88,
+      }),
+      controlRunner: async () => ({
+        pdseScore: 82,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
     store.addExperiment(experiment);
 
@@ -531,9 +543,17 @@ describe("D-12A: Full pipeline integration", () => {
     // Run a regression experiment
     const experiment = await runAdaptationExperiment(override, {
       baselineMetrics: { pdseScore: 80, completionStatus: "complete", successRate: 0.8 },
-      syntheticTaskRunner: async () => ({ pdseScore: 60, completionStatus: "partial", successRate: 0.5 }),
+      syntheticTaskRunner: async () => ({
+        pdseScore: 60,
+        completionStatus: "partial",
+        successRate: 0.5,
+      }),
       replayRunner: async () => ({ pdseScore: 55, completionStatus: "partial", successRate: 0.4 }),
-      controlRunner: async () => ({ pdseScore: 81, completionStatus: "complete", successRate: 0.8 }),
+      controlRunner: async () => ({
+        pdseScore: 81,
+        completionStatus: "complete",
+        successRate: 0.8,
+      }),
     });
 
     // shouldRollback detects PDSE regression
@@ -575,7 +595,7 @@ describe("D-12A: Full pipeline integration", () => {
 
     // Draft should still be in draft status (not transitioned to testing)
     const snap = store.snapshot();
-    const draftOverride = snap.overrides.find(o => o.id === draft.id);
+    const draftOverride = snap.overrides.find((o) => o.id === draft.id);
     expect(draftOverride!.status).toBe("draft");
   });
 });
@@ -599,7 +619,9 @@ describe("D-12.5: Progressive disclosure", () => {
   it("countSuccessfulSessions counts only sessions with >= 2 messages", async () => {
     mockReaddir.mockResolvedValue(["a.json", "b.json", "c.json"]);
     mockReadFile
-      .mockResolvedValueOnce(JSON.stringify({ messages: [{ role: "user" }, { role: "assistant" }] }))
+      .mockResolvedValueOnce(
+        JSON.stringify({ messages: [{ role: "user" }, { role: "assistant" }] }),
+      )
       .mockResolvedValueOnce(JSON.stringify({ messages: [{ role: "user" }] }))
       .mockResolvedValueOnce(JSON.stringify({ messages: [] }));
     const count = await countSuccessfulSessions("/project");

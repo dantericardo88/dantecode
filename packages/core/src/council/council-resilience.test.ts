@@ -80,11 +80,7 @@ describe("CouncilResilience", () => {
     });
 
     it("marks all tasks unassignable when no agents available", () => {
-      const plan = resilience.handleAgentFailure(
-        "failed-agent",
-        ["task-1", "task-2"],
-        [],
-      );
+      const plan = resilience.handleAgentFailure("failed-agent", ["task-1", "task-2"], []);
 
       expect(plan.reassignments).toHaveLength(0);
       expect(plan.unassignable).toEqual(["task-1", "task-2"]);

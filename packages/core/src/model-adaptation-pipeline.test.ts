@@ -194,9 +194,19 @@ describe("processNewDrafts", () => {
     const options: PipelineOptions = {
       rateLimiter,
       experimentOptions: {
-        syntheticTaskRunner: async () => { throw new Error("Runner exploded"); },
-        replayRunner: async () => ({ pdseScore: 85, completionStatus: "complete", successRate: 0.9 }),
-        controlRunner: async () => ({ pdseScore: 82, completionStatus: "complete", successRate: 0.8 }),
+        syntheticTaskRunner: async () => {
+          throw new Error("Runner exploded");
+        },
+        replayRunner: async () => ({
+          pdseScore: 85,
+          completionStatus: "complete",
+          successRate: 0.9,
+        }),
+        controlRunner: async () => ({
+          pdseScore: 82,
+          completionStatus: "complete",
+          successRate: 0.8,
+        }),
       },
     };
 
@@ -253,9 +263,7 @@ describe("processNewDrafts", () => {
     expect(updateSpy).toHaveBeenCalledWith(draft.id, "testing");
     // "testing" must be called before any terminal status
     const calls = updateSpy.mock.calls;
-    const testingIdx = calls.findIndex(
-      (c) => c[0] === draft.id && c[1] === "testing",
-    );
+    const testingIdx = calls.findIndex((c) => c[0] === draft.id && c[1] === "testing");
     expect(testingIdx).toBe(0);
   });
 
@@ -366,11 +374,7 @@ describe("processNewDrafts", () => {
       },
     };
 
-    const results = await processNewDrafts(
-      store,
-      [draftA, draftB],
-      options,
-    );
+    const results = await processNewDrafts(store, [draftA, draftB], options);
 
     expect(results).toHaveLength(2);
     expect(results[0]!.action).toBe("promoted");
@@ -401,7 +405,9 @@ describe("Pipeline logging and events", () => {
     const options: PipelineOptions = {
       rateLimiter,
       experimentOptions: strongExperimentOptions,
-      logger: (event) => { events.push(event); },
+      logger: (event) => {
+        events.push(event);
+      },
     };
 
     const results = await processNewDrafts(store, [draft], options);
@@ -442,7 +448,9 @@ describe("Pipeline logging and events", () => {
     const options: PipelineOptions = {
       rateLimiter,
       experimentOptions: strongExperimentOptions,
-      logger: () => { throw new Error("Logger exploded"); },
+      logger: () => {
+        throw new Error("Logger exploded");
+      },
     };
 
     // Pipeline should still complete successfully
@@ -479,7 +487,9 @@ describe("Pipeline logging and events", () => {
     const options: PipelineOptions = {
       rateLimiter,
       experimentOptions: strongExperimentOptions,
-      logger: (event) => { events.push(event); },
+      logger: (event) => {
+        events.push(event);
+      },
     };
 
     const results = await processNewDrafts(store, [draft], options);
@@ -517,11 +527,7 @@ describe("checkPromotedOverrides", () => {
   });
 
   it("does nothing when no promoted overrides exist", async () => {
-    const results = await checkPromotedOverrides(
-      store,
-      { rateLimiter },
-      () => [],
-    );
+    const results = await checkPromotedOverrides(store, { rateLimiter }, () => []);
 
     expect(results).toEqual([]);
   });
@@ -539,11 +545,7 @@ describe("checkPromotedOverrides", () => {
     store.updateStatus(draft.id, "promoted");
 
     // detectFn never detects the quirk (override is effective)
-    const results = await checkPromotedOverrides(
-      store,
-      { rateLimiter },
-      () => [],
-    );
+    const results = await checkPromotedOverrides(store, { rateLimiter }, () => []);
 
     expect(results).toEqual([]);
     // Override stays promoted
@@ -568,11 +570,7 @@ describe("checkPromotedOverrides", () => {
       { quirkKey: "stops_before_completion" },
     ];
 
-    const results = await checkPromotedOverrides(
-      store,
-      { rateLimiter },
-      detectFn,
-    );
+    const results = await checkPromotedOverrides(store, { rateLimiter }, detectFn);
 
     // Deterministic: detectFn always detects → detected=1/1 → successRate=0
     // → pdseScore=72 → delta (72-85) = -13 < -5 → rollback fires
@@ -623,7 +621,9 @@ describe("checkPromotedOverrides", () => {
     store.updateStatus(draft.id, "promoted");
 
     const events: AdaptationEvent[] = [];
-    const logger = (event: AdaptationEvent) => { events.push(event); };
+    const logger = (event: AdaptationEvent) => {
+      events.push(event);
+    };
 
     // Always detect quirk → regression
     const detectFn = () => [{ quirkKey: "stops_before_completion" }];

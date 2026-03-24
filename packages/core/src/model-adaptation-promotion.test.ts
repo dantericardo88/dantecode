@@ -4,18 +4,13 @@ import {
   createRollbackOverride,
   shouldRollback,
 } from "./model-adaptation-promotion.js";
-import type {
-  ExperimentResult,
-  CandidateOverride,
-} from "./model-adaptation-types.js";
+import type { ExperimentResult, CandidateOverride } from "./model-adaptation-types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeExperiment(
-  overrides?: Partial<ExperimentResult>,
-): ExperimentResult {
+function makeExperiment(overrides?: Partial<ExperimentResult>): ExperimentResult {
   return {
     id: "exp_test1",
     overrideId: "ovr_test1",
@@ -32,9 +27,7 @@ function makeExperiment(
   };
 }
 
-function makeOverride(
-  overrides?: Partial<CandidateOverride>,
-): CandidateOverride {
+function makeOverride(overrides?: Partial<CandidateOverride>): CandidateOverride {
   return {
     id: "ovr_test1",
     provider: "anthropic",
@@ -195,9 +188,7 @@ describe("shouldRollback", () => {
   });
 
   it("triggers on control regression", () => {
-    const experiments = [
-      makeExperiment({ controlRegression: true }),
-    ];
+    const experiments = [makeExperiment({ controlRegression: true })];
     const result = shouldRollback(experiments);
 
     expect(result.shouldRollback).toBe(true);

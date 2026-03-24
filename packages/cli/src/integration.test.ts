@@ -132,7 +132,7 @@ describe("CLI Integration", () => {
         currentPlanId: null,
         planExecutionInProgress: false,
         planExecutionResult: null,
-    approvalMode: "default",
+        approvalMode: "default",
         theme: "default",
       };
 
@@ -191,7 +191,7 @@ describe("CLI Integration", () => {
         currentPlanId: null,
         planExecutionInProgress: false,
         planExecutionResult: null,
-    approvalMode: "default",
+        approvalMode: "default",
         theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
@@ -253,7 +253,7 @@ describe("CLI Integration", () => {
         currentPlanId: null,
         planExecutionInProgress: false,
         planExecutionResult: null,
-    approvalMode: "default",
+        approvalMode: "default",
         theme: "default",
       };
 
