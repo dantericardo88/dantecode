@@ -1,3 +1,6 @@
+> **CI STATUS**: Live readiness state is in `artifacts/readiness/current-readiness.json`.
+> Run `npm run release:generate` to update. Scores below are targets, not verified CI state.
+
 # DanteCode Scoring Framework
 
 This document defines the metrics used to evaluate DanteCode's readiness for external users. All scores are evidence-backed — a score without evidence is a 0.

@@ -1,6 +1,8 @@
 # PLAN.md - DanteCode Public OSS v1 Ship Plan
 
-**Date:** 2026-03-16  
+> **CI Status:** Live readiness state: `artifacts/readiness/current-readiness.json` — run `npm run release:generate` to update.
+
+**Date:** 2026-03-16
 **Target:** Public OSS v1
 
 ## Ship target

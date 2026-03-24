@@ -10,7 +10,7 @@ vi.mock("node:util", () => ({
   promisify: (fn: unknown) => {
     return async (...args: unknown[]) => {
       return new Promise((resolve, reject) => {
-        (fn as Function)(...args, (err: Error | null, result: unknown) => {
+        (fn as (...callArgs: unknown[]) => void)(...args, (err: Error | null, result: unknown) => {
           if (err) reject(err);
           else resolve(result);
         });
@@ -44,7 +44,7 @@ describe("GitBridge", () => {
   it("readContext returns a GitContext object", async () => {
     const { exec } = await import("node:child_process");
     const mockExec = exec as unknown as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: Function) => {
+    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: ((err: Error | null, result: unknown) => void)) => {
       if (cb) cb(null, { stdout: "main\n", stderr: "" });
       return {};
     });
@@ -61,7 +61,7 @@ describe("GitBridge", () => {
   it("readContext handles git failures gracefully", async () => {
     const { exec } = await import("node:child_process");
     const mockExec = exec as unknown as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: Function) => {
+    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: ((err: Error | null, result: unknown) => void)) => {
       if (cb) cb(new Error("not a git repo"), { stdout: "", stderr: "" });
       return {};
     });
@@ -75,7 +75,7 @@ describe("GitBridge", () => {
   it("enrichTrailEvent returns partial provenance", async () => {
     const { exec } = await import("node:child_process");
     const mockExec = exec as unknown as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: Function) => {
+    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: ((err: Error | null, result: unknown) => void)) => {
       if (cb) cb(null, { stdout: "feat/test\n", stderr: "" });
       return {};
     });
@@ -87,7 +87,7 @@ describe("GitBridge", () => {
   it("fileDiff returns empty string when file has no changes", async () => {
     const { exec } = await import("node:child_process");
     const mockExec = exec as unknown as ReturnType<typeof vi.fn>;
-    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: Function) => {
+    mockExec.mockImplementation((_cmd: string, _opts: object, cb?: ((err: Error | null, result: unknown) => void)) => {
       if (cb) cb(null, { stdout: "", stderr: "" });
       return {};
     });

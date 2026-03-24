@@ -1,6 +1,6 @@
 {
   "name": "dantecode",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "Portable, model-agnostic skill runtime and coding agent with DanteForge verification",
@@ -34,6 +34,9 @@
     "release:check": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:coverage && npm run smoke:cli && npm run smoke:install && npm run smoke:skill-import && npm run smoke:external && npm run publish:dry-run",
     "release:check:strict": "npm run release:check",
     "release:gate": "node scripts/release-check.mjs",
+    "release:generate": "node scripts/release/generate-readiness.mjs",
+    "release:assert": "node scripts/release/assert-readiness.mjs",
+    "generate:samples": "node scripts/generate-verification-samples.mjs",
     "check:anti-stub": "node scripts/anti-stub-scan.mjs",
     "check:cli-smoke": "node scripts/cli-smoke.mjs",
     "cli": "node packages/cli/dist/index.js",

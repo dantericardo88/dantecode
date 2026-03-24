@@ -5,8 +5,6 @@ import {
   shouldTruncateToolOutput,
   getBudgetTier,
 } from "./context-budget.js";
-import { estimateMessageTokens } from "./token-counter.js";
-
 // Helper: generate content that produces a known number of tokens.
 // estimateTokens uses word-based: ~1.3 tokens/word. So 1000 words ≈ 1300 tokens.
 function makeWords(n: number): string {

@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/ux-polish",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Shared UX/Polish engine for DanteCode — rich rendering, progress, onboarding, theming, and accessibility across CLI/REPL/VS Code",
   "license": "MIT",
   "repository": {
@@ -40,8 +40,8 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/core": "1.0.0",
-    "@dantecode/config-types": "1.0.0"
+    "@dantecode/core": "0.9.0",
+    "@dantecode/config-types": "0.9.0"
   },
   "publishConfig": {
     "access": "public"

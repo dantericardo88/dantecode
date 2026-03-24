@@ -303,6 +303,65 @@ addCheck(
   "",
 );
 
+// Readiness artifact check — reads generated truth from current-readiness.json
+const readinessPath = join(repoRoot, "artifacts", "readiness", "current-readiness.json");
+let readinessStatus = "BLOCKER";
+let readinessMessage = "artifacts/readiness/current-readiness.json not found.";
+let readinessNote =
+  "Run `npm run release:generate` (with GATE_* env vars from CI) to generate.";
+let readinessAction = "Run `npm run release:generate` after CI jobs complete.";
+
+if (existsSync(readinessPath)) {
+  try {
+    const readiness = JSON.parse(readFileSync(readinessPath, "utf8"));
+    const s = readiness.status;
+    const sha = String(readiness.commitSha ?? "").slice(0, 12);
+    if (s === "public-ready") {
+      readinessStatus = "READY";
+      readinessMessage = `Readiness: public-ready (commit ${sha}).`;
+      readinessNote = "All gates pass. Safe to publish.";
+      readinessAction =
+        "Run `npm run release:doctor --strict` to confirm blockers are zero before publishing.";
+    } else if (s === "private-ready") {
+      readinessStatus = "ACTION";
+      readinessMessage = `Readiness: private-ready (commit ${sha}).`;
+      readinessNote = "Local gates pass. Live provider and publish dry-run still pending.";
+      readinessAction =
+        "Run live provider smoke and publish dry-run, then `npm run release:generate` to update.";
+    } else if (s === "local-green-external-pending") {
+      readinessStatus = "ACTION";
+      readinessMessage = `Readiness: local-green / external-pending (commit ${sha}).`;
+      readinessNote = "Local gates green. External gates not yet run by CI.";
+      readinessAction =
+        "Push to CI and let the update-readiness job run all gate checks.";
+    } else {
+      readinessStatus = "BLOCKER";
+      const blockerList = Array.isArray(readiness.blockers)
+        ? readiness.blockers.join("; ")
+        : "see artifacts/readiness/current-readiness.json";
+      readinessMessage = `Readiness: blocked — ${blockerList}`;
+      readinessNote = "One or more CI gates failed. Fix blockers before releasing.";
+      readinessAction =
+        "Fix failing gates, rerun CI, then `npm run release:generate` to update.";
+    }
+  } catch {
+    readinessStatus = "BLOCKER";
+    readinessMessage = "artifacts/readiness/current-readiness.json is malformed.";
+    readinessNote = "The readiness artifact could not be parsed.";
+    readinessAction =
+      "Delete artifacts/readiness/current-readiness.json and rerun `npm run release:generate`.";
+  }
+}
+
+addCheck(
+  checks,
+  "Artifacts",
+  readinessStatus,
+  readinessMessage,
+  readinessNote,
+  readinessAction,
+);
+
 const detectedProviders = detectProviderState();
 addCheck(
   checks,

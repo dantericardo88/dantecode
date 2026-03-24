@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/web-extractor",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Production-grade, intelligent page analysis and extraction engine for DanteCode",
   "license": "MIT",
   "type": "module",
@@ -18,8 +18,8 @@
     "test": "vitest run --config ../../vitest.package.config.ts"
   },
   "dependencies": {
-    "@dantecode/core": "1.0.0",
-    "@dantecode/runtime-spine": "1.0.0",
+    "@dantecode/core": "0.9.0",
+    "@dantecode/runtime-spine": "0.9.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

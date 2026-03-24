@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/mcp",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "MCP protocol client and server for DanteCode — connect to external tools and expose DanteForge as MCP",
   "license": "MIT",
   "repository": {
@@ -40,14 +40,14 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
-    "@dantecode/danteforge": "1.0.0",
-    "@dantecode/git-engine": "1.0.0",
-    "@dantecode/runtime-spine": "1.0.0",
-    "@dantecode/web-extractor": "1.0.0",
-    "@dantecode/web-research": "1.0.0",
-    "@dantecode/agent-orchestrator": "1.0.0",
+    "@dantecode/config-types": "0.9.0",
+    "@dantecode/core": "0.9.0",
+    "@dantecode/danteforge": "0.9.0",
+    "@dantecode/git-engine": "0.9.0",
+    "@dantecode/runtime-spine": "0.9.0",
+    "@dantecode/web-extractor": "0.9.0",
+    "@dantecode/web-research": "0.9.0",
+    "@dantecode/agent-orchestrator": "0.9.0",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "zod": "^3.24.0"
   },

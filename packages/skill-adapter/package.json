@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/skill-adapter",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Skill adapter for importing and wrapping external AI coding agent skills",
   "license": "MIT",
   "repository": {
@@ -38,9 +38,9 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
-    "@dantecode/danteforge": "1.0.0",
+    "@dantecode/config-types": "0.9.0",
+    "@dantecode/core": "0.9.0",
+    "@dantecode/danteforge": "0.9.0",
     "yaml": "^2.6.0"
   },
   "publishConfig": {

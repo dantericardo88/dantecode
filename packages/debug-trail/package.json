@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/debug-trail",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Always-on, immutable, queryable forensic debug spine for DanteCode agents",
   "license": "MIT",
   "repository": {
@@ -40,9 +40,9 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
-    "@dantecode/evidence-chain": "1.0.0"
+    "@dantecode/config-types": "0.9.0",
+    "@dantecode/core": "0.9.0",
+    "@dantecode/evidence-chain": "0.9.0"
   },
   "publishConfig": {
     "access": "public"

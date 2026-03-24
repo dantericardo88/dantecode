@@ -73,6 +73,8 @@ interface ParsedArgs {
   fearSetBlockOnNoGo: boolean;
   /** --name / -n — human-readable name for this session */
   sessionName: string | undefined;
+  /** --plan-first: generate and approve a plan before executing */
+  planFirst: boolean;
 }
 
 /**
@@ -102,6 +104,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     resume: false,
     fearSetBlockOnNoGo: false,
     sessionName: undefined,
+    planFirst: false,
   };
 
   const commands = new Set([
@@ -210,6 +213,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--fearset-block-on-nogo") {
       result.fearSetBlockOnNoGo = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--plan-first") {
+      result.planFirst = true;
       i += 1;
       continue;
     }
@@ -347,13 +356,14 @@ async function main(): Promise<void> {
     resumeFromLastSession: parsed.resume,
     fearSetBlockOnNoGo: parsed.fearSetBlockOnNoGo,
     sessionName: parsed.sessionName,
+    planFirst: parsed.planFirst,
   };
 
   // Route to the appropriate command
   if (parsed.command) {
     switch (parsed.command) {
       case "init":
-        await runInitCommand(projectRoot);
+        await runInitCommand(projectRoot, parsed.subArgs.includes("--force"));
         return;
       case "skills":
         await runSkillsCommand(parsed.subArgs, projectRoot);

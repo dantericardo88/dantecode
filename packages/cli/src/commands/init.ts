@@ -237,6 +237,15 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
       process.stdout.write(
         `${GREEN}No API keys found, but ollama detected on PATH. Using ${providerDefaults.modelId} as default.${RESET}\n`,
       );
+    } else if (process.env["DANTECODE_NONINTERACTIVE"] === "1") {
+      // Non-interactive mode (smoke tests, CI without credentials) — proceed
+      // without a live provider. STATE.yaml is written with ollama defaults as a
+      // harmless placeholder. The CLI will not make real API calls in this mode.
+      selectedProvider = "ollama";
+      providerDefaults = PROVIDER_DEFAULTS["ollama"]!;
+      process.stdout.write(
+        `${YELLOW}No API keys found (non-interactive mode). Writing STATE.yaml with placeholder provider.${RESET}\n`,
+      );
     } else {
       process.stderr.write(`${RED}No API keys found.${RESET}\n\n`);
       process.stderr.write(`Set one of the following environment variables:\n\n`);

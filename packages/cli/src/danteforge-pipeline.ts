@@ -166,3 +166,19 @@ export function getWrittenFilePath(
   }
   return null;
 }
+
+/**
+ * Returns the file path for ANY Write/Edit tool call, regardless of extension.
+ * Used for tracking all file modifications (config files, JSON, YAML, etc.)
+ * as opposed to getWrittenFilePath which only tracks code files for DanteForge PDSE.
+ */
+export function getAllWrittenFilePath(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): string | null {
+  if (toolName === "Write" || toolName === "Edit") {
+    const filePath = toolInput["file_path"] as string | undefined;
+    return filePath ?? null;
+  }
+  return null;
+}

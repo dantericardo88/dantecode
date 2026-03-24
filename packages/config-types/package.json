@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/config-types",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Shared TypeScript type definitions for DanteCode configuration",
   "license": "MIT",
   "repository": {

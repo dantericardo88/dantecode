@@ -1,0 +1,26 @@
+{
+  "file": "packages/core/src/autoforge-checkpoint.ts",
+  "note": "Real production file.",
+  "generatedAt": "2026-03-24T22:24:12.087Z",
+  "passed": true,
+  "pdseScore": 100,
+  "antiStub": {
+    "passed": true,
+    "hardViolations": 0,
+    "softViolations": 0
+  },
+  "constitution": {
+    "passed": true,
+    "criticalCount": 0,
+    "warningCount": 0
+  },
+  "pdse": {
+    "overall": 100,
+    "completeness": 100,
+    "correctness": 100,
+    "clarity": 100,
+    "consistency": 100,
+    "passedGate": true,
+    "scoredBy": "local-heuristic"
+  }
+}

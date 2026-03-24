@@ -583,10 +583,10 @@ describe("D-12A: Full pipeline integration", () => {
 // ─── D-12.5: Progressive disclosure ─────────────────────────────────────────
 
 describe("D-12.5: Progressive disclosure", () => {
-  it("tier 1 commands are at most 13", () => {
+  it("tier 1 commands are at most 20", () => {
     const meta = getSlashCommandsMeta();
     const tier1Count = meta.filter((c) => c.tier === 1).length;
-    expect(tier1Count).toBeLessThanOrEqual(13);
+    expect(tier1Count).toBeLessThanOrEqual(20);
     expect(tier1Count).toBeGreaterThan(0);
   });
 

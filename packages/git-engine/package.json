@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/git-engine",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Git operations engine — commits, diffs, worktrees, and repo mapping for DanteCode",
   "license": "MIT",
   "repository": {
@@ -38,9 +38,9 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
-    "@dantecode/danteforge": "1.0.0",
+    "@dantecode/config-types": "0.9.0",
+    "@dantecode/core": "0.9.0",
+    "@dantecode/danteforge": "0.9.0",
     "yaml": "^2.7.0"
   },
   "publishConfig": {

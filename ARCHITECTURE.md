@@ -1,5 +1,7 @@
 # DanteCode Architecture
 
+> **CI Status:** Live readiness: `artifacts/readiness/current-readiness.json` — run `npm run release:generate` to update.
+
 This document covers the internal architecture of DanteCode. For quickstart and usage, see [README.md](README.md).
 
 ## Architecture Diagram

@@ -103,3 +103,30 @@ jobs:
       - run: npm run build
       - name: Run anti-stub scanner on own source
         run: node scripts/anti-stub-check.cjs
+
+  update-readiness:
+    runs-on: ubuntu-24.04
+    needs: [format, typecheck, lint, test, windows-smoke, anti-stub-self-check]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Generate readiness artifact
+        env:
+          GATE_TYPECHECK:    ${{ needs.typecheck.result == 'success' && 'pass' || 'fail' }}
+          GATE_LINT:         ${{ needs.lint.result == 'success' && 'pass' || 'fail' }}
+          GATE_TEST:         ${{ needs.test.result == 'success' && 'pass' || 'fail' }}
+          GATE_BUILD:        ${{ needs.test.result == 'success' && 'pass' || 'fail' }}
+          GATE_WINDOWS_SMOKE: ${{ needs.windows-smoke.result == 'success' && 'pass' || 'fail' }}
+          GATE_ANTI_STUB:    ${{ needs.anti-stub-self-check.result == 'success' && 'pass' || 'fail' }}
+        run: node scripts/release/generate-readiness.mjs || true
+      - name: Upload readiness artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: readiness-report
+          path: artifacts/readiness/current-readiness.json
+          retention-days: 30

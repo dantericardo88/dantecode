@@ -37,7 +37,7 @@ function runNode(args, cwd) {
   const result = spawnSync(process.execPath, args, {
     cwd,
     encoding: "utf8",
-    env: process.env,
+    env: { ...process.env, DANTECODE_NONINTERACTIVE: "1" },
   });
 
   const combinedOutput = `${result.stdout ?? ""}${result.stderr ?? ""}`;

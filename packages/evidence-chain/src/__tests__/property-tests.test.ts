@@ -96,6 +96,9 @@ describe("stableJSON — property-based", () => {
   });
 
   it("is identical regardless of key insertion order", () => {
+    // stableJSON contract: callers must provide unique keys per object.
+    // We normalise duplicate keys (last-write-wins via Map) before building
+    // objA/objB so the comparison is meaningful and deterministic.
     fc.assert(
       fc.property(
         fc.array(
@@ -106,11 +109,16 @@ describe("stableJSON — property-based", () => {
           { minLength: 2, maxLength: 8 },
         ),
         (entries) => {
+          // Deduplicate: last occurrence wins for both orderings
+          const unique = new Map<string, unknown>(entries);
+          fc.pre(unique.size >= 2); // need ≥2 distinct keys to test ordering
+          const uniqueEntries = [...unique.entries()];
+
           const objA: Record<string, unknown> = {};
-          for (const [k, v] of entries) objA[k] = v;
+          for (const [k, v] of uniqueEntries) objA[k] = v;
 
           const objB: Record<string, unknown> = {};
-          for (const [k, v] of [...entries].reverse()) objB[k] = v;
+          for (const [k, v] of [...uniqueEntries].reverse()) objB[k] = v;
 
           expect(stableJSON(objA)).toBe(stableJSON(objB));
         },

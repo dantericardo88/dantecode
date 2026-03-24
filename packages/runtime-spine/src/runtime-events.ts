@@ -50,6 +50,14 @@ export const RuntimeEventKindSchema = z.enum([
   "fearset.sandbox.simulated",
   "fearset.lesson.distilled",
   "fearset.stopped",
+  // Plan mode events
+  "plan.generated",
+  "plan.approved",
+  "plan.rejected",
+  "plan.step.started",
+  "plan.step.completed",
+  "plan.step.failed",
+  "plan.execution.completed",
 ]);
 
 export type RuntimeEventKind = z.infer<typeof RuntimeEventKindSchema>;

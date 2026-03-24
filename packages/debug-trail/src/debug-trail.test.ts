@@ -1591,7 +1591,6 @@ describe("Query Engine", () => {
 
       // 100 partial streams — if handles leaked, OS would reject around fd limit.
       for (let i = 0; i < 100; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         for await (const _event of engine.streamEvents()) {
           break; // early exit — this is the path that previously leaked file handles
         }

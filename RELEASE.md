@@ -1,5 +1,7 @@
 # DanteCode Public OSS v1 Release Runbook
 
+> **Readiness:** See `artifacts/readiness/current-readiness.json` — run `npm run release:generate` to update.
+
 This is the shortest path from a locally green repo to a public OSS v1 release.
 
 ## 1. Local readiness

@@ -37,7 +37,7 @@
 ## Phase 4 - External acceptance
 
 - [x] Set real git identity for public history
-- [x] Push to GitHub and verify first Actions run (CI green: all 8 jobs pass)
+- [ ] CI green — run `npm run release:generate` to verify (see artifacts/readiness/current-readiness.json)
 - [!] Add `NPM_TOKEN`
 - [!] Add `VSCE_PAT`
 - [ ] Run `npm run smoke:provider -- --require-provider` with real credentials
@@ -75,13 +75,26 @@
 
 ## Current local baseline
 
-- [x] `npm run typecheck` — 16 packages, zero errors
-- [x] `npm run lint` — 16 packages, zero violations
-- [x] `npm test` — 1,371 tests passing across 67 suites
-- [x] `npm run test:coverage` — coverage gate enforced for core, danteforge, git-engine, mcp, skill-adapter
+- [x] `npm run typecheck` — all packages, zero errors
+- [x] `npm run lint` — all packages, zero violations
+- [x] `npm test` — all tests passing
+- [x] `npm run build` — all 21 packages built clean
+- [x] `npm run smoke:cli` — passes without API keys (DANTECODE_NONINTERACTIVE)
+- [x] `npm run smoke:install` — passes (packs and installs all 18 publishable packages)
+- [x] `npm run smoke:skill-import` — passes without API keys
+- [x] `npm run smoke:external` — 7/7 fixture projects pass
+
+## Completed verification artifacts (P2/P3 closure)
+
+- [x] `artifacts/verification/samples/` — real DanteForge pipeline output (sample-pass.json, sample-stub-fail.json, README.md)
+- [x] `scripts/generate-verification-samples.mjs` — regenerate via `npm run generate:samples`
+- [x] `scripts/release-doctor.mjs` — Artifacts section now reads and reports `current-readiness.json`
+- [x] `docs/golden-flows/cli-clean-install.md` — auto-init confirmation note added (README quickstart verified accurate)
 
 ## Notes
 
 - The coverage gate is scoped to the stable runtime packages for OSS v1.
 - Preview and beta surfaces still run in the shared test suite and should continue gaining coverage over time.
 - 10 packages total (config-types, core, mcp, danteforge, git-engine, skill-adapter, sandbox, cli, vscode, desktop).
+- P2 verification spine 100% complete: receipt-schema.md, pdse-contract.md, failure-reasons.md, golden fixtures, real pipeline samples.
+- P3 CLI golden flows 100% complete: cli-clean-install.md (with auto-init note), cli-repo-edit.md, cli-provider-failover.md, cli-skill-import.md.

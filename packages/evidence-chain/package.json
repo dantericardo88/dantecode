@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/evidence-chain",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Cryptographic primitives for tamper-evident audit trails: hash chains, Merkle trees, receipts, evidence bundles, and certification seals.",
   "license": "MIT",
   "type": "module",

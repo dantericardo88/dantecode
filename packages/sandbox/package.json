@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/sandbox",
-  "version": "1.0.0",
+  "version": "0.9.0",
   "description": "Sandboxed code execution with Docker isolation and audit logging",
   "license": "MIT",
   "repository": {
@@ -38,8 +38,8 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "1.0.0",
-    "@dantecode/core": "1.0.0",
+    "@dantecode/config-types": "0.9.0",
+    "@dantecode/core": "0.9.0",
     "dockerode": "^4.0.0"
   },
   "publishConfig": {

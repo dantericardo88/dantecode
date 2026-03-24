@@ -87,7 +87,10 @@ export interface CliToolExecutionContext {
    */
   sandboxBridge?: SandboxBridge;
   /** Memory orchestrator for the Memory tool (set when memory-engine is initialized). */
-  memoryOrchestrator?: { memoryStore: Function; memoryRecall: Function };
+  memoryOrchestrator?: {
+    memoryStore: (key: string, value: unknown, scope: "session" | "project" | "global") => Promise<void>;
+    memoryRecall: (query: string, limit: number) => Promise<Array<{ key: string; value: string; score?: number }>>;
+  };
   /** Secrets scanner for gating memory store operations. */
   secretsScanner?: { scan: (text: string) => { clean: boolean; findings?: Array<{ type: string }> } };
 }
