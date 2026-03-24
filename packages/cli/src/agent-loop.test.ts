@@ -476,6 +476,9 @@ vi.mock("@dantecode/core", () => {
       getAdaptiveBias() {
         return 0;
       }
+      getStepCount() {
+        return 0;
+      }
     },
     // AutonomyEngine — Lane 1 wiring
     AutonomyEngine: class MockAutonomyEngine {
@@ -527,6 +530,26 @@ vi.mock("@dantecode/core", () => {
     getCostMultiplier: vi.fn((_modelId: string) => 1.0),
     // detectSelfImprovementContext — called when isUsingFallback() returns true
     detectSelfImprovementContext: vi.fn((_prompt: string, _root: string, _opts?: unknown) => null),
+    // PRQualityChecker — advisory PR quality scoring in danteforge-pipeline
+    PRQualityChecker: class MockPRQualityChecker {
+      check() { return { size: { linesAdded: 0, linesRemoved: 0, isLarge: false }, antiStubViolations: [], conventionViolations: [], testsPassed: true, score: 85, blocked: false }; }
+      score(report: { score: number }) { return report.score; }
+      shouldBlock() { return false; }
+    },
+    // TaskComplexityRouter — informational complexity classification
+    TaskComplexityRouter: class MockTaskComplexityRouter {
+      computeComplexity() { return 25; }
+      classify() { return "standard"; }
+      route() { return { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 }; }
+      logRoutingDecision() {}
+      getDecisions() { return []; }
+      routeTask() {
+        return {
+          model: { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 },
+          decision: { taskId: "", complexity: 25, tier: "standard", selectedModel: "mock", reason: "" },
+        };
+      }
+    },
   };
 });
 

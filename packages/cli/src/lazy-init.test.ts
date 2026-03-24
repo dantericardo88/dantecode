@@ -112,6 +112,7 @@ function makeMinimalState(projectRoot: string): ReplState {
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    verificationTrendTracker: null,
     reasoningOverrideSession: false,
     theme: "default",
   } as unknown as ReplState;

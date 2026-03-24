@@ -267,6 +267,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     gaslight: null, // lazy-init: created on first prompt or /gaslight command
     memoryOrchestrator: null, // lazy-init: created on first /memory or /compact command
     modelAdaptationStore: null, // D-12: lazy-init below
+    verificationTrendTracker: null, // lazy-init: created on first PDSE recording or /trend command
     reasoningOverrideSession: false,
     theme: savedTheme,
   };

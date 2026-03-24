@@ -144,6 +144,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    verificationTrendTracker: null,
     reasoningOverrideSession: false,
     theme: "default",
   };

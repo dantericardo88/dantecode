@@ -23,6 +23,7 @@ import {
   synthesizeConfidence,
   observeAndAdapt,
   applyOverrides,
+  TaskComplexityRouter,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -437,6 +438,24 @@ async function _runAgentLoopCore(
     metricsCollector,
   } = await buildPreLoopContext(durablePrompt, session, config, messages);
   let currentRoundTier: import("@dantecode/core").ReasoningTier = "quick";
+
+  // ---- Feature: Task complexity classification (informational) ----
+  const taskComplexityRouter = new TaskComplexityRouter();
+  const taskSignals = {
+    tokenCount: durablePrompt.length,
+    fileCount: session.activeFiles?.length ?? 0,
+    reasoningDepth: reasoningChain?.getStepCount() ?? 0,
+    securitySensitivity: 0,
+    hasCodeGeneration: true,
+    hasMultiFileEdit: (session.activeFiles?.length ?? 0) > 1,
+  };
+  const complexityTier = taskComplexityRouter.classify(taskSignals);
+  if (config.verbose) {
+    const complexityScore = taskComplexityRouter.computeComplexity(taskSignals);
+    emitOrWrite(
+      `${DIM}[complexity] tier=${complexityTier} score=${complexityScore}${RESET}\n`,
+    );
+  }
 
   // ---- Feature: Pivot logic ----
   // Track consecutive failures with similar error signatures for strategy change.
@@ -1475,7 +1494,7 @@ async function _runAgentLoopCore(
     for (const filePath of touchedFiles) {
       try {
         const content = await readFile(filePath, "utf-8");
-        const { passed, summary } = await runDanteForge(
+        const { passed, summary, pdseScore } = await runDanteForge(
           content,
           filePath,
           session.projectRoot,
@@ -1488,6 +1507,11 @@ async function _runAgentLoopCore(
           evidenceTracker.recordPdseScore(filePath, passed, summary);
         } catch {
           // Evidence recording is non-fatal
+        }
+
+        // Trend tracker: record PDSE score for regression detection
+        if (config.replState?.verificationTrendTracker) {
+          config.replState.verificationTrendTracker.record("pdse", pdseScore);
         }
 
         if (passed) {
