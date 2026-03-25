@@ -560,29 +560,34 @@ vi.mock("@dantecode/core", () => {
     },
     // TaskComplexityRouter — informational complexity classification
     TaskComplexityRouter: class MockTaskComplexityRouter {
-      computeComplexity() {
-        return 25;
-      }
       classify() {
-        return "standard";
-      }
-      route() {
-        return { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 };
-      }
-      logRoutingDecision() {}
-      getDecisions() {
-        return [];
-      }
-      routeTask() {
         return {
-          model: { modelId: "mock", provider: "mock", tier: "standard", costPerToken: 1 },
-          decision: {
-            taskId: "",
-            complexity: 25,
-            tier: "standard",
-            selectedModel: "mock",
-            reason: "",
+          complexity: "standard",
+          confidence: 0.8,
+          signals: {
+            promptTokens: 100,
+            fileCount: 1,
+            hasReasoning: false,
+            hasSecurity: false,
+            hasMultiFile: false,
+            estimatedOutputTokens: 50,
           },
+          recommendedModel: "claude-sonnet-4-6",
+          rationale: "mock",
+          evidenceLogged: false,
+        };
+      }
+      getModel() {
+        return "claude-sonnet-4-6";
+      }
+      extractSignals() {
+        return {
+          promptTokens: 100,
+          fileCount: 1,
+          hasReasoning: false,
+          hasSecurity: false,
+          hasMultiFile: false,
+          estimatedOutputTokens: 50,
         };
       }
     },

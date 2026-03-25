@@ -5,21 +5,55 @@
 // ============================================================================
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { TaskComplexityRouter, type ModelOption } from "../../task-complexity-router.js";
+import {
+  TaskComplexityRouter,
+  type ComplexitySignals,
+  type ComplexityDecision,
+} from "../../task-complexity-router.js";
 import { FleetBudget } from "../../council/fleet-budget.js";
 
-describe("E2E: Budget Enforcement (real modules)", () => {
-  const MODELS: ModelOption[] = [
-    { modelId: "mini", provider: "grok", tier: "simple", costPerToken: 0.3 },
-    { modelId: "standard", provider: "grok", tier: "standard", costPerToken: 3.0 },
-    { modelId: "opus", provider: "anthropic", tier: "complex", costPerToken: 15.0 },
-  ];
+// Shim: map new ComplexityDecision to a shape compatible with old e2e assertions
+function routeTask(
+  router: TaskComplexityRouter,
+  _taskId: string,
+  oldSignals: {
+    tokenCount: number;
+    fileCount: number;
+    reasoningDepth: number;
+    securitySensitivity: number;
+    hasCodeGeneration: boolean;
+    hasMultiFileEdit: boolean;
+  },
+): { model: { modelId: string; tier: string }; decision: ComplexityDecision } {
+  const signals: ComplexitySignals = {
+    promptTokens: oldSignals.tokenCount * 10, // scale up for realistic thresholds
+    fileCount: oldSignals.fileCount,
+    hasReasoning: oldSignals.reasoningDepth > 30,
+    hasSecurity: oldSignals.securitySensitivity > 30,
+    hasMultiFile: oldSignals.hasMultiFileEdit,
+    estimatedOutputTokens: oldSignals.tokenCount * 5,
+  };
+  const decision = router.classify(signals);
+  return {
+    model: { modelId: router.getModel(decision.complexity), tier: decision.complexity },
+    decision,
+  };
+}
 
+describe("E2E: Budget Enforcement (real modules)", () => {
   let router: TaskComplexityRouter;
   let budget: FleetBudget;
 
+  // Track routing decisions manually (shim replaces old logRoutingDecision)
+  let decisions: ComplexityDecision[];
+
   beforeEach(() => {
-    router = new TaskComplexityRouter();
+    router = new TaskComplexityRouter({
+      simpleModel: "mini",
+      standardModel: "standard",
+      complexModel: "opus",
+    });
+    decisions = [];
   });
 
   it("routes simple tasks to cheap models and tracks budget consumption", () => {
@@ -30,21 +64,18 @@ describe("E2E: Budget Enforcement (real modules)", () => {
 
     // Run 5 simple tasks, each consuming 2000 tokens
     for (let i = 0; i < 5; i++) {
-      const { model, decision } = router.routeTask(
-        `simple-${i}`,
-        {
-          tokenCount: 10,
-          fileCount: 1,
-          reasoningDepth: 0,
-          securitySensitivity: 0,
-          hasCodeGeneration: false,
-          hasMultiFileEdit: false,
-        },
-        MODELS,
-      );
+      const { model, decision } = routeTask(router, `simple-${i}`, {
+        tokenCount: 10,
+        fileCount: 1,
+        reasoningDepth: 0,
+        securitySensitivity: 0,
+        hasCodeGeneration: false,
+        hasMultiFileEdit: false,
+      });
+      decisions.push(decision);
 
       expect(model.modelId).toBe("mini");
-      expect(decision.tier).toBe("simple");
+      expect(decision.complexity).toBe("simple");
 
       // Record cumulative tokens for agent
       const allowed = budget.record(`agent-${i}`, 2000, 0.6);
@@ -60,7 +91,7 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     expect(budget.isWarning()).toBe(false);
 
     // Verify all routing decisions logged
-    expect(router.getDecisions()).toHaveLength(5);
+    expect(decisions).toHaveLength(5);
   });
 
   it("FleetBudget warns at threshold and tracks per-agent usage", () => {
@@ -212,9 +243,10 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     let cumulativeTokens = 0;
     for (const task of taskSequence) {
       // Route the task
-      const { model, decision } = router.routeTask(task.id, task.signals, MODELS);
+      const { model, decision } = routeTask(router, task.id, task.signals);
+      decisions.push(decision);
       expect(model).toBeDefined();
-      expect(decision.tier).toBeDefined();
+      expect(decision.complexity).toBeDefined();
 
       // Track budget
       cumulativeTokens += task.tokensUsed;
@@ -237,10 +269,9 @@ describe("E2E: Budget Enforcement (real modules)", () => {
     expect(budget.isWarning()).toBe(true);
 
     // Verify routing decisions capture the complexity gradient
-    const decisions = router.getDecisions();
     expect(decisions).toHaveLength(4); // All 4 were routed, even if t4 wasn't completed
-    expect(decisions[0]!.tier).toBe("simple");
-    expect(decisions[2]!.tier).toBe("complex");
+    expect(decisions[0]!.complexity).toBe("simple");
+    expect(decisions[2]!.complexity).toBe("complex");
 
     // After budget exhaustion, fleet budget shows correct state
     const report = budget.report();

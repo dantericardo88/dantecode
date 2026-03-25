@@ -5,7 +5,10 @@
 // ============================================================================
 
 import type { HashChain, HashChainBlock } from "./hash-chain.js";
-import { sha256, stableJSON } from "./types.js";
+import { sha256, stableJSON, hashDict } from "./types.js";
+import type { ReceiptChain } from "./receipt.js";
+import type { EvidenceBundleData } from "./evidence-bundle.js";
+import type { CertificationSeal } from "./evidence-sealer.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -48,6 +51,32 @@ export interface TamperReport {
   actualHash: string;
   /** Description of the tampering. */
   message: string;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// New API types (static method interface)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Result of static HashChain verification. */
+export interface VerificationResult {
+  valid: boolean;
+  blockCount: number;
+  genesisHash: string;
+  headHash: string;
+  /** Indices where chain links break (previousHash mismatch). */
+  gaps: number[];
+  /** Indices where stored hash does not match recomputed hash. */
+  tampered: number[];
+  verifiedAt: string;
+}
+
+/** Result of static ReceiptChain verification. */
+export interface ReceiptChainVerification {
+  valid: boolean;
+  receiptCount: number;
+  merkleRootValid: boolean;
+  proofValidations: Array<{ receiptId: string; valid: boolean }>;
+  verifiedAt: string;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -208,6 +237,122 @@ export class ChainVerifier {
     }
 
     return tampers;
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Static API — matches spec interface
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Verify a HashChain<T> from genesis to head.
+   * Returns gaps (link-break indices) and tampered (hash-mismatch indices).
+   */
+  static verifyHashChain<T>(chain: HashChain<T>): VerificationResult {
+    const entries = chain.getAllEntries();
+    const verifiedAt = new Date().toISOString();
+
+    if (entries.length === 0) {
+      return {
+        valid: true,
+        blockCount: 0,
+        genesisHash: "",
+        headHash: "",
+        gaps: [],
+        tampered: [],
+        verifiedAt,
+      };
+    }
+
+    const tampered: number[] = [];
+    const gaps: number[] = [];
+
+    for (let i = 0; i < entries.length; i++) {
+      const block = entries[i]!;
+      const recomputed = sha256(
+        stableJSON({
+          index: block.index,
+          timestamp: block.timestamp,
+          data: block.data,
+          previousHash: block.previousHash,
+        }),
+      );
+      if (block.hash !== recomputed) {
+        tampered.push(i);
+      }
+
+      if (i === 0) {
+        if (block.previousHash !== GENESIS_PREV_HASH) gaps.push(i);
+      } else {
+        const prev = entries[i - 1]!;
+        if (block.previousHash !== prev.hash) gaps.push(i);
+      }
+    }
+
+    return {
+      valid: tampered.length === 0 && gaps.length === 0,
+      blockCount: entries.length,
+      genesisHash: entries[0]!.hash,
+      headHash: entries[entries.length - 1]!.hash,
+      gaps,
+      tampered,
+      verifiedAt,
+    };
+  }
+
+  /**
+   * Verify a ReceiptChain — check merkle root validity and all proofs.
+   */
+  static verifyReceiptChain(chain: ReceiptChain): ReceiptChainVerification {
+    const verifiedAt = new Date().toISOString();
+    const receipts = chain.getAllReceipts();
+    const proofValidations: Array<{ receiptId: string; valid: boolean }> = [];
+
+    let merkleRootValid = true;
+    for (let i = 0; i < receipts.length; i++) {
+      const receipt = receipts[i]!;
+      const valid = chain.verify(i);
+      proofValidations.push({ receiptId: receipt.receiptId, valid });
+      if (!valid) merkleRootValid = false;
+    }
+
+    return {
+      valid: merkleRootValid,
+      receiptCount: receipts.length,
+      merkleRootValid,
+      proofValidations,
+      verifiedAt,
+    };
+  }
+
+  /**
+   * Verify an EvidenceBundle — check bundle hash matches evidence payload.
+   */
+  static verifyBundle(bundle: EvidenceBundleData): { valid: boolean; reason?: string } {
+    const expected = hashDict(bundle.evidence);
+    if (bundle.hash !== expected) {
+      return {
+        valid: false,
+        reason: `Bundle hash mismatch: expected ${expected.slice(0, 16)}..., got ${bundle.hash.slice(0, 16)}...`,
+      };
+    }
+    return { valid: true };
+  }
+
+  /**
+   * Verify a CertificationSeal — check seal hash integrity.
+   * Validates the sealHash field against the seal's own fields.
+   */
+  static verifySeal(seal: CertificationSeal): { valid: boolean; reason?: string } {
+    const expectedSealHash = sha256(
+      `${seal.sealId}:${seal.timestamp}:${seal.sessionId}:${seal.evidenceRootHash}:${seal.configHash}:${seal.metricsHash}`,
+    );
+    if (seal.sealHash !== expectedSealHash) {
+      return {
+        valid: false,
+        reason: `Seal hash mismatch: stored hash does not match recomputed hash from seal fields`,
+      };
+    }
+    return { valid: true };
   }
 
   // ──────────────────────────────────────────────────────────────────────────

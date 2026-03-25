@@ -1,226 +1,226 @@
 // ============================================================================
-// @dantecode/core — Durable Execution
-// In-memory checkpoint/recovery system for agent loop state.
-// Complements the disk-based EventSourcedCheckpointer with a lightweight
-// in-memory variant for fast checkpoint/resume within a single session.
+// @dantecode/core — Durable Execution Engine
+// Every agent-loop round is checkpointed. If the process crashes or is killed,
+// the next run can resume from the last checkpoint rather than starting over.
 // ============================================================================
 
-import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdir, readFile, unlink, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Serializable snapshot of agent execution state. */
-export interface ExecutionState {
-  /** Unique checkpoint identifier. */
-  checkpointId: string;
-  /** Current step number in the execution. */
-  stepNumber: number;
-  /** Description of the current task being worked on. */
-  currentTask: string;
-  /** Partial output accumulated so far (e.g. generated text chunks). */
-  partialOutput: string[];
-  /** Arbitrary memory state (task variables, intermediate results). */
-  memoryState: Record<string, unknown>;
-  /** History of tool calls made during this execution. */
-  toolCallHistory: Array<{
-    tool: string;
-    timestamp: number;
-    success: boolean;
-  }>;
-  /** Timestamp when this checkpoint was created (ms since epoch). */
-  createdAt: number;
+export interface ExecutionCheckpoint {
+  sessionId: string;
+  stepIndex: number;
+  totalSteps?: number;
+  completedSteps: string[];
+  partialOutput?: string;
+  savedAt: string;
+  projectRoot: string;
+}
+
+export interface DurableExecutionOptions {
+  sessionId: string;
+  projectRoot: string;
+  /** How many steps between checkpoints. Default: 1 (after every step). */
+  checkpointEveryN?: number;
+  /** Maximum retries per step. Default: 3. */
+  maxRetries?: number;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Constants
-// ────────────────────────────────────────────────────────────────────────────
-
-const DEFAULT_CHECKPOINT_INTERVAL = 5;
-
-// ────────────────────────────────────────────────────────────────────────────
-// DurableExecution
+// DurableExecutionEngine
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * In-memory checkpoint/recovery system for agent execution state.
+ * Checkpoint-based durable execution engine.
  *
- * Provides:
- * - Fast checkpoint creation with unique IDs
- * - Recovery by checkpoint ID or most recent
- * - Automatic cleanup of old checkpoints
- * - Interval-based checkpoint scheduling
- *
- * Supports optional disk persistence via `persistDir`. When set,
- * checkpoints are written to `{persistDir}/{checkpointId}.json` and
- * reloaded on construction (surviving process restarts).
+ * Persists progress to `.dantecode/checkpoints/{sessionId}.json` so that a
+ * crashed or killed process can resume from where it left off on the next run.
  */
-export class DurableExecution {
-  private checkpoints = new Map<string, ExecutionState>();
-  /** Ordered list of checkpoint IDs (oldest first). */
-  private order: string[] = [];
-  /** Optional directory for disk persistence. */
-  private readonly persistDir: string | undefined;
+export class DurableExecutionEngine {
+  private readonly sessionId: string;
+  private readonly projectRoot: string;
+  private readonly checkpointEveryN: number;
+  private readonly maxRetries: number;
 
-  constructor(options?: { persistDir?: string }) {
-    this.persistDir = options?.persistDir;
-    if (this.persistDir) {
-      this.loadFromDisk(this.persistDir);
-    }
+  constructor(options: DurableExecutionOptions) {
+    this.sessionId = options.sessionId;
+    this.projectRoot = options.projectRoot;
+    this.checkpointEveryN = options.checkpointEveryN ?? 1;
+    this.maxRetries = options.maxRetries ?? 3;
+  }
+
+  /** Absolute path to the checkpoint file for this session. */
+  getCheckpointPath(): string {
+    return join(this.projectRoot, ".dantecode", "checkpoints", `${this.sessionId}.json`);
   }
 
   /**
-   * Creates a checkpoint from the given execution state.
-   *
-   * Assigns a unique checkpoint ID and records the creation timestamp.
-   * Returns the checkpoint ID for later recovery.
+   * Saves a checkpoint to `.dantecode/checkpoints/{sessionId}.json`.
    */
-  checkpoint(state: Omit<ExecutionState, "checkpointId" | "createdAt">): string {
-    const checkpointId = `cp-${randomUUID().slice(0, 8)}`;
-    const fullState: ExecutionState = {
-      ...state,
-      checkpointId,
-      createdAt: Date.now(),
-      partialOutput: [...state.partialOutput],
-      toolCallHistory: state.toolCallHistory.map((t) => ({ ...t })),
-      memoryState: JSON.parse(JSON.stringify(state.memoryState)) as Record<string, unknown>,
+  async checkpoint(
+    stepIndex: number,
+    completedSteps: string[],
+    partialOutput?: string,
+  ): Promise<void> {
+    const checkpointPath = this.getCheckpointPath();
+    const dir = join(this.projectRoot, ".dantecode", "checkpoints");
+    await mkdir(dir, { recursive: true });
+
+    const data: ExecutionCheckpoint = {
+      sessionId: this.sessionId,
+      stepIndex,
+      completedSteps: [...completedSteps],
+      partialOutput,
+      savedAt: new Date().toISOString(),
+      projectRoot: this.projectRoot,
     };
 
-    this.checkpoints.set(checkpointId, fullState);
-    this.order.push(checkpointId);
-    this.writeToDisk(checkpointId, fullState);
-    return checkpointId;
+    await writeFile(checkpointPath, JSON.stringify(data, null, 2), "utf-8");
   }
 
   /**
-   * Recovers an execution state from a checkpoint.
+   * Loads the most recent checkpoint for this session.
+   * Returns null if no checkpoint exists.
+   */
+  async loadCheckpoint(): Promise<ExecutionCheckpoint | null> {
+    const checkpointPath = this.getCheckpointPath();
+    try {
+      const raw = await readFile(checkpointPath, "utf-8");
+      return JSON.parse(raw) as ExecutionCheckpoint;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Removes the checkpoint file for this session after successful completion.
+   */
+  async clearCheckpoint(): Promise<void> {
+    const checkpointPath = this.getCheckpointPath();
+    try {
+      await unlink(checkpointPath);
+    } catch {
+      // Non-fatal: file may not exist
+    }
+  }
+
+  /**
+   * Runs a multi-step execution with checkpoint-every-N-steps behavior.
    *
-   * @param checkpointId - The checkpoint ID returned by `checkpoint()`.
-   * @returns A deep copy of the execution state, or null if not found.
-   */
-  recover(checkpointId: string): ExecutionState | null {
-    const state = this.checkpoints.get(checkpointId);
-    if (!state) return null;
-
-    return {
-      ...state,
-      partialOutput: [...state.partialOutput],
-      toolCallHistory: state.toolCallHistory.map((t) => ({ ...t })),
-      memoryState: JSON.parse(JSON.stringify(state.memoryState)) as Record<string, unknown>,
-    };
-  }
-
-  /**
-   * Returns the most recent checkpoint, or null if none exist.
-   */
-  getLastCheckpoint(): ExecutionState | null {
-    if (this.order.length === 0) return null;
-    const lastId = this.order[this.order.length - 1]!;
-    return this.recover(lastId);
-  }
-
-  /**
-   * Removes checkpoints older than `maxAge` milliseconds.
+   * - If a checkpoint exists for this session, resumes from
+   *   `completedSteps.length` (skipping already-done steps).
+   * - Calls `onStep(index, name)` before each step.
+   * - Writes a checkpoint after every `checkpointEveryN` steps.
+   * - Always clears the checkpoint on successful completion.
    *
-   * @param maxAge - Maximum age in milliseconds. Checkpoints older than this are removed.
-   * @returns The number of checkpoints deleted.
+   * Returns an array of results (one per step). Steps resumed from a
+   * checkpoint return `undefined` cast to T for already-completed steps.
    */
-  cleanup(maxAge: number): number {
-    const cutoff = Date.now() - maxAge;
-    let deleted = 0;
+  async run<T>(
+    steps: Array<{ name: string; fn: () => Promise<T> }>,
+    onStep?: (index: number, name: string) => void,
+  ): Promise<T[]> {
+    const existingCheckpoint = await this.loadCheckpoint();
+    const startIndex = existingCheckpoint ? existingCheckpoint.completedSteps.length : 0;
+    const completedSteps: string[] = existingCheckpoint
+      ? [...existingCheckpoint.completedSteps]
+      : [];
 
-    const surviving: string[] = [];
-    for (const id of this.order) {
-      const state = this.checkpoints.get(id);
-      if (state && state.createdAt < cutoff) {
-        this.checkpoints.delete(id);
-        this.deleteFromDisk(id);
-        deleted++;
-      } else {
-        surviving.push(id);
+    // Pre-fill results for already-completed steps
+    const results: T[] = new Array<T>(startIndex).fill(undefined as unknown as T);
+
+    for (let i = startIndex; i < steps.length; i++) {
+      const step = steps[i]!;
+
+      if (onStep) {
+        onStep(i, step.name);
       }
-    }
 
-    this.order = surviving;
-    return deleted;
-  }
-
-  /**
-   * Determines whether a checkpoint should be taken at the given step.
-   *
-   * Returns true every `interval` steps (e.g. every 5th step by default).
-   *
-   * @param stepNumber - The current step number (1-based).
-   * @param interval - How often to checkpoint (default: 5).
-   */
-  shouldCheckpoint(stepNumber: number, interval?: number): boolean {
-    const n = interval ?? DEFAULT_CHECKPOINT_INTERVAL;
-    if (n <= 0) return false;
-    return stepNumber > 0 && stepNumber % n === 0;
-  }
-
-  /**
-   * Returns the total number of stored checkpoints.
-   */
-  size(): number {
-    return this.checkpoints.size;
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Disk persistence (optional)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  private writeToDisk(id: string, state: ExecutionState): void {
-    if (!this.persistDir) return;
-    try {
-      mkdirSync(this.persistDir, { recursive: true });
-      writeFileSync(join(this.persistDir, `${id}.json`), JSON.stringify(state), "utf-8");
-    } catch {
-      // Non-fatal: disk write failure does not break in-memory operation
-    }
-  }
-
-  private deleteFromDisk(id: string): void {
-    if (!this.persistDir) return;
-    try {
-      unlinkSync(join(this.persistDir, `${id}.json`));
-    } catch {
-      // Non-fatal
-    }
-  }
-
-  private loadFromDisk(dir: string): void {
-    try {
-      if (!existsSync(dir)) return;
-      const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-      const states: ExecutionState[] = [];
-      for (const file of files) {
-        const data = readFileSync(join(dir, file), "utf-8");
-        const state = JSON.parse(data) as ExecutionState;
-        if (state.checkpointId) {
-          states.push(state);
+      let lastError: unknown;
+      let succeeded = false;
+      for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+        try {
+          const result = await step.fn();
+          results.push(result);
+          succeeded = true;
+          break;
+        } catch (err) {
+          lastError = err;
         }
       }
-      // Sort by createdAt to preserve insertion order across restarts
-      states.sort((a, b) => a.createdAt - b.createdAt);
-      for (const state of states) {
-        if (!this.checkpoints.has(state.checkpointId)) {
-          this.checkpoints.set(state.checkpointId, state);
-          this.order.push(state.checkpointId);
-        }
+
+      if (!succeeded) {
+        throw lastError;
       }
+
+      completedSteps.push(step.name);
+
+      // Checkpoint after every N steps
+      if ((i + 1) % this.checkpointEveryN === 0) {
+        await this.checkpoint(i, completedSteps);
+      }
+    }
+
+    // Clear checkpoint on successful completion
+    await this.clearCheckpoint();
+    return results;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Convenience helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lists all checkpoints stored in `.dantecode/checkpoints/` for the given
+ * project root. Returns them sorted oldest-first by `savedAt`.
+ */
+export async function listCheckpoints(projectRoot: string): Promise<ExecutionCheckpoint[]> {
+  const dir = join(projectRoot, ".dantecode", "checkpoints");
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return [];
+  }
+
+  const checkpoints: ExecutionCheckpoint[] = [];
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const raw = await readFile(join(dir, file), "utf-8");
+      const cp = JSON.parse(raw) as ExecutionCheckpoint;
+      checkpoints.push(cp);
     } catch {
-      // Non-fatal: corrupted disk state does not prevent fresh operation
+      // Skip corrupted files
     }
   }
+
+  return checkpoints.sort(
+    (a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime(),
+  );
+}
+
+/**
+ * Removes all checkpoint files in `.dantecode/checkpoints/` for the given
+ * project root.
+ */
+export async function clearAllCheckpoints(projectRoot: string): Promise<void> {
+  const dir = join(projectRoot, ".dantecode", "checkpoints");
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    files
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => unlink(join(dir, f)).catch(() => undefined)),
+  );
 }

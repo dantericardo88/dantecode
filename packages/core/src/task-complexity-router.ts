@@ -1,199 +1,248 @@
 // ============================================================================
 // @dantecode/core — Task Complexity Router
-// Routes tasks to appropriate models based on complexity analysis.
-// Signal-based classification picks cheapest model for simple tasks,
-// mid-tier for standard, strongest for complex.
+// Classifies tasks as simple/standard/complex and routes to the appropriate
+// model tier based on extracted signals.
 // ============================================================================
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Signals extracted from a task to determine its complexity. */
-export interface TaskSignals {
-  /** Estimated token count for the task prompt. */
-  tokenCount: number;
-  /** Number of files involved in the task. */
+export type TaskComplexity = "simple" | "standard" | "complex";
+
+export interface ComplexitySignals {
+  promptTokens: number;
   fileCount: number;
-  /** Depth of reasoning required (0-100 scale). */
-  reasoningDepth: number;
-  /** Security sensitivity level (0-100 scale). */
-  securitySensitivity: number;
-  /** Whether the task involves code generation. */
-  hasCodeGeneration: boolean;
-  /** Whether the task involves edits across multiple files. */
-  hasMultiFileEdit: boolean;
+  hasReasoning: boolean;
+  hasSecurity: boolean;
+  hasMultiFile: boolean;
+  estimatedOutputTokens: number;
 }
 
-/** Complexity tier determined by signal analysis. */
-export type ComplexityTier = "simple" | "standard" | "complex";
-
-/** A model option available for routing. */
-export interface ModelOption {
-  /** Unique model identifier (e.g. "grok-3-mini"). */
-  modelId: string;
-  /** Provider name (e.g. "grok", "anthropic"). */
-  provider: string;
-  /** Which complexity tier this model is suited for. */
-  tier: ComplexityTier;
-  /** Cost per 1M tokens (average of input+output). */
-  costPerToken: number;
+export interface ComplexityDecision {
+  complexity: TaskComplexity;
+  /** Confidence in the classification, 0-1. */
+  confidence: number;
+  signals: ComplexitySignals;
+  /** Model ID recommended for this decision. */
+  recommendedModel: string;
+  /** Human-readable explanation. */
+  rationale: string;
+  /** User-supplied override, if any. */
+  override?: string;
+  evidenceLogged: boolean;
 }
 
-/** A recorded routing decision for evidence chain / audit. */
-export interface RoutingDecision {
-  /** Unique task identifier. */
-  taskId: string;
-  /** Computed complexity score (0-100). */
-  complexity: number;
-  /** Assigned complexity tier. */
-  tier: ComplexityTier;
-  /** Model ID selected for this task. */
-  selectedModel: string;
-  /** Human-readable reason for the routing decision. */
-  reason: string;
+export interface ComplexityRouterConfig {
+  simpleModel?: string;
+  standardModel?: string;
+  complexModel?: string;
+  thresholds?: {
+    simpleMaxTokens?: number;
+    complexMinTokens?: number;
+    complexMinFiles?: number;
+  };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Constants — Signal Weights
+// Default constants
 // ────────────────────────────────────────────────────────────────────────────
 
-const WEIGHT_TOKEN_COUNT = 0.2;
-const WEIGHT_FILE_COUNT = 0.2;
-const WEIGHT_REASONING_DEPTH = 0.25;
-const WEIGHT_SECURITY_SENSITIVITY = 0.15;
-const WEIGHT_CODE_GENERATION = 0.1;
-const WEIGHT_MULTI_FILE_EDIT = 0.1;
+const DEFAULT_SIMPLE_MODEL = "claude-haiku-4-5-20251001";
+const DEFAULT_STANDARD_MODEL = "claude-sonnet-4-6";
+const DEFAULT_COMPLEX_MODEL = "claude-opus-4-6";
 
-/** Tier boundary: below this is "simple". */
-const SIMPLE_THRESHOLD = 15;
-/** Tier boundary: above this is "complex". */
-const COMPLEX_THRESHOLD = 45;
+const DEFAULT_SIMPLE_MAX_TOKENS = 2000;
+const DEFAULT_COMPLEX_MIN_TOKENS = 8000;
+const DEFAULT_COMPLEX_MIN_FILES = 5;
+
+// Security-related keywords for signal extraction
+const SECURITY_KEYWORDS = [
+  "secret",
+  "auth",
+  "password",
+  "token",
+  "credential",
+  "api_key",
+  "apikey",
+  "private_key",
+  "privatekey",
+  "encryption",
+  "certificate",
+  "oauth",
+  "jwt",
+  "hmac",
+];
+
+// Reasoning-related keywords for signal extraction
+const REASONING_KEYWORDS = [
+  "analyze",
+  "analyse",
+  "compare",
+  "evaluate",
+  "design",
+  "architect",
+  "investigate",
+  "assess",
+  "diagnose",
+  "plan",
+  "strategy",
+  "tradeoff",
+  "trade-off",
+  "recommend",
+  "decide",
+  "judge",
+];
 
 // ────────────────────────────────────────────────────────────────────────────
 // TaskComplexityRouter
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Routes tasks to the most cost-effective model based on complexity analysis.
+ * Classifies tasks as simple / standard / complex and maps each tier to the
+ * appropriate model.
  *
- * Complexity is a weighted sum of task signals normalized to 0-100.
- * The router then picks the cheapest model in the appropriate tier,
- * with fallback to the next higher tier if no model matches.
+ * Classification rules:
+ * - **simple**:   promptTokens < simpleMaxTokens AND fileCount <= 1
+ *                 AND no reasoning / security / multi-file signals → haiku
+ * - **complex**:  promptTokens > complexMinTokens OR fileCount >= complexMinFiles
+ *                 OR (hasSecurity AND hasReasoning) → opus
+ * - **standard**: everything else → sonnet
  */
 export class TaskComplexityRouter {
-  private decisions: RoutingDecision[] = [];
+  private readonly simpleModel: string;
+  private readonly standardModel: string;
+  private readonly complexModel: string;
+  private readonly simpleMaxTokens: number;
+  private readonly complexMinTokens: number;
+  private readonly complexMinFiles: number;
 
-  /**
-   * Computes a raw complexity score from task signals.
-   * Returns a value between 0 and 100.
-   */
-  computeComplexity(signals: TaskSignals): number {
-    // Normalize each signal to 0-100 range
-    const normalizedTokens = Math.min(signals.tokenCount / 100, 100);
-    const normalizedFiles = Math.min(signals.fileCount * 5, 100);
-    const normalizedReasoning = Math.min(signals.reasoningDepth, 100);
-    const normalizedSecurity = Math.min(signals.securitySensitivity, 100);
-    const codeGenScore = signals.hasCodeGeneration ? 100 : 0;
-    const multiFileScore = signals.hasMultiFileEdit ? 100 : 0;
-
-    const raw =
-      normalizedTokens * WEIGHT_TOKEN_COUNT +
-      normalizedFiles * WEIGHT_FILE_COUNT +
-      normalizedReasoning * WEIGHT_REASONING_DEPTH +
-      normalizedSecurity * WEIGHT_SECURITY_SENSITIVITY +
-      codeGenScore * WEIGHT_CODE_GENERATION +
-      multiFileScore * WEIGHT_MULTI_FILE_EDIT;
-
-    return Math.round(Math.min(raw, 100) * 100) / 100;
+  constructor(config?: ComplexityRouterConfig) {
+    this.simpleModel = config?.simpleModel ?? DEFAULT_SIMPLE_MODEL;
+    this.standardModel = config?.standardModel ?? DEFAULT_STANDARD_MODEL;
+    this.complexModel = config?.complexModel ?? DEFAULT_COMPLEX_MODEL;
+    this.simpleMaxTokens = config?.thresholds?.simpleMaxTokens ?? DEFAULT_SIMPLE_MAX_TOKENS;
+    this.complexMinTokens = config?.thresholds?.complexMinTokens ?? DEFAULT_COMPLEX_MIN_TOKENS;
+    this.complexMinFiles = config?.thresholds?.complexMinFiles ?? DEFAULT_COMPLEX_MIN_FILES;
   }
 
   /**
-   * Classifies a task into a complexity tier based on its signals.
+   * Returns the model ID for a given complexity tier.
    */
-  classify(signals: TaskSignals): ComplexityTier {
-    const score = this.computeComplexity(signals);
-    if (score < SIMPLE_THRESHOLD) return "simple";
-    if (score > COMPLEX_THRESHOLD) return "complex";
-    return "standard";
+  getModel(complexity: TaskComplexity): string {
+    switch (complexity) {
+      case "simple":
+        return this.simpleModel;
+      case "standard":
+        return this.standardModel;
+      case "complex":
+        return this.complexModel;
+    }
   }
 
   /**
-   * Routes a task to the best model for its complexity tier.
+   * Classifies signals into a complexity tier and returns a full decision.
    *
-   * Selection strategy:
-   * 1. Filter models matching the target tier
-   * 2. Pick the cheapest (lowest costPerToken)
-   * 3. If no model matches, escalate to the next higher tier
-   * 4. If still no match, pick the cheapest available model overall
+   * @param signals - Extracted signals for the task.
+   * @param override - Optional explicit complexity set by the user.
    */
-  route(tier: ComplexityTier, availableModels: ModelOption[]): ModelOption {
-    if (availableModels.length === 0) {
-      throw new Error("No models available for routing");
-    }
+  classify(signals: ComplexitySignals, override?: TaskComplexity): ComplexityDecision {
+    let complexity: TaskComplexity;
+    let rationale: string;
+    let confidence: number;
 
-    // Try exact tier match first
-    const tierModels = availableModels
-      .filter((m) => m.tier === tier)
-      .sort((a, b) => a.costPerToken - b.costPerToken);
+    if (override) {
+      complexity = override;
+      rationale = `User-supplied override: ${override}`;
+      confidence = 1.0;
+    } else {
+      // Complex conditions
+      const isComplexByTokens = signals.promptTokens > this.complexMinTokens;
+      const isComplexByFiles = signals.fileCount >= this.complexMinFiles;
+      const isComplexBySecurityReasoning = signals.hasSecurity && signals.hasReasoning;
 
-    if (tierModels.length > 0) {
-      return tierModels[0]!;
-    }
-
-    // Escalate: simple -> standard -> complex
-    const escalationOrder: ComplexityTier[] = ["simple", "standard", "complex"];
-    const currentIndex = escalationOrder.indexOf(tier);
-
-    for (let i = currentIndex + 1; i < escalationOrder.length; i++) {
-      const escalatedModels = availableModels
-        .filter((m) => m.tier === escalationOrder[i])
-        .sort((a, b) => a.costPerToken - b.costPerToken);
-      if (escalatedModels.length > 0) {
-        return escalatedModels[0]!;
+      if (isComplexByTokens || isComplexByFiles || isComplexBySecurityReasoning) {
+        complexity = "complex";
+        const reasons: string[] = [];
+        if (isComplexByTokens)
+          reasons.push(`promptTokens (${signals.promptTokens}) > ${this.complexMinTokens}`);
+        if (isComplexByFiles)
+          reasons.push(`fileCount (${signals.fileCount}) >= ${this.complexMinFiles}`);
+        if (isComplexBySecurityReasoning) reasons.push("hasSecurity + hasReasoning");
+        rationale = `Complex: ${reasons.join("; ")}`;
+        confidence = 0.9;
+      } else if (
+        signals.promptTokens < this.simpleMaxTokens &&
+        signals.fileCount <= 1 &&
+        !signals.hasReasoning &&
+        !signals.hasSecurity &&
+        !signals.hasMultiFile
+      ) {
+        complexity = "simple";
+        rationale = `Simple: promptTokens (${signals.promptTokens}) < ${this.simpleMaxTokens}, single file, no special signals`;
+        confidence = 0.95;
+      } else {
+        complexity = "standard";
+        rationale = "Standard: does not meet simple or complex thresholds";
+        confidence = 0.8;
       }
     }
 
-    // Final fallback: cheapest model regardless of tier
-    const sorted = [...availableModels].sort((a, b) => a.costPerToken - b.costPerToken);
-    return sorted[0]!;
-  }
-
-  /**
-   * Records a routing decision for audit/evidence chain.
-   */
-  logRoutingDecision(decision: RoutingDecision): void {
-    this.decisions.push(decision);
-  }
-
-  /**
-   * Returns all recorded routing decisions.
-   */
-  getDecisions(): RoutingDecision[] {
-    return [...this.decisions];
-  }
-
-  /**
-   * Convenience method: classify + route + log in one call.
-   */
-  routeTask(
-    taskId: string,
-    signals: TaskSignals,
-    availableModels: ModelOption[],
-  ): { model: ModelOption; decision: RoutingDecision } {
-    const complexity = this.computeComplexity(signals);
-    const tier = this.classify(signals);
-    const model = this.route(tier, availableModels);
-
-    const decision: RoutingDecision = {
-      taskId,
+    return {
       complexity,
-      tier,
-      selectedModel: model.modelId,
-      reason: `Complexity ${complexity} -> tier "${tier}" -> model "${model.modelId}" (cost: ${model.costPerToken})`,
+      confidence,
+      signals,
+      recommendedModel: this.getModel(complexity),
+      rationale,
+      override: override ?? undefined,
+      evidenceLogged: false,
     };
+  }
 
-    this.logRoutingDecision(decision);
-    return { model, decision };
+  /**
+   * Extracts complexity signals from a raw prompt string.
+   *
+   * @param prompt - The raw task prompt text.
+   * @param context - Optional supplementary context (file list, security flag).
+   */
+  extractSignals(
+    prompt: string,
+    context?: { files?: string[]; hasSecurity?: boolean },
+  ): ComplexitySignals {
+    const lower = prompt.toLowerCase();
+
+    // Token estimation: ~4 chars per token
+    const promptTokens = Math.ceil(prompt.length / 4);
+
+    // File count: from context.files, or count file-like references in prompt
+    let fileCount = context?.files?.length ?? 0;
+    if (fileCount === 0) {
+      // Heuristic: count unique file extensions mentioned
+      const fileMatches = prompt.match(/\b[\w\-/.]+\.\w{1,6}\b/g);
+      fileCount = fileMatches ? new Set(fileMatches).size : 0;
+    }
+
+    // Multi-file: more than one file
+    const hasMultiFile = fileCount > 1;
+
+    // Security detection
+    const hasSecurity =
+      context?.hasSecurity ??
+      SECURITY_KEYWORDS.some((kw) => lower.includes(kw));
+
+    // Reasoning detection
+    const hasReasoning = REASONING_KEYWORDS.some((kw) => lower.includes(kw));
+
+    // Estimated output tokens: rough heuristic = 50% of input tokens
+    const estimatedOutputTokens = Math.ceil(promptTokens * 0.5);
+
+    return {
+      promptTokens,
+      fileCount,
+      hasReasoning,
+      hasSecurity,
+      hasMultiFile,
+      estimatedOutputTokens,
+    };
   }
 }

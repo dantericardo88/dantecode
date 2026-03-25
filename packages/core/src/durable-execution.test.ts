@@ -1,300 +1,368 @@
 // ============================================================================
-// @dantecode/core — Durable Execution Tests
+// @dantecode/core — Durable Execution Engine Tests
 // ============================================================================
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, rmSync, readdirSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { DurableExecution } from "./durable-execution.js";
+import {
+  DurableExecutionEngine,
+  listCheckpoints,
+  clearAllCheckpoints,
+  type ExecutionCheckpoint,
+} from "./durable-execution.js";
 
-describe("DurableExecution", () => {
-  let exec: DurableExecution;
+// ────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+function makeTmpRoot(): string {
+  const dir = join(tmpdir(), `durable-exec-test-${randomUUID().slice(0, 8)}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function makeEngine(
+  projectRoot: string,
+  sessionId?: string,
+  checkpointEveryN = 1,
+): DurableExecutionEngine {
+  return new DurableExecutionEngine({
+    sessionId: sessionId ?? randomUUID().slice(0, 8),
+    projectRoot,
+    checkpointEveryN,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Tests
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("DurableExecutionEngine", () => {
+  let projectRoot: string;
 
   beforeEach(() => {
-    exec = new DurableExecution();
+    projectRoot = makeTmpRoot();
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Checkpoint creation
-  // ──────────────────────────────────────────────────────────────────────────
-
-  describe("checkpoint", () => {
-    it("creates a checkpoint and returns its ID", () => {
-      const id = exec.checkpoint({
-        stepNumber: 1,
-        currentTask: "write code",
-        partialOutput: ["line 1"],
-        memoryState: { key: "value" },
-        toolCallHistory: [{ tool: "Read", timestamp: Date.now(), success: true }],
-      });
-
-      expect(id).toMatch(/^cp-/);
-      expect(exec.size()).toBe(1);
-    });
+  afterEach(() => {
+    try {
+      rmSync(projectRoot, { recursive: true, force: true });
+    } catch {
+      // cleanup best-effort
+    }
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Recovery
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── 1. checkpoint() writes file ─────────────────────────────────────────
 
-  describe("recover", () => {
-    it("recovers state from a checkpoint by ID", () => {
-      const id = exec.checkpoint({
-        stepNumber: 3,
-        currentTask: "fix bug",
-        partialOutput: ["output A", "output B"],
-        memoryState: { progress: 50 },
-        toolCallHistory: [],
-      });
+  it("checkpoint() writes file to .dantecode/checkpoints/{sessionId}.json", async () => {
+    const sessionId = "test-session-001";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
 
-      const recovered = exec.recover(id);
-      expect(recovered).not.toBeNull();
-      expect(recovered!.stepNumber).toBe(3);
-      expect(recovered!.currentTask).toBe("fix bug");
-      expect(recovered!.partialOutput).toEqual(["output A", "output B"]);
-      expect(recovered!.memoryState).toEqual({ progress: 50 });
-    });
+    await engine.checkpoint(2, ["step-0", "step-1", "step-2"]);
 
-    it("returns null for unknown checkpoint ID", () => {
-      expect(exec.recover("cp-nonexistent")).toBeNull();
-    });
-
-    it("returns a deep copy that does not share references", () => {
-      const id = exec.checkpoint({
-        stepNumber: 1,
-        currentTask: "test",
-        partialOutput: ["a"],
-        memoryState: { nested: { val: 1 } },
-        toolCallHistory: [],
-      });
-
-      const first = exec.recover(id)!;
-      const second = exec.recover(id)!;
-
-      first.partialOutput.push("modified");
-      expect(second.partialOutput).toEqual(["a"]);
-    });
+    const expectedPath = join(
+      projectRoot,
+      ".dantecode",
+      "checkpoints",
+      `${sessionId}.json`,
+    );
+    expect(existsSync(expectedPath)).toBe(true);
+    expect(engine.getCheckpointPath()).toBe(expectedPath);
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Last checkpoint
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── 2. loadCheckpoint() returns null when no checkpoint exists ──────────
 
-  describe("getLastCheckpoint", () => {
-    it("returns the most recently created checkpoint", () => {
-      exec.checkpoint({
-        stepNumber: 1,
-        currentTask: "first",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-      exec.checkpoint({
-        stepNumber: 2,
-        currentTask: "second",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-
-      const last = exec.getLastCheckpoint();
-      expect(last).not.toBeNull();
-      expect(last!.currentTask).toBe("second");
-      expect(last!.stepNumber).toBe(2);
-    });
-
-    it("returns null when no checkpoints exist", () => {
-      expect(exec.getLastCheckpoint()).toBeNull();
-    });
+  it("loadCheckpoint() returns null when no checkpoint exists", async () => {
+    const engine = makeEngine(projectRoot);
+    const result = await engine.loadCheckpoint();
+    expect(result).toBeNull();
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Cleanup
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── 3. loadCheckpoint() returns checkpoint data after checkpoint() ──────
 
-  describe("cleanup", () => {
-    it("removes checkpoints older than maxAge", () => {
-      // Create a checkpoint with an old timestamp by manipulating Date.now
-      const realNow = Date.now;
-      const baseTime = 1_700_000_000_000;
+  it("loadCheckpoint() returns checkpoint data after checkpoint()", async () => {
+    const sessionId = "test-session-003";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
+    const completedSteps = ["step-alpha", "step-beta"];
 
-      Date.now = () => baseTime;
-      exec.checkpoint({
-        stepNumber: 1,
-        currentTask: "old",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
+    await engine.checkpoint(1, completedSteps, "partial content here");
 
-      Date.now = () => baseTime + 60_000;
-      exec.checkpoint({
-        stepNumber: 2,
-        currentTask: "new",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-
-      // Cleanup with 30-second maxAge, from the perspective of the "new" time
-      const deleted = exec.cleanup(30_000);
-
-      Date.now = realNow;
-
-      expect(deleted).toBe(1);
-      expect(exec.size()).toBe(1);
-      expect(exec.getLastCheckpoint()!.currentTask).toBe("new");
-    });
+    const loaded = await engine.loadCheckpoint();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.sessionId).toBe(sessionId);
+    expect(loaded!.stepIndex).toBe(1);
+    expect(loaded!.completedSteps).toEqual(completedSteps);
+    expect(loaded!.partialOutput).toBe("partial content here");
+    expect(loaded!.projectRoot).toBe(projectRoot);
+    expect(loaded!.savedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Checkpoint interval
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── 4. clearCheckpoint() removes the file ───────────────────────────────
 
-  describe("shouldCheckpoint", () => {
-    it("returns true at default interval of 5", () => {
-      expect(exec.shouldCheckpoint(5)).toBe(true);
-      expect(exec.shouldCheckpoint(10)).toBe(true);
-      expect(exec.shouldCheckpoint(15)).toBe(true);
-    });
+  it("clearCheckpoint() removes the file", async () => {
+    const sessionId = "test-session-004";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
 
-    it("returns false between intervals", () => {
-      expect(exec.shouldCheckpoint(1)).toBe(false);
-      expect(exec.shouldCheckpoint(3)).toBe(false);
-      expect(exec.shouldCheckpoint(7)).toBe(false);
-    });
+    await engine.checkpoint(0, ["step-0"]);
+    const path = engine.getCheckpointPath();
+    expect(existsSync(path)).toBe(true);
 
-    it("supports custom interval", () => {
-      expect(exec.shouldCheckpoint(3, 3)).toBe(true);
-      expect(exec.shouldCheckpoint(6, 3)).toBe(true);
-      expect(exec.shouldCheckpoint(4, 3)).toBe(false);
-    });
-
-    it("returns false for step 0", () => {
-      expect(exec.shouldCheckpoint(0)).toBe(false);
-    });
+    await engine.clearCheckpoint();
+    expect(existsSync(path)).toBe(false);
   });
 
-  // ──────────────────────────────────────────────────────────────────────────
-  // Disk persistence
-  // ──────────────────────────────────────────────────────────────────────────
+  it("clearCheckpoint() is a no-op when file does not exist", async () => {
+    const engine = makeEngine(projectRoot);
+    // Should not throw
+    await expect(engine.clearCheckpoint()).resolves.toBeUndefined();
+  });
 
-  describe("disk persistence", () => {
-    let persistDir: string;
+  // ── 5. run() executes all steps in order ────────────────────────────────
 
-    beforeEach(() => {
-      persistDir = join(tmpdir(), `durable-exec-test-${randomUUID().slice(0, 8)}`);
-      mkdirSync(persistDir, { recursive: true });
+  it("run() executes all steps in order and returns results", async () => {
+    const engine = makeEngine(projectRoot);
+    const executed: string[] = [];
+
+    const steps = [
+      {
+        name: "step-a",
+        fn: async () => {
+          executed.push("a");
+          return "result-a";
+        },
+      },
+      {
+        name: "step-b",
+        fn: async () => {
+          executed.push("b");
+          return "result-b";
+        },
+      },
+      {
+        name: "step-c",
+        fn: async () => {
+          executed.push("c");
+          return "result-c";
+        },
+      },
+    ];
+
+    const results = await engine.run(steps);
+    expect(executed).toEqual(["a", "b", "c"]);
+    expect(results).toEqual(["result-a", "result-b", "result-c"]);
+  });
+
+  // ── 6. run() resumes from checkpoint when one exists ────────────────────
+
+  it("run() resumes from checkpoint when one exists (pre-written)", async () => {
+    const sessionId = "test-session-006";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
+
+    // Pre-write a checkpoint simulating that steps 0 and 1 already completed
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints");
+    mkdirSync(checkpointDir, { recursive: true });
+    const checkpointData: ExecutionCheckpoint = {
+      sessionId,
+      stepIndex: 1,
+      completedSteps: ["step-first", "step-second"],
+      savedAt: new Date().toISOString(),
+      projectRoot,
+    };
+    writeFileSync(
+      join(checkpointDir, `${sessionId}.json`),
+      JSON.stringify(checkpointData),
+      "utf-8",
+    );
+
+    const executed: string[] = [];
+
+    const steps = [
+      {
+        name: "step-first",
+        fn: async () => {
+          executed.push("first");
+          return 1;
+        },
+      },
+      {
+        name: "step-second",
+        fn: async () => {
+          executed.push("second");
+          return 2;
+        },
+      },
+      {
+        name: "step-third",
+        fn: async () => {
+          executed.push("third");
+          return 3;
+        },
+      },
+    ];
+
+    await engine.run(steps);
+
+    // Only step-third should have executed (steps 0 and 1 were in checkpoint)
+    expect(executed).toEqual(["third"]);
+  });
+
+  // ── 7. run() clears checkpoint on completion ────────────────────────────
+
+  it("run() clears checkpoint on successful completion", async () => {
+    const sessionId = "test-session-007";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
+
+    const steps = [
+      { name: "step-x", fn: async () => "x" },
+      { name: "step-y", fn: async () => "y" },
+    ];
+
+    await engine.run(steps);
+
+    // Checkpoint file should be gone
+    const path = engine.getCheckpointPath();
+    expect(existsSync(path)).toBe(false);
+    // loadCheckpoint returns null
+    expect(await engine.loadCheckpoint()).toBeNull();
+  });
+
+  // ── onStep callback ──────────────────────────────────────────────────────
+
+  it("run() calls onStep callback for each step", async () => {
+    const engine = makeEngine(projectRoot);
+    const callLog: Array<{ index: number; name: string }> = [];
+
+    const steps = [
+      { name: "alpha", fn: async () => 1 },
+      { name: "beta", fn: async () => 2 },
+    ];
+
+    await engine.run(steps, (index, name) => {
+      callLog.push({ index, name });
     });
 
-    afterEach(() => {
-      try {
-        rmSync(persistDir, { recursive: true, force: true });
-      } catch {
-        // cleanup best-effort
-      }
+    expect(callLog).toEqual([
+      { index: 0, name: "alpha" },
+      { index: 1, name: "beta" },
+    ]);
+  });
+
+  // ── checkpointEveryN ────────────────────────────────────────────────────
+
+  it("run() respects checkpointEveryN option (checkpoints only every N steps)", async () => {
+    const sessionId = "test-session-everyN";
+    const engine = new DurableExecutionEngine({
+      sessionId,
+      projectRoot,
+      checkpointEveryN: 2,
     });
 
-    it("checkpoint writes to disk", () => {
-      const diskExec = new DurableExecution({ persistDir });
-      diskExec.checkpoint({
-        stepNumber: 1,
-        currentTask: "disk test",
-        partialOutput: ["hello"],
-        memoryState: { key: "val" },
-        toolCallHistory: [],
-      });
+    const steps = [
+      { name: "s0", fn: async () => 0 },
+      { name: "s1", fn: async () => 1 },
+      { name: "s2", fn: async () => 2 },
+    ];
 
-      const files = readdirSync(persistDir).filter((f) => f.endsWith(".json"));
-      expect(files).toHaveLength(1);
-      expect(files[0]).toMatch(/^cp-.*\.json$/);
+    await engine.run(steps);
+
+    // Checkpoint is cleared at end, file should not exist
+    expect(existsSync(engine.getCheckpointPath())).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// listCheckpoints
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("listCheckpoints()", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = makeTmpRoot();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(projectRoot, { recursive: true, force: true });
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  // ── 8. listCheckpoints() returns all checkpoints ────────────────────────
+
+  it("listCheckpoints() returns all checkpoints in .dantecode/checkpoints/", async () => {
+    const engine1 = new DurableExecutionEngine({
+      sessionId: "session-a",
+      projectRoot,
+    });
+    const engine2 = new DurableExecutionEngine({
+      sessionId: "session-b",
+      projectRoot,
     });
 
-    it("recover loads from disk after Map is empty (new instance)", () => {
-      const exec1 = new DurableExecution({ persistDir });
-      const cpId = exec1.checkpoint({
-        stepNumber: 5,
-        currentTask: "survive restart",
-        partialOutput: ["saved"],
-        memoryState: { progress: 99 },
-        toolCallHistory: [{ tool: "Bash", timestamp: 1000, success: true }],
-      });
+    await engine1.checkpoint(0, ["step-0"]);
+    // Small delay to ensure different savedAt timestamps
+    await new Promise((r) => setTimeout(r, 5));
+    await engine2.checkpoint(1, ["step-0", "step-1"]);
 
-      // New instance loads from disk
-      const exec2 = new DurableExecution({ persistDir });
-      const recovered = exec2.recover(cpId);
-      expect(recovered).not.toBeNull();
-      expect(recovered!.stepNumber).toBe(5);
-      expect(recovered!.currentTask).toBe("survive restart");
-      expect(recovered!.partialOutput).toEqual(["saved"]);
-      expect(recovered!.memoryState).toEqual({ progress: 99 });
+    const all = await listCheckpoints(projectRoot);
+    expect(all).toHaveLength(2);
+    // Sorted oldest-first
+    expect(all[0]!.sessionId).toBe("session-a");
+    expect(all[1]!.sessionId).toBe("session-b");
+  });
+
+  it("listCheckpoints() returns empty array when directory does not exist", async () => {
+    const empty = await listCheckpoints(join(projectRoot, "nonexistent"));
+    expect(empty).toEqual([]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// clearAllCheckpoints
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("clearAllCheckpoints()", () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = makeTmpRoot();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(projectRoot, { recursive: true, force: true });
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  it("clearAllCheckpoints() removes all checkpoint files", async () => {
+    const engine1 = new DurableExecutionEngine({
+      sessionId: "sa",
+      projectRoot,
+    });
+    const engine2 = new DurableExecutionEngine({
+      sessionId: "sb",
+      projectRoot,
     });
 
-    it("getLastCheckpoint finds from disk after restart (new instance same dir)", () => {
-      const realNow = Date.now;
-      const baseTime = 1_700_000_000_000;
+    await engine1.checkpoint(0, ["step-0"]);
+    await engine2.checkpoint(0, ["step-0"]);
 
-      Date.now = () => baseTime;
-      const exec1 = new DurableExecution({ persistDir });
-      exec1.checkpoint({
-        stepNumber: 1,
-        currentTask: "first",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
+    expect(await listCheckpoints(projectRoot)).toHaveLength(2);
 
-      Date.now = () => baseTime + 1000;
-      exec1.checkpoint({
-        stepNumber: 2,
-        currentTask: "second",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-      Date.now = realNow;
+    await clearAllCheckpoints(projectRoot);
+    expect(await listCheckpoints(projectRoot)).toHaveLength(0);
+  });
 
-      // New instance reloads from disk, sorted by createdAt
-      const exec2 = new DurableExecution({ persistDir });
-      expect(exec2.size()).toBe(2);
-      const last = exec2.getLastCheckpoint();
-      expect(last).not.toBeNull();
-      expect(last!.currentTask).toBe("second");
-    });
-
-    it("cleanup removes files from disk", () => {
-      const realNow = Date.now;
-      const baseTime = 1_700_000_000_000;
-
-      Date.now = () => baseTime;
-      const diskExec = new DurableExecution({ persistDir });
-      diskExec.checkpoint({
-        stepNumber: 1,
-        currentTask: "old checkpoint",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-
-      Date.now = () => baseTime + 60_000;
-      diskExec.checkpoint({
-        stepNumber: 2,
-        currentTask: "new checkpoint",
-        partialOutput: [],
-        memoryState: {},
-        toolCallHistory: [],
-      });
-
-      // Before cleanup: 2 files
-      expect(readdirSync(persistDir).filter((f) => f.endsWith(".json"))).toHaveLength(2);
-
-      const deleted = diskExec.cleanup(30_000);
-      Date.now = realNow;
-
-      expect(deleted).toBe(1);
-      expect(readdirSync(persistDir).filter((f) => f.endsWith(".json"))).toHaveLength(1);
-    });
+  it("clearAllCheckpoints() is a no-op when directory does not exist", async () => {
+    await expect(
+      clearAllCheckpoints(join(projectRoot, "nonexistent")),
+    ).resolves.toBeUndefined();
   });
 });

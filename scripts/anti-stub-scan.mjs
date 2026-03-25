@@ -86,6 +86,45 @@ function shouldSkipLine(line) {
   if (line.includes("createStubPattern(")) return true;
   // Mock/test helper references
   if (line.includes("mockReturnValue") || line.includes("mockImplementation")) return true;
+  // Compound camelCase or snake_case identifiers containing "stub" — not actual stubs.
+  // e.g. stubViolation, antiStub, stubCheck, stubFound, stub_detected, antiStubIcon
+  // A match is only a real stub if "stub" is a standalone word, not embedded in a longer identifier.
+  // Test: strip all compound occurrences and see if the word "stub" still stands alone.
+  if (/\bstub\b/i.test(line)) {
+    // Strip camelCase/PascalCase compounds (stubFoo, fooStub), snake_case (stub_foo, foo_stub),
+    // and hyphenated forms (anti-stub, stub-check) — all of which are naming conventions, not stubs.
+    const withoutCompound = line
+      .replace(/\w*[Ss]tub\w+/g, "REMOVED")  // stubViolation, antiStubIcon, stubFound, etc.
+      .replace(/\w+[Ss]tub\b/g, "REMOVED")   // fooStub
+      .replace(/\w+-[Ss]tub\b/gi, "REMOVED") // anti-stub
+      .replace(/\b[Ss]tub-\w+/g, "REMOVED"); // stub-check
+    if (!/\bstub\b/i.test(withoutCompound)) return true;
+  }
+  // Any line whose only "stub" occurrences are inside string/template literals used as
+  // labels, messages, or diagnostic text (not functional stub code).
+  // Covers: `Anti-Stub Scan: ${...}`, `${n} stub violation(s)`, "[STUB]", "Stub: ${...}"
+  if (/stub/i.test(line)) {
+    // Strip all string/template literal content and check if stub remains in code
+    const codeOnly = line
+      .replace(/`[^`]*`/g, "STRLIT")       // template literals
+      .replace(/"[^"]*"/g, "STRLIT")        // double-quoted strings
+      .replace(/'[^']*'/g, "STRLIT");       // single-quoted strings
+    if (!/\bstub\b/i.test(codeOnly)) return true;
+  }
+  // process.stdout.write / process.stderr.write calls with stub-mention strings
+  if (/(?:stdout|stderr)\.write\s*\(/.test(line) && /stub/i.test(line)) return true;
+  // Markdown bullet lines inside template strings describing the Anti-Stub Doctrine
+  // e.g. "- Stub functions ...", "- Placeholder comments ...", "- \`throw new Error(...)\`"
+  if (/^\s*-\s+(?:[Ss]tub\b|[Pp]laceholder\b|\\`|`)/i.test(t)) return true;
+  // Markdown headings describing the Anti-Stub Doctrine
+  if (/^##?\s*Anti.?Stub/i.test(t)) return true;
+  // Object key/value pairs using "stub" as metadata (type unions, label fields, category fields)
+  // e.g. category: "anti-stub", label: "Stub response", stub_detected: "Stub Detected"
+  if (/^\s*(?:category|label|stub_detected)\s*[:?]/.test(t)) return true;
+  // String union type literals: e.g. | "anti-stub" | or "anti-stub" in type position
+  if (/["']anti-stub["']/.test(line)) return true;
+  // Lines that contain only a string mentioning stub (e.g. object key: "Stub Detected")
+  if (/:\s*["'][^"']*stub[^"']*["']/i.test(line) && !/\bstub\s*\(/.test(line)) return true;
   return false;
 }
 

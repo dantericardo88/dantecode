@@ -460,17 +460,17 @@ async function _runAgentLoopCore(
   // ---- Feature: Task complexity classification (informational) ----
   const taskComplexityRouter = new TaskComplexityRouter();
   const taskSignals = {
-    tokenCount: durablePrompt.length,
+    promptTokens: Math.ceil(durablePrompt.length / 4),
     fileCount: session.activeFiles?.length ?? 0,
-    reasoningDepth: reasoningChain?.getStepCount() ?? 0,
-    securitySensitivity: 0,
-    hasCodeGeneration: true,
-    hasMultiFileEdit: (session.activeFiles?.length ?? 0) > 1,
+    hasReasoning: (reasoningChain?.getStepCount() ?? 0) > 0,
+    hasSecurity: false,
+    hasMultiFile: (session.activeFiles?.length ?? 0) > 1,
+    estimatedOutputTokens: Math.ceil(durablePrompt.length / 8),
   };
-  const complexityTier = taskComplexityRouter.classify(taskSignals);
+  const complexityDecision = taskComplexityRouter.classify(taskSignals);
+  const complexityTier = complexityDecision.complexity;
   if (config.verbose) {
-    const complexityScore = taskComplexityRouter.computeComplexity(taskSignals);
-    emitOrWrite(`${DIM}[complexity] tier=${complexityTier} score=${complexityScore}${RESET}\n`);
+    emitOrWrite(`${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`);
   }
 
   // ---- Feature: Pivot logic ----

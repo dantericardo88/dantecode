@@ -32,7 +32,10 @@ export type {
   VerificationReport,
   GapReport,
   TamperReport,
+  VerificationResult,
+  ReceiptChainVerification,
 } from "./chain-verifier.js";
 
 // ChainExporter
 export { ChainExporter } from "./chain-exporter.js";
+export type { ExportOptions } from "./chain-exporter.js";

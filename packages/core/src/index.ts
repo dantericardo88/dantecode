@@ -931,10 +931,10 @@ export type {
 
 export { TaskComplexityRouter } from "./task-complexity-router.js";
 export type {
-  TaskSignals,
-  ComplexityTier,
-  ModelOption,
-  RoutingDecision,
+  TaskComplexity,
+  ComplexitySignals,
+  ComplexityDecision,
+  ComplexityRouterConfig,
 } from "./task-complexity-router.js";
 
 // ─── Council Resilience ─────────────────────────────────────────────────────
@@ -948,9 +948,19 @@ export { VerificationTrendTracker } from "./verification-trend-tracker.js";
 export type {
   TrendReport as VerificationTrendReport,
   HealthReport as VerificationHealthReport,
+  VerificationDataPoint,
+  PdseTrendReport,
+  VerificationRegression,
 } from "./verification-trend-tracker.js";
 
 // ─── Durable Execution ──────────────────────────────────────────────────────
 
-export { DurableExecution } from "./durable-execution.js";
-export type { ExecutionState } from "./durable-execution.js";
+export {
+  DurableExecutionEngine,
+  listCheckpoints,
+  clearAllCheckpoints,
+} from "./durable-execution.js";
+export type {
+  ExecutionCheckpoint,
+  DurableExecutionOptions,
+} from "./durable-execution.js";
