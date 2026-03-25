@@ -158,8 +158,24 @@ describe("ChainExporter.exportHashChain (static)", () => {
 describe("ChainExporter.exportReceiptChain (static)", () => {
   it("JSON export has all receipts", () => {
     const chain = new ReceiptChain();
-    chain.append(createReceipt({ correlationId: "c1", actor: "agent", action: "read:foo.ts", beforeState: "a", afterState: "b" }));
-    chain.append(createReceipt({ correlationId: "c1", actor: "agent", action: "write:bar.ts", beforeState: "c", afterState: "d" }));
+    chain.append(
+      createReceipt({
+        correlationId: "c1",
+        actor: "agent",
+        action: "read:foo.ts",
+        beforeState: "a",
+        afterState: "b",
+      }),
+    );
+    chain.append(
+      createReceipt({
+        correlationId: "c1",
+        actor: "agent",
+        action: "write:bar.ts",
+        beforeState: "c",
+        afterState: "d",
+      }),
+    );
 
     const result = ChainExporter.exportReceiptChain(chain, { format: "json" });
     const parsed = JSON.parse(result);
@@ -172,7 +188,15 @@ describe("ChainExporter.exportReceiptChain (static)", () => {
 
   it("JSONL export has header + receipt lines", () => {
     const chain = new ReceiptChain();
-    chain.append(createReceipt({ correlationId: "c2", actor: "tool", action: "bash:ls", beforeState: "x", afterState: "y" }));
+    chain.append(
+      createReceipt({
+        correlationId: "c2",
+        actor: "tool",
+        action: "bash:ls",
+        beforeState: "x",
+        afterState: "y",
+      }),
+    );
 
     const result = ChainExporter.exportReceiptChain(chain, { format: "jsonl" });
     const lines = result.split("\n");
@@ -185,7 +209,15 @@ describe("ChainExporter.exportReceiptChain (static)", () => {
 
   it("markdown export contains receipt ID heading", () => {
     const chain = new ReceiptChain();
-    chain.append(createReceipt({ correlationId: "c3", actor: "agent", action: "verify", beforeState: "s1", afterState: "s2" }));
+    chain.append(
+      createReceipt({
+        correlationId: "c3",
+        actor: "agent",
+        action: "verify",
+        beforeState: "s1",
+        afterState: "s2",
+      }),
+    );
 
     const result = ChainExporter.exportReceiptChain(chain, { format: "markdown" });
     expect(result).toContain("# Receipt Chain Export");

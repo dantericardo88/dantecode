@@ -63,12 +63,7 @@ describe("DurableExecutionEngine", () => {
 
     await engine.checkpoint(2, ["step-0", "step-1", "step-2"]);
 
-    const expectedPath = join(
-      projectRoot,
-      ".dantecode",
-      "checkpoints",
-      `${sessionId}.json`,
-    );
+    const expectedPath = join(projectRoot, ".dantecode", "checkpoints", `${sessionId}.json`);
     expect(existsSync(expectedPath)).toBe(true);
     expect(engine.getCheckpointPath()).toBe(expectedPath);
   });
@@ -361,8 +356,6 @@ describe("clearAllCheckpoints()", () => {
   });
 
   it("clearAllCheckpoints() is a no-op when directory does not exist", async () => {
-    await expect(
-      clearAllCheckpoints(join(projectRoot, "nonexistent")),
-    ).resolves.toBeUndefined();
+    await expect(clearAllCheckpoints(join(projectRoot, "nonexistent"))).resolves.toBeUndefined();
   });
 });

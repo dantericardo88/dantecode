@@ -215,7 +215,9 @@ export class ChainExporter {
       };
       lines.push(JSON.stringify(header));
       for (const block of entries) {
-        const b = includeHashes ? block : (({ hash: _h, previousHash: _p, ...rest }) => rest)(block);
+        const b = includeHashes
+          ? block
+          : (({ hash: _h, previousHash: _p, ...rest }) => rest)(block);
         lines.push(stableJSON(b));
       }
       return lines.join("\n");

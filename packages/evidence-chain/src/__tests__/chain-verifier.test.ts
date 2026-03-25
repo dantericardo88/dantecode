@@ -169,8 +169,24 @@ describe("ChainVerifier.verifyHashChain (static)", () => {
 describe("ChainVerifier.verifyReceiptChain (static)", () => {
   it("valid receipt chain passes — merkleRootValid=true, all proofs valid", () => {
     const chain = new ReceiptChain();
-    chain.append(createReceipt({ correlationId: "c1", actor: "agent", action: "write:foo.ts", beforeState: "before", afterState: "after" }));
-    chain.append(createReceipt({ correlationId: "c1", actor: "agent", action: "write:bar.ts", beforeState: "a", afterState: "b" }));
+    chain.append(
+      createReceipt({
+        correlationId: "c1",
+        actor: "agent",
+        action: "write:foo.ts",
+        beforeState: "before",
+        afterState: "after",
+      }),
+    );
+    chain.append(
+      createReceipt({
+        correlationId: "c1",
+        actor: "agent",
+        action: "write:bar.ts",
+        beforeState: "a",
+        afterState: "b",
+      }),
+    );
 
     const result = ChainVerifier.verifyReceiptChain(chain);
 
@@ -178,7 +194,7 @@ describe("ChainVerifier.verifyReceiptChain (static)", () => {
     expect(result.receiptCount).toBe(2);
     expect(result.merkleRootValid).toBe(true);
     expect(result.proofValidations).toHaveLength(2);
-    expect(result.proofValidations.every(p => p.valid)).toBe(true);
+    expect(result.proofValidations.every((p) => p.valid)).toBe(true);
     expect(result.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 

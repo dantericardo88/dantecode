@@ -51,7 +51,7 @@ export interface HealthReport {
 
 /** A single PDSE verification data point written to the JSONL store. */
 export interface VerificationDataPoint {
-  timestamp: string;     // ISO-8601
+  timestamp: string; // ISO-8601
   sessionId: string;
   filePath: string;
   pdseScore: number;
@@ -115,9 +115,7 @@ export class VerificationTrendTracker {
   // ── Spec (JSONL) fields ────────────────────────────────────────────────────
   private readonly storePath: string | undefined;
 
-  constructor(
-    optionsOrStorePath?: string | { persistPath?: string },
-  ) {
+  constructor(optionsOrStorePath?: string | { persistPath?: string }) {
     if (typeof optionsOrStorePath === "string") {
       // Spec mode: storePath is the JSONL file path
       this.storePath = optionsOrStorePath;
@@ -265,7 +263,9 @@ export class VerificationTrendTracker {
       );
     }
     if (averageScore < 70) {
-      alerts.push(`Average PDSE score (${averageScore.toFixed(1)}) is below the 70-point threshold`);
+      alerts.push(
+        `Average PDSE score (${averageScore.toFixed(1)}) is below the 70-point threshold`,
+      );
     }
 
     return {

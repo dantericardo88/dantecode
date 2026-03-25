@@ -200,9 +200,7 @@ export async function listCheckpoints(projectRoot: string): Promise<ExecutionChe
     }
   }
 
-  return checkpoints.sort(
-    (a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime(),
-  );
+  return checkpoints.sort((a, b) => new Date(a.savedAt).getTime() - new Date(b.savedAt).getTime());
 }
 
 /**

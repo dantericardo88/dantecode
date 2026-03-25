@@ -3,10 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  TaskComplexityRouter,
-  type ComplexitySignals,
-} from "./task-complexity-router.js";
+import { TaskComplexityRouter, type ComplexitySignals } from "./task-complexity-router.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -151,8 +148,8 @@ describe("TaskComplexityRouter", () => {
   it("uses custom thresholds from config", () => {
     const custom = new TaskComplexityRouter({
       thresholds: {
-        simpleMaxTokens: 100,   // very low threshold
-        complexMinTokens: 500,  // lower complex threshold
+        simpleMaxTokens: 100, // very low threshold
+        complexMinTokens: 500, // lower complex threshold
         complexMinFiles: 3,
       },
     });

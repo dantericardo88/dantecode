@@ -218,7 +218,7 @@ check(10, "License + README present", () => {
     if (!existsSync(pkgPath)) continue;
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     if (pkg.private) continue; // skip private packages
-    if (!pkg.name) continue;  // skip packages with no name (temp directories)
+    if (!pkg.name) continue; // skip packages with no name (temp directories)
 
     const dir = join(packagesDir, entry.name);
     // License satisfied by: LICENSE file OR LICENSE.md file OR "license" field in package.json

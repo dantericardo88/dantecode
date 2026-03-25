@@ -223,7 +223,11 @@ describe("VerificationTrendTracker — async JSONL API", () => {
   });
 
   afterEach(() => {
-    try { rmSync(testDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try {
+      rmSync(testDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
   });
 
   // ── 1. record() appends to the JSONL file ─────────────────────────────────
@@ -256,7 +260,7 @@ describe("VerificationTrendTracker — async JSONL API", () => {
   it("loadPoints(limitDays) returns only points within the window", async () => {
     // Write directly: create a fresh tracker to get full control
     const oldPoint = makePoint("src/old.ts", 50, 10 * DAY); // 10 days ago
-    const newPoint = makePoint("src/new.ts", 85, 1 * DAY);   // 1 day ago
+    const newPoint = makePoint("src/new.ts", 85, 1 * DAY); // 1 day ago
 
     await tracker.record(oldPoint);
     await tracker.record(newPoint);
@@ -374,9 +378,7 @@ describe("VerificationTrendTracker — async JSONL API", () => {
   });
 
   it("generateReport() returns empty report for store with no data", async () => {
-    const emptyTracker = new VerificationTrendTracker(
-      join(testDir, "empty-trends.jsonl"),
-    );
+    const emptyTracker = new VerificationTrendTracker(join(testDir, "empty-trends.jsonl"));
     const report = await emptyTracker.generateReport();
     expect(report.dataPoints).toBe(0);
     expect(report.averageScore).toBe(0);

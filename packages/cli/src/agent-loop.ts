@@ -470,7 +470,9 @@ async function _runAgentLoopCore(
   const complexityDecision = taskComplexityRouter.classify(taskSignals);
   const complexityTier = complexityDecision.complexity;
   if (config.verbose) {
-    emitOrWrite(`${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`);
+    emitOrWrite(
+      `${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`,
+    );
   }
 
   // ---- Feature: Pivot logic ----

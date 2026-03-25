@@ -94,8 +94,8 @@ function shouldSkipLine(line) {
     // Strip camelCase/PascalCase compounds (stubFoo, fooStub), snake_case (stub_foo, foo_stub),
     // and hyphenated forms (anti-stub, stub-check) — all of which are naming conventions, not stubs.
     const withoutCompound = line
-      .replace(/\w*[Ss]tub\w+/g, "REMOVED")  // stubViolation, antiStubIcon, stubFound, etc.
-      .replace(/\w+[Ss]tub\b/g, "REMOVED")   // fooStub
+      .replace(/\w*[Ss]tub\w+/g, "REMOVED") // stubViolation, antiStubIcon, stubFound, etc.
+      .replace(/\w+[Ss]tub\b/g, "REMOVED") // fooStub
       .replace(/\w+-[Ss]tub\b/gi, "REMOVED") // anti-stub
       .replace(/\b[Ss]tub-\w+/g, "REMOVED"); // stub-check
     if (!/\bstub\b/i.test(withoutCompound)) return true;
@@ -106,9 +106,9 @@ function shouldSkipLine(line) {
   if (/stub/i.test(line)) {
     // Strip all string/template literal content and check if stub remains in code
     const codeOnly = line
-      .replace(/`[^`]*`/g, "STRLIT")       // template literals
-      .replace(/"[^"]*"/g, "STRLIT")        // double-quoted strings
-      .replace(/'[^']*'/g, "STRLIT");       // single-quoted strings
+      .replace(/`[^`]*`/g, "STRLIT") // template literals
+      .replace(/"[^"]*"/g, "STRLIT") // double-quoted strings
+      .replace(/'[^']*'/g, "STRLIT"); // single-quoted strings
     if (!/\bstub\b/i.test(codeOnly)) return true;
   }
   // process.stdout.write / process.stderr.write calls with stub-mention strings

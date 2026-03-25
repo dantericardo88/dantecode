@@ -226,9 +226,7 @@ export class TaskComplexityRouter {
     const hasMultiFile = fileCount > 1;
 
     // Security detection
-    const hasSecurity =
-      context?.hasSecurity ??
-      SECURITY_KEYWORDS.some((kw) => lower.includes(kw));
+    const hasSecurity = context?.hasSecurity ?? SECURITY_KEYWORDS.some((kw) => lower.includes(kw));
 
     // Reasoning detection
     const hasReasoning = REASONING_KEYWORDS.some((kw) => lower.includes(kw));
