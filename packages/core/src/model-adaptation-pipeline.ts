@@ -279,7 +279,7 @@ export async function checkPromotedOverrides(
       candidate: candidateMetrics,
       controlRegression: false,
       smokePassed: candidateMetrics.pdseScore !== undefined,
-      decision: "reject", // placeholder, not used by shouldRollback
+      decision: "reject", // default value, not used by shouldRollback
       createdAt: new Date().toISOString(),
     };
 

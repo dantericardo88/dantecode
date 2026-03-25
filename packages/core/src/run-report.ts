@@ -630,7 +630,7 @@ function humanizeVerification(v: RunReportVerification): string[] {
   const result: string[] = [];
 
   if (!v.antiStub.passed) {
-    result.push(`Found ${v.antiStub.violations} placeholder(s) that need real code`);
+    result.push(`Found ${v.antiStub.violations} stub violation(s) that need real implementations`);
     for (const d of v.antiStub.details.slice(0, 3)) {
       result.push(`  - ${d}`);
     }
@@ -713,7 +713,7 @@ function renderQualityCheckContent(lines: string[], report: RunReport): void {
     parts.push(`${passed} of ${attempted.length} task(s) passed all checks.`);
   }
   if (noPlaceholders) {
-    parts.push("No placeholder code was found.");
+    parts.push("No stub violations were found.");
   }
   if (allTestsPass) {
     parts.push("All tests are passing.");
