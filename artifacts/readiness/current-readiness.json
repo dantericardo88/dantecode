@@ -1,18 +1,16 @@
 {
-  "status": "blocked",
-  "commitSha": "4b5ceaa989332f19f065a373e681fd2a061530f1",
-  "generatedAt": "2026-03-24T20:59:44.922Z",
+  "status": "private-ready",
+  "commitSha": "074c44242704370241d0ca612a6e697b948cbed5",
+  "generatedAt": "2026-03-25T00:28:30.442Z",
   "gates": {
-    "typecheck": "unknown",
-    "lint": "unknown",
-    "test": "unknown",
-    "build": "unknown",
-    "windowsSmoke": "unknown",
-    "antiStub": "unknown",
+    "typecheck": "pass",
+    "lint": "pass",
+    "test": "pass",
+    "build": "pass",
+    "windowsSmoke": "pass",
+    "antiStub": "pass",
     "liveProvider": "unknown",
     "publishDryRun": "unknown"
   },
-  "blockers": [
-    "CI gates have not been run. Execute: npm run release:generate with GATE_* env vars set"
-  ]
+  "blockers": []
 }

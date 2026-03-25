@@ -37,7 +37,7 @@
 ## Phase 4 - External acceptance
 
 - [x] Set real git identity for public history
-- [ ] CI green — run `npm run release:generate` to verify (see artifacts/readiness/current-readiness.json)
+- [x] CI green — all 9 CI jobs passing on GitHub Actions (feat/all-nines, run 23518615698)
 - [!] Add `NPM_TOKEN`
 - [!] Add `VSCE_PAT`
 - [ ] Run `npm run smoke:provider -- --require-provider` with real credentials
