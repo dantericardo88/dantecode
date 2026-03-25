@@ -12,7 +12,12 @@ describe("GitAutomationOrchestrator", () => {
 
   afterEach(() => {
     if (tmpDir) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      // Best-effort cleanup — on Windows, file handles may still be open.
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
     }
   });
 
