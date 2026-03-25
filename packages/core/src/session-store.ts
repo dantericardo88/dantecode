@@ -6,6 +6,7 @@
 
 import { readFile, writeFile, readdir, mkdir, unlink, rename } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { ChatSessionFile, Session } from "@dantecode/config-types";
 
 /** A lightweight session summary entry returned by getRecentSummaries(). */
@@ -153,6 +154,40 @@ export class SessionStore {
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * Rename a saved session by updating its title field.
+   * If the session is not found, this is a no-op (returns silently).
+   */
+  async rename(sessionId: string, name: string): Promise<void> {
+    const session = await this.load(sessionId);
+    if (!session) return;
+    session.title = name;
+    await this.save(session);
+  }
+
+  /**
+   * Branch (fork) a session by creating a copy with a new ID.
+   * The copy includes all messages and metadata from the source session.
+   * An optional name parameter sets the title of the new session.
+   * Returns the new session.
+   */
+  async branch(sourceId: string, name?: string): Promise<ChatSessionFile> {
+    const source = await this.load(sourceId);
+    if (!source) {
+      throw new Error(`Session not found: ${sourceId}`);
+    }
+    const now = new Date().toISOString();
+    const newSession: ChatSessionFile = {
+      ...source,
+      id: randomUUID(),
+      title: name ?? `${source.title} (branch)`,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await this.save(newSession);
+    return newSession;
   }
 
   /** Check if a session exists. */

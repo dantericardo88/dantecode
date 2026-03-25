@@ -2089,11 +2089,45 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
     }
 
     case "export": {
+      // --format json|md outputs directly to stdout; otherwise write to a file
+      const fmtFlagIdx = parts.indexOf("--format");
+      const fmtArg = fmtFlagIdx !== -1 ? (parts[fmtFlagIdx + 1] ?? "") : "";
+      const stdoutFormat =
+        fmtArg === "json" ? "json" : fmtArg === "md" || fmtArg === "markdown" ? "md" : null;
+      // If no --format flag, the next arg (if present) is the output path
       const exportPath =
-        parts[1] ?? `dantecode-memory-${new Date().toISOString().slice(0, 10)}.json`;
+        stdoutFormat === null
+          ? (parts[1] ?? `dantecode-memory-${new Date().toISOString().slice(0, 10)}.json`)
+          : null;
       try {
         const viz = mo.memoryVisualize();
         const recallAll = await mo.memoryRecall("*", 1000);
+        const memories = recallAll.results.map((r) => ({
+          key: r.key,
+          scope: r.scope,
+          value: r.value,
+          summary: r.summary,
+          score: r.score,
+          recallCount: r.recallCount,
+        }));
+
+        if (stdoutFormat === "json") {
+          return JSON.stringify(memories, null, 2);
+        }
+
+        if (stdoutFormat === "md") {
+          const header = `# DanteMemory Export\n\nExported: ${new Date().toISOString()}\n\n`;
+          const tableHeader = `| Key | Scope | Summary | Score | Recalls |\n| --- | ----- | ------- | ----- | ------- |\n`;
+          const rows = memories
+            .map(
+              (m) =>
+                `| ${m.key} | ${m.scope} | ${(m.summary ?? String(m.value)).slice(0, 60)} | ${m.score.toFixed(2)} | ${m.recallCount} |`,
+            )
+            .join("\n");
+          return header + tableHeader + rows;
+        }
+
+        // File export (no --format)
         const exportData = {
           version: "1.0.0",
           exportedAt: new Date().toISOString(),
@@ -2102,17 +2136,10 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
             nodeCount: (viz.nodes ?? []).length,
             edgeCount: (viz.edges ?? []).length,
           },
-          memories: recallAll.results.map((r) => ({
-            key: r.key,
-            scope: r.scope,
-            value: r.value,
-            summary: r.summary,
-            score: r.score,
-            recallCount: r.recallCount,
-          })),
+          memories,
         };
         await writeFile(
-          resolve(state.projectRoot, exportPath),
+          resolve(state.projectRoot, exportPath!),
           JSON.stringify(exportData, null, 2),
           "utf8",
         );
@@ -4596,6 +4623,81 @@ async function branchCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// /session Command — unified session management dispatcher
+// ----------------------------------------------------------------------------
+
+async function sessionCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/);
+  const sub = parts[0] ?? "";
+
+  switch (sub) {
+    case "name": {
+      // /session name <name> — rename the current session
+      const name = parts.slice(1).join(" ").trim();
+      return nameCommand(name, state);
+    }
+
+    case "export": {
+      // /session export [--format json|md] — export current session
+      let format = "json";
+      const fmtIdx = parts.indexOf("--format");
+      if (fmtIdx !== -1 && parts[fmtIdx + 1]) {
+        const fmtArg = parts[fmtIdx + 1] ?? "json";
+        if (fmtArg === "md" || fmtArg === "markdown") format = "md";
+      } else if (parts[1] === "md" || parts[1] === "markdown") {
+        format = "md";
+      }
+      return exportCommand(format, state);
+    }
+
+    case "branch": {
+      // /session branch [<name>] — fork current session into a new context
+      const branchName = parts.slice(1).join(" ").trim() || undefined;
+      return branchCommand(branchName ?? "", state);
+    }
+
+    case "list":
+    case "": {
+      // /session list — show saved sessions with names
+      const store = new SessionStore(state.projectRoot);
+      const entries = await store.list();
+      if (entries.length === 0) {
+        return `${DIM}No saved sessions.${RESET}`;
+      }
+      const recent = entries.slice(0, 20);
+      const lines = ["", `${BOLD}Sessions${RESET} ${DIM}(${entries.length} total)${RESET}`, ""];
+      for (const entry of recent) {
+        const shortId = entry.id.slice(0, 8);
+        const name = entry.title.length > 0 ? ` ${DIM}— ${entry.title}${RESET}` : "";
+        const date = new Date(entry.updatedAt).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+        lines.push(
+          `  ${CYAN}${shortId}${RESET}${name}  ${DIM}${date} (${entry.messageCount} msgs)${RESET}`,
+        );
+      }
+      lines.push("");
+      lines.push(
+        `${DIM}Current: ${BOLD}${state.session.name ?? state.session.id.slice(0, 8)}${RESET}`,
+      );
+      return lines.join("\n");
+    }
+
+    default:
+      return [
+        `Usage: /session <subcommand>`,
+        ``,
+        `  list               — list saved sessions`,
+        `  name <name>        — rename current session`,
+        `  export [--format json|md]  — export current session`,
+        `  branch [<name>]    — fork current session`,
+      ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
 // History Command
 // ----------------------------------------------------------------------------
 
@@ -5776,6 +5878,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: memoryCommand,
     tier: 2,
     category: "memory",
+  },
+  {
+    name: "session",
+    description: "Manage sessions: list, name, export, branch",
+    usage: "/session [list|name <n>|export [--format json|md]|branch [<name>]]",
+    handler: sessionCommand,
+    tier: 1,
+    category: "core",
   },
   {
     name: "name",

@@ -26,7 +26,7 @@ export interface ParsedSkill {
 }
 
 /** The import source identifier. */
-export type ImportSource = "claude" | "continue" | "opencode";
+export type ImportSource = "claude" | "continue" | "opencode" | "codex" | "cursor" | "qwen";
 
 // ----------------------------------------------------------------------------
 // Preamble Block (PRD D4.6)

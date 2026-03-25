@@ -32,7 +32,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(tmpDir, { recursive: true, force: true });
+  await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -183,5 +183,120 @@ describe("CompletionTelemetry", () => {
     expect(stats.totalShown).toBe(10000);
     // The "oldest/model" entry should have been evicted
     expect(stats.byModel["oldest/model"]).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// B1/B4 — Lightweight accept/reject telemetry (standalone functions)
+// ============================================================================
+import {
+  recordAccept,
+  recordReject,
+  getAcceptanceRate,
+  recordPrefixPattern,
+  getMostAcceptedPrefixPatterns,
+  getTotalAccepts,
+  getTotalRejects,
+  _resetTelemetryForTest,
+} from "./completion-telemetry.js";
+
+beforeEach(() => {
+  _resetTelemetryForTest();
+});
+
+describe("getAcceptanceRate (B1)", () => {
+  it("returns 0 when no data has been recorded", () => {
+    expect(getAcceptanceRate()).toBe(0);
+  });
+
+  it("returns 1 when all recorded events are accepts", () => {
+    recordAccept("id-1");
+    recordAccept("id-2");
+    expect(getAcceptanceRate()).toBe(1);
+  });
+
+  it("returns 0 when all recorded events are rejects", () => {
+    recordReject("id-1");
+    expect(getAcceptanceRate()).toBe(0);
+  });
+
+  it("returns the correct ratio after a mix of accepts and rejects", () => {
+    recordAccept("a");
+    recordAccept("b");
+    recordReject("c");
+    recordReject("d");
+    expect(getAcceptanceRate()).toBe(0.5);
+  });
+});
+
+describe("recordAccept (B1)", () => {
+  it("increments the total accept count", () => {
+    expect(getTotalAccepts()).toBe(0);
+    recordAccept("comp-1");
+    expect(getTotalAccepts()).toBe(1);
+  });
+
+  it("does not increment the reject count", () => {
+    recordAccept("comp-1");
+    expect(getTotalRejects()).toBe(0);
+  });
+});
+
+describe("recordReject (B1)", () => {
+  it("increments the total reject count", () => {
+    expect(getTotalRejects()).toBe(0);
+    recordReject("comp-1");
+    expect(getTotalRejects()).toBe(1);
+  });
+
+  it("does not increment the accept count", () => {
+    recordReject("comp-1");
+    expect(getTotalAccepts()).toBe(0);
+  });
+});
+
+describe("recordPrefixPattern / getMostAcceptedPrefixPatterns (B4)", () => {
+  it("returns empty array with no data", () => {
+    expect(getMostAcceptedPrefixPatterns()).toEqual([]);
+  });
+
+  it("stores only the last 20 chars of a long prefix", () => {
+    const longPrefix = "a".repeat(30);
+    recordPrefixPattern(longPrefix);
+    const patterns = getMostAcceptedPrefixPatterns();
+    expect(patterns).toContain(longPrefix.slice(-20));
+  });
+
+  it("returns patterns sorted by descending frequency", () => {
+    recordPrefixPattern("alpha");
+    recordPrefixPattern("beta");
+    recordPrefixPattern("beta");
+    recordPrefixPattern("gamma");
+    recordPrefixPattern("gamma");
+    recordPrefixPattern("gamma");
+    const patterns = getMostAcceptedPrefixPatterns();
+    expect(patterns[0]).toBe("gamma");
+    expect(patterns[1]).toBe("beta");
+    expect(patterns[2]).toBe("alpha");
+  });
+
+  it("returns at most 10 patterns", () => {
+    for (let i = 0; i < 20; i++) {
+      recordPrefixPattern(`unique-prefix-${i}`);
+    }
+    expect(getMostAcceptedPrefixPatterns().length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("_resetTelemetryForTest (B1)", () => {
+  it("clears all state", () => {
+    recordAccept("id-1");
+    recordReject("id-2");
+    recordPrefixPattern("something");
+    _resetTelemetryForTest();
+    expect(getTotalAccepts()).toBe(0);
+    expect(getTotalRejects()).toBe(0);
+    expect(getAcceptanceRate()).toBe(0);
+    expect(getMostAcceptedPrefixPatterns()).toEqual([]);
   });
 });

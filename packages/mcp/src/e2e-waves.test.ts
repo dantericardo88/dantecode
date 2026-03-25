@@ -14,7 +14,7 @@ describe("MCP wave integrations", () => {
   });
 
   afterEach(async () => {
-    await rm(projectRoot, { recursive: true, force: true });
+    await rm(projectRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("runs semantic search against a saved code index", async () => {

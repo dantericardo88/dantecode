@@ -45,8 +45,8 @@ describe("ReplayOrchestrator — verifyReplayDeterminism", () => {
     expect(result.results[0]!.matched).toBe(true);
     expect(result.results[0]!.replayHash).toBe(expectedHash);
 
-    await rm(storageRoot, { recursive: true, force: true });
-    await rm(fileDir, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
+    await rm(fileDir, { recursive: true, force: true }).catch(() => {});
   });
 
   it("session with file_write where afterHash does not match current file → diverged > 0, determinismRate < 1.0", async () => {
@@ -84,8 +84,8 @@ describe("ReplayOrchestrator — verifyReplayDeterminism", () => {
     // replayHash is the current file content hash (not equal to originalHash)
     expect(result.results[0]!.replayHash).not.toBe(originalHash);
 
-    await rm(storageRoot, { recursive: true, force: true });
-    await rm(fileDir, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
+    await rm(fileDir, { recursive: true, force: true }).catch(() => {});
   });
 
   it("session with no file_write events → determinismRate = 1.0 and total = 0", async () => {
@@ -110,7 +110,7 @@ describe("ReplayOrchestrator — verifyReplayDeterminism", () => {
     expect(result.determinismRate).toBe(1.0);
     expect(result.results).toHaveLength(0);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("session with file_write for non-existent file → replayHash = 'file_missing'", async () => {
@@ -139,6 +139,6 @@ describe("ReplayOrchestrator — verifyReplayDeterminism", () => {
     expect(verif.matched).toBe(false);
     expect(verif.originalHash).toBe(storedHash);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 });

@@ -18,6 +18,9 @@ import {
   scanOpencodeAgents,
   parseOpencodeAgent,
 } from "./parsers/index.js";
+import { scanCodexSkills, parseCodexSkill } from "./parsers/codex-parser.js";
+import { scanCursorRules, parseCursorRule } from "./parsers/cursor-parser.js";
+import { scanQwenSkills, parseQwenSkill } from "./parsers/qwen-parser.js";
 import { wrapSkillWithAdapter } from "./wrap.js";
 import type { ImportSource, ParsedSkill } from "./wrap.js";
 
@@ -93,6 +96,39 @@ async function scanAndParse(
     case "opencode": {
       const scanned = await scanOpencodeAgents(sourceDir);
       return scanned.map((s) => parseOpencodeAgent(s.raw, s.path));
+    }
+    case "codex": {
+      const scanned = await scanCodexSkills(sourceDir);
+      return scanned.map((s) => {
+        const parsed = parseCodexSkill(s.raw, s.path);
+        return {
+          frontmatter: parsed.frontmatter,
+          instructions: parsed.instructions,
+          sourcePath: parsed.sourcePath,
+        };
+      });
+    }
+    case "cursor": {
+      const scanned = await scanCursorRules(sourceDir);
+      return scanned.map((s) => {
+        const parsed = parseCursorRule(s.raw, s.path);
+        return {
+          frontmatter: parsed.frontmatter,
+          instructions: parsed.instructions,
+          sourcePath: parsed.sourcePath,
+        };
+      });
+    }
+    case "qwen": {
+      const scanned = await scanQwenSkills(sourceDir);
+      return scanned.map((s) => {
+        const parsed = parseQwenSkill(s.raw, s.path);
+        return {
+          frontmatter: parsed.frontmatter,
+          instructions: parsed.instructions,
+          sourcePath: parsed.sourcePath,
+        };
+      });
     }
   }
 }

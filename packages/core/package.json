@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/core",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Core model router, audit logging, and state management for DanteCode",
   "license": "MIT",
   "repository": {
@@ -40,7 +40,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
-    "@dantecode/config-types": "0.9.0",
+    "@dantecode/config-types": "1.0.0",
     "ai": "^4.0.0",
     "yaml": "^2.7.0",
     "zod": "^3.24.0"

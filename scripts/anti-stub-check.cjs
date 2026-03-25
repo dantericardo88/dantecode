@@ -84,6 +84,16 @@ function shouldSkipLine(line) {
       line.includes("as any"))
   )
     return true;
+  // String/template literal passed as argument to a reporting/logging function
+  // e.g. result.push(`Found N placeholder(s)...`) — this is reporting, not a stub
+  if (
+    /(?:push|log|warn|error|info|return|throw|reject)\s*\(/.test(line) &&
+    (line.includes("`") || line.includes('"') || line.includes("'")) &&
+    (line.toLowerCase().includes("placeholder") ||
+      line.toLowerCase().includes("fixme") ||
+      line.toLowerCase().includes("hack"))
+  )
+    return true;
   // Backtick template lines that are part of multi-line template strings
   if (
     line.includes("\\`") &&

@@ -44,6 +44,17 @@ Each sample contains:
 - `constitution` — constitution check result (criticalCount, warningCount)
 - `pdse` — full PDSE breakdown (overall, completeness, correctness, clarity, consistency)
 
+## Scoring Method
+
+Samples are scored via `runLocalPDSEScorer` from `@dantecode/danteforge` — the
+**deterministic local heuristic path**, not a live LLM evaluation. This means:
+
+- Scores are reproducible and fast (no API calls required)
+- `"scoredBy": "local-heuristic"` appears in each receipt
+- All 100-point scores reflect clean production code with no anti-stub or constitution violations
+- Full LLM-based PDSE evaluation runs in the agent-loop hot-path during live sessions
+  and requires an API key; those scores may differ from heuristic scores for borderline cases
+
 ## Reproducibility
 
 Same source file + same repo state = same verification outcome (except `generatedAt` timestamp).

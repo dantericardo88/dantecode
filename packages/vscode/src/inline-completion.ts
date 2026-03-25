@@ -10,6 +10,7 @@ import { ModelRouterImpl, parseModelReference, FIMEngine } from "@dantecode/core
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 import { gatherCrossFileContext } from "./cross-file-context.js";
 import { CompletionTelemetry } from "./completion-telemetry.js";
+import { recordAccept, recordPrefixPattern } from "./completion-telemetry.js";
 import { PrefixTreeCache } from "./prefix-tree-cache.js";
 
 // Module-level FIMEngine instance — used to build FIM prompts via core/fim-engine.ts
@@ -231,6 +232,16 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
   private lastRequestId = 0;
   private lastKeystrokeTimes: number[] = [];
 
+  // ── B2: Smart cache invalidation ────────────────────────────────────────
+  /** The position at which the most recent completion was requested. */
+  private _lastRequestPosition: vscode.Position | undefined;
+  /** URI of the document for which _lastRequestPosition was recorded. */
+  private _lastRequestUri: string | undefined;
+
+  // ── B3: Prefetch support ─────────────────────────────────────────────────
+  private _prefetchTimer: ReturnType<typeof setTimeout> | undefined;
+  private _prefetchCache = new Map<string, { items: vscode.InlineCompletionItem[]; expiresAt: number }>();
+
   /** Trie cache used for edit-aware invalidation. Exposed for extension.ts wiring. */
   readonly completionCache: PrefixTreeCache = new PrefixTreeCache(MAX_CACHE_SIZE);
 
@@ -314,11 +325,23 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     // Update cursor position for smart cache invalidation
     this.completionCache.updateCursorPosition(document.uri.toString(), position.line);
 
+    // ── B2: Track last request position for cache invalidation ──────────────
+    this._lastRequestPosition = position;
+    this._lastRequestUri = document.uri.toString();
+
     // Build a cache key from last 3 lines before cursor + suffix head
     const prefixLines = prefix.split("\n");
     const last3Lines = prefixLines.slice(-3).join("\n");
     const suffixHead = suffix.slice(0, 100);
     const cacheKey = `${selectedModel}:${language}:${position.line}:${last3Lines}:${suffixHead}`;
+
+    // ── B3: Check prefetch cache first ───────────────────────────────────────
+    const prefetchKey = `prefetch:${document.uri.toString()}:${position.line}`;
+    const prefetched = this._prefetchCache.get(prefetchKey);
+    if (prefetched && prefetched.expiresAt > Date.now()) {
+      this._prefetchCache.delete(prefetchKey);
+      return prefetched.items;
+    }
 
     const cached = this.lookupCache(cacheKey);
     if (cached) {
@@ -386,7 +409,95 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       this.lastShownCompletion = { text: completionText, document };
     }
 
+    // ── B3: Schedule background prefetch for next line ───────────────────────
+    this._schedulePrefetch(document, position);
+
     return completions;
+  }
+
+  /**
+   * Handles a document change event for smart cache invalidation (B2).
+   * If an edit occurred at or above the last cursor position where a
+   * completion was requested, the cache entry for that document is cleared.
+   */
+  invalidateCacheForEdit(
+    document: vscode.TextDocument,
+    changes: readonly vscode.TextDocumentContentChangeEvent[],
+  ): void {
+    if (!this._lastRequestPosition || this._lastRequestUri !== document.uri.toString()) {
+      return;
+    }
+    for (const change of changes) {
+      if (change.range.end.line <= this._lastRequestPosition.line) {
+        const uriStr = document.uri.toString();
+        for (let i = this.cache.length - 1; i >= 0; i--) {
+          const entry = this.cache[i]!;
+          if (entry.key.includes(`:${this._lastRequestPosition.line}:`)) {
+            this.cache.splice(i, 1);
+          }
+        }
+        for (const key of this._prefetchCache.keys()) {
+          if (key.startsWith(`prefetch:${uriStr}:`)) {
+            this._prefetchCache.delete(key);
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Schedules a background prefetch for the next line after `position` (B3).
+   * The prefetch fires after 500ms of idle time. Results are cached for 2s.
+   */
+  private _schedulePrefetch(document: vscode.TextDocument, position: vscode.Position): void {
+    if (this._prefetchTimer !== undefined) {
+      clearTimeout(this._prefetchTimer);
+    }
+    this._prefetchTimer = setTimeout(async () => {
+      const nextPos = new vscode.Position(position.line + 1, 0);
+      if (nextPos.line < document.lineCount) {
+        const cacheKey = `prefetch:${document.uri.toString()}:${nextPos.line}`;
+        try {
+          const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), nextPos));
+          const suffix = document.getText(
+            new vscode.Range(
+              nextPos,
+              new vscode.Position(document.lineCount - 1, Number.MAX_SAFE_INTEGER),
+            ),
+          );
+          const items = await this._generateCompletions(document, nextPos, prefix, suffix);
+          this._prefetchCache.set(cacheKey, { items, expiresAt: Date.now() + 2000 });
+        } catch {
+          /* prefetch failure is silent */
+        }
+      }
+    }, 500);
+  }
+
+  /**
+   * Internal helper used by prefetch to generate completions without
+   * going through the debounce/cache machinery (B3).
+   */
+  private async _generateCompletions(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    prefix: string,
+    suffix: string,
+  ): Promise<vscode.InlineCompletionItem[]> {
+    const fakeToken: vscode.CancellationToken = {
+      isCancellationRequested: false,
+      onCancellationRequested: () => ({ dispose: () => {} }),
+    };
+    return this.fetchCompletions(
+      prefix,
+      suffix,
+      document.languageId,
+      document.uri.fsPath,
+      position,
+      document,
+      fakeToken,
+    );
   }
 
   /**
@@ -639,7 +750,31 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     const confidenceMarker = cleaned.length < 10 ? " [?]" : "";
     item.filterText = `dantecode${gateLabel}${confidenceMarker}`;
 
+    // ── B4: Telemetry wiring ─────────────────────────────────────────────────
+    const completionId = `${filePath}:${position.line}:${position.character}:${cleaned.length}`;
+    recordPrefixPattern(prefix);
+    (item as vscode.InlineCompletionItem & { command?: { command: string; title: string; arguments?: unknown[] } }).command = {
+      command: "dantecode._recordCompletionAccept",
+      title: "Record completion accept",
+      arguments: [completionId],
+    };
+    DanteCodeCompletionProvider._pendingAcceptIds.set(completionId, true);
+
     return [item];
+  }
+
+  /** B4: Pending accept IDs — maps completion IDs awaiting user accept gesture. */
+  static readonly _pendingAcceptIds = new Map<string, boolean>();
+
+  /**
+   * Called by the VS Code command `dantecode._recordCompletionAccept` when
+   * a user accepts an inline completion item (B4).
+   */
+  static recordCompletionAccept(completionId: string): void {
+    if (DanteCodeCompletionProvider._pendingAcceptIds.has(completionId)) {
+      recordAccept(completionId);
+      DanteCodeCompletionProvider._pendingAcceptIds.delete(completionId);
+    }
   }
 
   /**

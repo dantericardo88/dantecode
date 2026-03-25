@@ -108,6 +108,15 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       );
       process.stdout.write(`  dantecode skills import --from-opencode      Import from OpenCode\n`);
       process.stdout.write(
+        `  dantecode skills import --from-codex         Import from Codex CLI\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import --from-cursor        Import from Cursor rules\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills import --from-qwen          Import from Qwen Code\n`,
+      );
+      process.stdout.write(
         `  dantecode skills import --file <path>        Import a single skill file\n`,
       );
       process.stdout.write(
@@ -223,6 +232,15 @@ async function skillsImport(args: string[], projectRoot: string): Promise<void> 
       case "--from-opencode":
         source = "opencode";
         break;
+      case "--from-codex":
+        source = "codex";
+        break;
+      case "--from-cursor":
+        source = "cursor";
+        break;
+      case "--from-qwen":
+        source = "qwen";
+        break;
       case "--file":
         singleFilePath = args[i + 1] || null;
         i++;
@@ -248,6 +266,9 @@ async function skillsImport(args: string[], projectRoot: string): Promise<void> 
         `  dantecode skills import --from-claude\n` +
         `  dantecode skills import --from-continue\n` +
         `  dantecode skills import --from-opencode\n` +
+        `  dantecode skills import --from-codex\n` +
+        `  dantecode skills import --from-cursor\n` +
+        `  dantecode skills import --from-qwen\n` +
         `  dantecode skills import --file <path>\n`,
     );
     return;

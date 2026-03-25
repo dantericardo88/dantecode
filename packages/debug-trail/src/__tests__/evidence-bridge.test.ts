@@ -34,7 +34,7 @@ describe("EvidenceBridge", () => {
     expect(root!).toMatch(/^[0-9a-f]{64}$/i);
     expect(root!).not.toBe("0".repeat(64));
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("verifyChainIntegrity() returns true on a clean session with multiple events", async () => {
@@ -45,7 +45,7 @@ describe("EvidenceBridge", () => {
     const intact = bridge.verifyChainIntegrity();
     expect(intact).toBe(true);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("getChainStats() returns the same values as logger.getChainStats()", async () => {
@@ -64,7 +64,7 @@ describe("EvidenceBridge", () => {
     expect(bridgeStats!.headHash).toBe(loggerStats!.headHash);
     expect(bridgeStats!.integrityVerified).toBe(loggerStats!.integrityVerified);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("sealSession() → verifySeal() roundtrip passes via bridge", async () => {
@@ -80,7 +80,7 @@ describe("EvidenceBridge", () => {
     const valid = bridge.verifySeal(seal!, config, metrics);
     expect(valid).toBe(true);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("sealSession() with modified config → verifySeal() returns false", async () => {
@@ -97,7 +97,7 @@ describe("EvidenceBridge", () => {
     const valid = bridge.verifySeal(seal!, tamperedConfig, metrics);
     expect(valid).toBe(false);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("exportEvidence() returns complete { chain, receipts, merkleRoot } structure", async () => {
@@ -124,6 +124,6 @@ describe("EvidenceBridge", () => {
 
     expect(exported!.merkleRoot).toMatch(/^[0-9a-f]{64}$/i);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 });

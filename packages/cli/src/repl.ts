@@ -8,6 +8,7 @@ import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
+import { execSync } from "node:child_process";
 
 import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
@@ -45,6 +46,24 @@ import { generateSessionReport } from "./session-report.js";
 const RED = "\x1b[31m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
+
+// ----------------------------------------------------------------------------
+// TUI Utilities (exported for testing)
+// ----------------------------------------------------------------------------
+
+/**
+ * Build a readline prompt string with an optional context utilization gauge.
+ * At < 50% utilization returns "> "; above that shows a filled gauge bar.
+ *
+ * @param utilPct - Context utilization percentage (0–100).
+ * @returns The prompt string to pass to rl.setPrompt().
+ */
+export function buildPromptString(utilPct: number): string {
+  if (utilPct < 50) return "> ";
+  const filled = Math.round((utilPct / 100) * 5);
+  const empty = 5 - filled;
+  return `[${"█".repeat(filled)}${"░".repeat(empty)} ${utilPct}%] > `;
+}
 
 // ----------------------------------------------------------------------------
 // UX Polish: RichRenderer + ProgressOrchestrator singletons
@@ -225,6 +244,23 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       process.stdout.write(getCompactBanner(state.model.default) + "\n");
     }
     void checkForUpdate("2.0.0");
+
+    // C1: Print git branch + session status bar after the welcome banner
+    try {
+      const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+        stdio: "pipe",
+        timeout: 2000,
+      }).trim();
+      const shortId = session.id.slice(0, 8);
+      const modelId = state.model.default.modelId;
+      process.stdout.write(
+        `${DIM}[model: ${modelId}] [ctx: 0%] [session: ${shortId}] [branch: ${branch}]${RESET}\n`,
+      );
+    } catch {
+      // git not available or not a git repo — skip status bar
+    }
   }
 
   // Load saved theme from STATE.yaml (persisted by /theme command)

@@ -259,3 +259,58 @@ export class CompletionTelemetry {
     };
   }
 }
+
+// ============================================================================
+// B1/B4 — Lightweight accept/reject telemetry (module-level singleton)
+// ============================================================================
+
+const _acceptCounts = new Map<string, number>();
+const _rejectCounts = new Map<string, number>();
+const _prefixPatterns = new Map<string, number>();
+let _totalAccepts = 0;
+let _totalRejects = 0;
+
+export function recordAccept(completionId: string): void {
+  _acceptCounts.set(completionId, (_acceptCounts.get(completionId) ?? 0) + 1);
+  _totalAccepts++;
+}
+
+export function recordReject(completionId: string): void {
+  _rejectCounts.set(completionId, (_rejectCounts.get(completionId) ?? 0) + 1);
+  _totalRejects++;
+}
+
+export function getAcceptanceRate(): number {
+  const total = _totalAccepts + _totalRejects;
+  if (total === 0) return 0;
+  return _totalAccepts / total;
+}
+
+export function recordPrefixPattern(prefix: string): void {
+  const key = prefix.slice(-20);
+  _prefixPatterns.set(key, (_prefixPatterns.get(key) ?? 0) + 1);
+}
+
+export function getMostAcceptedPrefixPatterns(): string[] {
+  return [..._prefixPatterns.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([k]) => k);
+}
+
+export function getTotalAccepts(): number {
+  return _totalAccepts;
+}
+
+export function getTotalRejects(): number {
+  return _totalRejects;
+}
+
+/** Resets all lightweight telemetry state. For tests only. */
+export function _resetTelemetryForTest(): void {
+  _acceptCounts.clear();
+  _rejectCounts.clear();
+  _prefixPatterns.clear();
+  _totalAccepts = 0;
+  _totalRejects = 0;
+}

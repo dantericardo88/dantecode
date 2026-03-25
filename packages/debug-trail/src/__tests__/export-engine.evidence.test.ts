@@ -53,7 +53,7 @@ describe("ExportEngine — Evidence Integration", () => {
     expect(Array.isArray(doc.evidence.chain.chain)).toBe(true);
     expect(doc.evidence.chain.chain.length).toBeGreaterThan(0);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("exportSession with seal=true and sealConfig includes seal and verificationInstructions", async () => {
@@ -88,7 +88,7 @@ describe("ExportEngine — Evidence Integration", () => {
     // Must also still include evidence chain
     expect(doc).toHaveProperty("evidence");
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("sealed export has a non-empty sealHash in the seal object", async () => {
@@ -118,7 +118,7 @@ describe("ExportEngine — Evidence Integration", () => {
     expect(doc.seal).toHaveProperty("timestamp");
     expect(doc.seal.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("exportSession without logger (legacy) does NOT include evidence section", async () => {
@@ -147,6 +147,6 @@ describe("ExportEngine — Evidence Integration", () => {
     expect(doc).toHaveProperty("events");
     expect(doc).toHaveProperty("eventCount");
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 });

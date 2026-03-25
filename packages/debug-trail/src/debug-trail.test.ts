@@ -106,7 +106,7 @@ describe("Hash Engine", () => {
     const hash = await hashFile(filePath);
     expect(hash).not.toBeNull();
     expect(hash!).toHaveLength(64);
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   it("shortHash returns 8-char prefix", () => {
@@ -613,7 +613,7 @@ describe("Anomaly Detector", () => {
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.results[0]!.kind).toBe("anomaly_flag");
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -640,7 +640,7 @@ describe("Anomaly Detector", () => {
     });
     expect(burstFlags).toHaveLength(1);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1425,7 +1425,7 @@ describe("Query Engine", () => {
     expect(kinds).not.toContain("error");
     expect(kinds).toContain("tool_call");
     expect(kinds).toContain("file_write");
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("TrailQuery.actors (OR) returns events from any of the listed actors", async () => {
@@ -1443,7 +1443,7 @@ describe("Query Engine", () => {
     expect(actors).toContain("FileSystem");
     expect(actors).toContain("Checkpointer");
     expect(actors).not.toContain("AnomalyDetector");
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("TrailQuery.excludeActor removes matching actor from results", async () => {
@@ -1459,7 +1459,7 @@ describe("Query Engine", () => {
     const actors = result.results.map((e) => e.actor);
     expect(actors).not.toContain("FileSystem");
     expect(actors).toContain("Checkpointer");
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1481,7 +1481,7 @@ describe("Query Engine", () => {
       streamed.push(e);
     }
     expect(streamed.some((e) => e.summary === "cached event")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("streamEvents() always reads from disk — consistent results regardless of cache state", async () => {
@@ -1498,7 +1498,7 @@ describe("Query Engine", () => {
       streamed.push(e);
     }
     expect(streamed.some((e) => e.summary === "disk event")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1518,7 +1518,7 @@ describe("Query Engine", () => {
       streamed.push(e);
     }
     expect(streamed.some((e) => e.summary === "stream test event")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("streamEvents() and query() return the same events", async () => {
@@ -1543,7 +1543,7 @@ describe("Query Engine", () => {
     for (const e of streamed) {
       expect(queriedIds.has(e.id)).toBe(true);
     }
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1575,7 +1575,7 @@ describe("Query Engine", () => {
       expect(readCount).toBe(1);
     } finally {
       vi.restoreAllMocks();
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -1597,7 +1597,7 @@ describe("Query Engine", () => {
       }
       // Reaching here without EMFILE error means handles are being closed correctly.
     } finally {
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 });
@@ -1894,7 +1894,7 @@ describe("Trail Store", () => {
     // All 5 events recovered: seq 1..5, so lastSeq = 5
     expect(freshStore.getLastSeq()).toBe(5);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1924,7 +1924,7 @@ describe("Trail Store", () => {
 
     expect(invalidateSpy).toHaveBeenCalledTimes(2);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   it("TrailQueryEngine sees fresh data after log() when cache was invalidated", async () => {
@@ -1966,7 +1966,7 @@ describe("Trail Store", () => {
     const result = await queryEngine.query({ sessionId: "sess_fresh", limit: 10 });
     expect(result.totalMatches).toBeGreaterThan(0);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -1991,7 +1991,7 @@ describe("Trail Store", () => {
     // File with similar name but NOT in /src/auth/ should NOT match
     expect(paths).not.toContain("/src/auth-utils.ts");
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 });
 
@@ -2007,7 +2007,7 @@ describe("Audit Logger", () => {
   });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2045,7 +2045,7 @@ describe("Audit Logger", () => {
     const events = await store.readAllEvents();
     expect(events).toHaveLength(20);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   it("flush() waits for queued writes before persisting index", async () => {
@@ -2074,7 +2074,7 @@ describe("Audit Logger", () => {
     const events = await store.readAllEvents();
     expect(events).toHaveLength(5);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2090,7 +2090,7 @@ describe("Audit Logger", () => {
     expect(result.anomalies).toHaveLength(0);
     expect(result.detection.analyzedCount).toBe(1);
     expect(result.detection.truncated).toBe(false);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("flush() returns detected anomaly flags", async () => {
@@ -2104,7 +2104,7 @@ describe("Audit Logger", () => {
     }
     const result = await logger.flush();
     expect(result.anomalies.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("flush() calls onAnomalyDetected callback with FlushResult", async () => {
@@ -2128,7 +2128,7 @@ describe("Audit Logger", () => {
       true,
     );
     expect(callbackResults[0]!.detection.analyzedCount).toBe(3);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("flush() does NOT call onAnomalyDetected on second flush (dedup guard)", async () => {
@@ -2148,7 +2148,7 @@ describe("Audit Logger", () => {
     await logger.flush();
     await logger.flush(); // second flush — callback should NOT fire again
     expect(callCount).toBe(1);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2160,7 +2160,7 @@ describe("Audit Logger", () => {
     const logger = new AuditLogger({ config: { storageRoot }, anomalyDetector: customDetector });
     await logger.init();
     expect(logger.getAnomalyDetector()).toBe(customDetector);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("getSessionEvents() returns current session events in insertion order", async () => {
@@ -2176,7 +2176,7 @@ describe("Audit Logger", () => {
     // Returns a copy — mutating does not affect internal state
     events.push({} as never);
     expect(logger.getSessionEvents()).toHaveLength(2);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2203,7 +2203,7 @@ describe("Audit Logger", () => {
 
     // But only 3 in the in-memory buffer
     expect(logger.getSessionEvents()).toHaveLength(3);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("sessionEvents buffer defaults to 10_000 (not exceeded in normal use)", async () => {
@@ -2216,7 +2216,7 @@ describe("Audit Logger", () => {
       await logger.log("tool_call", "Actor", `event ${i}`, {});
     }
     expect(logger.getSessionEvents()).toHaveLength(100);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2237,7 +2237,7 @@ describe("Audit Logger", () => {
     expect(result.detection.truncated).toBe(true);
     // Round 11: disk spill now loads overflow, so all 5 events are analyzed
     expect(result.detection.analyzedCount).toBe(5);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("FlushResult.bufferTruncated is false when buffer is not exceeded", async () => {
@@ -2248,7 +2248,7 @@ describe("Audit Logger", () => {
     const result = await logger.flush();
     expect(result.detection.truncated).toBe(false);
     expect(result.detection.analyzedCount).toBe(1);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("onAnomalyDetected receives FlushResult with bufferTruncated and analyzedCount", async () => {
@@ -2271,7 +2271,7 @@ describe("Audit Logger", () => {
     expect(received!.detection.truncated).toBe(true);
     // Round 11: disk spill now loads overflow, so all 4 events are analyzed
     expect(received!.detection.analyzedCount).toBe(4);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2299,7 +2299,7 @@ describe("Audit Logger", () => {
     expect(r2.detection.analyzedCount).toBe(1); // only the 1 new event from lane B
 
     expect(results).toHaveLength(2); // both flushes had events to analyze
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("flush() on same lane twice does not re-analyze already-analyzed events", async () => {
@@ -2315,7 +2315,7 @@ describe("Audit Logger", () => {
     const r2 = await logger.flush(); // second flush — no new events
     expect(r2.detection.analyzedCount).toBe(0);
     expect(r2.anomalies).toHaveLength(0);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2332,7 +2332,7 @@ describe("Audit Logger", () => {
     // Final flush — session ends
     const result = await logger.flush();
     expect(result.detection.analyzedCount).toBeGreaterThanOrEqual(1);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2368,7 +2368,7 @@ describe("Audit Logger", () => {
     // relatedEventIds should include all 3 deletions
     expect(burstFlags[0]!.relatedEventIds).toHaveLength(3);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("cross-boundary burst dedup: no duplicate flags when burst spans flush boundary", async () => {
@@ -2399,7 +2399,7 @@ describe("Audit Logger", () => {
     const burstCount2 = r2.anomalies.filter((a) => a.anomalyType === "burst_deletion").length;
     expect(burstCount2).toBe(0);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2423,7 +2423,7 @@ describe("Audit Logger", () => {
     const r2 = await logger.flush();
     expect(r2.detection.analyzedCount).toBe(3);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2452,7 +2452,7 @@ describe("Audit Logger", () => {
     });
 
     store.appendEvent = original; // restore
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2491,7 +2491,7 @@ describe("Audit Logger", () => {
     expect(burstFlags).toHaveLength(1);
     expect(burstFlags[0]!.relatedEventIds).toHaveLength(3);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("overflow events are only analyzed once across multiple flush() calls", async () => {
@@ -2523,7 +2523,7 @@ describe("Audit Logger", () => {
     const r2 = await logger.flush({ endSession: false });
     expect(r2.detection.analyzedCount).toBe(2);
 
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2597,7 +2597,7 @@ describe("File Snapshotter", () => {
     const binFiles = files.filter((f) => f.endsWith(".bin"));
     expect(binFiles).toHaveLength(1);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   it("captureSnapshot for different content writes two .bin files", async () => {
@@ -2624,7 +2624,7 @@ describe("File Snapshotter", () => {
     const binFiles = files.filter((f) => f.endsWith(".bin"));
     expect(binFiles).toHaveLength(2);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2662,7 +2662,7 @@ describe("File Snapshotter", () => {
     const binFiles = files.filter((f) => f.endsWith(".bin"));
     expect(binFiles).toHaveLength(1);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2681,7 +2681,7 @@ describe("File Snapshotter", () => {
     expect(records).toHaveLength(1);
     expect(records[0]!.filePath).toBe(testFile);
     expect(records[0]!.contentHash).toBeTruthy();
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("FileSnapshotter.getSnapshotRecords() returns empty array before any snapshots", async () => {
@@ -2689,7 +2689,7 @@ describe("File Snapshotter", () => {
     const snapshotter = new FileSnapshotter({ storageRoot });
     const records = await snapshotter.getSnapshotRecords();
     expect(records).toEqual([]);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 });
 
@@ -2731,7 +2731,7 @@ describe("Replay & Restore", () => {
     expect(result.trail).toHaveLength(10);
     expect(result.replayed).toBe(true);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   it("replaySession with step returns events up to that step only", async () => {
@@ -2763,7 +2763,7 @@ describe("Replay & Restore", () => {
     expect(result.trail).toHaveLength(5);
     expect(result.step).toBe(4);
 
-    await rm(dir, { recursive: true });
+    await rm(dir, { recursive: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -2788,7 +2788,7 @@ describe("Replay & Restore", () => {
       const cursor = await orchestrator.stepForward(lastId, 1);
       expect(cursor.sessionId).toBe(lastId);
     } finally {
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -2854,7 +2854,7 @@ describe("Replay & Restore", () => {
       expect(typeof result.auditEventId).toBe("string");
       expect(result.auditEventId).toBeTruthy();
     } finally {
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -2890,7 +2890,7 @@ describe("Replay & Restore", () => {
       expect(results[0]!.snapshotId).toBeNull();
       expect(results[0]!.hasBeforeState).toBe(false);
     } finally {
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 
@@ -2919,7 +2919,7 @@ describe("Replay & Restore", () => {
       expect(result.restored).toBe(false);
       expect(result.auditEventId).toBeTruthy();
     } finally {
-      await rm(tmpDir, { recursive: true, force: true });
+      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 });
@@ -3003,7 +3003,7 @@ describe("Integrations & Config", () => {
     const flags = await bridge.detectAnomalies();
 
     expect(flags.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -3032,7 +3032,7 @@ describe("Integrations & Config", () => {
     // mutated config (burstDeletionCount=2). With default, 3 deletions still triggers burst_deletion.
     const flags = await bridge.detectAnomalies("sess_other");
     expect(flags.some((f) => f.anomalyType === "burst_deletion")).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -3047,7 +3047,7 @@ describe("Integrations & Config", () => {
     const bridge = new VsCodeBridge(logger, { storageRoot });
     const msg = await bridge.handleQuery("recent errors");
     expect((msg.data as Record<string, unknown>)["success"]).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("VsCodeBridge dispatch unknown command has success:false with results array", async () => {
@@ -3062,7 +3062,7 @@ describe("Integrations & Config", () => {
     expect(data["success"]).toBe(false);
     expect(data["error"]).toContain("Unknown command");
     expect(Array.isArray(data["results"])).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   it("VsCodeBridge.getRecentEvents() success response has events array", async () => {
@@ -3078,7 +3078,7 @@ describe("Integrations & Config", () => {
     const data = msg.data as Record<string, unknown>;
     expect(data["success"]).toBe(true);
     expect(Array.isArray(data["events"])).toBe(true);
-    await rm(storageRoot, { recursive: true, force: true });
+    await rm(storageRoot, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -3103,7 +3103,7 @@ describe("Integrations & Config", () => {
     const corruptRaw = await readFile(corruptPath, "utf8");
     expect(corruptRaw).toContain("{INVALID_JSON");
 
-    await rm(storeDir, { recursive: true, force: true });
+    await rm(storeDir, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
@@ -3129,6 +3129,6 @@ describe("Integrations & Config", () => {
 
     expect(freshStore.getLastSeq()).toBe(liveLastSeq);
 
-    await rm(storeDir, { recursive: true, force: true });
+    await rm(storeDir, { recursive: true, force: true }).catch(() => {});
   });
 });

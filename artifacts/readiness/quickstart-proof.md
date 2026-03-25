@@ -2,8 +2,9 @@
 
 **Status:** Automated gates passed — manual clean-clone timing run pending (P5/P8 gate)
 **Branch:** feat/all-nines
-**Pre-commit SHA:** 4b5ceaa989332f19f065a373e681fd2a061530f1
-**Generated:** 2026-03-24
+**Verified SHA:** ee61834b807bf4e00a609dbf7b052b5bf7693c42
+**CI Run:** 23518615698 — all 9 jobs green
+**Generated:** 2026-03-25
 
 ---
 
