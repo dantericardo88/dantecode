@@ -687,7 +687,7 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
     expect(md).toContain("caught 3 issue(s) and fixed all of them");
   });
 
-  it("shows placeholder language for anti-stub failures", () => {
+  it("shows stub violation language for anti-stub failures", () => {
     const md = serializeRunReportToMarkdown(
       makeReport({
         entries: [
@@ -704,7 +704,7 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
         ],
       }),
     );
-    expect(md).toContain("placeholder");
+    expect(md).toContain("stub violation");
     expect(md).toContain("empty fn at line 12");
     expect(md).not.toContain("Anti-stub");
   });

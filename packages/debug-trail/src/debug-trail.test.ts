@@ -2820,7 +2820,8 @@ describe("Replay & Restore", () => {
     expect(result.restored).toBe(false);
     expect(result.error).toMatch(/hash.mismatch/i);
 
-    await rm(dir, { recursive: true, force: true });
+    // Best-effort cleanup — on Windows, AuditLogger may keep trail/ handles open.
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   });
 
   // -------------------------------------------------------------------------
