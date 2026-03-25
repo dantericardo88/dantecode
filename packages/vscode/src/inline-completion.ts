@@ -240,7 +240,10 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
 
   // ── B3: Prefetch support ─────────────────────────────────────────────────
   private _prefetchTimer: ReturnType<typeof setTimeout> | undefined;
-  private _prefetchCache = new Map<string, { items: vscode.InlineCompletionItem[]; expiresAt: number }>();
+  private _prefetchCache = new Map<
+    string,
+    { items: vscode.InlineCompletionItem[]; expiresAt: number }
+  >();
 
   /** Trie cache used for edit-aware invalidation. Exposed for extension.ts wiring. */
   readonly completionCache: PrefixTreeCache = new PrefixTreeCache(MAX_CACHE_SIZE);
@@ -753,7 +756,11 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     // ── B4: Telemetry wiring ─────────────────────────────────────────────────
     const completionId = `${filePath}:${position.line}:${position.character}:${cleaned.length}`;
     recordPrefixPattern(prefix);
-    (item as vscode.InlineCompletionItem & { command?: { command: string; title: string; arguments?: unknown[] } }).command = {
+    (
+      item as vscode.InlineCompletionItem & {
+        command?: { command: string; title: string; arguments?: unknown[] };
+      }
+    ).command = {
       command: "dantecode._recordCompletionAccept",
       title: "Record completion accept",
       arguments: [completionId],
