@@ -960,7 +960,4 @@ export {
   listCheckpoints,
   clearAllCheckpoints,
 } from "./durable-execution.js";
-export type {
-  ExecutionCheckpoint,
-  DurableExecutionOptions,
-} from "./durable-execution.js";
+export type { ExecutionCheckpoint, DurableExecutionOptions } from "./durable-execution.js";
