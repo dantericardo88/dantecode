@@ -3,13 +3,14 @@
 // Sub-commands for managing skills: list, import, wrap, show, validate, remove
 // ============================================================================
 
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat, unlink, access } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   listSkills,
   getSkill,
+  getSkillWithBridgeMeta,
   removeSkill,
   validateSkill,
   importSkills,
@@ -85,7 +86,14 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       await skillsScan(args.slice(1), projectRoot);
       break;
     case "info":
-      await skillsShow(args.slice(1), projectRoot); // alias for show
+    case "skill-info":
+      await skillsInfo(args.slice(1), projectRoot);
+      break;
+    case "disable":
+      await skillsDisable(args.slice(1), projectRoot);
+      break;
+    case "enable":
+      await skillsEnable(args.slice(1), projectRoot);
       break;
     case "export":
       await skillsExport(args.slice(1), projectRoot);
@@ -95,6 +103,9 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       break;
     case "compose":
       await skillsCompose(args.slice(1), projectRoot);
+      break;
+    case "agent-skills-import":
+      await skillsAgentSkillsImport(args.slice(1), projectRoot);
       break;
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
@@ -132,7 +143,14 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
         `  dantecode skills show <name>                 Show skill definition\n`,
       );
       process.stdout.write(
-        `  dantecode skills info <name>                 Show skill definition (alias for show)\n`,
+        `  dantecode skills info <name>                 Show full metadata for a skill\n`,
+      );
+      process.stdout.write(`  dantecode skills skill-info <name>           Alias for info\n`);
+      process.stdout.write(
+        `  dantecode skills disable <name>              Disable a skill (keeps files)\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills enable <name>               Re-enable a disabled skill\n`,
       );
       process.stdout.write(`  dantecode skills validate <name>             Validate a skill\n`);
       process.stdout.write(`  dantecode skills remove <name>               Remove a skill\n`);
@@ -146,13 +164,16 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
         `  dantecode skills scan [path]                 Scan directory for skill sources\n`,
       );
       process.stdout.write(
-        `  dantecode skills export <name> [outdir]      Export/bundle a skill\n`,
+        `  dantecode skills export <name> [--out <dir>] Export skill to Agent Skills format\n`,
       );
       process.stdout.write(
         `  dantecode skills import-all <path>           Import all detected skills from path\n`,
       );
       process.stdout.write(
         `  dantecode skills compose <chain-name>        Show/manage a skill chain\n`,
+      );
+      process.stdout.write(
+        `  dantecode skills agent-skills-import [--dir <path>]  Import from .agents/skills/\n`,
       );
       break;
   }
@@ -882,31 +903,90 @@ async function skillsScan(args: string[], projectRoot: string): Promise<void> {
 
 /**
  * Exports/bundles a skill to a directory.
- * Usage: dantecode skills export <name> [outputPath]
+ * Usage: dantecode skills export <name> [--out <dir>]
+ *        dantecode skills export <name> [outputPath]  (legacy positional form)
+ *
+ * When --out is provided, writes to Agent Skills format: <out>/<slug>/SKILL.md
+ * Otherwise falls back to bundleSkill (legacy behavior, optionally with positional outputPath).
  */
 async function skillsExport(args: string[], projectRoot: string): Promise<void> {
-  const skillName = args[0];
+  // Collect positional args (not flags and not values that directly follow a known flag)
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--out") {
+      i++; // skip the value
+    } else if (!a.startsWith("--")) {
+      positional.push(a);
+    }
+  }
+  const skillName = positional[0];
   if (!skillName) {
-    process.stdout.write(`${RED}Usage: dantecode skills export <name> [outputPath]${RESET}\n`);
+    process.stdout.write(`${RED}Usage: dantecode skills export <name> [--out <dir>]${RESET}\n`);
     return;
   }
 
-  const outputPath =
-    args[1] ??
-    join(projectRoot, "exported-skills", skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
+  // Parse --out flag
+  const outIdx = args.indexOf("--out");
+  const outDir = outIdx !== -1 && args[outIdx + 1] ? resolve(projectRoot, args[outIdx + 1]!) : null;
 
   process.stdout.write(`\n${DIM}Exporting skill: ${skillName}${RESET}\n`);
 
-  const existing = await getSkill(skillName, projectRoot);
-  if (!existing) {
-    console.error(`Skill "${skillName}" not found in registry.`);
+  const skill = await getSkill(skillName, projectRoot);
+  if (!skill) {
+    process.stdout.write(`${RED}Skill not found: ${skillName}${RESET}\n`);
     return;
   }
+
+  if (outDir !== null) {
+    // Agent Skills format: <out>/<slug>/SKILL.md
+    const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    const skillOutDir = join(outDir, slug);
+    const skillOutFile = join(skillOutDir, "SKILL.md");
+
+    try {
+      await mkdir(skillOutDir, { recursive: true });
+
+      // Build Agent Skills SKILL.md content from the skill definition
+      const mdLines: string[] = [];
+      mdLines.push("---");
+      mdLines.push(`name: ${skill.frontmatter.name}`);
+      mdLines.push(`description: ${skill.frontmatter.description}`);
+      mdLines.push(`import_source: ${skill.importSource ?? "dantecode"}`);
+      if (skill.frontmatter.tools && skill.frontmatter.tools.length > 0) {
+        mdLines.push(`tools:`);
+        for (const t of skill.frontmatter.tools) {
+          mdLines.push(`  - ${t}`);
+        }
+      }
+      mdLines.push("---");
+      mdLines.push("");
+      mdLines.push(skill.instructions);
+
+      await writeFile(skillOutFile, mdLines.join("\n"), "utf-8");
+
+      // Make relative path for display
+      const displayPath = `./agent-skills-export/${slug}/SKILL.md`;
+      process.stdout.write(
+        `\n${GREEN}Exported ${skillName}${RESET} ${DIM}→ ${displayPath}${RESET}\n\n`,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`\n${RED}Export failed:${RESET} ${message}\n\n`);
+    }
+    return;
+  }
+
+  // Legacy: use bundleSkill; support positional outputPath as second arg
+  const legacyOutputPath =
+    positional[1] != null
+      ? resolve(projectRoot, positional[1])
+      : join(projectRoot, "exported-skills", skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
 
   const result = await bundleSkill(
     {
       skillName,
-      outputPath: resolve(projectRoot, outputPath),
+      outputPath: legacyOutputPath,
       includeVerification: true,
       includeScripts: true,
     },
@@ -920,6 +1000,253 @@ async function skillsExport(args: string[], projectRoot: string): Promise<void> 
   } else {
     process.stdout.write(`\n${RED}Export failed:${RESET} ${result.error ?? "Unknown error"}\n\n`);
   }
+}
+
+// ----------------------------------------------------------------------------
+// Lane D — New Sub-Commands
+// ----------------------------------------------------------------------------
+
+/**
+ * Displays full metadata for a named skill using getSkillWithBridgeMeta.
+ * Usage: dantecode skills info <name>
+ *        dantecode skills skill-info <name>
+ */
+async function skillsInfo(args: string[], projectRoot: string): Promise<void> {
+  const skillName = args[0];
+  if (!skillName) {
+    process.stdout.write(`${RED}Usage: dantecode skills info <name>${RESET}\n`);
+    return;
+  }
+
+  const skill = await getSkillWithBridgeMeta(skillName, projectRoot);
+  if (!skill) {
+    process.stdout.write(`${RED}Skill not found: ${skillName}${RESET}\n`);
+    return;
+  }
+
+  // Check if a .disabled marker exists
+  const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const disabledMarker = join(projectRoot, ".dantecode", "skills", slug, ".disabled");
+  let isDisabled = false;
+  try {
+    await access(disabledMarker);
+    isDisabled = true;
+  } catch {
+    // file does not exist — skill is enabled
+  }
+
+  const status = isDisabled ? `${YELLOW}disabled${RESET}` : `${GREEN}enabled${RESET}`;
+
+  process.stdout.write(`\n${BOLD}Skill:${RESET} ${skill.frontmatter.name}\n`);
+
+  const importSource = skill.importSource ?? "unknown";
+  const scope = importSource === "claude" ? "global" : "project";
+  process.stdout.write(`${DIM}Source:${RESET} ${importSource} (${scope} scope)\n`);
+  process.stdout.write(`${DIM}Scope:${RESET} ${scope}\n`);
+
+  if (skill.wrappedPath) {
+    process.stdout.write(`${DIM}Path:${RESET} ${skill.wrappedPath}\n`);
+  }
+
+  if (skill.sourcePath && skill.sourcePath !== skill.wrappedPath) {
+    process.stdout.write(
+      `${DIM}Provenance:${RESET} imported from ${importSource} at ${skill.sourcePath}\n`,
+    );
+  }
+
+  if (skill.frontmatter.tools && skill.frontmatter.tools.length > 0) {
+    const toolEnforcement = "(advisory)";
+    process.stdout.write(
+      `${DIM}Allowed tools:${RESET} ${skill.frontmatter.tools.join(", ")} ${toolEnforcement}\n`,
+    );
+  }
+
+  // Compatibility: list sources that can run this skill
+  const compatibility: string[] = ["claude"];
+  if (importSource !== "claude") compatibility.push(importSource);
+  process.stdout.write(`${DIM}Compatibility:${RESET} ${compatibility.join(", ")}\n`);
+
+  // License: default MIT (BridgeBundleMetadata does not carry a license field)
+  const license = "MIT";
+  process.stdout.write(`${DIM}License:${RESET} ${license}\n`);
+
+  process.stdout.write(`${DIM}Status:${RESET} ${status}\n`);
+
+  // Show bridge metadata if present
+  if (skill.bridgeMeta) {
+    const meta = skill.bridgeMeta;
+    const bucket = meta.bucket ?? "unknown";
+    const bucketColor = bucket === "green" ? GREEN : bucket === "amber" ? YELLOW : RED;
+    process.stdout.write(`\n${BOLD}SkillBridge:${RESET}\n`);
+    process.stdout.write(
+      `  ${DIM}Quality bucket:  ${bucketColor}${bucket.toUpperCase()}${RESET}\n`,
+    );
+    if (meta.conversionScore !== undefined) {
+      process.stdout.write(
+        `  ${DIM}Conv. score:     ${(meta.conversionScore * 100).toFixed(0)}%${RESET}\n`,
+      );
+    }
+  }
+
+  process.stdout.write("\n");
+}
+
+/**
+ * Marks a skill as disabled by writing a `.disabled` marker file.
+ * Usage: dantecode skills disable <name>
+ */
+async function skillsDisable(args: string[], projectRoot: string): Promise<void> {
+  const skillName = args[0];
+  if (!skillName) {
+    process.stdout.write(`${RED}Usage: dantecode skills disable <name>${RESET}\n`);
+    return;
+  }
+
+  // Verify the skill exists
+  const skill = await getSkill(skillName, projectRoot);
+  if (!skill) {
+    process.stdout.write(`${RED}Skill not found: ${skillName}${RESET}\n`);
+    return;
+  }
+
+  const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const skillDir = join(projectRoot, ".dantecode", "skills", slug);
+  const disabledMarker = join(skillDir, ".disabled");
+
+  try {
+    await writeFile(disabledMarker, "", "utf-8");
+    process.stdout.write(
+      `${GREEN}Skill "${skillName}" disabled.${RESET} ` +
+        `${DIM}Re-enable with: dantecode skills enable ${skillName}${RESET}\n`,
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stdout.write(`${RED}Failed to disable skill: ${message}${RESET}\n`);
+  }
+}
+
+/**
+ * Re-enables a disabled skill by removing the `.disabled` marker file.
+ * Usage: dantecode skills enable <name>
+ */
+async function skillsEnable(args: string[], projectRoot: string): Promise<void> {
+  const skillName = args[0];
+  if (!skillName) {
+    process.stdout.write(`${RED}Usage: dantecode skills enable <name>${RESET}\n`);
+    return;
+  }
+
+  // Verify the skill exists
+  const skill = await getSkill(skillName, projectRoot);
+  if (!skill) {
+    process.stdout.write(`${RED}Skill not found: ${skillName}${RESET}\n`);
+    return;
+  }
+
+  const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const disabledMarker = join(projectRoot, ".dantecode", "skills", slug, ".disabled");
+
+  try {
+    await unlink(disabledMarker);
+    process.stdout.write(`${GREEN}Skill "${skillName}" enabled.${RESET}\n`);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      // Not disabled — still report success
+      process.stdout.write(
+        `${GREEN}Skill "${skillName}" enabled.${RESET} ${DIM}(was not disabled)${RESET}\n`,
+      );
+    } else {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`${RED}Failed to enable skill: ${message}${RESET}\n`);
+    }
+  }
+}
+
+/**
+ * Imports skills from .agents/skills/ (Agent Skills compat dir) or --dir override.
+ * Usage: dantecode skills agent-skills-import [--dir <path>]
+ */
+async function skillsAgentSkillsImport(args: string[], projectRoot: string): Promise<void> {
+  // Parse --dir flag
+  const dirIdx = args.indexOf("--dir");
+  const importDir =
+    dirIdx !== -1 && args[dirIdx + 1]
+      ? resolve(projectRoot, args[dirIdx + 1]!)
+      : join(projectRoot, ".agents", "skills");
+
+  process.stdout.write(`\n${DIM}Scanning for Agent Skills in: ${importDir}${RESET}\n`);
+
+  // Check the directory exists
+  let dirEntries: string[];
+  try {
+    const { readdir: fsReaddir } = await import("node:fs/promises");
+    dirEntries = await fsReaddir(importDir);
+  } catch {
+    process.stdout.write(
+      `${YELLOW}Agent Skills directory not found: ${importDir}${RESET}\n` +
+        `${DIM}Create .agents/skills/ and place SKILL.md files inside skill subdirectories,\n` +
+        `or specify a path with --dir <path>.${RESET}\n\n`,
+    );
+    return;
+  }
+
+  if (dirEntries.length === 0) {
+    process.stdout.write(`${YELLOW}No entries found in: ${importDir}${RESET}\n`);
+    return;
+  }
+
+  process.stdout.write(`\n${BOLD}Found ${dirEntries.length} candidate(s):${RESET}\n\n`);
+
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const entry of dirEntries) {
+    const entryPath = join(importDir, entry);
+
+    // Try SKILL.md inside subdirectory, then treat the entry itself as a skill file
+    let skillFilePath: string | null = null;
+    try {
+      const entryInfo = await stat(entryPath);
+      if (entryInfo.isDirectory()) {
+        // Look for SKILL.md inside the subdir
+        const candidatePath = join(entryPath, "SKILL.md");
+        try {
+          await access(candidatePath);
+          skillFilePath = candidatePath;
+        } catch {
+          // No SKILL.md inside subdirectory
+        }
+      } else if (entry.endsWith(".md")) {
+        skillFilePath = entryPath;
+      }
+    } catch {
+      // Cannot stat entry
+    }
+
+    if (!skillFilePath) {
+      process.stdout.write(`  ${DIM}${entry}${RESET} ${YELLOW}[SKIP] no SKILL.md found${RESET}\n`);
+      skipped++;
+      continue;
+    }
+
+    process.stdout.write(`  ${DIM}Importing: ${entry}...${RESET} `);
+
+    try {
+      await importSingleFile(skillFilePath, projectRoot);
+      imported++;
+      // importSingleFile already prints success; suppress duplicate by overwriting
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stdout.write(`${RED}[FAIL] ${DIM}${message}${RESET}\n`);
+      failed++;
+    }
+  }
+
+  process.stdout.write(
+    `\n${DIM}Agent Skills import complete — Imported: ${imported}, Skipped: ${skipped}, Failed: ${failed}${RESET}\n\n`,
+  );
 }
 
 /**

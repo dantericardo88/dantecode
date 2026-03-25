@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/runtime-spine",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Shared runtime contracts, types, and event schemas for DanteCode Research and Orchestration",
   "license": "MIT",
   "type": "module",

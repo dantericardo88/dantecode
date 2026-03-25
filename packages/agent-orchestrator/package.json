@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/agent-orchestrator",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Dynamic subagent spawner and handoff engine for DanteCode",
   "license": "MIT",
   "type": "module",
@@ -18,11 +18,11 @@
     "test": "vitest run --config ../../vitest.package.config.ts"
   },
   "dependencies": {
-    "@dantecode/runtime-spine": "0.9.0",
-    "@dantecode/core": "0.9.0",
-    "@dantecode/git-engine": "0.9.0",
-    "@dantecode/config-types": "0.9.0",
-    "@dantecode/web-research": "0.9.0",
+    "@dantecode/runtime-spine": "0.9.1",
+    "@dantecode/core": "0.9.1",
+    "@dantecode/git-engine": "0.9.1",
+    "@dantecode/config-types": "0.9.1",
+    "@dantecode/web-research": "0.9.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {

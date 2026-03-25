@@ -19,6 +19,7 @@ const mockImportSkillBridgeBundle = vi.fn();
 const mockListBridgeWarnings = vi.fn();
 const mockValidateBridgeSkill = vi.fn();
 const mockGetSkill = vi.fn().mockResolvedValue(null);
+const mockGetSkillWithBridgeMeta = vi.fn().mockResolvedValue(null);
 const mockInstallSkill = vi.fn().mockResolvedValue({
   success: true,
   name: "my-skill",
@@ -75,6 +76,7 @@ const mockSkillCatalogConstructor = vi.fn().mockImplementation(() => ({
 vi.mock("@dantecode/skill-adapter", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
+  getSkillWithBridgeMeta: (...args: unknown[]) => mockGetSkillWithBridgeMeta(...args),
   removeSkill: vi.fn().mockResolvedValue(false),
   validateSkill: vi.fn().mockResolvedValue(null),
   importSkills: vi.fn().mockResolvedValue({ imported: [], skipped: [], errors: [] }),
@@ -814,18 +816,18 @@ describe("skills info", () => {
     tmpRoot = await mkdtemp(join(tmpdir(), "skills-info-test-"));
     projectRoot = join(tmpRoot, "project");
     await mkdir(projectRoot, { recursive: true });
-    mockGetSkill.mockReset();
-    mockGetSkill.mockResolvedValue(null);
+    mockGetSkillWithBridgeMeta.mockReset();
+    mockGetSkillWithBridgeMeta.mockResolvedValue(null);
   });
 
   afterEach(async () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it("info <name>: delegates to getSkill with the given name and projectRoot", async () => {
+  it("info <name>: delegates to getSkillWithBridgeMeta with the given name and projectRoot", async () => {
     const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    mockGetSkill.mockResolvedValue({
+    mockGetSkillWithBridgeMeta.mockResolvedValue({
       name: "my-skill",
       frontmatter: { name: "my-skill", description: "A skill" },
       instructions: "Do the thing",
@@ -833,11 +835,13 @@ describe("skills info", () => {
       wrappedPath: "/some/SKILL.dc.md",
       importSource: "claude",
       adapterVersion: "1.0",
+      constitutionCheckPassed: true,
+      antiStubScanPassed: true,
     });
 
     await runSkillsCommand(["info", "my-skill"], projectRoot);
 
-    expect(mockGetSkill).toHaveBeenCalledWith("my-skill", projectRoot);
+    expect(mockGetSkillWithBridgeMeta).toHaveBeenCalledWith("my-skill", projectRoot);
     const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("my-skill");
 
@@ -847,7 +851,7 @@ describe("skills info", () => {
   it("info on unknown skill: prints 'Skill not found'", async () => {
     const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    // mockGetSkill already returns null from beforeEach
+    // mockGetSkillWithBridgeMeta already returns null from beforeEach
     await runSkillsCommand(["info", "nonexistent"], projectRoot);
 
     const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");

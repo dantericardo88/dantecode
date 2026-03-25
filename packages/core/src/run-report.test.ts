@@ -749,3 +749,180 @@ describe("serializeRunReportToMarkdown (human-friendly)", () => {
     expect(md).toContain("Nothing requires attention.");
   });
 });
+
+// ─── sealHash and pdseDetail tests ──────────────────────────────────────────
+
+describe("serializeRunReportToMarkdown — sealHash and pdseDetail", () => {
+  function makeReport(overrides?: Partial<RunReport>): RunReport {
+    return {
+      project: "TestProject",
+      command: "/party --autoforge build everything",
+      startedAt: "2026-03-22T14:30:00Z",
+      completedAt: "2026-03-22T15:45:00Z",
+      model: { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+      entries: [],
+      filesManifest: [],
+      tokenUsage: { input: 125000, output: 89000 },
+      costEstimate: 1.71,
+      dantecodeVersion: "1.3.0",
+      environment: { nodeVersion: "v20.11.1", os: "win32 x64" },
+      ...overrides,
+    };
+  }
+
+  function makeEntry(overrides?: Partial<RunReportEntry>): RunReportEntry {
+    return {
+      prdName: "auth",
+      prdFile: "prds/01-auth.md",
+      status: "complete",
+      filesCreated: [{ path: "src/auth.ts", lines: 100 }],
+      filesModified: [],
+      filesDeleted: [],
+      verification: {
+        antiStub: { passed: true, violations: 0, details: [] },
+        constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+        pdseScore: 94,
+        pdseThreshold: 85,
+        regenerationAttempts: 0,
+        maxAttempts: 3,
+      },
+      tests: { created: 5, passing: 5, failing: 0 },
+      summary: "Built the auth feature.",
+      startedAt: "2026-03-22T14:30:00Z",
+      completedAt: "2026-03-22T14:45:00Z",
+      tokenUsage: { input: 5000, output: 3000 },
+      ...overrides,
+    };
+  }
+
+  // ── sealHash tests ──────────────────────────────────────────────────────
+
+  it("renders Receipt Seal footer when sealHash is set", () => {
+    const sealHash = "a".repeat(64); // 64-char hex string
+    const md = serializeRunReportToMarkdown(makeReport({ sealHash }));
+    expect(md).toContain("**Receipt Seal**");
+    expect(md).toContain("SHA256:");
+  });
+
+  it("omits Receipt Seal section when sealHash is undefined", () => {
+    const md = serializeRunReportToMarkdown(makeReport());
+    expect(md).not.toContain("**Receipt Seal**");
+    expect(md).not.toContain("SHA256:");
+  });
+
+  it("sealHash display uses correct 16-char prefix and 8-char suffix format", () => {
+    // 64-char hex hash (typical SHA-256)
+    const sealHash = "0123456789abcdef".repeat(4); // 64 chars
+    const md = serializeRunReportToMarkdown(makeReport({ sealHash }));
+    // First 16 chars: "0123456789abcdef"
+    // Last 8 chars: "abcdef" repeated last portion = "cdef0123" at position 56..64 = "cdef0123"
+    // Actually: repeat 4 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    // slice(0,16) = "0123456789abcdef"
+    // slice(-8)   = "89abcdef"
+    expect(md).toContain("0123456789abcdef...89abcdef");
+  });
+
+  it("sealHash is shown after the Reproduction section", () => {
+    const sealHash = "deadbeef".repeat(8); // 64 chars
+    const md = serializeRunReportToMarkdown(makeReport({ sealHash }));
+    const reproIdx = md.indexOf("## Reproduction");
+    const sealIdx = md.indexOf("**Receipt Seal**");
+    expect(reproIdx).toBeGreaterThanOrEqual(0);
+    expect(sealIdx).toBeGreaterThanOrEqual(0);
+    expect(sealIdx).toBeGreaterThan(reproIdx);
+  });
+
+  // ── pdseDetail tests ────────────────────────────────────────────────────
+
+  it("shows PDSE dimension detail in verbose mode when pdseDetail present and score below threshold", () => {
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({
+            verification: {
+              antiStub: { passed: true, violations: 0, details: [] },
+              constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+              pdseScore: 71,
+              pdseThreshold: 85,
+              regenerationAttempts: 0,
+              maxAttempts: 3,
+              pdseDetail: {
+                completeness: 41,
+                correctness: 88,
+                clarity: 72,
+                consistency: 83,
+              },
+            },
+          }),
+        ],
+      }),
+      true, // verbose
+    );
+    expect(md).toContain("PDSE: 71/100 (below threshold 85)");
+    expect(md).toContain("Completeness: 41");
+    expect(md).toContain("Correctness: 88");
+    expect(md).toContain("Clarity: 72");
+    expect(md).toContain("Consistency: 83");
+  });
+
+  it("shows plain PDSE line in verbose mode when no pdseDetail", () => {
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({
+            verification: {
+              antiStub: { passed: true, violations: 0, details: [] },
+              constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+              pdseScore: 71,
+              pdseThreshold: 85,
+              regenerationAttempts: 0,
+              maxAttempts: 3,
+            },
+          }),
+        ],
+      }),
+      true,
+    );
+    expect(md).toContain("PDSE: 71/100 (below threshold 85)");
+    expect(md).not.toContain("Completeness:");
+  });
+
+  it("shows PDSE dimension detail in human-friendly failure text when pdseDetail present", () => {
+    const md = serializeRunReportToMarkdown(
+      makeReport({
+        entries: [
+          makeEntry({
+            verification: {
+              antiStub: { passed: true, violations: 0, details: [] },
+              constitution: { passed: true, violations: 0, warnings: 0, details: [] },
+              pdseScore: 55,
+              pdseThreshold: 85,
+              regenerationAttempts: 0,
+              maxAttempts: 3,
+              pdseDetail: {
+                completeness: 41,
+                correctness: 88,
+                clarity: 72,
+                consistency: 83,
+              },
+            },
+          }),
+        ],
+      }),
+    );
+    // In non-verbose mode, the humanizeVerification function should show dimension detail
+    expect(md).toContain("PDSE 55/100");
+    expect(md).toContain("Completeness: 41");
+    expect(md).toContain("Correctness: 88");
+    expect(md).toContain("Clarity: 72");
+    expect(md).toContain("Consistency: 83");
+  });
+
+  it("RunReport interface accepts sealHash as optional field", () => {
+    const report = makeReport({ sealHash: "abc123".padEnd(64, "0") });
+    expect(report.sealHash).toBe("abc123".padEnd(64, "0"));
+
+    const reportNoSeal = makeReport();
+    expect(reportNoSeal.sealHash).toBeUndefined();
+  });
+});

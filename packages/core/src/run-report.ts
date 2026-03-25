@@ -30,6 +30,13 @@ export interface RunReportVerification {
   pdseThreshold: number;
   regenerationAttempts: number;
   maxAttempts: number;
+  /** Breakdown of PDSE score by dimension */
+  pdseDetail?: {
+    completeness: number;
+    correctness: number;
+    clarity: number;
+    consistency: number;
+  };
 }
 
 export interface RunReportTests {
@@ -75,6 +82,8 @@ export interface RunReport {
   costEstimate: number;
   dantecodeVersion: string;
   environment: { nodeVersion: string; os: string };
+  /** Cryptographic seal hash from evidence-chain EvidenceSealer. Shown in report footer. */
+  sealHash?: string;
 }
 
 // ─── Cost Estimation ────────────────────────────────────────────────────────
@@ -469,9 +478,16 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
           lines.push(`  - ${d}`);
         }
       }
-      lines.push(
-        `- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`,
-      );
+      if (v.pdseDetail && v.pdseScore < v.pdseThreshold) {
+        const d = v.pdseDetail;
+        lines.push(
+          `- PDSE: ${v.pdseScore}/100 (below threshold ${v.pdseThreshold}) \u2014 Completeness: ${d.completeness}, Correctness: ${d.correctness}, Clarity: ${d.clarity}, Consistency: ${d.consistency}`,
+        );
+      } else {
+        lines.push(
+          `- PDSE: ${v.pdseScore}/100${v.pdseScore < v.pdseThreshold ? ` (below threshold ${v.pdseThreshold})` : ""}`,
+        );
+      }
       if (v.regenerationAttempts > 0) {
         lines.push(`- Regeneration attempts: ${v.regenerationAttempts}/${v.maxAttempts}`);
       }
@@ -597,6 +613,12 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   lines.push(reproduction);
   lines.push("");
 
+  // Receipt seal (when sealHash is present)
+  if (report.sealHash) {
+    const short = `${report.sealHash.slice(0, 16)}...${report.sealHash.slice(-8)}`;
+    lines.push(`\n---\n**Receipt Seal** \`SHA256: ${short}\`\n`);
+  }
+
   // Environment (verbose only)
   if (verbose) {
     lines.push("## Environment");
@@ -646,7 +668,11 @@ function humanizeVerification(v: RunReportVerification): string[] {
   }
 
   if (v.pdseScore < v.pdseThreshold) {
-    if (v.pdseScore >= 50) {
+    if (v.pdseDetail) {
+      const d = v.pdseDetail;
+      const dimensionStr = `Completeness: ${d.completeness}, Correctness: ${d.correctness}, Clarity: ${d.clarity}, Consistency: ${d.consistency}`;
+      result.push(`PDSE ${v.pdseScore}/100 \u2014 ${dimensionStr}`);
+    } else if (v.pdseScore >= 50) {
       result.push("Review recommended");
     } else {
       result.push("Needs attention \u2014 additional review required");
