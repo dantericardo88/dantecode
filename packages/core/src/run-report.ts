@@ -6,6 +6,28 @@
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type RunReportStatus = "complete" | "partial" | "failed" | "not_attempted";
+export type RunReportExecutionStage =
+  | "planned"
+  | "proposed"
+  | "applied"
+  | "verified"
+  | "failed"
+  | "restored";
+
+export interface RunReportTimelineEvent {
+  kind:
+    | "checkpoint"
+    | "approval_requested"
+    | "approval_granted"
+    | "approval_denied"
+    | "restore"
+    | "skill_receipt"
+    | "artifact";
+  label: string;
+  at: string;
+  detail?: string;
+  artifactRef?: string;
+}
 
 export interface RunReportFileCreated {
   path: string;
@@ -49,12 +71,17 @@ export interface RunReportEntry {
   prdName: string;
   prdFile: string;
   status: RunReportStatus;
+  executionStages?: RunReportExecutionStage[];
   filesCreated: RunReportFileCreated[];
   filesModified: RunReportFileModified[];
   filesDeleted: string[];
   verification: RunReportVerification;
   tests: RunReportTests;
   completionVerification?: import("./completion-verifier.js").CompletionVerification;
+  mode?: string;
+  timeline?: RunReportTimelineEvent[];
+  receiptRefs?: string[];
+  artifactRefs?: string[];
   summary: string;
   failureReason?: string;
   actionNeeded?: string;
@@ -85,6 +112,15 @@ export interface RunReport {
   /** Cryptographic seal hash from evidence-chain EvidenceSealer. Shown in report footer. */
   sealHash?: string;
 }
+
+const EXECUTION_STAGE_ORDER: RunReportExecutionStage[] = [
+  "planned",
+  "proposed",
+  "applied",
+  "verified",
+  "failed",
+  "restored",
+];
 
 // ─── Cost Estimation ────────────────────────────────────────────────────────
 
@@ -139,6 +175,71 @@ function defaultTests(): RunReportTests {
   return { created: 0, passing: 0, failing: 0 };
 }
 
+export function normalizeExecutionStages(
+  stages: RunReportExecutionStage[] | undefined,
+): RunReportExecutionStage[] {
+  const seen = new Set<RunReportExecutionStage>();
+  const normalized: RunReportExecutionStage[] = [];
+
+  for (const stage of stages ?? []) {
+    if (!EXECUTION_STAGE_ORDER.includes(stage) || seen.has(stage)) {
+      continue;
+    }
+    seen.add(stage);
+    normalized.push(stage);
+  }
+
+  return normalized;
+}
+
+export function deriveStatusFromExecutionStages(
+  stages: RunReportExecutionStage[] | undefined,
+): RunReportStatus {
+  const normalized = normalizeExecutionStages(stages);
+  if (normalized.length === 0) {
+    return "not_attempted";
+  }
+
+  if (normalized.includes("verified")) {
+    return "complete";
+  }
+
+  if (normalized.includes("failed") && !normalized.includes("restored")) {
+    return "failed";
+  }
+
+  if (
+    normalized.includes("restored") ||
+    normalized.includes("applied") ||
+    normalized.includes("proposed")
+  ) {
+    return "partial";
+  }
+
+  return "not_attempted";
+}
+
+export function countExecutionStages(
+  entries: RunReportEntry[],
+): Record<RunReportExecutionStage, number> {
+  const counts: Record<RunReportExecutionStage, number> = {
+    planned: 0,
+    proposed: 0,
+    applied: 0,
+    verified: 0,
+    failed: 0,
+    restored: 0,
+  };
+
+  for (const entry of entries) {
+    for (const stage of normalizeExecutionStages(entry.executionStages)) {
+      counts[stage]++;
+    }
+  }
+
+  return counts;
+}
+
 // ─── Accumulator ────────────────────────────────────────────────────────────
 
 export interface RunReportAccumulatorOptions {
@@ -179,11 +280,15 @@ export class RunReportAccumulator {
       prdName,
       prdFile,
       status: "not_attempted",
+      executionStages: [],
       filesCreated: [],
       filesModified: [],
       filesDeleted: [],
       verification: defaultVerification(),
       tests: defaultTests(),
+      timeline: [],
+      receiptRefs: [],
+      artifactRefs: [],
       summary: "",
       startedAt: now,
       completedAt: now,
@@ -222,6 +327,47 @@ export class RunReportAccumulator {
     if (entry) entry.tests = tests;
   }
 
+  /** Record the execution stages observed for the current entry. */
+  recordExecutionStages(stages: RunReportExecutionStage[]): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.executionStages = normalizeExecutionStages(stages);
+  }
+
+  /** Append a single execution stage to the current entry. */
+  appendExecutionStage(stage: RunReportExecutionStage): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.executionStages = normalizeExecutionStages([...(entry.executionStages ?? []), stage]);
+  }
+
+  /** Record the operator/runtime mode used for this entry. */
+  recordMode(mode: string): void {
+    const entry = this.currentEntry();
+    if (entry) entry.mode = mode;
+  }
+
+  /** Append timeline events for the current entry. */
+  recordTimelineEvents(events: RunReportTimelineEvent[]): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.timeline = [...(entry.timeline ?? []), ...events];
+  }
+
+  /** Record durable receipt references for the current entry. */
+  recordReceiptRefs(receiptRefs: string[]): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.receiptRefs = Array.from(new Set([...(entry.receiptRefs ?? []), ...receiptRefs]));
+  }
+
+  /** Record artifact references for the current entry. */
+  recordArtifactRefs(artifactRefs: string[]): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+    entry.artifactRefs = Array.from(new Set([...(entry.artifactRefs ?? []), ...artifactRefs]));
+  }
+
   /** Record completion verification for the current entry. */
   recordCompletionVerification(
     verification: import("./completion-verifier.js").CompletionVerification,
@@ -241,14 +387,14 @@ export class RunReportAccumulator {
 
   /** Complete the current entry with status and summaries. */
   completeEntry(opts: {
-    status: RunReportStatus;
+    status?: RunReportStatus;
     summary: string;
     failureReason?: string;
     actionNeeded?: string;
   }): void {
     const entry = this.currentEntry();
     if (!entry) return;
-    entry.status = opts.status;
+    entry.status = opts.status ?? deriveStatusFromExecutionStages(entry.executionStages);
     entry.summary = opts.summary;
     entry.failureReason = opts.failureReason;
     entry.actionNeeded = opts.actionNeeded;
@@ -265,11 +411,15 @@ export class RunReportAccumulator {
           prdName: name,
           prdFile: "",
           status: "not_attempted",
+          executionStages: ["planned"],
           filesCreated: [],
           filesModified: [],
           filesDeleted: [],
           verification: defaultVerification(),
           tests: defaultTests(),
+          timeline: [],
+          receiptRefs: [],
+          artifactRefs: [],
           summary: "",
           actionNeeded: reason,
           startedAt: now,
@@ -353,6 +503,11 @@ const STATUS_LABEL: Record<RunReportStatus, string> = {
   not_attempted: "NOT ATTEMPTED",
 };
 
+function formatExecutionTruth(stages: RunReportExecutionStage[] | undefined): string | null {
+  const normalized = normalizeExecutionStages(stages);
+  return normalized.length > 0 ? normalized.join(" -> ") : null;
+}
+
 export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean = false): string {
   const lines: string[] = [];
   const duration = computeRunDuration(report.startedAt, report.completedAt);
@@ -420,6 +575,16 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   }
   lines.push("");
 
+  const executionCounts = countExecutionStages(report.entries);
+  lines.push("## Execution truth");
+  lines.push("");
+  lines.push("| Stage | Count |");
+  lines.push("|-------|-------|");
+  for (const stage of EXECUTION_STAGE_ORDER) {
+    lines.push(`| ${stage} | ${executionCounts[stage]} |`);
+  }
+  lines.push("");
+
   lines.push("---");
   lines.push("");
 
@@ -430,9 +595,20 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
   for (const [i, entry] of report.entries.entries()) {
     const emoji = STATUS_EMOJI[entry.status];
     const label = STATUS_LABEL[entry.status];
+    const executionTruth = formatExecutionTruth(entry.executionStages);
 
     lines.push(`### ${entry.prdName} ${emoji} ${label}`);
     lines.push("");
+
+    if (executionTruth) {
+      lines.push(`**Execution truth:** ${executionTruth}`);
+      lines.push("");
+    }
+
+    if (entry.mode) {
+      lines.push(`**Mode:** ${entry.mode}`);
+      lines.push("");
+    }
 
     // Files created
     if (entry.filesCreated.length > 0) {
@@ -538,6 +714,32 @@ export function serializeRunReportToMarkdown(report: RunReport, verbose: boolean
     // Action needed
     if (entry.actionNeeded) {
       lines.push(`**What needs to happen:** ${entry.actionNeeded}`);
+      lines.push("");
+    }
+
+    if ((entry.receiptRefs?.length ?? 0) > 0) {
+      lines.push("**Receipts:**");
+      for (const receiptRef of entry.receiptRefs ?? []) {
+        lines.push(`- \`${receiptRef}\``);
+      }
+      lines.push("");
+    }
+
+    if ((entry.artifactRefs?.length ?? 0) > 0) {
+      lines.push("**Artifacts:**");
+      for (const artifactRef of entry.artifactRefs ?? []) {
+        lines.push(`- \`${artifactRef}\``);
+      }
+      lines.push("");
+    }
+
+    if ((entry.timeline?.length ?? 0) > 0) {
+      lines.push("**Timeline:**");
+      for (const event of entry.timeline ?? []) {
+        const detail = event.detail ? ` — ${event.detail}` : "";
+        const artifact = event.artifactRef ? ` (\`${event.artifactRef}\`)` : "";
+        lines.push(`- ${event.at} ${event.kind}: ${event.label}${detail}${artifact}`);
+      }
       lines.push("");
     }
 
@@ -708,7 +910,13 @@ function renderAttentionSection(lines: string[], report: RunReport): void {
   }
 
   for (const entry of items) {
-    const reason = entry.actionNeeded ?? entry.failureReason ?? `Status: ${entry.status}`;
+    const executionTruth = formatExecutionTruth(entry.executionStages);
+    const reason =
+      entry.actionNeeded ??
+      entry.failureReason ??
+      (entry.status === "partial" && executionTruth
+        ? `Execution truth: ${executionTruth}`
+        : `Status: ${entry.status}`);
     lines.push(`- **${entry.prdName}**: ${reason}`);
   }
   lines.push("");

@@ -1,4 +1,12 @@
+import type { SkillPolicy } from "./skill-run-context.js";
+
 export type SkillRunState = "proposed" | "applied" | "verified" | "failed" | "partial";
+
+export interface SkillEvidenceHashes {
+  commands: string[];
+  files: string[];
+  verification?: string;
+}
 
 export interface SkillRunResult {
   runId: string; // Unique identifier e.g. "sr_" + 8 random hex chars
@@ -14,6 +22,11 @@ export interface SkillRunResult {
   startedAt: string; // ISO timestamp
   completedAt: string; // ISO timestamp
   receiptRef?: string; // Path to receipt file or receipt hash
+  verificationSummary?: string;
+  policySnapshot?: SkillPolicy;
+  evidenceHashes?: SkillEvidenceHashes;
+  artifactRefs?: string[];
+  ledgerRef?: string;
 }
 
 export function makeRunId(): string {

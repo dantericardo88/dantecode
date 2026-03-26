@@ -37,6 +37,49 @@ export const FearSetCheckpointRefSchema = z.object({
 });
 export type FearSetCheckpointRef = z.infer<typeof FearSetCheckpointRefSchema>;
 
+export const CheckpointReplaySummarySchema = z.object({
+  eventCount: z.number().int().min(0),
+  pendingWriteCount: z.number().int().min(0),
+  digest: z.string().min(16),
+  lastEventIndex: z.number().int().min(0).optional(),
+});
+export type CheckpointReplaySummary = z.infer<typeof CheckpointReplaySummarySchema>;
+
+export const CheckpointWorkspaceContextSchema = z.object({
+  projectRoot: z.string(),
+  workspaceRoot: z.string(),
+  repoRoot: z.string().optional(),
+  workspaceIsRepoRoot: z.boolean(),
+  installContextKind: z.enum([
+    "repo_checkout",
+    "npm_global_cli",
+    "npm_local_dependency",
+    "npx_ephemeral",
+    "vscode_extension_host",
+  ]),
+  worktreePath: z.string().optional(),
+});
+export type CheckpointWorkspaceContext = z.infer<typeof CheckpointWorkspaceContextSchema>;
+
+export const DurableExecutionRunConfigSchema = z.object({
+  checkpointEveryN: z.number().int().min(1),
+  maxRetries: z.number().int().min(0),
+});
+export type DurableExecutionRunConfig = z.infer<typeof DurableExecutionRunConfigSchema>;
+
+export const DurableExecutionCheckpointSchema = z.object({
+  sessionId: z.string().min(1),
+  stepIndex: z.number().int().min(0),
+  totalSteps: z.number().int().min(0).optional(),
+  completedSteps: z.array(z.string()).default([]),
+  partialOutput: z.string().optional(),
+  savedAt: z.string().datetime(),
+  projectRoot: z.string(),
+  runConfig: DurableExecutionRunConfigSchema.optional(),
+  workspaceContext: CheckpointWorkspaceContextSchema.optional(),
+});
+export type DurableExecutionCheckpoint = z.infer<typeof DurableExecutionCheckpointSchema>;
+
 export const CheckpointSchema = z.object({
   /** Unique ID for the checkpoint. */
   id: z.string().uuid(),
@@ -85,6 +128,12 @@ export const CheckpointSchema = z.object({
 
   /** FearSet trace for this checkpoint window. */
   fearSetRef: FearSetCheckpointRefSchema.optional(),
+
+  /** Deterministic replay summary for the persisted checkpoint state. */
+  replaySummary: CheckpointReplaySummarySchema.optional(),
+
+  /** Explicit workspace/install boundary captured at checkpoint time. */
+  workspaceContext: CheckpointWorkspaceContextSchema.optional(),
 });
 
 export type Checkpoint = z.infer<typeof CheckpointSchema>;

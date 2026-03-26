@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { globalToolScheduler, adaptToolResult, formatEvidenceSummary } from "@dantecode/core";
+import { globalToolScheduler, adaptToolResult, formatEvidenceSummary, globalApprovalGateway } from "@dantecode/core";
 import type { SecurityEngine, SecretsScanner } from "@dantecode/core";
 import type { DurableRunStore } from "@dantecode/core";
 import type {
@@ -204,7 +204,30 @@ export async function executeToolBatch(
       break;
     }
 
-    // Plan mode guard: block write tools when plan is pending approval
+    // Approval gateway hard enforcement FIRST: non-consuming peek so auto_deny policies
+    // are enforced as the primary layer. In plan mode the gateway has auto_deny rules
+    // for Write/Edit/SubAgent, so this fires before the soft guard below.
+    // Uses peekDecision so pre-approved fingerprints are not consumed before the
+    // scheduler runs check() downstream.
+    {
+      const gatewayDecision = globalApprovalGateway.peekDecision(
+        toolCall.name,
+        toolCall.input as Record<string, unknown>,
+      );
+      if (gatewayDecision === "auto_deny") {
+        const denyMsg =
+          `APPROVAL GATEWAY DENIED: "${toolCall.name}" is permanently blocked by the current ` +
+          `approval policy. Change the operator mode or switch to apply/yolo before retrying.`;
+        if (!config.silent) {
+          process.stdout.write(`\n${RED}${BOLD}[gateway-deny]${RESET} ${RED}${denyMsg}${RESET}\n`);
+        }
+        toolResults.push(denyMsg);
+        continue;
+      }
+    }
+
+    // Plan mode soft guard: fallback for cases where config.planModeActive is true
+    // but the approval gateway was not configured in plan mode (mode drift).
     if (config.planModeActive && isPlanModeBlocked(toolCall.name)) {
       const blockMsg = planModeBlockedMessage(toolCall.name);
       toolResults.push(blockMsg);
@@ -377,6 +400,38 @@ export async function executeToolBatch(
 
     if (config.verbose && !config.silent) {
       process.stdout.write(`${DIM}${JSON.stringify(toolCall.input).slice(0, 200)}${RESET}\n`);
+    }
+
+    // Pre-mutation snapshot: before the FIRST Write/Edit to a file this session,
+    // capture a Tier 1 persistent debug-trail snapshot so /undo has a reliable
+    // restore target that survives session exit (not just the ephemeral in-memory fallback).
+    if (toolCall.name === "Write" || toolCall.name === "Edit") {
+      const preMutTarget = toolCall.input["file_path"] as string | undefined;
+      if (preMutTarget) {
+        const resolvedPreMut = resolve(session.projectRoot, preMutTarget);
+        const snapshotted = config.replState?.preMutationSnapshotted;
+        if (snapshotted && !snapshotted.has(resolvedPreMut)) {
+          snapshotted.add(resolvedPreMut); // mark before async to prevent double-capture
+          try {
+            const trailMod = await import("@dantecode/debug-trail");
+            const bridge = new trailMod.CliBridge(trailMod.getGlobalLogger());
+            await bridge.debugSnapshot(resolvedPreMut);
+            if (config.verbose) {
+              process.stdout.write(
+                `${DIM}[pre-mutation-snapshot] captured for ${preMutTarget}${RESET}\n`,
+              );
+            }
+          } catch {
+            snapshotted.delete(resolvedPreMut); // allow retry on next attempt
+            if (!config.silent) {
+              process.stderr.write(
+                `\n${YELLOW}[pre-mutation-snapshot] warn: snapshot for ${preMutTarget} failed` +
+                ` — /undo Tier 1 unavailable for this file (in-memory fallback active)${RESET}\n`,
+              );
+            }
+          }
+        }
+      }
     }
 
     // Dirty-commit-before-edit (aider pattern): if the agent is about to edit

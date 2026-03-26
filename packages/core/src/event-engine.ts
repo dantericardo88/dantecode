@@ -7,13 +7,18 @@
  */
 
 import { randomUUID } from "node:crypto";
+import {
+  RuntimeEventSchema,
+  type RuntimeEvent,
+  type RuntimeEventKind,
+} from "@dantecode/runtime-spine";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** All first-class event types recognised by the engine. */
-export type DanteEventType =
+/** Legacy first-class event types recognised by the engine. */
+export type LegacyDanteEventType =
   | "git:commit"
   | "git:push"
   | "git:checkout"
@@ -30,6 +35,9 @@ export type DanteEventType =
   | "agent:start"
   | "custom";
 
+/** All event types recognised by the engine, including shared runtime-spine kinds. */
+export type DanteEventType = LegacyDanteEventType | RuntimeEventKind;
+
 /** A single event travelling through the engine. */
 export interface DanteEvent {
   /** UUID v4 unique to this event. */
@@ -44,6 +52,13 @@ export interface DanteEvent {
   source: string;
   /** True once all matching workflows have run (or been attempted). */
   processed: boolean;
+  /** Canonical runtime-spine envelope when this event originated from the shared runtime bus. */
+  runtimeEvent?: RuntimeEvent;
+}
+
+export interface RuntimeBackedDanteEvent extends DanteEvent {
+  type: RuntimeEventKind;
+  runtimeEvent: RuntimeEvent;
 }
 
 /** A workflow that reacts to one or more event types. */
@@ -200,7 +215,7 @@ export class EventEngine {
    * Factory helper — create a {@link DanteEvent} without enqueueing it.
    */
   createEvent(
-    type: DanteEventType,
+    type: LegacyDanteEventType,
     payload: Record<string, unknown>,
     source = "unknown",
   ): DanteEvent {
@@ -215,14 +230,58 @@ export class EventEngine {
   }
 
   /**
+   * Factory helper — validate and wrap a shared runtime-spine event without enqueueing it.
+   */
+  createRuntimeEvent(runtimeEvent: RuntimeEvent, source = "runtime"): RuntimeBackedDanteEvent {
+    const parsed = RuntimeEventSchema.parse(runtimeEvent);
+    return {
+      id: randomUUID(),
+      type: parsed.kind,
+      payload: parsed.payload,
+      timestamp: parsed.at,
+      source,
+      processed: false,
+      runtimeEvent: parsed,
+    };
+  }
+
+  /**
    * Create an event and add it to the processing queue.
    *
    * If the queue is at capacity the event is still returned but not enqueued.
    *
    * @returns The newly created {@link DanteEvent}.
    */
-  enqueue(type: DanteEventType, payload: Record<string, unknown>, source = "unknown"): DanteEvent {
+  enqueue(
+    type: LegacyDanteEventType,
+    payload: Record<string, unknown>,
+    source = "unknown",
+  ): DanteEvent {
     const event = this.createEvent(type, payload, source);
+
+    if (this.queue.length < this.options.maxQueueSize) {
+      const entry: EventQueueEntry = {
+        event,
+        enqueuedAt: new Date().toISOString(),
+        attempts: 0,
+        maxAttempts: this.options.maxAttempts,
+      };
+      this.queue.push(entry);
+    }
+
+    return event;
+  }
+
+  /**
+   * Validate a runtime-spine event and add it to the processing queue.
+   *
+   * If the queue is at capacity the event is still returned but not enqueued.
+   */
+  enqueueRuntimeEvent(
+    runtimeEvent: RuntimeEvent,
+    source = "runtime",
+  ): RuntimeBackedDanteEvent {
+    const event = this.createRuntimeEvent(runtimeEvent, source);
 
     if (this.queue.length < this.options.maxQueueSize) {
       const entry: EventQueueEntry = {

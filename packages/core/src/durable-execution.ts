@@ -6,20 +6,20 @@
 
 import { mkdir, readFile, unlink, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  DurableExecutionCheckpointSchema,
+  type DurableExecutionCheckpoint as RuntimeDurableExecutionCheckpoint,
+  type DurableExecutionRunConfig,
+  type CheckpointWorkspaceContext,
+} from "@dantecode/runtime-spine";
+import { detectInstallContext } from "./runtime-update.js";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-export interface ExecutionCheckpoint {
-  sessionId: string;
-  stepIndex: number;
-  totalSteps?: number;
-  completedSteps: string[];
-  partialOutput?: string;
-  savedAt: string;
-  projectRoot: string;
-}
+export type ExecutionCheckpoint = RuntimeDurableExecutionCheckpoint;
 
 export interface DurableExecutionOptions {
   sessionId: string;
@@ -29,6 +29,8 @@ export interface DurableExecutionOptions {
   /** Maximum retries per step. Default: 3. */
   maxRetries?: number;
 }
+
+const RUNTIME_FILE_PATH = fileURLToPath(import.meta.url);
 
 // ────────────────────────────────────────────────────────────────────────────
 // DurableExecutionEngine
@@ -70,14 +72,16 @@ export class DurableExecutionEngine {
     const dir = join(this.projectRoot, ".dantecode", "checkpoints");
     await mkdir(dir, { recursive: true });
 
-    const data: ExecutionCheckpoint = {
+    const data = DurableExecutionCheckpointSchema.parse({
       sessionId: this.sessionId,
       stepIndex,
       completedSteps: [...completedSteps],
       partialOutput,
       savedAt: new Date().toISOString(),
       projectRoot: this.projectRoot,
-    };
+      runConfig: this.getRunConfig(),
+      workspaceContext: this.getWorkspaceContext(),
+    });
 
     await writeFile(checkpointPath, JSON.stringify(data, null, 2), "utf-8");
   }
@@ -90,7 +94,8 @@ export class DurableExecutionEngine {
     const checkpointPath = this.getCheckpointPath();
     try {
       const raw = await readFile(checkpointPath, "utf-8");
-      return JSON.parse(raw) as ExecutionCheckpoint;
+      const parsed = DurableExecutionCheckpointSchema.safeParse(JSON.parse(raw));
+      return parsed.success ? parsed.data : null;
     } catch {
       return null;
     }
@@ -125,6 +130,12 @@ export class DurableExecutionEngine {
     onStep?: (index: number, name: string) => void,
   ): Promise<T[]> {
     const existingCheckpoint = await this.loadCheckpoint();
+    if (existingCheckpoint?.runConfig && !this.hasCompatibleRunConfig(existingCheckpoint.runConfig)) {
+      throw new Error(
+        `Checkpoint config mismatch for session "${this.sessionId}". ` +
+          `Expected checkpointEveryN=${this.checkpointEveryN}, maxRetries=${this.maxRetries}.`,
+      );
+    }
     const startIndex = existingCheckpoint ? existingCheckpoint.completedSteps.length : 0;
     const completedSteps: string[] = existingCheckpoint
       ? [...existingCheckpoint.completedSteps]
@@ -169,6 +180,21 @@ export class DurableExecutionEngine {
     await this.clearCheckpoint();
     return results;
   }
+
+  private getRunConfig(): DurableExecutionRunConfig {
+    return {
+      checkpointEveryN: this.checkpointEveryN,
+      maxRetries: this.maxRetries,
+    };
+  }
+
+  private getWorkspaceContext(): CheckpointWorkspaceContext {
+    return buildWorkspaceContext(this.projectRoot);
+  }
+
+  private hasCompatibleRunConfig(runConfig: DurableExecutionRunConfig): boolean {
+    return compareRunConfig(runConfig, this.getRunConfig());
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -193,8 +219,10 @@ export async function listCheckpoints(projectRoot: string): Promise<ExecutionChe
     if (!file.endsWith(".json")) continue;
     try {
       const raw = await readFile(join(dir, file), "utf-8");
-      const cp = JSON.parse(raw) as ExecutionCheckpoint;
-      checkpoints.push(cp);
+      const parsed = DurableExecutionCheckpointSchema.safeParse(JSON.parse(raw));
+      if (parsed.success) {
+        checkpoints.push(parsed.data);
+      }
     } catch {
       // Skip corrupted files
     }
@@ -220,5 +248,30 @@ export async function clearAllCheckpoints(projectRoot: string): Promise<void> {
     files
       .filter((f) => f.endsWith(".json"))
       .map((f) => unlink(join(dir, f)).catch(() => undefined)),
+  );
+}
+
+function buildWorkspaceContext(projectRoot: string): CheckpointWorkspaceContext {
+  const installContext = detectInstallContext({
+    runtimePath: RUNTIME_FILE_PATH,
+    cwd: projectRoot,
+    workspaceRoot: projectRoot,
+  });
+
+  return {
+    projectRoot,
+    workspaceRoot: projectRoot,
+    repoRoot: installContext.repoRoot,
+    workspaceIsRepoRoot: installContext.workspaceIsRepoRoot,
+    installContextKind: installContext.kind,
+  };
+}
+
+function compareRunConfig(
+  expected: DurableExecutionRunConfig,
+  actual: DurableExecutionRunConfig,
+): boolean {
+  return (
+    expected.checkpointEveryN === actual.checkpointEveryN && expected.maxRetries === actual.maxRetries
   );
 }

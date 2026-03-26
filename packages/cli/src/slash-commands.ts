@@ -38,6 +38,8 @@ import {
   estimateMessageTokens,
   verifyCompletion,
   deriveExpectations,
+  globalApprovalGateway,
+  globalToolScheduler,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -119,6 +121,11 @@ import { adaptationCommand } from "./commands/adaptation.js";
 import { planCommand } from "./commands/plan.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
+import {
+  configureApprovalMode,
+  normalizeApprovalMode,
+  type ApprovalModeInput,
+} from "./approval-mode-runtime.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -148,6 +155,9 @@ export interface ReplState {
   silent: boolean;
   lastEditFile: string | null;
   lastEditContent: string | null;
+  lastRestoreEvent?: { restoredAt: string; restoreSummary: string } | null;
+  /** Files for which a pre-mutation debug-trail snapshot has been captured this session. */
+  preMutationSnapshotted: Set<string>;
   /** Tracks recent tool call signatures for stuck-loop detection (from opencode/OpenHands). */
   recentToolCalls: string[];
   /** When set by a slash command, processInput will feed this prompt to the agent loop. */
@@ -210,6 +220,12 @@ export interface ReplState {
   modelAdaptationStore?: import("@dantecode/core").ModelAdaptationStore | null;
   /** Verification trend tracker — records PDSE scores and detects regressions. */
   verificationTrendTracker: import("@dantecode/core").VerificationTrendTracker | null;
+  /**
+   * Per-file PDSE results from the most recent agent-loop run.
+   * Populated by the DanteForge pipeline block in agent-loop.ts.
+   * Passed to generateSessionReport so REPL run reports include verification truth.
+   */
+  lastSessionPdseResults: Array<{ file: string; pdseScore: number; passed: boolean }>;
   /** Whether plan mode is currently active. */
   planMode: boolean;
   /** The current plan when in plan mode, or null. */
@@ -223,7 +239,7 @@ export interface ReplState {
   /** Result from completed PlanExecutor execution, or null. */
   planExecutionResult: import("@dantecode/core").PlanExecutionResult | null;
   /** Runtime-switchable approval mode for tool execution. */
-  approvalMode: "default" | "yolo" | "auto-edit" | "plan";
+  approvalMode: ApprovalModeInput | "review" | "apply" | "autoforge";
 }
 
 /** A single slash command handler. */
@@ -1121,20 +1137,174 @@ async function revertCommand(_args: string, state: ReplState): Promise<string> {
   }
 }
 
-async function undoCommand(_args: string, state: ReplState): Promise<string> {
-  if (!state.lastEditFile || !state.lastEditContent) {
-    return `${DIM}Nothing to undo. No previous edit recorded.${RESET}`;
+interface TrailMutationEvent {
+  timestamp: string;
+  kind: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  beforeSnapshotId?: string;
+  afterSnapshotId?: string;
+}
+
+async function loadTrailBridge() {
+  const trailMod = await import("@dantecode/debug-trail");
+  return {
+    bridge: new trailMod.CliBridge(trailMod.getGlobalLogger()),
+    debugRestore: trailMod.debugRestore,
+  };
+}
+
+function isPathLikeRestoreTarget(target: string): boolean {
+  return target.includes("/") || target.includes("\\") || target.includes(".");
+}
+
+function eventFilePath(event: TrailMutationEvent): string | null {
+  const filePath = event.payload["filePath"];
+  return typeof filePath === "string" ? filePath : null;
+}
+
+function formatTrailTarget(event: TrailMutationEvent, projectRoot: string): string {
+  const filePath = eventFilePath(event);
+  if (!filePath) {
+    return event.summary;
   }
 
+  return relative(projectRoot, filePath) || filePath;
+}
+
+async function findLatestRestorableSnapshot(
+  state: ReplState,
+  target?: string,
+): Promise<{ snapshotId: string; filePath: string | null } | null> {
+  const { bridge } = await loadTrailBridge();
+  const trail = await bridge.debugTrailRecent(100);
+  const targetPath = target ? resolve(state.projectRoot, target) : null;
+
+  for (const event of trail.results as TrailMutationEvent[]) {
+    if (!event.beforeSnapshotId) {
+      continue;
+    }
+
+    const filePath = eventFilePath(event);
+    if (targetPath && filePath && resolve(filePath) !== targetPath) {
+      continue;
+    }
+
+    if (
+      event.kind === "file_write" ||
+      event.kind === "file_restore" ||
+      event.kind === "file_move"
+    ) {
+      return {
+        snapshotId: event.beforeSnapshotId,
+        filePath,
+      };
+    }
+  }
+
+  return null;
+}
+
+function rememberRestore(state: ReplState, summary: string): void {
+  state.lastRestoreEvent = {
+    restoredAt: new Date().toISOString(),
+    restoreSummary: summary,
+  };
+}
+
+async function undoCommand(_args: string, state: ReplState): Promise<string> {
   try {
+    const target = _args.trim() || state.lastEditFile || undefined;
+    const restorable = await findLatestRestorableSnapshot(state, target);
+
+    if (restorable) {
+      const { debugRestore } = await loadTrailBridge();
+      const restored = await debugRestore(restorable.snapshotId);
+      if (!restored.restored) {
+        return `${RED}Undo error:${RESET} ${restored.error ?? "restore failed"}`;
+      }
+
+      const restoredTarget = restorable.filePath
+        ? relative(state.projectRoot, restorable.filePath) || restorable.filePath
+        : restored.targetPath ?? restorable.snapshotId;
+      const summary = `Restored ${restoredTarget} from snapshot ${restorable.snapshotId}.`;
+      rememberRestore(state, summary);
+      state.lastEditFile = null;
+      state.lastEditContent = null;
+      return `${GREEN}Restored${RESET} ${restoredTarget} [persistent snapshot: ${restorable.snapshotId}]`;
+    }
+
+    if (!state.lastEditFile || !state.lastEditContent) {
+      return `${DIM}Nothing to undo. No previous edit recorded.${RESET}`;
+    }
+
     await writeFile(state.lastEditFile, state.lastEditContent, "utf-8");
     const filePath = state.lastEditFile;
     state.lastEditFile = null;
     state.lastEditContent = null;
-    return `${GREEN}Undone${RESET} last edit to ${filePath}`;
+    rememberRestore(
+      state,
+      `Restored ${relative(state.projectRoot, filePath) || filePath} from in-memory fallback.`,
+    );
+    return `${GREEN}Restored${RESET} ${filePath} ${DIM}[in-memory fallback — does not survive session exit; capture a snapshot next time with /snapshot]${RESET}`;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return `${RED}Undo error: ${message}${RESET}`;
+  }
+}
+
+async function restoreCommand(args: string, state: ReplState): Promise<string> {
+  const target = args.trim();
+  if (!target) {
+    return `${RED}Usage: /restore <snapshot-id|file-path>${RESET}`;
+  }
+
+  try {
+    const { debugRestore } = await loadTrailBridge();
+    const restorable =
+      isPathLikeRestoreTarget(target) ? await findLatestRestorableSnapshot(state, target) : null;
+    const restoreTarget = restorable?.snapshotId ?? target;
+    const result = await debugRestore(restoreTarget);
+
+    if (!result.restored) {
+      return `${RED}Restore error:${RESET} ${result.error ?? "restore failed"}`;
+    }
+
+    const restoredTarget =
+      restorable?.filePath != null
+        ? relative(state.projectRoot, restorable.filePath) || restorable.filePath
+        : result.targetPath ?? target;
+    const summary = `Restored ${restoredTarget} from ${restoreTarget}.`;
+    rememberRestore(state, summary);
+    return `${GREEN}Restored${RESET} ${restoredTarget} from ${restoreTarget}`;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Restore error: ${message}${RESET}`;
+  }
+}
+
+async function timelineCommand(args: string, state: ReplState): Promise<string> {
+  const limit = Math.max(1, Math.min(50, parseInt(args.trim() || "10", 10) || 10));
+
+  try {
+    const { bridge } = await loadTrailBridge();
+    const trail = await bridge.debugTrailRecent(limit);
+    if (trail.results.length === 0) {
+      return `${DIM}No recovery timeline events are available yet.${RESET}`;
+    }
+
+    const lines = [`${BOLD}Recovery Timeline${RESET}`, ""];
+    for (const event of trail.results as TrailMutationEvent[]) {
+      const target = formatTrailTarget(event, state.projectRoot);
+      const before = event.beforeSnapshotId ? ` before:${event.beforeSnapshotId}` : "";
+      const after = event.afterSnapshotId ? ` after:${event.afterSnapshotId}` : "";
+      lines.push(`  ${DIM}${event.timestamp}${RESET} ${event.kind} ${target}${before}${after}`);
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Timeline error: ${message}${RESET}`;
   }
 }
 
@@ -4721,6 +4891,15 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
   const defaultName = `session-${state.session.name ?? state.session.id.slice(0, 8)}.${format}`;
   const outputPath = parts[1] ?? defaultName;
   const absPath = resolve(state.projectRoot, outputPath);
+  const visibility = {
+    approvalMode: state.approvalMode,
+    planMode: state.planMode,
+    activeSkill: state.activeSkill,
+    pendingResumeRunId: state.pendingResumeRunId,
+    recentToolCalls: [...state.recentToolCalls],
+    lastRestoreEvent: state.lastRestoreEvent ?? null,
+    pdseResults: [...state.lastSessionPdseResults],
+  };
 
   try {
     if (format === "json") {
@@ -4737,6 +4916,7 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
           activeFiles: state.session.activeFiles,
           todoList: state.session.todoList,
         },
+        visibility,
         memoryStats: state.memoryOrchestrator ? state.memoryOrchestrator.memoryVisualize() : null,
       };
       await writeFile(absPath, JSON.stringify(data, null, 2), "utf8");
@@ -4746,11 +4926,29 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
         "",
         `- **Created:** ${state.session.createdAt}`,
         `- **Model:** ${state.session.model.provider}/${state.session.model.modelId}`,
+        `- **Mode:** ${state.approvalMode}`,
+        `- **Plan Mode:** ${state.planMode ? "on" : "off"}`,
         `- **Messages:** ${state.session.messages.length}`,
         "",
+      ];
+      if (state.activeSkill) {
+        lines.push(`- **Active Skill:** ${state.activeSkill}`);
+      }
+      if (state.lastRestoreEvent) {
+        lines.push(`- **Last Restore:** ${state.lastRestoreEvent.restoreSummary}`);
+      }
+      if (state.lastSessionPdseResults.length > 0) {
+        lines.push(`- **PDSE Results:**`);
+        for (const result of state.lastSessionPdseResults) {
+          lines.push(
+            `  - ${result.file}: ${result.pdseScore} (${result.passed ? "pass" : "fail"})`,
+          );
+        }
+      }
+      lines.push(
         "---",
         "",
-      ];
+      );
       for (const msg of state.session.messages) {
         const role =
           msg.role === "user"
@@ -5242,17 +5440,24 @@ async function thinkCommand(args: string, state: ReplState): Promise<string> {
 // Approval Mode slash command
 // ----------------------------------------------------------------------------
 
-const APPROVAL_MODES = ["default", "yolo", "auto-edit", "plan"] as const;
+const APPROVAL_MODES = ["review", "apply", "autoforge", "plan", "yolo"] as const;
 type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 async function modeCommand(args: string, state: ReplState): Promise<string> {
   const sub = args.trim().toLowerCase();
+  const currentMode = normalizeApprovalMode(state.approvalMode) ?? "review";
 
   if (!sub) {
     const lines = [
-      `${BOLD}Current approval mode:${RESET} ${state.approvalMode}`,
+      `${BOLD}Current approval mode:${RESET} ${currentMode}`,
       "",
       `${BOLD}Available modes:${RESET}`,
+      `  ${GREEN}review${RESET}     - Require approval before workspace mutations and subagents`,
+      `  ${CYAN}apply${RESET}      - Auto-approve edits, still gate shell/git/subagent execution`,
+      `  ${YELLOW}autoforge${RESET}  - Apply profile for pipeline execution`,
+      `  ${RED}plan${RESET}       - Block workspace mutations and subagents until execution is approved`,
+      `  ${DIM}Legacy aliases:${RESET} default -> review, auto-edit -> apply`,
+      `  ${DIM}Unsafe escape hatch:${RESET} yolo -> disables the approval gateway`,
       `  ${GREEN}default${RESET}   — Standard approval flow (confirm destructive ops)`,
       `  ${YELLOW}yolo${RESET}      — No confirmations (use with caution)`,
       `  ${CYAN}auto-edit${RESET} — Auto-approve Write/Edit, confirm Bash/GitPush`,
@@ -5261,19 +5466,23 @@ async function modeCommand(args: string, state: ReplState): Promise<string> {
     return lines.join("\n");
   }
 
-  if (!APPROVAL_MODES.includes(sub as ApprovalMode)) {
+  const normalized = normalizeApprovalMode(sub);
+  if (!normalized && sub !== "yolo") {
     return `${RED}Unknown mode "${sub}". Available: ${APPROVAL_MODES.join(", ")}${RESET}`;
   }
 
-  state.approvalMode = sub as ApprovalMode;
+  const nextMode = (normalized ?? "yolo") as ApprovalMode;
+  state.approvalMode = nextMode;
+  configureApprovalMode(nextMode);
 
-  if (sub === "plan") {
+  if (nextMode === "plan") {
     state.planMode = true;
-  } else if (state.planMode && sub !== "plan") {
+    state.planApproved = false;
+  } else if (state.planMode) {
     state.planMode = false;
   }
 
-  return `${GREEN}Approval mode set to ${BOLD}${sub}${RESET}`;
+  return `${GREEN}Approval mode set to ${BOLD}${nextMode}${RESET}`;
 }
 
 // ----------------------------------------------------------------------------
@@ -5397,16 +5606,102 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
 // Approval Engine slash commands
 // ----------------------------------------------------------------------------
 
-async function approveCommand(_args: string, _state: ReplState): Promise<string> {
+async function approveCommand(_args: string, state: ReplState): Promise<string> {
   // Interactive approval signal — registers a pending approval for the current sandboxed action.
   // Full interactive wiring is deferred; this confirms the intent to the user.
   globalApprovalEngine.setPolicy("auto");
-  return `${GREEN}Approval registered.${RESET} ${DIM}The pending sandboxed action has been approved for this session (policy: auto).${RESET}`;
+  const store = new DurableRunStore(state.projectRoot);
+  const run = await store.getLatestWaitingUserRun();
+  if (!run) {
+    return `${YELLOW}No paused durable run awaiting approval.${RESET}`;
+  }
+
+  const pendingToolCalls = await store.loadPendingToolCalls(run.id);
+  const records = await store.loadToolCallRecords(run.id);
+  const pendingRecord = records.find((record) => record.status === "awaiting_approval");
+  const pendingToolCall =
+    pendingToolCalls[0] ??
+    (pendingRecord
+      ? {
+          id: pendingRecord.id,
+          name: pendingRecord.toolName,
+          input: pendingRecord.input,
+          dependsOn: pendingRecord.dependsOn,
+        }
+      : undefined);
+
+  if (!pendingToolCall) {
+    return `${YELLOW}Durable run ${run.id} does not have a pending tool approval.${RESET}`;
+  }
+
+  globalApprovalGateway.approveToolCall(pendingToolCall.name, pendingToolCall.input);
+  state.pendingAgentPrompt = "continue";
+  state.pendingResumeRunId = run.id;
+  state.pendingExpectedWorkflow = run.workflow;
+  return (
+    `${GREEN}Approved ${BOLD}${pendingToolCall.name}${RESET}${GREEN} for durable run ${run.id}.${RESET}\n` +
+    `${DIM}Queued the run to continue with the explicitly approved tool call.${RESET}`
+  );
 }
 
-async function denyCommand(_args: string, _state: ReplState): Promise<string> {
+async function denyCommand(_args: string, state: ReplState): Promise<string> {
   // Interactive denial signal — registers a denial for the current sandboxed action.
   globalApprovalEngine.setPolicy("manual");
+  const store = new DurableRunStore(state.projectRoot);
+  const run = await store.getLatestWaitingUserRun();
+  if (!run) {
+    return `${YELLOW}No paused durable run awaiting approval.${RESET}`;
+  }
+
+  const pendingToolCalls = await store.loadPendingToolCalls(run.id);
+  const restoredRecords = globalToolScheduler.resumeToolCalls(
+    await store.loadToolCallRecords(run.id),
+  );
+  const pendingRecord = restoredRecords.find((record) => record.status === "awaiting_approval");
+  const pendingToolCall =
+    pendingToolCalls[0] ??
+    (pendingRecord
+      ? {
+          id: pendingRecord.id,
+          name: pendingRecord.toolName,
+          input: pendingRecord.input,
+          dependsOn: pendingRecord.dependsOn,
+        }
+      : undefined);
+
+  if (pendingRecord) {
+    globalToolScheduler.cancel(pendingRecord.id, "Denied by operator.");
+    await store.persistToolCallRecords(run.id, [pendingRecord]);
+  }
+
+  if (pendingToolCall) {
+    globalApprovalGateway.revokeToolCallApproval(pendingToolCall.name, pendingToolCall.input);
+  }
+
+  await store.clearPendingToolCalls(run.id);
+  await store.failRun(run.id, {
+    session: state.session,
+    touchedFiles: collectTouchedFilesFromSession(state.session, state.projectRoot),
+    lastConfirmedStep: run.lastConfirmedStep,
+    nextAction: "Adjust the plan or switch approval modes before retrying the run.",
+    message: pendingToolCall
+      ? `Operator denied ${pendingToolCall.name}.`
+      : "Operator denied the pending action.",
+    evidence: [],
+  });
+
+  state.pendingAgentPrompt = null;
+  state.pendingResumeRunId = null;
+  state.pendingExpectedWorkflow = null;
+
+  if (!pendingToolCall) {
+    return `${RED}Denied the pending durable run.${RESET}`;
+  }
+
+  return (
+    `${RED}Denied ${BOLD}${pendingToolCall.name}${RESET}${RED} for durable run ${run.id}.${RESET}\n` +
+    `${DIM}The run was marked failed and its pending tool calls were cleared.${RESET}`
+  );
   return `${RED}Denial registered.${RESET} ${DIM}The pending sandboxed action has been denied. Policy reset to manual — all actions will prompt.${RESET}`;
 }
 
@@ -5973,9 +6268,25 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "undo",
-    description: "Undo last file edit",
-    usage: "/undo",
+    description: "Restore the most recent file snapshot",
+    usage: "/undo [file]",
     handler: undoCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "restore",
+    description: "Restore a file or snapshot from the recovery trail",
+    usage: "/restore <snapshot-id|file-path>",
+    handler: restoreCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "timeline",
+    description: "Show recent recovery trail events",
+    usage: "/timeline [limit]",
+    handler: timelineCommand,
     tier: 1,
     category: "core",
   },

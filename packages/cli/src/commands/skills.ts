@@ -1258,6 +1258,43 @@ async function skillsAgentSkillsImport(args: string[], projectRoot: string): Pro
  * Runs a skill by name: policy-checks it then executes via skills-runtime.
  * Usage: dantecode skills run <name>
  */
+async function writePolicyFailureReceipt(
+  projectRoot: string,
+  skillName: string,
+  allowedTools: string[] | undefined,
+  details: string,
+): Promise<{ runId: string; receiptRef: string }> {
+  const runId = `skill_policy_${Date.now().toString(16)}`;
+  const receiptRef = join(projectRoot, ".dantecode", "receipts", "skills", `${runId}.json`);
+  const issuedAt = new Date().toISOString();
+  const receipt = {
+    receiptVersion: 2,
+    receiptId: `rcpt_${runId}`,
+    runId,
+    skillName,
+    sourceType: "native",
+    state: "failed",
+    verificationOutcome: "fail",
+    verificationSummary: "Policy denied skill execution before any mutation ran.",
+    filesTouched: [] as string[],
+    commandsRun: [] as string[],
+    issuedAt,
+    failureReason: details,
+    receiptRef,
+    policySnapshot: {
+      requestedTools: [...(allowedTools ?? [])],
+    },
+    evidenceHashes: {
+      commands: [] as string[],
+      files: [] as string[],
+    },
+  };
+
+  await mkdir(join(projectRoot, ".dantecode", "receipts", "skills"), { recursive: true });
+  await writeFile(receiptRef, `${JSON.stringify(receipt, null, 2)}\n`, "utf-8");
+  return { runId, receiptRef };
+}
+
 async function skillsRun(args: string[], projectRoot: string): Promise<void> {
   const skillName = args[0];
   if (!skillName) {
@@ -1277,6 +1314,14 @@ async function skillsRun(args: string[], projectRoot: string): Promise<void> {
   });
   if (!policyResult.passed) {
     const details = policyResult.errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+    const deniedReceipt = await writePolicyFailureReceipt(
+      projectRoot,
+      skillDef.frontmatter.name,
+      skillDef.frontmatter.tools,
+      details,
+    );
+    process.stdout.write(`${DIM}Run ID: ${deniedReceipt.runId}${RESET}\n`);
+    process.stdout.write(`${DIM}Receipt: ${deniedReceipt.receiptRef}${RESET}\n`);
     process.stdout.write(`${RED}Policy check failed — ${details}${RESET}\n`);
     return;
   }
@@ -1309,6 +1354,9 @@ async function skillsRun(args: string[], projectRoot: string): Promise<void> {
   );
   if (result.runId) {
     process.stdout.write(`${DIM}Run ID: ${result.runId}${RESET}\n`);
+  }
+  if (result.receiptRef) {
+    process.stdout.write(`${DIM}Receipt: ${result.receiptRef}${RESET}\n`);
   }
 }
 

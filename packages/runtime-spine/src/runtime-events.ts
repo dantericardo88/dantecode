@@ -74,3 +74,8 @@ export const RuntimeEventSchema = z.object({
 });
 
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
+export type RuntimeEventInput = z.input<typeof RuntimeEventSchema>;
+
+export function buildRuntimeEvent(event: RuntimeEventInput): RuntimeEvent {
+  return RuntimeEventSchema.parse(event);
+}

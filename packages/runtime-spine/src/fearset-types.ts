@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { RuntimeEventSchema } from "./runtime-events.js";
 
 // ─── Trigger channels ──────────────────────────────────────────────────────────
 
@@ -164,6 +165,8 @@ export const FearSetResultSchema = z.object({
   passed: z.boolean().default(false),
   /** Operating mode. */
   mode: z.enum(["standard", "lite"]).default("standard"),
+  /** Captured shared runtime events emitted during the FearSet run. */
+  runtimeEvents: z.array(RuntimeEventSchema).optional(),
   /** Why the run ended (user-stop, budget, policy-abort, or completed normally). */
   stopReason: z.enum(["user-stop", "budget-exhausted", "policy-abort", "completed"]).optional(),
   /** ISO timestamp when the run was stopped early (user-stop / budget / policy). */

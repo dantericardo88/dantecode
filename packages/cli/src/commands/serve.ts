@@ -440,9 +440,11 @@ export async function runServeCommand(args: string[]): Promise<void> {
             }
           }
         }
+        opts.onCompleted?.();
         // Emit done so SSE clients can close their stream
         serverHandle.sessionEmitter.emitDone(opts.sessionId, 0, Date.now() - startMs);
       } catch (err: unknown) {
+        opts.onFailed?.(err instanceof Error ? err.message : String(err));
         serverHandle.sessionEmitter.emitError(
           opts.sessionId,
           err instanceof Error ? err.message : String(err),

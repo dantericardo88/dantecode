@@ -705,6 +705,15 @@ export type { VerifyOutputInput, QaSuiteOutputInput } from "./qa-harness.js";
 
 // ─── Tool Scheduler ───────────────────────────────────────────────────────────
 
+export {
+  ApprovalGateway,
+  DEFAULT_APPROVAL_RULES,
+  globalApprovalGateway,
+} from "./tool-runtime/approval-gateway.js";
+export type {
+  ApprovalGatewayConfig,
+  ApprovalRule,
+} from "./tool-runtime/approval-gateway.js";
 export { globalToolScheduler } from "./tool-runtime/tool-scheduler.js";
 
 // ─── Verification Stores ──────────────────────────────────────────────────────
@@ -754,6 +763,7 @@ export {
 export type {
   RunReport,
   RunReportEntry,
+  RunReportExecutionStage,
   RunReportStatus,
   RunReportVerification,
   RunReportTests,

@@ -165,6 +165,14 @@ describe("GitAutomationOrchestrator", () => {
     expect(result.status).toBe("blocked");
     expect(result.gateStatus).toBe("failed");
     expect(createAutoPR).not.toHaveBeenCalled();
+    expect(result.backgroundTaskId).toBeTruthy();
+
+    const runner = (
+      orchestrator as unknown as {
+        runner: { getTask(taskId: string): { status: string } | null };
+      }
+    ).runner;
+    expect(runner.getTask(result.backgroundTaskId!)?.status).toBe("completed");
 
     const events = await readAuditEvents(tmpDir);
     expect(events.some((event) => event.type === "git_automation_gate_fail")).toBe(true);

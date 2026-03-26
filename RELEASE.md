@@ -33,6 +33,12 @@ Set one real provider key, then run:
 npm run smoke:provider -- --require-provider
 ```
 
+Once the live provider receipt exists for the release commit, generate the same-commit README quickstart proof:
+
+```bash
+npm run release:prove-quickstart
+```
+
 Accepted env vars:
 
 - `GROK_API_KEY`
@@ -75,7 +81,7 @@ Watch the first GitHub Actions run and make sure [ci.yml](.github/workflows/ci.y
 Before creating a public release, add these GitHub Actions secrets:
 
 - `NPM_TOKEN` for npm package publishing
-- `VSCE_PAT` for preview VS Code extension publishing
+- `VSCE_PAT` only if you want Marketplace publishing for the preview VS Code extension
 
 The CLI and core libraries are the primary OSS v1 release artifacts. The VS Code extension remains preview, and the desktop app remains beta.
 
@@ -96,6 +102,8 @@ Call the release complete when all of the following are true:
 - `npm run release:doctor` shows no blockers
 - `npm run release:check` is green
 - `npm run smoke:provider -- --require-provider` is green
+- `npm run release:prove-quickstart` records a same-commit quickstart receipt
 - The first GitHub Actions CI run is green on the pushed repo
-- `NPM_TOKEN` and `VSCE_PAT` are configured for publish
+- `NPM_TOKEN` is configured for npm publish
 - The public README quickstart works from a clean clone
+- `VSCE_PAT` is configured if you want Marketplace publishing for the preview extension

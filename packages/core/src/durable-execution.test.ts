@@ -8,6 +8,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
+  DurableExecutionCheckpointSchema,
+  CheckpointWorkspaceContextSchema,
+} from "@dantecode/runtime-spine";
+import {
   DurableExecutionEngine,
   listCheckpoints,
   clearAllCheckpoints,
@@ -93,6 +97,12 @@ describe("DurableExecutionEngine", () => {
     expect(loaded!.partialOutput).toBe("partial content here");
     expect(loaded!.projectRoot).toBe(projectRoot);
     expect(loaded!.savedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(loaded!.runConfig).toMatchObject({
+      checkpointEveryN: 1,
+      maxRetries: 3,
+    });
+    expect(loaded!.workspaceContext).toBeDefined();
+    expect(CheckpointWorkspaceContextSchema.safeParse(loaded!.workspaceContext).success).toBe(true);
   });
 
   // ── 4. clearCheckpoint() removes the file ───────────────────────────────
@@ -165,6 +175,16 @@ describe("DurableExecutionEngine", () => {
       completedSteps: ["step-first", "step-second"],
       savedAt: new Date().toISOString(),
       projectRoot,
+      runConfig: {
+        checkpointEveryN: 1,
+        maxRetries: 3,
+      },
+      workspaceContext: {
+        projectRoot,
+        workspaceRoot: projectRoot,
+        workspaceIsRepoRoot: false,
+        installContextKind: "npm_global_cli",
+      },
     };
     writeFileSync(
       join(checkpointDir, `${sessionId}.json`),
@@ -202,6 +222,65 @@ describe("DurableExecutionEngine", () => {
 
     // Only step-third should have executed (steps 0 and 1 were in checkpoint)
     expect(executed).toEqual(["third"]);
+  });
+
+  it("run() refuses to resume when the persisted checkpoint config does not match", async () => {
+    const sessionId = "test-session-config-mismatch";
+    const engine = new DurableExecutionEngine({
+      sessionId,
+      projectRoot,
+      checkpointEveryN: 2,
+      maxRetries: 5,
+    });
+
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints");
+    mkdirSync(checkpointDir, { recursive: true });
+    const checkpointData: ExecutionCheckpoint = {
+      sessionId,
+      stepIndex: 0,
+      completedSteps: ["step-first"],
+      savedAt: new Date().toISOString(),
+      projectRoot,
+      runConfig: {
+        checkpointEveryN: 1,
+        maxRetries: 3,
+      },
+      workspaceContext: {
+        projectRoot,
+        workspaceRoot: projectRoot,
+        workspaceIsRepoRoot: false,
+        installContextKind: "npm_global_cli",
+      },
+    };
+    writeFileSync(
+      join(checkpointDir, `${sessionId}.json`),
+      JSON.stringify(checkpointData),
+      "utf-8",
+    );
+
+    await expect(
+      engine.run([{ name: "step-first", fn: async () => 1 }]),
+    ).rejects.toThrow(/Checkpoint config mismatch/);
+  });
+
+  it("loadCheckpoint() returns null for invalid persisted checkpoint payloads", async () => {
+    const sessionId = "test-session-invalid-payload";
+    const engine = new DurableExecutionEngine({ sessionId, projectRoot });
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints");
+    mkdirSync(checkpointDir, { recursive: true });
+    writeFileSync(
+      join(checkpointDir, `${sessionId}.json`),
+      JSON.stringify({
+        sessionId,
+        stepIndex: -1,
+        completedSteps: "not-an-array",
+        savedAt: "not-a-timestamp",
+        projectRoot,
+      }),
+      "utf-8",
+    );
+
+    await expect(engine.loadCheckpoint()).resolves.toBeNull();
   });
 
   // ── 7. run() clears checkpoint on completion ────────────────────────────
@@ -306,9 +385,52 @@ describe("listCheckpoints()", () => {
 
     const all = await listCheckpoints(projectRoot);
     expect(all).toHaveLength(2);
+    expect(DurableExecutionCheckpointSchema.safeParse(all[0]).success).toBe(true);
+    expect(DurableExecutionCheckpointSchema.safeParse(all[1]).success).toBe(true);
     // Sorted oldest-first
     expect(all[0]!.sessionId).toBe("session-a");
     expect(all[1]!.sessionId).toBe("session-b");
+  });
+
+  it("listCheckpoints() skips invalid checkpoint payloads", async () => {
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints");
+    mkdirSync(checkpointDir, { recursive: true });
+    writeFileSync(
+      join(checkpointDir, "valid.json"),
+      JSON.stringify({
+        sessionId: "session-valid",
+        stepIndex: 0,
+        completedSteps: [],
+        savedAt: new Date().toISOString(),
+        projectRoot,
+        runConfig: {
+          checkpointEveryN: 1,
+          maxRetries: 3,
+        },
+        workspaceContext: {
+          projectRoot,
+          workspaceRoot: projectRoot,
+          workspaceIsRepoRoot: false,
+          installContextKind: "npm_global_cli",
+        },
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(checkpointDir, "invalid.json"),
+      JSON.stringify({
+        sessionId: "session-invalid",
+        stepIndex: -3,
+        completedSteps: "oops",
+        savedAt: "bad",
+        projectRoot,
+      }),
+      "utf-8",
+    );
+
+    const all = await listCheckpoints(projectRoot);
+    expect(all).toHaveLength(1);
+    expect(all[0]?.sessionId).toBe("session-valid");
   });
 
   it("listCheckpoints() returns empty array when directory does not exist", async () => {

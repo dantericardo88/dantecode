@@ -1,0 +1,10 @@
+{
+  "gateName": "liveProvider",
+  "status": "unknown",
+  "source": "external-gate-runner",
+  "command": "npm run smoke:provider -- --require-provider",
+  "detail": "No supported provider credentials detected. Set GROK_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY.",
+  "artifacts": [],
+  "commitSha": "1a12b55b1313afc3b13a76f762a631cfd35165e3",
+  "generatedAt": "2026-03-26T16:45:32.408Z"
+}

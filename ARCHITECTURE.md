@@ -103,7 +103,8 @@ npm run publish:dry-run      # Pack all publishable packages
 
 - Push to GitHub and observe green Actions run
 - Set real git identity for public commit attribution
-- Add `NPM_TOKEN` and `VSCE_PAT` secrets for publishing
+- Add `NPM_TOKEN` for npm publishing
+- Add `VSCE_PAT` only if you want Marketplace publishing for the preview VS Code extension
 - Run `npm run smoke:provider -- --require-provider` with a real API key
 - Optionally run one real third-party skill import
 

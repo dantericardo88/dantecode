@@ -12,7 +12,6 @@ const PLAN_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   "WebSearch",
   "WebFetch",
   "TodoWrite",
-  "SubAgent",
   "AskUser",
   "Memory",
 ]);
@@ -31,7 +30,7 @@ export function isPlanModeBlocked(toolName: string): boolean {
 export function planModeBlockedMessage(toolName: string): string {
   return (
     `PLAN MODE ACTIVE: The tool "${toolName}" is blocked because a plan has not been approved yet. ` +
-    `Only read-only tools (Read, Glob, Grep, WebSearch, WebFetch, TodoWrite, SubAgent) are available. ` +
+    `Only read-only tools (Read, Glob, Grep, WebSearch, WebFetch, TodoWrite, AskUser, Memory) are available. ` +
     `Present your plan and wait for user approval before executing any file modifications or commands.`
   );
 }

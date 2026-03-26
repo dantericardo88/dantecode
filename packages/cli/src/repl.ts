@@ -37,6 +37,7 @@ import { watchGitEvents } from "@dantecode/git-engine";
 import type { GitEventWatcher } from "@dantecode/git-engine";
 import { DanteSandbox } from "@dantecode/dante-sandbox";
 import { getOrInitGaslight, tryAutoInit } from "./lazy-init.js";
+import { configureApprovalMode } from "./approval-mode-runtime.js";
 import { generateSessionReport } from "./session-report.js";
 
 // ----------------------------------------------------------------------------
@@ -148,6 +149,7 @@ function applyModelOverride(state: DanteCodeState, modelOverride: string): Dante
 }
 
 function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig): void {
+  configureApprovalMode(replState.approvalMode);
   agentConfig.state = replState.state;
   agentConfig.enableSandbox = replState.enableSandbox;
   agentConfig.silent = replState.silent;
@@ -294,6 +296,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     silent: options.silent,
     lastEditFile: null,
     lastEditContent: null,
+    lastRestoreEvent: null,
+    preMutationSnapshotted: new Set<string>(),
     recentToolCalls: [],
     pendingAgentPrompt: null,
     pendingResumeRunId: null,
@@ -307,6 +311,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     memoryOrchestrator: null, // lazy-init: created on first /memory or /compact command
     modelAdaptationStore: null, // D-12: lazy-init below
     verificationTrendTracker: null, // lazy-init: created on first PDSE recording or /trend command
+    lastSessionPdseResults: [],
     reasoningOverrideSession: false,
     theme: savedTheme,
     planMode: false,
@@ -315,7 +320,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     currentPlanId: null,
     planExecutionInProgress: false,
     planExecutionResult: null,
-    approvalMode: "default",
+    approvalMode: "review",
   };
 
   // --plan-first: automatically enter plan mode
@@ -472,6 +477,44 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     terminal: true,
   });
 
+  // Gap #3 — crash-safe session report.
+  // The rl.on("close") handler covers normal exits (Ctrl+D, /exit, process.exit).
+  // This handler also writes the report on uncaught exceptions so the user always
+  // has a record even if the process crashes. Non-fatal and best-effort only.
+  const _writeCrashReport = async () => {
+    if (currentRoundCount > 0) {
+      await generateSessionReport({
+        session: replState.session,
+        projectRoot: options.projectRoot,
+        modelId: state.model.default.modelId,
+        provider: state.model.default.provider,
+        dantecodeVersion: "1.0.0",
+        sessionDurationMs: Date.now() - sessionStartMs,
+        mode: replState.approvalMode,
+        restoredAt: replState.lastRestoreEvent?.restoredAt,
+        restoreSummary: replState.lastRestoreEvent?.restoreSummary,
+        pdseResults: replState.lastSessionPdseResults.length > 0
+          ? replState.lastSessionPdseResults
+          : undefined,
+      }).catch(() => {});
+    }
+  };
+  process.once("uncaughtException", async (err) => {
+    process.stderr.write(
+      `\n[DanteCode] Uncaught exception: ${err.message ?? err}\nWriting crash report...\n`,
+    );
+    await _writeCrashReport();
+    process.exit(1);
+  });
+  process.once("unhandledRejection", async (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    process.stderr.write(
+      `\n[DanteCode] Unhandled rejection: ${msg}\nWriting crash report...\n`,
+    );
+    await _writeCrashReport();
+    process.exit(1);
+  });
+
   // Handle Ctrl+C gracefully — first press aborts streaming, second exits
   let ctrlCCount = 0;
   rl.on("SIGINT", () => {
@@ -595,6 +638,15 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         provider: state.model.default.provider,
         dantecodeVersion: "1.0.0",
         sessionDurationMs: Date.now() - sessionStartMs,
+        mode: replState.approvalMode,
+        restoredAt: replState.lastRestoreEvent?.restoredAt,
+        restoreSummary: replState.lastRestoreEvent?.restoreSummary,
+        // Pass accumulated PDSE results so the report includes verification truth,
+        // not just mutation counts. This satisfies the core product trust promise
+        // for plain REPL sessions (gap FC-2 / gap #1).
+        pdseResults: replState.lastSessionPdseResults.length > 0
+          ? replState.lastSessionPdseResults
+          : undefined,
       });
       if (reportPath && !options.silent) {
         process.stdout.write(`${DIM}Report saved: ${reportPath}${RESET}\n`);

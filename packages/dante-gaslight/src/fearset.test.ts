@@ -48,6 +48,7 @@ import type {
   FearColumn,
   FearSetColumnName,
 } from "@dantecode/runtime-spine";
+import { RuntimeEventSchema } from "@dantecode/runtime-spine";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -2362,6 +2363,29 @@ describe("runFearSetEngine — stopReason and stoppedAt", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
+  it("emits schema-valid runtime events with a stable task id", async () => {
+    const events: unknown[] = [];
+    await runFearSetEngine(
+      "Launch the staged rollout",
+      EXPLICIT_TRIGGER,
+      {
+        ...makeMockCallbacks(),
+        onEvent: (event) => {
+          events.push(event);
+        },
+      },
+      { config: { ...ENABLED_FEARSET_CONFIG } },
+    );
+
+    expect(events.length).toBeGreaterThan(0);
+
+    const parsedEvents = events.map((event) => RuntimeEventSchema.parse(event));
+    const taskIds = new Set(parsedEvents.map((event) => event.taskId));
+
+    expect(taskIds.size).toBe(1);
+    expect(parsedEvents[0]?.kind).toBe("fearset.triggered");
+  });
+
   it("emits fearset.triggered at start", async () => {
     const events: string[] = [];
     await runFearSetEngine(
@@ -2466,6 +2490,50 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );
     expect(events).toContain("fearset.stopped");
+  });
+
+  it("result.runtimeEvents is populated with all emitted events", async () => {
+    const result = await runFearSetEngine(
+      "Deploy new payment service",
+      EXPLICIT_TRIGGER,
+      makeMockCallbacks(),
+      { config: { ...ENABLED_FEARSET_CONFIG } },
+    );
+    expect(result.runtimeEvents).toBeDefined();
+    expect(Array.isArray(result.runtimeEvents)).toBe(true);
+    expect(result.runtimeEvents!.length).toBeGreaterThan(0);
+    const kinds = result.runtimeEvents!.map((e) => e.kind);
+    expect(kinds).toContain("fearset.triggered");
+    expect(kinds.some((k) => k.startsWith("fearset.column."))).toBe(true);
+  });
+
+  it("result.runtimeEvents is populated on user-stop path", async () => {
+    const result = await runFearSetEngine(
+      "Deploy to prod",
+      EXPLICIT_TRIGGER,
+      { isStopped: () => true },
+      { config: { ...ENABLED_FEARSET_CONFIG } },
+    );
+    expect(result.runtimeEvents).toBeDefined();
+    expect(Array.isArray(result.runtimeEvents)).toBe(true);
+    const kinds = result.runtimeEvents!.map((e) => e.kind);
+    expect(kinds).toContain("fearset.triggered");
+    expect(kinds).toContain("fearset.stopped");
+  });
+
+  it("onEvent callback still fires when runtimeEvents is collected", async () => {
+    const externalEvents: string[] = [];
+    const result = await runFearSetEngine(
+      "Migrate DB schema",
+      EXPLICIT_TRIGGER,
+      {
+        ...makeMockCallbacks(),
+        onEvent: (e) => { externalEvents.push(e.kind); },
+      },
+      { config: { ...ENABLED_FEARSET_CONFIG } },
+    );
+    expect(externalEvents.length).toBeGreaterThan(0);
+    expect(result.runtimeEvents!.length).toBe(externalEvents.length);
   });
 });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { RuntimeEventSchema } from "@dantecode/runtime-spine";
 import { SubAgentSpawner } from "./subagent-spawner";
 import { HandoffEngine } from "./handoff-engine";
 
@@ -25,7 +26,9 @@ describe("Agent Orchestrator MVP", () => {
       });
 
       expect(event.kind).toBe("subagent.handoff");
+      expect(event.payload.fromId).toBe("agent-1");
       expect(event.payload.toRole).toBe("critic");
+      expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
     });
   });
 });

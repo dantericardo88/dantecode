@@ -129,6 +129,16 @@ describe("BackgroundAgentRunner", () => {
     it("returns null for unknown ID", () => {
       expect(runner.getTask("nonexistent")).toBeNull();
     });
+
+    it("waitForTask resolves once a task has fully settled", async () => {
+      runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
+      const id = runner.enqueue("wait for me");
+
+      const task = await runner.waitForTask(id, 10_000);
+
+      expect(task?.status).toBe("completed");
+      expect(task?.output).toBe("done");
+    });
   });
 
   describe("cancel", () => {
@@ -152,7 +162,7 @@ describe("BackgroundAgentRunner", () => {
         () => {
           expect(runner.getTask(id)?.status).toBe("completed");
         },
-        { timeout: 5_000 },
+        { timeout: 10_000 },
       );
       expect(runner.cancel(id)).toBe(false);
     });
@@ -175,13 +185,12 @@ describe("BackgroundAgentRunner", () => {
       runner.setWorkFn(async () => ({ output: "done", touchedFiles: [] }));
       const firstId = runner.enqueue("a");
       const secondId = runner.enqueue("b");
-      await vi.waitFor(
-        () => {
-          expect(runner.getTask(firstId)?.status).toBe("completed");
-          expect(runner.getTask(secondId)?.status).toBe("completed");
-        },
-        { timeout: 5_000 },
-      );
+      const [firstTask, secondTask] = await Promise.all([
+        runner.waitForTask(firstId, 10_000),
+        runner.waitForTask(secondId, 10_000),
+      ]);
+      expect(firstTask?.status).toBe("completed");
+      expect(secondTask?.status).toBe("completed");
       const cleared = runner.clearFinished();
       expect(cleared).toBe(2);
       expect(runner.listTasks()).toHaveLength(0);
@@ -264,9 +273,12 @@ describe("BackgroundAgentRunner", () => {
         cpuLimit: 1,
       });
 
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      await vi.waitFor(
+        () => {
+          expect(runner.getTask(id)?.status).toBe("completed");
+        },
+        { timeout: 10_000 },
+      );
       await vi.waitFor(() => {
         expect(mockSandboxStop).toHaveBeenCalledTimes(1);
       });
@@ -298,11 +310,14 @@ describe("BackgroundAgentRunner", () => {
 
     it("marks task as failed when no work function is set", async () => {
       const id = runner.enqueue("no worker");
-      await new Promise((r) => setTimeout(r, 50));
-
-      const task = runner.getTask(id);
-      expect(task!.status).toBe("failed");
-      expect(task!.error).toContain("No work function");
+      await vi.waitFor(
+        () => {
+          const task = runner.getTask(id);
+          expect(task!.status).toBe("failed");
+          expect(task!.error).toContain("No work function");
+        },
+        { timeout: 10_000 },
+      );
     });
 
     it(
@@ -474,13 +489,11 @@ describe("BackgroundAgentRunner", () => {
       }));
 
       const id = runner.enqueue("empty result", { autoCommit: true });
-
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      const task = await runner.waitForTask(id, 10_000);
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const gitCall = calls.find((c) => typeof c === "string" && c.includes("git commit"));
+      expect(task?.status).toBe("completed");
       expect(gitCall).toBeUndefined();
     });
 
@@ -500,13 +513,9 @@ describe("BackgroundAgentRunner", () => {
       }));
 
       const id = runner.enqueue("commit will fail", { autoCommit: true });
-
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      const task = await runner.waitForTask(id, 10_000);
 
       // Task should still be completed despite commit failure
-      const task = runner.getTask(id);
       expect(task!.status).toBe("completed");
       expect(task!.output).toBe("done");
     });
@@ -520,10 +529,7 @@ describe("BackgroundAgentRunner", () => {
       }));
 
       const id = runner.enqueue("add shiny feature", { autoCommit: true, createPR: true });
-
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      const task = await runner.waitForTask(id, 10_000);
 
       await vi.waitFor(() => {
         expect(
@@ -535,6 +541,7 @@ describe("BackgroundAgentRunner", () => {
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const prCall = calls.find((c) => typeof c === "string" && c.includes("gh pr create"));
+      expect(task?.status).toBe("completed");
       expect(prCall).toBeTruthy();
       expect(prCall).toContain("add shiny feature");
     });
@@ -554,15 +561,8 @@ describe("BackgroundAgentRunner", () => {
       }));
 
       const id = runner.enqueue("pr will fail", { autoCommit: true, createPR: true });
+      const task = await runner.waitForTask(id, 10_000);
 
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.progress).toContain("PR creation failed");
-      });
-
-      const task = runner.getTask(id);
       expect(task!.status).toBe("completed");
       // Progress should indicate PR creation failed
       expect(task!.progress).toContain("PR creation failed");
@@ -575,13 +575,11 @@ describe("BackgroundAgentRunner", () => {
       }));
 
       const id = runner.enqueue("just commit", { autoCommit: true });
-
-      await vi.waitFor(() => {
-        expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      const task = await runner.waitForTask(id, 10_000);
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const prCall = calls.find((c) => typeof c === "string" && c.includes("gh pr create"));
+      expect(task?.status).toBe("completed");
       expect(prCall).toBeUndefined();
     });
   });

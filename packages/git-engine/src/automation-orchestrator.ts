@@ -209,7 +209,17 @@ export class GitAutomationOrchestrator {
     while (Date.now() - startedAt < this.waitTimeoutMs) {
       const execution = await this.getExecution(executionId);
       if (execution && TERMINAL_EXECUTION_STATUSES.has(execution.status)) {
-        return execution;
+        const remainingMs = Math.max(0, this.waitTimeoutMs - (Date.now() - startedAt));
+        const task =
+          execution.backgroundTaskId && remainingMs > 0
+            ? await this.runner.waitForTask(execution.backgroundTaskId, remainingMs)
+            : execution.backgroundTaskId
+              ? null
+              : undefined;
+
+        if (!execution.backgroundTaskId || task) {
+          return execution;
+        }
       }
       await delay(this.pollIntervalMs);
     }

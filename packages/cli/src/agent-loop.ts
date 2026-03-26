@@ -1782,6 +1782,12 @@ async function _runAgentLoopCore(
           config.replState.verificationTrendTracker.record("pdse", pdseScore);
         }
 
+        // Session run report: accumulate per-file PDSE results so the REPL
+        // session report surfaces verification truth, not just mutation counts.
+        if (config.replState) {
+          config.replState.lastSessionPdseResults.push({ file: filePath, pdseScore, passed });
+        }
+
         if (passed) {
           await recordSuccessPattern(
             {

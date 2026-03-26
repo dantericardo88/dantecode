@@ -1098,9 +1098,10 @@ describe("skills run", () => {
     // Default stubs
     mockRunSkillPolicyCheck.mockReturnValue({ passed: true, errors: [], warnings: [] });
     mockRunSkill.mockResolvedValue({
-      state: "applied",
-      plainLanguageSummary: "Done.",
+      state: "proposed",
+      plainLanguageSummary: "Proposed skill instructions ready for review.",
       runId: "r1",
+      receiptRef: join(projectRoot, ".dantecode", "receipts", "skills", "r1.json"),
     });
     mockMakeRunContext.mockReturnValue({});
     mockMakeProvenance.mockReturnValue({
@@ -1115,7 +1116,7 @@ describe("skills run", () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it("finds skill, runs it, and prints APPLIED state", async () => {
+  it("finds skill, runs it, and prints PROPOSED state with receipt path", async () => {
     mockGetSkill.mockResolvedValue({
       frontmatter: { name: "my-skill", description: "A test skill", tools: ["Read"] },
       instructions: "Do something useful.",
@@ -1128,8 +1129,9 @@ describe("skills run", () => {
     await runSkillsCommand(["run", "my-skill"], projectRoot);
 
     const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
-    expect(output).toContain("APPLIED");
-    expect(output).toContain("Done.");
+    expect(output).toContain("PROPOSED");
+    expect(output).toContain("Proposed skill instructions ready for review.");
+    expect(output).toContain("Receipt:");
     expect(mockRunSkill).toHaveBeenCalledTimes(1);
 
     stdoutSpy.mockRestore();
@@ -1143,6 +1145,31 @@ describe("skills run", () => {
 
     const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("not found");
+    expect(mockRunSkill).not.toHaveBeenCalled();
+
+    stdoutSpy.mockRestore();
+  });
+
+  it("writes a failed receipt when policy denies execution", async () => {
+    mockGetSkill.mockResolvedValue({
+      frontmatter: { name: "blocked-skill", description: "A blocked skill", tools: ["Bash"] },
+      instructions: "Try to run a blocked command.",
+      sourcePath: "/p/blocked/SKILL.md",
+      wrappedPath: "/p/blocked/SKILL.dc.md",
+      importSource: "claude",
+    });
+    mockRunSkillPolicyCheck.mockReturnValue({
+      passed: false,
+      errors: [{ code: "SKILL-004", message: "Unsupported tool: Bash" }],
+      warnings: [],
+    });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runSkillsCommand(["run", "blocked-skill"], projectRoot);
+
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("Policy check failed");
+    expect(output).toContain("Receipt:");
     expect(mockRunSkill).not.toHaveBeenCalled();
 
     stdoutSpy.mockRestore();

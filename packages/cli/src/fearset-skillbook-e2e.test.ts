@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import {
   runFearSetEngine,
   distillFearSetLesson,
+  DanteGaslightIntegration,
   type FearSetCallbacks,
 } from "@dantecode/dante-gaslight";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
@@ -244,5 +245,92 @@ describe("Skillbook → FearSet prior-lessons E2E loop", () => {
     expect(capturedPrompts.length).toBeGreaterThan(0);
     const anyHasHeader = capturedPrompts.some((p) => p.includes("Prior Skillbook Lessons"));
     expect(anyHasHeader).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E2E-04: DanteGaslightIntegration high-level surface round-trip
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("DanteGaslightIntegration FearSet surface E2E", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = makeTestDir();
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  // Config with policy task class so maybeFearSet triggers deterministically
+  const INTEGRATION_FEARSET_CONFIG = {
+    ...ENABLED_CONFIG,
+    policyTaskClasses: ["destructive-op"],
+  };
+
+  it("E2E-04: maybeFearSet → distillFearSetLessons → Skillbook → second run receives priorLessons", async () => {
+    const integration = new DanteGaslightIntegration(
+      {},
+      { cwd: testDir },
+      {},
+      INTEGRATION_FEARSET_CONFIG,
+    );
+
+    // Step 1 — trigger via policy task class (deterministic, no regex dependency)
+    const result = await integration.maybeFearSet({
+      message: "Migrate the user database to a new schema",
+      taskClass: "destructive-op",
+      callbacks: makePassCallbacks(),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.passed).toBe(true);
+    expect(result!.columns.length).toBeGreaterThan(0);
+    // result is persisted by integration.maybeFearSet internally
+    expect(integration.getFearSetResults().length).toBe(1);
+
+    // Step 2 — distill through integration surface (not manual distillFearSetLesson)
+    const lessons = integration.distillFearSetLessons();
+    expect(lessons.length).toBeGreaterThan(0);
+
+    // Step 3 — apply to skillbook
+    const skillbook = new DanteSkillbookIntegration({ cwd: testDir, gitStage: false });
+    const { applied } = skillbook.applyProposals(
+      lessons.map((l) => l.proposal),
+      lessons.map(() => "pass" as const),
+      { sessionId: result!.id },
+    );
+    expect(applied).toBeGreaterThan(0);
+
+    // Step 4 — replay protection: distillFearSetLessons again returns empty (already distilled)
+    const replay = integration.distillFearSetLessons();
+    expect(replay.length).toBe(0);
+
+    // Step 5 — retrieve lessons and run second maybeFearSet with them injected
+    const retrieved = skillbook.getRelevantSkills({ keywords: ["database", "schema", "migration"] }, 5);
+    expect(retrieved.length).toBeGreaterThan(0);
+
+    const priorLessons = retrieved.map((s) => s.title);
+    const capturedPrompts: string[] = [];
+    const result2 = await integration.maybeFearSet({
+      message: "Migrate the user database to a new schema",
+      taskClass: "destructive-op",
+      priorLessons,
+      callbacks: makePassCallbacks({
+        onColumn: async (_sys, userPrompt, column) => {
+          capturedPrompts.push(userPrompt);
+          return makeColumnJson(column);
+        },
+      }),
+    });
+
+    expect(result2).not.toBeNull();
+    expect(capturedPrompts.length).toBeGreaterThan(0);
+    // At least one column prompt must reference a prior lesson title
+    const anyTitleInjected = priorLessons.some((title) =>
+      capturedPrompts.some((p) => p.includes(title)),
+    );
+    expect(anyTitleInjected).toBe(true);
   });
 });

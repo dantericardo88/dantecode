@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildRuntimeEvent,
   RuntimeTaskPacketSchema,
   RuntimeEventSchema,
   CheckpointSchema,
+  DurableExecutionCheckpointSchema,
   RuntimeVerificationReportSchema,
 } from "./index.js";
 import { randomUUID } from "node:crypto";
@@ -35,6 +37,17 @@ describe("Runtime Spine Contracts", () => {
     expect(result.success).toBe(true);
   });
 
+  it("should build a runtime event with shared defaults", () => {
+    const event = buildRuntimeEvent({
+      kind: "subagent.handoff",
+      taskId: randomUUID(),
+    });
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(event.payload).toEqual({});
+    expect(typeof event.at).toBe("string");
+  });
+
   it("should validate a checkpoint with nested state", () => {
     const checkpoint = {
       id: randomUUID(),
@@ -46,6 +59,20 @@ describe("Runtime Spine Contracts", () => {
       progress: "completed 1 of 2 steps",
       state: {
         currentFile: "src/index.ts",
+      },
+      replaySummary: {
+        eventCount: 3,
+        pendingWriteCount: 1,
+        digest: "0123456789abcdef",
+        lastEventIndex: 2,
+      },
+      workspaceContext: {
+        projectRoot: "/repo",
+        workspaceRoot: "/repo/worktree",
+        repoRoot: "/repo",
+        workspaceIsRepoRoot: false,
+        installContextKind: "repo_checkout",
+        worktreePath: "/repo/worktree",
       },
     };
 
@@ -64,6 +91,32 @@ describe("Runtime Spine Contracts", () => {
     };
 
     const result = RuntimeVerificationReportSchema.safeParse(report);
+    expect(result.success).toBe(true);
+  });
+
+  it("should validate a durable execution checkpoint with shared workspace context", () => {
+    const checkpoint = {
+      sessionId: "session-123",
+      stepIndex: 2,
+      totalSteps: 5,
+      completedSteps: ["step-a", "step-b"],
+      partialOutput: "halfway there",
+      savedAt: new Date().toISOString(),
+      projectRoot: "/repo",
+      runConfig: {
+        checkpointEveryN: 1,
+        maxRetries: 3,
+      },
+      workspaceContext: {
+        projectRoot: "/repo",
+        workspaceRoot: "/repo",
+        repoRoot: "/repo",
+        workspaceIsRepoRoot: true,
+        installContextKind: "repo_checkout",
+      },
+    };
+
+    const result = DurableExecutionCheckpointSchema.safeParse(checkpoint);
     expect(result.success).toBe(true);
   });
 });

@@ -57,10 +57,7 @@ describe("CLI Integration", () => {
       const id = runner.enqueue("fix the login bug");
       expect(id).toBeTruthy();
 
-      // Wait for completion
-      await new Promise((r) => setTimeout(r, 100));
-
-      const task = runner.getTask(id);
+      const task = await runner.waitForTask(id, 10_000);
       expect(task).not.toBeNull();
       expect(task!.status).toBe("completed");
       expect(task!.output).toBe("Completed: fix the login bug");
@@ -121,6 +118,7 @@ describe("CLI Integration", () => {
         silent: true,
         lastEditFile: null,
         lastEditContent: null,
+        preMutationSnapshotted: new Set<string>(),
         recentToolCalls: [],
         pendingAgentPrompt: null,
         pendingResumeRunId: null,
@@ -132,6 +130,7 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        lastSessionPdseResults: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,
@@ -180,6 +179,7 @@ describe("CLI Integration", () => {
         silent: true,
         lastEditFile: null,
         lastEditContent: null,
+        preMutationSnapshotted: new Set<string>(),
         recentToolCalls: [],
         pendingAgentPrompt: null,
         pendingResumeRunId: null,
@@ -191,6 +191,7 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        lastSessionPdseResults: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,
@@ -242,6 +243,7 @@ describe("CLI Integration", () => {
         silent: true,
         lastEditFile: null,
         lastEditContent: null,
+        preMutationSnapshotted: new Set<string>(),
         recentToolCalls: [],
         pendingAgentPrompt: null,
         pendingResumeRunId: null,
@@ -253,6 +255,7 @@ describe("CLI Integration", () => {
         gaslight: null,
         memoryOrchestrator: null,
         verificationTrendTracker: null,
+        lastSessionPdseResults: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,

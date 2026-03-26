@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillProvenance } from "./skill-provenance.js";
 import { makeProvenance } from "./skill-provenance.js";
@@ -256,14 +259,14 @@ describe("assertAppliedBeforeSuccess", () => {
 });
 
 describe("runSkill — instruction-only", () => {
-  it("returns state 'applied' for instruction-only skill", async () => {
+  it("returns state 'proposed' for instruction-only skill", async () => {
     const skill = makeSkill();
     const context = makeRunContext({
       skillName: "test-skill",
       projectRoot: "/project",
     });
     const result = await runSkill({ skill, context });
-    expect(result.state).toBe("applied");
+    expect(result.state).toBe("proposed");
   });
 
   it("plainLanguageSummary doesn't say 'success' in a misleading context", async () => {
@@ -273,7 +276,7 @@ describe("runSkill — instruction-only", () => {
       projectRoot: "/project",
     });
     const result = await runSkill({ skill, context });
-    // result.state is "applied" so no SKILL-010 violation
+    // summary should stay truthful even when the run is only proposed
     expect(() => assertAppliedBeforeSuccess(result)).not.toThrow();
   });
 
@@ -306,6 +309,31 @@ describe("runSkill — instruction-only", () => {
     });
     const result = await runSkill({ skill, context });
     expect(result.verificationOutcome).toBe("skipped");
+  });
+
+  it("writes a durable receipt file with policy and evidence metadata", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "skill-run-"));
+    const skill = makeSkill();
+    const context = makeRunContext({
+      skillName: "test-skill",
+      projectRoot,
+    });
+
+    const result = await runSkill({ skill, context });
+
+    expect(result.receiptRef).toBeDefined();
+    const receiptJson = await readFile(result.receiptRef!, "utf-8");
+    const receipt = JSON.parse(receiptJson) as {
+      state: string;
+      policySnapshot: { sandboxMode: string };
+      evidenceHashes: { commands: string[]; files: string[] };
+    };
+    expect(receipt.state).toBe("proposed");
+    expect(receipt.policySnapshot.sandboxMode).toBe("host");
+    expect(receipt.evidenceHashes.commands).toEqual([]);
+    expect(receipt.evidenceHashes.files).toEqual([]);
+
+    await rm(projectRoot, { recursive: true, force: true });
   });
 });
 
@@ -347,6 +375,60 @@ describe("runSkill — with scriptRunner", () => {
     const result = await runSkill({ skill, context, scriptRunner });
     expect(result.state).toBe("applied");
     expect(result.commandsRun).toEqual(["npm run lint", "npm test"]);
+  });
+
+  it("upgrades script-backed runs to 'verified' when verification passes", async () => {
+    const skill = makeSkill({ scripts: "/skills/test-skill/scripts" });
+    const context = makeRunContext({
+      skillName: "test-skill",
+      projectRoot: "/project",
+    });
+    const scriptRunner = async (_path: string, _ctx: typeof context) => ["npm test"];
+    const result = await runSkill({
+      skill,
+      context,
+      scriptRunner,
+      verification: {
+        outcome: "pass",
+        summary: "All skill verification checks passed.",
+      },
+    });
+    expect(result.state).toBe("verified");
+    expect(result.verificationOutcome).toBe("pass");
+  });
+
+  it("writes a durable receipt for verified runs", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "skill-verified-"));
+    const skill = makeSkill({ scripts: "/skills/test-skill/scripts" });
+    const context = makeRunContext({
+      skillName: "test-skill",
+      projectRoot,
+    });
+    const scriptRunner = async (_path: string, _ctx: typeof context) => ["npm test"];
+
+    const result = await runSkill({
+      skill,
+      context,
+      scriptRunner,
+      verification: {
+        outcome: "pass",
+        summary: "All skill verification checks passed.",
+      },
+    });
+
+    expect(result.receiptRef).toBeDefined();
+    const receiptJson = await readFile(result.receiptRef!, "utf-8");
+    const receipt = JSON.parse(receiptJson) as {
+      state: string;
+      verificationOutcome: string;
+      evidenceHashes: { commands: string[]; verification?: string };
+    };
+    expect(receipt.state).toBe("verified");
+    expect(receipt.verificationOutcome).toBe("pass");
+    expect(receipt.evidenceHashes.commands).toHaveLength(1);
+    expect(receipt.evidenceHashes.verification).toBeTruthy();
+
+    await rm(projectRoot, { recursive: true, force: true });
   });
 
   it("returns state 'failed' and failureReason with SKILL-007 on error", async () => {
@@ -539,7 +621,7 @@ describe("Full flow integration", () => {
 
     // 3. runSkill
     const result = await runSkill({ skill, context });
-    expect(result.state).toBe("applied");
+    expect(result.state).toBe("proposed");
     expect(result.runId.startsWith("sr_")).toBe(true);
 
     // 4. emitSkillReceipt
@@ -550,7 +632,7 @@ describe("Full flow integration", () => {
     // 5. buildSkillReport
     const report = buildSkillReport(result, receipt);
     expect(report).toContain("integration-test-skill");
-    expect(report).toContain("APPLIED");
+    expect(report).toContain("PROPOSED");
     expect(report).toContain(receipt.receiptId);
 
     // 6. linkToEvidenceChain

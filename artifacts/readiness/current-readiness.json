@@ -1,18 +1,89 @@
 {
-  "status": "blocked",
-  "commitSha": "ee61834b807bf4e00a609dbf7b052b5bf7693c42",
-  "generatedAt": "2026-03-25T01:37:37.870Z",
+  "status": "private-ready",
+  "scope": "repo-proof",
+  "commitSha": "1a12b55b1313afc3b13a76f762a631cfd35165e3",
+  "generatedAt": "2026-03-26T19:07:58.965Z",
   "gates": {
-    "typecheck": "unknown",
-    "lint": "unknown",
-    "test": "unknown",
-    "build": "unknown",
-    "windowsSmoke": "unknown",
-    "antiStub": "unknown",
+    "typecheck": "pass",
+    "lint": "pass",
+    "test": "pass",
+    "build": "pass",
+    "windowsSmoke": "pass",
+    "antiStub": "pass",
     "liveProvider": "unknown",
-    "publishDryRun": "unknown"
+    "publishDryRun": "pass"
   },
-  "blockers": [
-    "CI gates have not been run. Execute: npm run release:generate with GATE_* env vars set"
-  ]
+  "blockers": [],
+  "openRequirements": {
+    "privateReady": [],
+    "publicReady": [
+      "Gate \"liveProvider\" must pass. Current status: unknown.",
+      "Release doctor blocker: No provider credentials detected for the live model-router smoke test.",
+      "Release doctor blocker: No npm publish auth token detected locally or in GitHub Actions secrets.",
+      "Quickstart proof action: Same-commit live provider receipt is missing or unknown. Generate it with real credentials."
+    ]
+  },
+  "releaseDoctor": {
+    "checked": true,
+    "canPublish": false,
+    "blockerCount": 2,
+    "actionCount": 4,
+    "readyCount": 11,
+    "generatedAt": "2026-03-26T17:52:41.470Z",
+    "sourcePath": "C:\\Projects\\DanteCode\\artifacts\\readiness\\release-doctor.json",
+    "blockers": [
+      "No provider credentials detected for the live model-router smoke test.",
+      "No npm publish auth token detected locally or in GitHub Actions secrets."
+    ],
+    "actions": [
+      "Working tree has 81 uncommitted path(s).",
+      "Readiness: private-ready (commit 1a12b55b1313).",
+      "README quickstart proof is present but still has unresolved follow-up actions.",
+      "VSCE_PAT is not set locally or in GitHub Actions secrets."
+    ]
+  },
+  "quickstartProof": {
+    "checked": true,
+    "canClaimQuickstart": false,
+    "blockerCount": 0,
+    "actionCount": 1,
+    "generatedAt": "2026-03-26T16:46:23.680Z",
+    "sourcePath": "C:\\Projects\\DanteCode\\artifacts\\readiness\\quickstart-proof.json",
+    "blockers": [],
+    "actions": [
+      "Same-commit live provider receipt is missing or unknown. Generate it with real credentials."
+    ],
+    "steps": [
+      {
+        "name": "README quickstart block",
+        "status": "pass",
+        "detail": "Parsed 3 quickstart command(s) from README.md.",
+        "command": null
+      },
+      {
+        "name": "CLI smoke",
+        "status": "pass",
+        "detail": "CLI smoke check passed. Temporary project: C:\\Users\\richa\\AppData\\Local\\Temp\\dantecode-cli-smoke-5BC5OA",
+        "command": "npm run smoke:cli"
+      },
+      {
+        "name": "Install smoke",
+        "status": "pass",
+        "detail": "Install smoke check passed. Temporary install root: C:\\Users\\richa\\AppData\\Local\\Temp\\dantecode-install-smoke-NzV5S5",
+        "command": "npm run smoke:install"
+      },
+      {
+        "name": "Skill import smoke",
+        "status": "pass",
+        "detail": "Skill import smoke check passed. Temporary project: C:\\Users\\richa\\AppData\\Local\\Temp\\dantecode-skill-import-smoke-SqoFOO",
+        "command": "npm run smoke:skill-import"
+      },
+      {
+        "name": "Live provider receipt",
+        "status": "unknown",
+        "detail": "Same-commit live provider receipt is missing or unknown. Generate it with real credentials.",
+        "command": "npm run release:gate:live-provider"
+      }
+    ]
+  }
 }

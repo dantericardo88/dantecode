@@ -27,6 +27,13 @@ import { LoopDetector } from "./loop-detector.js";
 const execAsync = promisify(exec);
 const SANDBOX_PACKAGE_NAME = "@dantecode/sandbox";
 const CHECKPOINT_INTERVAL_MS = 300_000;
+const TASK_STORE_CLEANUP_INTERVAL_MS = 60_000;
+const TERMINAL_TASK_STATUSES = new Set<BackgroundAgentStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "paused",
+]);
 
 /** Callback for progress updates from a background task. */
 export type BackgroundProgressCallback = (task: BackgroundAgentTask) => void;
@@ -85,6 +92,10 @@ export class BackgroundAgentRunner {
   private readonly resetTimeoutMs: number;
   private readonly resumeTimers = new Map<string, NodeJS.Timeout>();
   private readonly loopDetectors = new Map<string, LoopDetector>();
+  private readonly taskCompletionWaiters = new Map<string, Promise<BackgroundAgentTask>>();
+  private readonly taskCompletionResolvers = new Map<string, (task: BackgroundAgentTask) => void>();
+  private readonly taskPersistence = new Map<string, Promise<void>>();
+  private lastTaskStoreCleanupAt = 0;
   private onProgress?: BackgroundProgressCallback;
   private workFn?: AgentWorkFn;
   private readonly restorePromise: Promise<void>;
@@ -161,6 +172,7 @@ export class BackgroundAgentRunner {
     };
 
     this.tasks.set(id, task);
+    this.ensureTaskCompletionWaiter(id);
     if (options) {
       this.taskOptions.set(id, options);
     }
@@ -169,6 +181,33 @@ export class BackgroundAgentRunner {
     void this.persistTask(task);
     this.processQueue();
     return id;
+  }
+
+  /** Wait for a task to reach a terminal state and flush its persisted state. */
+  async waitForTask(taskId: string, timeoutMs = 15_000): Promise<BackgroundAgentTask | null> {
+    await this.restorePromise;
+
+    const existing = this.tasks.get(taskId);
+    if (existing && TERMINAL_TASK_STATUSES.has(existing.status)) {
+      await this.flushTaskPersistence(taskId);
+      return existing;
+    }
+
+    const waiter = this.ensureTaskCompletionWaiter(taskId);
+    const task =
+      timeoutMs <= 0
+        ? await waiter
+        : await Promise.race<BackgroundAgentTask | null>([
+            waiter,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+          ]);
+
+    if (!task) {
+      return null;
+    }
+
+    await this.flushTaskPersistence(taskId);
+    return task;
   }
 
   /** Manually resumes a persisted paused or failed task from its latest checkpoint. */
@@ -215,6 +254,7 @@ export class BackgroundAgentRunner {
     const task = this.tasks.get(id);
     if (!task) return false;
     if (task.status === "completed" || task.status === "failed") return false;
+    const wasQueued = task.status === "queued" && !task.startedAt;
 
     this.clearResumeTimer(id);
     this.loopDetectors.delete(id);
@@ -223,7 +263,12 @@ export class BackgroundAgentRunner {
     task.progress = "Cancelled by user";
     this.queue = this.queue.filter((qId) => qId !== id);
     this.notifyProgress(task);
-    void this.persistTask(task);
+    const persist = this.persistTask(task);
+    if (wasQueued) {
+      void persist.finally(() => {
+        this.resolveTaskCompletion(task);
+      });
+    }
     return true;
   }
 
@@ -291,6 +336,8 @@ export class BackgroundAgentRunner {
         this.notifyProgress(task);
         this.running--;
         this.processQueue();
+        await this.flushTaskPersistence(task.id);
+        this.resolveTaskCompletion(task);
         return;
       }
 
@@ -320,11 +367,9 @@ export class BackgroundAgentRunner {
 
         if (task.status === "cancelled") return;
 
-        task.status = "completed";
         task.breakerState = this.breaker.getState(task.id);
         task.output = result.output;
         task.touchedFiles = result.touchedFiles;
-        task.completedAt = new Date().toISOString();
         task.progress = "Done";
         task.nextRetryAt = undefined;
         this.loopDetectors.delete(task.id);
@@ -334,6 +379,8 @@ export class BackgroundAgentRunner {
         }
         await context.saveCheckpoint?.("completed");
         await this.postCompletionHook(task);
+        task.status = "completed";
+        task.completedAt = new Date().toISOString();
       } catch (err: unknown) {
         if (task.status !== "cancelled") {
           await this.handleTaskFailure(task, err, context);
@@ -348,6 +395,8 @@ export class BackgroundAgentRunner {
       this.notifyProgress(task);
       this.running--;
       this.processQueue();
+      await this.flushTaskPersistence(task.id);
+      this.resolveTaskCompletion(task);
     };
 
     void execute();
@@ -429,7 +478,7 @@ export class BackgroundAgentRunner {
   }
 
   private async restorePersistedTasks(): Promise<void> {
-    await this.taskStore.cleanupExpired(7);
+    await this.maybeCleanupPersistedTasks(true);
     const persistedTasks = await this.taskStore.listTasks();
 
     for (const task of persistedTasks) {
@@ -456,8 +505,40 @@ export class BackgroundAgentRunner {
   }
 
   private async persistTask(task: BackgroundAgentTask): Promise<void> {
-    await this.taskStore.saveTask(task);
-    await this.taskStore.cleanupExpired(7);
+    const pending = this.taskPersistence.get(task.id) ?? Promise.resolve();
+    const next = pending
+      .catch(() => {
+        // Ignore an earlier persistence failure and continue serializing writes.
+      })
+      .then(async () => {
+        await this.taskStore.saveTask(task);
+        await this.maybeCleanupPersistedTasks(
+          task.status === "completed" || task.status === "failed" || task.status === "cancelled",
+        );
+      });
+
+    this.taskPersistence.set(task.id, next);
+    try {
+      await next;
+    } finally {
+      if (this.taskPersistence.get(task.id) === next) {
+        this.taskPersistence.delete(task.id);
+      }
+    }
+  }
+
+  private async maybeCleanupPersistedTasks(force = false): Promise<void> {
+    const now = Date.now();
+    if (!force && now - this.lastTaskStoreCleanupAt < TASK_STORE_CLEANUP_INTERVAL_MS) {
+      return;
+    }
+
+    try {
+      await this.taskStore.cleanupExpired(7);
+      this.lastTaskStoreCleanupAt = now;
+    } catch {
+      // Best-effort cleanup should never block task progress.
+    }
   }
 
   private async saveCheckpoint(
@@ -546,6 +627,31 @@ export class BackgroundAgentRunner {
   /** Notify the progress callback. */
   private notifyProgress(task: BackgroundAgentTask): void {
     this.onProgress?.(task);
+  }
+
+  private ensureTaskCompletionWaiter(taskId: string): Promise<BackgroundAgentTask> {
+    const existing = this.taskCompletionWaiters.get(taskId);
+    if (existing) {
+      return existing;
+    }
+
+    let resolve!: (task: BackgroundAgentTask) => void;
+    const promise = new Promise<BackgroundAgentTask>((innerResolve) => {
+      resolve = innerResolve;
+    });
+    this.taskCompletionWaiters.set(taskId, promise);
+    this.taskCompletionResolvers.set(taskId, resolve);
+    return promise;
+  }
+
+  private resolveTaskCompletion(task: BackgroundAgentTask): void {
+    this.taskCompletionResolvers.get(task.id)?.(task);
+    this.taskCompletionResolvers.delete(task.id);
+    this.taskCompletionWaiters.delete(task.id);
+  }
+
+  private async flushTaskPersistence(taskId: string): Promise<void> {
+    await this.taskPersistence.get(taskId);
   }
 
   private async createTaskContext(task: BackgroundAgentTask): Promise<{

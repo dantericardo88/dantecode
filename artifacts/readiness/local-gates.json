@@ -1,0 +1,15 @@
+{
+  "source": "release-check",
+  "commitSha": "1a12b55b1313afc3b13a76f762a631cfd35165e3",
+  "generatedAt": "2026-03-26T19:07:58.965Z",
+  "gates": {
+    "typecheck": "pass",
+    "lint": "pass",
+    "test": "pass",
+    "build": "pass",
+    "windowsSmoke": "pass",
+    "antiStub": "pass",
+    "liveProvider": "unknown",
+    "publishDryRun": "pass"
+  }
+}

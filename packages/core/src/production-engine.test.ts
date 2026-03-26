@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ProductionEngine } from "./production-engine.js";
 import type { HealthCheck } from "./production-engine.js";
 
@@ -171,6 +171,17 @@ describe("ProductionEngine.healthCheck()", () => {
 
   beforeEach(() => {
     engine = makeEngine();
+    vi.spyOn(process, "memoryUsage").mockReturnValue({
+      rss: 256 * 1024 * 1024,
+      heapTotal: 128 * 1024 * 1024,
+      heapUsed: 32 * 1024 * 1024,
+      external: 4 * 1024 * 1024,
+      arrayBuffers: 1 * 1024 * 1024,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("10. returns a HealthStatus object", () => {

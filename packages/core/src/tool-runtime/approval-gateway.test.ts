@@ -77,4 +77,50 @@ describe("ApprovalGateway", () => {
     expect(result.reason).toBe("Force pushes are denied");
     expect(result.enforcedRules).toHaveLength(1);
   });
+
+  it("can be reconfigured after construction", () => {
+    const gateway = new ApprovalGateway({ enabled: false });
+
+    gateway.configure({
+      enabled: true,
+      rules: [
+        {
+          reason: "Write requires approval in review mode",
+          tools: ["Write"],
+          decision: "requires_approval",
+        },
+      ],
+    });
+
+    const result = gateway.check("Write", { file_path: "src/app.ts", content: "export {};" });
+    expect(result.decision).toBe("requires_approval");
+    expect(result.reason).toBe("Write requires approval in review mode");
+    expect(gateway.enabled).toBe(true);
+  });
+
+  it("auto-approves an explicitly approved tool call even when rules would otherwise block it", () => {
+    const gateway = new ApprovalGateway({
+      enabled: true,
+      rules: [
+        {
+          reason: "Review mode requires write approval",
+          tools: ["Write"],
+          decision: "requires_approval",
+        },
+      ],
+    });
+
+    gateway.approveToolCall("Write", {
+      file_path: "src/app.ts",
+      content: "export const ready = true;",
+    });
+
+    const result = gateway.check("Write", {
+      file_path: "src/app.ts",
+      content: "export const ready = true;",
+    });
+
+    expect(result.decision).toBe("auto_approve");
+    expect(result.reason).toContain("explicitly approved");
+  });
 });

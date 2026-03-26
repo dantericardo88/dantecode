@@ -7,6 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventSourcedCheckpointer, hashCheckpointContent } from "./checkpointer.js";
 import type { PendingWrite, CheckpointTuple } from "./checkpointer.js";
+import {
+  CheckpointReplaySummarySchema,
+  CheckpointWorkspaceContextSchema,
+} from "@dantecode/runtime-spine";
 
 describe("EventSourcedCheckpointer", () => {
   let cp: EventSourcedCheckpointer;
@@ -197,6 +201,35 @@ describe("EventSourcedCheckpointer", () => {
       expect(tuple!.checkpoint.channelValues.file).toBe("a.ts");
       expect(tuple!.metadata.triggerCommand).toBe("/autoforge");
       expect(tuple!.pendingWrites.length).toBe(1);
+      expect(tuple!.replaySummary?.eventCount).toBe(2);
+      expect(tuple!.replaySummary?.pendingWriteCount).toBe(1);
+      expect(tuple!.replaySummary?.digest).toHaveLength(16);
+    });
+
+    it("persists runtime envelopes that match the shared runtime-spine schemas", async () => {
+      await cp.put(
+        { file: "a.ts" },
+        { source: "loop", step: 1, triggerCommand: "/autoforge" },
+        undefined,
+        {
+          workspaceContext: {
+            projectRoot: "/project",
+            workspaceRoot: "/project/worktree",
+            repoRoot: "/project",
+            workspaceIsRepoRoot: false,
+            installContextKind: "repo_checkout",
+            worktreePath: "/project/worktree",
+          },
+        },
+      );
+
+      const baseStatePath = Array.from(written.keys()).find((k) => k.includes("base_state.json"));
+      const persisted = JSON.parse(written.get(baseStatePath!)!);
+
+      expect(CheckpointReplaySummarySchema.safeParse(persisted.replaySummary).success).toBe(true);
+      expect(CheckpointWorkspaceContextSchema.safeParse(persisted.workspaceContext).success).toBe(
+        true,
+      );
     });
 
     it("returns from memory when already loaded", async () => {
@@ -248,6 +281,20 @@ describe("EventSourcedCheckpointer", () => {
       expect(tuple).not.toBeNull();
       expect(tuple!.checkpoint.channelValues.iteration).toBe(5);
       expect(tuple!.pendingWrites.length).toBe(2);
+      expect(tuple!.replaySummary?.eventCount).toBe(3);
+      expect(tuple!.replaySummary?.pendingWriteCount).toBe(2);
+      expect(tuple!.replaySummary?.digest).toHaveLength(16);
+
+      const secondResume = new EventSourcedCheckpointer("/project", "sess-001", {
+        writeFileFn: mockWrite,
+        readFileFn: mockRead,
+        mkdirFn: mockMkdir,
+        readdirFn: mockReaddir,
+        unlinkFn: mockUnlink,
+      });
+      await secondResume.resume();
+      const resumedAgain = await secondResume.getTuple();
+      expect(resumedAgain?.replaySummary?.digest).toBe(tuple!.replaySummary?.digest);
     });
 
     it("returns 0 when no session exists on disk", async () => {
@@ -261,6 +308,63 @@ describe("EventSourcedCheckpointer", () => {
 
       const count = await fresh.resume();
       expect(count).toBe(0);
+    });
+
+    it("rebuilds invalid replay summaries and drops invalid workspace context on resume", async () => {
+      await cp.put(
+        { task: "self-improve", iteration: 5 },
+        { source: "loop", step: 5 },
+        undefined,
+        {
+          workspaceContext: {
+            projectRoot: "/project",
+            workspaceRoot: "/project",
+            workspaceIsRepoRoot: true,
+            installContextKind: "repo_checkout",
+          },
+        },
+      );
+      await cp.putWrite({
+        taskId: "t1",
+        channel: "pdse",
+        value: 88,
+        timestamp: new Date().toISOString(),
+      });
+
+      const baseStatePath = Array.from(written.keys()).find((k) => k.includes("base_state.json"));
+      expect(baseStatePath).toBeTruthy();
+
+      const persisted = JSON.parse(written.get(baseStatePath!)!);
+      persisted.replaySummary = {
+        eventCount: -1,
+        pendingWriteCount: -1,
+        digest: "short",
+      };
+      persisted.workspaceContext = {
+        projectRoot: "/project",
+        workspaceRoot: "/project",
+        workspaceIsRepoRoot: true,
+        installContextKind: "unsupported_install",
+      };
+      written.set(baseStatePath!, JSON.stringify(persisted, null, 2));
+
+      const resumed = new EventSourcedCheckpointer("/project", "sess-001", {
+        writeFileFn: mockWrite,
+        readFileFn: mockRead,
+        mkdirFn: mockMkdir,
+        readdirFn: mockReaddir,
+        unlinkFn: mockUnlink,
+      });
+
+      const eventCount = await resumed.resume();
+      expect(eventCount).toBe(2);
+
+      const tuple = await resumed.getTuple();
+      expect(tuple?.replaySummary).toBeDefined();
+      expect(tuple?.replaySummary?.eventCount).toBe(2);
+      expect(tuple?.replaySummary?.pendingWriteCount).toBe(1);
+      expect(tuple?.replaySummary?.digest).toHaveLength(16);
+      expect(tuple?.workspaceContext).toBeUndefined();
     });
   });
 

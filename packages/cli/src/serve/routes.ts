@@ -35,6 +35,49 @@ export interface AgentRunnerOpts {
   abortSignal: AbortSignal;
   /** Called when the agent needs approval before executing a destructive action. */
   onApprovalNeeded: (toolName: string, command: string, riskLevel: string) => Promise<boolean>;
+  /** Called when the agent run finishes and can provide artifact visibility. */
+  onCompleted?: (result?: { artifacts?: string[]; receipts?: string[]; mode?: string }) => void;
+  /** Called when the agent run fails before completion. */
+  onFailed?: (message: string) => void;
+}
+
+export interface ApprovalEventRecord {
+  action: "needed" | "approved" | "denied";
+  toolName: string;
+  command: string;
+  riskLevel: string;
+  at: string;
+}
+
+export interface SessionTimelineEvent {
+  kind: "message" | "command" | "approval" | "abort" | "status";
+  label: string;
+  at: string;
+  detail?: string;
+}
+
+export interface CommandRecord {
+  id: string;
+  command: string;
+  status: "unavailable" | "completed" | "failed";
+  startedAt: string;
+  finishedAt?: string;
+  output?: string;
+}
+
+export interface CommandRunnerResult {
+  status: CommandRecord["status"];
+  output: string;
+  artifacts?: string[];
+  receipts?: string[];
+  mode?: string;
+}
+
+export interface CommandRunnerOpts {
+  sessionId: string;
+  command: string;
+  projectRoot: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 /** A server-side session record. */
@@ -45,6 +88,13 @@ export interface SessionRecord {
   messageCount: number;
   model: string;
   messages: Array<{ role: "user" | "assistant"; content: string; ts: string }>;
+  status?: "idle" | "running" | "awaiting_approval" | "aborted" | "completed" | "denied" | "failed";
+  mode?: string;
+  approvalEvents?: ApprovalEventRecord[];
+  commandHistory?: CommandRecord[];
+  timeline?: SessionTimelineEvent[];
+  artifactPaths?: string[];
+  receiptPaths?: string[];
   /** Pending approval request, if any. */
   pendingApproval?: {
     toolName: string;
@@ -66,6 +116,8 @@ export interface ServerContext {
   model: string;
   /** Injected by commands/serve.ts to execute the AI agent loop. Fire-and-forget. */
   agentRunner?: (opts: AgentRunnerOpts) => void;
+  /** Optional slash command executor used by preview surfaces. */
+  commandRunner?: (opts: CommandRunnerOpts) => Promise<CommandRunnerResult>;
 }
 
 type RouteHandler = (req: ParsedRequest) => Promise<RouteResponse>;
@@ -90,19 +142,63 @@ function generateId(): string {
   return randomBytes(8).toString("hex");
 }
 
+function ensureSessionCollections(session: SessionRecord): void {
+  session.approvalEvents ??= [];
+  session.commandHistory ??= [];
+  session.timeline ??= [];
+  session.artifactPaths ??= [];
+  session.receiptPaths ??= [];
+  session.mode ??= "review";
+  session.status ??= "idle";
+}
+
+function appendTimeline(
+  session: SessionRecord,
+  event: SessionTimelineEvent,
+): void {
+  ensureSessionCollections(session);
+  session.timeline!.push(event);
+}
+
+function appendUniquePaths(target: string[] | undefined, additions: string[] | undefined): string[] {
+  const next = [...(target ?? [])];
+  for (const item of additions ?? []) {
+    if (!next.includes(item)) {
+      next.push(item);
+    }
+  }
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // Session Management
 // ---------------------------------------------------------------------------
 
 function listSessions(ctx: ServerContext): RouteHandler {
   return async () => {
-    const sessions = Array.from(ctx.sessions.values()).map((s) => ({
-      id: s.id,
-      name: s.name,
-      createdAt: s.createdAt,
-      messageCount: s.messageCount,
-      model: s.model,
-    }));
+    const sessions = Array.from(ctx.sessions.values()).map((s) => {
+      ensureSessionCollections(s);
+      return {
+        id: s.id,
+        name: s.name,
+        createdAt: s.createdAt,
+        messageCount: s.messageCount,
+        model: s.model,
+        status: s.status,
+        mode: s.mode,
+        pendingApproval: s.pendingApproval
+          ? {
+              toolName: s.pendingApproval.toolName,
+              command: s.pendingApproval.command,
+              riskLevel: s.pendingApproval.riskLevel,
+            }
+          : null,
+        approvalCount: s.approvalEvents!.length,
+        commandCount: s.commandHistory!.length,
+        artifactCount: s.artifactPaths!.length,
+        receiptCount: s.receiptPaths!.length,
+      };
+    });
     return ok(sessions);
   };
 }
@@ -113,6 +209,8 @@ function getSession(ctx: ServerContext): RouteHandler {
     if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
+    ensureSessionCollections(session);
+    ensureSessionCollections(session);
     return ok({
       id: session.id,
       name: session.name,
@@ -120,6 +218,20 @@ function getSession(ctx: ServerContext): RouteHandler {
       messageCount: session.messageCount,
       model: session.model,
       messages: session.messages,
+      status: session.status,
+      mode: session.mode,
+      pendingApproval: session.pendingApproval
+        ? {
+            toolName: session.pendingApproval.toolName,
+            command: session.pendingApproval.command,
+            riskLevel: session.pendingApproval.riskLevel,
+          }
+        : null,
+      approvalEvents: session.approvalEvents,
+      commandHistory: session.commandHistory,
+      timeline: session.timeline,
+      artifactPaths: session.artifactPaths,
+      receiptPaths: session.receiptPaths,
     });
   };
 }
@@ -144,6 +256,13 @@ function createSession(ctx: ServerContext): RouteHandler {
       messageCount: 0,
       model,
       messages: [],
+      status: "idle",
+      mode: "review",
+      approvalEvents: [],
+      commandHistory: [],
+      timeline: [],
+      artifactPaths: [],
+      receiptPaths: [],
     };
     ctx.sessions.set(id, record);
     return ok({ id, name, model, createdAt: record.createdAt });
@@ -170,6 +289,7 @@ function sendMessage(ctx: ServerContext): RouteHandler {
     if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
+    ensureSessionCollections(session);
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     const content = body["content"] ?? body["message"] ?? body["prompt"];
@@ -190,6 +310,13 @@ function sendMessage(ctx: ServerContext): RouteHandler {
 
     session.messages.push({ role: "user", content, ts });
     session.messageCount++;
+    session.status = "running";
+    appendTimeline(session, {
+      kind: "message",
+      label: "User message received",
+      at: ts,
+      detail: content,
+    });
 
     // Signal SSE clients that a prompt was received
     ctx.sessionEmitter.emitStatus(session.id, `[message:${messageId}] User message received`);
@@ -210,11 +337,49 @@ function sendMessage(ctx: ServerContext): RouteHandler {
         onApprovalNeeded: (toolName, command, riskLevel) =>
           new Promise<boolean>((resolveApproval) => {
             session.pendingApproval = { toolName, command, riskLevel, resolve: resolveApproval };
+            session.status = "awaiting_approval";
+            session.approvalEvents!.push({
+              action: "needed",
+              toolName,
+              command,
+              riskLevel,
+              at: new Date().toISOString(),
+            });
+            appendTimeline(session, {
+              kind: "approval",
+              label: `${toolName} requires approval`,
+              at: new Date().toISOString(),
+              detail: command,
+            });
             ctx.sessionEmitter.emitApprovalNeeded(session.id, toolName, command, riskLevel);
           }),
+        onCompleted: (result) => {
+          session.abortController = undefined;
+          session.pendingApproval = undefined;
+          session.status = "completed";
+          session.mode = result?.mode ?? session.mode;
+          session.artifactPaths = appendUniquePaths(session.artifactPaths, result?.artifacts);
+          session.receiptPaths = appendUniquePaths(session.receiptPaths, result?.receipts);
+          appendTimeline(session, {
+            kind: "status",
+            label: "Agent run completed",
+            at: new Date().toISOString(),
+          });
+        },
+        onFailed: (message) => {
+          session.abortController = undefined;
+          session.status = "failed";
+          appendTimeline(session, {
+            kind: "status",
+            label: "Agent run failed",
+            at: new Date().toISOString(),
+            detail: message,
+          });
+        },
       });
     } catch {
       session.abortController = undefined;
+      session.status = "failed";
     }
 
     return {
@@ -231,11 +396,18 @@ function abortGeneration(ctx: ServerContext): RouteHandler {
     if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
+    ensureSessionCollections(session);
 
     if (session.abortController) {
       session.abortController.abort();
       session.abortController = undefined;
     }
+    session.status = "aborted";
+    appendTimeline(session, {
+      kind: "abort",
+      label: "Generation aborted by client",
+      at: new Date().toISOString(),
+    });
     ctx.sessionEmitter.emitStatus(session.id, "[abort] Generation aborted by client");
     return ok({ aborted: true, sessionId: req.params["id"] });
   };
@@ -252,6 +424,21 @@ function approveAction(ctx: ServerContext): RouteHandler {
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
     if (!session.pendingApproval) return badRequest("No pending approval for this session");
+    ensureSessionCollections(session);
+    session.approvalEvents!.push({
+      action: "approved",
+      toolName: session.pendingApproval.toolName,
+      command: session.pendingApproval.command,
+      riskLevel: session.pendingApproval.riskLevel,
+      at: new Date().toISOString(),
+    });
+    appendTimeline(session, {
+      kind: "approval",
+      label: `${session.pendingApproval.toolName} approved`,
+      at: new Date().toISOString(),
+      detail: session.pendingApproval.command,
+    });
+    session.status = "running";
     session.pendingApproval.resolve(true);
     session.pendingApproval = undefined;
     return ok({ approved: true, sessionId: id });
@@ -265,6 +452,21 @@ function denyAction(ctx: ServerContext): RouteHandler {
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
     if (!session.pendingApproval) return badRequest("No pending approval for this session");
+    ensureSessionCollections(session);
+    session.approvalEvents!.push({
+      action: "denied",
+      toolName: session.pendingApproval.toolName,
+      command: session.pendingApproval.command,
+      riskLevel: session.pendingApproval.riskLevel,
+      at: new Date().toISOString(),
+    });
+    appendTimeline(session, {
+      kind: "approval",
+      label: `${session.pendingApproval.toolName} denied`,
+      at: new Date().toISOString(),
+      detail: session.pendingApproval.command,
+    });
+    session.status = "denied";
     session.pendingApproval.resolve(false);
     session.pendingApproval = undefined;
     return ok({ denied: true, sessionId: id });
@@ -309,6 +511,7 @@ function runSlashCommand(ctx: ServerContext): RouteHandler {
     if (!SESSION_ID_RE.test(id)) return badRequest("Invalid session ID format");
     const session = ctx.sessions.get(id);
     if (!session) return notFound(id);
+    ensureSessionCollections(session);
 
     const body = (req.body ?? {}) as Record<string, unknown>;
     const command = body["command"];
@@ -316,8 +519,66 @@ function runSlashCommand(ctx: ServerContext): RouteHandler {
       return badRequest("Missing or invalid command — must start with /");
     }
 
-    ctx.sessionEmitter.emitStatus(session.id, `[slash] Dispatched: ${command}`);
-    return ok({ output: `Command queued: ${command}`, sessionId: id });
+    const commandId = generateId();
+    const startedAt = new Date().toISOString();
+    const record: CommandRecord = {
+      id: commandId,
+      command,
+      status: "unavailable",
+      startedAt,
+    };
+
+    session.commandHistory!.push(record);
+    appendTimeline(session, {
+      kind: "command",
+      label: `Slash command requested: ${command}`,
+      at: startedAt,
+    });
+
+    let result: CommandRunnerResult;
+    if (!ctx.commandRunner) {
+      result = {
+        status: "unavailable",
+        output: `Slash command execution is not wired in serve mode for ${command}.`,
+      };
+    } else {
+      try {
+        result = await ctx.commandRunner({
+          sessionId: session.id,
+          command,
+          projectRoot: ctx.projectRoot,
+          history: session.messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        });
+      } catch (err) {
+        result = {
+          status: "failed",
+          output:
+            err instanceof Error
+              ? err.message
+              : `Slash command execution failed: ${String(err)}`,
+        };
+      }
+    }
+
+    record.status = result.status;
+    record.output = result.output;
+    record.finishedAt = new Date().toISOString();
+    session.artifactPaths = appendUniquePaths(session.artifactPaths, result.artifacts);
+    session.receiptPaths = appendUniquePaths(session.receiptPaths, result.receipts);
+    if (result.mode) {
+      session.mode = result.mode;
+    }
+
+    ctx.sessionEmitter.emitStatus(session.id, `[slash:${result.status}] ${command}`);
+    return ok({
+      commandId,
+      sessionId: id,
+      status: result.status,
+      output: result.output,
+    });
   };
 }
 

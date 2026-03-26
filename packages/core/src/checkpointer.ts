@@ -8,6 +8,12 @@
 import { mkdir, readFile, writeFile, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import {
+  CheckpointReplaySummarySchema,
+  CheckpointWorkspaceContextSchema,
+  type CheckpointReplaySummary as RuntimeCheckpointReplaySummary,
+  type CheckpointWorkspaceContext as RuntimeCheckpointWorkspaceContext,
+} from "@dantecode/runtime-spine";
 
 // ----------------------------------------------------------------------------
 // Types — LangGraph-inspired
@@ -61,6 +67,16 @@ export interface CheckpointTuple {
   metadata: CheckpointMetadata;
   pendingWrites: PendingWrite[];
   parentId?: string;
+  replaySummary?: CheckpointReplaySummary;
+  workspaceContext?: CheckpointWorkspaceContext;
+}
+
+export type CheckpointReplaySummary = RuntimeCheckpointReplaySummary;
+export type CheckpointWorkspaceContext = RuntimeCheckpointWorkspaceContext;
+
+export interface CheckpointRuntimeEnvelope {
+  replaySummary?: CheckpointReplaySummary;
+  workspaceContext?: CheckpointWorkspaceContext;
 }
 
 /** An event in the event log (OpenHands-style). */
@@ -155,6 +171,8 @@ export class EventSourcedCheckpointer {
   private currentMetadata: CheckpointMetadata | null = null;
   /** Pending writes since last base state. */
   private pendingWrites: PendingWrite[] = [];
+  /** Replay/workspace envelope persisted with the current base state. */
+  private currentRuntimeEnvelope: CheckpointRuntimeEnvelope = {};
 
   constructor(
     projectRoot: string,
@@ -184,6 +202,7 @@ export class EventSourcedCheckpointer {
     channelValues: Record<string, unknown>,
     metadata: CheckpointMetadata,
     channelVersions?: Record<string, number>,
+    runtimeEnvelope: Omit<CheckpointRuntimeEnvelope, "replaySummary"> = {},
   ): Promise<string> {
     const id = randomUUID().slice(0, 12);
     const parentId = this.currentCheckpoint?.id;
@@ -202,11 +221,21 @@ export class EventSourcedCheckpointer {
       parentId,
     };
 
+    const replaySummary = this.buildReplaySummary(
+      checkpoint,
+      this.pendingWrites,
+      this.nextEventIndex + 1,
+    );
+
     this.currentCheckpoint = checkpoint;
     this.currentMetadata = fullMetadata;
+    this.currentRuntimeEnvelope = {
+      ...runtimeEnvelope,
+      replaySummary,
+    };
 
     // Write base state
-    await this.writeBaseState(checkpoint, fullMetadata);
+    await this.writeBaseState(checkpoint, fullMetadata, this.currentRuntimeEnvelope);
 
     // Append checkpoint event to log
     await this.appendEvent({
@@ -237,6 +266,8 @@ export class EventSourcedCheckpointer {
       data: write,
     });
 
+    await this.refreshRuntimeEnvelope();
+
     // Auto-compaction check
     if (this.nextEventIndex >= this.maxEvents) {
       await this.compact();
@@ -255,6 +286,8 @@ export class EventSourcedCheckpointer {
         metadata: { ...this.currentMetadata },
         pendingWrites: [...this.pendingWrites],
         parentId: this.currentMetadata.parentId,
+        replaySummary: this.currentRuntimeEnvelope.replaySummary,
+        workspaceContext: this.currentRuntimeEnvelope.workspaceContext,
       };
     }
 
@@ -319,6 +352,10 @@ export class EventSourcedCheckpointer {
     this.currentCheckpoint = tuple.checkpoint;
     this.currentMetadata = tuple.metadata;
     this.pendingWrites = tuple.pendingWrites;
+    this.currentRuntimeEnvelope = {
+      replaySummary: tuple.replaySummary,
+      workspaceContext: tuple.workspaceContext,
+    };
 
     return this.nextEventIndex;
   }
@@ -346,7 +383,11 @@ export class EventSourcedCheckpointer {
     this.pendingWrites = [];
 
     // Write new base state
-    await this.writeBaseState(this.currentCheckpoint, this.currentMetadata!);
+    this.currentRuntimeEnvelope = {
+      ...this.currentRuntimeEnvelope,
+      replaySummary: this.buildReplaySummary(this.currentCheckpoint, [], 0),
+    };
+    await this.writeBaseState(this.currentCheckpoint, this.currentMetadata!, this.currentRuntimeEnvelope);
 
     // Clear event log
     await this.clearEventLog();
@@ -382,9 +423,11 @@ export class EventSourcedCheckpointer {
   private async writeBaseState(
     checkpoint: Checkpoint,
     metadata: CheckpointMetadata,
+    runtimeEnvelope: CheckpointRuntimeEnvelope = {},
   ): Promise<void> {
     await this.ensureDirs();
-    const data = JSON.stringify({ checkpoint, metadata }, null, 2);
+    const normalizedEnvelope = normalizeRuntimeEnvelope(runtimeEnvelope);
+    const data = JSON.stringify({ checkpoint, metadata, ...normalizedEnvelope }, null, 2);
     await this.writeFileFn(this.baseStatePath(), data);
   }
 
@@ -413,9 +456,11 @@ export class EventSourcedCheckpointer {
   private async loadFromDisk(): Promise<CheckpointTuple | null> {
     try {
       const raw = await this.readFileFn(this.baseStatePath());
-      const { checkpoint, metadata } = JSON.parse(raw) as {
+      const { checkpoint, metadata, replaySummary, workspaceContext } = JSON.parse(raw) as {
         checkpoint: Checkpoint;
         metadata: CheckpointMetadata;
+        replaySummary?: unknown;
+        workspaceContext?: unknown;
       };
 
       // Replay events from the event log
@@ -434,11 +479,23 @@ export class EventSourcedCheckpointer {
         this.eventIndex.set(event.id, event.index);
       }
 
+      const normalizedReplaySummary = parseReplaySummary(replaySummary);
+      const normalizedWorkspaceContext = parseWorkspaceContext(workspaceContext);
+      const nextReplaySummary =
+        normalizedReplaySummary ??
+        this.buildReplaySummary(checkpoint, writes, events.length, events.at(-1)?.index);
+      this.currentRuntimeEnvelope = {
+        replaySummary: nextReplaySummary,
+        workspaceContext: normalizedWorkspaceContext,
+      };
+
       return {
         checkpoint,
         metadata,
         pendingWrites: writes,
         parentId: metadata.parentId,
+        replaySummary: nextReplaySummary,
+        workspaceContext: normalizedWorkspaceContext,
       };
     } catch {
       return null;
@@ -486,6 +543,47 @@ export class EventSourcedCheckpointer {
     }
     return versions;
   }
+
+  private buildReplaySummary(
+    checkpoint: Checkpoint,
+    pendingWrites: PendingWrite[],
+    eventCount: number,
+    lastEventIndex = eventCount > 0 ? eventCount - 1 : undefined,
+  ): CheckpointReplaySummary {
+    const digest = hashCheckpointContent(
+      JSON.stringify({
+        checkpointId: checkpoint.id,
+        step: checkpoint.step,
+        channelValues: checkpoint.channelValues,
+        channelVersions: checkpoint.channelVersions,
+        pendingWrites,
+        eventCount,
+      }),
+    );
+
+    return {
+      eventCount,
+      pendingWriteCount: pendingWrites.length,
+      digest,
+      ...(typeof lastEventIndex === "number" ? { lastEventIndex } : {}),
+    };
+  }
+
+  private async refreshRuntimeEnvelope(): Promise<void> {
+    if (!this.currentCheckpoint || !this.currentMetadata) {
+      return;
+    }
+
+    this.currentRuntimeEnvelope = {
+      ...this.currentRuntimeEnvelope,
+      replaySummary: this.buildReplaySummary(
+        this.currentCheckpoint,
+        this.pendingWrites,
+        this.nextEventIndex,
+      ),
+    };
+    await this.writeBaseState(this.currentCheckpoint, this.currentMetadata, this.currentRuntimeEnvelope);
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -495,4 +593,27 @@ export class EventSourcedCheckpointer {
 /** SHA-256 hash of a string, returned as 16-char hex prefix. */
 export function hashCheckpointContent(content: string): string {
   return createHash("sha256").update(content, "utf-8").digest("hex").slice(0, 16);
+}
+
+function normalizeRuntimeEnvelope(runtimeEnvelope: CheckpointRuntimeEnvelope): CheckpointRuntimeEnvelope {
+  return {
+    replaySummary: parseReplaySummary(runtimeEnvelope.replaySummary),
+    workspaceContext: parseWorkspaceContext(runtimeEnvelope.workspaceContext),
+  };
+}
+
+function parseReplaySummary(value: unknown): CheckpointReplaySummary | undefined {
+  if (typeof value === "undefined") {
+    return undefined;
+  }
+  const parsed = CheckpointReplaySummarySchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseWorkspaceContext(value: unknown): CheckpointWorkspaceContext | undefined {
+  if (typeof value === "undefined") {
+    return undefined;
+  }
+  const parsed = CheckpointWorkspaceContextSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }

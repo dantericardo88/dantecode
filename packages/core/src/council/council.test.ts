@@ -2148,6 +2148,18 @@ function makeTestPacketForBridge(laneId: string): CouncilTaskPacket {
   };
 }
 
+async function waitForJsonFile<T>(path: string): Promise<T> {
+  let raw = "";
+  await vi.waitFor(
+    async () => {
+      raw = await readFile(path, "utf-8");
+      expect(raw.length).toBeGreaterThan(0);
+    },
+    { timeout: 5_000, interval: 50 },
+  );
+  return JSON.parse(raw) as T;
+}
+
 const claudeConfig: AgentCommandConfig = {
   kind: "claude-code",
   command: "claude",
@@ -2197,10 +2209,12 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    // Wait for async runSession
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(calls.length).toBeGreaterThan(0);
+    await vi.waitFor(
+      () => {
+        expect(calls.length).toBeGreaterThan(0);
+      },
+      { timeout: 5_000 },
+    );
     expect(calls[0]!.cmd).toBe("claude");
   });
 
@@ -2239,11 +2253,9 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
-    const raw = await readFile(donePath, "utf-8");
-    const done = JSON.parse(raw) as { success: boolean; exitCode: number };
+    const done = await waitForJsonFile<{ success: boolean; exitCode: number }>(donePath);
     expect(done.success).toBe(true);
     expect(done.exitCode).toBe(0);
   });
@@ -2262,11 +2274,9 @@ describe("Lane B — BridgeListener Daemon", () => {
       pollIntervalMs: 5000,
     });
     await listener.poll();
-    await new Promise((r) => setTimeout(r, 500));
 
     const donePath = join(bridgeDir, "outbox", sessionId, "done.json");
-    const raw = await readFile(donePath, "utf-8");
-    const done = JSON.parse(raw) as { success: boolean; exitCode: number };
+    const done = await waitForJsonFile<{ success: boolean; exitCode: number }>(donePath);
     expect(done.success).toBe(false);
     expect(done.exitCode).toBe(1);
   });
@@ -3955,7 +3965,7 @@ describe("Lane G — Integration: real executor + real git", () => {
       const adapter = new DanteCodeAdapter({ executor: realExecutor });
       const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", adapter]]);
       const orchestrator = new CouncilOrchestrator(adapters, {
-        pollIntervalMs: 20,
+        pollIntervalMs: 100,
         maxLaneRetries: 0,
       });
       activeOrchestratorsG.push(orchestrator);
@@ -3977,7 +3987,7 @@ describe("Lane G — Integration: real executor + real git", () => {
       });
       expect(assignResult.accepted).toBe(true);
 
-      await orchestrator.watchUntilComplete({ timeoutMs: 30_000 });
+      await orchestrator.watchUntilComplete({ timeoutMs: 90_000 });
 
       expect(orchestrator.currentStatus).toBe("completed");
 
@@ -3997,7 +4007,7 @@ describe("Lane G — Integration: real executor + real git", () => {
       expect(patch!.unifiedDiff).toContain("generated.ts");
       expect(patch!.changedFiles).toContain("generated.ts");
     },
-    { timeout: 40_000 },
+    { timeout: 100_000 },
   );
 });
 

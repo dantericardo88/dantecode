@@ -179,6 +179,7 @@ function createMockState(): any {
     silent: false,
     lastEditFile: null,
     lastEditContent: null,
+    preMutationSnapshotted: new Set<string>(),
     recentToolCalls: [],
     pendingAgentPrompt: null,
     pendingResumeRunId: null,

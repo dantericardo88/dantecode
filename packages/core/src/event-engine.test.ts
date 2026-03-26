@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { randomUUID } from "node:crypto";
 import { EventEngine, type DanteEvent, type WorkflowDefinition } from "./event-engine.js";
 
 // ---------------------------------------------------------------------------
@@ -327,5 +328,74 @@ describe("EventEngine", () => {
     await engine.processAll();
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0]![0].payload.branch).toBe("main");
+  });
+
+  it("createRuntimeEvent() preserves the canonical runtime-spine envelope", () => {
+    const runtimeEvent = {
+      at: "2026-03-26T00:00:00.000Z",
+      kind: "subagent.handoff",
+      taskId: randomUUID(),
+      parentId: randomUUID(),
+      payload: {
+        handoffId: "handoff-1",
+        summary: "Escalated to verifier",
+      },
+    } as const;
+
+    const event = engine.createRuntimeEvent(runtimeEvent, "runtime-bridge");
+
+    expect(event.type).toBe(runtimeEvent.kind);
+    expect(event.timestamp).toBe(runtimeEvent.at);
+    expect(event.payload).toEqual(runtimeEvent.payload);
+    expect(event.runtimeEvent).toEqual(runtimeEvent);
+    expect(event.source).toBe("runtime-bridge");
+  });
+
+  it("enqueueRuntimeEvent() routes validated runtime-spine events to matching workflows", async () => {
+    const handler = vi.fn().mockResolvedValue(undefined);
+    engine.registerWorkflow(
+      makeWorkflow({
+        id: "runtime-handoff",
+        trigger: "subagent.handoff",
+        handler,
+      }),
+    );
+
+    const runtimeEvent = {
+      at: "2026-03-26T00:00:00.000Z",
+      kind: "subagent.handoff",
+      taskId: randomUUID(),
+      payload: {
+        handoffId: "handoff-1",
+      },
+    } as const;
+
+    engine.enqueueRuntimeEvent(runtimeEvent, "runtime-bridge");
+    const result = await engine.processNext();
+
+    expect(result.processed).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(handler.mock.calls[0]![0].type).toBe("subagent.handoff");
+    expect(handler.mock.calls[0]![0].runtimeEvent).toEqual(runtimeEvent);
+  });
+
+  it("enqueueRuntimeEvent() rejects invalid runtime events", () => {
+    expect(() =>
+      engine.enqueueRuntimeEvent({
+        at: "2026-03-26T00:00:00.000Z",
+        kind: "subagent.handoff",
+        taskId: "agent-1",
+        payload: {},
+      } as never),
+    ).toThrow();
+
+    expect(() =>
+      engine.enqueueRuntimeEvent({
+        at: "2026-03-26T00:00:00.000Z",
+        kind: "not-a-runtime-kind",
+        taskId: randomUUID(),
+        payload: {},
+      } as never),
+    ).toThrow();
   });
 });

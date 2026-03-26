@@ -28,7 +28,7 @@ import type {
   RepairPlan,
   InactionCost,
 } from "@dantecode/runtime-spine";
-import { DEFAULT_FEARSET_CONFIG } from "@dantecode/runtime-spine";
+import { DEFAULT_FEARSET_CONFIG, buildRuntimeEvent } from "@dantecode/runtime-spine";
 import type { RuntimeEvent } from "@dantecode/runtime-spine";
 import {
   FEARSET_SYSTEM_PROMPT,
@@ -122,12 +122,13 @@ function emitEvent(
   taskId: string,
   payload: Record<string, unknown> = {},
 ): void {
-  callbacks.onEvent?.({
+  const event = buildRuntimeEvent({
     at: new Date().toISOString(),
     kind,
     taskId,
     payload,
   });
+  callbacks.onEvent?.(event);
 }
 
 // ─── Column content validation ────────────────────────────────────────────────
@@ -553,8 +554,13 @@ export async function runFearSetEngine(
   const columns: FearColumn[] = [];
   const columnOrder = config.mode === "lite" ? LITE_COLUMNS : STANDARD_COLUMNS;
   const priorColumnOutputs: Partial<Record<FearSetColumnName, string>> = {};
+  const capturedEvents: RuntimeEvent[] = [];
+  const trackingCallbacks: FearSetCallbacks = {
+    ...callbacks,
+    onEvent: (e) => { capturedEvents.push(e); callbacks.onEvent?.(e); },
+  };
 
-  emitEvent(callbacks, "fearset.triggered", resultId, {
+  emitEvent(trackingCallbacks, "fearset.triggered", resultId, {
     channel: trigger.channel,
     context: context.slice(0, 80),
   });
@@ -575,14 +581,14 @@ export async function runFearSetEngine(
     if (callbacks.isStopped?.()) {
       result.stopReason = "user-stop";
       result.stoppedAt = new Date().toISOString();
-      emitEvent(callbacks, "fearset.stopped", resultId, {
+      emitEvent(trackingCallbacks, "fearset.stopped", resultId, {
         reason: "user-stop",
         column: columnName,
       });
       break;
     }
 
-    emitEvent(callbacks, "fearset.column.started", resultId, { column: columnName });
+    emitEvent(trackingCallbacks, "fearset.column.started", resultId, { column: columnName });
 
     const budget = newColumnBudget();
     const userPrompt = buildFearSetColumnPrompt(
@@ -632,13 +638,13 @@ export async function runFearSetEngine(
 
     // 6. Sandbox simulation (prevent/repair)
     if (config.sandboxSimulation && (columnName === "prevent" || columnName === "repair")) {
-      column = await simulateColumn(column, callbacks, resultId);
+      column = await simulateColumn(column, trackingCallbacks, resultId);
     }
 
     columns.push(column);
     priorColumnOutputs[columnName] = column.rawOutput;
 
-    emitEvent(callbacks, "fearset.column.completed", resultId, {
+    emitEvent(trackingCallbacks, "fearset.column.completed", resultId, {
       column: columnName,
       hasContent:
         column.worstCases.length > 0 ||
@@ -656,6 +662,7 @@ export async function runFearSetEngine(
   // Early exit if stopped by user
   if (result.stopReason === "user-stop") {
     result.completedAt = new Date().toISOString();
+    result.runtimeEvents = capturedEvents;
     callbacks.onComplete?.(result);
     return result;
   }
@@ -680,7 +687,7 @@ export async function runFearSetEngine(
   result.passed = robustnessScore.gateDecision === "pass";
 
   const gateEvent = result.passed ? "fearset.danteforge.passed" : "fearset.danteforge.failed";
-  emitEvent(callbacks, gateEvent, resultId, {
+  emitEvent(trackingCallbacks, gateEvent, resultId, {
     overall: robustnessScore.overall,
     gateDecision: robustnessScore.gateDecision,
     estimatedRiskReduction: robustnessScore.estimatedRiskReduction,
@@ -703,6 +710,7 @@ export async function runFearSetEngine(
     result.stopReason = "completed";
   }
   result.completedAt = new Date().toISOString();
+  result.runtimeEvents = capturedEvents;
 
   callbacks.onComplete?.(result);
   return result;

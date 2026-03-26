@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   BackgroundAgentTask,
   DurableRun,
@@ -9,9 +10,11 @@ import type {
   ResumeHint,
   Session,
 } from "@dantecode/config-types";
+import type { CheckpointWorkspaceContext } from "@dantecode/runtime-spine";
 import type { AutoforgeCheckpointFile } from "./autoforge-checkpoint.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { EventSourcedCheckpointer } from "./checkpointer.js";
+import { detectInstallContext } from "./runtime-update.js";
 import { SessionStore } from "./session-store.js";
 import type { ArtifactRecord, ToolCallRecord } from "./tool-runtime/tool-call-types.js";
 
@@ -39,6 +42,7 @@ const EVIDENCE_FILENAME = "evidence.json";
 const ARTIFACTS_FILENAME = "artifacts.json";
 const PENDING_TOOL_CALLS_FILENAME = "pending-tool-calls.json";
 const TOOL_CALLS_FILENAME = "tool-calls.json";
+const RUNTIME_FILE_PATH = fileURLToPath(import.meta.url);
 
 export interface DurablePendingToolCall {
   id: string;
@@ -77,7 +81,7 @@ export class DurableRunStore {
       source: "input",
       step: 0,
       triggerCommand: options.prompt,
-    });
+    }, options.session);
 
     return run;
   }
@@ -96,7 +100,7 @@ export class DurableRunStore {
       source: "loop",
       step: evidence.length,
       triggerCommand: current.prompt,
-    });
+    }, payload.session);
 
     return next;
   }
@@ -119,7 +123,7 @@ export class DurableRunStore {
       step: evidence.length,
       triggerCommand: current.prompt,
       extra: { pauseReason: payload.reason },
-    });
+    }, payload.session);
 
     return next;
   }
@@ -138,7 +142,7 @@ export class DurableRunStore {
       source: "update",
       step: evidence.length,
       triggerCommand: current.prompt,
-    });
+    }, payload.session);
 
     return next;
   }
@@ -157,7 +161,7 @@ export class DurableRunStore {
       source: "update",
       step: evidence.length,
       triggerCommand: current.prompt,
-    });
+    }, payload.session);
 
     return next;
   }
@@ -326,10 +330,25 @@ export class DurableRunStore {
       triggerCommand: string;
       extra?: Record<string, unknown>;
     },
+    session?: Session,
   ): Promise<void> {
     const checkpointer = new EventSourcedCheckpointer(this.projectRoot, "run", {
       baseDir: join(this.getRunDir(run.id), "event-log"),
     });
+    const workspaceRoot = session?.projectRoot ?? run.projectRoot;
+    const installContext = detectInstallContext({
+      runtimePath: RUNTIME_FILE_PATH,
+      cwd: workspaceRoot,
+      workspaceRoot,
+    });
+    const workspaceContext: CheckpointWorkspaceContext = {
+      projectRoot: run.projectRoot,
+      workspaceRoot,
+      repoRoot: installContext.repoRoot,
+      workspaceIsRepoRoot: installContext.workspaceIsRepoRoot,
+      installContextKind: installContext.kind,
+      ...(workspaceRoot !== run.projectRoot ? { worktreePath: workspaceRoot } : {}),
+    };
     await checkpointer.put(
       {
         id: run.id,
@@ -342,6 +361,10 @@ export class DurableRunStore {
         nextAction: run.nextAction,
       },
       metadata,
+      undefined,
+      {
+        workspaceContext,
+      },
     );
   }
 

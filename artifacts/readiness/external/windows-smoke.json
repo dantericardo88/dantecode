@@ -1,0 +1,10 @@
+{
+  "gateName": "windowsSmoke",
+  "status": "pass",
+  "source": "external-gate-runner",
+  "command": "npm run smoke:external",
+  "detail": "> dantecode@0.9.2 smoke:external\n> node scripts/smoke-external.mjs\n\nExternal project smoke tests\n\n  PASS  node-ts-project\n  PASS  python-project\n  PASS  rust-project\n  PASS  go-project\n  PASS  js-project\n  PASS  empty-project\n  PASS  idempotent-init\n\n7 passed, 0 failed out of 7 tests\nExternal project smoke check passed.",
+  "artifacts": [],
+  "commitSha": "1a12b55b1313afc3b13a76f762a631cfd35165e3",
+  "generatedAt": "2026-03-26T16:44:59.872Z"
+}

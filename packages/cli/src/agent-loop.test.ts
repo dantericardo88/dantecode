@@ -375,6 +375,20 @@ vi.mock("@dantecode/core", () => {
       ) => raw,
     ),
     formatEvidenceSummary: vi.fn(() => ""),
+    // globalApprovalGateway — required because tool-executor.ts calls peekDecision
+    globalApprovalGateway: {
+      peekDecision: vi.fn(() => "auto_approve"),
+      check: vi.fn(() => ({ decision: "auto_approve", warnings: [], matchedRules: [], enforcedRules: [] })),
+      configure: vi.fn(),
+      reset: vi.fn(),
+      approveToolCall: vi.fn(),
+      revokeToolCallApproval: vi.fn(),
+      clearApprovedToolCalls: vi.fn(),
+      setEnabled: vi.fn(),
+      setRules: vi.fn(),
+      get enabled() { return false; },
+      get rules() { return []; },
+    },
     // UXEngine — required because stream-renderer.ts imports it from @dantecode/core
     UXEngine: class MockUXEngine {
       constructor(_opts?: Record<string, unknown>) {}

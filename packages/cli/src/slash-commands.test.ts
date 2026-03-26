@@ -3,7 +3,13 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DanteCodeState, Session } from "@dantecode/config-types";
-import { DurableRunStore, globalVerificationRailRegistry, ReasoningChain } from "@dantecode/core";
+import {
+  DurableRunStore,
+  globalApprovalGateway,
+  globalToolScheduler,
+  globalVerificationRailRegistry,
+  ReasoningChain,
+} from "@dantecode/core";
 import { GitAutomationStore } from "@dantecode/git-engine";
 import type { ReplState } from "./slash-commands.js";
 
@@ -19,6 +25,8 @@ const {
   mockGetSkill,
   mockRunSkillPolicyCheck,
   mockRunSkillsCommand,
+  mockDebugTrailRecent,
+  mockDebugRestore,
 } = vi.hoisted(() => ({
   mockExecSync: vi.fn(),
   mockCreateWorktree: vi.fn(),
@@ -31,6 +39,8 @@ const {
   mockGetSkill: vi.fn(),
   mockRunSkillPolicyCheck: vi.fn(),
   mockRunSkillsCommand: vi.fn(),
+  mockDebugTrailRecent: vi.fn(),
+  mockDebugRestore: vi.fn(),
 }));
 
 vi.mock("node:child_process", async () => {
@@ -71,6 +81,21 @@ vi.mock("@dantecode/skills-policy", () => ({
 
 vi.mock("./commands/skills.js", () => ({
   runSkillsCommand: (...args: unknown[]) => mockRunSkillsCommand(...args),
+}));
+
+vi.mock("@dantecode/debug-trail", () => ({
+  CliBridge: class {
+    debugTrailRecent(limit: number) {
+      return mockDebugTrailRecent(limit);
+    }
+  },
+  getGlobalLogger: () => ({
+    getProvenance: () => ({
+      sessionId: "session-1",
+      runId: "run-1",
+    }),
+  }),
+  debugRestore: (...args: unknown[]) => mockDebugRestore(...args),
 }));
 
 vi.mock("@dantecode/danteforge", async () => {
@@ -149,6 +174,7 @@ function makeState(projectRoot: string): ReplState {
     silent: true,
     lastEditFile: null,
     lastEditContent: null,
+    preMutationSnapshotted: new Set<string>(),
     recentToolCalls: [],
     pendingAgentPrompt: null,
     pendingResumeRunId: null,
@@ -160,6 +186,7 @@ function makeState(projectRoot: string): ReplState {
     gaslight: null,
     memoryOrchestrator: null,
     verificationTrendTracker: null,
+    lastSessionPdseResults: [],
     planMode: false,
     currentPlan: null,
     planApproved: false,
@@ -948,5 +975,171 @@ describe("/skills run routing (Lane A)", () => {
 
     expect(mockRunAgentLoop).not.toHaveBeenCalled();
     expect(output).toMatch(/not found/i);
+  });
+});
+
+describe("/approve and /deny durable run flow", () => {
+  let projectRoot: string;
+  let state: ReplState;
+  let store: DurableRunStore;
+
+  async function seedPausedApprovalRun() {
+    const run = await store.initializeRun({
+      runId: "run-approval-1",
+      session: state.session,
+      prompt: "/magic update src/app.ts",
+      workflow: "magic",
+    });
+
+    await store.pauseRun(run.id, {
+      reason: "user_input_required",
+      session: state.session,
+      nextAction: "Approve the requested action and then continue the durable run.",
+      message: "Write requires approval.",
+      evidence: [],
+    });
+
+    await store.persistPendingToolCalls(run.id, [
+      {
+        id: "tool-write-1",
+        name: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const ready = true;\n",
+        },
+      },
+    ]);
+
+    await store.persistToolCallRecords(run.id, [
+      {
+        id: "tool-write-1",
+        toolName: "Write",
+        input: {
+          file_path: "src/app.ts",
+          content: "export const ready = true;\n",
+        },
+        requestId: "round-1",
+        status: "awaiting_approval",
+        statusHistory: [
+          { status: "created", ts: Date.now() - 30 },
+          { status: "validating", ts: Date.now() - 20 },
+          { status: "awaiting_approval", ts: Date.now() - 10, reason: "review mode" },
+        ],
+        createdAt: Date.now() - 30,
+      } as never,
+    ]);
+
+    return run;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-approval-cmd-"));
+    state = makeState(projectRoot);
+    store = new DurableRunStore(projectRoot);
+    globalApprovalGateway.reset();
+    globalToolScheduler.reset();
+  });
+
+  it("/approve registers the pending tool call and queues the durable run to continue", async () => {
+    const run = await seedPausedApprovalRun();
+
+    const output = await routeSlashCommand("/approve", state);
+
+    expect(output).toMatch(/Approved/);
+    expect(output).toContain(run.id);
+    expect(state.pendingAgentPrompt).toBe("continue");
+    expect(state.pendingResumeRunId).toBe(run.id);
+    expect(state.pendingExpectedWorkflow).toBe("magic");
+    expect(
+      globalApprovalGateway.check("Write", {
+        file_path: "src/app.ts",
+        content: "export const ready = true;\n",
+      }).decision,
+    ).toBe("auto_approve");
+  });
+
+  it("/deny cancels the pending tool call, clears replay state, and fails the run", async () => {
+    const run = await seedPausedApprovalRun();
+
+    const output = await routeSlashCommand("/deny", state);
+
+    expect(output).toMatch(/Denied/);
+    expect(output).toContain(run.id);
+    expect(state.pendingAgentPrompt).toBeNull();
+    expect(state.pendingResumeRunId).toBeNull();
+    expect(state.pendingExpectedWorkflow).toBeNull();
+
+    const persistedRun = await store.loadRun(run.id);
+    expect(persistedRun?.status).toBe("failed");
+
+    const persistedToolCalls = await store.loadToolCallRecords(run.id);
+    expect(persistedToolCalls[0]?.status).toBe("cancelled");
+
+    const pendingToolCalls = await store.loadPendingToolCalls(run.id);
+    expect(pendingToolCalls).toHaveLength(0);
+  });
+});
+
+describe("/undo, /restore, and /timeline recovery flow", () => {
+  let projectRoot: string;
+  let state: ReplState;
+  const filePathSuffix = join("src", "app.ts");
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-recovery-cmd-"));
+    state = makeState(projectRoot);
+    mockDebugTrailRecent.mockResolvedValue({
+      totalMatches: 1,
+      latencyMs: 1,
+      results: [
+        {
+          timestamp: "2026-03-26T12:00:00.000Z",
+          kind: "file_write",
+          actor: "Write",
+          summary: "Updated src/app.ts",
+          payload: {
+            filePath: join(projectRoot, filePathSuffix),
+          },
+          beforeSnapshotId: "snap-before-app",
+          afterSnapshotId: "snap-after-app",
+        },
+      ],
+    });
+    mockDebugRestore.mockResolvedValue({
+      snapshotId: "snap-before-app",
+      restored: true,
+      targetPath: join(projectRoot, filePathSuffix),
+    });
+  });
+
+  it("/undo prefers the latest recovery snapshot over the in-memory fallback", async () => {
+    state.lastEditFile = join(projectRoot, filePathSuffix);
+    state.lastEditContent = "old content";
+
+    const output = await routeSlashCommand("/undo", state);
+
+    expect(output).toContain("snap-before-app");
+    expect(mockDebugRestore).toHaveBeenCalledWith("snap-before-app");
+    expect(state.lastRestoreEvent?.restoreSummary).toContain("snap-before-app");
+  });
+
+  it("/restore resolves file paths to their latest restorable snapshot", async () => {
+    const output = await routeSlashCommand(`/restore ${filePathSuffix}`, state);
+
+    expect(output).toContain("snap-before-app");
+    expect(mockDebugRestore).toHaveBeenCalledWith("snap-before-app");
+    expect(state.lastRestoreEvent?.restoreSummary).toContain(filePathSuffix);
+  });
+
+  it("/timeline exposes recent trail events with snapshot references", async () => {
+    const output = await routeSlashCommand("/timeline 5", state);
+
+    expect(output).toContain("Recovery Timeline");
+    expect(output).toContain("file_write");
+    expect(output).toContain(filePathSuffix.replace(/\\/g, "/").includes("/") ? "src" : filePathSuffix);
+    expect(output).toContain("before:snap-before-app");
+    expect(output).toContain("after:snap-after-app");
   });
 });

@@ -3,6 +3,10 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecutionEvidence, Session } from "@dantecode/config-types";
+import {
+  CheckpointReplaySummarySchema,
+  CheckpointWorkspaceContextSchema,
+} from "@dantecode/runtime-spine";
 import { DurableRunStore } from "./durable-run-store.js";
 import type { ArtifactRecord, ToolCallRecord } from "./tool-runtime/tool-call-types.js";
 
@@ -109,9 +113,23 @@ describe("DurableRunStore", () => {
     expect(JSON.parse(await readFile(runPath, "utf-8")).id).toBe(run.id);
     expect(JSON.parse(await readFile(resumePath, "utf-8")).runId).toBe(run.id);
     expect(JSON.parse(await readFile(evidencePath, "utf-8"))).toHaveLength(1);
+    const persistedCheckpoint = JSON.parse(await readFile(eventBaseState, "utf-8"));
+    expect(persistedCheckpoint.checkpoint.channelValues.status).toBe("waiting_user");
+    expect(persistedCheckpoint.replaySummary.eventCount).toBeGreaterThan(0);
+    expect(persistedCheckpoint.replaySummary.pendingWriteCount).toBe(0);
+    expect(persistedCheckpoint.replaySummary.digest).toHaveLength(16);
+    expect(CheckpointReplaySummarySchema.safeParse(persistedCheckpoint.replaySummary).success).toBe(
+      true,
+    );
+    expect(persistedCheckpoint.workspaceContext).toMatchObject({
+      projectRoot,
+      workspaceRoot: projectRoot,
+      workspaceIsRepoRoot: false,
+      installContextKind: "npm_global_cli",
+    });
     expect(
-      JSON.parse(await readFile(eventBaseState, "utf-8")).checkpoint.channelValues.status,
-    ).toBe("waiting_user");
+      CheckpointWorkspaceContextSchema.safeParse(persistedCheckpoint.workspaceContext).success,
+    ).toBe(true);
   });
 
   it("lists durable runs alongside legacy autoforge checkpoints and paused background tasks", async () => {

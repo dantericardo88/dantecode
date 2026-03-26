@@ -152,6 +152,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     silent: true,
     lastEditFile: null,
     lastEditContent: null,
+    preMutationSnapshotted: new Set<string>(),
     recentToolCalls: [],
     pendingAgentPrompt: null,
     pendingResumeRunId: null,
@@ -164,6 +165,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     gaslight: null,
     memoryOrchestrator: null,
     verificationTrendTracker: null,
+    lastSessionPdseResults: [],
     planMode: false,
     currentPlan: null,
     planApproved: false,
@@ -228,6 +230,26 @@ describe("/export command", () => {
     expect(raw).toContain("Hello! How can I help?");
   });
 
+  it("export markdown includes operator visibility summary", async () => {
+    const state = makeState(tempDir);
+    state.approvalMode = "apply";
+    state.lastRestoreEvent = {
+      restoredAt: "2026-03-26T11:00:00.000Z",
+      restoreSummary: "Restored workspace to checkpoint before apply.",
+    };
+    state.lastSessionPdseResults = [{ file: "src/app.ts", pdseScore: 88, passed: false }];
+
+    await routeSlashCommand("/export md", state);
+
+    const files = await import("node:fs/promises").then((m) => m.readdir(tempDir));
+    const mdFile = files.find((f) => f.endsWith(".md"))!;
+    const raw = await readFile(join(tempDir, mdFile), "utf8");
+
+    expect(raw).toContain("**Mode:** apply");
+    expect(raw).toContain("Restored workspace to checkpoint before apply.");
+    expect(raw).toContain("src/app.ts");
+  });
+
   it("export with custom path writes to specified location", async () => {
     const state = makeState(tempDir);
     const customPath = "my-export.json";
@@ -255,6 +277,31 @@ describe("/export command", () => {
     const raw = await readFile(join(tempDir, jsonFile), "utf8");
     const data = JSON.parse(raw);
     expect(data.memoryStats).toBeNull();
+  });
+
+  it("export JSON includes operator visibility fields for mode, restore, and PDSE truth", async () => {
+    const state = makeState(tempDir);
+    state.approvalMode = "review";
+    state.planMode = true;
+    state.activeSkill = "ship-check";
+    state.lastRestoreEvent = {
+      restoredAt: "2026-03-26T11:00:00.000Z",
+      restoreSummary: "Restored workspace to checkpoint before apply.",
+    };
+    state.lastSessionPdseResults = [{ file: "src/app.ts", pdseScore: 92, passed: true }];
+
+    await routeSlashCommand("/export json", state);
+
+    const files = await import("node:fs/promises").then((m) => m.readdir(tempDir));
+    const jsonFile = files.find((f) => f.endsWith(".json"))!;
+    const raw = await readFile(join(tempDir, jsonFile), "utf8");
+    const data = JSON.parse(raw);
+
+    expect(data.visibility.approvalMode).toBe("review");
+    expect(data.visibility.planMode).toBe(true);
+    expect(data.visibility.activeSkill).toBe("ship-check");
+    expect(data.visibility.lastRestoreEvent.restoreSummary).toContain("checkpoint");
+    expect(data.visibility.pdseResults[0].pdseScore).toBe(92);
   });
 
   it("export returns error message when write fails (e.g. bad path)", async () => {

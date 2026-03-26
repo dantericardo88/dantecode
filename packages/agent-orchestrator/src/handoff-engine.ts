@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { buildRuntimeEvent } from "@dantecode/runtime-spine";
 import type { RuntimeEvent, RuntimeTaskPacket, Checkpoint } from "@dantecode/runtime-spine";
 
 export interface HandoffSignal {
@@ -12,16 +14,17 @@ export interface HandoffSignal {
  */
 export class HandoffEngine {
   async initiateHandoff(signal: HandoffSignal): Promise<RuntimeEvent> {
-    const event: RuntimeEvent = {
+    const event = buildRuntimeEvent({
       at: new Date().toISOString(),
       kind: "subagent.handoff",
-      taskId: signal.fromId,
+      taskId: randomUUID(),
       payload: {
+        fromId: signal.fromId,
         toRole: signal.toRole,
         reason: signal.reason,
         context: signal.context,
       },
-    };
+    });
 
     // logic to persist handoff in checkpoint
     return event;

@@ -4,6 +4,17 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnNpm } from "./npm-runner.mjs";
+import {
+  readExternalGateEvidence,
+  readQuickstartProofEvidence,
+  resolveCommitSha,
+  writeReleaseDoctorReceipt,
+} from "./release/readiness-lib.mjs";
+import {
+  classifyCiProofCheck,
+  classifyNpmPublishCheck,
+  classifyProviderProofCheck,
+} from "./release/release-doctor-lib.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
@@ -13,6 +24,7 @@ const statusPriority = {
   ACTION: 1,
   BLOCKER: 2,
 };
+const commitSha = resolveCommitSha(repoRoot, process.env);
 
 function parseArgs(argv) {
   return {
@@ -74,6 +86,12 @@ function readOriginRemote() {
   return (result.stdout ?? "").trim();
 }
 
+function parseGitHubRepoSlug(remoteUrl) {
+  const trimmed = String(remoteUrl ?? "").trim();
+  const match = trimmed.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
+  return match?.[1] ?? "";
+}
+
 function readWorkingTreeChanges() {
   const result = runCommand("git", ["status", "--porcelain"]);
   if (result.status !== 0) {
@@ -113,6 +131,58 @@ function readNpmAuthState() {
     ready: false,
     source: "",
   };
+}
+
+function listGitHubSecretNames(repoSlug) {
+  if (!repoSlug) {
+    return null;
+  }
+
+  const result = runCommand("gh", ["secret", "list", "--repo", repoSlug, "--json", "name"]);
+  if (result.status !== 0) {
+    return null;
+  }
+
+  try {
+    const secrets = JSON.parse(result.stdout ?? "[]");
+    return Array.isArray(secrets) ? secrets.map((secret) => String(secret.name ?? "")) : [];
+  } catch {
+    return null;
+  }
+}
+
+function readCiProof(repoSlug, commitSha) {
+  if (!repoSlug || !commitSha) {
+    return null;
+  }
+
+  const result = runCommand("gh", [
+    "run",
+    "list",
+    "--repo",
+    repoSlug,
+    "--workflow",
+    "ci.yml",
+    "--commit",
+    commitSha,
+    "--json",
+    "databaseId,headSha,status,conclusion,url",
+    "--limit",
+    "5",
+  ]);
+  if (result.status !== 0) {
+    return null;
+  }
+
+  try {
+    const runs = JSON.parse(result.stdout ?? "[]");
+    if (!Array.isArray(runs)) {
+      return null;
+    }
+    return runs.find((run) => String(run.headSha ?? "") === commitSha) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function detectProviderState() {
@@ -157,6 +227,9 @@ function printSection(title, checks) {
 
 const args = parseArgs(process.argv);
 const checks = [];
+const quickstartProof = readQuickstartProofEvidence(repoRoot, { currentCommitSha: commitSha }).receipt;
+const externalGateEvidence = readExternalGateEvidence(repoRoot, { currentCommitSha: commitSha });
+const liveProviderReceipt = externalGateEvidence.receipts?.liveProvider ?? null;
 
 addCheck(
   checks,
@@ -223,6 +296,7 @@ addCheck(
 );
 
 const originRemote = readOriginRemote();
+const repoSlug = parseGitHubRepoSlug(originRemote);
 addCheck(
   checks,
   "Repo",
@@ -266,6 +340,12 @@ if (ghVersionResult.status === 0) {
     "GitHub CLI is optional. Browser repo creation plus `git push` still works.",
     "Install `gh` only if you want GitHub automation from the terminal.",
   );
+}
+
+const ciProof = readCiProof(repoSlug, commitSha);
+{
+  const ciCheck = classifyCiProofCheck({ ciProof, repoSlug, commitSha });
+  addCheck(checks, "External Validation", ciCheck.status, ciCheck.label, ciCheck.detail, ciCheck.action);
 }
 
 const cliArtifactPath = join(repoRoot, "packages", "cli", "dist", "index.js");
@@ -315,23 +395,30 @@ if (existsSync(readinessPath)) {
     const readiness = JSON.parse(readFileSync(readinessPath, "utf8"));
     const s = readiness.status;
     const sha = String(readiness.commitSha ?? "").slice(0, 12);
+    const publicRequirements = Array.isArray(readiness.openRequirements?.publicReady)
+      ? readiness.openRequirements.publicReady
+      : [];
+    const summarizedRequirements =
+      publicRequirements.length > 0
+        ? publicRequirements.slice(0, 3).join("; ")
+        : "Run `npm run release:generate` to refresh public-ready requirements.";
     if (s === "public-ready") {
       readinessStatus = "READY";
       readinessMessage = `Readiness: public-ready (commit ${sha}).`;
-      readinessNote = "All gates pass. Safe to publish.";
+      readinessNote = "All gated repo-proof checks pass for the current commit.";
       readinessAction =
         "Run `npm run release:doctor --strict` to confirm blockers are zero before publishing.";
     } else if (s === "private-ready") {
       readinessStatus = "ACTION";
       readinessMessage = `Readiness: private-ready (commit ${sha}).`;
-      readinessNote = "Local gates pass. Live provider and publish dry-run still pending.";
+      readinessNote = `Repo proof is private-ready. Public-ready still requires: ${summarizedRequirements}`;
       readinessAction =
-        "Run live provider smoke and publish dry-run, then `npm run release:generate` to update.";
+        "Close the remaining public-ready requirements, then rerun `npm run release:generate`.";
     } else if (s === "local-green-external-pending") {
       readinessStatus = "ACTION";
       readinessMessage = `Readiness: local-green / external-pending (commit ${sha}).`;
-      readinessNote = "Local gates green. External gates not yet run by CI.";
-      readinessAction = "Push to CI and let the update-readiness job run all gate checks.";
+      readinessNote = `Local gates are green. Remaining requirements: ${summarizedRequirements}`;
+      readinessAction = "Run the missing external gates or CI jobs, then regenerate readiness.";
     } else {
       readinessStatus = "BLOCKER";
       const blockerList = Array.isArray(readiness.blockers)
@@ -352,41 +439,75 @@ if (existsSync(readinessPath)) {
 
 addCheck(checks, "Artifacts", readinessStatus, readinessMessage, readinessNote, readinessAction);
 
-const detectedProviders = detectProviderState();
-addCheck(
-  checks,
-  "External Validation",
-  detectedProviders.length > 0 ? "READY" : "BLOCKER",
-  detectedProviders.length > 0
-    ? `Provider credentials detected for ${detectedProviders.map((provider) => provider.label).join(", ")}.`
-    : "No provider credentials detected for the live model-router smoke test.",
-  "A real provider run is still required to complete external acceptance beyond local mocks.",
-  detectedProviders.length > 0
-    ? "Run `npm run smoke:provider -- --require-provider`."
-    : "Set GROK_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY, then rerun the provider smoke test.",
+const quickstartSummary = quickstartProof?.summary ?? {};
+  addCheck(
+    checks,
+    "Artifacts",
+    !quickstartProof
+      ? "BLOCKER"
+      : quickstartSummary.canClaimQuickstart
+        ? "READY"
+        : Array.isArray(quickstartSummary.blockers) && quickstartSummary.blockers.length > 0
+          ? "BLOCKER"
+          : "ACTION",
+    !quickstartProof
+      ? "README quickstart proof receipt is missing for the current commit."
+      : quickstartSummary.canClaimQuickstart
+        ? "README quickstart proof is recorded for the current commit."
+        : "README quickstart proof is present but still has unresolved follow-up actions.",
+  !quickstartProof
+    ? "Public release proof should include a same-commit quickstart receipt generated from real smoke commands."
+    : quickstartSummary.canClaimQuickstart
+      ? `Quickstart proof recorded at ${quickstartProof.sourcePath ?? "artifacts/readiness/quickstart-proof.json"}. The provider-backed task step remains covered by the live provider gate.`
+      : Array.isArray(quickstartSummary.blockers) && quickstartSummary.blockers.length > 0
+        ? quickstartSummary.blockers.join(" ")
+        : Array.isArray(quickstartSummary.actions) && quickstartSummary.actions.length > 0
+          ? quickstartSummary.actions.join(" ")
+        : "The quickstart proof receipt exists, but it does not yet support the public claim.",
+  !quickstartProof || !quickstartSummary.canClaimQuickstart
+    ? "Run `npm run release:prove-quickstart` to generate same-commit quickstart proof."
+    : "Quickstart proof is already recorded for this commit.",
 );
+
+const detectedProviders = detectProviderState();
+{
+  const providerCheck = classifyProviderProofCheck({
+    detectedProviders,
+    liveProviderReceipt,
+  });
+  addCheck(
+    checks,
+    "External Validation",
+    providerCheck.status,
+    providerCheck.label,
+    providerCheck.detail,
+    providerCheck.action,
+  );
+}
 
 const npmAuthState = readNpmAuthState();
-addCheck(
-  checks,
-  "External Validation",
-  npmAuthState.ready ? "READY" : "BLOCKER",
-  npmAuthState.ready
-    ? `npm publish auth detected via ${npmAuthState.source}.`
-    : "No npm publish auth token detected locally.",
-  "Publishing the CLI and core packages requires npm auth locally or the `NPM_TOKEN` GitHub secret.",
-  npmAuthState.ready
-    ? "Mirror the same credential into the `NPM_TOKEN` GitHub Actions secret before publishing."
-    : "Add the `NPM_TOKEN` GitHub Actions secret before running the publish workflow.",
-);
+const githubSecrets = listGitHubSecretNames(repoSlug) ?? [];
+const hasGitHubNpmToken = githubSecrets.includes("NPM_TOKEN");
+{
+  const npmCheck = classifyNpmPublishCheck({
+    npmAuthState,
+    hasGitHubNpmToken,
+  });
+  addCheck(checks, "External Validation", npmCheck.status, npmCheck.label, npmCheck.detail, npmCheck.action);
+}
 
+const hasVsceSecret = githubSecrets.includes("VSCE_PAT");
 addCheck(
   checks,
   "External Validation",
-  process.env.VSCE_PAT ? "READY" : "BLOCKER",
-  process.env.VSCE_PAT ? "VS Code Marketplace token detected in VSCE_PAT." : "VSCE_PAT is not set.",
-  "The preview extension publish job requires `VSCE_PAT` when you want Marketplace distribution.",
+  process.env.VSCE_PAT || hasVsceSecret ? "READY" : "ACTION",
   process.env.VSCE_PAT
+    ? "VS Code Marketplace token detected in VSCE_PAT."
+    : hasVsceSecret
+      ? "GitHub Actions secret VSCE_PAT is configured."
+      : "VSCE_PAT is not set locally or in GitHub Actions secrets.",
+  "The preview extension publish job requires `VSCE_PAT` only when you want Marketplace distribution for the preview surface. It is not required for CLI Public GA.",
+  process.env.VSCE_PAT || hasVsceSecret
     ? "Mirror the same token into the `VSCE_PAT` GitHub Actions secret before publishing."
     : "Add the `VSCE_PAT` GitHub Actions secret before publishing the preview extension.",
 );
@@ -407,12 +528,25 @@ for (const section of ["Toolchain", "Repo", "Artifacts", "External Validation"])
 const blockers = checks.filter((check) => check.status === "BLOCKER");
 const actions = checks.filter((check) => check.status === "ACTION");
 const ready = checks.filter((check) => check.status === "READY");
+const doctorReceipt = writeReleaseDoctorReceipt(repoRoot, {
+  commitSha,
+  generatedAt: new Date().toISOString(),
+  summary: {
+    readyCount: ready.length,
+    actionCount: actions.length,
+    blockerCount: blockers.length,
+    blockers: blockers.map((check) => check.label),
+    actions: actions.map((check) => check.label),
+  },
+  checks,
+});
 
 console.log("\nSummary");
 console.log("-------");
 console.log(`Ready:    ${ready.length}`);
 console.log(`Actions:  ${actions.length}`);
 console.log(`Blockers: ${blockers.length}`);
+console.log(`Receipt:  ${doctorReceipt.filePath}`);
 
 const nextSteps = checks
   .filter((check) => check.status !== "READY" && check.action)

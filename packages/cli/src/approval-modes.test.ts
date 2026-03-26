@@ -1,57 +1,130 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
+import { ApprovalGateway, globalApprovalGateway } from "@dantecode/core";
+import {
+  buildApprovalGatewayProfile,
+  configureApprovalMode,
+  normalizeApprovalMode,
+} from "./approval-mode-runtime.js";
+import { isPlanModeBlocked } from "./plan-mode-guard.js";
 
-describe("Approval modes", () => {
-  // Inline test of mode state transitions (no real slash-command wiring needed)
-  type ApprovalMode = "default" | "yolo" | "auto-edit" | "plan";
-
-  function applyMode(
-    current: { approvalMode: ApprovalMode; planModeActive: boolean },
-    newMode: ApprovalMode,
-  ) {
-    current.approvalMode = newMode;
-    if (newMode === "plan") {
-      current.planModeActive = true;
-    } else if (current.planModeActive) {
-      current.planModeActive = false;
-    }
-  }
-
-  it("default mode does not activate plan guard", () => {
-    const state = { approvalMode: "yolo" as ApprovalMode, planModeActive: false };
-    applyMode(state, "default");
-    expect(state.approvalMode).toBe("default");
-    expect(state.planModeActive).toBe(false);
+describe("approval mode runtime profiles", () => {
+  it("normalizes new and legacy mode labels", () => {
+    expect(normalizeApprovalMode("review")).toBe("review");
+    expect(normalizeApprovalMode("default")).toBe("review");
+    expect(normalizeApprovalMode("apply")).toBe("apply");
+    expect(normalizeApprovalMode("auto-edit")).toBe("apply");
+    expect(normalizeApprovalMode("autoforge")).toBe("autoforge");
+    expect(normalizeApprovalMode("plan")).toBe("plan");
+    expect(normalizeApprovalMode("yolo")).toBe("yolo");
   });
 
-  it("yolo mode sets approvalMode without plan guard", () => {
-    const state = { approvalMode: "default" as ApprovalMode, planModeActive: false };
-    applyMode(state, "yolo");
-    expect(state.approvalMode).toBe("yolo");
-    expect(state.planModeActive).toBe(false);
+  it("review mode requires approval for writes and subagents", () => {
+    const profile = buildApprovalGatewayProfile("review");
+    const gateway = new ApprovalGateway(profile);
+
+    expect(
+      gateway.check("Write", { file_path: "src/app.ts", content: "export const ready = true;" })
+        .decision,
+    ).toBe("requires_approval");
+    expect(gateway.check("SubAgent", { prompt: "edit the file" }).decision).toBe(
+      "requires_approval",
+    );
   });
 
-  it("plan mode activates plan guard", () => {
-    const state = { approvalMode: "default" as ApprovalMode, planModeActive: false };
-    applyMode(state, "plan");
-    expect(state.approvalMode).toBe("plan");
-    expect(state.planModeActive).toBe(true);
+  it("apply mode auto-approves edits but still gates bash and subagents", () => {
+    const profile = buildApprovalGatewayProfile("apply");
+    const gateway = new ApprovalGateway(profile);
+
+    expect(
+      gateway.check("Write", { file_path: "src/app.ts", content: "export const ready = true;" })
+        .decision,
+    ).toBe("auto_approve");
+    expect(gateway.check("Bash", { command: "git commit -am ready" }).decision).toBe(
+      "requires_approval",
+    );
+    expect(gateway.check("SubAgent", { prompt: "edit the file" }).decision).toBe(
+      "requires_approval",
+    );
   });
 
-  it("switching from plan to auto-edit deactivates plan guard", () => {
-    const state = { approvalMode: "plan" as ApprovalMode, planModeActive: true };
-    applyMode(state, "auto-edit");
-    expect(state.approvalMode).toBe("auto-edit");
-    expect(state.planModeActive).toBe(false);
+  it("autoforge mode shares apply permissions", () => {
+    const profile = buildApprovalGatewayProfile("autoforge");
+    const gateway = new ApprovalGateway(profile);
+
+    expect(
+      gateway.check("Write", { file_path: "src/app.ts", content: "export const ready = true;" })
+        .decision,
+    ).toBe("auto_approve");
+    expect(gateway.check("Bash", { command: "git push origin main" }).decision).toBe(
+      "requires_approval",
+    );
   });
 
-  it("auto-edit mode classification is correct", () => {
-    const AUTO_EDIT_TOOLS = new Set(["Write", "Edit", "TodoWrite"]);
-    const CONFIRM_TOOLS = new Set(["Bash", "GitPush", "GitCommit"]);
+  it("plan mode denies mutation tools at the gateway layer", () => {
+    const profile = buildApprovalGatewayProfile("plan");
+    const gateway = new ApprovalGateway(profile);
 
-    expect(AUTO_EDIT_TOOLS.has("Write")).toBe(true);
-    expect(AUTO_EDIT_TOOLS.has("Edit")).toBe(true);
-    expect(AUTO_EDIT_TOOLS.has("Bash")).toBe(false);
-    expect(CONFIRM_TOOLS.has("Bash")).toBe(true);
-    expect(CONFIRM_TOOLS.has("GitPush")).toBe(true);
+    expect(
+      gateway.check("Write", { file_path: "src/app.ts", content: "export const ready = true;" })
+        .decision,
+    ).toBe("auto_deny");
+    expect(gateway.check("SubAgent", { prompt: "edit the file" }).decision).toBe("auto_deny");
+  });
+
+  it("yolo mode leaves the gateway disabled", () => {
+    const profile = buildApprovalGatewayProfile("yolo");
+    const gateway = new ApprovalGateway(profile);
+
+    expect(gateway.enabled).toBe(false);
+    expect(gateway.check("Bash", { command: "git push origin main" }).decision).toBe(
+      "auto_approve",
+    );
+  });
+
+  it("plan mode blocks SubAgent in the CLI guard as well", () => {
+    expect(isPlanModeBlocked("SubAgent")).toBe(true);
+  });
+});
+
+describe("approval gateway hard enforcement via peekDecision", () => {
+  afterEach(() => {
+    // Reset global gateway to disabled state after each test
+    globalApprovalGateway.reset();
+  });
+
+  it("peekDecision returns auto_deny for Write when plan mode is configured", () => {
+    configureApprovalMode("plan");
+    const input = { file_path: "src/app.ts", content: "export const x = 1;" };
+    expect(globalApprovalGateway.peekDecision("Write", input)).toBe("auto_deny");
+  });
+
+  it("peekDecision is non-consuming — second call returns the same result", () => {
+    configureApprovalMode("plan");
+    const input = { file_path: "src/app.ts", content: "export const x = 1;" };
+    expect(globalApprovalGateway.peekDecision("Write", input)).toBe("auto_deny");
+    // A second peek must NOT change the result (no fingerprint consumed)
+    expect(globalApprovalGateway.peekDecision("Write", input)).toBe("auto_deny");
+  });
+
+  it("peekDecision returns auto_approve for a pre-approved fingerprint (uses has, not delete)", () => {
+    configureApprovalMode("review");
+    const input = { file_path: "src/app.ts", content: "export const x = 1;" };
+    globalApprovalGateway.approveToolCall("Write", input);
+    // peekDecision should see the pre-approval (has) and return auto_approve
+    expect(globalApprovalGateway.peekDecision("Write", input)).toBe("auto_approve");
+    // The fingerprint must NOT have been consumed — check() should also return auto_approve
+    expect(globalApprovalGateway.check("Write", input).decision).toBe("auto_approve");
+  });
+
+  it("peekDecision returns auto_approve in yolo mode (gateway disabled)", () => {
+    configureApprovalMode("yolo");
+    expect(globalApprovalGateway.peekDecision("Write", { file_path: "x.ts" })).toBe("auto_approve");
+  });
+
+  it("peekDecision returns requires_approval for Bash in apply mode", () => {
+    configureApprovalMode("apply");
+    expect(
+      globalApprovalGateway.peekDecision("Bash", { command: "git commit -am x" }),
+    ).toBe("requires_approval");
   });
 });

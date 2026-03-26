@@ -21,8 +21,8 @@ describe("plan-mode-guard", () => {
     it("allows TodoWrite", () => {
       expect(isPlanModeBlocked("TodoWrite")).toBe(false);
     });
-    it("allows SubAgent", () => {
-      expect(isPlanModeBlocked("SubAgent")).toBe(false);
+    it("blocks SubAgent", () => {
+      expect(isPlanModeBlocked("SubAgent")).toBe(true);
     });
     it("blocks Write", () => {
       expect(isPlanModeBlocked("Write")).toBe(true);

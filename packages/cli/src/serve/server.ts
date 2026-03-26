@@ -17,7 +17,13 @@ import { SessionEventEmitter } from "./session-emitter.js";
 import { createSSEStream } from "./sse-stream.js";
 import { checkAuth, unauthorizedResponse } from "./auth.js";
 import type { AuthConfig } from "./auth.js";
-import type { ServerContext, AgentRunnerOpts, SessionRecord } from "./routes.js";
+import type {
+  ServerContext,
+  AgentRunnerOpts,
+  CommandRunnerOpts,
+  CommandRunnerResult,
+  SessionRecord,
+} from "./routes.js";
 
 const VERSION = "1.0.0";
 
@@ -42,6 +48,8 @@ export interface ServeOptions {
    * Injected by commands/serve.ts; omitted in tests to avoid needing an API key.
    */
   agentRunner?: (opts: AgentRunnerOpts) => void;
+  /** Optional slash command runner for preview clients. */
+  commandRunner?: (opts: CommandRunnerOpts) => Promise<CommandRunnerResult>;
 }
 
 /** Handle returned by startServer. */
@@ -182,6 +190,7 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
     sessionEmitter,
     model: "claude-sonnet-4-6",
     agentRunner: options.agentRunner,
+    commandRunner: options.commandRunner,
   };
 
   // Build the router once — all routes except SSE streams (which need raw `res`)

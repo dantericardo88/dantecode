@@ -39,7 +39,7 @@
 - [x] Set real git identity for public history
 - [x] CI green — all 9 CI jobs passing on GitHub Actions (feat/all-nines, run 23518615698)
 - [!] Add `NPM_TOKEN`
-- [!] Add `VSCE_PAT`
+- [!] Add `VSCE_PAT` for optional preview VS Code extension publish
 - [ ] Run `npm run smoke:provider -- --require-provider` with real credentials
 - [x] Add a scripted fixture-based Claude-style skill import acceptance pass
 
@@ -89,12 +89,12 @@
 - [x] `artifacts/verification/samples/` — real DanteForge pipeline output (sample-pass.json, sample-stub-fail.json, README.md)
 - [x] `scripts/generate-verification-samples.mjs` — regenerate via `npm run generate:samples`
 - [x] `scripts/release-doctor.mjs` — Artifacts section now reads and reports `current-readiness.json`
-- [x] `docs/golden-flows/cli-clean-install.md` — auto-init confirmation note added (README quickstart verified accurate)
+- [x] `artifacts/readiness/quickstart-proof.json` / `artifacts/readiness/quickstart-proof.md` — generated via `npm run release:prove-quickstart` for same-commit README quickstart proof
 
 ## Notes
 
 - The coverage gate is scoped to the stable runtime packages for OSS v1.
 - Preview and beta surfaces still run in the shared test suite and should continue gaining coverage over time.
 - 10 packages total (config-types, core, mcp, danteforge, git-engine, skill-adapter, sandbox, cli, vscode, desktop).
-- P2 verification spine 100% complete: receipt-schema.md, pdse-contract.md, failure-reasons.md, golden fixtures, real pipeline samples.
-- P3 CLI golden flows 100% complete: cli-clean-install.md (with auto-init note), cli-repo-edit.md, cli-provider-failover.md, cli-skill-import.md.
+- P2 verification spine is implemented and locally proven. Public ship proof still depends on the generated readiness surface staying green for same-commit external gates.
+- P3 CLI golden flows are implemented and locally proven. Public GA remains partial until the provider-backed real run gate passes and the generated readiness artifact reaches `public-ready`.
