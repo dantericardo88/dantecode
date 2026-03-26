@@ -65,7 +65,7 @@ export function formatVerificationVerdict(details: VerificationDetails, verbose:
     lines.push(`${RED}\u26A0 Could not fully verify \u2014 additional review needed${RESET}`);
   }
 
-  if (verbose) {
+  if (verbose || !allPassed) {
     lines.push(
       `  ${DIM}Anti-stub scan: ${details.antiStubPassed ? "PASSED" : "FAILED"} (${details.hardViolationCount} hard violations)${RESET}`,
     );

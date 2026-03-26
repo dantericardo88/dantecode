@@ -3007,6 +3007,174 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
   return result;
 }
 
+async function forgeCommand(args: string, state: ReplState): Promise<string> {
+  const goal = args.trim();
+  if (!goal) {
+    return [
+      `${YELLOW}What would you like to forge?${RESET}`,
+      "",
+      `${DIM}Examples:${RESET}`,
+      `  ${YELLOW}/forge add a payments checkout flow with Stripe${RESET}`,
+      `  ${YELLOW}/forge build a full CRUD API with validation and tests${RESET}`,
+      `  ${YELLOW}/forge implement rate limiting middleware with Redis${RESET}`,
+      "",
+      `${DIM}/forge runs a GSD-phased build (Plan → Execute → Verify) with full verification.${RESET}`,
+      "",
+    ].join("\n");
+  }
+
+  // D-11 Run Report: initialize accumulator
+  const reportStart = new Date().toISOString();
+  const reportAcc = new RunReportAccumulator({
+    project: resolve(state.projectRoot).split(/[\\/]/).pop() ?? "unknown",
+    command: `/forge ${goal}`,
+    model: {
+      provider: state.state.model.default.provider,
+      modelId: state.state.model.default.modelId,
+    },
+    dantecodeVersion: "1.3.0",
+  });
+  reportAcc.beginEntry(goal, "forge");
+
+  process.stdout.write(`\n${GREEN}${BOLD}Forging...${RESET} ${DIM}${goal}${RESET}\n\n`);
+
+  let result = "";
+  let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined;
+  try {
+    const forgeSession = cloneSessionForTask(
+      state.session,
+      state.projectRoot,
+      `forge-${Date.now()}`,
+    );
+    const forgePrompt = [
+      "You are forging exactly what the user asked for using a GSD-phased approach.",
+      `Goal: ${goal}`,
+      "",
+      "## Phase 1 — Plan",
+      "- Use TodoWrite to decompose the goal into numbered implementation steps.",
+      "- Identify files to create or modify.",
+      "",
+      "## Phase 2 — Execute",
+      "- Implement each step ONE AT A TIME with real tool calls (Write, Edit, Bash).",
+      "- Write complete, production-ready code. No stubs, no placeholders.",
+      "- Verify each step as you go (Read the file back, run the relevant check).",
+      "- Mark each TodoWrite step completed as you finish it.",
+      "",
+      "## Phase 3 — Verify",
+      "- Run typecheck and tests for all touched files.",
+      "- Fix any failures before stopping.",
+      "- Summarize what you built in plain language.",
+    ].join("\n");
+
+    loopResult = await runAgentLoop(forgePrompt, forgeSession, {
+      state: state.state,
+      verbose: state.verbose,
+      enableGit: state.enableGit,
+      enableSandbox: state.enableSandbox,
+      silent: false,
+      skillActive: true,
+    });
+
+    const assistantText = getLastAssistantText(loopResult);
+
+    const touchedFiles = collectTouchedFilesFromSession(loopResult, state.projectRoot);
+    if (touchedFiles.length > 0) {
+      const created = touchedFiles.map((p) => ({
+        path: relative(state.projectRoot, p),
+        lines: 0,
+      }));
+      reportAcc.recordFilesCreated(created);
+      for (const f of created) {
+        reportAcc.addToManifest([{ action: "created" as const, path: f.path }]);
+      }
+    }
+
+    // GStack verification — forge always runs verification suite when configured
+    let forgeStatus: "complete" | "partial" = "complete";
+    let verificationSummary: string | undefined;
+    if (state.state.autoforge?.gstackCommands?.length) {
+      try {
+        const gstackResults = await runGStack(
+          "",
+          state.state.autoforge.gstackCommands,
+          state.projectRoot,
+        );
+        forgeStatus = allGStackPassed(gstackResults) ? "complete" : "partial";
+        verificationSummary = summarizeGStackResults(gstackResults);
+      } catch {
+        /* non-fatal */
+      }
+    }
+    const completionSummary = verificationSummary
+      ? `${assistantText.slice(0, 200)}\n\nVerification: ${verificationSummary}`
+      : assistantText.slice(0, 300);
+    reportAcc.completeEntry({ status: forgeStatus, summary: completionSummary });
+
+    // D-12: Completion verification
+    try {
+      const entry = reportAcc.snapshot().entries[0];
+      if (entry && (entry.filesCreated.length > 0 || entry.filesModified.length > 0)) {
+        const expectations = deriveExpectations(entry);
+        const verification = await verifyCompletion(state.projectRoot, expectations);
+        reportAcc.recordCompletionVerification(verification);
+      }
+    } catch {
+      /* non-fatal */
+    }
+
+    state.session.messages.push({
+      id: randomUUID(),
+      role: "assistant",
+      content: assistantText,
+      timestamp: new Date().toISOString(),
+    });
+
+    result = `\n${GREEN}${BOLD}Forged.${RESET}`;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    reportAcc.completeEntry({
+      status: "failed",
+      summary: "Forge failed.",
+      failureReason: message,
+      actionNeeded: "Try again with a more specific goal, or break into smaller steps.",
+    });
+    result = `${RED}Error: ${message}${RESET}`;
+  } finally {
+    // D-11: Always write run report (crash-safe)
+    try {
+      const sealHash = (loopResult as Record<string, unknown> | undefined)?._sealHash;
+      if (typeof sealHash === "string" && sealHash.length > 0) {
+        reportAcc.setSealHash(sealHash);
+      }
+      const report = reportAcc.finalize();
+      const md = serializeRunReportToMarkdown(report, state.verbose);
+      const reportPath = await writeRunReport({
+        projectRoot: state.projectRoot,
+        markdown: md,
+        timestamp: reportStart,
+        autoCommit: state.enableGit,
+        commitFn: state.enableGit
+          ? async (files, msg, cwd) => {
+              autoCommit({ files, message: msg, footer: "", allowEmpty: false }, cwd);
+            }
+          : undefined,
+      });
+      result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportPath)}${RESET}`;
+      const entry = report.entries[0];
+      if (entry) {
+        result +=
+          entry.status === "complete"
+            ? `\n  ${GREEN}Forged and verified.${RESET}`
+            : `\n  ${YELLOW}${entry.failureReason ?? "Needs attention."}${RESET}`;
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  return result;
+}
+
 async function partyCommand(args: string, state: ReplState): Promise<string> {
   const hasAutoforge = /(?:^|\s)--autoforge(?:\s|$)/.test(args);
   const filesMatch = args.match(/--files\s+([^\s]+)/);
@@ -6100,6 +6268,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: partyCommand,
     tier: 2,
     category: "agents",
+  },
+  {
+    name: "forge",
+    description: "GSD-phased build — Plan, Execute, and Verify in one command",
+    usage: "/forge <goal description>",
+    handler: forgeCommand,
+    tier: 2,
+    category: "core",
   },
   {
     name: "postal",

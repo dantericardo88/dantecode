@@ -103,6 +103,49 @@ describe("/magic command", () => {
   });
 });
 
+describe("/forge command", () => {
+  let _stdoutOutput: string;
+  const originalWrite = process.stdout.write;
+
+  beforeEach(() => {
+    _stdoutOutput = "";
+    process.stdout.write = vi.fn((chunk: string | Uint8Array) => {
+      _stdoutOutput += String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.stdout.write = originalWrite;
+  });
+
+  it("returns usage hint when no args provided", async () => {
+    const { routeSlashCommand } = await import("./slash-commands.js");
+    const state = createMockState();
+    const result = await routeSlashCommand("/forge", state);
+    const plain = stripAnsi(result);
+    expect(plain).toContain("What would you like to forge?");
+    expect(plain).toContain("GSD-phased");
+  });
+
+  it("returns forged confirmation when goal provided", async () => {
+    const { routeSlashCommand } = await import("./slash-commands.js");
+    const state = createMockState();
+    const result = await routeSlashCommand("/forge build a CRUD API", state);
+    const plain = stripAnsi(result);
+    expect(plain).toContain("Forged");
+  });
+
+  it("writes run report when goal provided", async () => {
+    const { routeSlashCommand } = await import("./slash-commands.js");
+    const { writeRunReport } = await import("@dantecode/core");
+    const state = createMockState();
+    await routeSlashCommand("/forge implement rate limiting", state);
+    expect(vi.mocked(writeRunReport)).toHaveBeenCalledOnce();
+  });
+});
+
 // Minimal mock state for testing
 function createMockState(): any {
   return {

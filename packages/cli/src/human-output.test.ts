@@ -129,20 +129,31 @@ describe("formatVerificationVerdict (non-verbose)", () => {
     expect(plain).toContain("caught 2 stub(s)");
   });
 
-  it("does NOT show raw PDSE score in non-verbose mode for PDSE-only failure", () => {
+  it("shows PDSE score on failure even in non-verbose mode (P1 requirement)", () => {
     const result = formatVerificationVerdict(
-      makeDetails({ pdsePassedGate: false, pdseScore: 42 }),
+      makeDetails({
+        pdsePassedGate: false,
+        pdseScore: 42,
+        pdseBreakdown: { completeness: 40, correctness: 44, clarity: 41, consistency: 43 },
+      }),
       false,
     );
     const plain = stripAnsi(result);
     expect(plain).toContain("additional review needed");
-    expect(plain).not.toContain("42/100");
-    expect(plain).not.toContain("score 42");
+    expect(plain).toContain("42/100");
+    expect(plain).toContain("Completeness");
   });
 
   it("shows PDSE score in verbose mode (power users)", () => {
     const result = formatVerificationVerdict(makeDetails({ pdseScore: 94 }), true);
     const plain = stripAnsi(result);
     expect(plain).toContain("94/100");
+  });
+
+  it("does NOT show breakdown in non-verbose mode when all checks pass", () => {
+    const result = formatVerificationVerdict(makeDetails(), false);
+    const plain = stripAnsi(result);
+    expect(plain).toContain("no issues found");
+    expect(plain).not.toContain("PDSE score");
   });
 });
