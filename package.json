@@ -1,6 +1,6 @@
 {
   "name": "dantecode",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "private": true,
   "type": "module",
   "description": "Portable, model-agnostic skill runtime and coding agent with DanteForge verification",

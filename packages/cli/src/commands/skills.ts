@@ -26,6 +26,7 @@ import {
   SkillChain,
 } from "@dantecode/skill-adapter";
 import type { ImportSource, ParsedSkill, CatalogEntry } from "@dantecode/skill-adapter";
+import { parseSkillMd, validateAgentSkill } from "@dantecode/skills-import";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -336,56 +337,48 @@ async function skillsImport(args: string[], projectRoot: string): Promise<void> 
 async function importSingleFile(filePath: string, projectRoot: string): Promise<void> {
   const resolved = resolve(projectRoot, filePath);
 
-  try {
-    const content = await readFile(resolved, "utf-8");
+  const content = await readFile(resolved, "utf-8");
 
-    // Parse basic frontmatter
-    let name = basename(filePath, ".md");
-    let description = "";
-
-    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (fmMatch?.[1]) {
-      const nameMatch = fmMatch[1].match(/name:\s*(.+)/);
-      const descMatch = fmMatch[1].match(/description:\s*(.+)/);
-      if (nameMatch?.[1]) name = nameMatch[1].trim().replace(/^['"]|['"]$/g, "");
-      if (descMatch?.[1]) description = descMatch[1].trim().replace(/^['"]|['"]$/g, "");
-    }
-
-    // Extract instructions (everything after frontmatter)
-    const instructions = fmMatch ? content.slice(content.indexOf("---", 3) + 3).trim() : content;
-
-    // Wrap with adapter
-    const parsedSkill: ParsedSkill = {
-      frontmatter: {
-        name,
-        description,
-      },
-      instructions,
-      sourcePath: resolved,
-    };
-
-    const wrappedContent = wrapSkillWithAdapter(parsedSkill, "claude");
-
-    // Write to .dantecode/skills/<name>/SKILL.dc.md
-    const sanitizedName = name
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, "-")
-      .replace(/-{2,}/g, "-");
-    const skillDir = join(projectRoot, ".dantecode", "skills", sanitizedName);
-    await mkdir(skillDir, { recursive: true });
-
-    const outputPath = join(skillDir, "SKILL.dc.md");
-    await writeFile(outputPath, wrappedContent, "utf-8");
-
-    process.stdout.write(
-      `\n${GREEN}Imported skill:${RESET} ${BOLD}${name}${RESET}\n` +
-        `  ${DIM}Source: ${resolved}${RESET}\n` +
-        `  ${DIM}Output: ${outputPath}${RESET}\n\n`,
-    );
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stdout.write(`${RED}Error importing file: ${message}${RESET}\n`);
+  const parseResult = parseSkillMd(content, resolved);
+  if (!parseResult.ok) {
+    const details = parseResult.errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+    throw new Error(`Skill parse failed — ${details}`);
   }
+
+  const validation = validateAgentSkill(parseResult.skill);
+  if (!validation.valid) {
+    const details = validation.errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+    throw new Error(`Skill validation failed — ${details}`);
+  }
+  for (const warn of validation.warnings) {
+    process.stdout.write(`${DIM}[${warn.code}] ${warn.message}${RESET}\n`);
+  }
+
+  const parsedSkill: ParsedSkill = {
+    frontmatter: { name: parseResult.skill.name, description: parseResult.skill.description },
+    instructions: parseResult.skill.instructions,
+    sourcePath: parseResult.skill.sourcePath,
+  };
+
+  const wrappedContent = wrapSkillWithAdapter(parsedSkill, "claude");
+
+  // Write to .dantecode/skills/<name>/SKILL.dc.md
+  const name = parseResult.skill.name;
+  const sanitizedName = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-{2,}/g, "-");
+  const skillDir = join(projectRoot, ".dantecode", "skills", sanitizedName);
+  await mkdir(skillDir, { recursive: true });
+
+  const outputPath = join(skillDir, "SKILL.dc.md");
+  await writeFile(outputPath, wrappedContent, "utf-8");
+
+  process.stdout.write(
+    `\n${GREEN}Imported skill:${RESET} ${BOLD}${name}${RESET}\n` +
+      `  ${DIM}Source: ${resolved}${RESET}\n` +
+      `  ${DIM}Output: ${outputPath}${RESET}\n\n`,
+  );
 }
 
 /**

@@ -73,6 +73,13 @@ const mockSkillCatalogConstructor = vi.fn().mockImplementation(() => ({
   upsert: vi.fn(),
 }));
 
+const mockParseSkillMd = vi.fn();
+const mockValidateAgentSkill = vi.fn();
+vi.mock("@dantecode/skills-import", () => ({
+  parseSkillMd: (...args: unknown[]) => mockParseSkillMd(...args),
+  validateAgentSkill: (...args: unknown[]) => mockValidateAgentSkill(...args),
+}));
+
 vi.mock("@dantecode/skill-adapter", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
@@ -953,5 +960,72 @@ describe("skills import-all --tier validation", () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// agent-skills-import: parseSkillMd integration
+// ---------------------------------------------------------------------------
+
+describe("agent-skills-import: parseSkillMd integration", () => {
+  let tmpRoot: string;
+  let projectRoot: string;
+  let agentSkillsDir: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "agent-skills-import-test-"));
+    projectRoot = join(tmpRoot, "project");
+    agentSkillsDir = join(projectRoot, ".agents", "skills", "my-skill");
+    await mkdir(agentSkillsDir, { recursive: true });
+    await writeFile(
+      join(agentSkillsDir, "SKILL.md"),
+      "---\nname: my-skill\ndescription: A test skill\n---\n\nDo something useful.",
+    );
+    mockParseSkillMd.mockReset();
+    mockValidateAgentSkill.mockReset();
+    // Default happy-path stubs
+    mockParseSkillMd.mockReturnValue({
+      ok: true,
+      skill: {
+        name: "my-skill",
+        description: "A test skill",
+        instructions: "Do something useful.",
+        sourcePath: join(agentSkillsDir, "SKILL.md"),
+      },
+    });
+    mockValidateAgentSkill.mockReturnValue({ valid: true, errors: [], warnings: [] });
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("calls parseSkillMd with file content and resolved path", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runSkillsCommand(["agent-skills-import"], projectRoot);
+    expect(mockParseSkillMd).toHaveBeenCalledTimes(1);
+    const callArgs = mockParseSkillMd.mock.calls[0];
+    expect(typeof callArgs?.[0]).toBe("string"); // content
+    expect(String(callArgs?.[1])).toContain("SKILL.md"); // resolved path
+  });
+
+  it("increments failed count when parseSkillMd returns ok:false", async () => {
+    mockParseSkillMd.mockReturnValue({
+      ok: false,
+      errors: [{ code: "SKILL-001", message: "Missing name field" }],
+    });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runSkillsCommand(["agent-skills-import"], projectRoot);
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("Failed: 1");
+    stdoutSpy.mockRestore();
+  });
+
+  it("calls validateAgentSkill after successful parseSkillMd", async () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runSkillsCommand(["agent-skills-import"], projectRoot);
+    expect(mockValidateAgentSkill).toHaveBeenCalledTimes(1);
+    const callArg = mockValidateAgentSkill.mock.calls[0]?.[0];
+    expect(callArg).toMatchObject({ name: "my-skill" });
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/danteforge",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "DanteForge quality verification engine — PDSE scoring, anti-stub enforcement, constitution checker",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -40,8 +40,8 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@dantecode/config-types": "0.9.1",
-    "@dantecode/core": "0.9.1",
+    "@dantecode/config-types": "0.9.2",
+    "@dantecode/core": "0.9.2",
     "sql.js": "^1.11.0",
     "zod": "^3.24.0"
   },

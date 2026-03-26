@@ -87,6 +87,7 @@ import {
   createSessionEvidenceTracker,
   type SessionEvidenceTracker,
 } from "./evidence-chain-bridge.js";
+import { discoverSkills, SkillRegistry } from "@dantecode/skills-registry";
 
 // Types re-exported from extracted modules are imported above.
 
@@ -473,6 +474,26 @@ async function _runAgentLoopCore(
     emitOrWrite(
       `${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`,
     );
+  }
+
+  // ---- Feature: Skill Discovery ----
+  try {
+    const discoveredEntries = await discoverSkills({ projectRoot: session.projectRoot });
+    if (discoveredEntries.length > 0) {
+      const reg = new SkillRegistry();
+      reg.register(discoveredEntries);
+      for (const col of reg.getCollisions()) {
+        const scopes = col.entries.map((e) => e.scope).join(", ");
+        process.stderr.write(`[SKILL-WARN] Skill collision: "${col.name}" in scopes: ${scopes}\n`);
+      }
+      if (config.verbose) {
+        process.stdout.write(
+          `${DIM}[skills] Discovered ${discoveredEntries.length} skill(s), ${reg.list().length} active${RESET}\n`,
+        );
+      }
+    }
+  } catch {
+    // Non-fatal — skill discovery never blocks a session
   }
 
   // ---- Feature: Pivot logic ----
@@ -1854,6 +1875,19 @@ async function _runAgentLoopCore(
   // ---- debug-trail: flush session audit log ----
   try {
     await auditLogger.flush({ endSession: true });
+  } catch {
+    // Non-fatal
+  }
+
+  // ---- Evidence Chain: seal session and surface sealHash ----
+  try {
+    const sealConfig: Record<string, unknown> = {
+      sessionId: session.id,
+      modelId: config.state.model.default.modelId,
+      provider: config.state.model.default.provider,
+    };
+    const seal = evidenceTracker.seal(sealConfig, filesModified, roundCounter);
+    (session as unknown as Record<string, unknown>)._sealHash = seal.sealHash;
   } catch {
     // Non-fatal
   }

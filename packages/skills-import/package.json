@@ -1,6 +1,6 @@
 {
   "name": "@dantecode/skills-import",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "DanteCode Agent Skills SKILL.md parser and import utilities",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,7 @@
     "test": "vitest run --config ../../vitest.package.config.ts"
   },
   "files": ["dist"],
-  "dependencies": { "@dantecode/skills-runtime": "0.9.1" },
+  "dependencies": { "@dantecode/skills-runtime": "0.9.2" },
   "devDependencies": { "@types/node": "^22.0.0", "tsup": "^8.3.0", "typescript": "^5.7.0", "vitest": "^3.0.0" },
   "publishConfig": { "access": "public" },
   "repository": { "type": "git", "url": "git+https://github.com/dantericardo88/dantecode.git", "directory": "packages/skills-import" }

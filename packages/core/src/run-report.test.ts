@@ -228,6 +228,21 @@ describe("RunReportAccumulator", () => {
     expect(entry.failureReason).toContain("Empty function bodies");
     expect(entry.actionNeeded).toContain("Implement POST/PUT/DELETE");
   });
+
+  it("setSealHash stamps sealHash onto finalized report", () => {
+    const acc = makeAccumulator();
+    const hash = "a".repeat(64);
+    acc.setSealHash(hash);
+    const report = acc.finalize();
+    expect(report.sealHash).toBe(hash);
+  });
+
+  it("setSealHash is reflected in snapshot before finalize", () => {
+    const acc = makeAccumulator();
+    const hash = "b".repeat(64);
+    acc.setSealHash(hash);
+    expect(acc.snapshot().sealHash).toBe(hash);
+  });
 });
 
 // ─── computeRunDuration ─────────────────────────────────────────────────────
@@ -924,5 +939,13 @@ describe("serializeRunReportToMarkdown — sealHash and pdseDetail", () => {
 
     const reportNoSeal = makeReport();
     expect(reportNoSeal.sealHash).toBeUndefined();
+  });
+
+  it("serializeRunReportToMarkdown renders Receipt Seal footer when sealHash present", () => {
+    const hash = "c".repeat(64);
+    const md = serializeRunReportToMarkdown(makeReport({ sealHash: hash }), false);
+    expect(md).toContain("Receipt Seal");
+    expect(md).toContain("SHA256:");
+    expect(md).toContain(hash.slice(0, 16));
   });
 });

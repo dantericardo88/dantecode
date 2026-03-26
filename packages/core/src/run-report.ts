@@ -295,6 +295,11 @@ export class RunReportAccumulator {
     this.report.costEstimate = cost;
   }
 
+  /** Stamp the evidence-chain seal hash onto the report. */
+  setSealHash(hash: string): void {
+    this.report.sealHash = hash;
+  }
+
   /** Get a snapshot of the current state (for crash-safe partial writes). */
   snapshot(): RunReport {
     return { ...this.report, entries: [...this.report.entries] };

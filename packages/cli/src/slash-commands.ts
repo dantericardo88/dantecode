@@ -2788,6 +2788,7 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
   process.stdout.write(`\n${GREEN}${BOLD}Building...${RESET} ${DIM}${goal}${RESET}\n\n`);
 
   let result = "";
+  let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined;
   try {
     const magicSession = cloneSessionForTask(
       state.session,
@@ -2805,7 +2806,7 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
       "- When done, summarize what you built in plain language.",
     ].join("\n");
 
-    const loopResult = await runAgentLoop(magicPrompt, magicSession, {
+    loopResult = await runAgentLoop(magicPrompt, magicSession, {
       state: state.state,
       verbose: state.verbose,
       enableGit: state.enableGit,
@@ -2866,6 +2867,10 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
   } finally {
     // D-11: Always write run report (crash-safe)
     try {
+      const sealHash = (loopResult as Record<string, unknown> | undefined)?._sealHash;
+      if (typeof sealHash === "string" && sealHash.length > 0) {
+        reportAcc.setSealHash(sealHash);
+      }
       const report = reportAcc.finalize();
       const md = serializeRunReportToMarkdown(report, state.verbose);
       const reportPath = await writeRunReport({
