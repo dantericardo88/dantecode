@@ -27,6 +27,8 @@ import {
 } from "@dantecode/skill-adapter";
 import type { ImportSource, ParsedSkill, CatalogEntry } from "@dantecode/skill-adapter";
 import { parseSkillMd, validateAgentSkill } from "@dantecode/skills-import";
+import { exportAgentSkill } from "@dantecode/skills-export";
+import type { ExportableSkill } from "@dantecode/skills-export";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
 import { runSkill, makeRunContext, makeProvenance } from "@dantecode/skills-runtime";
 import type { DanteSkill } from "@dantecode/skills-runtime";
@@ -950,41 +952,33 @@ async function skillsExport(args: string[], projectRoot: string): Promise<void> 
   }
 
   if (outDir !== null) {
-    // Agent Skills format: <out>/<slug>/SKILL.md
-    const slug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-    const skillOutDir = join(outDir, slug);
-    const skillOutFile = join(skillOutDir, "SKILL.md");
+    // Agent Skills format: <out>/<slug>/SKILL.md — delegate to @dantecode/skills-export
+    const sanitizedSlug = skillName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-    try {
-      await mkdir(skillOutDir, { recursive: true });
+    const exportable: ExportableSkill = {
+      name: skill.frontmatter.name,
+      slug: sanitizedSlug,
+      description: skill.frontmatter.description ?? "",
+      license: "MIT",
+      allowedTools: skill.frontmatter.tools ?? [],
+      instructions: skill.instructions,
+    };
 
-      // Build Agent Skills SKILL.md content from the skill definition
-      const mdLines: string[] = [];
-      mdLines.push("---");
-      mdLines.push(`name: ${skill.frontmatter.name}`);
-      mdLines.push(`description: ${skill.frontmatter.description}`);
-      mdLines.push(`import_source: ${skill.importSource ?? "dantecode"}`);
-      if (skill.frontmatter.tools && skill.frontmatter.tools.length > 0) {
-        mdLines.push(`tools:`);
-        for (const t of skill.frontmatter.tools) {
-          mdLines.push(`  - ${t}`);
-        }
-      }
-      mdLines.push("---");
-      mdLines.push("");
-      mdLines.push(skill.instructions);
+    const result = await exportAgentSkill(exportable, outDir);
 
-      await writeFile(skillOutFile, mdLines.join("\n"), "utf-8");
-
-      // Make relative path for display
-      const displayPath = `./agent-skills-export/${slug}/SKILL.md`;
-      process.stdout.write(
-        `\n${GREEN}Exported ${skillName}${RESET} ${DIM}→ ${displayPath}${RESET}\n\n`,
-      );
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stdout.write(`\n${RED}Export failed:${RESET} ${message}\n\n`);
+    if (!result.ok) {
+      process.stdout.write(`\n${RED}Export failed:${RESET} ${result.error ?? "Unknown error"}\n\n`);
+      return;
     }
+
+    for (const w of result.warnings) {
+      process.stdout.write(`${DIM}[${w.code}] ${w.message}${RESET}\n`);
+    }
+
+    process.stdout.write(
+      `\n${GREEN}Exported skill:${RESET} ${BOLD}${skill.frontmatter.name}${RESET}\n` +
+        `  ${DIM}Output: ${result.outputPath}${RESET}\n\n`,
+    );
     return;
   }
 

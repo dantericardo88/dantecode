@@ -439,11 +439,15 @@ All 6 must pass on real repositories, not demos.
 | `/automate` unified command | Built | `packages/cli/src/commands/automate.ts` |
 | Skill parsers (codex/cursor/qwen) | Built | `packages/skill-adapter/src/parsers/` |
 | SkillBridge runtime | Built | `packages/skill-adapter/src/import-bridge.ts` |
-| Session naming + export + branch | Partial | `packages/core/src/session-store.ts` |
+| Session naming + export + branch | Built | `packages/cli/src/slash-commands.ts` (export+import), `packages/core/src/session-store.ts` |
 | Completion telemetry (B1/B4) | Partial | `packages/vscode/src/completion-telemetry.ts` |
-| DanteTUI status bar + `/theme` | Partial | `packages/cli/src/repl.ts` |
-| D-12A Model Adaptation | Not started | — |
-| Completion Verifier (D-12) | Not started | — |
+| DanteTUI status bar + `/theme` | Built | `/diff` (line 1060), `/theme` (line 5471), `/tokens` (line 1577), StatusBar in `repl.ts` |
+| D-12A Model Adaptation | Built | `packages/core/src/model-adaptation/` (10 quirks, store, CLI, agent-loop wiring) |
+| Completion Verifier (D-12) | Built | `packages/core/src/completion-verifier.ts` (called at 3 sites in agent-loop.ts) |
+| Receipt integrity display | Built | `packages/core/src/run-report.ts` — `sealHash` field + Receipt Seal footer |
+| `/skills run` REPL routing | Built | `packages/cli/src/slash-commands.ts` (`skillsRoutingCommand`) |
+| skills-export integration | Built | `packages/cli/src/commands/skills.ts` uses `exportAgentSkill()` |
+| UpliftOrchestrator `agentRunner` DI | Built | `packages/agent-orchestrator/src/orchestrator/uplift-orchestrator.ts` |
 | Progressive Disclosure unlock counter | Not started | — |
 | GF-01 through GF-06 real-repo runs | Not attempted | — |
 | Live provider proof (all 4) | Not attempted | — |
@@ -454,16 +458,16 @@ All 6 must pass on real repositories, not demos.
 
 ### P0 — Execution Truth (Must have for daily-driver)
 1. **Run report integration depth**: Ensure `/magic`, `/party`, `/forge` all write reports with honest COMPLETE/PARTIAL/FAILED per-PRD. Report must survive Ctrl+C.
-2. **D-12 Completion Verifier**: Module that checks whether expected outputs were actually created (diff actual vs expected file list from PRD).
-3. **DanteTUI full wiring**: Status bar, context gauge in prompt, `/diff`, `/theme`, `/tokens` all connected to live data.
+2. ~~**D-12 Completion Verifier**~~ — **BUILT**: `packages/core/src/completion-verifier.ts`; `verifyCompletion()` called at 3 sites in agent-loop.ts.
+3. ~~**DanteTUI full wiring**~~ — **BUILT**: `/diff`, `/theme`, `/tokens` all connected to live data; StatusBar wired in `repl.ts`.
 
 ### P1 — Trust Spine
-4. **D-12A Model Adaptation (observe-only mode first)**: QuirkObservation logger that persists to `.dantecode/model-adaptation/observations.jsonl`. No learning yet — just data collection with full schema.
-5. **Receipt integrity display**: Show receipt summary in run report footer. `sealHash` visible to user.
+4. ~~**D-12A Model Adaptation**~~ — **BUILT**: 10 quirks, versioned prompt overrides, observation store, CLI commands, agent-loop wiring in `packages/core/src/model-adaptation/`.
+5. ~~**Receipt integrity display**~~ — **BUILT**: `sealHash` field in `RunReport`; `Receipt Seal SHA256:…` footer rendered in `serializeRunReportToMarkdown()`.
 6. **PDSE contract in UI**: When PDSE fails, show exactly which dimension failed and why (e.g., "Completeness 41/100: createProduct() is empty").
 
 ### P2 — Session and Portability
-7. **Session export/import roundtrip**: `/session export json` then `/session import` in new workspace. Test across sessions.
+7. ~~**Session export/import roundtrip**~~ — **BUILT**: `/session export [--format json|md]` + `/session import <path>` both implemented in `slash-commands.ts`.
 8. **Memory auto-retain per round**: Record tools used + PDSE + files changed per round. Wrapped in try/catch.
 9. **Progressive disclosure unlock**: Counter for successful sessions. After 3: unlock `/fleet`, `/council`, `/gaslight`, `/fearset`.
 

@@ -108,6 +108,8 @@ import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
+import { runSkillsCommand } from "./commands/skills.js";
+import { runSkillPolicyCheck } from "@dantecode/skills-policy";
 import { getOrInitGaslight, getOrInitMemory } from "./lazy-init.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
@@ -1784,6 +1786,108 @@ async function skillsListCommand(_args: string, state: ReplState): Promise<strin
   }
 
   return lines.join("\n");
+}
+
+/** Router: /skills with no args → list; /skills run <name> → agent loop; else → CLI handler */
+async function skillsRoutingCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0] ?? "";
+
+  if (sub === "run") {
+    return await skillsRunViaLoop(parts.slice(1).join(" ").trim(), state);
+  }
+
+  if (parts.length > 0) {
+    // Other sub-commands (import, export, wrap, etc.) — delegate to CLI handler
+    await runSkillsCommand(parts, state.projectRoot);
+    return "";
+  }
+
+  return await skillsListCommand("", state);
+}
+
+async function skillsRunViaLoop(skillName: string, state: ReplState): Promise<string> {
+  if (!skillName) return `${RED}Usage: /skills run <name>${RESET}`;
+
+  const skill = await getSkill(skillName, state.projectRoot);
+  if (!skill) return `${YELLOW}Skill "${skillName}" not found.${RESET}`;
+
+  const policyResult = runSkillPolicyCheck({
+    allowedTools: skill.frontmatter.tools,
+    compatibility: undefined,
+  });
+  if (!policyResult.passed) {
+    const details = policyResult.errors
+      .map((e: { code: string; message: string }) => `[${e.code}] ${e.message}`)
+      .join("; ");
+    return `${RED}Policy check failed — ${details}${RESET}`;
+  }
+
+  const taskSession = cloneSessionForTask(
+    state.session,
+    state.projectRoot,
+    `skill-run-${Date.now()}`,
+  );
+
+  const waves = parseSkillWaves(skill.instructions);
+  const hasWaves = waves.length > 1;
+  const waveStateObj = hasWaves ? createWaveState(waves) : undefined;
+
+  // Build preamble and inject into cloned session (mirrors skillCommand logic)
+  const preamble = hasWaves
+    ? [
+        `Execute skill "${skill.frontmatter.name}": ${skill.frontmatter.description ?? ""}`,
+        "",
+        `This skill has ${waves.length} waves. You will receive ONE wave at a time.`,
+        "",
+        "Wave overview:",
+        ...waves.map((w: { number: number; title: string }) => `  ${w.number}. ${w.title}`),
+        "",
+        "You are starting with Wave 1. When a wave is complete, signal with [WAVE COMPLETE].",
+      ].join("\n")
+    : [
+        `Execute skill "${skill.frontmatter.name}": ${skill.frontmatter.description ?? ""}`,
+        "",
+        "## MANDATORY: Step-by-Step Execution",
+        "",
+        "1. Use TodoWrite to decompose this skill into numbered steps.",
+        "2. Execute each step ONE AT A TIME with real tool calls.",
+        "3. NEVER skip steps. NEVER narrate — actually DO it with tools.",
+        "4. Mark each step completed as you finish it.",
+        "",
+        "---",
+        "",
+        skill.instructions,
+      ].join("\n");
+
+  taskSession.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content: preamble,
+    timestamp: new Date().toISOString(),
+  });
+
+  try {
+    const loopResult = await runAgentLoop(
+      `Execute the "${skill.frontmatter.name}" skill.`,
+      taskSession,
+      {
+        state: state.state,
+        verbose: state.verbose,
+        enableGit: state.enableGit,
+        enableSandbox: state.enableSandbox,
+        silent: false,
+        skillActive: true,
+        waveState: waveStateObj,
+      },
+    );
+    const output = getLastAssistantText(loopResult) ?? "";
+    const summary = output.length > 400 ? `${output.slice(0, 400)}…` : output;
+    return `${GREEN}Skill "${skill.frontmatter.name}" complete.${RESET}\n\n${summary}`;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Skill execution failed:${RESET} ${msg}`;
+  }
 }
 
 async function skillInstallCommand(args: string, state: ReplState): Promise<string> {
@@ -5830,9 +5934,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "skills",
-    description: "List all installed skills with verification scores",
-    usage: "/skills",
-    handler: skillsListCommand,
+    description: "Manage skills: list, run, import, export",
+    usage: "/skills [run <name>|import|export|...]",
+    handler: skillsRoutingCommand,
     tier: 2,
     category: "skills",
   },

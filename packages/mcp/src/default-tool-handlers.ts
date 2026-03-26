@@ -385,7 +385,18 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
       const task = requiredString(args, "task");
       const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
 
-      const orchestrator = new UpliftOrchestrator({ projectRoot });
+      const orchestrator = new UpliftOrchestrator({
+        projectRoot,
+        agentRunner: async (_agentRole, agentObjective, worktreeRoot) => {
+          // Structured summary for MCP callers; full LLM-backed runner deferred
+          // to a session-handoff protocol (future PRD).
+          return [
+            `Objective: ${agentObjective}`,
+            `Worktree: ${worktreeRoot}`,
+            `Status: Queued for execution`,
+          ].join("\n");
+        },
+      });
       const message = await orchestrator.executeSubTask("mcp-root", role, task);
 
       return serialize({

@@ -94,6 +94,11 @@ vi.mock("@dantecode/skills-runtime", () => ({
   makeProvenance: (...args: unknown[]) => mockMakeProvenance(...args),
 }));
 
+const mockExportAgentSkill = vi.fn();
+vi.mock("@dantecode/skills-export", () => ({
+  exportAgentSkill: (...args: unknown[]) => mockExportAgentSkill(...args),
+}));
+
 vi.mock("@dantecode/skill-adapter", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
@@ -1139,6 +1144,82 @@ describe("skills run", () => {
     const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
     expect(output).toContain("not found");
     expect(mockRunSkill).not.toHaveBeenCalled();
+
+    stdoutSpy.mockRestore();
+  });
+});
+
+describe("skills export — uses exportAgentSkill() (Lane B)", () => {
+  let tmpRoot: string;
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "dantecode-export-test-"));
+    projectRoot = join(tmpRoot, "project");
+    await mkdir(projectRoot, { recursive: true });
+    mockGetSkill.mockReset();
+    mockExportAgentSkill.mockReset();
+
+    mockGetSkill.mockResolvedValue({
+      frontmatter: { name: "my-skill", description: "Does something", tools: ["Read", "Write"] },
+      instructions: "Step 1: do the thing.",
+      sourcePath: "/skills/my-skill.md",
+      importSource: "native",
+    });
+    mockExportAgentSkill.mockResolvedValue({
+      ok: true,
+      outputPath: "/out/my-skill/SKILL.md",
+      warnings: [],
+    });
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("calls exportAgentSkill with correct ExportableSkill shape", async () => {
+    const outDir = join(tmpRoot, "out");
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runSkillsCommand(["export", "my-skill", "--out", outDir], projectRoot);
+
+    expect(mockExportAgentSkill).toHaveBeenCalledOnce();
+    const [exportable, passedDir] = mockExportAgentSkill.mock.calls[0] as [
+      { name: string; slug: string; instructions: string; allowedTools: string[] },
+      string,
+    ];
+    expect(exportable.name).toBe("my-skill");
+    expect(exportable.slug).toBe("my-skill");
+    expect(exportable.instructions).toBe("Step 1: do the thing.");
+    expect(exportable.allowedTools).toEqual(["Read", "Write"]);
+    expect(passedDir).toBe(outDir);
+
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toMatch(/exported skill/i);
+
+    stdoutSpy.mockRestore();
+  });
+
+  it("warns on SKILL-008 advisory warnings from exportAgentSkill", async () => {
+    mockExportAgentSkill.mockResolvedValue({
+      ok: true,
+      outputPath: "/out/my-skill/SKILL.md",
+      warnings: [
+        {
+          code: "SKILL-008",
+          message: "Skill has provenance fields that cannot be represented",
+          field: "provenance",
+        },
+      ],
+    });
+
+    const outDir = join(tmpRoot, "out");
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runSkillsCommand(["export", "my-skill", "--out", outDir], projectRoot);
+
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("SKILL-008");
 
     stdoutSpy.mockRestore();
   });

@@ -16,6 +16,9 @@ const {
   mockGetDiff,
   mockRunAgentLoop,
   mockRunLocalPDSEScorer,
+  mockGetSkill,
+  mockRunSkillPolicyCheck,
+  mockRunSkillsCommand,
 } = vi.hoisted(() => ({
   mockExecSync: vi.fn(),
   mockCreateWorktree: vi.fn(),
@@ -25,6 +28,9 @@ const {
   mockGetDiff: vi.fn(),
   mockRunAgentLoop: vi.fn(),
   mockRunLocalPDSEScorer: vi.fn(),
+  mockGetSkill: vi.fn(),
+  mockRunSkillPolicyCheck: vi.fn(),
+  mockRunSkillsCommand: vi.fn(),
 }));
 
 vi.mock("node:child_process", async () => {
@@ -49,6 +55,22 @@ vi.mock("@dantecode/git-engine", async () => {
 
 vi.mock("./agent-loop.js", () => ({
   runAgentLoop: (...args: unknown[]) => mockRunAgentLoop(...args),
+}));
+
+vi.mock("@dantecode/skill-adapter", async () => {
+  const actual = await vi.importActual<object>("@dantecode/skill-adapter");
+  return {
+    ...actual,
+    getSkill: (...args: unknown[]) => mockGetSkill(...args),
+  };
+});
+
+vi.mock("@dantecode/skills-policy", () => ({
+  runSkillPolicyCheck: (...args: unknown[]) => mockRunSkillPolicyCheck(...args),
+}));
+
+vi.mock("./commands/skills.js", () => ({
+  runSkillsCommand: (...args: unknown[]) => mockRunSkillsCommand(...args),
 }));
 
 vi.mock("@dantecode/danteforge", async () => {
@@ -882,5 +904,49 @@ describe("/diff command (C6)", () => {
     mockGetDiff.mockReturnValue("diff --git a/foo.ts b/foo.ts\n+const x = 1;");
     const output = await routeSlashCommand("/diff", state);
     expect(output).toContain("foo.ts");
+  });
+});
+
+describe("/skills run routing (Lane A)", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  const fakeSkill = {
+    frontmatter: {
+      name: "my-skill",
+      description: "Does something useful",
+      tools: ["Read", "Write"],
+    },
+    instructions: "Step 1: do the thing.",
+    sourcePath: "/skills/my-skill.md",
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-skills-run-"));
+    state = makeState(projectRoot);
+
+    mockRunSkillPolicyCheck.mockReturnValue({ passed: true, errors: [], warnings: [] });
+    mockRunAgentLoop.mockImplementation(async (_prompt: unknown, session: unknown) => session);
+  });
+
+  it("/skills run <name> invokes runAgentLoop with skillActive: true", async () => {
+    mockGetSkill.mockResolvedValue(fakeSkill);
+
+    const output = await routeSlashCommand("/skills run my-skill", state);
+
+    expect(mockRunAgentLoop).toHaveBeenCalledOnce();
+    const config = mockRunAgentLoop.mock.calls[0]![2] as { skillActive?: boolean };
+    expect(config.skillActive).toBe(true);
+    expect(output).toMatch(/my-skill.*complete/i);
+  });
+
+  it("/skills run <name> returns not-found message when skill is absent", async () => {
+    mockGetSkill.mockResolvedValue(null);
+
+    const output = await routeSlashCommand("/skills run missing-skill", state);
+
+    expect(mockRunAgentLoop).not.toHaveBeenCalled();
+    expect(output).toMatch(/not found/i);
   });
 });

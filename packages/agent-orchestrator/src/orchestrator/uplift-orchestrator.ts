@@ -6,6 +6,11 @@ import { WorktreeHook } from "../isolation/worktree-hook.js";
 
 export interface OrchestratorOptions {
   projectRoot: string;
+  /**
+   * Optional agent runner for real task execution.
+   * When absent, executeSubTask returns a structured stub string (test/preview mode).
+   */
+  agentRunner?: (role: string, objective: string, projectRoot: string) => Promise<string>;
 }
 
 /**
@@ -19,8 +24,10 @@ export class UpliftOrchestrator {
   private tree = new WaveTreeManager();
   private worktreeHook: WorktreeHook;
   private researchPipeline: ResearchPipeline;
+  private options: OrchestratorOptions;
 
   constructor(options: OrchestratorOptions) {
+    this.options = options;
     this.worktreeHook = new WorktreeHook(options.projectRoot);
     this.researchPipeline = new ResearchPipeline({
       projectRoot: options.projectRoot,
@@ -42,9 +49,18 @@ export class UpliftOrchestrator {
 
     try {
       this.spawner.updateStatus(instance.id, "running");
-      return `Task ${instance.id} completed in ${worktree.directory}`;
-    } finally {
+
+      const result = this.options.agentRunner
+        ? await this.options.agentRunner(role, objective, worktree.directory)
+        : `Task ${instance.id} queued in ${worktree.directory} (no agent runner configured)`;
+
       this.spawner.updateStatus(instance.id, "completed");
+      return result;
+    } catch (err: unknown) {
+      this.spawner.updateStatus(instance.id, "failed");
+      const msg = err instanceof Error ? err.message : String(err);
+      return `Task ${instance.id} failed: ${msg}`;
+    } finally {
       this.worktreeHook.cleanup(instance.id);
     }
   }
