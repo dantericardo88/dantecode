@@ -72,7 +72,6 @@ import {
   installSkill,
   verifySkill,
 } from "@dantecode/skill-adapter";
-import { getFeaturesByMaturity } from "./lib/feature-flags.js";
 import {
   getStatus,
   getDiff,
@@ -119,6 +118,7 @@ import { researchSlashHandler } from "./commands/research.js";
 import { automateCommand } from "./commands/automate.js";
 import { adaptationCommand } from "./commands/adaptation.js";
 import { planCommand } from "./commands/plan.js";
+import { buildCliOperatorStatus } from "./operator-status.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
 import {
@@ -5990,16 +5990,35 @@ async function scoreCommand(_args: string, state: ReplState): Promise<string> {
 }
 
 async function statusCommand(_args: string, state: ReplState): Promise<string> {
-  const stable = getFeaturesByMaturity("stable");
-  const beta = getFeaturesByMaturity("beta");
-  const experimental = getFeaturesByMaturity("experimental");
-
   const providerName = state.state.model.default.provider;
   const modelId = state.state.model.default.modelId;
+  const operatorStatus = await buildCliOperatorStatus(state);
+  const readinessCommit =
+    operatorStatus.readiness.artifactCommitSha?.slice(0, 12) ??
+    operatorStatus.readiness.headCommitSha?.slice(0, 12) ??
+    "unknown";
+  const sameCommitLabel =
+    operatorStatus.readiness.sameCommit === null
+      ? `${DIM}unknown${RESET}`
+      : operatorStatus.readiness.sameCommit
+        ? `${GREEN}yes${RESET}`
+        : `${RED}no${RESET}`;
+  const contextTierColor =
+    operatorStatus.contextUtilization.tier === "red"
+      ? RED
+      : operatorStatus.contextUtilization.tier === "yellow"
+        ? YELLOW
+        : GREEN;
+  const pausedRunLine = operatorStatus.latestPausedDurableRun
+    ? `${operatorStatus.latestPausedDurableRun.id} (${operatorStatus.latestPausedDurableRun.workflow})`
+    : `${DIM}none${RESET}`;
+  const pdseSummary = operatorStatus.lastPdseSummary
+    ? operatorStatus.lastPdseSummary.summary
+    : "No PDSE results recorded for this session yet.";
 
   const lines: string[] = [
     "",
-    `${BOLD}DanteCode Status${RESET}`,
+    `${BOLD}DanteCode Operator Status${RESET}`,
     "",
     `${DIM}Version:${RESET}  2.0.0`,
     `${DIM}Provider:${RESET} ${providerName} / ${modelId}`,
@@ -6007,26 +6026,33 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
     `${DIM}Sandbox:${RESET}  ${state.enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
     `${DIM}Git:${RESET}      ${state.enableGit ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}`,
     "",
-    `${BOLD}Features${RESET}`,
+    `${BOLD}Operator${RESET}`,
+    `  Approval Mode: ${CYAN}${operatorStatus.approvalMode}${RESET}`,
+    `  Plan Mode:     ${operatorStatus.planMode ? `${YELLOW}active${RESET}` : `${DIM}inactive${RESET}`}`,
+    `  Current Plan:  ${operatorStatus.currentPlanId ? `${CYAN}${operatorStatus.currentPlanId}${RESET}` : `${DIM}none${RESET}`}`,
+    `  Current Run:   ${operatorStatus.currentRunId ? `${CYAN}${operatorStatus.currentRunId}${RESET}` : `${DIM}none${RESET}`}`,
+    `  Paused Run:    ${pausedRunLine}`,
     "",
-    `${GREEN}Stable${RESET}`,
-    ...stable.map(
-      (f) => `  ${GREEN}[ok]${RESET} ${f.name.padEnd(20)} ${DIM}${f.description}${RESET}`,
-    ),
+    `${BOLD}Context${RESET}`,
+    `  Utilization:   ${contextTierColor}${operatorStatus.contextUtilization.percent}%${RESET} (${operatorStatus.contextUtilization.tokens}/${operatorStatus.contextUtilization.maxTokens} tokens)`,
     "",
-    `${YELLOW}Beta${RESET}`,
-    ...beta.map(
-      (f) => `  ${YELLOW}[beta]${RESET} ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
-    ),
+    `${BOLD}Recovery${RESET}`,
+    `  Last Restore:  ${operatorStatus.lastRestoreEvent?.restoreSummary ?? "none"}`,
     "",
-    `${DIM}Experimental (opt-in)${RESET}`,
-    ...experimental.map(
-      (f) => `  ${DIM}[exp]${RESET}  ${f.name.padEnd(18)} ${DIM}${f.description}${RESET}`,
-    ),
+    `${BOLD}Verification${RESET}`,
+    `  Last PDSE:     ${pdseSummary}`,
+    "",
+    `${BOLD}Readiness${RESET}`,
+    `  Status:        ${operatorStatus.readiness.status}`,
+    `  Commit:        ${readinessCommit}`,
+    `  same-commit:   ${sameCommitLabel}`,
+    operatorStatus.latestPausedDurableRun?.nextAction
+      ? `  Next Action:   ${operatorStatus.latestPausedDurableRun.nextAction}`
+      : "",
     "",
   ];
 
-  return lines.join("\n");
+  return lines.filter(Boolean).join("\n");
 }
 
 // ----------------------------------------------------------------------------

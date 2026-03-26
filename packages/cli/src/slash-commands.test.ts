@@ -387,6 +387,155 @@ describe("/party --autoforge", () => {
   });
 });
 
+describe("/status command", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-status-"));
+    state = makeState(projectRoot);
+    state.approvalMode = "review";
+    state.planMode = true;
+    state.currentPlanId = "plan-123";
+    state.lastRestoreEvent = {
+      restoredAt: "2026-03-26T12:00:00.000Z",
+      restoreSummary: "Restored src/app.ts from checkpoint-7",
+    };
+    state.lastSessionPdseResults = [{ file: "src/app.ts", pdseScore: 88, passed: false }];
+    state.session.messages = [
+      {
+        id: "m1",
+        role: "user",
+        content: "Investigate why readiness drifted between commits.",
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "I am checking the current readiness chain and the durable run store.",
+        timestamp: new Date().toISOString(),
+      },
+    ];
+
+    mockExecSync.mockImplementation((command: string) => {
+      if (command === "git rev-parse HEAD") {
+        return "1111111111111111111111111111111111111111\n";
+      }
+      return "";
+    });
+
+    await mkdir(join(projectRoot, "artifacts", "readiness"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "artifacts", "readiness", "current-readiness.json"),
+      JSON.stringify(
+        {
+          status: "private-ready",
+          commitSha: "1111111111111111111111111111111111111111",
+          generatedAt: "2026-03-26T12:10:00.000Z",
+          gates: {
+            typecheck: "pass",
+            lint: "pass",
+            test: "pass",
+            build: "pass",
+            windowsSmoke: "pass",
+            antiStub: "pass",
+            liveProvider: "unknown",
+            publishDryRun: "pass",
+          },
+          blockers: [],
+          openRequirements: {
+            privateReady: [],
+            publicReady: ['Gate "liveProvider" must pass. Current status: unknown.'],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const runStore = new DurableRunStore(projectRoot);
+    const run = await runStore.initializeRun({
+      runId: "run-status-1",
+      session: state.session,
+      prompt: "Repair release sync proof",
+      workflow: "inferno",
+    });
+    await runStore.pauseRun(run.id, {
+      reason: "user_input_required",
+      session: state.session,
+      nextAction: "Approve the pending write after reviewing the plan.",
+      message: "Waiting for approval.",
+    });
+  });
+
+  it("shows operator-visible plan, run, recovery, PDSE, and same-commit readiness data", async () => {
+    const output = await routeSlashCommand("/status", state);
+
+    expect(output).toContain("Approval Mode");
+    expect(output).toContain("Plan Mode");
+    expect(output).toContain("plan-123");
+    expect(output).toContain("run-status-1");
+    expect(output).toContain("same-commit");
+    expect(output).toContain("private-ready");
+    expect(output).toContain("Restored src/app.ts");
+    expect(output).toContain("88");
+  });
+});
+
+describe("/plan command", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-plan-"));
+    state = makeState(projectRoot);
+    mockExecSync.mockReturnValue("");
+
+    await mkdir(join(projectRoot, "packages", "cli", "src"), { recursive: true });
+    await mkdir(join(projectRoot, "tests"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "packages", "cli", "src", "release-status.ts"),
+      "export const releaseStatus = 'stale';\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(projectRoot, "tests", "release-status.test.ts"),
+      "import { expect, it } from 'vitest';\nit('tracks release status', () => { expect(true).toBe(true); });\n",
+      "utf-8",
+    );
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify(
+        {
+          scripts: {
+            test: "vitest run",
+            typecheck: "tsc --noEmit",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+  });
+
+  it("builds a repo-aware plan with context files, dependencies, and verification commands", async () => {
+    const output = await routeSlashCommand("/plan improve release status reporting", state);
+
+    expect(output).toContain("Files:");
+    expect(output).toContain("Depends:");
+    expect(output).toContain("Verify:");
+    expect(output).toContain("release-status");
+    expect(state.currentPlan?.steps.some((step) => step.files.length > 0)).toBe(true);
+    expect(state.currentPlan?.steps.some((step) => (step.dependencies?.length ?? 0) > 0)).toBe(
+      true,
+    );
+  });
+});
+
 describe("verification slash commands", () => {
   let projectRoot: string;
 

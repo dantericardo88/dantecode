@@ -638,4 +638,45 @@ describe("release readiness generation", () => {
       "Quickstart proof blocker: Exact README quickstart smoke is not proven for the current commit.",
     );
   });
+
+  it("ignores stale release doctor and quickstart receipts from a different commit", () => {
+    const commitSha = FIXTURE_COMMIT_SHA;
+    writeBaseReadyEvidence(commitSha, { includeLiveProvider: true });
+    writeQuickstartReceipt("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    writeReleaseDoctorReceiptFixture("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+    const result = spawnSync(process.execPath, ["scripts/release/generate-readiness.mjs"], {
+      cwd: repoRoot,
+      env: envWithoutReadinessGates(),
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+
+    const artifact = JSON.parse(readFileSync(readinessJsonPath, "utf8"));
+    expect(artifact.status).toBe("private-ready");
+    expect(artifact.releaseDoctor).toMatchObject({
+      checked: false,
+      canPublish: false,
+    });
+    expect(artifact.quickstartProof).toMatchObject({
+      checked: false,
+      canClaimQuickstart: false,
+    });
+  });
+
+  it("release:sync exits non-zero when generated commit proof does not match git HEAD", () => {
+    const result = spawnSync(process.execPath, ["scripts/release/sync-readiness.mjs"], {
+      cwd: repoRoot,
+      env: {
+        ...envWithoutReadinessGates(),
+        DANTECODE_RELEASE_SYNC_DRY: "1",
+        GITHUB_SHA: FIXTURE_COMMIT_SHA,
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("git HEAD");
+  });
 });

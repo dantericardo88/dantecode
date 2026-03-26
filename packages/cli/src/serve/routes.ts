@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import { buildServeOperatorStatus, readSessionDurableRunSnapshot } from "../operator-status.js";
 
 /** Session IDs must be alphanumeric + dash/underscore, max 64 chars (blocks path traversal). */
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -211,6 +212,7 @@ function getSession(ctx: ServerContext): RouteHandler {
     if (!session) return notFound(id);
     ensureSessionCollections(session);
     ensureSessionCollections(session);
+    const durableRun = await readSessionDurableRunSnapshot(ctx.projectRoot, session.id);
     return ok({
       id: session.id,
       name: session.name,
@@ -232,6 +234,7 @@ function getSession(ctx: ServerContext): RouteHandler {
       timeline: session.timeline,
       artifactPaths: session.artifactPaths,
       receiptPaths: session.receiptPaths,
+      durableRun,
     });
   };
 }
@@ -478,15 +481,21 @@ function denyAction(ctx: ServerContext): RouteHandler {
 // ---------------------------------------------------------------------------
 
 function getStatus(ctx: ServerContext): RouteHandler {
-  return async () =>
-    ok({
+  return async () => {
+    const operator = await buildServeOperatorStatus({
+      projectRoot: ctx.projectRoot,
+      sessions: ctx.sessions.values(),
+    });
+    return ok({
       model: ctx.model,
       project: ctx.projectRoot,
       version: ctx.version,
       sessionCount: ctx.sessions.size,
       uptime: Math.floor((Date.now() - ctx.startTime) / 1000),
       features: { sse: true, approval: true, skills: true, evidenceChain: true },
+      operator,
     });
+  };
 }
 
 function getConfig(ctx: ServerContext): RouteHandler {

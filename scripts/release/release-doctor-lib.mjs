@@ -81,6 +81,86 @@ export function classifyNpmPublishCheck({ npmAuthState, hasGitHubNpmToken }) {
   };
 }
 
+export function classifyReadinessArtifactCheck({ readinessArtifact, commitSha }) {
+  const artifactCommitSha = String(readinessArtifact?.commitSha ?? "").trim();
+  const shortSha = String(commitSha ?? "").slice(0, 12);
+
+  if (!readinessArtifact) {
+    return {
+      status: "BLOCKER",
+      label: "Readiness artifact is missing for the current commit.",
+      detail:
+        "The repo-tracked readiness surface must be regenerated from the current commit before it can support any ship claim.",
+      action: "Run `npm run release:sync` to regenerate same-commit readiness receipts.",
+    };
+  }
+
+  if (artifactCommitSha && commitSha && artifactCommitSha !== commitSha) {
+    return {
+      status: "BLOCKER",
+      label: `Readiness artifact is stale for git HEAD ${shortSha}.`,
+      detail:
+        `current-readiness.json is pinned to ${artifactCommitSha.slice(0, 12)}, ` +
+        `not the current commit ${shortSha}.`,
+      action: "Run `npm run release:sync` to regenerate same-commit readiness receipts.",
+    };
+  }
+
+  return {
+    status: "READY",
+    label: `Readiness artifact matches git HEAD ${shortSha}.`,
+    detail: "The repo-tracked readiness surface is aligned with the commit being evaluated.",
+    action: "Same-commit readiness proof is already recorded.",
+  };
+}
+
+export function classifyWorkingTreeCheck({
+  workingTreeChanges,
+  recordedChangeCount,
+  recordedCommitSha,
+  commitSha,
+}) {
+  const currentCount = Array.isArray(workingTreeChanges) ? workingTreeChanges.length : 0;
+  const normalizedRecordedCount = Number.isFinite(recordedChangeCount) ? recordedChangeCount : null;
+  const hasRecordedCommit = Boolean(String(recordedCommitSha ?? "").trim());
+  const currentCommit = String(commitSha ?? "").trim();
+  const shortSha = currentCommit.slice(0, 12);
+
+  if (
+    normalizedRecordedCount === null ||
+    !hasRecordedCommit ||
+    !currentCommit ||
+    recordedCommitSha !== currentCommit
+  ) {
+    return {
+      status: "BLOCKER",
+      label: `Recorded working-tree summary is stale for git HEAD ${shortSha}.`,
+      detail:
+        `The recorded change count (${normalizedRecordedCount ?? "unknown"}) does not belong to ` +
+        `the current commit and cannot be trusted against the current ${currentCount} path(s).`,
+      action: "Run `npm run release:sync` to refresh repo-tracked proof for the current commit.",
+    };
+  }
+
+  if (normalizedRecordedCount !== currentCount) {
+    return {
+      status: "BLOCKER",
+      label: `Recorded working-tree summary drifted from git HEAD ${shortSha}.`,
+      detail:
+        `The recorded change count (${normalizedRecordedCount}) no longer matches the current ` +
+        `${currentCount} path(s) in \`git status --short\`.`,
+      action: "Regenerate readiness after reviewing or committing the working tree changes.",
+    };
+  }
+
+  return {
+    status: "READY",
+    label: `Recorded working-tree summary matches git HEAD ${shortSha}.`,
+    detail: `The recorded and current working-tree counts both report ${currentCount} path(s).`,
+    action: "Working-tree proof is aligned with the current commit.",
+  };
+}
+
 function normalizeStatus(value) {
   return value === "pass" || value === "fail" || value === "unknown" ? value : "unknown";
 }

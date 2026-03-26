@@ -18,3 +18,11 @@ bun.lockb
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Codex / Claire worktrees and scratch outputs
+.claire/worktrees/
+packages/temp-*/
+*_output.txt
+status.txt
+results.tsv
+vitest-error.txt

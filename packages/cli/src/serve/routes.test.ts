@@ -1,4 +1,8 @@
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it, expect, vi } from "vitest";
+import { DurableRunStore, PlanStore } from "@dantecode/core";
 import { Router } from "./router.js";
 import { buildRoutes, type ServerContext, type SessionRecord } from "./routes.js";
 import { SessionEventEmitter } from "./session-emitter.js";
@@ -45,6 +49,108 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 }
 
 describe("serve routes truth surface", () => {
+  it("GET /api/status returns operator dashboard data for plan, paused run, and readiness", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "dantecode-routes-status-"));
+    await mkdir(join(projectRoot, "artifacts", "readiness"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "artifacts", "readiness", "current-readiness.json"),
+      JSON.stringify(
+        {
+          status: "private-ready",
+          commitSha: "unknown",
+          generatedAt: "2026-03-26T12:00:00.000Z",
+          gates: {},
+          blockers: [],
+          openRequirements: { privateReady: [], publicReady: [] },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+
+    const planStore = new PlanStore(projectRoot);
+    await planStore.save({
+      id: "plan-route-1",
+      status: "draft",
+      createdAt: "2026-03-26T12:01:00.000Z",
+      sessionId: "sess-1",
+      plan: {
+        goal: "Improve operator visibility",
+        steps: [],
+        createdAt: "2026-03-26T12:01:00.000Z",
+        estimatedComplexity: 0.42,
+      },
+    });
+
+    const runtimeSession = {
+      id: "sess-1",
+      projectRoot,
+      messages: [],
+      activeFiles: [],
+      readOnlyFiles: [],
+      model: {
+        provider: "grok",
+        modelId: "grok-3",
+        maxTokens: 4096,
+        temperature: 0.1,
+        contextWindow: 131072,
+        supportsVision: false,
+        supportsToolCalls: true,
+      },
+      createdAt: "2026-03-26T12:01:00.000Z",
+      updatedAt: "2026-03-26T12:01:00.000Z",
+      agentStack: [],
+      todoList: [],
+    };
+    const runStore = new DurableRunStore(projectRoot);
+    const run = await runStore.initializeRun({
+      runId: "run-route-1",
+      session: runtimeSession,
+      prompt: "Repair operator truth surface",
+      workflow: "inferno",
+    });
+    await runStore.pauseRun(run.id, {
+      reason: "user_input_required",
+      session: runtimeSession,
+      nextAction: "Approve the pending change.",
+      message: "Waiting for approval.",
+    });
+
+    const router = new Router();
+    const context = makeContext({
+      projectRoot,
+      sessions: new Map<string, SessionRecord>([
+        [
+          "sess-1",
+          makeSession({
+            mode: "apply",
+            messages: [
+              { role: "user", content: "Show me the operator state", ts: "2026-03-26T12:02:00.000Z" },
+            ],
+          }),
+        ],
+      ]),
+    });
+    buildRoutes(router, context);
+
+    const res = await router.handle(makeReq("GET", "/api/status"));
+    const body = res.body as Record<string, unknown>;
+    const operator = body["operator"] as Record<string, unknown>;
+
+    expect(res.status).toBe(200);
+    expect(operator["approvalMode"]).toBe("apply");
+    expect(operator["planMode"]).toBe(true);
+    expect(operator["currentPlanId"]).toBe("plan-route-1");
+    expect(operator["latestPausedDurableRun"]).toMatchObject({
+      id: "run-route-1",
+      workflow: "inferno",
+    });
+    expect(operator["readiness"]).toMatchObject({
+      status: "private-ready",
+    });
+  });
+
   it("GET /api/sessions/:id returns operator-visible status, approvals, commands, and artifacts", async () => {
     const router = new Router();
     const context = makeContext();

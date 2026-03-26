@@ -83,7 +83,7 @@ Before creating a public release, add these GitHub Actions secrets:
 - `NPM_TOKEN` for npm package publishing
 - `VSCE_PAT` only if you want Marketplace publishing for the preview VS Code extension
 
-The CLI and core libraries are the primary OSS v1 release artifacts. The VS Code extension remains preview, and the desktop app remains beta.
+The CLI and core libraries are the primary OSS v1 release artifacts. The VS Code extension remains preview, and the desktop app remains experimental and out of ship scope.
 
 ## 5. Release workflow
 
@@ -101,6 +101,7 @@ Call the release complete when all of the following are true:
 
 - `npm run release:doctor` shows no blockers
 - `npm run release:check` is green
+- `npm run release:sync` regenerates same-commit doctor, quickstart, and readiness receipts
 - `npm run smoke:provider -- --require-provider` is green
 - `npm run release:prove-quickstart` records a same-commit quickstart receipt
 - The first GitHub Actions CI run is green on the pushed repo

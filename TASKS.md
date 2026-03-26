@@ -94,7 +94,7 @@
 ## Notes
 
 - The coverage gate is scoped to the stable runtime packages for OSS v1.
-- Preview and beta surfaces still run in the shared test suite and should continue gaining coverage over time.
-- 10 packages total (config-types, core, mcp, danteforge, git-engine, skill-adapter, sandbox, cli, vscode, desktop).
+- Preview and experimental surfaces still run in the shared test suite and should continue gaining coverage over time.
+- 28 packages currently live under `packages/`; OSS v1 ships the CLI and npm runtime packages first, keeps VS Code as preview, and leaves desktop out of ship scope.
 - P2 verification spine is implemented and locally proven. Public ship proof still depends on the generated readiness surface staying green for same-commit external gates.
 - P3 CLI golden flows are implemented and locally proven. Public GA remains partial until the provider-backed real run gate passes and the generated readiness artifact reaches `public-ready`.

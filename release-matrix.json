@@ -5,21 +5,24 @@
       "label": "CLI",
       "releaseRing": "ga",
       "role": "primary",
-      "shipTarget": true
+      "shipTarget": true,
+      "proofCommands": ["npm run publish:dry-run"]
     },
     {
       "id": "vscode",
       "label": "VS Code Extension",
       "releaseRing": "preview",
       "role": "primary",
-      "shipTarget": true
+      "shipTarget": true,
+      "proofCommands": ["npm --prefix packages/vscode run package"]
     },
     {
       "id": "desktop",
       "label": "Desktop App",
       "releaseRing": "experimental",
       "role": "secondary",
-      "shipTarget": false
+      "shipTarget": false,
+      "proofCommands": []
     }
   ],
   "providers": [

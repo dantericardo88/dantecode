@@ -14,6 +14,7 @@ import {
   classifyCiProofCheck,
   classifyNpmPublishCheck,
   classifyProviderProofCheck,
+  classifyReadinessArtifactCheck,
 } from "./release/release-doctor-lib.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -383,61 +384,82 @@ addCheck(
   "",
 );
 
-// Readiness artifact check — reads generated truth from current-readiness.json
 const readinessPath = join(repoRoot, "artifacts", "readiness", "current-readiness.json");
-let readinessStatus = "BLOCKER";
-let readinessMessage = "artifacts/readiness/current-readiness.json not found.";
-let readinessNote = "Run `npm run release:generate` (with GATE_* env vars from CI) to generate.";
-let readinessAction = "Run `npm run release:generate` after CI jobs complete.";
-
+let readinessArtifact = null;
 if (existsSync(readinessPath)) {
   try {
-    const readiness = JSON.parse(readFileSync(readinessPath, "utf8"));
-    const s = readiness.status;
-    const sha = String(readiness.commitSha ?? "").slice(0, 12);
-    const publicRequirements = Array.isArray(readiness.openRequirements?.publicReady)
-      ? readiness.openRequirements.publicReady
-      : [];
-    const summarizedRequirements =
-      publicRequirements.length > 0
-        ? publicRequirements.slice(0, 3).join("; ")
-        : "Run `npm run release:generate` to refresh public-ready requirements.";
-    if (s === "public-ready") {
-      readinessStatus = "READY";
-      readinessMessage = `Readiness: public-ready (commit ${sha}).`;
-      readinessNote = "All gated repo-proof checks pass for the current commit.";
-      readinessAction =
-        "Run `npm run release:doctor --strict` to confirm blockers are zero before publishing.";
-    } else if (s === "private-ready") {
-      readinessStatus = "ACTION";
-      readinessMessage = `Readiness: private-ready (commit ${sha}).`;
-      readinessNote = `Repo proof is private-ready. Public-ready still requires: ${summarizedRequirements}`;
-      readinessAction =
-        "Close the remaining public-ready requirements, then rerun `npm run release:generate`.";
-    } else if (s === "local-green-external-pending") {
-      readinessStatus = "ACTION";
-      readinessMessage = `Readiness: local-green / external-pending (commit ${sha}).`;
-      readinessNote = `Local gates are green. Remaining requirements: ${summarizedRequirements}`;
-      readinessAction = "Run the missing external gates or CI jobs, then regenerate readiness.";
-    } else {
-      readinessStatus = "BLOCKER";
-      const blockerList = Array.isArray(readiness.blockers)
-        ? readiness.blockers.join("; ")
-        : "see artifacts/readiness/current-readiness.json";
-      readinessMessage = `Readiness: blocked — ${blockerList}`;
-      readinessNote = "One or more CI gates failed. Fix blockers before releasing.";
-      readinessAction = "Fix failing gates, rerun CI, then `npm run release:generate` to update.";
-    }
+    readinessArtifact = JSON.parse(readFileSync(readinessPath, "utf8"));
   } catch {
-    readinessStatus = "BLOCKER";
-    readinessMessage = "artifacts/readiness/current-readiness.json is malformed.";
-    readinessNote = "The readiness artifact could not be parsed.";
-    readinessAction =
-      "Delete artifacts/readiness/current-readiness.json and rerun `npm run release:generate`.";
+    readinessArtifact = null;
   }
 }
 
-addCheck(checks, "Artifacts", readinessStatus, readinessMessage, readinessNote, readinessAction);
+const readinessArtifactCheck = classifyReadinessArtifactCheck({
+  readinessArtifact,
+  commitSha,
+});
+if (readinessArtifactCheck.status !== "READY") {
+  addCheck(
+    checks,
+    "Artifacts",
+    readinessArtifactCheck.status,
+    readinessArtifactCheck.label,
+    readinessArtifactCheck.detail,
+    readinessArtifactCheck.action,
+  );
+} else {
+  const readiness = readinessArtifact;
+  const s = readiness.status;
+  const sha = String(readiness.commitSha ?? "").slice(0, 12);
+  const publicRequirements = Array.isArray(readiness.openRequirements?.publicReady)
+    ? readiness.openRequirements.publicReady
+    : [];
+  const summarizedRequirements =
+    publicRequirements.length > 0
+      ? publicRequirements.slice(0, 3).join("; ")
+      : "Run `npm run release:sync` to refresh public-ready requirements.";
+
+  if (s === "public-ready") {
+    addCheck(
+      checks,
+      "Artifacts",
+      "READY",
+      `Readiness: public-ready (commit ${sha}).`,
+      "All gated repo-proof checks pass for the current commit.",
+      "Run `npm run release:doctor --strict` to confirm blockers are zero before publishing.",
+    );
+  } else if (s === "private-ready") {
+    addCheck(
+      checks,
+      "Artifacts",
+      "ACTION",
+      `Readiness: private-ready (commit ${sha}).`,
+      `Repo proof is private-ready. Public-ready still requires: ${summarizedRequirements}`,
+      "Close the remaining public-ready requirements, then rerun `npm run release:sync`.",
+    );
+  } else if (s === "local-green-external-pending") {
+    addCheck(
+      checks,
+      "Artifacts",
+      "ACTION",
+      `Readiness: local-green / external-pending (commit ${sha}).`,
+      `Local gates are green. Remaining requirements: ${summarizedRequirements}`,
+      "Run the missing external gates or CI jobs, then rerun `npm run release:sync`.",
+    );
+  } else {
+    const blockerList = Array.isArray(readiness.blockers)
+      ? readiness.blockers.join("; ")
+      : "see artifacts/readiness/current-readiness.json";
+    addCheck(
+      checks,
+      "Artifacts",
+      "BLOCKER",
+      `Readiness: blocked — ${blockerList}`,
+      "One or more CI gates failed. Fix blockers before releasing.",
+      "Fix failing gates, rerun CI, then `npm run release:sync` to update.",
+    );
+  }
+}
 
 const quickstartSummary = quickstartProof?.summary ?? {};
   addCheck(

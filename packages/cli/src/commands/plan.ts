@@ -11,14 +11,10 @@
 //   /plan status       Show current plan mode state
 // ============================================================================
 
-import {
-  ArchitectPlanner,
-  PlanStore,
-  PlanExecutor,
-  renderPlan,
-  renderPlanSummary,
-  analyzeComplexity,
-} from "@dantecode/core";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { execSync } from "node:child_process";
+import { PlanStore, PlanExecutor, renderPlan, renderPlanSummary, analyzeComplexity } from "@dantecode/core";
 import type {
   StoredPlan,
   PlanExecutionResult,
@@ -37,6 +33,35 @@ const RED = "\x1b[31m";
 const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
+
+const REPO_CONTEXT_FILE_LIMIT = 250;
+const REPO_CONTEXT_DEPTH_LIMIT = 4;
+const REPO_CONTEXT_IGNORES = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "coverage",
+  ".turbo",
+  ".next",
+  ".dantecode",
+  "artifacts",
+]);
+const STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "into",
+  "make",
+  "build",
+  "improve",
+  "update",
+  "status",
+  "reporting",
+]);
 
 // ─── Main Handler ───────────────────────────────────────────────────────────
 
@@ -72,43 +97,10 @@ async function generatePlan(goal: string, state: ReplState): Promise<string> {
 
   const complexity = analyzeComplexity(goal);
   process.stdout.write(`\n${DIM}Analyzing complexity: ${complexity.toFixed(2)}${RESET}\n`);
-  process.stdout.write(`${DIM}Generating execution plan...${RESET}\n\n`);
+  process.stdout.write(`${DIM}Gathering read-only repo context...${RESET}\n\n`);
 
-  // Build plan using ArchitectPlanner with a simple prompt-based generator
-  const planner = new ArchitectPlanner({
-    generatePlan: async (prompt: string, _context: string) => {
-      // Use the agent loop to generate the plan by setting it as a pending prompt
-      // For now, use the prompt directly as structured text
-      return prompt;
-    },
-  });
-
-  const plan = await planner.createPlan(goal, "");
-
-  // If the planner returned empty steps, create a basic plan from the goal
-  if (plan.steps.length === 0) {
-    plan.steps = [
-      {
-        id: "step-1",
-        description: `Analyze requirements for: ${goal}`,
-        files: [],
-        status: "pending",
-      },
-      {
-        id: "step-2",
-        description: `Implement: ${goal}`,
-        files: [],
-        status: "pending",
-      },
-      {
-        id: "step-3",
-        description: "Run tests and verify",
-        files: [],
-        verifyCommand: "npm test",
-        status: "pending",
-      },
-    ];
-  }
+  const repoContext = await buildRepoContext(goal, state.projectRoot);
+  const plan = buildRepoAwarePlan(goal, complexity, repoContext);
 
   // Store plan in state
   state.planMode = true;
@@ -144,6 +136,226 @@ async function generatePlan(goal: string, state: ReplState): Promise<string> {
   ];
 
   return lines.join("\n");
+}
+
+async function buildRepoContext(goal: string, projectRoot: string): Promise<{
+  relevantFiles: string[];
+  verificationCommands: string[];
+}> {
+  const files = await collectRepoFiles(projectRoot, projectRoot, 0, []);
+  const tokens = tokenizeGoal(goal);
+  const changedFiles = readChangedFiles(projectRoot);
+  const relevantFiles = selectRelevantFiles(files, tokens, changedFiles);
+  const verificationCommands = await selectVerificationCommands(projectRoot, relevantFiles);
+
+  return {
+    relevantFiles,
+    verificationCommands,
+  };
+}
+
+async function collectRepoFiles(
+  projectRoot: string,
+  currentDir: string,
+  depth: number,
+  collected: string[],
+): Promise<string[]> {
+  if (depth > REPO_CONTEXT_DEPTH_LIMIT || collected.length >= REPO_CONTEXT_FILE_LIMIT) {
+    return collected;
+  }
+
+  let entries;
+  try {
+    entries = await readdir(currentDir, { withFileTypes: true });
+  } catch {
+    return collected;
+  }
+
+  for (const entry of entries) {
+    if (collected.length >= REPO_CONTEXT_FILE_LIMIT) {
+      break;
+    }
+
+    if (entry.isDirectory()) {
+      if (REPO_CONTEXT_IGNORES.has(entry.name)) {
+        continue;
+      }
+      await collectRepoFiles(projectRoot, join(currentDir, entry.name), depth + 1, collected);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const relativePath = relative(projectRoot, join(currentDir, entry.name)).replace(/\\/g, "/");
+    if (/\.(png|jpg|jpeg|gif|svg|ico|lock)$/i.test(relativePath)) {
+      continue;
+    }
+    collected.push(relativePath);
+  }
+
+  return collected;
+}
+
+function tokenizeGoal(goal: string): string[] {
+  return Array.from(
+    new Set(
+      goal
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !STOP_WORDS.has(token)),
+    ),
+  );
+}
+
+function readChangedFiles(projectRoot: string): string[] {
+  try {
+    const output = execSync("git status --short", {
+      cwd: projectRoot,
+      encoding: "utf8",
+    });
+    return output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.replace(/^[A-Z?]+\s+/, "").replace(/\\/g, "/"));
+  } catch {
+    return [];
+  }
+}
+
+function scoreFile(filePath: string, goalTokens: string[], changedFiles: string[]): number {
+  const lowerPath = filePath.toLowerCase();
+  let score = 0;
+
+  for (const token of goalTokens) {
+    if (lowerPath.includes(token)) {
+      score += 5;
+    }
+  }
+
+  if (changedFiles.includes(filePath)) {
+    score += 6;
+  }
+  if (lowerPath.includes("/src/")) {
+    score += 2;
+  }
+  if (lowerPath.includes("test")) {
+    score += 2;
+  }
+  if (lowerPath.endsWith("package.json") || lowerPath.endsWith("readme.md")) {
+    score += 1;
+  }
+
+  return score;
+}
+
+function selectRelevantFiles(files: string[], goalTokens: string[], changedFiles: string[]): string[] {
+  const scored = files
+    .map((filePath) => ({
+      filePath,
+      score: scoreFile(filePath, goalTokens, changedFiles),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score || left.filePath.localeCompare(right.filePath))
+    .map((candidate) => candidate.filePath);
+
+  if (scored.length > 0) {
+    return scored.slice(0, 8);
+  }
+
+  const fallbacks = files.filter((filePath) =>
+    /^(packages|tests|scripts)\//.test(filePath) || /(^README\.md$|package\.json$)/.test(filePath),
+  );
+  return fallbacks.slice(0, 8);
+}
+
+async function selectVerificationCommands(
+  projectRoot: string,
+  relevantFiles: string[],
+): Promise<string[]> {
+  let scripts: Record<string, string> = {};
+  try {
+    const raw = await readFile(join(projectRoot, "package.json"), "utf8");
+    const packageJson = JSON.parse(raw) as { scripts?: Record<string, string> };
+    scripts = packageJson.scripts ?? {};
+  } catch {
+    scripts = {};
+  }
+
+  const commands: string[] = [];
+  if (relevantFiles.some((filePath) => filePath.startsWith("packages/vscode/"))) {
+    commands.push("npm --prefix packages/vscode run package");
+  }
+  if (scripts["typecheck"]) {
+    commands.push("npm run typecheck");
+  }
+  if (scripts["test"]) {
+    commands.push("npm test");
+  }
+  if (scripts["lint"]) {
+    commands.push("npm run lint");
+  }
+
+  return Array.from(new Set(commands)).slice(0, 3);
+}
+
+function buildRepoAwarePlan(
+  goal: string,
+  complexity: number,
+  repoContext: { relevantFiles: string[]; verificationCommands: string[] },
+): ExecutionPlan {
+  const primaryFiles = repoContext.relevantFiles.slice(0, 6);
+  const verificationFiles = repoContext.relevantFiles
+    .filter((filePath) => filePath.includes("test") || filePath.endsWith(".md"))
+    .slice(0, 4);
+  const filesForVerification = verificationFiles.length > 0 ? verificationFiles : primaryFiles;
+  const verificationCommand = repoContext.verificationCommands[0] ?? "npm test";
+  const secondaryVerificationCommand = repoContext.verificationCommands[1];
+
+  const steps: PlanStep[] = [
+    {
+      id: "step-1",
+      description: `Gather read-only context for "${goal}" before editing.`,
+      files: primaryFiles,
+      status: "pending",
+    },
+    {
+      id: "step-2",
+      description: `Implement the required code changes for "${goal}".`,
+      files: primaryFiles,
+      dependencies: ["step-1"],
+      status: "pending",
+    },
+    {
+      id: "step-3",
+      description: `Verify the changed areas and supporting proof for "${goal}".`,
+      files: filesForVerification,
+      dependencies: ["step-2"],
+      verifyCommand: verificationCommand,
+      status: "pending",
+    },
+  ];
+
+  if (secondaryVerificationCommand) {
+    steps.push({
+      id: "step-4",
+      description: `Run secondary verification before approving the change set for "${goal}".`,
+      files: filesForVerification,
+      dependencies: ["step-3"],
+      verifyCommand: secondaryVerificationCommand,
+      status: "pending",
+    });
+  }
+
+  return {
+    goal,
+    steps,
+    createdAt: new Date().toISOString(),
+    estimatedComplexity: complexity,
+  };
 }
 
 // ─── Show Plan ──────────────────────────────────────────────────────────────

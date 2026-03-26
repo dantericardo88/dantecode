@@ -1,6 +1,6 @@
 # PLAN.md - DanteCode Public OSS v1 Ship Plan
 
-> **CI Status:** Live readiness state: `artifacts/readiness/current-readiness.json` — run `npm run release:generate` to update.
+> **CI Status:** Live readiness state: `artifacts/readiness/current-readiness.json` — run `npm run release:sync` to update the same-commit readiness chain.
 
 **Date:** 2026-03-16
 **Target:** Public OSS v1
@@ -12,7 +12,7 @@ DanteCode ships first as a portable, model-agnostic skill runtime and coding age
 - stable CLI
 - published npm libraries
 - preview VS Code extension
-- beta desktop shell
+- experimental desktop shell (non-ship)
 
 ## Completed locally
 

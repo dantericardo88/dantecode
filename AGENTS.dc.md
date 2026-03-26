@@ -31,8 +31,8 @@ Runtime: Node.js 20+
 
 ## Architecture Notes
 
-- Monorepo with 9 packages in `packages/` directory
-- Dependency order: config-types → core → danteforge → git-engine → skill-adapter → sandbox → cli → vscode → desktop
+- Monorepo with 28 packages in `packages/`
+- Launch spine order: config-types -> core -> danteforge -> git-engine -> skill-adapter -> sandbox -> cli -> vscode
 - `config-types` is the foundation — all interfaces and types live here
 - `core` contains model routing (Grok default with Anthropic fallback), STATE.yaml management, and audit logging
 - `danteforge` is the "brain" — PDSE scoring, anti-stub scanning, autoforge IAL, GStack, lessons
@@ -41,7 +41,7 @@ Runtime: Node.js 20+
 - `sandbox` provides Docker-based execution isolation (with local fallback)
 - `cli` is the terminal REPL with all commands and slash commands
 - `vscode` is the VS Code extension with chat sidebar, inline completions, and PDSE diagnostics
-- `desktop` wraps the CLI in an Electron shell
+- `desktop` wraps the CLI in an Electron shell and remains experimental / non-ship for OSS v1
 
 ## DanteForge Gates
 

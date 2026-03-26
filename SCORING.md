@@ -1,5 +1,5 @@
 > **CI STATUS**: Live readiness state is in `artifacts/readiness/current-readiness.json`.
-> Run `npm run release:generate` to update. Scores below are targets, not verified CI state.
+> Run `npm run release:sync` to update the same-commit readiness chain. Scores below are targets, not verified CI state.
 
 # DanteCode Scoring Framework
 
@@ -9,9 +9,9 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 
 | # | Dimension | Evidence | Basis | Score |
 |---|-----------|----------|-------|-------|
-| A-1 | Test suite | 6,434 tests across 23 packages, 0 failures | Measured | 10 |
-| A-2 | Type safety | 23/23 packages typecheck clean (tsc --noEmit) | Measured | 10 |
-| A-3 | Build | 23/23 packages build green (tsup via turbo) | Measured | 10 |
+| A-1 | Test suite | 6,434 tests across 28 packages, 0 failures | Measured | 10 |
+| A-2 | Type safety | 28/28 packages typecheck clean (tsc --noEmit) | Measured | 10 |
+| A-3 | Build | 28/28 packages build green (tsup via turbo) | Measured | 10 |
 | A-4 | Lint | 0 errors across 31 lint tasks (warnings only) | Measured | 9 |
 | A-5 | Anti-stub | Anti-stub checks pass in CI gate | Measured | 9 |
 | A-6 | Code decomposition | agent-loop.ts: 3,016 → 1,496 lines (11 extracted modules) | Measured | 8 |
