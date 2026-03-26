@@ -491,6 +491,24 @@ async function _runAgentLoopCore(
           `${DIM}[skills] Discovered ${discoveredEntries.length} skill(s), ${reg.list().length} active${RESET}\n`,
         );
       }
+      const activeSkills = reg.list();
+      if (activeSkills.length > 0) {
+        const skillLines = activeSkills.map((s) => {
+          const tag = s.scope === "project" ? "[PRJ]" : s.scope === "user" ? "[USR]" : "[LIB]";
+          return `- ${tag} **${s.name}** (${s.slug})`;
+        });
+        messages.push({
+          role: "system" as const,
+          content: [
+            "## Available Skills",
+            "",
+            "The following skills are installed and active in this project:",
+            ...skillLines,
+            "",
+            "To execute a skill, reference it by name or use `/skills run <name>`.",
+          ].join("\n"),
+        });
+      }
     }
   } catch {
     // Non-fatal — skill discovery never blocks a session

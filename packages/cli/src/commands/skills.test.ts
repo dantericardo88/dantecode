@@ -80,6 +80,20 @@ vi.mock("@dantecode/skills-import", () => ({
   validateAgentSkill: (...args: unknown[]) => mockValidateAgentSkill(...args),
 }));
 
+const mockRunSkillPolicyCheck = vi.fn();
+vi.mock("@dantecode/skills-policy", () => ({
+  runSkillPolicyCheck: (...args: unknown[]) => mockRunSkillPolicyCheck(...args),
+}));
+
+const mockRunSkill = vi.fn();
+const mockMakeRunContext = vi.fn();
+const mockMakeProvenance = vi.fn();
+vi.mock("@dantecode/skills-runtime", () => ({
+  runSkill: (...args: unknown[]) => mockRunSkill(...args),
+  makeRunContext: (...args: unknown[]) => mockMakeRunContext(...args),
+  makeProvenance: (...args: unknown[]) => mockMakeProvenance(...args),
+}));
+
 vi.mock("@dantecode/skill-adapter", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
   getSkill: (...args: unknown[]) => mockGetSkill(...args),
@@ -983,6 +997,7 @@ describe("agent-skills-import: parseSkillMd integration", () => {
     );
     mockParseSkillMd.mockReset();
     mockValidateAgentSkill.mockReset();
+    mockRunSkillPolicyCheck.mockReset();
     // Default happy-path stubs
     mockParseSkillMd.mockReturnValue({
       ok: true,
@@ -994,6 +1009,7 @@ describe("agent-skills-import: parseSkillMd integration", () => {
       },
     });
     mockValidateAgentSkill.mockReturnValue({ valid: true, errors: [], warnings: [] });
+    mockRunSkillPolicyCheck.mockReturnValue({ passed: true, errors: [], warnings: [] });
   });
 
   afterEach(async () => {
@@ -1027,5 +1043,103 @@ describe("agent-skills-import: parseSkillMd integration", () => {
     expect(mockValidateAgentSkill).toHaveBeenCalledTimes(1);
     const callArg = mockValidateAgentSkill.mock.calls[0]?.[0];
     expect(callArg).toMatchObject({ name: "my-skill" });
+  });
+
+  it("SKILL-004 blocking policy error increments failed count", async () => {
+    mockRunSkillPolicyCheck.mockReturnValue({
+      passed: false,
+      errors: [{ code: "SKILL-004", message: "Unsupported tool: Bash" }],
+      warnings: [],
+    });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runSkillsCommand(["agent-skills-import"], projectRoot);
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("Failed: 1");
+    stdoutSpy.mockRestore();
+  });
+
+  it("SKILL-005 advisory warning prints but still imports", async () => {
+    mockRunSkillPolicyCheck.mockReturnValue({
+      passed: true,
+      errors: [],
+      warnings: [{ code: "SKILL-005", message: "Unknown compat agent: codex" }],
+    });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    await runSkillsCommand(["agent-skills-import"], projectRoot);
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("SKILL-005");
+    expect(output).not.toContain("Failed: 1");
+    stdoutSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// skills run subcommand
+// ---------------------------------------------------------------------------
+
+describe("skills run", () => {
+  let tmpRoot: string;
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), "skills-run-test-"));
+    projectRoot = join(tmpRoot, "project");
+    await mkdir(projectRoot, { recursive: true });
+    mockGetSkill.mockReset();
+    mockRunSkillPolicyCheck.mockReset();
+    mockRunSkill.mockReset();
+    mockMakeRunContext.mockReset();
+    mockMakeProvenance.mockReset();
+    // Default stubs
+    mockRunSkillPolicyCheck.mockReturnValue({ passed: true, errors: [], warnings: [] });
+    mockRunSkill.mockResolvedValue({
+      state: "applied",
+      plainLanguageSummary: "Done.",
+      runId: "r1",
+    });
+    mockMakeRunContext.mockReturnValue({});
+    mockMakeProvenance.mockReturnValue({
+      sourceType: "native",
+      sourceRef: "",
+      license: "MIT",
+      importedAt: new Date().toISOString(),
+    });
+  });
+
+  afterEach(async () => {
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("finds skill, runs it, and prints APPLIED state", async () => {
+    mockGetSkill.mockResolvedValue({
+      frontmatter: { name: "my-skill", description: "A test skill", tools: ["Read"] },
+      instructions: "Do something useful.",
+      sourcePath: "/p/SKILL.md",
+      wrappedPath: "/p/SKILL.dc.md",
+      importSource: "claude",
+    });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runSkillsCommand(["run", "my-skill"], projectRoot);
+
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("APPLIED");
+    expect(output).toContain("Done.");
+    expect(mockRunSkill).toHaveBeenCalledTimes(1);
+
+    stdoutSpy.mockRestore();
+  });
+
+  it("prints not-found message when skill is absent", async () => {
+    mockGetSkill.mockResolvedValue(null);
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runSkillsCommand(["run", "nonexistent-skill"], projectRoot);
+
+    const output = stdoutSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(output).toContain("not found");
+    expect(mockRunSkill).not.toHaveBeenCalled();
+
+    stdoutSpy.mockRestore();
   });
 });

@@ -27,6 +27,9 @@ import {
 } from "@dantecode/skill-adapter";
 import type { ImportSource, ParsedSkill, CatalogEntry } from "@dantecode/skill-adapter";
 import { parseSkillMd, validateAgentSkill } from "@dantecode/skills-import";
+import { runSkillPolicyCheck } from "@dantecode/skills-policy";
+import { runSkill, makeRunContext, makeProvenance } from "@dantecode/skills-runtime";
+import type { DanteSkill } from "@dantecode/skills-runtime";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -107,6 +110,9 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       break;
     case "agent-skills-import":
       await skillsAgentSkillsImport(args.slice(1), projectRoot);
+      break;
+    case "run":
+      await skillsRun(args.slice(1), projectRoot);
       break;
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
@@ -352,6 +358,18 @@ async function importSingleFile(filePath: string, projectRoot: string): Promise<
   }
   for (const warn of validation.warnings) {
     process.stdout.write(`${DIM}[${warn.code}] ${warn.message}${RESET}\n`);
+  }
+
+  const policyCheck = runSkillPolicyCheck({
+    allowedTools: parseResult.skill.allowedTools,
+    compatibility: parseResult.skill.compatibility,
+  });
+  if (!policyCheck.passed) {
+    const details = policyCheck.errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+    throw new Error(`Policy check failed — ${details}`);
+  }
+  for (const warn of policyCheck.warnings) {
+    process.stdout.write(`${YELLOW}[${warn.code}] ${warn.message}${RESET}\n`);
   }
 
   const parsedSkill: ParsedSkill = {
@@ -1240,6 +1258,64 @@ async function skillsAgentSkillsImport(args: string[], projectRoot: string): Pro
   process.stdout.write(
     `\n${DIM}Agent Skills import complete — Imported: ${imported}, Skipped: ${skipped}, Failed: ${failed}${RESET}\n\n`,
   );
+}
+
+/**
+ * Runs a skill by name: policy-checks it then executes via skills-runtime.
+ * Usage: dantecode skills run <name>
+ */
+async function skillsRun(args: string[], projectRoot: string): Promise<void> {
+  const skillName = args[0];
+  if (!skillName) {
+    process.stdout.write(`${RED}Usage: dantecode skills run <name>${RESET}\n`);
+    return;
+  }
+
+  const skillDef = await getSkill(skillName, projectRoot);
+  if (!skillDef) {
+    process.stdout.write(`${YELLOW}Skill "${skillName}" not found.${RESET}\n`);
+    return;
+  }
+
+  const policyResult = runSkillPolicyCheck({
+    allowedTools: skillDef.frontmatter.tools,
+    compatibility: undefined,
+  });
+  if (!policyResult.passed) {
+    const details = policyResult.errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+    process.stdout.write(`${RED}Policy check failed — ${details}${RESET}\n`);
+    return;
+  }
+
+  const danteskill: DanteSkill = {
+    name: skillDef.frontmatter.name,
+    description: skillDef.frontmatter.description ?? "",
+    sourceType: "native",
+    sourceRef: skillDef.sourcePath ?? skillName,
+    license: "MIT",
+    instructions: skillDef.instructions,
+    allowedTools: skillDef.frontmatter.tools,
+    provenance: makeProvenance({
+      sourceType: "native",
+      sourceRef: skillDef.sourcePath ?? skillName,
+      license: "MIT",
+    }),
+  };
+
+  const context = makeRunContext({
+    skillName: skillDef.frontmatter.name,
+    mode: "apply",
+    projectRoot,
+    dryRun: false,
+  });
+
+  const result = await runSkill({ skill: danteskill, context });
+  process.stdout.write(
+    `\n${BOLD}[${result.state.toUpperCase()}]${RESET} ${result.plainLanguageSummary ?? ""}\n`,
+  );
+  if (result.runId) {
+    process.stdout.write(`${DIM}Run ID: ${result.runId}${RESET}\n`);
+  }
 }
 
 /**

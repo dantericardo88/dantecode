@@ -745,6 +745,24 @@ vi.mock("./tool-schemas.js", () => ({
   getAISDKTools: vi.fn(() => ({})),
 }));
 
+// Skills registry mock — skill discovery must not block sessions
+const mockDiscoverSkills = vi.fn().mockResolvedValue([]);
+vi.mock("@dantecode/skills-registry", () => ({
+  discoverSkills: (...args: unknown[]) => mockDiscoverSkills(...args),
+  SkillRegistry: class MockSkillRegistry {
+    private _entries: Array<{ name: string; slug: string; scope: string; disabled: boolean }> = [];
+    register(entries: typeof this._entries) {
+      this._entries.push(...entries);
+    }
+    list() {
+      return this._entries.filter((e) => !e.disabled);
+    }
+    getCollisions() {
+      return [];
+    }
+  },
+}));
+
 // Safety module is NOT mocked — we test it for real
 
 import { runAgentLoop, type AgentLoopConfig } from "./agent-loop.js";
@@ -881,6 +899,7 @@ describe("runAgentLoop smoke tests", () => {
       }
       return results;
     });
+    mockDiscoverSkills.mockResolvedValue([]);
   });
 
   it("basic prompt produces response with no tool calls", async () => {
@@ -4030,6 +4049,7 @@ describe("Fallback pipeline guard", () => {
       }
       return results;
     });
+    mockDiscoverSkills.mockResolvedValue([]);
   });
 
   it("aborts pipeline after 2 consecutive fallback rounds and emits abort message", async () => {
@@ -4143,5 +4163,81 @@ describe("Fallback pipeline guard", () => {
     // Both rounds complete — guard should NOT fire for non-pipeline prompts
     expect(mockGenerateText).toHaveBeenCalledTimes(2);
     expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skill Discovery: system message injection
+// ---------------------------------------------------------------------------
+
+describe("skill discovery: system message injection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateText.mockResolvedValue({
+      text: "Done.",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    });
+    mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
+    mockMemoryInitialize.mockResolvedValue(undefined);
+    mockMemoryRecall.mockResolvedValue({ query: "", scope: "all", results: [], latencyMs: 0 });
+    mockMemoryStore.mockResolvedValue({ stored: true });
+    mockMemorySummarize.mockResolvedValue({
+      sessionId: "test-session",
+      summary: "",
+      compressed: false,
+      tokensSaved: 0,
+    });
+    mockMemoryPrune.mockResolvedValue({ prunedCount: 0, retainedCount: 0, policy: "default" });
+    mockAuditLoggerFlush.mockResolvedValue({
+      anomalies: [],
+      analyzedCount: 0,
+      bufferTruncated: false,
+      detection: { analyzedCount: 0, truncated: false },
+    });
+    mockGetLatestWaitingRun.mockResolvedValue(null);
+    mockLoadSessionSnapshot.mockResolvedValue(null);
+    mockLoadResumeHint.mockResolvedValue(null);
+    mockLoadBackgroundTask.mockResolvedValue(null);
+    mockLoadPendingToolCalls.mockResolvedValue([]);
+  });
+
+  it("injects ## Available Skills system message when skills are discovered", async () => {
+    mockDiscoverSkills.mockResolvedValue([
+      {
+        name: "my-skill",
+        slug: "my-skill",
+        scope: "project",
+        disabled: false,
+        skillMdPath: "/p/SKILL.md",
+        dirPath: "/p",
+      },
+    ]);
+
+    const session = makeSession();
+    await runAgentLoop("Do something", session, makeConfig());
+
+    // The system message injected before the model call should contain the skill listing
+    expect(mockGenerateText).toHaveBeenCalled();
+    const callArgs = mockGenerateText.mock.calls[0]?.[0] as
+      | { messages?: Array<{ role: string; content: string }> }
+      | undefined;
+    const allContent = (callArgs?.messages ?? []).map((m) => m.content).join("\n");
+    expect(allContent).toContain("## Available Skills");
+    expect(allContent).toContain("[PRJ]");
+    expect(allContent).toContain("my-skill");
+  });
+
+  it("does not inject skills system message when no skills are discovered", async () => {
+    mockDiscoverSkills.mockResolvedValue([]);
+
+    const session = makeSession();
+    await runAgentLoop("Do something", session, makeConfig());
+
+    expect(mockGenerateText).toHaveBeenCalled();
+    const callArgs = mockGenerateText.mock.calls[0]?.[0] as
+      | { messages?: Array<{ role: string; content: string }> }
+      | undefined;
+    const allContent = (callArgs?.messages ?? []).map((m) => m.content).join("\n");
+    expect(allContent).not.toContain("## Available Skills");
   });
 });
