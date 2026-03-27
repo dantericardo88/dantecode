@@ -67,6 +67,7 @@ import {
   MAX_CONFABULATION_NUDGES,
   EMPTY_RESPONSE_WARNING,
   CONFABULATION_WARNING,
+  displayThinking,
 } from "./agent-loop-constants.js";
 import { type ExtractedToolCall, extractToolCalls } from "./tool-call-parser.js";
 import {
@@ -634,6 +635,9 @@ async function _runAgentLoopCore(
           thinkingBudget: thinkingBudget,
         });
         renderer.printHeader();
+        if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
+          displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
+        }
         const useNativeTools = config.state.model.default.supportsToolCalls;
         let nativeSuccess = false;
 
@@ -696,8 +700,8 @@ async function _runAgentLoopCore(
             }
             // Fallback to blocking generate if streaming is not supported
             renderer.reset();
-            if (!config.silent) {
-              process.stdout.write(`${DIM}(thinking...)${RESET}\n`);
+            if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
+              displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
             }
             responseText = await router.generate(messages, {
               system: systemPrompt,

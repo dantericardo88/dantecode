@@ -147,6 +147,8 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     memoryOrchestrator: null,
     verificationTrendTracker: null,
     lastSessionPdseResults: [],
+    pdseCache: new Map(),
+    lastFileList: [],
     planMode: false,
     currentPlan: null,
     planApproved: false,
@@ -154,6 +156,9 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    macroRecording: false,
+    macroRecordingName: null,
+    macroRecordingSteps: [],
     reasoningOverrideSession: false,
     theme: "default",
   };

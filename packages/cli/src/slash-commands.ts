@@ -3,10 +3,11 @@
 // Each slash command is a function that operates on the REPL state.
 // ============================================================================
 
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
 import {
   appendAuditEvent,
   criticDebate,
@@ -41,6 +42,9 @@ import {
   globalApprovalGateway,
   globalToolScheduler,
   updateStateYaml,
+  PROVIDER_CATALOG,
+  MODEL_CATALOG,
+  estimateRunCost,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -131,7 +135,6 @@ import {
 // ----------------------------------------------------------------------------
 // ANSI Colors
 // ----------------------------------------------------------------------------
-
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
@@ -140,7 +143,94 @@ const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
+// Tree Visualization Helpers
+// ------------------------------------------------------------------------------
+// Cursor movement for in-place updates
+const HIDE_CURSOR = "\x1b[?25l";
+const SHOW_CURSOR = "\x1b[?25h";
+const MOVE_CURSOR_UP = (lines: number) => `\x1b[${lines}A`;
+const CLEAR_SCREEN_FROM_CURSOR = "\x1b[0J";
+
+interface ProgressNode {
+  name: string;
+  status: "pending" | "running" | "complete" | "failed";
+  pdseScore?: number;
+  progress?: number;
+  children?: ProgressNode[];
+}
+
+function renderProgressTree(nodes: ProgressNode[], prefix = "", isLast = true): string {
+  const lines: string[] = [];
+  const childPrefix = prefix + (isLast ? "    " : "│   ");
+  const _nodePrefix = prefix + (isLast ? "└── " : "├── ");
+  const _connector = isLast ? "└── " : "├── ";
+
+  nodes.forEach((node, index) => {
+    const isLastNode = index === nodes.length - 1;
+    let statusIcon: string;
+    let statusColor: string;
+
+    switch (node.status) {
+      case "running":
+        statusIcon = "▸";
+        statusColor = YELLOW;
+        break;
+      case "complete":
+        statusIcon = "✓";
+        statusColor = GREEN;
+        break;
+      case "failed":
+        statusIcon = "✗";
+        statusColor = RED;
+        break;
+      default:
+        statusIcon = "○";
+        statusColor = DIM;
+    }
+
+    let label = node.name;
+    if (node.progress !== undefined) {
+      label += ` (${node.progress}%)`;
+    }
+    if (node.pdseScore !== undefined) {
+      const pdseStr = node.pdseScore.toFixed(0);
+      const pdseColor = node.pdseScore >= 80 ? GREEN : node.pdseScore >= 60 ? YELLOW : RED;
+      label += ` ${pdseColor}${pdseStr}${RESET}`;
+    }
+
+    lines.push(
+      `${prefix}${isLastNode ? "└──" : "├──"} ${statusColor}${statusIcon}${RESET} ${BOLD}${label}${RESET}`,
+    );
+
+    if (node.children && node.children.length > 0) {
+      lines.push(...renderProgressTree(node.children, childPrefix, isLastNode));
+    }
+  });
+
+  return lines.join("\n");
+}
+
+// Start progress display with initial state
+function startProgressDisplay(header: string, initialNodes: ProgressNode[]) {
+  process.stdout.write(HIDE_CURSOR);
+  const initialTree = renderProgressTree(initialNodes);
+  const display = `\n${header}\n${initialTree}\n\n`;
+  process.stdout.write(display);
+  return {
+    update: (nodes: ProgressNode[]) => {
+      const newTree = renderProgressTree(nodes);
+      const lines = newTree.split("\n").length + 2; // header + empty line
+      process.stdout.write(MOVE_CURSOR_UP(lines) + CLEAR_SCREEN_FROM_CURSOR);
+      process.stdout.write(`${header}\n${newTree}\n\n`);
+    },
+    end: () => {
+      process.stdout.write(SHOW_CURSOR);
+    },
+  };
+}
+
+// --------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
 
@@ -221,6 +311,10 @@ export interface ReplState {
   modelAdaptationStore?: import("@dantecode/core").ModelAdaptationStore | null;
   /** Verification trend tracker — records PDSE scores and detects regressions. */
   verificationTrendTracker: import("@dantecode/core").VerificationTrendTracker | null;
+  /** Cache for PDSE scores to avoid recomputing during file listing. */
+  pdseCache: Map<string, number>;
+  /** Last list of files shown to the user for selection. */
+  lastFileList: string[];
   /**
    * Per-file PDSE results from the most recent agent-loop run.
    * Populated by the DanteForge pipeline block in agent-loop.ts.
@@ -241,6 +335,12 @@ export interface ReplState {
   planExecutionResult: import("@dantecode/core").PlanExecutionResult | null;
   /** Runtime-switchable approval mode for tool execution. */
   approvalMode: ApprovalModeInput | "review" | "apply" | "autoforge";
+  /** Whether macro recording is active. */
+  macroRecording: boolean;
+  /** Name of the macro being recorded. */
+  macroRecordingName: string | null;
+  /** Array of recorded commands during macro recording. */
+  macroRecordingSteps: Array<{ type: "slash" | "input"; value: string }>;
 }
 
 /** A single slash command handler. */
@@ -262,6 +362,139 @@ interface SlashCommand {
     | "automation"
     | "sandbox"
     | "advanced";
+}
+
+// ----------------------------------------------------------------------------
+type MacroStep = { type: "slash" | "input"; value: string };
+type MacroDefinition = { [name: string]: MacroStep[] };
+
+// ----------------------------------------------------------------------------
+async function loadMacros(state: ReplState): Promise<MacroDefinition> {
+  const macrosPath = join(state.projectRoot, ".dantecode", "macros.json");
+  try {
+    await mkdir(join(state.projectRoot, ".dantecode"), { recursive: true });
+    const content = await readFile(macrosPath, "utf-8");
+    const macros = JSON.parse(content) as MacroDefinition;
+    return macros;
+  } catch {
+    return {};
+  }
+}
+
+async function saveMacros(macros: MacroDefinition, state: ReplState): Promise<void> {
+  const macrosPath = join(state.projectRoot, ".dantecode", "macros.json");
+  await mkdir(join(state.projectRoot, ".dantecode"), { recursive: true });
+  await writeFile(macrosPath, JSON.stringify(macros, null, 2), "utf-8");
+}
+
+// ----------------------------------------------------------------------------
+async function macroRecordCommand(args: string, state: ReplState): Promise<string> {
+  const name = args.trim();
+  if (!name) {
+    return `${RED}Usage: /macro record <name>${RESET}`;
+  }
+
+  if (state.macroRecording) {
+    return `${RED}Already recording macro: ${state.macroRecordingName}${RESET}`;
+  }
+
+  state.macroRecording = true;
+  state.macroRecordingName = name;
+  state.macroRecordingSteps = [];
+  return `${GREEN}Started recording macro: ${name}${RESET} ${DIM}(Use /macro stop to finish)${RESET}`;
+}
+
+async function macroStopCommand(_args: string, state: ReplState): Promise<string> {
+  if (!state.macroRecording) {
+    return `${YELLOW}No macro is currently being recorded.${RESET}`;
+  }
+
+  const name = state.macroRecordingName!;
+  const macros = await loadMacros(state);
+  const steps = [...state.macroRecordingSteps];
+
+  macros[name] = steps;
+  await saveMacros(macros, state);
+
+  state.macroRecording = false;
+  state.macroRecordingName = null;
+  state.macroRecordingSteps = [];
+
+  return `${GREEN}Recorded macro: ${name}${RESET} ${DIM}(${steps.length} steps)${RESET}`;
+}
+
+async function macroPlayCommand(args: string, state: ReplState): Promise<string> {
+  const name = args.trim();
+  if (!name) {
+    return `${RED}Usage: /macro play <name>${RESET}`;
+  }
+
+  const macros = await loadMacros(state);
+  const macro = macros[name];
+  if (!macro) {
+    return `${RED}Macro not found: ${name}${RESET}`;
+  }
+
+  // Verify PDSE before playing
+  if (macro.length > 0 && state.lastSessionPdseResults.length > 0) {
+    const recentPdse =
+      state.lastSessionPdseResults.reduce((total, result) => total + result.pdseScore, 0) /
+      state.lastSessionPdseResults.length;
+    const threshold = state.state.pdse?.threshold ?? 85;
+    if (recentPdse < threshold / 100) {
+      return `${RED}PDSE verification failed${RESET} ${DIM}(recent score: ${(recentPdse * 100).toFixed(1)}, threshold: ${threshold})${RESET}`;
+    }
+  }
+
+  for (const step of macro) {
+    if (step.type === "slash") {
+      const result = await routeSlashCommand(step.value, state);
+      process.stdout.write(`${CYAN}[MACRO ${name}]${RESET} /${step.value}\n`);
+      if (result) {
+        process.stdout.write(`${result}\n`);
+      }
+    }
+  }
+
+  return `${GREEN}Played macro: ${name}${RESET} ${DIM}(${macro.length} steps)${RESET}`;
+}
+
+async function macroListCommand(_args: string, state: ReplState): Promise<string> {
+  const macros = await loadMacros(state);
+  const names = Object.keys(macros).sort();
+
+  if (names.length === 0) {
+    return `${DIM}No macros defined. Use /macro record <name> to start recording.${RESET}`;
+  }
+
+  const lines = [`${BOLD}Stored Macros${RESET}`, ""];
+  for (const name of names) {
+    const steps = macros[name];
+    if (steps) {
+      lines.push(`  ${YELLOW}${name}${RESET} ${DIM}(${steps.length} steps)${RESET}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function macroCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/, 2);
+  const subcommand = parts[0] || "";
+  const rest = parts[1] || "";
+
+  switch (subcommand) {
+    case "record":
+      return await macroRecordCommand(rest, state);
+    case "stop":
+      return await macroStopCommand("", state);
+    case "play":
+      return await macroPlayCommand(rest, state);
+    case "list":
+      return await macroListCommand("", state);
+    default:
+      return `${RED}Usage: /macro <record|stop|play|list>${RESET}`;
+  }
 }
 
 function cloneSessionForTask(
@@ -839,15 +1072,227 @@ async function persistVerificationBenchmark(
 }
 
 // ----------------------------------------------------------------------------
-// Command Implementations
+// Helper Functions
 // ----------------------------------------------------------------------------
 
+async function getAllFiles(
+  dir: string,
+  exclude: Set<string> = new Set(["node_modules", ".git", "dist", "build", ".dantecode"]),
+): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!exclude.has(entry.name)) {
+        files.push(...(await getAllFiles(fullPath, exclude)));
+      }
+    } else if (entry.isFile()) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+async function getPDSEScore(filePath: string, state: ReplState): Promise<number> {
+  if (state.pdseCache.has(filePath)) {
+    return state.pdseCache.get(filePath)!;
+  }
+  try {
+    const content = await readFile(filePath, "utf-8");
+    const score = runLocalPDSEScorer(content, state.projectRoot);
+    const overall = score.overall > 1 ? score.overall : score.overall * 100;
+    state.pdseCache.set(filePath, overall);
+    return overall;
+  } catch {
+    return 0;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Command Implementations
+// ----------------------------------------------------------------------------
+// Helper to analyze session for context-aware help suggestions
+function analyzeRecentSession(session: Session) {
+  const recentMessages = session.messages.slice(-20); // Last 20 messages for analysis
+  const usedCommands = new Set<string>();
+  const recentCommands: string[] = [];
+  let hasErrors = false;
+
+  for (const message of recentMessages) {
+    // Check for slash command usage in user input
+    if (message.role === "user" && typeof message.content === "string") {
+      const slashedCommands = message.content.match(/\/(\w+)/g);
+      if (slashedCommands) {
+        for (const cmd of slashedCommands) {
+          const cleanCmd = cmd.slice(1); // remove /
+          usedCommands.add(cleanCmd);
+          recentCommands.push(cleanCmd);
+        }
+      }
+    }
+
+    // Check for tool use that might represent slash commands
+    if (message.toolUse?.name === "route_slash_command" && message.toolUse.input?.command) {
+      const command = message.toolUse.input.command;
+      if (typeof command === "string") {
+        usedCommands.add(command);
+        recentCommands.push(command);
+      }
+    }
+
+    // Check for error messages in assistant responses
+    if (message.role === "assistant" && typeof message.content === "string") {
+      const lowercaseContent = message.content.toLowerCase();
+      if (
+        lowercaseContent.includes("error") ||
+        lowercaseContent.includes("failed") ||
+        lowercaseContent.includes("✗") ||
+        lowercaseContent.includes("\x1b[31m")
+      ) {
+        // RED color code
+        hasErrors = true;
+      }
+    }
+  }
+
+  return { recentCommands, hasErrors, usedCommands };
+}
+
+// ----------------------------------------------------------------------------
+const TUTORIALS: Record<string, { title: string; steps: string[]; tips: string[] }> = {
+  "magic-basics": {
+    title: "Magic Basics: Getting Started with AI Development",
+    steps: [
+      "Use /magic to start building something new",
+      "Describe what you want in plain language",
+      "Review the generated code and ask questions",
+      "Use /verify to check code quality",
+      "Iterate by asking for improvements",
+    ],
+    tips: [
+      "Be specific about what you want to build",
+      "Mention technologies if you have preferences",
+      "Include example behavior or features",
+    ],
+  },
+  "party-advanced": {
+    title: "Party Mode: Multi-Agent Development",
+    steps: [
+      "Use /party for complex tasks needing multiple agents",
+      "Set your approval mode first: /approval review",
+      "Define the task clearly with requirements",
+      "Monitor progress and provide feedback",
+      "Review results with /verify and /score",
+    ],
+    tips: [
+      "Break complex tasks into clear requirements",
+      "Use /status to check agent availability",
+      "Consider using worktrees: /git worktree create",
+    ],
+  },
+  verification: {
+    title: "Code Verification: Ensuring Quality",
+    steps: [
+      "Run /verify on important files",
+      "Use /score for overall project health",
+      "Check for PDSE scores above 80%",
+      "Address failing verifications promptly",
+      "Use /party if verification reveals issues",
+    ],
+    tips: [
+      "Run verification after major changes",
+      "PDSE scores indicate code robustness",
+      "Fix errors before committing",
+    ],
+  },
+  debugging: {
+    title: "Debugging Common Issues",
+    steps: [
+      "Check error messages in the output",
+      "Use /add to examine relevant files",
+      "Run /verify to identify code issues",
+      "Ask specific questions about problems",
+      "Use /tutorial [topic] for help with any command",
+    ],
+    tips: [
+      "Include error messages in questions",
+      "Check file permissions and dependencies",
+      "Try simple test cases first",
+    ],
+  },
+  agents: {
+    title: "Multi-Agent Workflows",
+    steps: [
+      "Start with single commands like /magic for simple tasks",
+      "Use /party for complex multi-step tasks",
+      "Use /multirun to coordinate multiple agents",
+      "Set appropriate approval levels: /approval autoforge",
+      "Monitor progress and intervene when needed",
+    ],
+    tips: [
+      "Agents specialize in different types of work",
+      "Use /status to see available agents",
+      "Complex tasks benefit from multiple perspectives",
+    ],
+  },
+};
+
+async function tutorialCommand(args: string, _state: ReplState): Promise<string> {
+  const topic = args.trim().toLowerCase().replace(/\s+/g, "-");
+
+  if (!topic) {
+    const availableTopics = Object.keys(TUTORIALS);
+    const lines = [`${BOLD}Interactive Tutorials${RESET}`, "", `${DIM}Available topics:${RESET}`];
+
+    availableTopics.forEach((topic) => {
+      const tutorial = TUTORIALS[topic];
+      lines.push(`  ${YELLOW}${topic.padEnd(15)}${RESET} ${DIM}${tutorial.title}${RESET}`);
+    });
+
+    lines.push("");
+    lines.push(`${DIM}Usage: /tutorial <topic>${RESET}`);
+    lines.push(`${DIM}Examples: /tutorial magic-basics, /tutorial debugging${RESET}`);
+
+    return lines.join("\n");
+  }
+
+  const tutorial = TUTORIALS[topic];
+  if (!tutorial) {
+    const availableTopics = Object.keys(TUTORIALS);
+    return `${RED}Tutorial not found:${RESET} ${topic}\n\n${DIM}Available: ${availableTopics.join(", ")}${RESET}`;
+  }
+
+  const lines = [`${BOLD}${tutorial.title}${RESET}`, "", `${CYAN}Steps to follow:${RESET}`];
+
+  tutorial.steps.forEach((step, index) => {
+    lines.push(`  ${index + 1}. ${step}`);
+  });
+
+  if (tutorial.tips.length > 0) {
+    lines.push("");
+    lines.push(`${CYAN}Pro tips:${RESET}`);
+    tutorial.tips.forEach((tip) => {
+      lines.push(`  • ${tip}`);
+    });
+  }
+
+  lines.push("");
+  lines.push(`${DIM}Need help with a specific command? Try /help${RESET}`);
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 async function helpCommand(args: string, state: ReplState): Promise<string> {
   const showAll = args.trim() === "--all";
 
   // D-12: Count successful sessions for progressive disclosure unlock
   const sessionStats = await countSuccessfulSessions(state.projectRoot);
   const advancedUnlocked = showAll || sessionStats.unlocked;
+
+  // Analyze recent session for context-aware suggestions
+  const { recentCommands, hasErrors, usedCommands } = analyzeRecentSession(state.session);
 
   if (!advancedUnlocked) {
     // Tier 1 only — the essential commands new users need
@@ -867,7 +1312,7 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
     }
     lines.push("");
 
-    // Contextual suggestions based on session state
+    // Enhanced contextual suggestions
     const suggestions: string[] = [];
     if (state.session.messages.length === 0) {
       suggestions.push(`  ${YELLOW}/magic${RESET} ${DIM}\u2014 start building something${RESET}`);
@@ -875,6 +1320,21 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
     if (state.session.messages.length > 20) {
       suggestions.push(
         `  ${YELLOW}/compact${RESET} ${DIM}\u2014 free up conversation space${RESET}`,
+      );
+    }
+    if (hasErrors) {
+      suggestions.push(
+        `  ${YELLOW}/tutorial debugging${RESET} ${DIM}\u2014 learn to fix common errors${RESET}`,
+      );
+    }
+    if (recentCommands.includes("magic") && !usedCommands.has("verify")) {
+      suggestions.push(
+        `  ${YELLOW}/tutorial verification${RESET} ${DIM}\u2014 ensure your builds are solid${RESET}`,
+      );
+    }
+    if (recentCommands.includes("party") || recentCommands.includes("multirun")) {
+      suggestions.push(
+        `  ${YELLOW}/tutorial agents${RESET} ${DIM}\u2014 mastering multi-agent workflows${RESET}`,
       );
     }
     if (suggestions.length > 0) {
@@ -946,6 +1406,35 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
     lines.push("");
   }
 
+  // Add context-aware suggestions for advanced users
+  const suggestions: string[] = [];
+  if (hasErrors) {
+    suggestions.push(
+      `  ${YELLOW}/tutorial debugging${RESET} ${DIM}\u2014 learn to fix common errors${RESET}`,
+    );
+  }
+  if (recentCommands.includes("magic") && !usedCommands.has("verify")) {
+    suggestions.push(
+      `  ${YELLOW}/tutorial verification${RESET} ${DIM}\u2014 ensure your builds are solid${RESET}`,
+    );
+  }
+  if (recentCommands.includes("party") || recentCommands.includes("multirun")) {
+    suggestions.push(
+      `  ${YELLOW}/tutorial agents${RESET} ${DIM}\u2014 mastering multi-agent workflows${RESET}`,
+    );
+  }
+  if (state.session.messages.length === 0) {
+    suggestions.push(
+      `  ${YELLOW}/tutorial magic-basics${RESET} ${DIM}\u2014 get started with AI development${RESET}`,
+    );
+  }
+
+  if (suggestions.length > 0) {
+    lines.push(`${BOLD}Contextual Help:${RESET}`);
+    lines.push(...suggestions);
+    lines.push("");
+  }
+
   return lines.join("\n");
 }
 
@@ -989,10 +1478,17 @@ async function runsCommand(_args: string, state: ReplState): Promise<string> {
 }
 
 async function modelCommand(args: string, state: ReplState): Promise<string> {
-  const modelReference = args.trim();
+  const trimmedArgs = args.trim();
+
+  // Handle /model select command
+  if (trimmedArgs === "select") {
+    return await modelSelectCommand(state);
+  }
+
+  const modelReference = trimmedArgs;
   if (!modelReference) {
     const current = state.state.model.default;
-    return `${DIM}Current model:${RESET} ${BOLD}${current.provider}/${current.modelId}${RESET}\n\n${DIM}Usage: /model <provider/modelId> (e.g. /model grok/grok-3)${RESET}`;
+    return `${DIM}Current model:${RESET} ${BOLD}${current.provider}/${current.modelId}${RESET}\n\n${DIM}Usage: /model <provider/modelId> or /model select${RESET}`;
   }
 
   const parsed = parseModelReference(modelReference, state.state.model.default.provider);
@@ -1014,35 +1510,316 @@ async function modelCommand(args: string, state: ReplState): Promise<string> {
   return `${GREEN}Model switched to${RESET} ${BOLD}${parsed.id}${RESET} ${DIM}(${providerEntry.label})${RESET}`;
 }
 
-async function addCommand(args: string, state: ReplState): Promise<string> {
-  const filePath = args.trim();
-  if (!filePath) {
-    return `${RED}Usage: /add <file_path>${RESET}`;
+async function modelSelectCommand(state: ReplState): Promise<string> {
+  if (!process.stdin.isTTY) {
+    return `${YELLOW}Interactive model selection requires a TTY terminal.${RESET}`;
   }
 
-  const resolved = resolve(state.projectRoot, filePath);
+  // Group models by provider for display
+  const groupedModels = MODEL_CATALOG.map((model) => {
+    const provider = PROVIDER_CATALOG.find((p) => p.id === model.provider);
+    return {
+      ...model,
+      providerLabel: provider?.shortLabel ?? model.provider,
+      requiresApiKey: provider?.requiresApiKey ?? false,
+      localOnly: provider?.localOnly ?? false,
+    };
+  });
 
-  try {
-    const content = await readFile(resolved, "utf-8");
-    const lineCount = content.split("\n").length;
+  // Create menu options with cost estimates
+  const menuOptions = groupedModels.map((model) => {
+    // Estimate cost for a typical 1000 token input + 500 token output
+    const costEstimate = estimateRunCost(model.modelId, 1000, 500);
+    const costDisplay = costEstimate > 0 ? `$${costEstimate.toFixed(4)}` : "Free";
 
-    if (!state.session.activeFiles.includes(resolved)) {
-      state.session.activeFiles.push(resolved);
+    const reasoningIndicator = model.reasoningModel ? " (Reasoning)" : "";
+    const thinkingIndicator = model.supportsExtendedThinking ? " (Thinking)" : "";
+
+    return {
+      id: model.id,
+      label: `${model.label}${reasoningIndicator}${thinkingIndicator}`,
+      provider: model.providerLabel,
+      cost: costDisplay,
+      requiresApiKey: model.requiresApiKey,
+      localOnly: model.localOnly,
+    };
+  });
+
+  // Interactive menu with arrow navigation
+  const selectedModelId = await interactiveModelMenu(menuOptions);
+
+  if (!selectedModelId) {
+    return `${DIM}Model selection cancelled.${RESET}`;
+  }
+
+  const selectedModel = MODEL_CATALOG.find((m) => m.id === selectedModelId);
+  if (!selectedModel) {
+    return `${RED}Selected model not found.${RESET}`;
+  }
+
+  // Handle API key setup if required
+  const provider = PROVIDER_CATALOG.find((p) => p.id === selectedModel.provider);
+  if (provider?.requiresApiKey) {
+    const existingKey = provider.envVars.some((envVar) => process.env[envVar]);
+    if (!existingKey) {
+      const apiKey = await promptForApiKey(provider);
+      if (!apiKey) {
+        return `${YELLOW}Model selection cancelled — API key required.${RESET}`;
+      }
+      // Note: In a real implementation, you'd save this to environment or config
+      process.env[provider.envVars[0]!] = apiKey;
     }
+  }
 
-    // Add as a system message so the agent has the context
-    state.session.messages.push({
-      id: randomUUID(),
-      role: "system",
-      content: `File added to context: ${resolved}\n\n\`\`\`\n${content}\n\`\`\``,
-      timestamp: new Date().toISOString(),
+  // Update state
+  const newModelConfig: ModelConfig = {
+    ...state.state.model.default,
+    provider: selectedModel.provider,
+    modelId: selectedModel.modelId,
+  };
+
+  state.state.model.default = newModelConfig;
+  state.session.model = newModelConfig;
+
+  return `${GREEN}Model selected:${RESET} ${BOLD}${selectedModel.id}${RESET} ${DIM}(${provider?.label ?? selectedModel.provider})${RESET}`;
+}
+
+interface MenuOption {
+  id: string;
+  label: string;
+  provider: string;
+  cost: string;
+  requiresApiKey: boolean;
+  localOnly: boolean;
+}
+
+async function interactiveModelMenu(options: MenuOption[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    let selectedIndex = 0;
+    let isRawMode = false;
+
+    const renderMenu = () => {
+      // Clear screen and move cursor to top
+      process.stdout.write("\x1b[2J\x1b[H");
+
+      console.log(`${BOLD}Select AI Model${RESET}`);
+      console.log(`${DIM}Use ↑↓ arrows to navigate, Enter to select, Ctrl+C to cancel${RESET}\n`);
+
+      options.forEach((option, index) => {
+        const isSelected = index === selectedIndex;
+        const marker = isSelected ? `${GREEN}▶${RESET}` : " ";
+        const apiKeyIndicator = option.requiresApiKey ? `${YELLOW}🔑${RESET}` : `${GREEN}✓${RESET}`;
+        const localIndicator = option.localOnly ? `${CYAN}🏠${RESET}` : "";
+
+        const line = `${marker} ${option.label} ${DIM}(${option.provider})${RESET} ${DIM}${option.cost}/1k${RESET} ${apiKeyIndicator}${localIndicator}`;
+        console.log(line);
+      });
+
+      console.log(`\n${DIM}Selected: ${options[selectedIndex]?.label ?? "None"}${RESET}`);
+    };
+
+    const cleanup = () => {
+      if (isRawMode) {
+        process.stdin.setRawMode(false);
+        process.stdin.removeListener("data", handleKeypress);
+      }
+      process.stdout.write("\x1b[?25h"); // Show cursor
+    };
+
+    const handleKeypress = (data: Buffer) => {
+      const key = data.toString();
+
+      if (key === "\u0003" || key === "\u0004") {
+        // Ctrl+C or Ctrl+D
+        cleanup();
+        resolve(null);
+        return;
+      }
+
+      if (key === "\r" || key === "\n") {
+        // Enter
+        cleanup();
+        resolve(options[selectedIndex]?.id ?? null);
+        return;
+      }
+
+      if (key === "\u001b[A") {
+        // Up arrow
+        selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : options.length - 1;
+        renderMenu();
+      } else if (key === "\u001b[B") {
+        // Down arrow
+        selectedIndex = selectedIndex < options.length - 1 ? selectedIndex + 1 : 0;
+        renderMenu();
+      }
+    };
+
+    // Setup raw mode for arrow key detection
+    process.stdout.write("\x1b[?25l"); // Hide cursor
+    process.stdin.setRawMode(true);
+    isRawMode = true;
+    process.stdin.on("data", handleKeypress);
+
+    renderMenu();
+  });
+}
+
+async function promptForApiKey(provider: {
+  label: string;
+  envVars: string[];
+}): Promise<string | null> {
+  return new Promise((resolve) => {
+    console.log(`\n${YELLOW}API Key Required${RESET}`);
+    console.log(`${DIM}Provider: ${provider.label}${RESET}`);
+    console.log(`${DIM}Set one of: ${provider.envVars.join(", ")}${RESET}`);
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true,
     });
 
-    return `${GREEN}Added${RESET} ${resolved} ${DIM}(${lineCount} lines)${RESET}`;
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    return `${RED}Error reading file: ${message}${RESET}`;
+    rl.question(
+      `${CYAN}Enter API key${RESET} ${DIM}(or press Enter to skip)${RESET}: `,
+      (answer: string) => {
+        rl.close();
+        const trimmed = answer.trim();
+        resolve(trimmed || null);
+      },
+    );
+
+    // Handle Ctrl+C
+    rl.on("SIGINT", () => {
+      rl.close();
+      resolve(null);
+    });
+  });
+}
+
+async function addCommand(args: string, state: ReplState): Promise<string> {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    // Show numbered list with PDSE previews
+    const files = (await getAllFiles(state.projectRoot)).filter(
+      (f): f is string => typeof f === "string",
+    );
+    state.lastFileList = files.sort((a, b) => a.localeCompare(b)); // Sort for consistency
+    const lines = [`${BOLD}Files in project (${files.length}):${RESET}`, ""];
+
+    const limit = Math.min(files.length, 30); // Limit display to avoid overwhelming
+    for (let i = 0; i < limit; i++) {
+      const relPath = relative(state.projectRoot, files[i]!);
+      const pdse = await getPDSEScore(files[i]!, state);
+      const color = pdse >= 80 ? GREEN : pdse >= 60 ? YELLOW : RED;
+      lines.push(
+        `  ${CYAN}${(i + 1).toString().padStart(3)}${RESET} ${color}${pdse.toFixed(0).padEnd(3)}${RESET} ${relPath}`,
+      );
+    }
+
+    if (files.length > 30) {
+      lines.push(`  ${DIM}... and ${files.length - 30} more (use /add <search> to filter)${RESET}`);
+    }
+    lines.push("");
+    lines.push(
+      `${DIM}Type /add <number> to add a file, or /add <search> to filter by name${RESET}`,
+    );
+    return lines.join("\n");
+  } else if (/^\d+$/.test(trimmed)) {
+    // Select file by number
+    const index = parseInt(trimmed) - 1;
+    if (!state.lastFileList || index < 0 || index >= state.lastFileList.length) {
+      return `${RED}Invalid number: ${trimmed}. Run /add with no arguments to see the list.${RESET}`;
+    }
+    const file = state.lastFileList[index];
+    if (!file) {
+      return `${RED}Invalid file at index ${index} (file list may have changed)${RESET}`;
+    }
+    const resolved = file;
+    try {
+      const content = await readFile(resolved, "utf-8");
+      const lineCount = content.split("\n").length;
+
+      if (!state.session.activeFiles.includes(resolved)) {
+        state.session.activeFiles.push(resolved);
+      }
+
+      // Add as a system message so the agent has the context
+      state.session.messages.push({
+        id: randomUUID(),
+        role: "system",
+        content: `File added to context: ${resolved}\n\n\`\`\`\n${content}\n\`\`\``,
+        timestamp: new Date().toISOString(),
+      });
+
+      return `${GREEN}Added${RESET} ${relative(state.projectRoot, resolved)} ${DIM}(${lineCount} lines)${RESET}`;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return `${RED}Error reading file: ${message}${RESET}`;
+    }
+  } else {
+    // Filter by search string (case-insensitive)
+    const files = (await getAllFiles(state.projectRoot))
+      .filter((f): f is string => typeof f === "string")
+      .filter((f) => relative(state.projectRoot, f).toLowerCase().includes(trimmed.toLowerCase()));
+    state.lastFileList = files;
+
+    const lines = [`${BOLD}Files matching "${trimmed}" (${files.length}):${RESET}`, ""];
+
+    const limit = Math.min(files.length, 30);
+    for (let i = 0; i < limit; i++) {
+      const relPath = relative(state.projectRoot, files[i]!);
+      const pdse = await getPDSEScore(files[i]!, state);
+      const color = pdse >= 80 ? GREEN : pdse >= 60 ? YELLOW : RED;
+      lines.push(
+        `  ${CYAN}${(i + 1).toString().padStart(3)}${RESET} ${color}${pdse.toFixed(0).padEnd(3)}${RESET} ${relPath}`,
+      );
+    }
+
+    if (files.length > 30) {
+      lines.push(`  ${DIM}... and ${files.length - 30} more${RESET}`);
+    }
+    lines.push("");
+    lines.push(`${DIM}Type /add <number> to add a file${RESET}`);
+    return lines.join("\n");
   }
+}
+
+async function browseCommand(args: string, state: ReplState): Promise<string> {
+  const trimmed = args.trim();
+  let files: string[];
+
+  if (!trimmed) {
+    files = (await getAllFiles(state.projectRoot)).filter(
+      (f): f is string => typeof f === "string",
+    );
+  } else {
+    files = (await getAllFiles(state.projectRoot))
+      .filter((f): f is string => typeof f === "string")
+      .filter((f) => relative(state.projectRoot, f).toLowerCase().includes(trimmed.toLowerCase()));
+  }
+
+  files.sort((a, b) => a.localeCompare(b));
+
+  const lines = [
+    `${BOLD}Browsing ${trimmed ? `files matching "${trimmed}"` : "project files"} (${files.length}):${RESET}`,
+    "",
+  ];
+
+  const limit = Math.min(files.length, 20); // More conservative limit for browse
+  for (let i = 0; i < limit; i++) {
+    const relPath = relative(state.projectRoot, files[i]!);
+    const pdse = await getPDSEScore(files[i]!, state);
+    const color = pdse >= 80 ? GREEN : pdse >= 60 ? YELLOW : RED;
+    lines.push(
+      `  ${CYAN}${(i + 1).toString().padStart(3)}${RESET} ${color}${pdse.toFixed(0).padEnd(3)}${RESET} ${relPath}`,
+    );
+  }
+
+  if (files.length > 20) {
+    lines.push(`  ${DIM}... and ${files.length - 20} more${RESET}`);
+  }
+
+  return lines.join("\n");
 }
 
 async function dropCommand(args: string, state: ReplState): Promise<string> {
@@ -2699,7 +3476,10 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
   }
 
   // Get the code to autoforge from the last edited file or the first active file
-  const targetFile = state.lastEditFile ?? state.session.activeFiles[0]!;
+  const targetFile = state.lastEditFile ?? state.session.activeFiles[0];
+  if (!targetFile) {
+    return `${RED}No file to autoforge. Edit a file first or specify one with /add${RESET}`;
+  }
   const resolvedTargetFile = resolve(state.projectRoot, targetFile);
   const displayTargetFile = relative(state.projectRoot, resolvedTargetFile) || resolvedTargetFile;
   let code: string;
@@ -3307,7 +4087,17 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
   });
   reportAcc.beginEntry(goal, "forge");
 
-  process.stdout.write(`\n${GREEN}${BOLD}Forging...${RESET} ${DIM}${goal}${RESET}\n\n`);
+  // Initialize progress tree for forge phases - all phases are executed in sequence in the agent loop
+  const phaseNodes: ProgressNode[] = [
+    { name: "Plan", status: "pending", progress: 0 },
+    { name: "Execute", status: "pending", progress: 0 },
+    { name: "Verify", status: "pending", progress: 0 },
+  ];
+
+  const progressDisplay = startProgressDisplay(
+    `${GREEN}${BOLD}Forging...${RESET} ${DIM}${goal}${RESET}`,
+    phaseNodes,
+  );
 
   let result = "";
   let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined;
@@ -3470,6 +4260,15 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
       timestamp: new Date().toISOString(),
     });
 
+    // Update progress: all phases complete
+    phaseNodes.forEach((node) => {
+      node.status = "complete";
+      node.progress = 100;
+    });
+    phaseNodes[phaseNodes.length - 1].pdseScore = pdseFailures.length > 0 ? 60 : 90; // Verify phase shows overall score
+    progressDisplay.update(phaseNodes);
+    progressDisplay.end();
+
     result = `\n${GREEN}${BOLD}Forged.${RESET}`;
 
     if (pdseFailures.length > 0) {
@@ -3480,6 +4279,15 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+
+    // Update progress: mark phases as failed
+    phaseNodes.forEach((node) => {
+      node.status = "failed";
+      node.progress = 0;
+    });
+    progressDisplay.update(phaseNodes);
+    progressDisplay.end();
+
     reportAcc.completeEntry({
       status: "failed",
       summary: "Forge failed.",
@@ -3768,8 +4576,16 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     },
   }));
 
-  process.stdout.write(
-    `\n${YELLOW}${BOLD}Party Autoforge${RESET} ${DIM}(isolated worktrees per lane)${RESET}\n\n`,
+  // Initialize progress tree for party lanes
+  const laneNodes: ProgressNode[] = lanes.map((lane) => ({
+    name: lane,
+    status: completedLaneNames.includes(lane) ? "complete" : "pending",
+    pdseScore: completedLaneNames.includes(lane) ? 90 : undefined,
+  }));
+
+  const progressDisplay = startProgressDisplay(
+    `${YELLOW}${BOLD}Party Autoforge${RESET} ${DIM}(isolated worktrees per lane)${RESET}`,
+    laneNodes,
   );
 
   // D-11 Run Report: accumulator for autoforge party
@@ -3791,12 +4607,16 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       continue;
     }
 
+    // Update progress: mark lane as running
+    const laneIndex = lanes.indexOf(lane);
+    laneNodes[laneIndex].status = "running";
+    progressDisplay.update(laneNodes);
+
     const worktreeSessionId = `${state.session.id}-${lane}`;
     const branch = `danteparty/${state.session.id}/${lane}`;
 
     autoforgeReportAcc.beginEntry(lane, "party-autoforge");
     try {
-      process.stdout.write(`  ${DIM}creating worktree for ${lane}...${RESET}\n`);
       const worktree = createWorktree({
         branch,
         baseBranch,
@@ -3929,6 +4749,21 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         const failureMsg =
           `${lane}: ${scopeViolation ? "scope violation" : ""}${pdseFailures.length > 0 ? ` PDSE failed (${pdseFailures.join(", ")})` : ""}${!laneVerification.passed ? ` verification failed (${laneVerification.failedSteps.join(", ")})` : ""}`.trim();
         blockedLanes.push(failureMsg);
+
+        // Update progress: mark lane as failed
+        laneNodes[laneIndex].status = "failed";
+        if (pdseFailures.length > 0) {
+          const avgPdse =
+            pdseFailures.reduce((sum, f) => {
+              const match = f.match(/(\d+)/);
+              return match ? sum + parseInt(match[1], 10) : sum;
+            }, 0) / pdseFailures.length;
+          laneNodes[laneIndex].pdseScore = avgPdse;
+        } else {
+          laneNodes[laneIndex].pdseScore = 0;
+        }
+        progressDisplay.update(laneNodes);
+
         autoforgeReportAcc.completeEntry({
           status: "failed",
           summary: `Lane ${lane} blocked.`,
@@ -4023,6 +4858,12 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           blockedLanes.push(
             `post-merge gate failed after ${lane} (${postMergeVerification.failedSteps.join(", ")})`,
           );
+
+          // Update progress: mark lane as failed due to post-merge issues
+          laneNodes[laneIndex].status = "failed";
+          laneNodes[laneIndex].pdseScore = 0; // post-merge failure is critical
+          progressDisplay.update(laneNodes);
+
           break;
         }
       } else {
@@ -4034,6 +4875,26 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         status: "complete",
         summary: `Lane ${lane} merged successfully. ${uniqueChangedFiles.length} files changed.`,
       });
+
+      // Update progress: mark lane as complete with PDSE score
+      laneNodes[laneIndex].status = "complete";
+      if (uniqueChangedFiles.length > 0) {
+        const scores: number[] = [];
+        for (const file of uniqueChangedFiles) {
+          try {
+            const content = await readFile(resolve(worktree.directory, file), "utf-8");
+            const score = runLocalPDSEScorer(content, worktree.directory);
+            scores.push(score.overall > 1 ? score.overall : score.overall * 100);
+          } catch {
+            scores.push(50); // default for unreadable files
+          }
+        }
+        laneNodes[laneIndex].pdseScore =
+          scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 80;
+      } else {
+        laneNodes[laneIndex].pdseScore = 85; // no changes is still good
+      }
+      progressDisplay.update(laneNodes);
 
       // Save checkpoint after each lane
       await checkpointMgr.createCheckpoint({
@@ -4058,6 +4919,12 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       blockedLanes.push(`${lane}: ${errMsg}`);
+
+      // Update progress: mark lane as failed due to exception
+      laneNodes[laneIndex].status = "failed";
+      laneNodes[laneIndex].pdseScore = 0; // exceptions mean major failure
+      progressDisplay.update(laneNodes);
+
       autoforgeReportAcc.completeEntry({
         status: "failed",
         summary: `Lane ${lane} threw an error.`,
@@ -4067,6 +4934,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   }
 
   checkpointMgr.stopPeriodicCheckpoints();
+  progressDisplay.end();
 
   // Final verification using RecoveryEngine
   const finalVerification = recoveryEng.runRepoRootVerification(state.projectRoot);
@@ -5566,24 +6434,59 @@ function formatThinkChain(
 async function thinkCommand(args: string, state: ReplState): Promise<string> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
   const sub = parts[0]?.toLowerCase() ?? "";
+  const subSub = parts[1]?.toLowerCase() ?? "";
   const isSession = parts.includes("--session");
 
   if (!sub) {
     const current = state.reasoningOverride ?? "auto";
     const budget = state.lastThinkingBudget;
     const chain = state.reasoningChain;
+    const displayMode = state.state.thinkingDisplayMode ?? "spinner";
     return [
       `${BOLD}Reasoning Effort${RESET}`,
       `  Current tier: ${formatThinkTier(current)}`,
+      `  Display mode: ${displayMode}`,
       `  Mode: ${state.reasoningOverride ? "manual override" : "automatic (decideTier)"}`,
       `  Scope: ${state.reasoningOverrideSession ? "session" : "next prompt only"}`,
       budget !== undefined ? `  Last thinking budget: ${budget.toLocaleString()} tokens` : "",
       `  Chain depth: ${chain?.getHistory().length ?? 0} steps`,
       "",
-      `  ${DIM}Usage: /think [quick|deep|expert|auto] [--session]${RESET}`,
+      `  ${DIM}Usage: /think [quick|deep|expert|auto] [--session] | display <mode> | stats | chain [N]${RESET}`,
     ]
       .filter(Boolean)
       .join("\n");
+  }
+
+  if (sub === "display") {
+    if (!subSub) {
+      const current = state.state.thinkingDisplayMode ?? "spinner";
+      return [
+        `${BOLD}Thinking Display Mode${RESET}`,
+        `  Current mode: ${current}`,
+        "",
+        `${BOLD}Available modes:${RESET}`,
+        `  ${GREEN}spinner${RESET}      - Show animated spinner ┌${RESET}`,
+        `  ${YELLOW}progress-bar${RESET} - Show progress bar with percentage`,
+        `  ${RED}disabled${RESET}     - Disable thinking display entirely`,
+        `  ${CYAN}compact${RESET}     - Show compact indicator (…)`,
+        "",
+        `  ${DIM}Usage: /think display <spinner|progress-bar|disabled|compact>${RESET}`,
+      ].join("\n");
+    }
+
+    const validModes = ["spinner", "progress-bar", "disabled", "compact"];
+    if (!validModes.includes(subSub)) {
+      return `${RED}Invalid mode: ${subSub}. Options: ${validModes.join(", ")}${RESET}`;
+    }
+
+    state.state.thinkingDisplayMode = subSub as "spinner" | "progress-bar" | "disabled" | "compact";
+    await updateStateYaml(state.projectRoot, {
+      thinkingDisplayMode: subSub as "spinner" | "progress-bar" | "disabled" | "compact",
+    });
+
+    return `${GREEN}Thinking display mode set to ${BOLD}${subSub}${RESET}${GREEN}${
+      subSub === "disabled" ? " (thinking indicators hidden)" : ""
+    }${RESET}`;
   }
 
   if (sub === "stats") return formatThinkStats(state.reasoningChain);
@@ -6380,6 +7283,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "core",
   },
   {
+    name: "tutorial",
+    description: "Interactive tutorials for beginners (magic-basics, party-advanced, etc.)",
+    usage: "/tutorial [<topic>]",
+    handler: tutorialCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
     name: "magic",
     description: "Build something \u2014 describe what you want in plain language",
     usage: "/magic <what to build>",
@@ -6413,17 +7324,33 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "model",
-    description: "Switch model mid-session",
-    usage: "/model <id>",
+    description: "Switch model mid-session or select interactively",
+    usage: "/model <id> or /model select",
     handler: modelCommand,
     tier: 1,
     category: "core",
   },
   {
+    name: "macro",
+    description: "Record, play, and manage macros of slash commands",
+    usage: "/macro <record <name>|stop|play <name>|list>",
+    handler: macroCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
     name: "add",
-    description: "Add file to conversation context",
-    usage: "/add <file>",
+    description: "Add file to conversation context (shows fuzzy finder if no args)",
+    usage: "/add [file|<number>|<search>]",
     handler: addCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "browse",
+    description: "Browse project files with PDSE previews (read-only)",
+    usage: "/browse [<search>]",
+    handler: browseCommand,
     tier: 1,
     category: "core",
   },
@@ -6895,8 +7822,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "think",
-    description: "Control reasoning effort tier for next prompt or entire session",
-    usage: "/think [quick|deep|expert|auto] [--session] | stats | chain [N]",
+    description: "Control reasoning effort tier and thinking display mode for session",
+    usage: "/think [quick|deep|expert|auto] [--session] | display <mode> | stats | chain [N]",
     handler: thinkCommand,
     tier: 2,
     category: "advanced",
@@ -7141,7 +8068,15 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
     return `${YELLOW}/${commandName} is unlocked after 3 successful sessions.${RESET}\n${DIM}Complete ${remaining} more ${remaining === 1 ? "session" : "sessions"} with /magic to unlock advanced features.${RESET}`;
   }
 
-  return nativeCommand.handler(args, state);
+  const result = await nativeCommand.handler(args, state);
+
+  // Record macro step if recording is active (only for native commands)
+  if (state.macroRecording && commandName !== "macro") {
+    // Don't record macro commands themselves to avoid recursion
+    state.macroRecordingSteps.push({ type: "slash", value: withoutSlash });
+  }
+
+  return result;
 }
 
 /**

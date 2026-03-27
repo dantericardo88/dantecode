@@ -16,6 +16,43 @@ export const BOLD = "\x1b[1m";
 export const RESET = "\x1b[0m";
 
 // ----------------------------------------------------------------------------
+/**
+ * Display thinking indicator based on mode.
+ * @param mode The thinking display mode to use
+ * @param budget Remaining thinking budget (for progress-bar mode)
+ */
+export function displayThinking(
+  mode: "spinner" | "progress-bar" | "disabled" | "compact",
+  budget?: number,
+): void {
+  if (mode === "disabled") {
+    return; // No output
+  }
+
+  let output = "";
+  if (mode === "spinner") {
+    output = `${DIM}┌ Thinking...${RESET}\n`;
+  } else if (mode === "progress-bar") {
+    if (budget !== undefined && budget > 0) {
+      const width = 20; // Fixed width for progress bar
+      const pct = Math.min(1, Math.max(0, budget / 10000)); // Assume 10k max for demonstration
+      const filled = Math.round(pct * width);
+      const empty = width - filled;
+      const bar = `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
+      output = `${DIM}${bar} ${Math.round(pct * 100)}% tokens remaining${RESET}\n`;
+    } else {
+      output = `${DIM}[░░░░░░░░░░░░░░░░░░░░] Thinking...${RESET}\n`;
+    }
+  } else if (mode === "compact") {
+    output = `${DIM}(…)${RESET}\n`;
+  }
+
+  if (output) {
+    process.stdout.write(output);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Constants
 // ----------------------------------------------------------------------------
 

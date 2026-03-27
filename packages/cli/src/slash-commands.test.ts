@@ -187,6 +187,8 @@ function makeState(projectRoot: string): ReplState {
     memoryOrchestrator: null,
     verificationTrendTracker: null,
     lastSessionPdseResults: [],
+    pdseCache: new Map(),
+    lastFileList: [],
     planMode: false,
     currentPlan: null,
     planApproved: false,
@@ -194,6 +196,9 @@ function makeState(projectRoot: string): ReplState {
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    macroRecording: false,
+    macroRecordingName: null,
+    macroRecordingSteps: [],
     theme: "default",
   };
 }
@@ -1287,7 +1292,9 @@ describe("/undo, /restore, and /timeline recovery flow", () => {
 
     expect(output).toContain("Recovery Timeline");
     expect(output).toContain("file_write");
-    expect(output).toContain(filePathSuffix.replace(/\\/g, "/").includes("/") ? "src" : filePathSuffix);
+    expect(output).toContain(
+      filePathSuffix.replace(/\\/g, "/").includes("/") ? "src" : filePathSuffix,
+    );
     expect(output).toContain("before:snap-before-app");
     expect(output).toContain("after:snap-after-app");
   });

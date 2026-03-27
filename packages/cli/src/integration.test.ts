@@ -131,6 +131,8 @@ describe("CLI Integration", () => {
         memoryOrchestrator: null,
         verificationTrendTracker: null,
         lastSessionPdseResults: [],
+        pdseCache: new Map(),
+        lastFileList: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,
@@ -138,6 +140,9 @@ describe("CLI Integration", () => {
         planExecutionInProgress: false,
         planExecutionResult: null,
         approvalMode: "default",
+        macroRecording: false,
+        macroRecordingName: null,
+        macroRecordingSteps: [],
         theme: "default",
       };
 
@@ -192,6 +197,8 @@ describe("CLI Integration", () => {
         memoryOrchestrator: null,
         verificationTrendTracker: null,
         lastSessionPdseResults: [],
+        pdseCache: new Map(),
+        lastFileList: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,
@@ -199,6 +206,9 @@ describe("CLI Integration", () => {
         planExecutionInProgress: false,
         planExecutionResult: null,
         approvalMode: "default",
+        macroRecording: false,
+        macroRecordingName: null,
+        macroRecordingSteps: [],
         theme: "default",
         _bgRunner: {
           hasWorkFn: () => true,
@@ -256,6 +266,8 @@ describe("CLI Integration", () => {
         memoryOrchestrator: null,
         verificationTrendTracker: null,
         lastSessionPdseResults: [],
+        pdseCache: new Map(),
+        lastFileList: [],
         planMode: false,
         currentPlan: null,
         planApproved: false,
@@ -263,6 +275,9 @@ describe("CLI Integration", () => {
         planExecutionInProgress: false,
         planExecutionResult: null,
         approvalMode: "default",
+        macroRecording: false,
+        macroRecordingName: null,
+        macroRecordingSteps: [],
         theme: "default",
       };
 

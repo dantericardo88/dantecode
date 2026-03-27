@@ -394,6 +394,10 @@ export async function initializeState(
         ".dantecode/worktrees/",
       ],
     },
+    progressiveDisclosure: {
+      unlocked: false,
+    },
+    thinkingDisplayMode: "spinner",
   };
 
   await writeStateYaml(projectRoot, defaultState);

@@ -752,6 +752,7 @@ export interface DanteCodeState {
   progressiveDisclosure: {
     unlocked: boolean;
   };
+  thinkingDisplayMode: "spinner" | "progress-bar" | "disabled" | "compact";
 }
 
 // ----------------------------------------------------------------------------

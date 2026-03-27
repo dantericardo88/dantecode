@@ -191,6 +191,8 @@ function makeReplState(overrides?: Partial<ReplState>): ReplState {
     memoryOrchestrator: null,
     verificationTrendTracker: null,
     lastSessionPdseResults: [],
+    pdseCache: new Map(),
+    lastFileList: [],
     planMode: false,
     currentPlan: null,
     planApproved: false,
@@ -198,6 +200,9 @@ function makeReplState(overrides?: Partial<ReplState>): ReplState {
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    macroRecording: false,
+    macroRecordingName: null,
+    macroRecordingSteps: [],
     theme: "default",
     ...overrides,
   };

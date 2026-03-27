@@ -312,6 +312,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     modelAdaptationStore: null, // D-12: lazy-init below
     verificationTrendTracker: null, // lazy-init: created on first PDSE recording or /trend command
     lastSessionPdseResults: [],
+    pdseCache: new Map(),
+    lastFileList: [],
     reasoningOverrideSession: false,
     theme: savedTheme,
     planMode: false,
@@ -321,6 +323,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "review",
+    macroRecording: false,
+    macroRecordingName: null,
+    macroRecordingSteps: [],
   };
 
   // --plan-first: automatically enter plan mode
@@ -493,9 +498,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         mode: replState.approvalMode,
         restoredAt: replState.lastRestoreEvent?.restoredAt,
         restoreSummary: replState.lastRestoreEvent?.restoreSummary,
-        pdseResults: replState.lastSessionPdseResults.length > 0
-          ? replState.lastSessionPdseResults
-          : undefined,
+        pdseResults:
+          replState.lastSessionPdseResults.length > 0
+            ? replState.lastSessionPdseResults
+            : undefined,
       }).catch(() => {});
     }
   };
@@ -508,9 +514,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   });
   process.once("unhandledRejection", async (reason) => {
     const msg = reason instanceof Error ? reason.message : String(reason);
-    process.stderr.write(
-      `\n[DanteCode] Unhandled rejection: ${msg}\nWriting crash report...\n`,
-    );
+    process.stderr.write(`\n[DanteCode] Unhandled rejection: ${msg}\nWriting crash report...\n`);
     await _writeCrashReport();
     process.exit(1);
   });
@@ -644,9 +648,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         // Pass accumulated PDSE results so the report includes verification truth,
         // not just mutation counts. This satisfies the core product trust promise
         // for plain REPL sessions (gap FC-2 / gap #1).
-        pdseResults: replState.lastSessionPdseResults.length > 0
-          ? replState.lastSessionPdseResults
-          : undefined,
+        pdseResults:
+          replState.lastSessionPdseResults.length > 0
+            ? replState.lastSessionPdseResults
+            : undefined,
       });
       if (reportPath && !options.silent) {
         process.stdout.write(`${DIM}Report saved: ${reportPath}${RESET}\n`);
