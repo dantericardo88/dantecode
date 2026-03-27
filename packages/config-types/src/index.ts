@@ -749,6 +749,9 @@ export interface DanteCodeState {
   sessionHistory: SessionHistoryEntry[];
   lessons: LessonsConfig;
   project: ProjectConfig;
+  progressiveDisclosure: {
+    unlocked: boolean;
+  };
 }
 
 // ----------------------------------------------------------------------------

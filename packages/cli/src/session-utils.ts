@@ -3,9 +3,12 @@ import { join } from "node:path";
 
 /**
  * Count sessions with meaningful interaction (>= 2 messages = at least one exchange).
- * Returns 0 if sessions directory doesn't exist.
+ * Returns an object with the count and unlocked status (count >= 3).
+ * Returns { count: 0, unlocked: false } if sessions directory doesn't exist.
  */
-export async function countSuccessfulSessions(projectRoot: string): Promise<number> {
+export async function countSuccessfulSessions(
+  projectRoot: string,
+): Promise<{ count: number; unlocked: boolean }> {
   try {
     const sessionsDir = join(projectRoot, ".dantecode", "sessions");
     const files = await readdir(sessionsDir);
@@ -22,8 +25,8 @@ export async function countSuccessfulSessions(projectRoot: string): Promise<numb
         /* skip corrupt files */
       }
     }
-    return count;
+    return { count, unlocked: count >= 3 };
   } catch {
-    return 0;
+    return { count: 0, unlocked: false };
   }
 }

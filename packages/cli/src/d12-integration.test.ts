@@ -612,8 +612,8 @@ describe("D-12.5: Progressive disclosure", () => {
 
   it("countSuccessfulSessions returns 0 when no sessions directory exists", async () => {
     mockReaddir.mockRejectedValue({ code: "ENOENT" });
-    const count = await countSuccessfulSessions("/nonexistent");
-    expect(count).toBe(0);
+    const result = await countSuccessfulSessions("/nonexistent");
+    expect(result).toEqual({ count: 0, unlocked: false });
   });
 
   it("countSuccessfulSessions counts only sessions with >= 2 messages", async () => {
@@ -624,7 +624,7 @@ describe("D-12.5: Progressive disclosure", () => {
       )
       .mockResolvedValueOnce(JSON.stringify({ messages: [{ role: "user" }] }))
       .mockResolvedValueOnce(JSON.stringify({ messages: [] }));
-    const count = await countSuccessfulSessions("/project");
-    expect(count).toBe(1);
+    const result = await countSuccessfulSessions("/project");
+    expect(result).toEqual({ count: 1, unlocked: false });
   });
 });

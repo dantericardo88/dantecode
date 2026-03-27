@@ -40,6 +40,7 @@ import {
   deriveExpectations,
   globalApprovalGateway,
   globalToolScheduler,
+  updateStateYaml,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -845,8 +846,8 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
   const showAll = args.trim() === "--all";
 
   // D-12: Count successful sessions for progressive disclosure unlock
-  const sessionCount = await countSuccessfulSessions(state.projectRoot);
-  const advancedUnlocked = showAll || sessionCount >= 3;
+  const sessionStats = await countSuccessfulSessions(state.projectRoot);
+  const advancedUnlocked = showAll || sessionStats.unlocked;
 
   if (!advancedUnlocked) {
     // Tier 1 only — the essential commands new users need
@@ -854,6 +855,15 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
     const lines = ["", `${BOLD}Commands${RESET}`, ""];
     for (const cmd of tier1) {
       lines.push(`  ${YELLOW}${cmd.usage.padEnd(24)}${RESET} ${DIM}${cmd.description}${RESET}`);
+    }
+
+    // Show advanced commands as available after unlock
+    const advanced = SLASH_COMMANDS.filter((c) => c.tier === 2);
+    if (advanced.length > 0) {
+      lines.push(`${BOLD}Advanced (unlocked after 3 successful sessions):${RESET}`);
+      for (const cmd of advanced) {
+        lines.push(`  ${DIM}${cmd.usage.padEnd(24)}${RESET} ${DIM}${cmd.description}${RESET}`);
+      }
     }
     lines.push("");
 
@@ -873,9 +883,9 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
       lines.push("");
     }
 
-    if (sessionCount > 0) {
+    if (sessionStats.count > 0) {
       lines.push(
-        `${DIM}${sessionCount}/3 sessions completed \u2014 ${3 - sessionCount} more to unlock all commands.${RESET}`,
+        `${DIM}${sessionStats.count}/3 sessions completed \u2014 ${3 - sessionStats.count} more to unlock advanced commands.${RESET}`,
       );
     }
     lines.push(
@@ -1226,7 +1236,7 @@ async function undoCommand(_args: string, state: ReplState): Promise<string> {
 
       const restoredTarget = restorable.filePath
         ? relative(state.projectRoot, restorable.filePath) || restorable.filePath
-        : restored.targetPath ?? restorable.snapshotId;
+        : (restored.targetPath ?? restorable.snapshotId);
       const summary = `Restored ${restoredTarget} from snapshot ${restorable.snapshotId}.`;
       rememberRestore(state, summary);
       state.lastEditFile = null;
@@ -1261,8 +1271,9 @@ async function restoreCommand(args: string, state: ReplState): Promise<string> {
 
   try {
     const { debugRestore } = await loadTrailBridge();
-    const restorable =
-      isPathLikeRestoreTarget(target) ? await findLatestRestorableSnapshot(state, target) : null;
+    const restorable = isPathLikeRestoreTarget(target)
+      ? await findLatestRestorableSnapshot(state, target)
+      : null;
     const restoreTarget = restorable?.snapshotId ?? target;
     const result = await debugRestore(restoreTarget);
 
@@ -1273,7 +1284,7 @@ async function restoreCommand(args: string, state: ReplState): Promise<string> {
     const restoredTarget =
       restorable?.filePath != null
         ? relative(state.projectRoot, restorable.filePath) || restorable.filePath
-        : result.targetPath ?? target;
+        : (result.targetPath ?? target);
     const summary = `Restored ${restoredTarget} from ${restoreTarget}.`;
     rememberRestore(state, summary);
     return `${GREEN}Restored${RESET} ${restoredTarget} from ${restoreTarget}`;
@@ -3063,6 +3074,7 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
 
   let result = "";
   let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined;
+  const pdseFailures: string[] = [];
   try {
     const magicSession = cloneSessionForTask(
       state.session,
@@ -3103,8 +3115,90 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
       }
     }
 
+    // D-12: Progressive disclosure unlock
+    try {
+      const isUndefined = !state.state.progressiveDisclosure;
+      const isAlreadyUnlocked = state.state.progressiveDisclosure?.unlocked;
+      if (!isUndefined && !isAlreadyUnlocked) {
+        const sessionStats = await countSuccessfulSessions(state.projectRoot);
+        if (sessionStats.unlocked) {
+          await updateStateYaml(state.projectRoot, {
+            progressiveDisclosure: { unlocked: true },
+          });
+        }
+      }
+    } catch {
+      // Non-fatal, continue
+    }
+
+    // Memory auto-retain
+    if (state.memoryOrchestrator) {
+      try {
+        const toolCalls = loopResult.messages.filter((m) => m.toolUse).length;
+        let avgPdse = 0;
+        if (touchedFiles.length > 0) {
+          const scores: number[] = [];
+          for (const file of touchedFiles) {
+            const content = await readFile(file, "utf-8");
+            const score = runLocalPDSEScorer(content, state.projectRoot);
+            scores.push(score.overall > 1 ? score.overall : score.overall * 100);
+          }
+          avgPdse = scores.reduce((a, b) => a + b, 0) / scores.length;
+        }
+        const filesChanged = touchedFiles.map((p) => relative(state.projectRoot, p));
+        await state.memoryOrchestrator.memoryStore(
+          `round-${Date.now()}`,
+          {
+            toolCalls,
+            avgPdse,
+            filesChanged,
+          },
+          "session",
+          {
+            tags: ["auto-retain", "round"],
+            source: "magic-command",
+          },
+        );
+      } catch {
+        // Never blocks on error
+      }
+    }
+
+    // PDSE scoring on touched files
+    const threshold = state.state.pdse?.threshold ?? 85;
+    if (touchedFiles.length > 0) {
+      for (const file of touchedFiles) {
+        try {
+          const content = await readFile(file, "utf-8");
+          const score = runLocalPDSEScorer(content, state.projectRoot);
+          if (score.overall < threshold || !score.passedGate) {
+            const relPath = relative(state.projectRoot, file);
+            if (score.completeness < threshold) {
+              pdseFailures.push(`${relPath} Completeness ${score.completeness}/100`);
+            }
+            if (score.correctness < threshold) {
+              pdseFailures.push(`${relPath} Correctness ${score.correctness}/100`);
+            }
+            if (score.clarity < threshold) {
+              pdseFailures.push(`${relPath} Clarity ${score.clarity}/100`);
+            }
+            if (score.consistency < threshold) {
+              pdseFailures.push(`${relPath} Consistency ${score.consistency}/100`);
+            }
+            for (const v of score.violations) {
+              pdseFailures.push(
+                `${relPath} ${v.severity} ${v.line ? `line ${v.line}` : ""}: ${v.message}`,
+              );
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+
     reportAcc.completeEntry({
-      status: "complete",
+      status: pdseFailures.length > 0 ? "partial" : "complete",
       summary: assistantText.slice(0, 300),
     });
 
@@ -3128,6 +3222,13 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
     });
 
     result = `\n${GREEN}${BOLD}Done.${RESET}`;
+
+    if (pdseFailures.length > 0) {
+      result += `\n${YELLOW}PDSE Failures:${RESET}\n`;
+      for (const failure of pdseFailures) {
+        result += `  ${failure}\n`;
+      }
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     reportAcc.completeEntry({
@@ -3210,6 +3311,7 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
 
   let result = "";
   let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined;
+  const pdseFailures: string[] = [];
   try {
     const forgeSession = cloneSessionForTask(
       state.session,
@@ -3259,6 +3361,72 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
       }
     }
 
+    // Memory auto-retain
+    if (state.memoryOrchestrator) {
+      try {
+        const toolCalls = loopResult.messages.filter((m) => m.toolUse).length;
+        let avgPdse = 0;
+        if (touchedFiles.length > 0) {
+          const scores: number[] = [];
+          for (const file of touchedFiles) {
+            const content = await readFile(file, "utf-8");
+            const score = runLocalPDSEScorer(content, state.projectRoot);
+            scores.push(score.overall > 1 ? score.overall : score.overall * 100);
+          }
+          avgPdse = scores.reduce((a, b) => a + b, 0) / scores.length;
+        }
+        const filesChanged = touchedFiles.map((p) => relative(state.projectRoot, p));
+        await state.memoryOrchestrator.memoryStore(
+          `round-${Date.now()}`,
+          {
+            toolCalls,
+            avgPdse,
+            filesChanged,
+          },
+          "session",
+          {
+            tags: ["auto-retain", "round"],
+            source: "forge-command",
+          },
+        );
+      } catch {
+        // Never blocks on error
+      }
+    }
+
+    // PDSE scoring on touched files
+    const threshold = state.state.pdse?.threshold ?? 85;
+    if (touchedFiles.length > 0) {
+      for (const file of touchedFiles) {
+        try {
+          const content = await readFile(file, "utf-8");
+          const score = runLocalPDSEScorer(content, state.projectRoot);
+          if (score.overall < threshold || !score.passedGate) {
+            const relPath = relative(state.projectRoot, file);
+            if (score.completeness < threshold) {
+              pdseFailures.push(`${relPath} Completeness ${score.completeness}/100`);
+            }
+            if (score.correctness < threshold) {
+              pdseFailures.push(`${relPath} Correctness ${score.correctness}/100`);
+            }
+            if (score.clarity < threshold) {
+              pdseFailures.push(`${relPath} Clarity ${score.clarity}/100`);
+            }
+            if (score.consistency < threshold) {
+              pdseFailures.push(`${relPath} Consistency ${score.consistency}/100`);
+            }
+            for (const v of score.violations) {
+              pdseFailures.push(
+                `${relPath} ${v.severity} ${v.line ? `line ${v.line}` : ""}: ${v.message}`,
+              );
+            }
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+
     // GStack verification — forge always runs verification suite when configured
     let forgeStatus: "complete" | "partial" = "complete";
     let verificationSummary: string | undefined;
@@ -3269,15 +3437,18 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
           state.state.autoforge.gstackCommands,
           state.projectRoot,
         );
-        forgeStatus = allGStackPassed(gstackResults) ? "complete" : "partial";
+        const gstackPassed = allGStackPassed(gstackResults);
         verificationSummary = summarizeGStackResults(gstackResults);
+        forgeStatus = gstackPassed && pdseFailures.length === 0 ? "complete" : "partial";
       } catch {
-        /* non-fatal */
+        forgeStatus = pdseFailures.length === 0 ? "complete" : "partial";
       }
+    } else {
+      forgeStatus = pdseFailures.length === 0 ? "complete" : "partial";
     }
     const completionSummary = verificationSummary
-      ? `${assistantText.slice(0, 200)}\n\nVerification: ${verificationSummary}`
-      : assistantText.slice(0, 300);
+      ? `${assistantText.slice(0, 200)}\n\nVerification: ${verificationSummary}${pdseFailures.length > 0 ? `\nPDSE Failures: ${pdseFailures.length}` : ""}`
+      : `${assistantText.slice(0, 300)}${pdseFailures.length > 0 ? `\nPDSE Failures: ${pdseFailures.length}` : ""}`;
     reportAcc.completeEntry({ status: forgeStatus, summary: completionSummary });
 
     // D-12: Completion verification
@@ -3300,6 +3471,13 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
     });
 
     result = `\n${GREEN}${BOLD}Forged.${RESET}`;
+
+    if (pdseFailures.length > 0) {
+      result += `\n${YELLOW}PDSE Failures:${RESET}\n`;
+      for (const failure of pdseFailures) {
+        result += `  ${failure}\n`;
+      }
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     reportAcc.completeEntry({
@@ -4945,10 +5123,7 @@ async function exportCommand(args: string, state: ReplState): Promise<string> {
           );
         }
       }
-      lines.push(
-        "---",
-        "",
-      );
+      lines.push("---", "");
       for (const msg of state.session.messages) {
         const role =
           msg.role === "user"
@@ -6957,6 +7132,13 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
   const nativeCommand = SLASH_COMMANDS.find((c) => c.name === commandName);
   if (!nativeCommand) {
     return `${RED}Native command handler missing for /${commandName}.${RESET}`;
+  }
+
+  // Progressive disclosure: prevent tier 2 commands when not unlocked
+  if (nativeCommand.tier === 2 && !state.state.progressiveDisclosure?.unlocked) {
+    const sessionStats = await countSuccessfulSessions(state.projectRoot);
+    const remaining = 3 - sessionStats.count;
+    return `${YELLOW}/${commandName} is unlocked after 3 successful sessions.${RESET}\n${DIM}Complete ${remaining} more ${remaining === 1 ? "session" : "sessions"} with /magic to unlock advanced features.${RESET}`;
   }
 
   return nativeCommand.handler(args, state);
