@@ -50,14 +50,20 @@ export class UpliftOrchestrator {
     try {
       this.spawner.updateStatus(instance.id, "running");
 
-      const result = this.options.agentRunner
-        ? await this.options.agentRunner(role, objective, worktree.directory)
-        : `Task ${instance.id} queued in ${worktree.directory} (no agent runner configured)`;
+      if (!this.options.agentRunner) {
+        throw new Error(`No agent runner configured for role: ${role}`);
+      }
+
+      const result = await this.options.agentRunner(role, objective, worktree.directory);
 
       this.spawner.updateStatus(instance.id, "completed");
       return result;
     } catch (err: unknown) {
       this.spawner.updateStatus(instance.id, "failed");
+      // Re-throw configuration errors instead of catching them
+      if (err instanceof Error && err.message.includes("No agent runner configured")) {
+        throw err;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       return `Task ${instance.id} failed: ${msg}`;
     } finally {

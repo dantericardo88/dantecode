@@ -7,6 +7,7 @@ import { Router } from "./router.js";
 import { buildRoutes, type ServerContext, type SessionRecord } from "./routes.js";
 import { SessionEventEmitter } from "./session-emitter.js";
 import type { ParsedRequest } from "./router.js";
+import type { ModelProvider } from "@dantecode/config-types";
 
 function makeReq(
   method: "GET" | "POST" | "PUT" | "DELETE",
@@ -90,7 +91,7 @@ describe("serve routes truth surface", () => {
       activeFiles: [],
       readOnlyFiles: [],
       model: {
-        provider: "grok",
+        provider: "grok" as ModelProvider,
         modelId: "grok-3",
         maxTokens: 4096,
         temperature: 0.1,
@@ -126,7 +127,11 @@ describe("serve routes truth surface", () => {
           makeSession({
             mode: "apply",
             messages: [
-              { role: "user", content: "Show me the operator state", ts: "2026-03-26T12:02:00.000Z" },
+              {
+                role: "user",
+                content: "Show me the operator state",
+                ts: "2026-03-26T12:02:00.000Z",
+              },
             ],
           }),
         ],
@@ -213,9 +218,7 @@ describe("serve routes truth surface", () => {
     expect(body["commandHistory"]).toHaveLength(1);
     expect(body["timeline"]).toHaveLength(1);
     expect(body["artifactPaths"]).toEqual(["/tmp/dantecode/.dantecode/reports/run-1.md"]);
-    expect(body["receiptPaths"]).toEqual([
-      "/tmp/dantecode/.dantecode/receipts/skills/run-1.json",
-    ]);
+    expect(body["receiptPaths"]).toEqual(["/tmp/dantecode/.dantecode/receipts/skills/run-1.json"]);
   });
 
   it("POST /api/sessions/:id/command records truthful unavailable status when no command runner is wired", async () => {
@@ -267,8 +270,6 @@ describe("serve routes truth surface", () => {
     expect(body["output"]).toBe("Current approval mode: review");
     expect(session.commandHistory?.[0]?.status).toBe("completed");
     expect(session.artifactPaths).toContain("/tmp/dantecode/.dantecode/reports/run-2.md");
-    expect(session.receiptPaths).toContain(
-      "/tmp/dantecode/.dantecode/receipts/skills/run-2.json",
-    );
+    expect(session.receiptPaths).toContain("/tmp/dantecode/.dantecode/receipts/skills/run-2.json");
   });
 });

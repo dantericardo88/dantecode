@@ -10,6 +10,30 @@ import { SkillbookCheckpointRefSchema } from "./skillbook-types.js";
 import { SandboxAuditRefSchema } from "./sandbox-types.js";
 import { FearSetColumnNameSchema, FearSetRobustnessScoreSchema } from "./fearset-types.js";
 
+// ─── Apply Receipt Schema ──────────────────────────────────────────────────────
+
+/**
+ * Receipt from applying a step during execution.
+ * Wave 2 closure: tracks actual apply state rather than just step names.
+ */
+export const ApplyReceiptSchema = z.object({
+  /** Step identifier/name. */
+  stepId: z.string(),
+  /** Outcome of applying this step. */
+  state: z.enum(["success", "failed", "skipped"]),
+  /** Files affected by this step application. */
+  affectedFiles: z.array(z.string()).default([]),
+  /** Apply error if state === "failed". */
+  error: z.string().optional(),
+  /** Timestamp when step was applied. */
+  appliedAt: z
+    .string()
+    .datetime()
+    .default(() => new Date().toISOString()),
+  /** Verification outcome if step was verified. */
+  verification: z.enum(["passed", "failed"]).optional(),
+});
+
 // ─── FearSet trace ref ────────────────────────────────────────────────────────
 
 /**
@@ -71,6 +95,9 @@ export const DurableExecutionCheckpointSchema = z.object({
   sessionId: z.string().min(1),
   stepIndex: z.number().int().min(0),
   totalSteps: z.number().int().min(0).optional(),
+  // Wave 2 closure: completedStepReceipts track actual apply state/receipts, not just step names
+  completedStepReceipts: z.array(ApplyReceiptSchema).optional(),
+  // Legacy field for backward compatibility - deprecated in Wave 2
   completedSteps: z.array(z.string()).default([]),
   partialOutput: z.string().optional(),
   savedAt: z.string().datetime(),
@@ -78,8 +105,9 @@ export const DurableExecutionCheckpointSchema = z.object({
   runConfig: DurableExecutionRunConfigSchema.optional(),
   workspaceContext: CheckpointWorkspaceContextSchema.optional(),
 });
-export type DurableExecutionCheckpoint = z.infer<typeof DurableExecutionCheckpointSchema>;
 
+export type DurableExecutionCheckpoint = z.infer<typeof DurableExecutionCheckpointSchema>;
+export type ApplyReceipt = z.infer<typeof ApplyReceiptSchema>;
 export const CheckpointSchema = z.object({
   /** Unique ID for the checkpoint. */
   id: z.string().uuid(),

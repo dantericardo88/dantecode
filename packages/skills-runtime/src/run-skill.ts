@@ -9,17 +9,32 @@ export interface SkillVerification {
   summary?: string;
 }
 
+export interface FileReceipt {
+  filePath: string;
+  state: "success" | "failed" | "skipped";
+  action: "read" | "write" | "create" | "delete";
+  hash?: string; // Content hash for verification
+  error?: string; // Only present when state === "failed"
+}
+
+export interface ScriptResult {
+  commands: string[];
+  fileReceipts: FileReceipt[];
+  allSucceeded: boolean;
+}
+
 export interface RunSkillOptions {
   skill: DanteSkill;
   context: SkillRunContext;
-  /** Injectable executor for scripts (default: no-op for instruction-only) */
-  scriptRunner?: (scriptPath: string, context: SkillRunContext) => Promise<string[]>;
+  /** Injectable executor for scripts (returns commands run, optionally with file receipts for Wave 1 closure) */
+  scriptRunner?: (scriptPath: string, context: SkillRunContext) => Promise<ScriptResult | string[]>;
   verification?: SkillVerification;
 }
 
 async function finalizeSkillRun(
   context: SkillRunContext,
   result: SkillRunResult,
+  fileReceipts?: FileReceipt[],
 ): Promise<SkillRunResult> {
   const receipt = await persistSkillReceipt(
     {
@@ -32,6 +47,7 @@ async function finalizeSkillRun(
       verificationSummary: result.verificationSummary,
       artifactRefs: result.artifactRefs,
       ledgerRef: result.ledgerRef,
+      fileReceipts,
     },
   );
 
@@ -81,100 +97,113 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
       completedAt,
     };
 
-    return finalizeSkillRun(context, proposedResult);
+    return finalizeSkillRun(context, proposedResult, undefined);
   }
 
   try {
-    const commands = await opts.scriptRunner!(skill.scripts!, context);
+    const scriptOutput = await opts.scriptRunner!(skill.scripts!, context);
     const completedAt = new Date().toISOString();
     const verification = opts.verification;
 
-    if (verification?.outcome === "fail") {
-      return finalizeSkillRun(context, {
+    // Handle backward compatibility: scriptRunner can return string[] or ScriptResult
+    const scriptResult: ScriptResult = Array.isArray(scriptOutput)
+      ? { commands: scriptOutput, fileReceipts: [], allSucceeded: true }
+      : scriptOutput;
+
+    // Extract files from receipts, separating successful and failed
+    const successfulFiles = scriptResult.fileReceipts
+      .filter((receipt) => receipt.state === "success")
+      .map((receipt) => receipt.filePath);
+    const failedReceipts = scriptResult.fileReceipts.filter(
+      (receipt) => receipt.state === "failed",
+    );
+
+    // Determine overall state based on file receipts and verification
+    let finalState: SkillRunResult["state"];
+    let verificationOutcome: SkillRunResult["verificationOutcome"];
+    let failureReason: string | undefined;
+
+    if (verification?.outcome === "fail" || failedReceipts.length > 0) {
+      finalState = "failed";
+      verificationOutcome = "fail";
+      failureReason =
+        verification?.summary ??
+        (failedReceipts.length > 0
+          ? `SKILL-011: ${failedReceipts.length} file operations failed: ${failedReceipts.map((r) => `${r.filePath}: ${r.error}`).join("; ")}`
+          : `SKILL-009: verification failed after running ${scriptResult.commands.length} command(s).`);
+    } else if (verification?.outcome === "partial" || !scriptResult.allSucceeded) {
+      finalState = "partial";
+      verificationOutcome = "partial";
+      failureReason = verification?.summary ?? "Some file operations were skipped or incomplete";
+    } else if (verification?.outcome === "pass") {
+      finalState = "verified";
+      verificationOutcome = "pass";
+    } else {
+      finalState = "applied";
+      verificationOutcome = "skipped";
+    }
+
+    // Only mark as applied if we have successful file operations or verification passes
+    const hasAppliedState =
+      successfulFiles.length > 0 ||
+      verification?.outcome === "pass" ||
+      verification?.outcome === "partial";
+
+    if (!hasAppliedState && (finalState === "applied" || finalState === "verified")) {
+      finalState = "proposed";
+      verificationOutcome = "skipped";
+    }
+
+    return finalizeSkillRun(
+      context,
+      {
+        runId,
+        skillName: skill.name,
+        sourceType: skill.sourceType,
+        mode: context.mode,
+        state: finalState,
+        filesTouched: successfulFiles,
+        commandsRun: scriptResult.commands,
+        verificationOutcome,
+        verificationSummary: verification?.summary,
+        plainLanguageSummary:
+          finalState === "failed"
+            ? `Skill "${skill.name}" failed during execution.`
+            : finalState === "verified"
+              ? (verification?.summary ??
+                `Verified skill "${skill.name}" — ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`)
+              : finalState === "partial"
+                ? `Partially applied skill "${skill.name}" — verification is incomplete.`
+                : finalState === "applied"
+                  ? `Applied skill "${skill.name}" — ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`
+                  : `Proposed skill "${skill.name}" — instructions are ready for review.`,
+        failureReason,
+        startedAt,
+        completedAt,
+      },
+      scriptResult.fileReceipts,
+    );
+  } catch (err) {
+    const completedAt = new Date().toISOString();
+    const message = err instanceof Error ? err.message : String(err);
+
+    return finalizeSkillRun(
+      context,
+      {
         runId,
         skillName: skill.name,
         sourceType: skill.sourceType,
         mode: context.mode,
         state: "failed",
         filesTouched: [],
-        commandsRun: commands,
+        commandsRun: [],
         verificationOutcome: "fail",
-        verificationSummary: verification.summary,
-        plainLanguageSummary: `Skill "${skill.name}" failed verification after execution.`,
-        failureReason:
-          verification.summary ??
-          `SKILL-009: verification failed after running ${commands.length} command(s).`,
+        plainLanguageSummary: `Skill "${skill.name}" failed during execution.`,
+        failureReason: `SKILL-007: script execution error â€” ${message}`,
         startedAt,
         completedAt,
-      });
-    }
-
-    if (verification?.outcome === "partial") {
-      return finalizeSkillRun(context, {
-        runId,
-        skillName: skill.name,
-        sourceType: skill.sourceType,
-        mode: context.mode,
-        state: "partial",
-        filesTouched: [],
-        commandsRun: commands,
-        verificationOutcome: "partial",
-        verificationSummary: verification.summary,
-        plainLanguageSummary: `Applied skill "${skill.name}" â€” verification is still partial.`,
-        startedAt,
-        completedAt,
-      });
-    }
-
-    if (verification?.outcome === "pass") {
-      return finalizeSkillRun(context, {
-        runId,
-        skillName: skill.name,
-        sourceType: skill.sourceType,
-        mode: context.mode,
-        state: "verified",
-        filesTouched: [],
-        commandsRun: commands,
-        verificationOutcome: "pass",
-        verificationSummary: verification.summary,
-        plainLanguageSummary:
-          verification.summary ??
-          `Verified skill "${skill.name}" â€” ${commands.length} command(s) executed and checked.`,
-        startedAt,
-        completedAt,
-      });
-    }
-
-    return finalizeSkillRun(context, {
-      runId,
-      skillName: skill.name,
-      sourceType: skill.sourceType,
-      mode: context.mode,
-      state: "applied",
-      filesTouched: [],
-      commandsRun: commands,
-      verificationOutcome: "skipped",
-      plainLanguageSummary: `Applied skill "${skill.name}" â€” ${commands.length} command(s) executed.`,
-      startedAt,
-      completedAt,
-    });
-  } catch (err) {
-    const completedAt = new Date().toISOString();
-    const message = err instanceof Error ? err.message : String(err);
-
-    return finalizeSkillRun(context, {
-      runId,
-      skillName: skill.name,
-      sourceType: skill.sourceType,
-      mode: context.mode,
-      state: "failed",
-      filesTouched: [],
-      commandsRun: [],
-      verificationOutcome: "fail",
-      plainLanguageSummary: `Skill "${skill.name}" failed during execution.`,
-      failureReason: `SKILL-007: script execution error â€” ${message}`,
-      startedAt,
-      completedAt,
-    });
+      },
+      undefined,
+    );
   }
 }

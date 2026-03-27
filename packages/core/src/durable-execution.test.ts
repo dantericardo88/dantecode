@@ -65,7 +65,14 @@ describe("DurableExecutionEngine", () => {
     const sessionId = "test-session-001";
     const engine = new DurableExecutionEngine({ sessionId, projectRoot });
 
-    await engine.checkpoint(2, ["step-0", "step-1", "step-2"]);
+    const receipts = ["step-0", "step-1", "step-2"].map((stepId) => ({
+      stepId,
+      state: "success" as const,
+      affectedFiles: [],
+      appliedAt: new Date().toISOString(),
+      verification: "passed" as const,
+    }));
+    await engine.checkpoint(2, receipts);
 
     const expectedPath = join(projectRoot, ".dantecode", "checkpoints", `${sessionId}.json`);
     expect(existsSync(expectedPath)).toBe(true);
@@ -87,13 +94,21 @@ describe("DurableExecutionEngine", () => {
     const engine = new DurableExecutionEngine({ sessionId, projectRoot });
     const completedSteps = ["step-alpha", "step-beta"];
 
-    await engine.checkpoint(1, completedSteps, "partial content here");
+    const receipts = completedSteps.map((stepId) => ({
+      stepId,
+      state: "success" as const,
+      affectedFiles: [],
+      appliedAt: new Date().toISOString(),
+      verification: "passed" as const,
+    }));
+    await engine.checkpoint(1, receipts, "partial content here");
 
     const loaded = await engine.loadCheckpoint();
     expect(loaded).not.toBeNull();
     expect(loaded!.sessionId).toBe(sessionId);
     expect(loaded!.stepIndex).toBe(1);
-    expect(loaded!.completedSteps).toEqual(completedSteps);
+    expect(loaded!.completedSteps).toEqual(completedSteps); // Legacy field for backward compatibility
+    expect((loaded as any).completedStepReceipts).toHaveLength(2);
     expect(loaded!.partialOutput).toBe("partial content here");
     expect(loaded!.projectRoot).toBe(projectRoot);
     expect(loaded!.savedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -111,7 +126,15 @@ describe("DurableExecutionEngine", () => {
     const sessionId = "test-session-004";
     const engine = new DurableExecutionEngine({ sessionId, projectRoot });
 
-    await engine.checkpoint(0, ["step-0"]);
+    await engine.checkpoint(0, [
+      {
+        stepId: "step-0",
+        state: "success",
+        affectedFiles: [],
+        appliedAt: new Date().toISOString(),
+        verification: "passed",
+      },
+    ]);
     const path = engine.getCheckpointPath();
     expect(existsSync(path)).toBe(true);
 
@@ -258,9 +281,9 @@ describe("DurableExecutionEngine", () => {
       "utf-8",
     );
 
-    await expect(
-      engine.run([{ name: "step-first", fn: async () => 1 }]),
-    ).rejects.toThrow(/Checkpoint config mismatch/);
+    await expect(engine.run([{ name: "step-first", fn: async () => 1 }])).rejects.toThrow(
+      /Checkpoint config mismatch/,
+    );
   });
 
   it("loadCheckpoint() returns null for invalid persisted checkpoint payloads", async () => {

@@ -38,6 +38,8 @@ export interface AgentRunnerOpts {
   onApprovalNeeded: (toolName: string, command: string, riskLevel: string) => Promise<boolean>;
   /** Called when the agent run finishes and can provide artifact visibility. */
   onCompleted?: (result?: { artifacts?: string[]; receipts?: string[]; mode?: string }) => void;
+  /** Called when the agent run has partial results to expose immediately. */
+  onPartial?: (partialResult: { artifacts?: string[]; receipts?: string[]; mode?: string }) => void;
   /** Called when the agent run fails before completion. */
   onFailed?: (message: string) => void;
 }
@@ -89,7 +91,16 @@ export interface SessionRecord {
   messageCount: number;
   model: string;
   messages: Array<{ role: "user" | "assistant"; content: string; ts: string }>;
-  status?: "idle" | "running" | "awaiting_approval" | "aborted" | "completed" | "denied" | "failed";
+  status?:
+    | "idle"
+    | "running"
+    | "awaiting_approval"
+    | "aborted"
+    | "completed"
+    | "denied"
+    | "failed"
+    | "partial"
+    | "timeout";
   mode?: string;
   approvalEvents?: ApprovalEventRecord[];
   commandHistory?: CommandRecord[];
@@ -153,15 +164,15 @@ function ensureSessionCollections(session: SessionRecord): void {
   session.status ??= "idle";
 }
 
-function appendTimeline(
-  session: SessionRecord,
-  event: SessionTimelineEvent,
-): void {
+function appendTimeline(session: SessionRecord, event: SessionTimelineEvent): void {
   ensureSessionCollections(session);
   session.timeline!.push(event);
 }
 
-function appendUniquePaths(target: string[] | undefined, additions: string[] | undefined): string[] {
+function appendUniquePaths(
+  target: string[] | undefined,
+  additions: string[] | undefined,
+): string[] {
   const next = [...(target ?? [])];
   for (const item of additions ?? []) {
     if (!next.includes(item)) {
@@ -356,6 +367,21 @@ function sendMessage(ctx: ServerContext): RouteHandler {
             });
             ctx.sessionEmitter.emitApprovalNeeded(session.id, toolName, command, riskLevel);
           }),
+        onPartial: (partialResult) => {
+          session.status = "partial";
+          session.mode = partialResult?.mode ?? session.mode;
+          // Only add partial artifacts/receipts - these are exposed immediately but not "confirmed"
+          session.artifactPaths = appendUniquePaths(
+            session.artifactPaths,
+            partialResult?.artifacts,
+          );
+          session.receiptPaths = appendUniquePaths(session.receiptPaths, partialResult?.receipts);
+          appendTimeline(session, {
+            kind: "status",
+            label: "Partial results available",
+            at: new Date().toISOString(),
+          });
+        },
         onCompleted: (result) => {
           session.abortController = undefined;
           session.pendingApproval = undefined;
@@ -565,9 +591,7 @@ function runSlashCommand(ctx: ServerContext): RouteHandler {
         result = {
           status: "failed",
           output:
-            err instanceof Error
-              ? err.message
-              : `Slash command execution failed: ${String(err)}`,
+            err instanceof Error ? err.message : `Slash command execution failed: ${String(err)}`,
         };
       }
     }

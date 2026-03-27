@@ -69,13 +69,12 @@ describe("UpliftOrchestrator", () => {
     expect(result).toBe("Agent completed the task successfully");
   });
 
-  it("executeSubTask returns stub string when agentRunner is absent", async () => {
+  it("executeSubTask rejects when agentRunner is absent", async () => {
     const orchestrator = new UpliftOrchestrator({ projectRoot: "/tmp/project" });
 
-    const result = await orchestrator.executeSubTask("mcp-root", "developer", "Build feature Y");
-
-    expect(result).toMatch(/queued/i);
-    expect(result).toContain("no agent runner configured");
+    await expect(
+      orchestrator.executeSubTask("mcp-root", "developer", "Build feature Y"),
+    ).rejects.toThrow("No agent runner configured for role: developer");
   });
 
   it("executeSubTask marks instance as failed when agentRunner throws", async () => {

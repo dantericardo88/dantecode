@@ -80,6 +80,7 @@ check(5, "Version alignment", () => {
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith("temp-") || entry.name.startsWith("scratch-")) continue;
+    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
     const pkgPath = join(packagesDir, entry.name, "package.json");
     if (!existsSync(pkgPath)) continue;
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
@@ -129,6 +130,7 @@ check(8, "No circular dependencies", () => {
 
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
     const pkgPath = join(packagesDir, entry.name, "package.json");
     if (!existsSync(pkgPath)) continue;
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
@@ -171,6 +173,7 @@ check(9, "Export verification (index.ts)", () => {
 
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
+    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
     const indexPath = join(packagesDir, entry.name, "src", "index.ts");
     if (!existsSync(indexPath)) continue;
     const content = readFileSync(indexPath, "utf-8");
@@ -195,6 +198,7 @@ check(10, "License + README present", () => {
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     if (entry.name.startsWith("temp-") || entry.name.startsWith("scratch-")) continue;
+    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
     const pkgPath = join(packagesDir, entry.name, "package.json");
     if (!existsSync(pkgPath)) continue;
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
@@ -234,7 +238,9 @@ console.log("=".repeat(50));
 
 for (const result of results) {
   const icon = result.passed ? "\u2713" : "\u2717";
-  console.log(`  ${result.num.toString().padStart(2, " ")}. [${icon}] ${result.name} - ${result.detail}`);
+  console.log(
+    `  ${result.num.toString().padStart(2, " ")}. [${icon}] ${result.name} - ${result.detail}`,
+  );
 }
 
 const passed = results.filter((result) => result.passed).length;
@@ -253,7 +259,9 @@ try {
   const commitSha = resolveCommitSha(repoRoot, process.env);
   const externalEvidence = readExternalGateEvidence(repoRoot, { currentCommitSha: commitSha });
   const persistedEvidence = readPersistedGateEvidence(repoRoot, { currentCommitSha: commitSha });
-  const releaseDoctorEvidence = readReleaseDoctorEvidence(repoRoot, { currentCommitSha: commitSha });
+  const releaseDoctorEvidence = readReleaseDoctorEvidence(repoRoot, {
+    currentCommitSha: commitSha,
+  });
   const quickstartProofEvidence = readQuickstartProofEvidence(repoRoot, {
     currentCommitSha: commitSha,
   });

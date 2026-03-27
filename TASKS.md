@@ -75,12 +75,12 @@
 
 ## Current local baseline
 
-- [x] `npm run typecheck` — all packages, zero errors
+- [x] `npm run typecheck` — requires fixing (exit 2)
 - [x] `npm run lint` — all packages, zero violations
-- [x] `npm test` — all tests passing
-- [x] `npm run build` — all 21 packages built clean
+- [x] `npm test` — requires fixing (exit 1)
+- [x] `npm run build` — all 26 packages built clean
 - [x] `npm run smoke:cli` — passes without API keys (DANTECODE_NONINTERACTIVE)
-- [x] `npm run smoke:install` — passes (packs and installs all 18 publishable packages)
+- [x] `npm run smoke:install` — passes (packs and installs all publishable packages)
 - [x] `npm run smoke:skill-import` — passes without API keys
 - [x] `npm run smoke:external` — 7/7 fixture projects pass
 
@@ -95,6 +95,6 @@
 
 - The coverage gate is scoped to the stable runtime packages for OSS v1.
 - Preview and experimental surfaces still run in the shared test suite and should continue gaining coverage over time.
-- 28 packages currently live under `packages/`; OSS v1 ships the CLI and npm runtime packages first, keeps VS Code as preview, and leaves desktop out of ship scope.
+- 26 packages currently live under `packages/`; OSS v1 ships the CLI and npm runtime packages first, keeps VS Code as preview, and leaves desktop out of ship scope.
 - P2 verification spine is implemented and locally proven. Public ship proof still depends on the generated readiness surface staying green for same-commit external gates.
 - P3 CLI golden flows are implemented and locally proven. Public GA remains partial until the provider-backed real run gate passes and the generated readiness artifact reaches `public-ready`.

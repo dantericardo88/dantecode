@@ -27,6 +27,7 @@ export type ParseSkillResult =
 /**
  * Parse SKILL.md from a string (content) and metadata about optional dirs.
  * Returns ok:false with structured errors for missing required fields.
+ * Provides trustworthy validation and deterministic parsing for portability.
  */
 export function parseSkillMd(
   content: string,
@@ -117,4 +118,44 @@ export function parseSkillMd(
       sourcePath,
     },
   };
+}
+
+/**
+ * Validates that a parsed skill meets portability requirements.
+ * Ensures the skill can be reliably exported and imported across systems.
+ */
+export function validateSkillPortability(skill: AgentSkillParsed): {
+  valid: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+
+  // Check required fields
+  if (!skill.name?.trim()) {
+    warnings.push("Missing or empty skill name");
+  }
+  if (!skill.description?.trim()) {
+    warnings.push("Missing or empty skill description");
+  }
+  if (!skill.instructions?.trim()) {
+    warnings.push("Missing or empty skill instructions");
+  }
+
+  // Check portability of metadata
+  if (skill.metadata) {
+    for (const [key, value] of Object.entries(skill.metadata)) {
+      if (typeof value === "function") {
+        warnings.push(`Metadata field '${key}' contains unportable function value`);
+      } else if (value instanceof Date) {
+        warnings.push(`Metadata field '${key}' contains unportable Date object`);
+      }
+    }
+  }
+
+  // Check source path exists and is absolute
+  if (!skill.sourcePath || skill.sourcePath.startsWith(".")) {
+    warnings.push("Source path should be absolute for portability");
+  }
+
+  return { valid: warnings.length === 0, warnings };
 }

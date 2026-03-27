@@ -3,7 +3,7 @@
 // Exports a single DanteCode skill to Agent Skills format in a target directory.
 // ============================================================================
 
-import { writeFile, mkdir, access } from "node:fs/promises";
+import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { renderSkillMd } from "./render-skill-md.js";
 
@@ -48,6 +48,43 @@ export interface ExportWarning {
 // ----------------------------------------------------------------------------
 
 /**
+ * Validates that the skill data is suitable for export.
+ * Ensures trustworthy portability by checking for required fields and valid slugs.
+ */
+function validateExportableSkill(skill: ExportableSkill): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!skill.name?.trim()) {
+    errors.push("Missing or empty skill name");
+  }
+  if (!skill.description?.trim()) {
+    errors.push("Missing or empty skill description");
+  }
+  if (!skill.instructions?.trim()) {
+    errors.push("Missing or empty skill instructions");
+  }
+
+  if (!skill.slug?.trim()) {
+    errors.push("Missing or empty skill slug");
+  } else {
+    // Validate slug is URL-safe and deterministic
+    const slugRegex = /^[a-z0-9-]+$|^[a-z0-9]+(-[a-z0-9]+)*[a-z0-9]*$/;
+    if (!slugRegex.test(skill.slug)) {
+      errors.push(
+        `Invalid skill slug '${skill.slug}' - must contain only lowercase letters, numbers, and hyphens`,
+      );
+    }
+  }
+
+  // Check tool names are valid
+  if (skill.allowedTools?.some((tool) => !tool?.trim())) {
+    errors.push("Empty tool names in allowedTools array");
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
  * Determine whether a skill has Dante-specific fields that cannot be
  * represented in the standard Agent Skills format.
  */
@@ -81,6 +118,8 @@ function collectSkill008Warnings(skill: ExportableSkill): ExportWarning[] {
  * Emits SKILL-008 warnings when Dante-specific fields (provenance, receipts)
  * cannot be represented in the standard format.
  *
+ * Provides trustworthy portability by validating inputs and ensuring deterministic output.
+ *
  * @param skill  - The skill data to export.
  * @param outDir - The directory under which to create `<slug>/SKILL.md`.
  * @returns      ExportResult indicating success/failure and any warnings.
@@ -89,6 +128,16 @@ export async function exportAgentSkill(
   skill: ExportableSkill,
   outDir: string,
 ): Promise<ExportResult> {
+  // Input validation for trustworthy portability
+  const validation = validateExportableSkill(skill);
+  if (!validation.valid) {
+    return {
+      ok: false,
+      warnings: [],
+      error: `Invalid skill data: ${validation.errors.join(", ")}`,
+    };
+  }
+
   const warnings: ExportWarning[] = collectSkill008Warnings(skill);
 
   try {
@@ -132,5 +181,3 @@ export async function exportAgentSkill(
 // ----------------------------------------------------------------------------
 // Re-export types for convenience
 // ----------------------------------------------------------------------------
-
-export { access };

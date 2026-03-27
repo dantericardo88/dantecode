@@ -6,7 +6,7 @@ export { DEFAULT_SKILL_POLICY, makeRunContext } from "./skill-run-context.js";
 export type { SkillRunResult, SkillRunState } from "./skill-run-result.js";
 export { makeRunId, assertAppliedBeforeSuccess } from "./skill-run-result.js";
 export { runSkill } from "./run-skill.js";
-export type { RunSkillOptions, SkillVerification } from "./run-skill.js";
+export type { RunSkillOptions, SkillVerification, FileReceipt, ScriptResult } from "./run-skill.js";
 export type { SkillReceipt } from "./skill-receipt.js";
 export type { SkillReceiptOptions } from "./skill-receipt.js";
 export { emitSkillReceipt, persistSkillReceipt } from "./skill-receipt.js";

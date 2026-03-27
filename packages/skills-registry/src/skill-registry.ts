@@ -3,8 +3,21 @@
 // Manages registered skills with scope tracking and collision detection.
 // ============================================================================
 
-import type { SkillEntry } from "./discover-skills.js";
+import type { SkillEntry, SkillScope } from "./discover-skills.js";
 import { resolveSkillPrecedence } from "./resolve-skill-precedence.js";
+
+export interface SkillRegistryEntryWithScope {
+  name: string;
+  winningScope: SkillScope | "none";
+  entries: Array<{
+    scope: SkillScope;
+    dirPath: string;
+    skillMdPath: string;
+    description: string;
+    disabled: boolean;
+    wins: boolean;
+  }>;
+}
 
 export interface RegistryCollision {
   /** The name that collides. */
@@ -71,6 +84,55 @@ export class SkillRegistry {
    */
   listAll(): SkillEntry[] {
     return [...this._entries];
+  }
+
+  /**
+   * Return a deterministic, visible list of all skills with their scopes and precedence.
+   * Groups skills by name and shows which entry wins precedence.
+   */
+  listWithScopes(): SkillRegistryEntryWithScope[] {
+    const resolved = resolveSkillPrecedence(this._entries);
+    const allByName = new Map<string, SkillEntry[]>();
+
+    // Group all entries by name to show conflicts
+    for (const entry of this._entries) {
+      const existing = allByName.get(entry.name);
+      if (existing === undefined) {
+        allByName.set(entry.name, [entry]);
+      } else {
+        existing.push(entry);
+      }
+    }
+
+    const result: SkillRegistryEntryWithScope[] = [];
+
+    for (const [name, entries] of allByName) {
+      // Sort by precedence for display (project, user, compat)
+      const sortedEntries = entries.sort((a, b) => {
+        const scopeOrder = { project: 1, user: 2, compat: 3 };
+        return scopeOrder[a.scope] - scopeOrder[b.scope];
+      });
+
+      const winningEntry = sortedEntries.find((entry) =>
+        resolved.some((e) => e.name === entry.name && e.scope === entry.scope),
+      );
+
+      result.push({
+        name,
+        winningScope: winningEntry?.scope ?? "none",
+        entries: sortedEntries.map((entry) => ({
+          scope: entry.scope,
+          dirPath: entry.dirPath,
+          skillMdPath: entry.skillMdPath,
+          description: entry.name, // fallback - we'll parse later if needed
+          disabled: entry.disabled,
+          wins: winningEntry === entry,
+        })),
+      });
+    }
+
+    // Sort by name for deterministic output
+    return result.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   /**

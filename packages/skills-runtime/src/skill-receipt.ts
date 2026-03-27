@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { SkillPolicy } from "./skill-run-context.js";
 import type { SkillEvidenceHashes, SkillRunResult } from "./skill-run-result.js";
+import type { FileReceipt } from "./run-skill.js";
 
 export interface SkillReceipt {
   receiptVersion: number;
@@ -13,7 +14,7 @@ export interface SkillReceipt {
   state: string;
   verificationOutcome: string;
   verificationSummary?: string;
-  filesTouched: string[];
+  filesTouched: string[]; // Successful files only
   commandsRun: string[];
   issuedAt: string;
   failureReason?: string;
@@ -22,6 +23,7 @@ export interface SkillReceipt {
   evidenceHashes: SkillEvidenceHashes;
   artifactRefs?: string[];
   ledgerRef?: string;
+  fileReceipts?: FileReceipt[]; // Detailed file-by-file closure
 }
 
 export interface SkillReceiptOptions {
@@ -30,6 +32,7 @@ export interface SkillReceiptOptions {
   receiptRef?: string;
   artifactRefs?: string[];
   ledgerRef?: string;
+  fileReceipts?: FileReceipt[];
 }
 
 function hashValue(value: string): string {
@@ -77,10 +80,10 @@ export function emitSkillReceipt(
     failureReason: result.failureReason,
     receiptRef: options.receiptRef ?? result.receiptRef,
     policySnapshot: options.policySnapshot ?? result.policySnapshot,
-    evidenceHashes:
-      result.evidenceHashes ?? buildEvidenceHashes(result, verificationSummary),
+    evidenceHashes: result.evidenceHashes ?? buildEvidenceHashes(result, verificationSummary),
     artifactRefs: options.artifactRefs ?? result.artifactRefs,
     ledgerRef: options.ledgerRef ?? result.ledgerRef,
+    fileReceipts: options.fileReceipts,
   };
 }
 
@@ -90,7 +93,8 @@ export async function persistSkillReceipt(
   options: SkillReceiptOptions = {},
 ): Promise<SkillReceipt> {
   const receiptDir = join(projectRoot, ".dantecode", "receipts", "skills");
-  const receiptRef = options.receiptRef ?? result.receiptRef ?? join(receiptDir, `${result.runId}.json`);
+  const receiptRef =
+    options.receiptRef ?? result.receiptRef ?? join(receiptDir, `${result.runId}.json`);
 
   await mkdir(dirname(receiptRef), { recursive: true });
 

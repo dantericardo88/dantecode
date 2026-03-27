@@ -24,6 +24,11 @@ export class VerificationBridge {
   ];
 
   async verify(result: WebFetchResult): Promise<RuntimeVerificationReport> {
+    // Basic validation - isolate from ship paths if invalid
+    if (!result || typeof result !== "object") {
+      throw new Error("WebFetchResult must be a valid object");
+    }
+
     const taskId = randomUUID();
     const gates: VerificationGate[] = [];
 

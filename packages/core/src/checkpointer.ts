@@ -13,6 +13,7 @@ import {
   CheckpointWorkspaceContextSchema,
   type CheckpointReplaySummary as RuntimeCheckpointReplaySummary,
   type CheckpointWorkspaceContext as RuntimeCheckpointWorkspaceContext,
+  type ApplyReceipt,
 } from "@dantecode/runtime-spine";
 
 // ----------------------------------------------------------------------------
@@ -44,6 +45,18 @@ export interface CheckpointMetadata {
   /** Parent checkpoint ID. */
   parentId?: string;
   /** Command that triggered the session. */
+  triggerCommand?: string;
+  /** Additional metadata. */
+  extra?: Record<string, unknown>;
+}
+
+/** Wave 2 closure: Apply receipt metadata for event sourcing. */
+export interface ApplyReceiptMetadata {
+  /** Step that was applied. */
+  stepId: string;
+  /** Outcome state. */
+  state: "success" | "failed" | "skipped";
+  /** Command that triggered the apply. */
   triggerCommand?: string;
   /** Additional metadata. */
   extra?: Record<string, unknown>;
@@ -252,11 +265,10 @@ export class EventSourcedCheckpointer {
    * Appended as an event — never rewrites base_state.json.
    */
   async putWrite(write: PendingWrite): Promise<void> {
-    // Deduplication: skip if identical write already exists for this taskId + channel
-    const existing = this.pendingWrites.find(
-      (w) => w.taskId === write.taskId && w.channel === write.channel,
-    );
-    if (existing) return;
+    // Skip if identical write already exists for this taskId + channel
+    if (this.pendingWrites.some((w) => w.taskId === write.taskId && w.channel === write.channel)) {
+      return;
+    }
 
     this.pendingWrites.push(write);
 
@@ -272,6 +284,35 @@ export class EventSourcedCheckpointer {
     if (this.nextEventIndex >= this.maxEvents) {
       await this.compact();
     }
+  }
+
+  /**
+   * Wave 2 closure: Stores an apply receipt for event sourcing.
+   * Tracks actual apply state changes rather than just steps.
+   */
+  async putApplyReceipt(receipt: ApplyReceipt, metadata: ApplyReceiptMetadata): Promise<void> {
+    // Deduplication: skip if identical receipt already exists for this step
+    // TODO: implement deduplication logic
+
+    const applyWrite: PendingWrite = {
+      taskId: receipt.stepId,
+      channel: "apply_receipt",
+      value: receipt,
+      timestamp: receipt.appliedAt,
+    };
+
+    this.pendingWrites.push(applyWrite);
+
+    await this.appendEvent({
+      kind: "action",
+      source: "system",
+      data: {
+        receipt,
+        metadata,
+      },
+    });
+
+    await this.refreshRuntimeEnvelope();
   }
 
   /**
@@ -387,7 +428,11 @@ export class EventSourcedCheckpointer {
       ...this.currentRuntimeEnvelope,
       replaySummary: this.buildReplaySummary(this.currentCheckpoint, [], 0),
     };
-    await this.writeBaseState(this.currentCheckpoint, this.currentMetadata!, this.currentRuntimeEnvelope);
+    await this.writeBaseState(
+      this.currentCheckpoint,
+      this.currentMetadata!,
+      this.currentRuntimeEnvelope,
+    );
 
     // Clear event log
     await this.clearEventLog();
@@ -483,7 +528,12 @@ export class EventSourcedCheckpointer {
       const normalizedWorkspaceContext = parseWorkspaceContext(workspaceContext);
       const nextReplaySummary =
         normalizedReplaySummary ??
-        this.buildReplaySummary(checkpoint, writes, events.length, events.at(-1)?.index);
+        this.buildReplaySummary(
+          checkpoint,
+          writes,
+          events.length,
+          events[events.length - 1]?.index,
+        );
       this.currentRuntimeEnvelope = {
         replaySummary: nextReplaySummary,
         workspaceContext: normalizedWorkspaceContext,
@@ -582,7 +632,11 @@ export class EventSourcedCheckpointer {
         this.nextEventIndex,
       ),
     };
-    await this.writeBaseState(this.currentCheckpoint, this.currentMetadata, this.currentRuntimeEnvelope);
+    await this.writeBaseState(
+      this.currentCheckpoint,
+      this.currentMetadata,
+      this.currentRuntimeEnvelope,
+    );
   }
 }
 
@@ -595,7 +649,9 @@ export function hashCheckpointContent(content: string): string {
   return createHash("sha256").update(content, "utf-8").digest("hex").slice(0, 16);
 }
 
-function normalizeRuntimeEnvelope(runtimeEnvelope: CheckpointRuntimeEnvelope): CheckpointRuntimeEnvelope {
+function normalizeRuntimeEnvelope(
+  runtimeEnvelope: CheckpointRuntimeEnvelope,
+): CheckpointRuntimeEnvelope {
   return {
     replaySummary: parseReplaySummary(runtimeEnvelope.replaySummary),
     workspaceContext: parseWorkspaceContext(runtimeEnvelope.workspaceContext),

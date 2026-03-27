@@ -1,7 +1,9 @@
 {
   "name": "@dantecode/web-extractor",
   "version": "0.9.2",
-  "description": "Production-grade, intelligent page analysis and extraction engine for DanteCode",
+  "description": "⚠️ EXPERIMENTAL (Wave 6) - Production-grade, intelligent page analysis and extraction engine for DanteCode",
+  "experimental": true,
+  "outOfShipScope": true,
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",

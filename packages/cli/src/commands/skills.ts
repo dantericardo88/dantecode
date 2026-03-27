@@ -27,6 +27,7 @@ import {
 } from "@dantecode/skill-adapter";
 import type { ImportSource, ParsedSkill, CatalogEntry } from "@dantecode/skill-adapter";
 import { parseSkillMd, validateAgentSkill } from "@dantecode/skills-import";
+import { discoverSkillsWithScopes } from "@dantecode/skills-registry";
 import { exportAgentSkill } from "@dantecode/skills-export";
 import type { ExportableSkill } from "@dantecode/skills-export";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
@@ -36,7 +37,7 @@ import type { DanteSkill } from "@dantecode/skills-runtime";
 // ----------------------------------------------------------------------------
 // ANSI Colors
 // ----------------------------------------------------------------------------
-
+const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -193,49 +194,86 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
 // ----------------------------------------------------------------------------
 
 /**
- * Lists all registered skills in a table format.
+ * Lists all skills in a deterministic, scope-aware format.
  */
 async function skillsList(projectRoot: string): Promise<void> {
-  const skills = await listSkills(projectRoot);
+  const discovered = await discoverSkillsWithScopes({
+    projectRoot,
+    includeUserScope: true,
+    includeCompatScope: true,
+  });
 
-  if (skills.length === 0) {
+  const registered = await listSkills(projectRoot);
+
+  process.stdout.write(
+    `\n${BOLD}Skill Discovery (deterministic precedence: project > user > compat):${RESET}\n`,
+  );
+
+  if (discovered.length === 0) {
     process.stdout.write(
-      `\n${DIM}No skills registered.${RESET}\n` +
+      `\n${DIM}No skills discovered.${RESET}\n` +
         `${DIM}Use 'dantecode skills import' to import skills from Claude, Continue.dev, or OpenCode.${RESET}\n\n`,
     );
     return;
   }
 
-  process.stdout.write(`\n${BOLD}Registered Skills (${skills.length}):${RESET}\n\n`);
+  process.stdout.write(`\n${BOLD}Discovered Skills (${discovered.length}):${RESET}\n\n`);
 
   // Table header
   const nameWidth = 24;
-  const sourceWidth = 12;
-  const versionWidth = 10;
+  const scopeWidth = 10;
+  const statusWidth = 12;
 
   process.stdout.write(
-    `  ${"Name".padEnd(nameWidth)} ${"Source".padEnd(sourceWidth)} ${"Version".padEnd(versionWidth)} Description\n`,
+    `  ${"Name".padEnd(nameWidth)} ${"Winning Scope".padEnd(scopeWidth)} ${"Sources/Status".padEnd(statusWidth)} Description\n`,
   );
   process.stdout.write(
-    `  ${"─".repeat(nameWidth)} ${"─".repeat(sourceWidth)} ${"─".repeat(versionWidth)} ${"─".repeat(40)}\n`,
+    `  ${"─".repeat(nameWidth)} ${"─".repeat(scopeWidth)} ${"─".repeat(statusWidth)} ${"─".repeat(30)}\n`,
   );
 
-  for (const skill of skills) {
-    const name = skill.name.slice(0, nameWidth).padEnd(nameWidth);
-    const source = skill.importSource.slice(0, sourceWidth).padEnd(sourceWidth);
-    const version = skill.adapterVersion.slice(0, versionWidth).padEnd(versionWidth);
-    const desc = skill.description.slice(0, 60);
+  for (const skill of discovered) {
+    const scopeColors = {
+      project: GREEN,
+      user: CYAN,
+      compat: YELLOW,
+      none: DIM,
+    };
 
-    // Bridge bucket indicator
-    let bucketTag = "";
-    if (skill.importSource === "skillbridge" && skill.bucket) {
-      const bucketColor =
-        skill.bucket === "green" ? GREEN : skill.bucket === "amber" ? YELLOW : RED;
-      bucketTag = ` ${bucketColor}[${skill.bucket}]${RESET}`;
+    const name = skill.name.slice(0, nameWidth - 2).padEnd(nameWidth);
+    const winningScope =
+      skill.winningScope === "none" ? "disabled" : skill.winningScope.padEnd(scopeWidth);
+    const winnerColor = scopeColors[skill.winningScope] || DIM;
+
+    // Status column shows availability/installation
+    const isInstalled = registered.some((r) => r.name === skill.name);
+    let statusText = "";
+    let statusColor = DIM;
+
+    if (isInstalled) {
+      statusText = "installed";
+      statusColor = GREEN;
+    } else {
+      statusText = `${skill.entries.length} source${skill.entries.length > 1 ? "s" : ""}`;
     }
 
     process.stdout.write(
-      `  ${YELLOW}${name}${RESET} ${DIM}${source}${RESET} ${DIM}${version}${RESET} ${desc}${bucketTag}\n`,
+      `  ${YELLOW}${name}${RESET} ${winnerColor}${winningScope}${RESET} ${statusColor}${statusText.padEnd(statusWidth)}${RESET}\n`,
+    );
+
+    if (skill.entries.length > 1) {
+      // Show additional source details for multi-source skills
+      for (const entry of skill.entries.slice(1)) {
+        const entryColor = entry.disabled ? RED : scopeColors[entry.scope];
+        const entryScope = entry.disabled ? `${entry.scope} (disabled)` : entry.scope;
+        process.stdout.write(`    ${DIM}├── ${entryColor}${entryScope}${RESET}\n`);
+      }
+    }
+  }
+
+  // Show registered skills info if different
+  if (registered.length !== discovered.filter((s) => s.winningScope !== "none").length) {
+    process.stdout.write(
+      `\n${BOLD}Note:${RESET} ${DIM}${registered.length} skills installed, ${discovered.length} skills total discovered${RESET}\n`,
     );
   }
 

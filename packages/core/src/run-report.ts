@@ -3,6 +3,8 @@
 // D-11: Run Report Generation — The Trust Layer
 // ============================================================================
 
+import type { SkillReceipt } from "@dantecode/skills-runtime";
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type RunReportStatus = "complete" | "partial" | "failed" | "not_attempted";
@@ -368,81 +370,77 @@ export class RunReportAccumulator {
     entry.artifactRefs = Array.from(new Set([...(entry.artifactRefs ?? []), ...artifactRefs]));
   }
 
-  /** Record completion verification for the current entry. */
-  recordCompletionVerification(
-    verification: import("./completion-verifier.js").CompletionVerification,
-  ): void {
-    const entry = this.currentEntry();
-    if (entry) entry.completionVerification = verification;
-  }
-
-  /** Record token usage for the current entry. */
-  recordTokenUsage(input: number, output: number): void {
-    const entry = this.currentEntry();
-    if (entry) {
-      entry.tokenUsage.input += input;
-      entry.tokenUsage.output += output;
-    }
-  }
-
-  /** Complete the current entry with status and summaries. */
-  completeEntry(opts: {
-    status?: RunReportStatus;
-    summary: string;
-    failureReason?: string;
-    actionNeeded?: string;
-  }): void {
+  /** Consume a skill receipt to populate file tracking and execution stages. */
+  consumeSkillReceipt(receipt: SkillReceipt): void {
     const entry = this.currentEntry();
     if (!entry) return;
-    entry.status = opts.status ?? deriveStatusFromExecutionStages(entry.executionStages);
-    entry.summary = opts.summary;
-    entry.failureReason = opts.failureReason;
-    entry.actionNeeded = opts.actionNeeded;
-    entry.completedAt = new Date().toISOString();
-  }
 
-  /** Mark PRDs that were never started as not_attempted. */
-  markRemainingNotAttempted(reason: string, prdNames: string[]): void {
-    for (const name of prdNames) {
-      const exists = this.report.entries.some((e) => e.prdName === name);
-      if (!exists) {
-        const now = new Date().toISOString();
-        this.report.entries.push({
-          prdName: name,
-          prdFile: "",
-          status: "not_attempted",
-          executionStages: ["planned"],
-          filesCreated: [],
-          filesModified: [],
-          filesDeleted: [],
-          verification: defaultVerification(),
-          tests: defaultTests(),
-          timeline: [],
-          receiptRefs: [],
-          artifactRefs: [],
-          summary: "",
-          actionNeeded: reason,
-          startedAt: now,
-          completedAt: now,
-          tokenUsage: { input: 0, output: 0 },
-        });
+    // Record receipt reference
+    if (receipt.receiptRef) {
+      this.recordReceiptRefs([receipt.receiptRef]);
+    }
+
+    // Map file receipts to report fields
+    if (receipt.fileReceipts) {
+      for (const fileReceipt of receipt.fileReceipts) {
+        if (fileReceipt.state !== "success") continue;
+
+        const existingCreated = entry.filesCreated.find((f) => f.path === fileReceipt.filePath);
+        const existingModified = entry.filesModified.find((f) => f.path === fileReceipt.filePath);
+
+        switch (fileReceipt.action) {
+          case "create": {
+            if (!existingCreated) {
+              // For created files, we need to get the line count
+              // This would need to be enhanced to actually read the file
+              entry.filesCreated.push({ path: fileReceipt.filePath, lines: 0 });
+            }
+            break;
+          }
+          case "write": {
+            if (existingCreated) {
+              // Already tracked as created, remove from modified to avoid double counting
+            } else if (existingModified) {
+              // Already tracked, could increment count if we had diff info
+            } else {
+              entry.filesModified.push({ path: fileReceipt.filePath, added: 0, removed: 0 });
+            }
+            break;
+          }
+          case "delete": {
+            if (!entry.filesDeleted.includes(fileReceipt.filePath)) {
+              entry.filesDeleted.push(fileReceipt.filePath);
+            }
+            break;
+          }
+        }
       }
     }
-  }
 
-  /** Add entries to the global files manifest. */
-  addToManifest(entries: RunReportManifestEntry[]): void {
-    this.report.filesManifest.push(...entries);
-  }
+    // Record execution stages based on receipt state
+    const stateStages: Record<string, any[]> = {
+      applied: ["applied"],
+      verified: ["applied", "verified"],
+      partial: ["applied"], // partial can include multiple stages
+      failed: ["failed"],
+    };
 
-  /** Set global token usage totals. */
-  setGlobalTokenUsage(input: number, output: number): void {
-    this.report.tokenUsage = { input, output };
+    const stages = stateStages[receipt.state];
+    if (stages) {
+      for (const stage of stages) {
+        this.appendExecutionStage(stage);
+      }
+    }
   }
 
   /** Set cost estimate. */
   setCostEstimate(cost: number): void {
     this.report.costEstimate = cost;
+  }
+
+  /** Override the global token usage counters (bypassing per-entry accumulation). */
+  setGlobalTokenUsage(inputTokens: number, outputTokens: number): void {
+    this.report.tokenUsage = { input: inputTokens, output: outputTokens };
   }
 
   /** Stamp the evidence-chain seal hash onto the report. */
@@ -480,6 +478,78 @@ export class RunReportAccumulator {
     }
 
     return { ...this.report, entries: [...this.report.entries] };
+  }
+
+  /** Complete the current entry with final status and summary. */
+  completeEntry(opts: {
+    status: RunReportStatus;
+    summary: string;
+    failureReason?: string;
+    actionNeeded?: string;
+  }): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+
+    const now = new Date().toISOString();
+    entry.status = opts.status;
+    entry.summary = opts.summary;
+    entry.completedAt = now;
+    if (opts.failureReason) entry.failureReason = opts.failureReason;
+    if (opts.actionNeeded) entry.actionNeeded = opts.actionNeeded;
+  }
+
+  /** Record token usage for the current entry. */
+  recordTokenUsage(inputTokens: number, outputTokens: number): void {
+    const entry = this.currentEntry();
+    if (!entry) return;
+
+    entry.tokenUsage.input += inputTokens;
+    entry.tokenUsage.output += outputTokens;
+  }
+
+  /** Record completion verification results for the current entry. */
+  recordCompletionVerification(
+    verification: import("./completion-verifier.js").CompletionVerification,
+  ): void {
+    const entry = this.currentEntry();
+    if (entry) entry.completionVerification = verification;
+  }
+
+  /** Add files to the global manifest. */
+  addToManifest(
+    items: Array<{ action: "created" | "modified" | "deleted"; path: string; lines?: number }>,
+  ): void {
+    this.report.filesManifest.push(...items);
+  }
+
+  /** Mark remaining PRD names as not attempted. */
+  markRemainingNotAttempted(reason: string, prdNames: string[]): void {
+    const existingPrdNames = new Set(this.report.entries.map((e) => e.prdName));
+
+    for (const prdName of prdNames) {
+      if (existingPrdNames.has(prdName)) continue; // Skip if already exists
+
+      const now = new Date().toISOString();
+      this.report.entries.push({
+        prdName,
+        prdFile: "prds/" + prdName + ".md", // Reasonable default
+        status: "not_attempted",
+        executionStages: [],
+        filesCreated: [],
+        filesModified: [],
+        filesDeleted: [],
+        verification: defaultVerification(),
+        tests: defaultTests(),
+        timeline: [],
+        receiptRefs: [],
+        artifactRefs: [],
+        summary: "",
+        startedAt: now,
+        completedAt: now,
+        tokenUsage: { input: 0, output: 0 },
+        actionNeeded: reason,
+      });
+    }
   }
 
   private currentEntry(): RunReportEntry | undefined {

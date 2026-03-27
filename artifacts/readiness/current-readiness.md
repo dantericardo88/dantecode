@@ -1,38 +1,49 @@
 # DanteCode Readiness
 
-**Status:** private-ready  
+**Status:** blocked  
 **Scope:** repo-proof  
-**Commit:** `1a12b55b1313`  
-**Generated:** 2026-03-26T19:07:58.965Z
+**Commit:** `2eab47dbf137`  
+**Generated:** 2026-03-27T10:50:03.412Z
 
 ## Gates
 
 | Gate | Status |
 |------|--------|
-| typecheck | pass |
+| typecheck | fail |
 | lint | pass |
-| test | pass |
+| test | fail |
 | build | pass |
-| windowsSmoke | pass |
+| windowsSmoke | unknown |
 | antiStub | pass |
 | liveProvider | unknown |
-| publishDryRun | pass |
+| publishDryRun | unknown |
 
 ## Release Doctor
 
-- canPublish: false
-- blockers: 2
-- actions: 4
+- missing same-commit release doctor receipt
 
 ## Quickstart Proof
 
-- canClaimQuickstart: false
-- blockers: 0
-- actions: 1
+- missing same-commit quickstart proof receipt
+
+## Blockers
+
+- Gate "typecheck" failed
+- Gate "test" failed
+
+## Open Requirements (privateReady)
+
+- Gate "typecheck" must pass. Current status: fail.
+- Gate "test" must pass. Current status: fail.
+- Gate "windowsSmoke" must pass. Current status: unknown.
+- Gate "publishDryRun" must pass. Current status: unknown.
 
 ## Open Requirements (publicReady)
 
+- Gate "typecheck" must pass. Current status: fail.
+- Gate "test" must pass. Current status: fail.
+- Gate "windowsSmoke" must pass. Current status: unknown.
+- Gate "publishDryRun" must pass. Current status: unknown.
 - Gate "liveProvider" must pass. Current status: unknown.
-- Release doctor blocker: No provider credentials detected for the live model-router smoke test.
-- Release doctor blocker: No npm publish auth token detected locally or in GitHub Actions secrets.
-- Quickstart proof action: Same-commit live provider receipt is missing or unknown. Generate it with real credentials.
+- Release doctor receipt is missing for the current commit. Run `npm run release:doctor` to validate publish blockers.
+- Quickstart proof receipt is missing for the current commit. Run `npm run release:prove-quickstart` to validate the README quickstart path.

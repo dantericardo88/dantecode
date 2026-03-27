@@ -116,6 +116,7 @@ import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
 import { runSkillsCommand } from "./commands/skills.js";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
+import { discoverSkillsWithScopes } from "@dantecode/skills-registry";
 import { getOrInitGaslight, getOrInitMemory } from "./lazy-init.js";
 import { runGaslightCommand } from "./commands/gaslight.js";
 import { runFearsetCommand } from "./commands/fearset.js";
@@ -163,8 +164,6 @@ interface ProgressNode {
 function renderProgressTree(nodes: ProgressNode[], prefix = "", isLast = true): string {
   const lines: string[] = [];
   const childPrefix = prefix + (isLast ? "    " : "│   ");
-  const _nodePrefix = prefix + (isLast ? "└── " : "├── ");
-  const _connector = isLast ? "└── " : "├── ";
 
   nodes.forEach((node, index) => {
     const isLastNode = index === nodes.length - 1;
@@ -1247,7 +1246,9 @@ async function tutorialCommand(args: string, _state: ReplState): Promise<string>
 
     availableTopics.forEach((topic) => {
       const tutorial = TUTORIALS[topic];
-      lines.push(`  ${YELLOW}${topic.padEnd(15)}${RESET} ${DIM}${tutorial.title}${RESET}`);
+      if (tutorial) {
+        lines.push(`  ${YELLOW}${topic.padEnd(15)}${RESET} ${DIM}${tutorial.title}${RESET}`);
+      }
     });
 
     lines.push("");
@@ -2611,16 +2612,57 @@ async function webCommand(args: string, _state: ReplState): Promise<string> {
 async function skillCommand(args: string, state: ReplState): Promise<string> {
   const skillName = args.trim();
   if (!skillName) {
-    // List skills
-    const skills = await listSkills(state.projectRoot);
-    if (skills.length === 0) {
-      return `${DIM}No skills imported. Use 'dantecode skills import' to import skills.${RESET}`;
+    // List skills with scopes and precedence (deterministic discovery)
+    const discovered = await discoverSkillsWithScopes({
+      projectRoot: state.projectRoot,
+      includeUserScope: true,
+      includeCompatScope: true,
+      userHome: undefined, // Will use default
+    });
+
+    if (discovered.length === 0) {
+      return `${DIM}No skills discovered. Use '/skills import' to import skills.${RESET}`;
     }
 
-    const lines = [`${BOLD}Available Skills:${RESET}`, ""];
-    for (const skill of skills) {
-      lines.push(`  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${DIM}${skill.description}${RESET}`);
+    const lines = [
+      `${BOLD}Discovered Skills (deterministic precedence: project > user > compat):${RESET}`,
+      "",
+    ];
+
+    for (const skill of discovered) {
+      const scopeColors = {
+        project: GREEN,
+        user: CYAN,
+        compat: YELLOW,
+        none: DIM,
+      };
+
+      const winningScope = skill.winningScope === "none" ? "disabled" : skill.winningScope;
+      const winnerColor = scopeColors[skill.winningScope] || DIM;
+
+      lines.push(
+        `  ${YELLOW}${skill.name.padEnd(24)}${RESET} ${winnerColor}${winningScope.padEnd(8)}${RESET}`,
+      );
+
+      if (skill.entries.length > 1) {
+        // Show all versions with their scopes
+        for (const entry of skill.entries) {
+          const scopeColor = entry.disabled ? RED : scopeColors[entry.scope];
+          const status = entry.disabled ? "disabled" : entry.scope;
+          const marker = entry.wins ? "* " : "  ";
+          const disabledSuffix = entry.disabled ? " (disabled)" : "";
+          lines.push(
+            `    ${marker}${scopeColor}${status}${disabledSuffix}${RESET} ${DIM}${entry.skillMdPath}${RESET}`,
+          );
+        }
+      } else {
+        // Single entry - show the path
+        const entry = skill.entries[0]!;
+        lines.push(`    ${DIM}${entry.skillMdPath}${RESET}`);
+      }
     }
+
+    lines.push(`\n${DIM}* indicates winning precedence${RESET}`);
     return lines.join("\n");
   }
 
@@ -4756,11 +4798,11 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           const avgPdse =
             pdseFailures.reduce((sum, f) => {
               const match = f.match(/(\d+)/);
-              return match ? sum + parseInt(match[1], 10) : sum;
+              return match && match[1] ? sum + parseInt(match[1], 10) : sum;
             }, 0) / pdseFailures.length;
-          laneNodes[laneIndex].pdseScore = avgPdse;
+          if (laneNodes[laneIndex]) laneNodes[laneIndex].pdseScore = avgPdse;
         } else {
-          laneNodes[laneIndex].pdseScore = 0;
+          if (laneNodes[laneIndex]) laneNodes[laneIndex].pdseScore = 0;
         }
         progressDisplay.update(laneNodes);
 
@@ -4860,8 +4902,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           );
 
           // Update progress: mark lane as failed due to post-merge issues
-          laneNodes[laneIndex].status = "failed";
-          laneNodes[laneIndex].pdseScore = 0; // post-merge failure is critical
+          if (laneNodes[laneIndex]) {
+            laneNodes[laneIndex].status = "failed";
+            laneNodes[laneIndex].pdseScore = 0; // post-merge failure is critical
+          }
           progressDisplay.update(laneNodes);
 
           break;
@@ -4877,7 +4921,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       });
 
       // Update progress: mark lane as complete with PDSE score
-      laneNodes[laneIndex].status = "complete";
+      if (laneNodes[laneIndex]) laneNodes[laneIndex].status = "complete";
       if (uniqueChangedFiles.length > 0) {
         const scores: number[] = [];
         for (const file of uniqueChangedFiles) {
@@ -4889,10 +4933,11 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
             scores.push(50); // default for unreadable files
           }
         }
-        laneNodes[laneIndex].pdseScore =
-          scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 80;
+        if (laneNodes[laneIndex])
+          laneNodes[laneIndex].pdseScore =
+            scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 80;
       } else {
-        laneNodes[laneIndex].pdseScore = 85; // no changes is still good
+        if (laneNodes[laneIndex]) laneNodes[laneIndex].pdseScore = 85; // no changes is still good
       }
       progressDisplay.update(laneNodes);
 
@@ -4921,8 +4966,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       blockedLanes.push(`${lane}: ${errMsg}`);
 
       // Update progress: mark lane as failed due to exception
-      laneNodes[laneIndex].status = "failed";
-      laneNodes[laneIndex].pdseScore = 0; // exceptions mean major failure
+      if (laneNodes[laneIndex]) {
+        laneNodes[laneIndex].status = "failed";
+        laneNodes[laneIndex].pdseScore = 0; // exceptions mean major failure
+      }
       progressDisplay.update(laneNodes);
 
       autoforgeReportAcc.completeEntry({
@@ -6713,6 +6760,19 @@ async function approveCommand(_args: string, state: ReplState): Promise<string> 
   }
 
   globalApprovalGateway.approveToolCall(pendingToolCall.name, pendingToolCall.input);
+
+  // Wave 3: Record approval_granted in receipts/reports
+  if (state.runReportAccumulator) {
+    state.runReportAccumulator.recordTimelineEvents([
+      {
+        kind: "approval_granted",
+        label: `${pendingToolCall.name} granted`,
+        at: new Date().toISOString(),
+        detail: `User approved ${pendingToolCall.name} for durable run ${run.id}`,
+      },
+    ]);
+  }
+
   state.pendingAgentPrompt = "continue";
   state.pendingResumeRunId = run.id;
   state.pendingExpectedWorkflow = run.workflow;
@@ -6754,6 +6814,18 @@ async function denyCommand(_args: string, state: ReplState): Promise<string> {
 
   if (pendingToolCall) {
     globalApprovalGateway.revokeToolCallApproval(pendingToolCall.name, pendingToolCall.input);
+
+    // Wave 3: Record approval_denied in receipts/reports
+    if (state.runReportAccumulator) {
+      state.runReportAccumulator.recordTimelineEvents([
+        {
+          kind: "approval_denied",
+          label: `${pendingToolCall.name} denied`,
+          at: new Date().toISOString(),
+          detail: `User denied ${pendingToolCall.name} for durable run ${run.id}`,
+        },
+      ]);
+    }
   }
 
   await store.clearPendingToolCalls(run.id);
