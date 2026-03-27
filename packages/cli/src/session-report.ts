@@ -147,14 +147,12 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
       const restoreLine = ctx.restoreSummary ? ` ${ctx.restoreSummary}` : "";
 
       acc.completeEntry({
-        summary:
-          `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. ${verificationLine}${restoreLine}`,
+        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. ${verificationLine}${restoreLine}`,
         failureReason: allPassed ? undefined : verificationLine,
       });
     } else {
       acc.completeEntry({
-        summary:
-          `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. Changes were applied without verification.`,
+        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. Changes were applied without verification.`,
         actionNeeded: "Verify the applied changes before treating the run as complete.",
       });
     }
@@ -163,13 +161,13 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
 
     const report = acc.finalize();
     const markdown = serializeRunReportToMarkdown(report, false);
-    const reportPath = await writeRunReport({
+    const writeResult = await writeRunReport({
       projectRoot: ctx.projectRoot,
       markdown,
       timestamp: report.completedAt,
     });
 
-    return reportPath;
+    return writeResult.success ? writeResult.path : null;
   } catch {
     // Non-fatal - never break session exit.
     return null;

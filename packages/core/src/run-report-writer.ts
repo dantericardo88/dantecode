@@ -34,14 +34,20 @@ export function reportFileName(isoTimestamp: string, command?: string): string {
   return `run-${base}-${suffix}.md`;
 }
 
+export interface WriteRunReportResult {
+  success: boolean;
+  path?: string;
+  error?: string;
+}
+
 /**
  * Writes the run report markdown to `.dantecode/reports/`.
- * Returns the absolute path of the written file.
+ * Returns success indicator and path if written.
  *
- * Non-fatal: catches and logs errors rather than rethrowing,
- * so report writing never breaks the main command output.
+ * Catches errors and logs them — report persistence is non-fatal
+ * but honesty requires not implying success when it failed.
  */
-export async function writeRunReport(opts: WriteRunReportOptions): Promise<string> {
+export async function writeRunReport(opts: WriteRunReportOptions): Promise<WriteRunReportResult> {
   const reportsDir = join(opts.projectRoot, ".dantecode", "reports");
   const fileName = reportFileName(opts.timestamp);
   const filePath = join(reportsDir, fileName);
@@ -57,12 +63,15 @@ export async function writeRunReport(opts: WriteRunReportOptions): Promise<strin
       const message = `dantecode: run report (${completeCount}/${totalCount} complete)`;
       await opts.commitFn([filePath], message, opts.projectRoot);
     }
+
+    return { success: true, path: filePath };
   } catch (err) {
-    // Non-fatal — log but never rethrow
+    // Non-fatal — log error, return failure indicator for honesty
+    const errorMessage = err instanceof Error ? err.message : String(err);
     if (process.env.DANTECODE_DEBUG) {
       console.error("[run-report-writer] Failed to write report:", err);
     }
-  }
 
-  return filePath;
+    return { success: false, error: errorMessage };
+  }
 }

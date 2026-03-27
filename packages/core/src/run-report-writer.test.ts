@@ -31,12 +31,16 @@ describe("writeRunReport", () => {
   });
 
   it("creates the reports directory and writes the file", async () => {
-    const resultPath = await writeRunReport({
+    const result = await writeRunReport({
       projectRoot: "/test/project",
       markdown: "# Report",
       timestamp: "2026-03-22T14:30:00Z",
     });
 
+    expect(result.success).toBe(true);
+    expect(result.path).toBe(
+      path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
+    );
     expect(mockMkdir).toHaveBeenCalledWith(path.join("/test/project", ".dantecode", "reports"), {
       recursive: true,
     });
@@ -44,9 +48,6 @@ describe("writeRunReport", () => {
       path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
       "# Report",
       "utf-8",
-    );
-    expect(resultPath).toBe(
-      path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
     );
   });
 
@@ -96,32 +97,31 @@ describe("writeRunReport", () => {
     expect(mockWriteFile).toHaveBeenCalled();
   });
 
-  it("swallows write errors gracefully", async () => {
+  it("returns failure on write errors", async () => {
     mockWriteFile.mockRejectedValueOnce(new Error("ENOSPC"));
 
-    const resultPath = await writeRunReport({
+    const result = await writeRunReport({
       projectRoot: "/test/project",
       markdown: "# Report",
       timestamp: "2026-03-22T14:30:00Z",
     });
 
-    // Should not throw, still returns the intended path
-    expect(resultPath).toBe(
-      path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
-    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("ENOSPC");
+    expect(result.path).toBeUndefined();
   });
 
-  it("swallows mkdir errors gracefully", async () => {
+  it("returns failure on mkdir errors", async () => {
     mockMkdir.mockRejectedValueOnce(new Error("EACCES"));
 
-    const resultPath = await writeRunReport({
+    const result = await writeRunReport({
       projectRoot: "/test/project",
       markdown: "# Report",
       timestamp: "2026-03-22T14:30:00Z",
     });
 
-    expect(resultPath).toBe(
-      path.join("/test/project", ".dantecode", "reports", "run-2026-03-22T14-30-00Z.md"),
-    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("EACCES");
+    expect(result.path).toBeUndefined();
   });
 });

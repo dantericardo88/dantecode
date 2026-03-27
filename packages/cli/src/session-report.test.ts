@@ -17,7 +17,9 @@ vi.mock("@dantecode/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@dantecode/core")>();
   return {
     ...actual,
-    writeRunReport: vi.fn().mockResolvedValue("/tmp/test/.dantecode/reports/run-test.md"),
+    writeRunReport: vi
+      .fn()
+      .mockResolvedValue({ success: true, path: "/tmp/test/.dantecode/reports/run-test.md" }),
   };
 });
 
@@ -96,7 +98,10 @@ describe("shouldGenerateSessionReport", () => {
 describe("generateSessionReport - without pdseResults", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(writeRunReport).mockResolvedValue("/tmp/test/.dantecode/reports/run-test.md");
+    vi.mocked(writeRunReport).mockResolvedValue({
+      success: true,
+      path: "/tmp/test/.dantecode/reports/run-test.md",
+    });
   });
 
   it("returns null for sessions with no mutations", async () => {
@@ -141,7 +146,10 @@ describe("generateSessionReport - without pdseResults", () => {
 describe("generateSessionReport - with pdseResults (Gap FC-2)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(writeRunReport).mockResolvedValue("/tmp/test/.dantecode/reports/run-test.md");
+    vi.mocked(writeRunReport).mockResolvedValue({
+      success: true,
+      path: "/tmp/test/.dantecode/reports/run-test.md",
+    });
   });
 
   it("includes PDSE score in the report when all files pass", async () => {
@@ -187,8 +195,8 @@ describe("generateSessionReport - with pdseResults (Gap FC-2)", () => {
     expect(call.markdown).toContain("90");
   });
 
-  it("is non-fatal when writeRunReport throws", async () => {
-    vi.mocked(writeRunReport).mockRejectedValueOnce(new Error("disk full"));
+  it("is non-fatal when writeRunReport fails", async () => {
+    vi.mocked(writeRunReport).mockResolvedValueOnce({ success: false });
     const pdseResults = [{ file: "src/app.ts", pdseScore: 95, passed: true }];
     const result = await generateSessionReport({ ...baseCtx(makeSession(1)), pdseResults });
     expect(result).toBeNull();
