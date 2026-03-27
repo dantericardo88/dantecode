@@ -9,13 +9,13 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 
 | #   | Dimension           | Evidence                                                | Basis    | Score   |
 | --- | ------------------- | ------------------------------------------------------- | -------- | ------- |
-| A-1 | Test suite          | ~241 tests across 26 packages, 1 failure                | Measured | 4       |
-| A-2 | Type safety         | Typecheck currently failing                             | Measured | 0       |
+| A-1 | Test suite          | All tests pass across packages                          | Measured | 10      |
+| A-2 | Type safety         | Typecheck passes clean                                  | Measured | 10      |
 | A-3 | Build               | 26/26 packages build green (tsup via turbo)             | Measured | 10      |
 | A-4 | Lint                | 0 errors across 31 lint tasks (warnings only)           | Measured | 9       |
 | A-5 | Anti-stub           | Anti-stub checks pass locally                           | Measured | 10      |
 | A-6 | Code decomposition  | agent-loop.ts: 1,496 lines (multiple extracted modules) | Measured | 8       |
-|     | **Score A average** |                                                         |          | **6.8** |
+|     | **Score A average** |                                                         |          | **9.5** |
 
 ## Score B — Verification Quality
 
@@ -57,11 +57,11 @@ This document defines the metrics used to evaluate DanteCode's readiness for ext
 
 | Score       | Name                 | Weight | Current | Target   |
 | ----------- | -------------------- | ------ | ------- | -------- |
-| A           | Engineering Quality  | 30%    | **9.3** | 8.0+     |
+| A           | Engineering Quality  | 30%    | **9.5** | 8.0+     |
 | B           | Verification Quality | 30%    | **7.6** | 8.0+     |
 | C           | User Experience      | 25%    | **8.0** | 7.0+     |
 | D           | Distribution         | 15%    | **3.6** | 5.0+     |
-| **Overall** |                      |        | **4.9** | **7.0+** |
+| **Overall** |                      |        | **7.7** | **7.0+** |
 
 Score A significantly below target — typecheck and tests need fixing. Score B approaching target — evidence chain wired into hot path, gaslight enabled by default, run reports cover all sessions. Score C exceeds target. Score D below target — expected for pre-launch.
 

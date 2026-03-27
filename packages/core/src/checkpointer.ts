@@ -291,8 +291,15 @@ export class EventSourcedCheckpointer {
    * Tracks actual apply state changes rather than just steps.
    */
   async putApplyReceipt(receipt: ApplyReceipt, metadata: ApplyReceiptMetadata): Promise<void> {
-    // Deduplication: skip if identical receipt already exists for this step
-    // TODO: implement deduplication logic
+    // Deduplication: skip if a receipt for this stepId already exists
+    // Prevent duplicate receipts for the same step
+    if (
+      this.pendingWrites.some(
+        (w) => w.channel === "apply_receipt" && (w.value as ApplyReceipt).stepId === receipt.stepId,
+      )
+    ) {
+      return;
+    }
 
     const applyWrite: PendingWrite = {
       taskId: receipt.stepId,

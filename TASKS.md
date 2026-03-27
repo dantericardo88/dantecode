@@ -1,6 +1,6 @@
 # TASKS.md - OSS v1 Execution Checklist
 
-**Date:** 2026-03-18
+**Date:** 2026-03-27
 
 ## Legend
 
@@ -75,9 +75,9 @@
 
 ## Current local baseline
 
-- [x] `npm run typecheck` — requires fixing (exit 2)
+- [x] `npm run typecheck` — passes clean
 - [x] `npm run lint` — all packages, zero violations
-- [x] `npm test` — requires fixing (exit 1)
+- [x] `npm run test` — all tests pass
 - [x] `npm run build` — all 26 packages built clean
 - [x] `npm run smoke:cli` — passes without API keys (DANTECODE_NONINTERACTIVE)
 - [x] `npm run smoke:install` — passes (packs and installs all publishable packages)
@@ -90,6 +90,14 @@
 - [x] `scripts/generate-verification-samples.mjs` — regenerate via `npm run generate:samples`
 - [x] `scripts/release-doctor.mjs` — Artifacts section now reads and reports `current-readiness.json`
 - [x] `artifacts/readiness/quickstart-proof.json` / `artifacts/readiness/quickstart-proof.md` — generated via `npm run release:prove-quickstart` for same-commit README quickstart proof
+
+## Gap Closure (2026-03-27)
+
+- [x] Completed checkpointer.ts trust/recovery path with deduplication and apply receipt handling
+- [x] Added comprehensive tests for checkpointer apply receipts
+- [x] De-scoped web extractor stub (removed crawlee-provider.ts stub)
+- [x] Synchronized SCORING.md with current gates (typecheck, tests now pass)
+- [x] Synchronized TASKS.md baseline with current readiness
 
 ## Notes
 

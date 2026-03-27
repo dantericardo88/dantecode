@@ -10,6 +10,7 @@ import type { PendingWrite, CheckpointTuple } from "./checkpointer.js";
 import {
   CheckpointReplaySummarySchema,
   CheckpointWorkspaceContextSchema,
+  type ApplyReceipt,
 } from "@dantecode/runtime-spine";
 
 describe("EventSourcedCheckpointer", () => {
@@ -311,19 +312,14 @@ describe("EventSourcedCheckpointer", () => {
     });
 
     it("rebuilds invalid replay summaries and drops invalid workspace context on resume", async () => {
-      await cp.put(
-        { task: "self-improve", iteration: 5 },
-        { source: "loop", step: 5 },
-        undefined,
-        {
-          workspaceContext: {
-            projectRoot: "/project",
-            workspaceRoot: "/project",
-            workspaceIsRepoRoot: true,
-            installContextKind: "repo_checkout",
-          },
+      await cp.put({ task: "self-improve", iteration: 5 }, { source: "loop", step: 5 }, undefined, {
+        workspaceContext: {
+          projectRoot: "/project",
+          workspaceRoot: "/project",
+          workspaceIsRepoRoot: true,
+          installContextKind: "repo_checkout",
         },
-      );
+      });
       await cp.putWrite({
         taskId: "t1",
         channel: "pdse",
@@ -491,6 +487,94 @@ describe("EventSourcedCheckpointer", () => {
       expect(cp.getEventCount()).toBe(0);
       await cp.put({ v: 1 }, { source: "input", step: 0 });
       expect(cp.getEventCount()).toBe(1); // checkpoint event
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Apply receipts
+  // --------------------------------------------------------------------------
+
+  describe("apply receipts", () => {
+    beforeEach(() => {
+      cp = new EventSourcedCheckpointer("test", "sess-apply", {
+        writeFileFn: mockWrite,
+        readFileFn: mockRead,
+        mkdirFn: mockMkdir,
+        readdirFn: mockReaddir,
+        unlinkFn: mockUnlink,
+      });
+    });
+
+    it("stores apply receipts as pending writes", async () => {
+      await cp.put({ initial: true }, { source: "input", step: 0 });
+
+      const receipt: ApplyReceipt = {
+        stepId: "step-1",
+        state: "success",
+        affectedFiles: ["file1.ts"],
+        appliedAt: new Date().toISOString(),
+      };
+
+      await cp.putApplyReceipt(receipt, { stepId: "step-1", state: "success" });
+
+      const writes = cp.getPendingWrites();
+      expect(writes).toHaveLength(1);
+      expect(writes[0].channel).toBe("apply_receipt");
+      expect(writes[0].value).toEqual(receipt);
+    });
+
+    it("deduplicates receipts for the same stepId", async () => {
+      await cp.put({ initial: true }, { source: "input", step: 0 });
+
+      const receipt1: ApplyReceipt = {
+        stepId: "step-1",
+        state: "success",
+        affectedFiles: ["file1.ts"],
+        appliedAt: "2023-01-01T00:00:00.000Z",
+      };
+
+      const receipt2: ApplyReceipt = {
+        stepId: "step-1",
+        state: "failed",
+        affectedFiles: ["file1.ts"],
+        appliedAt: "2023-01-01T00:01:00.000Z",
+      };
+
+      await cp.putApplyReceipt(receipt1, { stepId: "step-1", state: "success" });
+      await cp.putApplyReceipt(receipt2, { stepId: "step-1", state: "failed" }); // should skip
+
+      const writes = cp.getPendingWrites();
+      expect(writes).toHaveLength(1);
+      expect((writes[0].value as ApplyReceipt).state).toBe("success");
+    });
+
+    it("recovers apply receipts after resume", async () => {
+      await cp.put({ initial: true }, { source: "input", step: 0 });
+
+      const receipt: ApplyReceipt = {
+        stepId: "step-1",
+        state: "success",
+        affectedFiles: ["file1.ts"],
+        appliedAt: new Date().toISOString(),
+      };
+
+      await cp.putApplyReceipt(receipt, { stepId: "step-1", state: "success" });
+
+      // Create new checkpointer to simulate restart
+      const cp2 = new EventSourcedCheckpointer("test", "sess-apply", {
+        writeFileFn: mockWrite,
+        readFileFn: mockRead,
+        mkdirFn: mockMkdir,
+        readdirFn: mockReaddir,
+        unlinkFn: mockUnlink,
+      });
+
+      await cp2.resume();
+
+      const tuple = await cp2.getTuple();
+      expect(tuple).not.toBeNull();
+      expect(tuple!.pendingWrites).toHaveLength(1);
+      expect(tuple!.pendingWrites[0].channel).toBe("apply_receipt");
     });
   });
 
