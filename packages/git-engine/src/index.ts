@@ -16,6 +16,7 @@ export type { CommitResult, PushResult, StatusEntry, GitStatusResult } from "./c
 // ─── Worktree Management ────────────────────────────────────────────────────
 
 export {
+  getGitStatusSummary,
   createWorktree,
   removeWorktree,
   listWorktrees,

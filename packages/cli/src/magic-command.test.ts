@@ -171,6 +171,7 @@ function createMockState(): any {
         fallback: [],
       },
       pdse: { threshold: 85 },
+      progressiveDisclosure: { unlocked: true },
     },
     projectRoot: "/tmp/test",
     verbose: false,

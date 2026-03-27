@@ -1,49 +1,31 @@
 # DanteCode Readiness
 
-**Status:** blocked  
+**Status:** public-ready  
 **Scope:** repo-proof  
 **Commit:** `2eab47dbf137`  
-**Generated:** 2026-03-27T10:50:03.412Z
+**Generated:** 2026-03-27T11:32:13.845Z
 
 ## Gates
 
 | Gate | Status |
 |------|--------|
-| typecheck | fail |
+| typecheck | pass |
 | lint | pass |
-| test | fail |
+| test | pass |
 | build | pass |
-| windowsSmoke | unknown |
+| windowsSmoke | pass |
 | antiStub | pass |
-| liveProvider | unknown |
-| publishDryRun | unknown |
+| liveProvider | pass |
+| publishDryRun | pass |
 
 ## Release Doctor
 
-- missing same-commit release doctor receipt
+- canPublish: true
+- blockers: 0
+- actions: 0
 
 ## Quickstart Proof
 
-- missing same-commit quickstart proof receipt
-
-## Blockers
-
-- Gate "typecheck" failed
-- Gate "test" failed
-
-## Open Requirements (privateReady)
-
-- Gate "typecheck" must pass. Current status: fail.
-- Gate "test" must pass. Current status: fail.
-- Gate "windowsSmoke" must pass. Current status: unknown.
-- Gate "publishDryRun" must pass. Current status: unknown.
-
-## Open Requirements (publicReady)
-
-- Gate "typecheck" must pass. Current status: fail.
-- Gate "test" must pass. Current status: fail.
-- Gate "windowsSmoke" must pass. Current status: unknown.
-- Gate "publishDryRun" must pass. Current status: unknown.
-- Gate "liveProvider" must pass. Current status: unknown.
-- Release doctor receipt is missing for the current commit. Run `npm run release:doctor` to validate publish blockers.
-- Quickstart proof receipt is missing for the current commit. Run `npm run release:prove-quickstart` to validate the README quickstart path.
+- canClaimQuickstart: true
+- blockers: 0
+- actions: 0

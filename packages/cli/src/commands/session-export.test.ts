@@ -144,7 +144,7 @@ function makeSession(projectRoot: string, overrides: Partial<Session> = {}): Ses
 function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {}): ReplState {
   return {
     session: makeSession(projectRoot, sessionOverrides),
-    state: {} as DanteCodeState,
+    state: { progressiveDisclosure: { unlocked: true } } as DanteCodeState,
     projectRoot,
     verbose: false,
     enableGit: false,

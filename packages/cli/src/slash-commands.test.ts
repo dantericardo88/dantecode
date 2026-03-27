@@ -166,6 +166,7 @@ function makeState(projectRoot: string): ReplState {
         lessonInjectionEnabled: true,
         abortOnSecurityViolation: true,
       },
+      progressiveDisclosure: { unlocked: true },
     } as unknown as DanteCodeState,
     projectRoot,
     verbose: false,

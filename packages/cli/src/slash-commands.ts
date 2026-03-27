@@ -85,6 +85,7 @@ import {
   createWorktree,
   mergeWorktree,
   removeWorktree,
+  getGitStatusSummary,
   watchGitEvents,
   listGitWatchers,
   stopGitWatcher,
@@ -3783,42 +3784,133 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
     lines.push(`  Duration: ${(result.totalDurationMs / 1000).toFixed(1)}s`);
 
     if (result.succeeded) {
-      // Self-edit path: run repo-root verification before writing
-      if (selfImprove) {
-        const verification = recovery.runRepoRootVerification(state.projectRoot);
-        if (!verification.passed) {
-          lines.push(
-            `  ${RED}Repo-root verification FAILED: ${verification.failedSteps.join(", ")}${RESET}`,
-          );
-          lines.push(`  Disk state: unchanged — verification must pass before self-edit commit`);
+      // Always require repo-root verification before declaring success/writing
+      process.stdout.write(`${DIM}Running final verification...${RESET}\n`);
+      const verification = recovery.runRepoRootVerification(state.projectRoot);
+      if (!verification.passed) {
+        // Override succeeded status if verification fails - no partial successes
+        result.succeeded = false;
+        lines[1] = `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`;
+        lines.push(
+          `  ${RED}Repo-root verification FAILED: ${verification.failedSteps.join(", ")}${RESET}`,
+        );
+        lines.push(`  Disk state: unchanged — all gates must be green for success`);
+        lines.push(`  Session: ${sessionId}`);
 
-          await checkpointMgr.createCheckpoint({
-            label: "verification-blocked",
-            triggerCommand: `/autoforge --self-improve`,
-            currentStep: startStep + result.iterations,
-            elapsedMs: Date.now() - sessionStart,
-            targetFilePath: resolvedTargetFile,
-            targetFileContent: result.finalCode,
-            pdseScores: result.finalScore
-              ? [
-                  {
-                    filePath: displayTargetFile,
-                    overall: result.finalScore.overall,
-                    passedGate: result.finalScore.passedGate ?? true,
-                    iteration: result.iterations,
-                  },
-                ]
-              : [],
-            metadata: { verificationFailed: verification.failedSteps },
-          });
-          return lines.join("\n");
-        }
+        await checkpointMgr.createCheckpoint({
+          label: "verification-failed",
+          triggerCommand: selfImprove ? `/autoforge --self-improve` : `/autoforge`,
+          currentStep: startStep + result.iterations,
+          elapsedMs: Date.now() - sessionStart,
+          targetFilePath: resolvedTargetFile,
+          targetFileContent: currentCode, // Don't use result.finalCode since we didn't succeed
+          pdseScores: result.finalScore
+            ? [
+                {
+                  filePath: displayTargetFile,
+                  overall: result.finalScore.overall,
+                  passedGate: result.finalScore.passedGate ?? false, // Override to failed
+                  iteration: result.iterations,
+                },
+              ]
+            : [],
+          metadata: { verificationFailed: verification.failedSteps, overrideSucceeded: false },
+        });
+        return lines.join("\n");
       }
+      // Check git status before applying changes
+      const preWriteStatus = getGitStatusSummary(state.projectRoot);
+      if (!preWriteStatus.isClean) {
+        result.succeeded = false;
+        lines[1] = `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`;
+        lines.push(
+          `  ${RED}Pre-write verification FAILED: git is dirty (${preWriteStatus.stagedCount} staged, ${preWriteStatus.unstagedCount} unstaged, ${preWriteStatus.untrackedCount} untracked)${RESET}`,
+        );
+        lines.push(`  Disk state: unchanged — cannot apply on dirty repository`);
+        return lines.join("\n");
+      }
+
+      // Verification passed - proceed with success
+      lines.push(`${GREEN}${BOLD}✓ All gates green: Verification passed${RESET}`);
 
       await writeFile(resolvedTargetFile, result.finalCode, "utf-8");
 
       // Record after-hash for audit trail
       recovery.recordAfterHash(resolvedTargetFile, result.finalCode);
+
+      // Check git status after writing and verify it's clean (only expected changes)
+      const postWriteStatus = getGitStatusSummary(state.projectRoot);
+      if (!postWriteStatus.isClean) {
+        // Revert the file write since git became dirty
+        try {
+          // Check if we can safely revert by comparing git status
+          const gitDiffOutput = execSync("git diff --name-only", {
+            cwd: state.projectRoot,
+            encoding: "utf-8",
+          })
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+
+          const expectedChanged = [relative(state.projectRoot, resolvedTargetFile)];
+          const unexpectedChanges = gitDiffOutput.filter((path) => !expectedChanged.includes(path));
+
+          if (unexpectedChanges.length > 0) {
+            // Unexpected changes - revert everything
+            execSync("git checkout -- . && git clean -fd", { cwd: state.projectRoot });
+            result.succeeded = false;
+            lines[1] = `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`;
+            lines.push(
+              `  ${RED}Post-write verification FAILED: unexpected changes found: ${unexpectedChanges.join(", ")}${RESET}`,
+            );
+            lines.push(`  Auto-reverted: all changes undone`);
+
+            await checkpointMgr.createCheckpoint({
+              label: "unexpected-changes-reverted",
+              triggerCommand: selfImprove ? `/autoforge --self-improve` : `/autoforge`,
+              currentStep: startStep + result.iterations,
+              elapsedMs: Date.now() - sessionStart,
+              targetFilePath: resolvedTargetFile,
+              targetFileContent: currentCode, // Revert to original
+              metadata: { reverted: true, unexpectedChanges },
+            });
+            return lines.join("\n");
+          }
+        } catch (_revertErr) {
+          result.succeeded = false;
+          lines[1] = `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`;
+          lines.push(
+            `  ${RED}Post-write verification FAILED: git is dirty and revert failed${RESET}`,
+          );
+          lines.push(`  Manual intervention required — check git status`);
+          return lines.join("\n");
+        }
+      }
+
+      // Git status is clean and only expected changes - safe to proceed with auto-commit
+      const commitMessage = result.finalScore
+        ? `autoforge: improve ${displayTargetFile} (${result.finalScore.overall}/100, ${result.iterations} iterations)`
+        : `autoforge: update ${displayTargetFile} (${result.iterations} iterations)`;
+
+      try {
+        autoCommit(
+          {
+            message: commitMessage,
+            body: "",
+            footer: "Autoforge IAL",
+            files: ["."], // commit all changes
+            allowEmpty: false,
+          },
+          state.projectRoot,
+        );
+        lines.push(`  Committed: ${commitMessage}`);
+      } catch (commitErr) {
+        // If auto-commit fails, we keep the changes but warn user
+        lines.push(
+          `  ${YELLOW}Auto-commit failed: ${commitErr instanceof Error ? commitErr.message : String(commitErr)}${RESET}`,
+        );
+        lines.push(`  Changes applied to disk — manual commit required`);
+      }
 
       state.lastEditFile = resolvedTargetFile;
       state.lastEditContent = code;
@@ -4891,14 +4983,14 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           }
         }
 
-        mergeWorktree(worktree.directory, baseBranch, state.projectRoot);
+        const mergeResult = mergeWorktree(worktree.directory, baseBranch, state.projectRoot);
         mergedLanes.push(lane);
 
         // Post-merge verification using RecoveryEngine
         const postMergeVerification = recoveryEng.runRepoRootVerification(state.projectRoot);
-        if (!postMergeVerification.passed) {
+        if (!postMergeVerification.passed || !mergeResult.mainBranchClean) {
           blockedLanes.push(
-            `post-merge gate failed after ${lane} (${postMergeVerification.failedSteps.join(", ")})`,
+            `post-merge gate failed after ${lane} (${postMergeVerification.failedSteps.join(", ")})${!mergeResult.mainBranchClean ? " — main branch dirty after merge" : ""}`,
           );
 
           // Update progress: mark lane as failed due to post-merge issues
@@ -4909,6 +5001,26 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           progressDisplay.update(laneNodes);
 
           break;
+        }
+
+        // Auto-commit verified good changes
+        try {
+          const commitMessage = `${lane}: party autoforge improvements (${uniqueChangedFiles.length} files)`;
+          autoCommit(
+            {
+              message: commitMessage,
+              body: "",
+              footer: "Party Autoforge",
+              files: ["."], // commit all changes
+              allowEmpty: false,
+            },
+            state.projectRoot,
+          );
+          process.stdout.write(`  ${GREEN}Committed: ${commitMessage}${RESET}\n`);
+        } catch (commitErr) {
+          process.stdout.write(
+            `  ${YELLOW}Auto-commit failed for ${lane}: ${commitErr instanceof Error ? commitErr.message : String(commitErr)}${RESET}\n`,
+          );
         }
       } else {
         removeWorktree(worktree.directory);

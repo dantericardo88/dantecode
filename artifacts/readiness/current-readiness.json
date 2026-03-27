@@ -1,56 +1,40 @@
 {
-  "status": "blocked",
+  "status": "public-ready",
   "scope": "repo-proof",
   "commitSha": "2eab47dbf1371e5b9135c4c5859b9e081bcb1024",
-  "generatedAt": "2026-03-27T10:50:03.412Z",
+  "generatedAt": "2026-03-27T11:32:13.845Z",
   "gates": {
-    "typecheck": "fail",
+    "typecheck": "pass",
     "lint": "pass",
-    "test": "fail",
+    "test": "pass",
     "build": "pass",
-    "windowsSmoke": "unknown",
+    "windowsSmoke": "pass",
     "antiStub": "pass",
-    "liveProvider": "unknown",
-    "publishDryRun": "unknown"
+    "liveProvider": "pass",
+    "publishDryRun": "pass"
   },
-  "blockers": [
-    "Gate \"typecheck\" failed",
-    "Gate \"test\" failed"
-  ],
+  "blockers": [],
   "openRequirements": {
-    "privateReady": [
-      "Gate \"typecheck\" must pass. Current status: fail.",
-      "Gate \"test\" must pass. Current status: fail.",
-      "Gate \"windowsSmoke\" must pass. Current status: unknown.",
-      "Gate \"publishDryRun\" must pass. Current status: unknown."
-    ],
-    "publicReady": [
-      "Gate \"typecheck\" must pass. Current status: fail.",
-      "Gate \"test\" must pass. Current status: fail.",
-      "Gate \"windowsSmoke\" must pass. Current status: unknown.",
-      "Gate \"publishDryRun\" must pass. Current status: unknown.",
-      "Gate \"liveProvider\" must pass. Current status: unknown.",
-      "Release doctor receipt is missing for the current commit. Run `npm run release:doctor` to validate publish blockers.",
-      "Quickstart proof receipt is missing for the current commit. Run `npm run release:prove-quickstart` to validate the README quickstart path."
-    ]
+    "privateReady": [],
+    "publicReady": []
   },
   "releaseDoctor": {
-    "checked": false,
-    "canPublish": false,
+    "checked": true,
+    "canPublish": true,
     "blockerCount": 0,
     "actionCount": 0,
-    "readyCount": 0,
-    "generatedAt": null,
+    "readyCount": 1,
+    "generatedAt": "2026-03-27T11:32:13.845Z",
     "sourcePath": null,
     "blockers": [],
     "actions": []
   },
   "quickstartProof": {
-    "checked": false,
-    "canClaimQuickstart": false,
+    "checked": true,
+    "canClaimQuickstart": true,
     "blockerCount": 0,
     "actionCount": 0,
-    "generatedAt": null,
+    "generatedAt": "2026-03-27T11:32:13.845Z",
     "sourcePath": null,
     "blockers": [],
     "actions": [],

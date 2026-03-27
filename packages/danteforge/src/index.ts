@@ -417,7 +417,7 @@ export function runLocalPDSEScorer(code: string, projectRoot: string): PDSEScore
     consistency,
     overall,
     violations,
-    passedGate: overall >= 85 && hardCount === 0,
+    passedGate: overall >= 85 && hardCount === 0 && softCount === 0,
     scoredAt: new Date().toISOString(),
     scoredBy: "local-heuristic",
   };
