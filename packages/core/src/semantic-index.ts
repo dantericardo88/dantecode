@@ -223,7 +223,7 @@ export class BackgroundSemanticIndex implements SemanticIndex {
             this.readiness.filesIndexed++;
           }
           // If entry is null, just skip it (e.g., empty file)
-        } catch (err) {
+        } catch (_err) {
           // Log error for debugging
           errors.push({ file, error: err instanceof Error ? err.message : String(err) });
           // Skip files that can't be read/parsed
@@ -247,7 +247,7 @@ export class BackgroundSemanticIndex implements SemanticIndex {
 
       this.readiness.status = "ready";
       this.readiness.progress = 100;
-    } catch (err) {
+    } catch (_err) {
       this.readiness.status = "error";
       this.readiness.error = err instanceof Error ? err.message : String(err);
     }
@@ -285,7 +285,7 @@ export class BackgroundSemanticIndex implements SemanticIndex {
             }
           }
         }
-      } catch (err) {
+      } catch (_err) {
         // Skip directories that can't be read
       }
     };

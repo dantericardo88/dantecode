@@ -56,7 +56,7 @@ async function importDanteForge(injectedModule?: any): Promise<any> {
   try {
     const danteforge = await import("@dantecode/danteforge");
     return danteforge;
-  } catch (error) {
+  } catch (_error) {
     // DanteForge not available - fail-closed
     return null;
   }
@@ -73,7 +73,7 @@ async function importEvidenceChain(injectedSealer?: any): Promise<any> {
   try {
     const evidenceChain = await import("@dantecode/evidence-chain");
     return evidenceChain;
-  } catch (error) {
+  } catch (_error) {
     // Evidence chain not available - optional feature
     return null;
   }
@@ -215,7 +215,7 @@ async function createEvidenceSeal(
 
     const seal = sealer.seal(sessionId, evidence, config, metrics);
     return seal.sealId;
-  } catch (error) {
+  } catch (_error) {
     // Evidence sealing is optional - don't fail the gate
     return undefined;
   }

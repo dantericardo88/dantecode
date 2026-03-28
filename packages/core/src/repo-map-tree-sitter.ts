@@ -69,7 +69,7 @@ export class RepoMapTreeSitter {
       const symbols = parser.parse(source, filePath);
       this.stats.treeSitterSuccess++;
       return symbols;
-    } catch (error) {
+    } catch (_error) {
       // Parse error, fall back to regex
       this.stats.treeSitterFallback++;
       return extractSymbolsRegex(source, filePath);

@@ -169,7 +169,7 @@ export async function runTestRepair(options: RunTestRepairOptions): Promise<Test
     );
   }
 
-  let iteration = 0;
+  const iteration = 0;
   let baselineFailures: TestFailure[] | undefined = providedBaseline;
   let currentFailures: TestFailure[] = [];
 

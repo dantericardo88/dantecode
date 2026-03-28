@@ -203,7 +203,7 @@ export class JsonlEventStore implements DurableEventStore {
       let event: StoredEvent;
       try {
         event = JSON.parse(line) as StoredEvent;
-      } catch (err) {
+      } catch (_err) {
         // Skip corrupted line with warning
         console.warn(`[JsonlEventStore] Skipping corrupted line: ${line.slice(0, 100)}`);
         continue;

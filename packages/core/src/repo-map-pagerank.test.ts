@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm as _rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {

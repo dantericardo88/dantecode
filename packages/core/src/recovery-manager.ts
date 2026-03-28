@@ -205,7 +205,7 @@ export class RecoveryManager {
             timestamp: checkpoint.ts,
             step: checkpoint.step,
           });
-        } catch (error) {
+        } catch (_error) {
           sessions.push({
             sessionId,
             checkpointPath,
@@ -214,7 +214,7 @@ export class RecoveryManager {
           });
         }
       }
-    } catch (error) {
+    } catch (_error) {
       // If we can't read the checkpoints directory, return empty array
       return [];
     }

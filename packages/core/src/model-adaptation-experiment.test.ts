@@ -429,7 +429,7 @@ describe("createFixtureReplayRunner", () => {
     const runner = createFixtureReplayRunner(neverDetect);
     // Use a quirk key that has no fixture — all 10 real keys now have fixtures
     const override = makeOverride({ quirkKey: "stops_before_completion" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (override as any).quirkKey = "nonexistent_quirk_for_test";
     const metrics = await runner(override);
 
@@ -638,7 +638,7 @@ describe("createDetectionBasedRunner", () => {
     const runner = createDetectionBasedRunner(neverDetect);
     // Use a made-up quirk key that definitely has no fixture
     const override = makeOverride({ quirkKey: "tool_call_format_error" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     (override as any).quirkKey = "nonexistent_quirk_key";
     const metrics = await runner(override);
 

@@ -72,7 +72,7 @@ describe("runLintRepair - Execution", () => {
   });
 
   it("should attempt auto-fix when errors found", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
@@ -127,7 +127,7 @@ describe("runLintRepair - Execution", () => {
   });
 
   it("should respect maxRetries limit", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       // Always return errors (error count doesn't decrease, so loop breaks after first iteration)
@@ -195,7 +195,7 @@ describe("runLintRepair - Execution", () => {
   });
 
   it("should skip auto-commit when autoCommitFixes is false", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
@@ -239,7 +239,7 @@ describe("runLintRepair - Execution", () => {
   });
 
   it("should use custom fixCommand when provided", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn((command: string) => {
       callCount++;
       if (callCount === 1) {
@@ -280,7 +280,7 @@ describe("runLintRepair - Execution", () => {
   });
 
   it("should stop retrying when error count doesn't decrease", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       const error: any = new Error("Lint failed");
@@ -323,7 +323,7 @@ describe("runLintRepair - Execution", () => {
 describe("runLintRepair - Auto-fix", () => {
   it("should build fix command for ESLint", async () => {
     let fixCommandUsed = "";
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn((command: string) => {
       callCount++;
       if (callCount === 1) {
@@ -368,7 +368,7 @@ describe("runLintRepair - Auto-fix", () => {
 
   it("should build fix command for Prettier", async () => {
     let fixCommandUsed = "";
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn((command: string) => {
       callCount++;
       if (callCount === 1) {
@@ -403,7 +403,7 @@ describe("runLintRepair - Auto-fix", () => {
   });
 
   it("should handle git commit failure gracefully", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
@@ -449,7 +449,7 @@ describe("runLintRepair - Auto-fix", () => {
   });
 
   it("should handle fix command failure", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
@@ -504,7 +504,7 @@ describe("runLintRepair - Auto-fix", () => {
 
   it("should default to --fix when tool not specified", async () => {
     let fixCommandUsed = "";
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn((command: string) => {
       callCount++;
       if (callCount === 1) {
@@ -544,7 +544,7 @@ describe("runLintRepair - Auto-fix", () => {
   });
 
   it("should reduce error count across iterations", async () => {
-    let callCount = 0;
+    const _callCount = 0;
     const execFn = vi.fn(() => {
       callCount++;
       if (callCount === 1) {
