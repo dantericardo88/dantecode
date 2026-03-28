@@ -20,17 +20,19 @@ import {
   scheduleGitTask,
   listGitWatchers,
   stopGitWatcher,
+  type StoredWebhookListenerRecord,
+  type StoredScheduledTaskRecord,
+  type StoredGitWatcherRecord,
+  type StoredAutomationExecutionRecord,
+} from "@dantecode/git-engine";
+import {
   GitAutomationOrchestrator,
   FilePatternWatcher,
   getTemplate,
   listTemplates,
   type AutomationDefinition,
   type FileChangeEvent,
-  type StoredWebhookListenerRecord,
-  type StoredScheduledTaskRecord,
-  type StoredGitWatcherRecord,
-  type StoredAutomationExecutionRecord,
-} from "@dantecode/git-engine";
+} from "@dantecode/automation-engine";
 import type { WebhookProvider } from "@dantecode/git-engine";
 import { randomBytes } from "node:crypto";
 

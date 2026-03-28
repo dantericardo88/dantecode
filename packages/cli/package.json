@@ -53,6 +53,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@dantecode/automation-engine": "0.9.2",
     "@dantecode/config-types": "0.9.2",
     "@dantecode/core": "0.9.2",
     "@dantecode/dante-gaslight": "0.9.2",

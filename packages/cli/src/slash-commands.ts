@@ -97,10 +97,13 @@ import {
   scheduleGitTask,
   listScheduledGitTasks,
   stopScheduledGitTask,
+} from "@dantecode/git-engine";
+import {
   GitAutomationOrchestrator,
   substitutePromptVars,
-} from "@dantecode/git-engine";
-import type { AgentBridgeConfig, AgentBridgeResult } from "@dantecode/git-engine";
+  type AgentBridgeConfig,
+  type AgentBridgeResult,
+} from "@dantecode/automation-engine";
 import type {
   Session,
   SessionMessage,
