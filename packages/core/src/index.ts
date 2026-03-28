@@ -150,6 +150,28 @@ export type { SymbolDefinition, ImportEdge, RankedFile, RepoMapOptions } from ".
 export { RepoMapTreeSitter } from "./repo-map-tree-sitter.js";
 export type { TreeSitterParser } from "./repo-map-tree-sitter.js";
 
+export {
+  extractTags,
+  computeSymbolRanks,
+  formatRepoMapContext,
+  buildPageRankRepoMap,
+  getRelevantContext,
+} from "./repo-map-pagerank.js";
+export type {
+  SymbolTag,
+  SymbolRank,
+  PageRankRepoMapOptions,
+  RepoMapContext,
+} from "./repo-map-pagerank.js";
+
+// Unified Repo Map API
+export {
+  buildUnifiedRepoMap,
+  getRepoMapForQuery,
+  invalidateRepoMapCache,
+} from "./repo-map.js";
+export type { UnifiedRepoMapOptions, RepoMapCache } from "./repo-map.js";
+
 export { TypeScriptParser } from "./parsers/typescript-parser.js";
 export { JavaScriptParser } from "./parsers/javascript-parser.js";
 export { PythonParser } from "./parsers/python-parser.js";
