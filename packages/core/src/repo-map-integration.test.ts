@@ -129,10 +129,7 @@ class App {
       await mkdir(join(tempDir, "src"), { recursive: true });
 
       // Create files with both supported and unsupported extensions
-      await writeFile(
-        join(tempDir, "src", "main.ts"),
-        `export function main() { return 0; }`,
-      );
+      await writeFile(join(tempDir, "src", "main.ts"), `export function main() { return 0; }`);
 
       await writeFile(
         join(tempDir, "src", "Main.java"),

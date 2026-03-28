@@ -7,11 +7,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
-import {
-  buildUnifiedRepoMap,
-  getRepoMapForQuery,
-  invalidateRepoMapCache,
-} from "./repo-map.js";
+import { buildUnifiedRepoMap, getRepoMapForQuery, invalidateRepoMapCache } from "./repo-map.js";
 
 describe("buildUnifiedRepoMap", () => {
   let testDir: string;

@@ -21,6 +21,21 @@ export class GitAutomationOrchestrator {
 
 export type WorkflowRequest = any;
 export type WorkflowBackgroundRequest = any;
+export type FileChangeEvent = any;
+export type AutomationDefinition = any;
+export type AgentBridgeConfig = any;
+export type AgentBridgeResult = any;
+
+export class FilePatternWatcher {
+  constructor(options: any);
+  start(): Promise<void>;
+  stop(): void;
+  on(event: string, callback: (event: any) => void): void;
+}
+
+export function getTemplate(name: string): any;
+export function listTemplates(): any[];
+export function substitutePromptVars(template: string, context: any): string;
 `;
 
 const outputPath = join(__dirname, '..', 'dist', 'index.d.ts');

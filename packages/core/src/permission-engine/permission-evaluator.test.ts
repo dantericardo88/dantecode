@@ -6,11 +6,7 @@ import {
   matchGlob,
   globToRegex,
 } from "./permission-evaluator.js";
-import type {
-  PermissionCheck,
-  PermissionConfig,
-  PermissionRule,
-} from "./types.js";
+import type { PermissionCheck, PermissionConfig, PermissionRule } from "./types.js";
 import { parseRule, parseRules } from "./rule-parser.js";
 
 // ─── matchGlob ──────────────────────────────────────────────────────────────
@@ -269,10 +265,7 @@ describe("evaluatePermission", () => {
 
   it("deny beats allow (priority: deny > allow)", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "allow Bash *",
-        "deny Bash rm *",
-      ]),
+      rules: parseRules(["allow Bash *", "deny Bash rm *"]),
       defaultDecision: "ask",
     };
     const check: PermissionCheck = {
@@ -288,10 +281,7 @@ describe("evaluatePermission", () => {
 
   it("deny beats ask (priority: deny > ask)", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "ask Write src/*",
-        "deny Write src/secret/*",
-      ]),
+      rules: parseRules(["ask Write src/*", "deny Write src/secret/*"]),
       defaultDecision: "allow",
     };
     const check: PermissionCheck = {
@@ -305,10 +295,7 @@ describe("evaluatePermission", () => {
 
   it("ask beats allow (priority: ask > allow)", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "allow Write src/*",
-        "ask Write src/core/*",
-      ]),
+      rules: parseRules(["allow Write src/*", "ask Write src/core/*"]),
       defaultDecision: "deny",
     };
     const check: PermissionCheck = {
@@ -366,10 +353,7 @@ describe("evaluatePermission", () => {
 
   it("returns decidingRule correctly", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "allow Bash echo *",
-        "ask Bash git *",
-      ]),
+      rules: parseRules(["allow Bash echo *", "ask Bash git *"]),
       defaultDecision: "deny",
     };
     const check: PermissionCheck = {
@@ -385,10 +369,7 @@ describe("evaluatePermission", () => {
 
   it("handles multiple deny rules gracefully", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "deny Bash rm *",
-        "deny Bash sudo *",
-      ]),
+      rules: parseRules(["deny Bash rm *", "deny Bash sudo *"]),
       defaultDecision: "allow",
     };
     // "sudo rm -rf /" matches "sudo *" but not "rm *" (rm is not at the start)
@@ -403,10 +384,7 @@ describe("evaluatePermission", () => {
 
     // Test with a command that matches both rules
     const config2: PermissionConfig = {
-      rules: parseRules([
-        "deny Bash *rm*",
-        "deny Bash *sudo*",
-      ]),
+      rules: parseRules(["deny Bash *rm*", "deny Bash *sudo*"]),
       defaultDecision: "allow",
     };
     const check2: PermissionCheck = {
@@ -464,11 +442,7 @@ describe("evaluatePermissionDecision", () => {
 
   it("returns highest priority across multiple matches", () => {
     const config: PermissionConfig = {
-      rules: parseRules([
-        "allow Bash *",
-        "ask Bash git *",
-        "deny Bash git push *",
-      ]),
+      rules: parseRules(["allow Bash *", "ask Bash git *", "deny Bash git push *"]),
       defaultDecision: "allow",
     };
     const check: PermissionCheck = {

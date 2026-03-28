@@ -4,11 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { CoreMessage } from "ai";
-import {
-  calculatePressure,
-  condenseContext,
-  estimateMessageTokens,
-} from "./context-condenser.js";
+import { calculatePressure, condenseContext, estimateMessageTokens } from "./context-condenser.js";
 
 // ----------------------------------------------------------------------------
 // Test Helpers
@@ -16,7 +12,12 @@ import {
 
 function createMessage(role: CoreMessage["role"], content: string): CoreMessage {
   if (role === "tool") {
-    return { role: "tool", content: [{ type: "tool-result", toolCallId: "test-tool-call", toolName: "test", result: content }] };
+    return {
+      role: "tool",
+      content: [
+        { type: "tool-result", toolCallId: "test-tool-call", toolName: "test", result: content },
+      ],
+    };
   }
   return { role, content } as CoreMessage;
 }
@@ -34,9 +35,7 @@ function messageContentIncludes(msg: CoreMessage, text: string): boolean {
 }
 
 function createConversation(rounds: number): CoreMessage[] {
-  const messages: CoreMessage[] = [
-    createMessage("system", "You are a helpful assistant."),
-  ];
+  const messages: CoreMessage[] = [createMessage("system", "You are a helpful assistant.")];
 
   for (let i = 0; i < rounds; i++) {
     messages.push(createMessage("user", `User request ${i + 1}`));
@@ -128,7 +127,9 @@ describe("condenseContext", () => {
   it("should preserve system message", async () => {
     const messages = createConversation(10);
     const result = await condenseContext(messages, 500);
-    const systemMsg = result.messages.find((m) => m.role === "system" && messageContentIncludes(m, "helpful assistant"));
+    const systemMsg = result.messages.find(
+      (m) => m.role === "system" && messageContentIncludes(m, "helpful assistant"),
+    );
     expect(systemMsg).toBeDefined();
   });
 
@@ -401,7 +402,10 @@ describe("critical info extraction", () => {
     const messages = [
       createMessage("system", "System"),
       createMessage("user", "Task"),
-      createMessage("assistant", "Error: Failed to compile\nTypeError: undefined is not a function"),
+      createMessage(
+        "assistant",
+        "Error: Failed to compile\nTypeError: undefined is not a function",
+      ),
       createMessage("user", "Task 2"),
       createMessage("assistant", "Response"),
       createMessage("user", "Task 3"),

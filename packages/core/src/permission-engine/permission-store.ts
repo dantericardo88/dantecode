@@ -82,10 +82,7 @@ export function normalizeConfigFile(file: PermissionConfigFile): PermissionConfi
  * @param projectRoot - The project root directory
  * @param config - The permission config to save
  */
-export function savePermissionConfig(
-  projectRoot: string,
-  config: PermissionConfig,
-): void {
+export function savePermissionConfig(projectRoot: string, config: PermissionConfig): void {
   const configDir = join(projectRoot, CONFIG_DIR);
   const configPath = join(configDir, CONFIG_FILE);
 

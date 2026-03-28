@@ -270,10 +270,7 @@ vi.mock("@dantecode/core", () => ({
     constructor(private readonly profile: { mode?: string } = {}) {}
 
     check(toolName: string) {
-      if (
-        this.profile.mode === "plan" &&
-        !["Read", "ListDir", "Glob", "Grep"].includes(toolName)
-      ) {
+      if (this.profile.mode === "plan" && !["Read", "ListDir", "Glob", "Grep"].includes(toolName)) {
         return {
           decision: "auto_deny" as const,
           reason: "Plan mode only allows read-only tools.",
@@ -507,7 +504,13 @@ vi.mock("@dantecode/core", () => ({
     delete: vi.fn().mockResolvedValue(undefined),
   })),
   assessMutationScope: vi.fn(
-    ({ actualFiles = [], claimedFiles = [] }: { actualFiles?: string[]; claimedFiles?: string[] }) => {
+    ({
+      actualFiles = [],
+      claimedFiles = [],
+    }: {
+      actualFiles?: string[];
+      claimedFiles?: string[];
+    }) => {
       const actualSet = new Set(actualFiles);
       const claimedSet = new Set(claimedFiles);
       return {
@@ -3425,9 +3428,11 @@ describe("Skills Tree View (Wave 3)", () => {
 describe("Skill Commands (Wave 3)", () => {
   it("commandExecuteSkill shows quick pick when no skill name provided", async () => {
     vi.mock("@dantecode/skill-adapter", () => ({
-      listSkills: vi.fn().mockResolvedValue([
-        { name: "skill-a", description: "Skill A", metadata: { category: "Test" } },
-      ]),
+      listSkills: vi
+        .fn()
+        .mockResolvedValue([
+          { name: "skill-a", description: "Skill A", metadata: { category: "Test" } },
+        ]),
       getSkill: vi.fn(),
     }));
 

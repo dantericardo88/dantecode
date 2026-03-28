@@ -1,15 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  executeChain,
-  resolveInput,
-  resolveOutputRef,
-  handleGateFailure,
-} from "./skill-chain.js";
-import type {
-  SkillChain,
-  ChainStepResult,
-  SkillOutputRef,
-} from "./skill-chain.js";
+import { executeChain, resolveInput, resolveOutputRef, handleGateFailure } from "./skill-chain.js";
+import type { SkillChain, ChainStepResult, SkillOutputRef } from "./skill-chain.js";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillRunContext } from "./skill-run-context.js";
 import type { SkillRunResult } from "./skill-run-result.js";
@@ -539,9 +530,7 @@ describe("executeChain - PDSE gating", () => {
   it("should use step-specific threshold when provided", async () => {
     const chain: SkillChain = {
       name: "step-threshold",
-      steps: [
-        { skillName: "step-1", input: "test", onFailure: "abort", pdseThreshold: 90 },
-      ],
+      steps: [{ skillName: "step-1", input: "test", onFailure: "abort", pdseThreshold: 90 }],
       gating: "pdse",
       pdseThreshold: 70,
     };

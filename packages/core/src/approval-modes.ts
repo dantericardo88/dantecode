@@ -65,15 +65,7 @@ export function getModeToolExclusions(mode: CanonicalApprovalMode): string[] {
   switch (mode) {
     case "plan":
     case "review":
-      return [
-        "Write",
-        "Edit",
-        "NotebookEdit",
-        "Bash",
-        "GitCommit",
-        "GitPush",
-        "SubAgent",
-      ];
+      return ["Write", "Edit", "NotebookEdit", "Bash", "GitCommit", "GitPush", "SubAgent"];
     case "apply":
     case "autoforge":
     case "yolo":

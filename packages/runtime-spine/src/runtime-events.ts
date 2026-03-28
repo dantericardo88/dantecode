@@ -199,7 +199,9 @@ export const RunDecompositionCompletedPayloadSchema = z.object({
   durationMs: z.number(),
   success: z.boolean(),
 });
-export type RunDecompositionCompletedPayload = z.infer<typeof RunDecompositionCompletedPayloadSchema>;
+export type RunDecompositionCompletedPayload = z.infer<
+  typeof RunDecompositionCompletedPayloadSchema
+>;
 
 // Tool lifecycle payloads
 export const RunToolStartedPayloadSchema = z.object({

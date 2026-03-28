@@ -92,12 +92,17 @@ export class WorkflowGraphCheckpointer<TState = unknown> {
    * Note: EventSourcedCheckpointer keeps only the latest checkpoint per session.
    * This returns at most one checkpoint.
    */
-  async list(sessionId: string, _limit = 10): Promise<Array<{
-    checkpointId: string;
-    step: number;
-    timestamp: string;
-    metadata?: Record<string, unknown>;
-  }>> {
+  async list(
+    sessionId: string,
+    _limit = 10,
+  ): Promise<
+    Array<{
+      checkpointId: string;
+      step: number;
+      timestamp: string;
+      metadata?: Record<string, unknown>;
+    }>
+  > {
     const checkpointer = this.getCheckpointer(sessionId);
     const tuple = await checkpointer.getTuple();
 
@@ -105,12 +110,14 @@ export class WorkflowGraphCheckpointer<TState = unknown> {
       return [];
     }
 
-    return [{
-      checkpointId: tuple.checkpoint.id,
-      step: tuple.checkpoint.step,
-      timestamp: tuple.checkpoint.ts,
-      metadata: tuple.metadata.extra,
-    }];
+    return [
+      {
+        checkpointId: tuple.checkpoint.id,
+        step: tuple.checkpoint.step,
+        timestamp: tuple.checkpoint.ts,
+        metadata: tuple.metadata.extra,
+      },
+    ];
   }
 
   /**

@@ -150,7 +150,9 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       process.stdout.write(
         `  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`,
       );
-      process.stdout.write(`  dantecode skills chain <name> --input "text"  Execute a skill chain\n`);
+      process.stdout.write(
+        `  dantecode skills chain <name> --input "text"  Execute a skill chain\n`,
+      );
       process.stdout.write(
         `  dantecode skills wrap <name>                 Wrap an existing skill\n`,
       );
@@ -1610,7 +1612,9 @@ async function skillsChain(args: string[], projectRoot: string): Promise<void> {
   if (chainDef.description) {
     process.stdout.write(`${DIM}${chainDef.description}${RESET}\n`);
   }
-  process.stdout.write(`${DIM}Steps: ${chainDef.steps.length} | Gating: ${chainDef.gating}${RESET}\n\n`);
+  process.stdout.write(
+    `${DIM}Steps: ${chainDef.steps.length} | Gating: ${chainDef.gating}${RESET}\n\n`,
+  );
 
   // Skill loader function
   const skillLoader = async (name: string) => {

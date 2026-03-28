@@ -57,7 +57,9 @@ describe("Skill Load Event Emission", () => {
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & {
+      getEmittedEvents: () => RuntimeEvent[];
+    };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",
@@ -150,7 +152,9 @@ describe("Skill Execute Event Emission", () => {
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & {
+      getEmittedEvents: () => RuntimeEvent[];
+    };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",
@@ -285,7 +289,9 @@ describe("Event Payload Validation", () => {
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & {
+      getEmittedEvents: () => RuntimeEvent[];
+    };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",

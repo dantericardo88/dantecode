@@ -148,9 +148,9 @@ describe("LocalWorkspace", () => {
 
       // Should match all txt files at any depth
       expect(allFiles.length).toBeGreaterThanOrEqual(3);
-      expect(allFiles.some(f => f.includes("file1.txt"))).toBe(true);
-      expect(allFiles.some(f => f.includes("file2.txt"))).toBe(true);
-      expect(allFiles.some(f => f.includes("file3.txt"))).toBe(true);
+      expect(allFiles.some((f) => f.includes("file1.txt"))).toBe(true);
+      expect(allFiles.some((f) => f.includes("file2.txt"))).toBe(true);
+      expect(allFiles.some((f) => f.includes("file3.txt"))).toBe(true);
     });
 
     it("should check file existence", async () => {

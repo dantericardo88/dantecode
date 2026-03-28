@@ -39,7 +39,12 @@ export function parseVitestOutput(output: string): TestFailure[] {
     const failMatch = line?.match(/^(?:FAIL|❯)\s+(.+?)\s+>\s+(.+)/);
     if (failMatch && failMatch[1] && failMatch[2]) {
       // Save previous failure if exists
-      if (currentFailure && currentFailure.testFile && currentFailure.testName && currentFailure.error) {
+      if (
+        currentFailure &&
+        currentFailure.testFile &&
+        currentFailure.testName &&
+        currentFailure.error
+      ) {
         failures.push({
           testFile: currentFailure.testFile,
           testName: currentFailure.testName,
@@ -78,7 +83,12 @@ export function parseVitestOutput(output: string): TestFailure[] {
   }
 
   // Save last failure
-  if (currentFailure && currentFailure.testFile && currentFailure.testName && currentFailure.error) {
+  if (
+    currentFailure &&
+    currentFailure.testFile &&
+    currentFailure.testName &&
+    currentFailure.error
+  ) {
     failures.push({
       testFile: currentFailure.testFile,
       testName: currentFailure.testName,
@@ -213,7 +223,12 @@ export function parsePytestOutput(output: string): TestFailure[] {
     const failMatch = line.match(/^FAILED\s+(.+?)::(.+?)\s+-\s+(.+)/);
     if (failMatch && failMatch[1] && failMatch[2] && failMatch[3]) {
       // Save previous failure
-      if (currentFailure && currentFailure.testFile && currentFailure.testName && currentFailure.error) {
+      if (
+        currentFailure &&
+        currentFailure.testFile &&
+        currentFailure.testName &&
+        currentFailure.error
+      ) {
         failures.push({
           testFile: currentFailure.testFile,
           testName: currentFailure.testName,
@@ -235,7 +250,12 @@ export function parsePytestOutput(output: string): TestFailure[] {
     const failMatchClass = line.match(/^FAILED\s+(.+?)::(.+?)::(.+)/);
     if (failMatchClass && failMatchClass[1] && failMatchClass[2] && failMatchClass[3]) {
       // Save previous failure
-      if (currentFailure && currentFailure.testFile && currentFailure.testName && currentFailure.error) {
+      if (
+        currentFailure &&
+        currentFailure.testFile &&
+        currentFailure.testName &&
+        currentFailure.error
+      ) {
         failures.push({
           testFile: currentFailure.testFile,
           testName: currentFailure.testName,
@@ -271,7 +291,12 @@ export function parsePytestOutput(output: string): TestFailure[] {
   }
 
   // Save last failure
-  if (currentFailure && currentFailure.testFile && currentFailure.testName && currentFailure.error) {
+  if (
+    currentFailure &&
+    currentFailure.testFile &&
+    currentFailure.testName &&
+    currentFailure.error
+  ) {
     failures.push({
       testFile: currentFailure.testFile,
       testName: currentFailure.testName,

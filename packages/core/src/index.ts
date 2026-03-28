@@ -165,11 +165,7 @@ export type {
 } from "./repo-map-pagerank.js";
 
 // Unified Repo Map API
-export {
-  buildUnifiedRepoMap,
-  getRepoMapForQuery,
-  invalidateRepoMapCache,
-} from "./repo-map.js";
+export { buildUnifiedRepoMap, getRepoMapForQuery, invalidateRepoMapCache } from "./repo-map.js";
 export type { UnifiedRepoMapOptions, RepoMapCache } from "./repo-map.js";
 
 export { TypeScriptParser } from "./parsers/typescript-parser.js";
@@ -275,11 +271,7 @@ export type {
 // ─── Durable Event Store ─────────────────────────────────────────────────────
 
 export { JsonlEventStore } from "./durable-event-store.js";
-export type {
-  DurableEventStore,
-  EventFilter,
-  StoredEvent,
-} from "./durable-event-store.js";
+export type { DurableEventStore, EventFilter, StoredEvent } from "./durable-event-store.js";
 
 // ─── Credential Vault ────────────────────────────────────────────────────────
 export { CredentialVault } from "./credential-vault.js";
@@ -395,7 +387,12 @@ export type {
 
 // ─── Recovery Manager ───────────────────────────────────────────────────────
 
-export { RecoveryManager, formatStaleSessionSummary, filterSessionsByStatus, sortSessionsByTime } from "./recovery-manager.js";
+export {
+  RecoveryManager,
+  formatStaleSessionSummary,
+  filterSessionsByStatus,
+  sortSessionsByTime,
+} from "./recovery-manager.js";
 export type {
   SessionStatus,
   StaleSession,
@@ -547,7 +544,12 @@ export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";
 // ─── Semantic Index ────────────────────────────────────────────────────────
 
 export { BackgroundSemanticIndex } from "./semantic-index.js";
-export type { SemanticIndex, IndexReadiness, IndexEntry, BackgroundSemanticIndexOptions } from "./semantic-index.js";
+export type {
+  SemanticIndex,
+  IndexReadiness,
+  IndexEntry,
+  BackgroundSemanticIndexOptions,
+} from "./semantic-index.js";
 
 // ─── Council Orchestrator ────────────────────────────────────────────────────
 
@@ -1060,7 +1062,12 @@ export type {
 
 // ─── Run Intake ────────────────────────────────────────────────────────────
 
-export { createRunIntake, classifyTask, extractScopeFromPrompt, TaskClassSchema } from "./run-intake.js";
+export {
+  createRunIntake,
+  classifyTask,
+  extractScopeFromPrompt,
+  TaskClassSchema,
+} from "./run-intake.js";
 export type { RunIntake, TaskClass, AllowedBoundary } from "./run-intake.js";
 
 // ─── Boundary Tracker ─────────────────────────────────────────────────────
@@ -1144,7 +1151,11 @@ export {
 export type { TestFailure } from "./repair-loop/test-parsers.js";
 
 export { runFinalGate, formatFinalGateResult } from "./repair-loop/final-gate.js";
-export type { FinalGateConfig, FinalGateResult, RunFinalGateOptions } from "./repair-loop/final-gate.js";
+export type {
+  FinalGateConfig,
+  FinalGateResult,
+  RunFinalGateOptions,
+} from "./repair-loop/final-gate.js";
 
 // ─── Doc-Code Drift ───────────────────────────────────────────────────────────
 
@@ -1177,11 +1188,7 @@ export type { CustomMode, PathCheckResult, ToolCheckResult } from "./custom-mode
 
 // ─── Async Task Executor ──────────────────────────────────────────────────────
 
-export {
-  AsyncTaskExecutor,
-  createAsyncTaskExecutor,
-  createTask,
-} from "./async-task-executor.js";
+export { AsyncTaskExecutor, createAsyncTaskExecutor, createTask } from "./async-task-executor.js";
 export type {
   Task,
   TaskResult,

@@ -17,12 +17,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatusSchema>;
 
 // ─── Workspace Type ───────────────────────────────────────────────────────────
 
-export const WorkspaceTypeSchema = z.enum([
-  "local",
-  "remote",
-  "container",
-  "hybrid",
-]);
+export const WorkspaceTypeSchema = z.enum(["local", "remote", "container", "hybrid"]);
 export type WorkspaceType = z.infer<typeof WorkspaceTypeSchema>;
 
 // ─── File Operation Options ──────────────────────────────────────────────────

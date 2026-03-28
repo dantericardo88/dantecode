@@ -559,11 +559,7 @@ async function _runAgentLoopCore(
   );
 
   // ---- RunIntake: capture intent boundary before any model call ----
-  const runIntake: RunIntake = createRunIntake(
-    durablePrompt,
-    session.id,
-    config.runId,
-  );
+  const runIntake: RunIntake = createRunIntake(durablePrompt, session.id, config.runId);
   if (config.verbose) {
     emitOrWrite(
       `${DIM}[run-intake] id=${runIntake.runId} class=${runIntake.classification} scope=${runIntake.requestedScope.length} paths${RESET}\n`,
@@ -647,7 +643,7 @@ async function _runAgentLoopCore(
         targetPercent: 50,
       });
 
-      messages = condensed.messages as { role: "user" | "assistant" | "system"; content: string; }[];
+      messages = condensed.messages as { role: "user" | "assistant" | "system"; content: string }[];
 
       if (!config.silent) {
         const reduction = Math.round(
@@ -1370,13 +1366,10 @@ async function _runAgentLoopCore(
         }
         // In interactive TTY mode (non-serve, non-silent), prompt for approval
         if (!config.eventEmitter && process.stdin.isTTY !== false) {
-          const shouldContinue = await confirmDestructive(
-            formatDriftMessage(boundaryState),
-            {
-              operation: "Boundary Drift",
-              detail: `${boundaryState.outOfScopeFiles.length} file(s) mutated outside declared scope`,
-            },
-          );
+          const shouldContinue = await confirmDestructive(formatDriftMessage(boundaryState), {
+            operation: "Boundary Drift",
+            detail: `${boundaryState.outOfScopeFiles.length} file(s) mutated outside declared scope`,
+          });
           if (!shouldContinue) {
             if (!config.silent) {
               emitOrWrite(

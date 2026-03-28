@@ -204,7 +204,9 @@ describe("runLintRepair - Execution", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -246,7 +248,9 @@ describe("runLintRepair - Execution", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -329,7 +333,9 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -406,7 +412,9 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -450,7 +458,9 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -467,7 +477,9 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -501,7 +513,9 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 }],
+              messages: [
+                { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
+              ],
             },
           ]),
         );
@@ -542,7 +556,13 @@ describe("runLintRepair - Auto-fix", () => {
               filePath: "src/file.ts",
               messages: [
                 { ruleId: "semi", severity: 2, message: "Missing semicolon", line: 10, column: 5 },
-                { ruleId: "quotes", severity: 2, message: "Use single quotes", line: 15, column: 10 },
+                {
+                  ruleId: "quotes",
+                  severity: 2,
+                  message: "Use single quotes",
+                  line: 15,
+                  column: 10,
+                },
               ],
             },
           ]),
@@ -558,7 +578,15 @@ describe("runLintRepair - Auto-fix", () => {
           JSON.stringify([
             {
               filePath: "src/file.ts",
-              messages: [{ ruleId: "quotes", severity: 2, message: "Use single quotes", line: 15, column: 10 }],
+              messages: [
+                {
+                  ruleId: "quotes",
+                  severity: 2,
+                  message: "Use single quotes",
+                  line: 15,
+                  column: 10,
+                },
+              ],
             },
           ]),
         );

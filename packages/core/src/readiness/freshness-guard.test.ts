@@ -44,7 +44,7 @@ describe("freshness-guard", () => {
       expect(mockExecFileSync).toHaveBeenCalledWith(
         "git",
         ["rev-parse", "HEAD"],
-        expect.objectContaining({ cwd: testDir })
+        expect.objectContaining({ cwd: testDir }),
       );
     });
 
@@ -130,7 +130,7 @@ describe("freshness-guard", () => {
           gitCommit: "current-commit-abc123",
           timestamp: new Date().toISOString(),
         }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = checkReadinessFreshness([artifactPath], testDir);
@@ -154,7 +154,7 @@ describe("freshness-guard", () => {
           gitCommit: "old-commit-xyz789",
           timestamp: oldTimestamp,
         }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = checkReadinessFreshness([artifactPath], testDir);
@@ -198,7 +198,7 @@ describe("freshness-guard", () => {
           commitSha: "current-commit-abc123", // legacy field name
           generatedAt: new Date().toISOString(),
         }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = checkReadinessFreshness([artifactPath], testDir);
@@ -215,13 +215,13 @@ describe("freshness-guard", () => {
       writeFileSync(
         join(testDir, artifact1),
         JSON.stringify({ gitCommit: "current-commit-abc123", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
       mkdirSync(dirname(join(testDir, artifact2)), { recursive: true });
       writeFileSync(
         join(testDir, artifact2),
         JSON.stringify({ gitCommit: "old-commit", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = checkReadinessFreshness([artifact1, artifact2], testDir);
@@ -241,7 +241,7 @@ describe("freshness-guard", () => {
       writeFileSync(
         fullPath,
         JSON.stringify({ gitCommit: "current-commit-abc123", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = checkReadinessFreshness([artifactPath], testDir);
@@ -297,12 +297,18 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("1 readiness artifact STALE"));
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("1 readiness artifact STALE"),
+      );
       expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("stale.json"));
       expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("old-xyz"));
       expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("2 hours ago"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Current commit: current"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("npm run generate-readiness"));
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Current commit: current"),
+      );
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("npm run generate-readiness"),
+      );
     });
 
     it("should handle plural artifacts", () => {
@@ -332,7 +338,9 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("2 readiness artifacts STALE"));
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("2 readiness artifacts STALE"),
+      );
     });
 
     it("should handle special commit states", () => {
@@ -394,13 +402,15 @@ describe("freshness-guard", () => {
       writeFileSync(
         join(testDir, artifactPath),
         JSON.stringify({ gitCommit: "current-commit-abc123", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = enforceFreshnessInCI([artifactPath], testDir);
 
       expect(result).toBe(true);
-      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("All readiness artifacts are fresh"));
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining("All readiness artifacts are fresh"),
+      );
     });
 
     it("should return false in CI mode when stale artifacts detected", () => {
@@ -409,14 +419,14 @@ describe("freshness-guard", () => {
       writeFileSync(
         join(testDir, artifactPath),
         JSON.stringify({ gitCommit: "old-commit", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = enforceFreshnessInCI([artifactPath], testDir, { ci: true });
 
       expect(result).toBe(false);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Stale readiness artifacts detected in CI/strict mode")
+        expect.stringContaining("Stale readiness artifacts detected in CI/strict mode"),
       );
     });
 
@@ -426,7 +436,7 @@ describe("freshness-guard", () => {
       writeFileSync(
         join(testDir, artifactPath),
         JSON.stringify({ gitCommit: "old-commit", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = enforceFreshnessInCI([artifactPath], testDir, { strict: true });
@@ -440,7 +450,7 @@ describe("freshness-guard", () => {
       writeFileSync(
         join(testDir, artifactPath),
         JSON.stringify({ gitCommit: "old-commit", timestamp: new Date().toISOString() }),
-        "utf-8"
+        "utf-8",
       );
 
       const result = enforceFreshnessInCI([artifactPath], testDir, { ci: false });

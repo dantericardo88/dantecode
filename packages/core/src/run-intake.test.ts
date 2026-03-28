@@ -110,15 +110,7 @@ describe("extractScopeFromPrompt", () => {
   });
 
   it("returns at most 5 paths", () => {
-    const prompt = [
-      "a.ts",
-      "b.ts",
-      "c.ts",
-      "d.ts",
-      "e.ts",
-      "f.ts",
-      "g.ts",
-    ].join(" ");
+    const prompt = ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts", "g.ts"].join(" ");
     const scope = extractScopeFromPrompt(prompt);
     expect(scope.length).toBeLessThanOrEqual(5);
   });

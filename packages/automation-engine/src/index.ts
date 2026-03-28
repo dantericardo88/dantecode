@@ -12,7 +12,11 @@ export type {
   GitAutomationOrchestratorOptions,
 } from "./automation-orchestrator.js";
 
-export { runAutomationAgent, substitutePromptVars, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
+export {
+  runAutomationAgent,
+  substitutePromptVars,
+  PDSE_GATE_THRESHOLD,
+} from "./automation-agent-bridge.js";
 export type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
 export { getTemplate, listTemplates, BUILT_IN_TEMPLATES } from "./automation-templates.js";
@@ -29,6 +33,7 @@ export {
 } from "@dantecode/git-engine";
 
 export { FilePatternWatcher, matchGlob } from "./file-pattern-watcher.js";
+export type { FileChangeEvent } from "./file-pattern-watcher.js";
 
 // ============================================================================
 // Workflow Graph Execution (LangGraph-inspired)

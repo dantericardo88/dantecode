@@ -28,9 +28,7 @@ import {
 /**
  * Workflow graph executor - executes compiled graphs.
  */
-export class WorkflowGraphExecutor<TState = unknown>
-  implements CompiledWorkflowGraph<TState>
-{
+export class WorkflowGraphExecutor<TState = unknown> implements CompiledWorkflowGraph<TState> {
   constructor(
     private readonly nodes: Map<string, WorkflowNode<TState>>,
     private readonly edges: WorkflowEdge<TState>[],
@@ -226,10 +224,7 @@ export class WorkflowGraphExecutor<TState = unknown>
   /**
    * Execute function with timeout.
    */
-  private async executeWithTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-  ): Promise<T> {
+  private async executeWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return Promise.race([
       promise,
       new Promise<never>((_, reject) =>
@@ -241,10 +236,7 @@ export class WorkflowGraphExecutor<TState = unknown>
   /**
    * Resolve next nodes from edges.
    */
-  private async resolveNextNodes(
-    nodeName: string,
-    state: TState,
-  ): Promise<string[]> {
+  private async resolveNextNodes(nodeName: string, state: TState): Promise<string[]> {
     const nextNodes: string[] = [];
 
     for (const edge of this.edges) {
@@ -296,9 +288,7 @@ export class WorkflowGraphExecutor<TState = unknown>
     }
 
     // Count previous retries
-    const retries = context.history.filter(
-      (h) => h.nodeName === nodeName && h.error,
-    ).length;
+    const retries = context.history.filter((h) => h.nodeName === nodeName && h.error).length;
 
     if (retries >= retryPolicy.maxRetries) {
       return false;
@@ -307,9 +297,7 @@ export class WorkflowGraphExecutor<TState = unknown>
     // Calculate backoff delay
     const delay = retryPolicy.delayMs ?? 1000;
     const backoffDelay =
-      retryPolicy.backoff === "exponential"
-        ? delay * Math.pow(2, retries)
-        : delay * (retries + 1);
+      retryPolicy.backoff === "exponential" ? delay * Math.pow(2, retries) : delay * (retries + 1);
 
     await new Promise((resolve) => setTimeout(resolve, backoffDelay));
 
@@ -370,14 +358,19 @@ export class WorkflowGraphExecutor<TState = unknown>
     ];
 
     for (const eventType of eventTypes) {
-      emitter.on(eventType, (data) => eventHandler(eventType as keyof WorkflowGraphEvents<TState>, data));
+      emitter.on(eventType, (data) =>
+        eventHandler(eventType as keyof WorkflowGraphEvents<TState>, data),
+      );
     }
 
     // Execute in background
     const executionPromise = this.execute(options);
 
     // Yield events as they come
-    while (events.length > 0 || !(await Promise.race([executionPromise.then(() => true), Promise.resolve(false)]))) {
+    while (
+      events.length > 0 ||
+      !(await Promise.race([executionPromise.then(() => true), Promise.resolve(false)]))
+    ) {
       if (events.length > 0) {
         yield events.shift()!;
       } else {

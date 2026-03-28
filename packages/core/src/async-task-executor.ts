@@ -155,7 +155,8 @@ interface TaskExecutionState<TInput = unknown, TOutput = unknown> {
 export class AsyncTaskExecutor extends EventEmitter {
   private options: Required<AsyncTaskExecutorOptions>;
   private tasks: Map<string, TaskExecutionState<unknown, unknown>> = new Map();
-  private queue: Array<{ task: Task<unknown, unknown>; executor: TaskExecutor<unknown, unknown> }> = [];
+  private queue: Array<{ task: Task<unknown, unknown>; executor: TaskExecutor<unknown, unknown> }> =
+    [];
   private runningCount = 0;
 
   constructor(options: AsyncTaskExecutorOptions = {}) {
@@ -206,7 +207,10 @@ export class AsyncTaskExecutor extends EventEmitter {
     if (this.runningCount < this.options.maxConcurrency) {
       void this.executeTask(task.id);
     } else {
-      this.queue.push({ task: task as Task<unknown, unknown>, executor: executor as TaskExecutor<unknown, unknown> });
+      this.queue.push({
+        task: task as Task<unknown, unknown>,
+        executor: executor as TaskExecutor<unknown, unknown>,
+      });
       this.emit("queue:full");
     }
 
@@ -440,7 +444,11 @@ export class AsyncTaskExecutor extends EventEmitter {
    */
   cleanup(): void {
     for (const [taskId, state] of this.tasks.entries()) {
-      if (state.status === "completed" || state.status === "failed" || state.status === "cancelled") {
+      if (
+        state.status === "completed" ||
+        state.status === "failed" ||
+        state.status === "cancelled"
+      ) {
         this.tasks.delete(taskId);
       }
     }

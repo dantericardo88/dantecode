@@ -347,7 +347,9 @@ export class BackgroundSemanticIndex implements SemanticIndex {
     try {
       content = await readFile(absPath, "utf-8");
     } catch (readErr) {
-      throw new Error(`Failed to read ${relPath}: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+      throw new Error(
+        `Failed to read ${relPath}: ${readErr instanceof Error ? readErr.message : String(readErr)}`,
+      );
     }
 
     if (content.length === 0) {
@@ -399,14 +401,25 @@ const SYMBOL_REGEXES: Record<string, RegExp[]> = {
   ".py": [/(?:class|def)\s+(\w+)/g],
   ".go": [/(?:func|type|const|var)\s+(\w+)/g],
   ".rs": [/(?:fn|struct|enum|trait|impl)\s+(\w+)/g],
-  ".java": [/(?:class|interface|enum)\s+(\w+)/g, /(?:public|private|protected)?\s*(?:static)?\s*\w+\s+(\w+)\s*\(/g],
+  ".java": [
+    /(?:class|interface|enum)\s+(\w+)/g,
+    /(?:public|private|protected)?\s*(?:static)?\s*\w+\s+(\w+)\s*\(/g,
+  ],
 };
 
 const IMPORT_REGEXES: Record<string, RegExp[]> = {
   ".ts": [/import\s+.*?\s+from\s+['"]([^'"]+)['"]/g, /import\s+['"]([^'"]+)['"]/g],
   ".tsx": [/import\s+.*?\s+from\s+['"]([^'"]+)['"]/g, /import\s+['"]([^'"]+)['"]/g],
-  ".js": [/import\s+.*?\s+from\s+['"]([^'"]+)['"]/g, /import\s+['"]([^'"]+)['"]/g, /require\(['"]([^'"]+)['"]\)/g],
-  ".jsx": [/import\s+.*?\s+from\s+['"]([^'"]+)['"]/g, /import\s+['"]([^'"]+)['"]/g, /require\(['"]([^'"]+)['"]\)/g],
+  ".js": [
+    /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g,
+    /import\s+['"]([^'"]+)['"]/g,
+    /require\(['"]([^'"]+)['"]\)/g,
+  ],
+  ".jsx": [
+    /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g,
+    /import\s+['"]([^'"]+)['"]/g,
+    /require\(['"]([^'"]+)['"]\)/g,
+  ],
   ".py": [/^import\s+([\w.]+)/gm, /^from\s+([\w.]+)\s+import/gm],
   ".go": [/import\s+(?:\([\s\S]*?\)|"([^"]+)")/g],
   ".rs": [/use\s+([\w:]+)/g],

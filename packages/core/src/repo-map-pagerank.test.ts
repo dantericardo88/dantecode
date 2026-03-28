@@ -121,7 +121,13 @@ describe("computeSymbolRanks", () => {
   it("should rank symbols by reference frequency", () => {
     const tags: SymbolTag[] = [
       // Define two functions in different files
-      { filePath: "a.ts", symbolName: "helper", kind: "def", line: 1, signature: "function helper()" },
+      {
+        filePath: "a.ts",
+        symbolName: "helper",
+        kind: "def",
+        line: 1,
+        signature: "function helper()",
+      },
       { filePath: "b.ts", symbolName: "util", kind: "def", line: 1, signature: "function util()" },
 
       // File c references helper multiple times
@@ -143,7 +149,13 @@ describe("computeSymbolRanks", () => {
 
   it("should boost symbols mentioned in options", () => {
     const tags: SymbolTag[] = [
-      { filePath: "a.ts", symbolName: "common", kind: "def", line: 1, signature: "function common()" },
+      {
+        filePath: "a.ts",
+        symbolName: "common",
+        kind: "def",
+        line: 1,
+        signature: "function common()",
+      },
       { filePath: "b.ts", symbolName: "rare", kind: "def", line: 1, signature: "function rare()" },
       { filePath: "c.ts", symbolName: "common", kind: "ref", line: -1 },
       { filePath: "c.ts", symbolName: "rare", kind: "ref", line: -1 },
@@ -159,8 +171,20 @@ describe("computeSymbolRanks", () => {
 
   it("should boost symbols from chat files", () => {
     const tags: SymbolTag[] = [
-      { filePath: "chat.ts", symbolName: "chatFunc", kind: "def", line: 1, signature: "function chatFunc()" },
-      { filePath: "other.ts", symbolName: "otherFunc", kind: "def", line: 1, signature: "function otherFunc()" },
+      {
+        filePath: "chat.ts",
+        symbolName: "chatFunc",
+        kind: "def",
+        line: 1,
+        signature: "function chatFunc()",
+      },
+      {
+        filePath: "other.ts",
+        symbolName: "otherFunc",
+        kind: "def",
+        line: 1,
+        signature: "function otherFunc()",
+      },
       { filePath: "user.ts", symbolName: "chatFunc", kind: "ref", line: -1 },
       { filePath: "user.ts", symbolName: "otherFunc", kind: "ref", line: -1 },
     ];
@@ -175,8 +199,20 @@ describe("computeSymbolRanks", () => {
 
   it("should penalize private symbols", () => {
     const tags: SymbolTag[] = [
-      { filePath: "a.ts", symbolName: "_private", kind: "def", line: 1, signature: "function _private()" },
-      { filePath: "b.ts", symbolName: "public", kind: "def", line: 1, signature: "function public()" },
+      {
+        filePath: "a.ts",
+        symbolName: "_private",
+        kind: "def",
+        line: 1,
+        signature: "function _private()",
+      },
+      {
+        filePath: "b.ts",
+        symbolName: "public",
+        kind: "def",
+        line: 1,
+        signature: "function public()",
+      },
       { filePath: "c.ts", symbolName: "_private", kind: "ref", line: -1 },
       { filePath: "c.ts", symbolName: "public", kind: "ref", line: -1 },
     ];
@@ -190,8 +226,20 @@ describe("computeSymbolRanks", () => {
 
   it("should boost symbols with conventional naming", () => {
     const tags: SymbolTag[] = [
-      { filePath: "a.ts", symbolName: "long_snake_case_name", kind: "def", line: 1, signature: "const long_snake_case_name" },
-      { filePath: "b.ts", symbolName: "LongCamelCaseName", kind: "def", line: 1, signature: "class LongCamelCaseName" },
+      {
+        filePath: "a.ts",
+        symbolName: "long_snake_case_name",
+        kind: "def",
+        line: 1,
+        signature: "const long_snake_case_name",
+      },
+      {
+        filePath: "b.ts",
+        symbolName: "LongCamelCaseName",
+        kind: "def",
+        line: 1,
+        signature: "class LongCamelCaseName",
+      },
       { filePath: "c.ts", symbolName: "x", kind: "def", line: 1, signature: "const x" },
       { filePath: "d.ts", symbolName: "long_snake_case_name", kind: "ref", line: -1 },
       { filePath: "d.ts", symbolName: "LongCamelCaseName", kind: "ref", line: -1 },
@@ -233,7 +281,13 @@ describe("computeSymbolRanks", () => {
 
   it("should handle files with no references gracefully", () => {
     const tags: SymbolTag[] = [
-      { filePath: "isolated.ts", symbolName: "unused", kind: "def", line: 1, signature: "function unused()" },
+      {
+        filePath: "isolated.ts",
+        symbolName: "unused",
+        kind: "def",
+        line: 1,
+        signature: "function unused()",
+      },
     ];
 
     const ranked = computeSymbolRanks(tags);
@@ -268,8 +322,20 @@ describe("formatRepoMapContext", () => {
 
   it("should exclude chat files from output", () => {
     const ranked = [
-      { filePath: "chat.ts", symbolName: "chatFunc", rank: 1.0, line: 1, signature: "function chatFunc()" },
-      { filePath: "other.ts", symbolName: "otherFunc", rank: 0.9, line: 1, signature: "function otherFunc()" },
+      {
+        filePath: "chat.ts",
+        symbolName: "chatFunc",
+        rank: 1.0,
+        line: 1,
+        signature: "function chatFunc()",
+      },
+      {
+        filePath: "other.ts",
+        symbolName: "otherFunc",
+        rank: 0.9,
+        line: 1,
+        signature: "function otherFunc()",
+      },
     ];
 
     const output = formatRepoMapContext(ranked, ["chat.ts"], 1000);

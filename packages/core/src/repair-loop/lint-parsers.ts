@@ -70,7 +70,9 @@ export function parseESLintOutput(output: string): LintError[] {
     const lines = output.split("\n");
 
     for (const line of lines) {
-      const match = line.match(/^(.+):(\d+):(\d+):\s*(error|warning)\s*-?\s*(.+?)(?:\s*\((.+?)\))?$/);
+      const match = line.match(
+        /^(.+):(\d+):(\d+):\s*(error|warning)\s*-?\s*(.+?)(?:\s*\((.+?)\))?$/,
+      );
 
       if (match) {
         const [, file, lineNum, col, severity, message, rule] = match;

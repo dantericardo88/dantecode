@@ -88,9 +88,9 @@ describe("DiffUndoManager", () => {
     it("throws when auto-commit is disabled", async () => {
       manager.setConfig({ autoCommitEnabled: false });
 
-      await expect(
-        manager.autoCommitAfterEdit(["test.ts"], "Add test file"),
-      ).rejects.toThrow("Auto-commit is disabled");
+      await expect(manager.autoCommitAfterEdit(["test.ts"], "Add test file")).rejects.toThrow(
+        "Auto-commit is disabled",
+      );
     });
 
     it("commits multiple files", async () => {

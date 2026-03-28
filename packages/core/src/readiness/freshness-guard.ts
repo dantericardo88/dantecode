@@ -30,7 +30,9 @@ export function getCurrentCommit(projectRoot: string): string {
     }).trim();
     return commit;
   } catch (error) {
-    throw new Error(`Failed to get current git commit: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Failed to get current git commit: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -78,7 +80,7 @@ export function calculateDuration(timestamp: string): string {
  */
 export function checkReadinessFreshness(
   artifactPaths: string[],
-  projectRoot: string
+  projectRoot: string,
 ): FreshnessCheckResult {
   const currentCommit = getCurrentCommit(projectRoot);
   const artifacts: ReadinessArtifact[] = [];
@@ -103,7 +105,8 @@ export function checkReadinessFreshness(
       const artifact = JSON.parse(content);
 
       const artifactCommit = artifact.gitCommit || artifact.commitSha || "";
-      const artifactTimestamp = artifact.timestamp || artifact.generatedAt || new Date().toISOString();
+      const artifactTimestamp =
+        artifact.timestamp || artifact.generatedAt || new Date().toISOString();
       const stale = artifactCommit !== currentCommit;
 
       artifacts.push({
@@ -146,16 +149,19 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
     return;
   }
 
-  console.warn(`\n⚠️  ${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE:`);
+  console.warn(
+    `\n⚠️  ${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE:`,
+  );
 
   for (const artifact of staleArtifacts) {
-    const commitDisplay = artifact.gitCommit === "missing"
-      ? "MISSING"
-      : artifact.gitCommit === "parse-error"
-      ? "PARSE-ERROR"
-      : artifact.gitCommit === "unknown"
-      ? "UNKNOWN"
-      : artifact.gitCommit.slice(0, 7);
+    const commitDisplay =
+      artifact.gitCommit === "missing"
+        ? "MISSING"
+        : artifact.gitCommit === "parse-error"
+          ? "PARSE-ERROR"
+          : artifact.gitCommit === "unknown"
+            ? "UNKNOWN"
+            : artifact.gitCommit.slice(0, 7);
 
     console.warn(`   - ${artifact.name}: commit ${commitDisplay} (${artifact.staleDuration})`);
   }
@@ -171,7 +177,7 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
 export function enforceFreshnessInCI(
   artifactPaths: string[],
   projectRoot: string,
-  options: { ci?: boolean; strict?: boolean } = {}
+  options: { ci?: boolean; strict?: boolean } = {},
 ): boolean {
   const result = checkReadinessFreshness(artifactPaths, projectRoot);
 

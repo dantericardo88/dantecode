@@ -2075,8 +2075,12 @@ async function recoverCommand(args: string, state: ReplState): Promise<string> {
   const sessionArg = args.trim().split(/\s+/)[1];
 
   try {
-    const { RecoveryManager, formatStaleSessionSummary, filterSessionsByStatus, sortSessionsByTime } =
-      await import("@dantecode/core");
+    const {
+      RecoveryManager,
+      formatStaleSessionSummary,
+      filterSessionsByStatus,
+      sortSessionsByTime,
+    } = await import("@dantecode/core");
     const recoveryManager = new RecoveryManager({ projectRoot: state.projectRoot });
     const staleSessions = await recoveryManager.scanStaleSessions();
 
@@ -2162,7 +2166,12 @@ async function recoverCommand(args: string, state: ReplState): Promise<string> {
 
       // Delete checkpoint directory
       const checkpointDir = join(state.projectRoot, ".dantecode", "checkpoints", session.sessionId);
-      const eventLogPath = join(state.projectRoot, ".dantecode", "events", `${session.sessionId}.jsonl`);
+      const eventLogPath = join(
+        state.projectRoot,
+        ".dantecode",
+        "events",
+        `${session.sessionId}.jsonl`,
+      );
 
       const { rmSync } = await import("node:fs");
       const { existsSync } = await import("node:fs");
@@ -2237,7 +2246,8 @@ async function resumeCheckpointCommand(args: string, state: ReplState): Promise<
   const sessionArg = args.trim();
 
   try {
-    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } = await import("@dantecode/core");
+    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } =
+      await import("@dantecode/core");
     const recoveryManager = new RecoveryManager({ projectRoot: state.projectRoot });
     const staleSessions = await recoveryManager.scanStaleSessions();
     const resumableSessions = staleSessions.filter((s) => s.status === "resumable");
@@ -2250,7 +2260,9 @@ async function resumeCheckpointCommand(args: string, state: ReplState): Promise<
 
       const lines = [`${BOLD}Resumable Sessions${RESET}`, ""];
       for (const session of resumableSessions.slice(0, 10)) {
-        const timestamp = session.timestamp ? new Date(session.timestamp).toLocaleString() : "unknown";
+        const timestamp = session.timestamp
+          ? new Date(session.timestamp).toLocaleString()
+          : "unknown";
         const stepInfo = session.step !== undefined ? ` step:${session.step}` : "";
         const eventInfo = session.lastEventId !== undefined ? ` events:${session.lastEventId}` : "";
         lines.push(
@@ -2301,7 +2313,9 @@ async function resumeCheckpointCommand(args: string, state: ReplState): Promise<
     }
 
     lines.push("");
-    lines.push(`${YELLOW}Note:${RESET} ${DIM}Checkpoint state loaded. Resume logic integration is complete.${RESET}`);
+    lines.push(
+      `${YELLOW}Note:${RESET} ${DIM}Checkpoint state loaded. Resume logic integration is complete.${RESET}`,
+    );
 
     return lines.join("\n");
   } catch (err: unknown) {
@@ -7354,7 +7368,9 @@ async function driftCommand(args: string, state: ReplState): Promise<string> {
         const typeColor = issue.type === "function" ? CYAN : YELLOW;
         lines.push(`  ${typeColor}${issue.type}${RESET} ${BOLD}${issue.name}${RESET}`);
         lines.push(`    ${RED}Issue:${RESET} ${issue.driftReason}`);
-        lines.push(`    ${DIM}Code:${RESET} ${issue.codeSignature.slice(0, 80)}${issue.codeSignature.length > 80 ? "..." : ""}`);
+        lines.push(
+          `    ${DIM}Code:${RESET} ${issue.codeSignature.slice(0, 80)}${issue.codeSignature.length > 80 ? "..." : ""}`,
+        );
         lines.push(`    ${DIM}Docs:${RESET} ${issue.docSignature}`);
         lines.push("");
       }

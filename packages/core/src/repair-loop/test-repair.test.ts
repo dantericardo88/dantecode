@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { runTestRepair, formatTestFailures, type TestConfig, type TestFailure } from "./test-repair.js";
+import {
+  runTestRepair,
+  formatTestFailures,
+  type TestConfig,
+  type TestFailure,
+} from "./test-repair.js";
 import type { EventEngine } from "../event-engine.js";
 
 describe("runTestRepair", () => {

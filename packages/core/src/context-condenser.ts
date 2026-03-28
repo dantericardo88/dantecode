@@ -101,10 +101,7 @@ export async function condenseContext(
   maxTokens: number,
   options: CondenseOptions = {},
 ): Promise<CondenseResult> {
-  const {
-    preserveRecentRounds = 3,
-    summarizeFn = defaultSummarizeFn,
-  } = options;
+  const { preserveRecentRounds = 3, summarizeFn = defaultSummarizeFn } = options;
 
   if (messages.length === 0) {
     return {
@@ -311,7 +308,9 @@ async function defaultSummarizeFn(messages: CoreMessage[]): Promise<string> {
 
   const parts: string[] = [];
 
-  parts.push(`Summarizing ${messages.length} messages (${Math.floor(messages.length / 2)} rounds).`);
+  parts.push(
+    `Summarizing ${messages.length} messages (${Math.floor(messages.length / 2)} rounds).`,
+  );
 
   if (userActions.length > 0) {
     parts.push("");

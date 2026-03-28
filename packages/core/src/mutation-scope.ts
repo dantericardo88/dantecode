@@ -44,13 +44,9 @@ export function assessMutationScope(input: MutationScopeInput): MutationScopeAss
 
   const unverifiedClaims = claimedFiles.filter((filePath) => !actualSet.has(filePath));
   const unexpectedWrites =
-    expectedFiles.length > 0
-      ? actualFiles.filter((filePath) => !expectedSet.has(filePath))
-      : [];
+    expectedFiles.length > 0 ? actualFiles.filter((filePath) => !expectedSet.has(filePath)) : [];
   const missingExpected =
-    expectedFiles.length > 0
-      ? expectedFiles.filter((filePath) => !actualSet.has(filePath))
-      : [];
+    expectedFiles.length > 0 ? expectedFiles.filter((filePath) => !actualSet.has(filePath)) : [];
 
   return {
     actualFiles,
@@ -60,9 +56,7 @@ export function assessMutationScope(input: MutationScopeInput): MutationScopeAss
     unexpectedWrites,
     missingExpected,
     hasDrift:
-      unverifiedClaims.length > 0 ||
-      unexpectedWrites.length > 0 ||
-      missingExpected.length > 0,
+      unverifiedClaims.length > 0 || unexpectedWrites.length > 0 || missingExpected.length > 0,
   };
 }
 

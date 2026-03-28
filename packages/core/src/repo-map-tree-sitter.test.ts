@@ -117,9 +117,7 @@ describe("repo-map-tree-sitter", () => {
     it("extracts private methods", () => {
       const code = `def _private_method():\n    pass`;
       const symbols = extractor.extractSymbols(code, "private.py");
-      expect(symbols.some((s) => s.name === "_private_method" && s.kind === "function")).toBe(
-        true,
-      );
+      expect(symbols.some((s) => s.name === "_private_method" && s.kind === "function")).toBe(true);
     });
   });
 

@@ -73,7 +73,9 @@ describe("Doc-Code Drift Detection", () => {
     });
 
     it("should handle object destructuring parameters", () => {
-      const params = extractCodeParameters("function test({ name, age }: { name: string; age: number })");
+      const params = extractCodeParameters(
+        "function test({ name, age }: { name: string; age: number })",
+      );
       expect(params).toHaveLength(1);
       expect(params[0]!.name).toBe("{ name, age }");
     });
@@ -101,7 +103,11 @@ function test(name, age) {
       expect(docSymbols).toHaveLength(1);
       expect(docSymbols[0]!.name).toBe("test");
       expect(docSymbols[0]!.params).toHaveLength(2);
-      expect(docSymbols[0]!.params[0]).toEqual({ name: "name", type: "string", description: "The name" });
+      expect(docSymbols[0]!.params[0]).toEqual({
+        name: "name",
+        type: "string",
+        description: "The name",
+      });
       expect(docSymbols[0]!.returnType).toBe("boolean");
     });
 

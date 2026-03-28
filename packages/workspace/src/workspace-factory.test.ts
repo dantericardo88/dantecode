@@ -3,7 +3,12 @@
 // ============================================================================
 
 import { describe, it, expect } from "vitest";
-import { WorkspaceFactory, createLocalWorkspace, createContainerWorkspace, createRemoteWorkspace } from "./workspace-factory.js";
+import {
+  WorkspaceFactory,
+  createLocalWorkspace,
+  createContainerWorkspace,
+  createRemoteWorkspace,
+} from "./workspace-factory.js";
 import { LocalWorkspace } from "./local-workspace.js";
 import { ContainerWorkspace } from "./container-workspace.js";
 import { RemoteWorkspace } from "./remote-workspace.js";

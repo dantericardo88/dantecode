@@ -17,13 +17,7 @@ export type PermissionDecision = z.infer<typeof PermissionDecisionSchema>;
 
 // ─── Specifier Kind ──────────────────────────────────────────────────────────
 
-export const SpecifierKindSchema = z.enum([
-  "command",
-  "path",
-  "domain",
-  "skill",
-  "literal",
-]);
+export const SpecifierKindSchema = z.enum(["command", "path", "domain", "skill", "literal"]);
 export type SpecifierKind = z.infer<typeof SpecifierKindSchema>;
 
 // ─── Permission Rule ─────────────────────────────────────────────────────────

@@ -230,11 +230,7 @@ describe("workflow-graph-state", () => {
         z?: number;
       }
 
-      const updates: Partial<TestState>[] = [
-        { x: 10 },
-        { y: 20 },
-        { x: 30, z: 40 },
-      ];
+      const updates: Partial<TestState>[] = [{ x: 10 }, { y: 20 }, { x: 30, z: 40 }];
 
       const merged = mergeStateUpdates(updates);
 
@@ -259,10 +255,7 @@ describe("workflow-graph-state", () => {
     });
 
     it("merge should shallow merge objects", () => {
-      const result = ChannelReducers.merge(
-        { a: 1, b: 2 },
-        { b: 3 },
-      );
+      const result = ChannelReducers.merge({ a: 1, b: 2 }, { b: 3 });
       expect(result).toEqual({ a: 1, b: 3 });
     });
 
@@ -272,18 +265,12 @@ describe("workflow-graph-state", () => {
     });
 
     it("union should create set union", () => {
-      const result = ChannelReducers.union(
-        new Set([1, 2]),
-        new Set([2, 3]),
-      );
+      const result = ChannelReducers.union(new Set([1, 2]), new Set([2, 3]));
       expect(result).toEqual(new Set([1, 2, 3]));
     });
 
     it("union should handle array input", () => {
-      const result = ChannelReducers.union(
-        new Set([1, 2]),
-        [2, 3],
-      );
+      const result = ChannelReducers.union(new Set([1, 2]), [2, 3]);
       expect(result).toEqual(new Set([1, 2, 3]));
     });
   });

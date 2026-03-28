@@ -54,7 +54,13 @@ export function normalizeAgentMode(mode: string | null | undefined): AgentMode {
   if (raw === "auto-edit") {
     return "apply";
   }
-  if (raw === "review" || raw === "apply" || raw === "autoforge" || raw === "plan" || raw === "yolo") {
+  if (
+    raw === "review" ||
+    raw === "apply" ||
+    raw === "autoforge" ||
+    raw === "plan" ||
+    raw === "yolo"
+  ) {
     return raw;
   }
   return DEFAULT_AGENT_CONFIG.agentMode;

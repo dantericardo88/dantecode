@@ -84,10 +84,22 @@ describe("JsonlEventStore", () => {
 
     it("writes one JSON object per line", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
 
-      const content = await (await import("node:fs/promises")).readFile(store.getFilePath(), "utf-8");
+      const content = await (
+        await import("node:fs/promises")
+      ).readFile(store.getFilePath(), "utf-8");
       const lineArray = content.trim().split("\n");
 
       expect(lineArray).toHaveLength(2);
@@ -177,9 +189,24 @@ describe("JsonlEventStore", () => {
     it("initializes nextId from existing file", async () => {
       // Append 3 events
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
 
       // Create new store instance pointing to same file
       const store2 = new JsonlEventStore(TEST_SESSION_ID, TEST_DIR);
@@ -201,9 +228,24 @@ describe("JsonlEventStore", () => {
   describe("search", () => {
     it("returns all events when no filter provided", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.checkpoint.saved", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.checkpoint.saved",
+        taskId,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({})) {
@@ -217,9 +259,24 @@ describe("JsonlEventStore", () => {
       const taskId1 = randomUUID();
       const taskId2 = randomUUID();
 
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId1, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId2, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId: taskId1, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId1,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId2,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId: taskId1,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({ runId: taskId1 })) {
@@ -232,9 +289,24 @@ describe("JsonlEventStore", () => {
 
     it("filters by kind (single string)", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({ kind: "run.tool.started" })) {
@@ -247,10 +319,30 @@ describe("JsonlEventStore", () => {
 
     it("filters by kind (array of strings)", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.checkpoint.saved", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.failed", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.checkpoint.saved",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.failed",
+        taskId,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({ kind: ["run.tool.started", "run.tool.failed"] })) {
@@ -263,10 +355,30 @@ describe("JsonlEventStore", () => {
 
     it("filters by afterId (exclusive)", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=1
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=2
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=3
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=4
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=1
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=2
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=3
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=4
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({ afterId: 2 })) {
@@ -279,10 +391,30 @@ describe("JsonlEventStore", () => {
 
     it("filters by beforeId (exclusive)", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=1
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=2
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=3
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} }); // id=4
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=1
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=2
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=3
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      }); // id=4
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({ beforeId: 3 })) {
@@ -296,7 +428,12 @@ describe("JsonlEventStore", () => {
     it("filters by range (afterId and beforeId)", async () => {
       const taskId = randomUUID();
       for (let i = 0; i < 10; i++) {
-        await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+        await store.append({
+          at: new Date().toISOString(),
+          kind: "run.tool.started",
+          taskId,
+          payload: {},
+        });
       }
 
       const results: StoredEvent[] = [];
@@ -311,7 +448,12 @@ describe("JsonlEventStore", () => {
     it("respects limit", async () => {
       const taskId = randomUUID();
       for (let i = 0; i < 10; i++) {
-        await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+        await store.append({
+          at: new Date().toISOString(),
+          kind: "run.tool.started",
+          taskId,
+          payload: {},
+        });
       }
 
       const results: StoredEvent[] = [];
@@ -327,11 +469,36 @@ describe("JsonlEventStore", () => {
       const taskId1 = randomUUID();
       const taskId2 = randomUUID();
 
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId1, payload: {} }); // 1
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId: taskId1, payload: {} }); // 2
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId2, payload: {} }); // 3
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId1, payload: {} }); // 4
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId: taskId1, payload: {} }); // 5
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId1,
+        payload: {},
+      }); // 1
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId: taskId1,
+        payload: {},
+      }); // 2
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId2,
+        payload: {},
+      }); // 3
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId1,
+        payload: {},
+      }); // 4
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId: taskId1,
+        payload: {},
+      }); // 5
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({
@@ -360,17 +527,28 @@ describe("JsonlEventStore", () => {
 
     it("skips corrupted lines with warning", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
 
       // Manually corrupt a line
       const filePath = store.getFilePath();
       await writeFile(
         filePath,
-        (await import("node:fs/promises").then((m) => m.readFile(filePath, "utf-8"))) + "{corrupted json\n",
+        (await import("node:fs/promises").then((m) => m.readFile(filePath, "utf-8"))) +
+          "{corrupted json\n",
         "utf-8",
       );
 
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({})) {
@@ -384,7 +562,12 @@ describe("JsonlEventStore", () => {
 
     it("handles empty lines gracefully", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
 
       // Add empty lines
       const filePath = store.getFilePath();
@@ -394,7 +577,12 @@ describe("JsonlEventStore", () => {
         "utf-8",
       );
 
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
 
       const results: StoredEvent[] = [];
       for await (const event of store.search({})) {
@@ -409,7 +597,12 @@ describe("JsonlEventStore", () => {
       const count = 1000;
 
       for (let i = 0; i < count; i++) {
-        await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: { i } });
+        await store.append({
+          at: new Date().toISOString(),
+          kind: "run.tool.started",
+          taskId,
+          payload: { i },
+        });
       }
 
       let seen = 0;
@@ -470,9 +663,24 @@ describe("JsonlEventStore", () => {
 
     it("getLatestId returns correct id after appends", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
 
       const latestId = await store.getLatestId();
       expect(latestId).toBe(3);
@@ -482,9 +690,24 @@ describe("JsonlEventStore", () => {
       const taskId1 = randomUUID();
       const taskId2 = randomUUID();
 
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId1, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId: taskId2, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId: taskId1, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId1,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId: taskId2,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId: taskId1,
+        payload: {},
+      });
 
       const results1: StoredEvent[] = [];
       for await (const event of store.getEventsForRun(taskId1)) {
@@ -565,14 +788,25 @@ describe("JsonlEventStore", () => {
 
     it("handles corrupted last line during getLatestId", async () => {
       const taskId = randomUUID();
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.started", taskId, payload: {} });
-      await store.append({ at: new Date().toISOString(), kind: "run.tool.completed", taskId, payload: {} });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.started",
+        taskId,
+        payload: {},
+      });
+      await store.append({
+        at: new Date().toISOString(),
+        kind: "run.tool.completed",
+        taskId,
+        payload: {},
+      });
 
       // Corrupt last line
       const filePath = store.getFilePath();
       await writeFile(
         filePath,
-        (await import("node:fs/promises").then((m) => m.readFile(filePath, "utf-8"))) + "{corrupted\n",
+        (await import("node:fs/promises").then((m) => m.readFile(filePath, "utf-8"))) +
+          "{corrupted\n",
         "utf-8",
       );
 

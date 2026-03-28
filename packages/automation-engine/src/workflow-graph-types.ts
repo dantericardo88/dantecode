@@ -335,7 +335,9 @@ export interface CompiledWorkflowGraph<TState = unknown> {
   /** Execute the workflow. */
   execute(options?: ExecutionOptions<TState>): Promise<ExecutionResult<TState>>;
   /** Stream execution events. */
-  stream(options?: ExecutionOptions<TState>): AsyncGenerator<WorkflowGraphEvents<TState>[keyof WorkflowGraphEvents<TState>]>;
+  stream(
+    options?: ExecutionOptions<TState>,
+  ): AsyncGenerator<WorkflowGraphEvents<TState>[keyof WorkflowGraphEvents<TState>]>;
   /** Get DOT representation for visualization. */
   toDot(): string;
   /** Get graph metadata. */

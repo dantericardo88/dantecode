@@ -119,7 +119,10 @@ export interface ExecuteChainOptions {
   /** Optional verification provider */
   verificationProvider?: (result: SkillRunResult) => Promise<SkillVerification>;
   /** Optional PDSE gate callback (for custom gating logic) */
-  forgeGate?: (result: SkillRunResult, threshold: number) => Promise<{ approved: boolean; score?: number }>;
+  forgeGate?: (
+    result: SkillRunResult,
+    threshold: number,
+  ) => Promise<{ approved: boolean; score?: number }>;
   /** Optional event engine for skill events */
   eventEngine?: EventEmitter;
   /** Optional task ID for event correlation */
@@ -145,7 +148,9 @@ export function resolveOutputRef(
 
   if (ref.type === "previous") {
     if (stepResults.length === 0) {
-      throw new Error("SKILL-CHAIN-001: Cannot reference previous step - no previous steps executed");
+      throw new Error(
+        "SKILL-CHAIN-001: Cannot reference previous step - no previous steps executed",
+      );
     }
     targetResult = stepResults[stepResults.length - 1];
   } else if (ref.type === "step") {
@@ -401,7 +406,12 @@ export async function executeChain(opts: ExecuteChainOptions): Promise<ChainResu
 
       // Handle failure
       if (failed) {
-        const failureAction = await handleGateFailure(step.onFailure, index, stepResults, promptUser);
+        const failureAction = await handleGateFailure(
+          step.onFailure,
+          index,
+          stepResults,
+          promptUser,
+        );
 
         if (failureAction.shouldAbort) {
           return {

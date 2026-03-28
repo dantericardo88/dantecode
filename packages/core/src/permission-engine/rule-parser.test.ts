@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseRule,
-  parseRules,
-  inferSpecifierKind,
-  serializeRule,
-} from "./rule-parser.js";
+import { parseRule, parseRules, inferSpecifierKind, serializeRule } from "./rule-parser.js";
 
 describe("parseRule", () => {
   it("parses a basic allow rule with command specifier", () => {
@@ -94,15 +89,11 @@ describe("parseRule", () => {
   });
 
   it("throws on missing tool name", () => {
-    expect(() => parseRule("allow")).toThrow(
-      'Invalid permission rule "allow": expected format',
-    );
+    expect(() => parseRule("allow")).toThrow('Invalid permission rule "allow": expected format');
   });
 
   it("throws on invalid decision", () => {
-    expect(() => parseRule("permit Bash echo")).toThrow(
-      'Invalid permission decision "permit"',
-    );
+    expect(() => parseRule("permit Bash echo")).toThrow('Invalid permission decision "permit"');
   });
 
   it("throws on missing tool name after decision", () => {
@@ -112,11 +103,7 @@ describe("parseRule", () => {
 
 describe("parseRules", () => {
   it("parses multiple rule strings", () => {
-    const rules = parseRules([
-      "allow Bash git *",
-      "deny Write src/secret/*",
-      "ask GitPush *",
-    ]);
+    const rules = parseRules(["allow Bash git *", "deny Write src/secret/*", "ask GitPush *"]);
     expect(rules).toHaveLength(3);
     expect(rules[0]!.decision).toBe("allow");
     expect(rules[1]!.decision).toBe("deny");
@@ -145,9 +132,9 @@ describe("parseRules", () => {
   });
 
   it("throws on first malformed rule", () => {
-    expect(() =>
-      parseRules(["allow Bash echo", "invalid", "deny Write /etc/*"]),
-    ).toThrow("Invalid permission rule");
+    expect(() => parseRules(["allow Bash echo", "invalid", "deny Write /etc/*"])).toThrow(
+      "Invalid permission rule",
+    );
   });
 });
 

@@ -109,7 +109,9 @@ export class CheckpointTreeDataProvider implements vscode.TreeDataProvider<Check
    * Get session by ID (for command handlers)
    */
   getSession(sessionId: string): StaleSession | undefined {
-    return this.sessions.find((s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId));
+    return this.sessions.find(
+      (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
+    );
   }
 
   /**

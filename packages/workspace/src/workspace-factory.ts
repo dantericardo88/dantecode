@@ -113,7 +113,7 @@ export class WorkspaceFactory {
 export function createLocalWorkspace(
   id: string,
   basePath: string,
-  options?: Partial<WorkspaceConfig>
+  options?: Partial<WorkspaceConfig>,
 ): Workspace {
   return WorkspaceFactory.create({
     id,
@@ -130,7 +130,7 @@ export function createContainerWorkspace(
   id: string,
   basePath: string,
   image: string,
-  options?: Partial<WorkspaceConfig>
+  options?: Partial<WorkspaceConfig>,
 ): Workspace {
   return WorkspaceFactory.create({
     id,
@@ -148,7 +148,7 @@ export function createRemoteWorkspace(
   id: string,
   basePath: string,
   host: string,
-  options?: Partial<WorkspaceConfig>
+  options?: Partial<WorkspaceConfig>,
 ): Workspace {
   return WorkspaceFactory.create({
     id,

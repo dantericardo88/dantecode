@@ -6,7 +6,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
-import { WorkspaceManager, getWorkspaceManager, setWorkspaceManager, resetWorkspaceManager } from "./workspace-manager.js";
+import {
+  WorkspaceManager,
+  getWorkspaceManager,
+  setWorkspaceManager,
+  resetWorkspaceManager,
+} from "./workspace-manager.js";
 import type { WorkspaceConfig } from "./types.js";
 
 describe("WorkspaceManager", () => {

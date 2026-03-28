@@ -29,13 +29,17 @@ describe("AsyncTaskExecutor", () => {
     });
 
     it("accepts optional fields", () => {
-      const task = createTask("test-task", { foo: "bar" }, {
-        description: "Test description",
-        priority: "high",
-        timeout: 5000,
-        retries: 3,
-        tags: ["test", "unit"],
-      });
+      const task = createTask(
+        "test-task",
+        { foo: "bar" },
+        {
+          description: "Test description",
+          priority: "high",
+          timeout: 5000,
+          retries: 3,
+          tags: ["test", "unit"],
+        },
+      );
 
       expect(task.description).toBe("Test description");
       expect(task.priority).toBe("high");

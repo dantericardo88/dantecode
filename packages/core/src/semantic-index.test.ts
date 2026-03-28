@@ -40,7 +40,7 @@ describe("BackgroundSemanticIndex", () => {
     it("should index TypeScript files", async () => {
       await writeFile(
         pathJoin(testDir, "test.ts"),
-        `export class MyClass {}\nexport function myFunc() {}\nconst myConst = 42;`
+        `export class MyClass {}\nexport function myFunc() {}\nconst myConst = 42;`,
       );
 
       const index = new BackgroundSemanticIndex({
@@ -78,7 +78,10 @@ describe("BackgroundSemanticIndex", () => {
     });
 
     it("should index Python files", async () => {
-      await writeFile(pathJoin(testDir, "test.py"), `class MyPyClass:\n    pass\ndef my_py_func():\n    pass`);
+      await writeFile(
+        pathJoin(testDir, "test.py"),
+        `class MyPyClass:\n    pass\ndef my_py_func():\n    pass`,
+      );
 
       const index = new BackgroundSemanticIndex({
         projectRoot: testDir,
@@ -94,7 +97,10 @@ describe("BackgroundSemanticIndex", () => {
     });
 
     it("should extract imports from TypeScript files", async () => {
-      await writeFile(pathJoin(testDir, "test.ts"), `import { foo } from 'bar';\nimport 'side-effect';`);
+      await writeFile(
+        pathJoin(testDir, "test.ts"),
+        `import { foo } from 'bar';\nimport 'side-effect';`,
+      );
 
       const index = new BackgroundSemanticIndex({
         projectRoot: testDir,
@@ -130,7 +136,7 @@ describe("BackgroundSemanticIndex", () => {
     it("should extract keywords from file content", async () => {
       await writeFile(
         pathJoin(testDir, "test.ts"),
-        `export class MySpecialClass { private specialMethod() { return "special result"; } }`
+        `export class MySpecialClass { private specialMethod() { return "special result"; } }`,
       );
 
       const index = new BackgroundSemanticIndex({
@@ -380,7 +386,10 @@ describe("BackgroundSemanticIndex", () => {
     });
 
     it("should handle React component patterns", async () => {
-      await writeFile(pathJoin(testDir, "Component.tsx"), `export const MyComponent = () => { return <div />; }`);
+      await writeFile(
+        pathJoin(testDir, "Component.tsx"),
+        `export const MyComponent = () => { return <div />; }`,
+      );
 
       const index = new BackgroundSemanticIndex({
         projectRoot: testDir,

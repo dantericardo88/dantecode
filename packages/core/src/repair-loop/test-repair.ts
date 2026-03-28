@@ -78,9 +78,7 @@ function findNewFailures(baseline: TestFailure[], current: TestFailure[]): TestF
   const newFailures: TestFailure[] = [];
 
   // Create a set of baseline failure keys for fast lookup
-  const baselineKeys = new Set(
-    baseline.map((f) => `${f.testFile}::${f.testName}`),
-  );
+  const baselineKeys = new Set(baseline.map((f) => `${f.testFile}::${f.testName}`));
 
   // Find current failures that don't exist in baseline
   for (const failure of current) {
@@ -144,7 +142,14 @@ export function formatTestFailures(failures: TestFailure[]): string {
  * 5. Retry with max iterations
  */
 export async function runTestRepair(options: RunTestRepairOptions): Promise<TestResult> {
-  const { config, projectRoot, eventEngine, taskId, baselineFailures: providedBaseline, execFn } = options;
+  const {
+    config,
+    projectRoot,
+    eventEngine,
+    taskId,
+    baselineFailures: providedBaseline,
+    execFn,
+  } = options;
 
   const effectiveTaskId = taskId || randomUUID();
   const startedAt = new Date().toISOString();

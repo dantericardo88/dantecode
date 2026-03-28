@@ -97,9 +97,7 @@ export class RemoteWorkspace extends BaseWorkspace {
 
     try {
       // List all files
-      const listResult = await this._ssh(
-        `find "${this.config.basePath}" -type f`
-      );
+      const listResult = await this._ssh(`find "${this.config.basePath}" -type f`);
 
       if (listResult.exitCode !== 0) {
         throw new Error(`Failed to list files: ${listResult.stderr}`);
@@ -275,9 +273,7 @@ EOF_DANTECODE`;
       const files = result.stdout.trim().split("\n").filter(Boolean);
       const regex = this._globToRegex(pattern);
 
-      return files
-        .map((f) => path.relative(this.config.basePath, f))
-        .filter((f) => regex.test(f));
+      return files.map((f) => path.relative(this.config.basePath, f)).filter((f) => regex.test(f));
     } catch (error) {
       throw new Error(`Failed to list files: ${error}`);
     }
@@ -428,7 +424,7 @@ EOF_DANTECODE`;
 
   async executeBackground(
     command: string,
-    options?: ExecOptions
+    options?: ExecOptions,
   ): Promise<{ pid: number; kill: () => Promise<void> }> {
     // Execute command in background and capture PID
     const bgCommand = `(${command}) & echo $!`;
@@ -512,12 +508,16 @@ EOF_DANTECODE`;
     }
 
     sshArgs.push(
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "UserKnownHostsFile=/dev/null",
-      "-o", "LogLevel=ERROR",
-      "-p", String(this._port),
+      "-o",
+      "StrictHostKeyChecking=no",
+      "-o",
+      "UserKnownHostsFile=/dev/null",
+      "-o",
+      "LogLevel=ERROR",
+      "-p",
+      String(this._port),
       `${this._username}@${this._host}`,
-      fullCommand
+      fullCommand,
     );
 
     try {

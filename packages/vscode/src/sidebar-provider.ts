@@ -534,9 +534,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           ? 50
           : agentMode === "autoforge"
             ? Math.max(this.agentConfig.maxToolRounds, 30)
-          : runUntilComplete
-            ? 30
-            : this.agentConfig.maxToolRounds;
+            : runUntilComplete
+              ? 30
+              : this.agentConfig.maxToolRounds;
     this.pendingRequiredRounds = 0; // Reset after use
     let executionNudges = 0;
     const MAX_EXECUTION_NUDGES = 2;
@@ -1399,9 +1399,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               approvalReasons,
             );
             if (!approved) {
-              toolResultParts.push(
-                `Tool "${toolCall.name}" blocked: operator denied approval.`,
-              );
+              toolResultParts.push(`Tool "${toolCall.name}" blocked: operator denied approval.`);
               continue;
             }
             approvalGateway.approveToolCall(toolCall.name, toolCall.input);
@@ -2494,7 +2492,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const actualFiles = touchedFiles.map((filePath) => normalizeMutationPath(filePath, projectRoot));
+    const actualFiles = touchedFiles.map((filePath) =>
+      normalizeMutationPath(filePath, projectRoot),
+    );
     const mutationScope = assessMutationScope({
       actualFiles,
       claimedFiles,

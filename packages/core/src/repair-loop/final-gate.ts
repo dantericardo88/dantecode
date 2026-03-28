@@ -225,7 +225,15 @@ async function createEvidenceSeal(
  * Run final gate verification after repair loops complete
  */
 export async function runFinalGate(options: RunFinalGateOptions): Promise<FinalGateResult> {
-  const { mutatedFiles, config, projectRoot, eventEngine, taskId, danteForgeModule, evidenceSealer } = options;
+  const {
+    mutatedFiles,
+    config,
+    projectRoot,
+    eventEngine,
+    taskId,
+    danteForgeModule,
+    evidenceSealer,
+  } = options;
   const timestamp = new Date().toISOString();
   const failureReasons: string[] = [];
   const gateTaskId = taskId || randomUUID();

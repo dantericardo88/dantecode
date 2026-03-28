@@ -73,8 +73,7 @@ function isInScope(mutatedFile: string, scopePaths: string[]): boolean {
   return scopePaths.some((scopePath) => {
     const normalizedScope = normalizePath(scopePath);
     return (
-      normalizedMutation.includes(normalizedScope) ||
-      normalizedScope.includes(normalizedMutation)
+      normalizedMutation.includes(normalizedScope) || normalizedScope.includes(normalizedMutation)
     );
   });
 }
@@ -132,9 +131,7 @@ export function checkBoundaryDrift(
   const uniqueMutations = [...new Set(mutatedFiles.map(normalizePath))];
 
   // Identify files mutated outside original scope
-  const outOfScopeFiles = uniqueMutations.filter(
-    (file) => !isInScope(file, originalScope),
-  );
+  const outOfScopeFiles = uniqueMutations.filter((file) => !isInScope(file, originalScope));
 
   const scopeSize = originalScope.length;
   const expansionPercent = (outOfScopeFiles.length / scopeSize) * 100;

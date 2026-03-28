@@ -69,15 +69,14 @@ export function parseRule(raw: string): PermissionRule {
   const rest = trimmed.slice(firstSpace + 1).trim();
 
   if (rest.length === 0) {
-    throw new Error(
-      `Invalid permission rule "${trimmed}": missing tool name after decision`,
-    );
+    throw new Error(`Invalid permission rule "${trimmed}": missing tool name after decision`);
   }
 
   // Extract tool name (next token) and optional specifier (rest)
   const secondSpace = rest.indexOf(" ");
   const toolName = secondSpace === -1 ? rest : rest.slice(0, secondSpace);
-  const specifier = secondSpace === -1 ? undefined : rest.slice(secondSpace + 1).trim() || undefined;
+  const specifier =
+    secondSpace === -1 ? undefined : rest.slice(secondSpace + 1).trim() || undefined;
 
   const specifierKind = inferSpecifierKind(toolName, specifier);
 
@@ -109,10 +108,7 @@ export function parseRules(ruleStrings: string[]): PermissionRule[] {
  * Infer the specifier kind based on tool name and specifier content.
  * Tool-specific mapping takes priority, with content-based heuristics as fallback.
  */
-export function inferSpecifierKind(
-  toolName: string,
-  specifier: string | undefined,
-): SpecifierKind {
+export function inferSpecifierKind(toolName: string, specifier: string | undefined): SpecifierKind {
   // No specifier = literal (tool-level rule)
   if (!specifier) {
     return "literal";

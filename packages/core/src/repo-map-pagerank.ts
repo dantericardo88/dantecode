@@ -122,11 +122,43 @@ export async function extractTags(
 }
 
 const KEYWORDS = new Set([
-  "if", "else", "for", "while", "do", "switch", "case", "break", "continue",
-  "return", "function", "const", "let", "var", "class", "interface", "type",
-  "import", "export", "from", "async", "await", "try", "catch", "finally",
-  "throw", "new", "this", "super", "extends", "implements", "true", "false",
-  "null", "undefined", "typeof", "instanceof",
+  "if",
+  "else",
+  "for",
+  "while",
+  "do",
+  "switch",
+  "case",
+  "break",
+  "continue",
+  "return",
+  "function",
+  "const",
+  "let",
+  "var",
+  "class",
+  "interface",
+  "type",
+  "import",
+  "export",
+  "from",
+  "async",
+  "await",
+  "try",
+  "catch",
+  "finally",
+  "throw",
+  "new",
+  "this",
+  "super",
+  "extends",
+  "implements",
+  "true",
+  "false",
+  "null",
+  "undefined",
+  "typeof",
+  "instanceof",
 ]);
 
 function isKeyword(ident: string): boolean {
@@ -540,9 +572,7 @@ export async function getRelevantContext(
   options: Omit<PageRankRepoMapOptions, "mentionedIdents"> = {},
 ): Promise<string> {
   // Extract identifiers from query
-  const idents = query
-    .split(/\W+/)
-    .filter((t) => t.length > 2 && /[a-zA-Z]/.test(t));
+  const idents = query.split(/\W+/).filter((t) => t.length > 2 && /[a-zA-Z]/.test(t));
 
   return buildPageRankRepoMap(context, {
     ...options,

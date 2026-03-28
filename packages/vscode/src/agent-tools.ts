@@ -1024,43 +1024,52 @@ export function getToolDefinitionsPrompt(mode?: CanonicalApprovalMode | string):
   const allTools = [
     {
       name: "Read",
-      description: "### Read — Read a file from disk with line numbers\n  Input: { \"file_path\": \"path/to/file\", \"offset\": 0, \"limit\": 2000 }",
+      description:
+        '### Read — Read a file from disk with line numbers\n  Input: { "file_path": "path/to/file", "offset": 0, "limit": 2000 }',
     },
     {
       name: "Write",
-      description: "### Write — Write content to a file (creates directories)\n  Input: { \"file_path\": \"path/to/file\", \"content\": \"file content here\" }",
+      description:
+        '### Write — Write content to a file (creates directories)\n  Input: { "file_path": "path/to/file", "content": "file content here" }',
     },
     {
       name: "Edit",
-      description: "### Edit — Replace a string in a file\n  Input: { \"file_path\": \"path/to/file\", \"old_string\": \"text to find\", \"new_string\": \"replacement\" }",
+      description:
+        '### Edit — Replace a string in a file\n  Input: { "file_path": "path/to/file", "old_string": "text to find", "new_string": "replacement" }',
     },
     {
       name: "ListDir",
-      description: "### ListDir — List directory contents\n  Input: { \"path\": \"path/to/dir\" }",
+      description: '### ListDir — List directory contents\n  Input: { "path": "path/to/dir" }',
     },
     {
       name: "Bash",
-      description: "### Bash — Execute a shell command\n  Input: { \"command\": \"npm test\", \"timeout\": 30000 }",
+      description:
+        '### Bash — Execute a shell command\n  Input: { "command": "npm test", "timeout": 30000 }',
     },
     {
       name: "Glob",
-      description: "### Glob — Find files matching a glob pattern\n  Input: { \"pattern\": \"**/*.ts\", \"path\": \"src/\" }",
+      description:
+        '### Glob — Find files matching a glob pattern\n  Input: { "pattern": "**/*.ts", "path": "src/" }',
     },
     {
       name: "Grep",
-      description: "### Grep — Search file contents with regex\n  Input: { \"pattern\": \"function.*export\", \"path\": \"src/\", \"-i\": true, \"head_limit\": 30 }",
+      description:
+        '### Grep — Search file contents with regex\n  Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }',
     },
     {
       name: "GitCommit",
-      description: "### GitCommit — Stage files and create a git commit\n  Input: { \"message\": \"commit summary\", \"files\": [\"optional/file.ts\"] }",
+      description:
+        '### GitCommit — Stage files and create a git commit\n  Input: { "message": "commit summary", "files": ["optional/file.ts"] }',
     },
     {
       name: "GitPush",
-      description: "### GitPush — Push a branch to a remote and verify the remote ref\n  Input: { \"remote\": \"origin\", \"branch\": \"main\", \"set_upstream\": true/false }",
+      description:
+        '### GitPush — Push a branch to a remote and verify the remote ref\n  Input: { "remote": "origin", "branch": "main", "set_upstream": true/false }',
     },
     {
       name: "SelfUpdate",
-      description: "### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)\n  Input: { \"dryRun\": true/false }",
+      description:
+        '### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)\n  Input: { "dryRun": true/false }',
     },
   ];
 
@@ -1077,18 +1086,22 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 ${toolDescriptions}
 
 ## CRITICAL: Tool Execution Rules
-${canonical === "plan" || canonical === "review" ? `- You are in READ-ONLY mode (${canonical}). You can analyze, review, and plan, but NOT make changes.
+${
+  canonical === "plan" || canonical === "review"
+    ? `- You are in READ-ONLY mode (${canonical}). You can analyze, review, and plan, but NOT make changes.
 - Available tools: Read, Grep, Glob, ListDir only.
 - When asked to implement changes, provide detailed plans and recommendations instead.
 - Focus on analysis, architecture review, and generating implementation guidance.
-` : `- You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.
+`
+    : `- You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.
 - When asked to implement, build, fix, or change code: immediately use Read, Edit, Write, Bash tools.
 - Read files BEFORE editing them. Understand context first.
 - Use Edit for small changes, Write for new files or complete rewrites.
 - Use Bash to run tests, type-checks, or build commands to verify changes.
 - Prefer GitCommit over raw Bash git commit commands.
 - Use GitPush when the user explicitly asks you to publish verified commits to a remote.
-`}- When asked to analyze or review: use Read, Grep, Glob to examine the actual code.
+`
+}- When asked to analyze or review: use Read, Grep, Glob to examine the actual code.
 - Use Glob or ListDir to explore the project structure.
 - Use Grep to search for specific code patterns.
 - You can chain multiple tool calls in one response.

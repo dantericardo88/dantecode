@@ -27,9 +27,7 @@ export function createChannel<T>(name: string, config: StateChannelConfig<T>): S
 /**
  * Initialize graph state from schema definition.
  */
-export function initializeGraphState<TState>(
-  schema: StateSchemaDefinition<TState>,
-): GraphState {
+export function initializeGraphState<TState>(schema: StateSchemaDefinition<TState>): GraphState {
   const channels = new Map<string, StateChannel>();
 
   for (const [name, config] of Object.entries(schema)) {
@@ -57,10 +55,7 @@ export function updateChannel<T>(channel: StateChannel<T>, newValue: T): void {
 /**
  * Apply partial state updates to graph state.
  */
-export function applyStateUpdates<TState>(
-  graphState: GraphState,
-  updates: Partial<TState>,
-): void {
+export function applyStateUpdates<TState>(graphState: GraphState, updates: Partial<TState>): void {
   for (const [key, value] of Object.entries(updates)) {
     const channel = graphState.channels.get(key);
     if (!channel) {
@@ -186,9 +181,7 @@ export function validateStateUpdates<TState>(
 /**
  * Merge multiple partial state updates.
  */
-export function mergeStateUpdates<TState>(
-  updates: Partial<TState>[],
-): Partial<TState> {
+export function mergeStateUpdates<TState>(updates: Partial<TState>[]): Partial<TState> {
   const merged: Record<string, unknown> = {};
 
   for (const update of updates) {

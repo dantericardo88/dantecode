@@ -5,11 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  checkBoundaryDrift,
-  formatDriftMessage,
-  BoundaryTracker,
-} from "./boundary-tracker.js";
+import { checkBoundaryDrift, formatDriftMessage, BoundaryTracker } from "./boundary-tracker.js";
 import type { BoundaryState, BoundaryDriftOptions } from "./boundary-tracker.js";
 import type { RunIntake } from "./run-intake.js";
 
@@ -107,13 +103,7 @@ describe("checkBoundaryDrift", () => {
     const intake = makeIntake({
       requestedScope: ["src/main.ts", "src/utils.ts"],
     });
-    const mutated = [
-      "src/main.ts",
-      "src/utils.ts",
-      "lib/a.ts",
-      "lib/b.ts",
-      "test/c.ts",
-    ];
+    const mutated = ["src/main.ts", "src/utils.ts", "lib/a.ts", "lib/b.ts", "test/c.ts"];
 
     const state = checkBoundaryDrift(intake, mutated);
 

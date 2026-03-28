@@ -68,14 +68,11 @@ export class ContainerWorkspace extends BaseWorkspace {
       }
 
       // Verify Docker strategy is available
-      const testResult = await sandboxRun(
-        "echo 'test'",
-        {
-          strategy: "docker",
-          cwd: this._cwd,
-          env: this._env,
-        }
-      );
+      const testResult = await sandboxRun("echo 'test'", {
+        strategy: "docker",
+        cwd: this._cwd,
+        env: this._env,
+      });
 
       if (testResult.exitCode !== 0) {
         throw new Error("Docker strategy not available");
@@ -97,10 +94,7 @@ export class ContainerWorkspace extends BaseWorkspace {
 
     try {
       // List all files in workspace
-      const listResult = await this._executeContainer(
-        `find ${this._cwd} -type f -o -type d`,
-        {}
-      );
+      const listResult = await this._executeContainer(`find ${this._cwd} -type f -o -type d`, {});
 
       if (listResult.exitCode !== 0) {
         throw new Error(`Failed to list files: ${listResult.stderr}`);
@@ -242,7 +236,10 @@ EOF_DANTECODE`;
 
       // Set mode if specified
       if (options?.mode) {
-        await this._executeContainer(`chmod ${options.mode.toString(8)} "${resolvedPath}"`, {} as ExecOptions);
+        await this._executeContainer(
+          `chmod ${options.mode.toString(8)} "${resolvedPath}"`,
+          {} as ExecOptions,
+        );
       }
 
       this._incrementStat("filesWritten");
@@ -277,9 +274,7 @@ EOF_DANTECODE`;
       const files = result.stdout.trim().split("\n").filter(Boolean);
       const regex = this._globToRegex(pattern);
 
-      return files
-        .map((f) => path.relative(this._cwd, f))
-        .filter((f) => regex.test(f));
+      return files.map((f) => path.relative(this._cwd, f)).filter((f) => regex.test(f));
     } catch (error) {
       throw new Error(`Failed to list files: ${error}`);
     }
@@ -318,7 +313,10 @@ EOF_DANTECODE`;
       const mode = parseInt(modeHex || "0", 16);
 
       // Check if file or directory
-      const typeResult = await this._executeContainer(`test -d "${resolvedPath}"`, {} as ExecOptions);
+      const typeResult = await this._executeContainer(
+        `test -d "${resolvedPath}"`,
+        {} as ExecOptions,
+      );
       const isDirectory = typeResult.exitCode === 0;
 
       return {
@@ -370,7 +368,10 @@ EOF_DANTECODE`;
     }
 
     if (_options?.mode) {
-      await this._executeContainer(`chmod ${_options.mode.toString(8)} "${resolvedPath}"`, {} as ExecOptions);
+      await this._executeContainer(
+        `chmod ${_options.mode.toString(8)} "${resolvedPath}"`,
+        {} as ExecOptions,
+      );
     }
   }
 
@@ -378,7 +379,10 @@ EOF_DANTECODE`;
     const srcPath = this._resolvePath(src);
     const destPath = this._resolvePath(dest);
 
-    const result = await this._executeContainer(`cp -r "${srcPath}" "${destPath}"`, {} as ExecOptions);
+    const result = await this._executeContainer(
+      `cp -r "${srcPath}" "${destPath}"`,
+      {} as ExecOptions,
+    );
 
     if (result.exitCode !== 0) {
       throw new Error(result.stderr || "Failed to copy");
@@ -431,7 +435,7 @@ EOF_DANTECODE`;
 
   async executeBackground(
     command: string,
-    options?: ExecOptions
+    options?: ExecOptions,
   ): Promise<{ pid: number; kill: () => Promise<void> }> {
     // Background execution in containers requires process tracking
     // This is a simplified implementation - production would need more sophisticated handling
@@ -497,10 +501,7 @@ EOF_DANTECODE`;
 
   // ─── Private Helpers ──────────────────────────────────────────────────────────
 
-  private async _executeContainer(
-    command: string,
-    options: ExecOptions
-  ): Promise<ExecResult> {
+  private async _executeContainer(command: string, options: ExecOptions): Promise<ExecResult> {
     const result = await sandboxRun(command, {
       strategy: "docker",
       cwd: options.cwd || this._cwd,

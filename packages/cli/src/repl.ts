@@ -409,7 +409,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         }
 
         if (corrupt.length > 0 && options.verbose) {
-          process.stdout.write(`${DIM}Note: ${corrupt.length} corrupt session(s) detected.${RESET}\n`);
+          process.stdout.write(
+            `${DIM}Note: ${corrupt.length} corrupt session(s) detected.${RESET}\n`,
+          );
         }
       }
     } catch {

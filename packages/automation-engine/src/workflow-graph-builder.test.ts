@@ -218,20 +218,16 @@ describe("workflow-graph-builder", () => {
       const schema = defineStateSchema({ value: { default: 0 } });
       const graph = new WorkflowGraph({ stateSchema: schema });
 
-      graph.addNode(
-        "nodeA",
-        async () => ({ value: 1 }),
-        {
-          description: "Test node",
-          tags: ["test"],
-          timeout: 5000,
-          retryPolicy: {
-            maxRetries: 3,
-            backoff: "exponential",
-            delayMs: 1000,
-          },
+      graph.addNode("nodeA", async () => ({ value: 1 }), {
+        description: "Test node",
+        tags: ["test"],
+        timeout: 5000,
+        retryPolicy: {
+          maxRetries: 3,
+          backoff: "exponential",
+          delayMs: 1000,
         },
-      );
+      });
 
       // Metadata is stored internally, verify compilation succeeds
       graph.setFinishPoint("nodeA");

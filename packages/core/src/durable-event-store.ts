@@ -190,7 +190,11 @@ export class JsonlEventStore implements DurableEventStore {
     const stream = createReadStream(this.filePath, { encoding: "utf-8" });
     const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
-    const kindFilter = Array.isArray(filter.kind) ? filter.kind : filter.kind ? [filter.kind] : undefined;
+    const kindFilter = Array.isArray(filter.kind)
+      ? filter.kind
+      : filter.kind
+        ? [filter.kind]
+        : undefined;
     let count = 0;
 
     for await (const line of rl) {

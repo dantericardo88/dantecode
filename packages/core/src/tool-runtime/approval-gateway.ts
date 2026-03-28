@@ -234,11 +234,12 @@ export class ApprovalGateway {
       const permissionCheck: PermissionCheck = {
         toolName,
         command: typeof input["command"] === "string" ? input["command"] : undefined,
-        filePath: typeof input["file_path"] === "string"
-          ? input["file_path"]
-          : typeof input["path"] === "string"
-            ? input["path"]
-            : undefined,
+        filePath:
+          typeof input["file_path"] === "string"
+            ? input["file_path"]
+            : typeof input["path"] === "string"
+              ? input["path"]
+              : undefined,
         skillName: typeof input["skill_name"] === "string" ? input["skill_name"] : undefined,
         mode: this._approvalMode,
         subagentId: typeof input["subagent_id"] === "string" ? input["subagent_id"] : undefined,

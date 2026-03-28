@@ -7,10 +7,7 @@
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export {
-  PermissionDecisionSchema,
-  SpecifierKindSchema,
-} from "./types.js";
+export { PermissionDecisionSchema, SpecifierKindSchema } from "./types.js";
 
 export type {
   PermissionDecision,
@@ -23,12 +20,7 @@ export type {
 
 // ─── Rule Parser ─────────────────────────────────────────────────────────────
 
-export {
-  parseRule,
-  parseRules,
-  inferSpecifierKind,
-  serializeRule,
-} from "./rule-parser.js";
+export { parseRule, parseRules, inferSpecifierKind, serializeRule } from "./rule-parser.js";
 
 // ─── Evaluator ───────────────────────────────────────────────────────────────
 

@@ -44,7 +44,12 @@ let checkpointManager: CheckpointManager | undefined;
 let diffReviewProvider: DiffReviewProvider | undefined;
 let checkpointTreeProvider: CheckpointTreeDataProvider | undefined;
 let skillsTreeProvider: SkillsTreeDataProvider | undefined;
-let semanticIndex: { start: () => Promise<void>; getReadiness: () => { status: "indexing" | "ready" | "error"; progress: number } } | undefined;
+let semanticIndex:
+  | {
+      start: () => Promise<void>;
+      getReadiness: () => { status: "indexing" | "ready" | "error"; progress: number };
+    }
+  | undefined;
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -300,12 +305,27 @@ function registerCommands(context: vscode.ExtensionContext): void {
     ["dantecode.listCheckpoints", commandListCheckpoints],
     ["dantecode.rewindCheckpoint", commandRewindCheckpoint],
     ["dantecode.setupApiKeys", commandSetupApiKeys],
-    ["dantecode.resumeSession", (sessionId?: unknown) => commandResumeSession(sessionId as string | undefined)],
-    ["dantecode.forkSession", (sessionId?: unknown) => commandForkSession(sessionId as string | undefined)],
-    ["dantecode.deleteCheckpoint", (sessionId?: unknown) => commandDeleteCheckpoint(sessionId as string | undefined)],
+    [
+      "dantecode.resumeSession",
+      (sessionId?: unknown) => commandResumeSession(sessionId as string | undefined),
+    ],
+    [
+      "dantecode.forkSession",
+      (sessionId?: unknown) => commandForkSession(sessionId as string | undefined),
+    ],
+    [
+      "dantecode.deleteCheckpoint",
+      (sessionId?: unknown) => commandDeleteCheckpoint(sessionId as string | undefined),
+    ],
     ["dantecode.refreshCheckpoints", commandRefreshCheckpoints],
-    ["dantecode.executeSkill", (skillName?: unknown) => commandExecuteSkill(skillName as string | undefined)],
-    ["dantecode.executeSkillChain", (chainName?: unknown) => commandExecuteSkillChain(chainName as string | undefined)],
+    [
+      "dantecode.executeSkill",
+      (skillName?: unknown) => commandExecuteSkill(skillName as string | undefined),
+    ],
+    [
+      "dantecode.executeSkillChain",
+      (chainName?: unknown) => commandExecuteSkillChain(chainName as string | undefined),
+    ],
     ["dantecode.refreshSkills", commandRefreshSkills],
   ];
 
@@ -870,7 +890,8 @@ async function commandResumeSession(sessionId?: string): Promise<void> {
   }
 
   try {
-    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } = await import("@dantecode/core");
+    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } =
+      await import("@dantecode/core");
     const recoveryManager = new RecoveryManager({ projectRoot });
     const staleSessions = await recoveryManager.scanStaleSessions();
     const resumableSessions = staleSessions.filter((s) => s.status === "resumable");
@@ -1211,7 +1232,10 @@ async function commandExecuteSkill(skillName?: string): Promise<void> {
       }),
     };
 
-    const context = makeRunContext({ skillName: skillName as string, projectRoot: projectRoot as string });
+    const context = makeRunContext({
+      skillName: skillName as string,
+      projectRoot: projectRoot as string,
+    });
     const result = await runSkill({ skill, context });
 
     // Show result
@@ -1253,7 +1277,8 @@ async function commandExecuteSkillChain(chainName?: string): Promise<void> {
   try {
     const { readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const { executeChain, makeRunContext, makeProvenance } = await import("@dantecode/skills-runtime");
+    const { executeChain, makeRunContext, makeProvenance } =
+      await import("@dantecode/skills-runtime");
     const { getSkill } = await import("@dantecode/skill-adapter");
 
     // If no chain name provided, show picker
@@ -1363,7 +1388,9 @@ async function commandExecuteSkillChain(chainName?: string): Promise<void> {
     for (const stepResult of result.stepResults) {
       outputChannel.appendLine(`Step ${stepResult.stepIndex + 1}: ${stepResult.skillName}`);
       outputChannel.appendLine(`  State: ${stepResult.result.state}`);
-      outputChannel.appendLine(`  Summary: ${stepResult.result.plainLanguageSummary.substring(0, 200)}${stepResult.result.plainLanguageSummary.length > 200 ? "..." : ""}`);
+      outputChannel.appendLine(
+        `  Summary: ${stepResult.result.plainLanguageSummary.substring(0, 200)}${stepResult.result.plainLanguageSummary.length > 200 ? "..." : ""}`,
+      );
     }
 
     outputChannel.show();

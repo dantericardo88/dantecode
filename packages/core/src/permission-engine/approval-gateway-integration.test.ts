@@ -4,9 +4,7 @@ import { parseRules } from "./rule-parser.js";
 import type { PermissionConfig } from "./types.js";
 
 describe("ApprovalGateway + Permission Engine Integration", () => {
-  function createGatewayWithPermissions(
-    permissionConfig: PermissionConfig,
-  ): ApprovalGateway {
+  function createGatewayWithPermissions(permissionConfig: PermissionConfig): ApprovalGateway {
     const gateway = new ApprovalGateway({
       enabled: true,
       rules: [
@@ -139,10 +137,7 @@ describe("ApprovalGateway + Permission Engine Integration", () => {
 
   it("deny > ask in permission engine prevents fall-through to verification rules", () => {
     const gateway = createGatewayWithPermissions({
-      rules: parseRules([
-        "ask Bash *",
-        "deny Bash rm *",
-      ]),
+      rules: parseRules(["ask Bash *", "deny Bash rm *"]),
       defaultDecision: "allow",
     });
 
@@ -157,9 +152,7 @@ describe("ApprovalGateway + Permission Engine Integration", () => {
     });
 
     // With permission config: denied
-    expect(
-      gateway.checkWithPermissions("Bash", { command: "echo" }).decision,
-    ).toBe("auto_deny");
+    expect(gateway.checkWithPermissions("Bash", { command: "echo" }).decision).toBe("auto_deny");
 
     // Remove permission config
     gateway.setPermissionConfig(null);

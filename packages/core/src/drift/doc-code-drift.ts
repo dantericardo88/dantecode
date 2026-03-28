@@ -78,9 +78,7 @@ export function extractDocSignatures(source: string): DocSymbol[] {
       const trimmed = line.replace(/^\s*\*\s?/, "").trim();
 
       // @param {type} name - description
-      const paramMatch = trimmed.match(
-        /@param\s+(?:\{([^}]+)\}\s+)?(\w+)(?:\s+-\s+(.+))?/,
-      );
+      const paramMatch = trimmed.match(/@param\s+(?:\{([^}]+)\}\s+)?(\w+)(?:\s+-\s+(.+))?/);
       if (paramMatch && paramMatch[2]) {
         params.push({
           name: paramMatch[2],
@@ -91,9 +89,7 @@ export function extractDocSignatures(source: string): DocSymbol[] {
       }
 
       // @returns {type} description
-      const returnMatch = trimmed.match(
-        /@returns?\s+(?:\{([^}]+)\}\s*)?(.+)?/,
-      );
+      const returnMatch = trimmed.match(/@returns?\s+(?:\{([^}]+)\}\s*)?(.+)?/);
       if (returnMatch) {
         returnType = returnMatch[1];
         continue;
@@ -324,11 +320,7 @@ export async function detectDrift(
       for (const symbol of codeSymbols) {
         // Only check functions and classes (interfaces/types don't have runtime params)
         // Also check const (arrow functions assigned to const)
-        if (
-          symbol.kind !== "function" &&
-          symbol.kind !== "const" &&
-          symbol.kind !== "class"
-        ) {
+        if (symbol.kind !== "function" && symbol.kind !== "const" && symbol.kind !== "class") {
           continue;
         }
 

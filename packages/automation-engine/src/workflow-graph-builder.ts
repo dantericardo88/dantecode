@@ -80,11 +80,7 @@ export class WorkflowGraph<TState = unknown> {
   /**
    * Add a conditional edge that branches based on state.
    */
-  addConditionalEdge(
-    from: string,
-    condition: EdgeCondition<TState>,
-    label?: string,
-  ): this {
+  addConditionalEdge(from: string, condition: EdgeCondition<TState>, label?: string): this {
     if (this.compiled) {
       throw new Error("Cannot modify graph after compilation");
     }
@@ -146,11 +142,7 @@ export class WorkflowGraph<TState = unknown> {
 
     this.compiled = true;
 
-    const executor = new WorkflowGraphExecutor<TState>(
-      this.nodes,
-      this.edges,
-      this.config,
-    );
+    const executor = new WorkflowGraphExecutor<TState>(this.nodes, this.edges, this.config);
 
     this.config.eventEmitter?.emit("graph:compiled", {
       nodeCount: this.nodes.size - 2, // Exclude START and END

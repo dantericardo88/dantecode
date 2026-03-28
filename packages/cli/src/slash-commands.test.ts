@@ -1348,12 +1348,15 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
   });
 
   // Helper to create a mock checkpoint
-  async function createMockCheckpoint(sessionId: string, options?: {
-    step?: number;
-    eventId?: number;
-    worktreeRef?: string;
-    gitSnapshotHash?: string;
-  }) {
+  async function createMockCheckpoint(
+    sessionId: string,
+    options?: {
+      step?: number;
+      eventId?: number;
+      worktreeRef?: string;
+      gitSnapshotHash?: string;
+    },
+  ) {
     const checkpointDir = join(projectRoot, ".dantecode", "checkpoints", sessionId);
     await mkdir(checkpointDir, { recursive: true });
 
@@ -1384,7 +1387,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
     await writeFile(
       join(checkpointDir, "base_state.json"),
       JSON.stringify(checkpointTuple, null, 2),
-      "utf-8"
+      "utf-8",
     );
 
     return checkpoint;
@@ -1398,7 +1401,12 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
     for (let i = 1; i <= eventCount; i++) {
       const event = {
         id: i,
-        kind: i % 3 === 0 ? "run.tool.completed" : i % 3 === 1 ? "run.tool.started" : "run.checkpoint.saved",
+        kind:
+          i % 3 === 0
+            ? "run.tool.completed"
+            : i % 3 === 1
+              ? "run.tool.started"
+              : "run.checkpoint.saved",
         timestamp: new Date(Date.now() + i * 1000).toISOString(),
         payload: { test: `event-${i}` },
       };
@@ -1537,7 +1545,10 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
       const sessionId = "session-replay-filter-multi";
       await createMockEventLog(sessionId, 15);
 
-      const output = await routeSlashCommand(`/replay ${sessionId} run.tool.started run.tool.completed`, state);
+      const output = await routeSlashCommand(
+        `/replay ${sessionId} run.tool.started run.tool.completed`,
+        state,
+      );
 
       expect(output).toContain("Filtered by: run.tool.started, run.tool.completed");
     });

@@ -405,7 +405,9 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       await orchestrator.watchUntilComplete({ timeoutMs: 5000 });
 
       // Check that output.txt exists in main branch
-      const files = execSync("git ls-files", { cwd: testDir, encoding: "utf-8" }).trim().split("\n");
+      const files = execSync("git ls-files", { cwd: testDir, encoding: "utf-8" })
+        .trim()
+        .split("\n");
       expect(files).toContain("output.txt");
     });
 
@@ -822,13 +824,12 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
 
       let capturedEvent: { laneId: string; worktreePath: string; worktreeBranch: string } | null =
         null;
-      orchestrator.on("worktree:created", (event: {
-        laneId: string;
-        worktreePath: string;
-        worktreeBranch: string;
-      }) => {
-        capturedEvent = event;
-      });
+      orchestrator.on(
+        "worktree:created",
+        (event: { laneId: string; worktreePath: string; worktreeBranch: string }) => {
+          capturedEvent = event;
+        },
+      );
 
       await orchestrator.start({
         objective: "Test metadata",
@@ -868,14 +869,17 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
         targetBranch: string;
         commitSha: string;
       } | null = null;
-      orchestrator.on("worktree:merged", (event: {
-        laneId: string;
-        worktreeBranch: string;
-        targetBranch: string;
-        commitSha: string;
-      }) => {
-        capturedEvent = event;
-      });
+      orchestrator.on(
+        "worktree:merged",
+        (event: {
+          laneId: string;
+          worktreeBranch: string;
+          targetBranch: string;
+          commitSha: string;
+        }) => {
+          capturedEvent = event;
+        },
+      );
 
       await orchestrator.start({
         objective: "Test commit SHA",

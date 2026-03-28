@@ -81,12 +81,7 @@ describe("workflow-graph-executor", () => {
       const result = await graph.execute();
 
       expect(result.history.length).toBe(4); // START, a, b, c (END exits early)
-      expect(result.history.map((h) => h.nodeName)).toEqual([
-        "__start__",
-        "a",
-        "b",
-        "c",
-      ]);
+      expect(result.history.map((h) => h.nodeName)).toEqual(["__start__", "a", "b", "c"]);
     });
   });
 
@@ -534,7 +529,7 @@ describe("workflow-graph-executor", () => {
       expect(dot).toContain("digraph workflow");
       expect(dot).toContain('"start"');
       expect(dot).toContain('"end"');
-      expect(dot).toContain('->');
+      expect(dot).toContain("->");
     });
   });
 });

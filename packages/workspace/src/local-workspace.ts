@@ -47,7 +47,7 @@ export class LocalWorkspace extends BaseWorkspace {
     super(config.id, "local", config);
     // Filter out undefined values from process.env
     const filteredEnv = Object.fromEntries(
-      Object.entries(process.env).filter(([_, v]) => v !== undefined)
+      Object.entries(process.env).filter(([_, v]) => v !== undefined),
     ) as Record<string, string>;
     this._env = { ...filteredEnv, ...config.env };
     this._cwd = config.workDir || config.basePath;
@@ -234,7 +234,12 @@ export class LocalWorkspace extends BaseWorkspace {
   }
 
   async listFiles(pattern: string, options?: ListFilesOptions): Promise<string[]> {
-    const { recursive = true, includeHidden = false, maxDepth = Infinity, ignorePatterns = [] } = options || {};
+    const {
+      recursive = true,
+      includeHidden = false,
+      maxDepth = Infinity,
+      ignorePatterns = [],
+    } = options || {};
 
     const results: string[] = [];
     const regex = this._globToRegex(pattern);
@@ -359,34 +364,30 @@ export class LocalWorkspace extends BaseWorkspace {
       throw new Error(`Already watching path: ${watchPath}`);
     }
 
-    const watcher = fsSync.watch(
-      resolvedPath,
-      { recursive: true },
-      (eventType, filename) => {
-        if (!filename) return;
+    const watcher = fsSync.watch(resolvedPath, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
 
-        const fullPath = path.join(resolvedPath, filename);
-        const relativePath = path.relative(this.config.basePath, fullPath);
+      const fullPath = path.join(resolvedPath, filename);
+      const relativePath = path.relative(this.config.basePath, fullPath);
 
-        let changeType: FileChangeType = "modified";
-        if (eventType === "rename") {
-          // Check if file exists to determine if created or deleted
-          try {
-            fsSync.accessSync(fullPath);
-            changeType = "created";
-          } catch {
-            changeType = "deleted";
-          }
+      let changeType: FileChangeType = "modified";
+      if (eventType === "rename") {
+        // Check if file exists to determine if created or deleted
+        try {
+          fsSync.accessSync(fullPath);
+          changeType = "created";
+        } catch {
+          changeType = "deleted";
         }
-
-        callback({
-          type: changeType,
-          path: relativePath,
-          timestamp: Date.now(),
-          workspaceId: this.id,
-        });
       }
-    );
+
+      callback({
+        type: changeType,
+        path: relativePath,
+        timestamp: Date.now(),
+        workspaceId: this.id,
+      });
+    });
 
     this._watchers.set(resolvedPath, watcher);
 
@@ -455,7 +456,7 @@ export class LocalWorkspace extends BaseWorkspace {
 
   async executeBackground(
     command: string,
-    options?: ExecOptions
+    options?: ExecOptions,
   ): Promise<{ pid: number; kill: () => Promise<void> }> {
     const cwd = options?.cwd ? this._resolvePath(options.cwd) : this._cwd;
     const env = { ...this._env, ...options?.env };

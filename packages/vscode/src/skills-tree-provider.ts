@@ -84,9 +84,7 @@ export class SkillsTreeDataProvider implements vscode.TreeDataProvider<SkillTree
       // Sort by name for consistent display
       skills.sort((a, b) => a.name.localeCompare(b.name));
 
-      return skills.map(
-        (skill) => new SkillTreeItem(skill, vscode.TreeItemCollapsibleState.None),
-      );
+      return skills.map((skill) => new SkillTreeItem(skill, vscode.TreeItemCollapsibleState.None));
     } catch (error) {
       console.error("Failed to load skills:", error);
       return [];

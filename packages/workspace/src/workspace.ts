@@ -135,7 +135,7 @@ export interface Workspace {
    */
   executeBackground(
     command: string,
-    options?: ExecOptions
+    options?: ExecOptions,
   ): Promise<{ pid: number; kill: () => Promise<void> }>;
 
   // ─── Environment ──────────────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ export abstract class BaseWorkspace implements Workspace {
   constructor(
     public readonly id: string,
     public readonly type: WorkspaceType,
-    public readonly config: WorkspaceConfig
+    public readonly config: WorkspaceConfig,
   ) {
     this._stats = this._initStats();
   }
@@ -230,7 +230,7 @@ export abstract class BaseWorkspace implements Workspace {
   abstract execute(command: string, options?: ExecOptions): Promise<ExecResult>;
   abstract executeBackground(
     command: string,
-    options?: ExecOptions
+    options?: ExecOptions,
   ): Promise<{ pid: number; kill: () => Promise<void> }>;
 
   abstract getEnv(key: string): Promise<string | undefined>;
@@ -310,7 +310,9 @@ export abstract class BaseWorkspace implements Workspace {
     };
   }
 
-  protected _incrementStat(stat: keyof Pick<WorkspaceStats, "commandsExecuted" | "filesRead" | "filesWritten">): void {
+  protected _incrementStat(
+    stat: keyof Pick<WorkspaceStats, "commandsExecuted" | "filesRead" | "filesWritten">,
+  ): void {
     (this._stats[stat] as number)++;
   }
 }
