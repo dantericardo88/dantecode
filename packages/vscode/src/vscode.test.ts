@@ -119,6 +119,10 @@ vi.mock("vscode", () => {
     constructor(public id: string) {}
   }
 
+  class ThemeIcon {
+    constructor(public id: string) {}
+  }
+
   class InlineCompletionItem {
     filterText = "";
     constructor(
@@ -185,6 +189,7 @@ vi.mock("vscode", () => {
     Range,
     Position,
     ThemeColor,
+    ThemeIcon,
     InlineCompletionItem,
     RelativePattern,
     EventEmitter,
@@ -560,6 +565,22 @@ vi.mock("@dantecode/core", () => ({
       language: "typescript",
     })),
     buildPrompt: vi.fn((_ctx: unknown, _model: string) => "<PRE> <SUF> <MID>"),
+  })),
+  // RecoveryManager and recovery helpers
+  RecoveryManager: vi.fn().mockImplementation(() => ({
+    recoverSession: vi.fn(),
+    cleanupSession: vi.fn(),
+    getStaleSessionCount: vi.fn(() => 0),
+  })),
+  formatStaleSessionSummary: vi.fn((sessions: unknown[]) => `${sessions.length} stale sessions`),
+  filterSessionsByStatus: vi.fn((sessions: unknown[]) => sessions),
+  sortSessionsByTime: vi.fn((sessions: unknown[]) => sessions),
+  // BackgroundSemanticIndex for semantic code indexing
+  BackgroundSemanticIndex: vi.fn().mockImplementation(() => ({
+    start: vi.fn(),
+    stop: vi.fn(),
+    search: vi.fn(() => Promise.resolve([])),
+    isReady: vi.fn(() => ({ ready: false, progress: 0 })),
   })),
 }));
 
@@ -3248,9 +3269,9 @@ describe("Status Bar Badges (Wave 3)", () => {
 });
 
 describe("Skills Tree View (Wave 3)", () => {
-  it("creates skill tree items with correct properties", () => {
-    const { SkillTreeItem } = require("./skills-tree-provider.js");
-    const vscode = require("vscode");
+  it("creates skill tree items with correct properties", async () => {
+    const { SkillTreeItem } = await import("./skills-tree-provider.js");
+    const vscode = await import("vscode");
 
     const skill = {
       name: "test-skill",
@@ -3274,9 +3295,9 @@ describe("Skills Tree View (Wave 3)", () => {
     expect(item.contextValue).toBe("skill");
   });
 
-  it("creates skill tree items with skillbridge badge", () => {
-    const { SkillTreeItem } = require("./skills-tree-provider.js");
-    const vscode = require("vscode");
+  it("creates skill tree items with skillbridge badge", async () => {
+    const { SkillTreeItem } = await import("./skills-tree-provider.js");
+    const vscode = await import("vscode");
 
     const skill = {
       name: "bridge-skill",
@@ -3294,7 +3315,7 @@ describe("Skills Tree View (Wave 3)", () => {
   });
 
   it("SkillsTreeDataProvider lists skills from project", async () => {
-    const { SkillsTreeDataProvider } = require("./skills-tree-provider.js");
+    const { SkillsTreeDataProvider } = await import("./skills-tree-provider.js");
 
     // Mock skill-adapter
     vi.mock("@dantecode/skill-adapter", () => ({
@@ -3314,7 +3335,7 @@ describe("Skills Tree View (Wave 3)", () => {
   });
 
   it("SkillsTreeDataProvider returns empty when no project root", async () => {
-    const { SkillsTreeDataProvider } = require("./skills-tree-provider.js");
+    const { SkillsTreeDataProvider } = await import("./skills-tree-provider.js");
 
     const provider = new SkillsTreeDataProvider("");
     const children = await provider.getChildren();
@@ -3322,8 +3343,8 @@ describe("Skills Tree View (Wave 3)", () => {
     expect(children.length).toBe(0);
   });
 
-  it("SkillsTreeDataProvider refresh fires tree data change event", () => {
-    const { SkillsTreeDataProvider } = require("./skills-tree-provider.js");
+  it("SkillsTreeDataProvider refresh fires tree data change event", async () => {
+    const { SkillsTreeDataProvider } = await import("./skills-tree-provider.js");
 
     const provider = new SkillsTreeDataProvider("/test/project");
     const mockListener = vi.fn();
