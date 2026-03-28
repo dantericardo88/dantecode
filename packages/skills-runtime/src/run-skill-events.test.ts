@@ -9,15 +9,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runSkill } from "./run-skill.js";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillRunContext } from "./skill-run-context.js";
-import type { EventEngine } from "@dantecode/core";
-import type { RuntimeEvent } from "@dantecode/runtime-spine";
+import type { EventEmitter, RuntimeEvent } from "@dantecode/runtime-spine";
 import { makeRunContext } from "./skill-run-context.js";
 
 // ============================================================================
 // Test Setup
 // ============================================================================
 
-function createMockEventEngine(): EventEngine {
+function createMockEventEmitter(): EventEmitter {
   const emittedEvents: RuntimeEvent[] = [];
 
   return {
@@ -26,7 +25,7 @@ function createMockEventEngine(): EventEngine {
       return emittedEvents.length;
     }),
     getEmittedEvents: () => emittedEvents,
-  } as unknown as EventEngine;
+  } as unknown as EventEmitter;
 }
 
 function createMinimalSkill(overrides: Partial<DanteSkill> = {}): DanteSkill {
@@ -54,11 +53,11 @@ function createMinimalSkill(overrides: Partial<DanteSkill> = {}): DanteSkill {
 // ============================================================================
 
 describe("Skill Load Event Emission", () => {
-  let mockEngine: EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+  let mockEngine: EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEngine() as EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",
@@ -73,7 +72,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent).toBeDefined();
     expect(loadEvent?.payload.skillName).toBe("test-skill");
@@ -85,7 +84,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent?.payload.source).toBe("hf");
   });
@@ -98,7 +97,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent?.payload.license).toBe("Apache-2.0");
   });
@@ -111,7 +110,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent?.payload.trustTier).toBe("verified");
   });
@@ -124,7 +123,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent?.payload.trustTier).toBe("unknown");
   });
@@ -136,7 +135,7 @@ describe("Skill Load Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine, taskId: customTaskId });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent?.taskId).toBe(customTaskId);
   });
@@ -147,11 +146,11 @@ describe("Skill Load Event Emission", () => {
 // ============================================================================
 
 describe("Skill Execute Event Emission", () => {
-  let mockEngine: EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+  let mockEngine: EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEngine() as EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",
@@ -166,7 +165,7 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent).toBeDefined();
     expect(executeEvent?.payload.skillName).toBe("test-skill");
@@ -189,7 +188,7 @@ describe("Skill Execute Event Emission", () => {
     });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent?.payload.success).toBe(true);
   });
@@ -205,7 +204,7 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine, scriptRunner });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent?.payload.success).toBe(true);
   });
@@ -219,7 +218,7 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine, scriptRunner });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent?.payload.success).toBe(false);
     expect(executeEvent?.payload.error).toContain("Execution failed");
@@ -231,7 +230,7 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent?.payload.durationMs).toBeGreaterThanOrEqual(0);
     expect(typeof executeEvent?.payload.durationMs).toBe("number");
@@ -243,7 +242,7 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const eventKinds = events.map((e) => e.kind);
+    const eventKinds = events.map((e: RuntimeEvent) => e.kind);
 
     expect(eventKinds).toEqual(["run.skill.loaded", "run.skill.executed"]);
   });
@@ -255,8 +254,8 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine, taskId: customTaskId });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(loadEvent?.taskId).toBe(customTaskId);
     expect(executeEvent?.taskId).toBe(customTaskId);
@@ -268,8 +267,8 @@ describe("Skill Execute Event Emission", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(loadEvent?.taskId).toBeDefined();
     expect(executeEvent?.taskId).toBeDefined();
@@ -282,11 +281,11 @@ describe("Skill Execute Event Emission", () => {
 // ============================================================================
 
 describe("Event Payload Validation", () => {
-  let mockEngine: EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+  let mockEngine: EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
   let context: SkillRunContext;
 
   beforeEach(() => {
-    mockEngine = createMockEventEngine() as EventEngine & { getEmittedEvents: () => RuntimeEvent[] };
+    mockEngine = createMockEventEmitter() as EventEmitter & { getEmittedEvents: () => RuntimeEvent[] };
     context = makeRunContext({
       skillName: "test-skill",
       mode: "apply",
@@ -301,8 +300,8 @@ describe("Event Payload Validation", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(loadEvent?.payload.skillId).toBeDefined();
     expect(executeEvent?.payload.skillId).toBeDefined();
@@ -320,7 +319,7 @@ describe("Event Payload Validation", () => {
     await runSkill({ skill, context, eventEngine: mockEngine, scriptRunner });
 
     const events = mockEngine.getEmittedEvents();
-    const executeEvent = events.find((e) => e.kind === "run.skill.executed");
+    const executeEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.executed");
 
     expect(executeEvent?.payload.error).toBeUndefined();
   });
@@ -354,7 +353,7 @@ describe("Event Payload Validation", () => {
     await runSkill({ skill, context, eventEngine: mockEngine });
 
     const events = mockEngine.getEmittedEvents();
-    const loadEvent = events.find((e) => e.kind === "run.skill.loaded");
+    const loadEvent = events.find((e: RuntimeEvent) => e.kind === "run.skill.loaded");
 
     expect(loadEvent).toBeDefined();
     expect(loadEvent?.payload.license).toBe("MIT");

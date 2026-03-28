@@ -3,8 +3,7 @@ import { makeRunId } from "./skill-run-result.js";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillRunContext } from "./skill-run-context.js";
 import type { SkillRunResult } from "./skill-run-result.js";
-import type { EventEngine } from "@dantecode/core";
-import { buildRuntimeEvent } from "@dantecode/runtime-spine";
+import { buildRuntimeEvent, type EventEmitter } from "@dantecode/runtime-spine";
 import { randomUUID } from "node:crypto";
 
 export interface SkillVerification {
@@ -33,13 +32,13 @@ export interface RunSkillOptions {
   scriptRunner?: (scriptPath: string, context: SkillRunContext) => Promise<ScriptResult | string[]>;
   verification?: SkillVerification;
   /** Optional event engine for emitting skill load and execution events */
-  eventEngine?: EventEngine;
+  eventEngine?: EventEmitter;
   /** Optional task ID for event correlation (generates UUID if not provided) */
   taskId?: string;
 }
 
 async function emitSkillExecutedEvent(
-  eventEngine: EventEngine | undefined,
+  eventEngine: EventEmitter | undefined,
   taskId: string,
   skill: DanteSkill,
   result: SkillRunResult,

@@ -1,12 +1,12 @@
 {
   "source": "release-check",
-  "commitSha": "6b9b62cd1bc4755a8cf66ca5700599e576e801ad",
-  "generatedAt": "2026-03-27T17:18:20.241Z",
+  "commitSha": "7ff510354945b7f5b8b36ae6e3a1dc5db55c4a54",
+  "generatedAt": "2026-03-28T15:58:27.059Z",
   "gates": {
-    "typecheck": "pass",
-    "lint": "pass",
-    "test": "pass",
-    "build": "pass",
+    "typecheck": "fail",
+    "lint": "fail",
+    "test": "fail",
+    "build": "fail",
     "windowsSmoke": "unknown",
     "antiStub": "pass",
     "liveProvider": "unknown",

@@ -117,9 +117,33 @@ See [WAVE_2_COMPLETE.md](WAVE_2_COMPLETE.md) for full completion report.
 
 See [WAVE_3_COMPLETE.md](.danteforge/WAVE_3_COMPLETE.md) for full completion report.
 
-## Future Waves (PLANNED)
+## Wave 4: Quality & Hygiene ✅ COMPLETE (2026-03-28)
 
-- [ ] Wave 4: repair loop + contract/hygiene sync (Weeks 7-9)
+**Duration:** 1 day (estimated 12 days → completed in 1 session)
+**Tests Added:** 171 new tests (exceeded 145 target by 18%)
+**Key Achievements:**
+- ✅ Lint repair loop: Auto-fix + auto-commit, max 3 iterations
+- ✅ Test repair loop: Baseline comparison (only new failures)
+- ✅ Final gate: PDSE scoring + anti-stub detection
+- ✅ Freshness guard: Same-commit validation for artifacts
+- ✅ Doc-code drift: Tree-sitter based signature comparison
+- ✅ CLI/VS Code parity: /drift command available
+
+**Gaps Closed:** A7 (Aider-grade repair loop), A8 (Contract and hygiene sync)
+
+See [WAVE_4_COMPLETE.md](.danteforge/WAVE_4_COMPLETE.md) and [WAVE_4_TASKS.md](.danteforge/WAVE_4_TASKS.md) for full completion report.
+
+## Phase A Status: ✅ COMPLETE
+
+All 4 Waves complete. All 8 gaps closed (A1-A8). 790 new tests passing.
+- Wave 1: 218 tests (Mode enforcement + permission engine)
+- Wave 2: 201 tests (Event-sourced execution + worktree recovery)
+- Wave 3: 200 tests (Tree-sitter precision + skill composition)
+- Wave 4: 171 tests (Repair loops + hygiene checks)
+
+Total: 93 new files created, 67 files modified, ~38,500 lines added.
+
+See [PHASE_A_COMPLETE.md](.danteforge/PHASE_A_COMPLETE.md) for comprehensive synthesis.
 
 ## External Evidence Still Required
 

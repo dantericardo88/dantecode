@@ -1,39 +1,55 @@
 # DanteCode Readiness
 
-**Status:** private-ready  
+**Status:** blocked  
 **Scope:** repo-proof  
-**Commit:** `6b9b62cd1bc4`  
-**Generated:** 2026-03-27T18:42:36.967Z
+**Commit:** `7ff510354945`  
+**Generated:** 2026-03-28T15:58:27.059Z
 
 ## Gates
 
 | Gate | Status |
 |------|--------|
-| typecheck | pass |
-| lint | pass |
-| test | pass |
-| build | pass |
-| windowsSmoke | pass |
+| typecheck | fail |
+| lint | fail |
+| test | fail |
+| build | fail |
+| windowsSmoke | unknown |
 | antiStub | pass |
 | liveProvider | unknown |
-| publishDryRun | pass |
+| publishDryRun | unknown |
 
 ## Release Doctor
 
-- canPublish: false
-- blockers: 3
-- actions: 4
+- missing same-commit release doctor receipt
 
 ## Quickstart Proof
 
-- canClaimQuickstart: false
-- blockers: 0
-- actions: 1
+- missing same-commit quickstart proof receipt
+
+## Blockers
+
+- Gate "typecheck" failed
+- Gate "lint" failed
+- Gate "test" failed
+- Gate "build" failed
+
+## Open Requirements (privateReady)
+
+- Gate "typecheck" must pass. Current status: fail.
+- Gate "lint" must pass. Current status: fail.
+- Gate "test" must pass. Current status: fail.
+- Gate "build" must pass. Current status: fail.
+- Gate "windowsSmoke" must pass. Current status: unknown.
+- Gate "publishDryRun" must pass. Current status: unknown.
 
 ## Open Requirements (publicReady)
 
+- Gate "typecheck" must pass. Current status: fail.
+- Gate "lint" must pass. Current status: fail.
+- Gate "test" must pass. Current status: fail.
+- Gate "build" must pass. Current status: fail.
+- Gate "windowsSmoke" must pass. Current status: unknown.
+- Gate "publishDryRun" must pass. Current status: unknown.
 - Gate "liveProvider" must pass. Current status: unknown.
-- Release doctor blocker: GitHub CI for 6b9b62cd1bc4 concluded failure.
-- Release doctor blocker: No provider credentials detected for the live model-router smoke test.
-- Release doctor blocker: No npm publish auth token detected locally or in GitHub Actions secrets.
-- Quickstart proof action: Same-commit live provider receipt is missing or unknown. Generate it with real credentials.
+- Release doctor receipt is missing for the current commit. Run `npm run release:doctor` to validate publish blockers.
+- Quickstart proof receipt is missing for the current commit. Run `npm run release:prove-quickstart` to validate the README quickstart path.

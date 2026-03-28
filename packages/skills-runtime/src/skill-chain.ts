@@ -3,7 +3,7 @@ import type { RunSkillOptions, SkillVerification } from "./run-skill.js";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillRunContext } from "./skill-run-context.js";
 import type { SkillRunResult } from "./skill-run-result.js";
-import type { EventEngine } from "@dantecode/core";
+import type { EventEmitter } from "@dantecode/runtime-spine";
 
 /**
  * Gating strategy for skill chains.
@@ -121,7 +121,7 @@ export interface ExecuteChainOptions {
   /** Optional PDSE gate callback (for custom gating logic) */
   forgeGate?: (result: SkillRunResult, threshold: number) => Promise<{ approved: boolean; score?: number }>;
   /** Optional event engine for skill events */
-  eventEngine?: EventEngine;
+  eventEngine?: EventEmitter;
   /** Optional task ID for event correlation */
   taskId?: string;
   /** Optional prompt function for interactive failure handling */
