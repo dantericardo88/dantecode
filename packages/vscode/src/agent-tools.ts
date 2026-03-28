@@ -642,12 +642,14 @@ export async function executeTool(
   // Mode-based tool enforcement: reject excluded tools at runtime
   if (mode) {
     const canonical = normalizeApprovalMode(mode);
-    const exclusions = getModeToolExclusions(canonical);
-    if (exclusions.includes(name)) {
-      return {
-        content: `Error: Tool "${name}" is not available in ${canonical} mode. Switch to apply mode to use mutation tools.`,
-        isError: true,
-      };
+    if (canonical) {
+      const exclusions = getModeToolExclusions(canonical);
+      if (exclusions.includes(name)) {
+        return {
+          content: `Error: Tool "${name}" is not available in ${canonical} mode. Switch to apply mode to use mutation tools.`,
+          isError: true,
+        };
+      }
     }
   }
 
@@ -1015,7 +1017,7 @@ export function extractToolCalls(text: string): {
  * @returns A string containing tool definitions for the system prompt
  */
 export function getToolDefinitionsPrompt(mode?: CanonicalApprovalMode | string): string {
-  const canonical = normalizeApprovalMode(mode);
+  const canonical = normalizeApprovalMode(mode) || "apply";
   const exclusions = getModeToolExclusions(canonical);
 
   // Define all tools with their descriptions

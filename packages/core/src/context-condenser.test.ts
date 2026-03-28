@@ -15,7 +15,22 @@ import {
 // ----------------------------------------------------------------------------
 
 function createMessage(role: CoreMessage["role"], content: string): CoreMessage {
-  return { role, content };
+  if (role === "tool") {
+    return { role: "tool", content: [{ type: "tool-result", toolCallId: "test-tool-call", toolName: "test", result: content }] };
+  }
+  return { role, content } as CoreMessage;
+}
+
+function messageContentIncludes(msg: CoreMessage, text: string): boolean {
+  if (typeof msg.content === "string") {
+    return msg.content.includes(text);
+  }
+  // Array content (tool/assistant with parts)
+  return msg.content.some((part) => {
+    if ("text" in part) return part.text.includes(text);
+    if ("result" in part && typeof part.result === "string") return part.result.includes(text);
+    return false;
+  });
 }
 
 function createConversation(rounds: number): CoreMessage[] {
@@ -113,7 +128,7 @@ describe("condenseContext", () => {
   it("should preserve system message", async () => {
     const messages = createConversation(10);
     const result = await condenseContext(messages, 500);
-    const systemMsg = result.messages.find((m) => m.role === "system" && m.content.includes("helpful assistant"));
+    const systemMsg = result.messages.find((m) => m.role === "system" && messageContentIncludes(m, "helpful assistant"));
     expect(systemMsg).toBeDefined();
   });
 
@@ -134,7 +149,7 @@ describe("condenseContext", () => {
 
     // Should have: system + summary + 6 recent messages
     expect(result.messages.length).toBeLessThan(messages.length);
-    const summaryMsg = result.messages.find((m) => m.content.includes("Context Summary"));
+    const summaryMsg = result.messages.find((m) => messageContentIncludes(m, "Context Summary"));
     expect(summaryMsg).toBeDefined();
   });
 

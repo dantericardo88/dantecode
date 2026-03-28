@@ -519,8 +519,8 @@ describe("EventSourcedCheckpointer", () => {
 
       const writes = cp.getPendingWrites();
       expect(writes).toHaveLength(1);
-      expect(writes[0].channel).toBe("apply_receipt");
-      expect(writes[0].value).toEqual(receipt);
+      expect(writes[0]!.channel).toBe("apply_receipt");
+      expect(writes[0]!.value).toEqual(receipt);
     });
 
     it("deduplicates receipts for the same stepId", async () => {
@@ -545,7 +545,7 @@ describe("EventSourcedCheckpointer", () => {
 
       const writes = cp.getPendingWrites();
       expect(writes).toHaveLength(1);
-      expect((writes[0].value as ApplyReceipt).state).toBe("success");
+      expect((writes[0]!.value as ApplyReceipt).state).toBe("success");
     });
 
     it("recovers apply receipts after resume", async () => {
@@ -574,7 +574,7 @@ describe("EventSourcedCheckpointer", () => {
       const tuple = await cp2.getTuple();
       expect(tuple).not.toBeNull();
       expect(tuple!.pendingWrites).toHaveLength(1);
-      expect(tuple!.pendingWrites[0].channel).toBe("apply_receipt");
+      expect(tuple!.pendingWrites[0]!.channel).toBe("apply_receipt");
     });
   });
 

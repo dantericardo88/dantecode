@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup",
+    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup && node scripts/generate-stub-dts.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config ../../vitest.package.config.ts"
   },
