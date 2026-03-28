@@ -133,6 +133,7 @@ import { buildCliOperatorStatus } from "./operator-status.js";
 import { mergeVisibleSkills } from "./skill-visibility.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
+import { fuzzyFindFile } from "./fuzzy-finder.js";
 import {
   configureApprovalMode,
   normalizeApprovalMode,
@@ -1859,6 +1860,54 @@ async function filesCommand(_args: string, state: ReplState): Promise<string> {
   lines.push("");
   lines.push(`${DIM}${state.session.activeFiles.length} file(s) total${RESET}`);
   return lines.join("\n");
+}
+
+async function findCommand(_args: string, state: ReplState): Promise<string> {
+  const { glob } = await import("glob");
+
+  // Find all files in project (exclude common directories)
+  const allFiles = await glob("**/*", {
+    cwd: state.projectRoot,
+    ignore: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/build/**",
+      "**/.git/**",
+      "**/coverage/**",
+      "**/.next/**",
+      "**/.turbo/**",
+      "**/.cache/**",
+    ],
+    nodir: true,
+    absolute: false,
+  });
+
+  if (allFiles.length === 0) {
+    return `${YELLOW}No files found in project${RESET}`;
+  }
+
+  // Launch fuzzy finder
+  const selected = await fuzzyFindFile(allFiles, {
+    prompt: "Select file to add to context:",
+    maxResults: 10,
+    minScore: 0.05,
+  });
+
+  if (!selected) {
+    return `${DIM}Cancelled${RESET}`;
+  }
+
+  // Add selected file to context
+  const fullPath = resolve(state.projectRoot, selected);
+
+  // Check if already in context
+  if (state.session.activeFiles.includes(fullPath)) {
+    return `${YELLOW}File already in context: ${selected}${RESET}`;
+  }
+
+  state.session.activeFiles.push(fullPath);
+
+  return `${GREEN}✓${RESET} Added to context: ${selected}\n${DIM}Use /files to see all files in context${RESET}`;
 }
 
 async function diffCommand(_args: string, state: ReplState): Promise<string> {
@@ -8098,6 +8147,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List files currently in context",
     usage: "/files",
     handler: filesCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "find",
+    description: "Interactive fuzzy finder for project files",
+    usage: "/find",
+    handler: findCommand,
     tier: 1,
     category: "core",
   },
