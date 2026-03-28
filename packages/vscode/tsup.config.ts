@@ -3,7 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: ["src/extension.ts"],
   format: ["cjs"],
-  dts: true,
+  dts: false, // Skip DTS - extension doesn't need type declarations
   external: ["vscode"],
   noExternal: [
     "@dantecode/config-types",

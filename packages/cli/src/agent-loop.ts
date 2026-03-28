@@ -375,7 +375,7 @@ async function _runAgentLoopCore(
   }
 
   // Convert session messages to the format expected by the AI SDK
-  const messages = session.messages.map((msg) => ({
+  let messages = session.messages.map((msg) => ({
     role: msg.role as "user" | "assistant" | "system",
     content:
       typeof msg.content === "string"
