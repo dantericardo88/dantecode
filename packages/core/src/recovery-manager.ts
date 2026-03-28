@@ -205,7 +205,7 @@ export class RecoveryManager {
             timestamp: checkpoint.ts,
             step: checkpoint.step,
           });
-        } catch (_error) {
+        } catch (error) {
           sessions.push({
             sessionId,
             checkpointPath,

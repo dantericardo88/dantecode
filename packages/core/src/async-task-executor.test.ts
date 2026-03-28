@@ -61,7 +61,7 @@ describe("AsyncTaskExecutor", () => {
         return t.input.value * 2;
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
 
       expect(handle.taskId).toBe(task.id);
       expect(handle.promise).toBeInstanceOf(Promise);
@@ -94,7 +94,7 @@ describe("AsyncTaskExecutor", () => {
       const spy = vi.fn();
       executor.on("task:completed", spy);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       expect(spy).toHaveBeenCalledWith(task.id, expect.objectContaining({ success: true }));
@@ -109,7 +109,7 @@ describe("AsyncTaskExecutor", () => {
       const spy = vi.fn();
       executor.on("task:failed", spy);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.success).toBe(false);
@@ -222,7 +222,7 @@ describe("AsyncTaskExecutor", () => {
         return "done";
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
 
       // Cancel after a short delay
       setTimeout(() => handle.cancel(), 100);
@@ -242,7 +242,7 @@ describe("AsyncTaskExecutor", () => {
       const spy = vi.fn();
       executor.on("task:cancelled", spy);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.cancel();
 
       expect(spy).toHaveBeenCalledWith(task.id);
@@ -256,7 +256,7 @@ describe("AsyncTaskExecutor", () => {
       const task = createTask("task", {});
       const taskExecutor: TaskExecutor = async () => "done";
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       // Should not throw
@@ -314,7 +314,7 @@ describe("AsyncTaskExecutor", () => {
       const callback = vi.fn();
       executor.onTaskComplete(callback);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       expect(callback).toHaveBeenCalledWith(task.id, expect.objectContaining({ success: true }));
@@ -337,7 +337,7 @@ describe("AsyncTaskExecutor", () => {
       const retrySpy = vi.fn();
       executor.on("task:retry", retrySpy);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.success).toBe(true);
@@ -355,7 +355,7 @@ describe("AsyncTaskExecutor", () => {
         throw new Error("Always fail");
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.success).toBe(false);
@@ -373,7 +373,7 @@ describe("AsyncTaskExecutor", () => {
         return "should not complete";
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.success).toBe(false);
@@ -388,7 +388,7 @@ describe("AsyncTaskExecutor", () => {
         return "completed";
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.success).toBe(true);
@@ -418,7 +418,7 @@ describe("AsyncTaskExecutor", () => {
       const task = createTask("task", {});
       const taskExecutor: TaskExecutor = async () => "done";
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       const active = executor.getActiveTasks();
@@ -431,7 +431,7 @@ describe("AsyncTaskExecutor", () => {
       const task = createTask("task", {});
       const taskExecutor: TaskExecutor = async () => "done";
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       executor.cleanup();
@@ -487,7 +487,7 @@ describe("AsyncTaskExecutor", () => {
       const spy = vi.fn();
       executor.on("queue:empty", spy);
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       await handle.promise;
 
       // Wait for event
@@ -505,7 +505,7 @@ describe("AsyncTaskExecutor", () => {
         return "done";
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      const handle = executor.startTask(task, taskExecutor);
       const result = await handle.promise;
 
       expect(result.metrics.startedAt).toBeTruthy();
