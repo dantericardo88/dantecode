@@ -1162,3 +1162,34 @@ export type {
   CodeParameter,
   CodeSymbol,
 } from "./drift/doc-code-drift.js";
+
+// ─── Custom Modes ─────────────────────────────────────────────────────────────
+
+export {
+  checkPathAllowed,
+  checkToolAllowed,
+  validateModeSlug,
+  validateCustomMode,
+  getCustomModeToolExclusions,
+  formatModeDisplay,
+} from "./custom-modes.js";
+export type { CustomMode, PathCheckResult, ToolCheckResult } from "./custom-modes.js";
+
+// ─── Async Task Executor ──────────────────────────────────────────────────────
+
+export {
+  AsyncTaskExecutor,
+  createAsyncTaskExecutor,
+  createTask,
+} from "./async-task-executor.js";
+export type {
+  Task,
+  TaskResult,
+  TaskHandle,
+  TaskStatus,
+  TaskStatusSnapshot,
+  TaskPriority,
+  TaskExecutor,
+  AsyncTaskExecutorOptions,
+  AsyncTaskExecutorEvents,
+} from "./async-task-executor.js";

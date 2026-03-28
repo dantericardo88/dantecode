@@ -29,3 +29,55 @@ export {
 } from "@dantecode/git-engine";
 
 export { FilePatternWatcher, matchGlob } from "./file-pattern-watcher.js";
+
+// ============================================================================
+// Workflow Graph Execution (LangGraph-inspired)
+// ============================================================================
+
+export { WorkflowGraph, createWorkflowGraph } from "./workflow-graph-builder.js";
+export { WorkflowGraphExecutor } from "./workflow-graph-executor.js";
+export { WorkflowGraphCheckpointer } from "./workflow-graph-checkpoint.js";
+export {
+  defineWorkflowAutomation,
+  registerWorkflowAutomation,
+  executeWorkflowAutomation,
+  toAutomationExecutionRecord,
+} from "./workflow-graph-integration.js";
+
+export {
+  initializeGraphState,
+  applyStateUpdates,
+  getStateSnapshot,
+  getChannelValue,
+  cloneGraphState,
+  serializeGraphState,
+  deserializeGraphState,
+  validateStateUpdates,
+  mergeStateUpdates,
+  defineStateSchema,
+  ChannelReducers,
+} from "./workflow-graph-state.js";
+
+export type {
+  StateChannel,
+  GraphState,
+  NodeContext,
+  NodeFunction,
+  WorkflowNode,
+  EdgeCondition,
+  WorkflowEdge,
+  WorkflowGraphConfig,
+  StateSchemaDefinition,
+  StateChannelConfig,
+  NodeExecutionResult,
+  GraphExecutionContext,
+  ExecutionOptions,
+  ExecutionResult,
+  WorkflowGraphEvents,
+  SubgraphNode,
+  CompiledWorkflowGraph,
+} from "./workflow-graph-types.js";
+
+export { START_NODE, END_NODE } from "./workflow-graph-types.js";
+
+export type { WorkflowGraphAutomation } from "./workflow-graph-integration.js";

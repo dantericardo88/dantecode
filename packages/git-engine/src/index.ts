@@ -159,3 +159,13 @@ export type {
   ConflictScanResult,
   SymbolDiffEntry,
 } from "./conflict-scan.js";
+
+// ─── Diff/Undo Manager ───────────────────────────────────────────────────────
+
+export { DiffUndoManager, createDiffUndoManager } from "./diff-undo-manager.js";
+export type {
+  DiffUndoConfig,
+  CommitHistoryEntry,
+  DiffResult,
+  UndoResult,
+} from "./diff-undo-manager.js";
