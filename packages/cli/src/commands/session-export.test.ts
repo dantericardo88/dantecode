@@ -175,6 +175,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    taskMode: null,
     macroRecording: false,
     macroRecordingName: null,
     macroRecordingSteps: [],

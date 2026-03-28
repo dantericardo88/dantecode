@@ -14,7 +14,13 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { execSync } from "node:child_process";
-import { PlanStore, PlanExecutor, renderPlan, renderPlanSummary, analyzeComplexity } from "@dantecode/core";
+import {
+  PlanStore,
+  PlanExecutor,
+  renderPlan,
+  renderPlanSummary,
+  analyzeComplexity,
+} from "@dantecode/core";
 import type {
   StoredPlan,
   PlanExecutionResult,
@@ -138,7 +144,10 @@ async function generatePlan(goal: string, state: ReplState): Promise<string> {
   return lines.join("\n");
 }
 
-async function buildRepoContext(goal: string, projectRoot: string): Promise<{
+async function buildRepoContext(
+  goal: string,
+  projectRoot: string,
+): Promise<{
   relevantFiles: string[];
   verificationCommands: string[];
 }> {
@@ -252,7 +261,11 @@ function scoreFile(filePath: string, goalTokens: string[], changedFiles: string[
   return score;
 }
 
-function selectRelevantFiles(files: string[], goalTokens: string[], changedFiles: string[]): string[] {
+function selectRelevantFiles(
+  files: string[],
+  goalTokens: string[],
+  changedFiles: string[],
+): string[] {
   const scored = files
     .map((filePath) => ({
       filePath,
@@ -266,8 +279,10 @@ function selectRelevantFiles(files: string[], goalTokens: string[], changedFiles
     return scored.slice(0, 8);
   }
 
-  const fallbacks = files.filter((filePath) =>
-    /^(packages|tests|scripts)\//.test(filePath) || /(^README\.md$|package\.json$)/.test(filePath),
+  const fallbacks = files.filter(
+    (filePath) =>
+      /^(packages|tests|scripts)\//.test(filePath) ||
+      /(^README\.md$|package\.json$)/.test(filePath),
   );
   return fallbacks.slice(0, 8);
 }

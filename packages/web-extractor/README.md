@@ -1,35 +1,34 @@
 # @dantecode/web-extractor
 
-**⚠️ EXPERIMENTAL - Wave 6 (Out-of-Ship Scope)**
-
-This package is currently in experimental phase and is excluded from release readiness checks. It contains production-grade web extraction capabilities but may undergo significant changes.
+Intelligent page analysis and extraction for DanteCode.
 
 ## Overview
 
-Intelligent page analysis and extraction engine for DanteCode, providing:
+`@dantecode/web-extractor` fetches web content through a small provider stack and returns cleaned markdown, structured metadata, source provenance, and verification warnings.
 
-- Multi-provider web scraping (Crawl4AI, Stagehand, basic fetch)
-- Content cleaning and deduplication
-- Relevance scoring and injection detection
-- PDSE verification bridge for content quality assessment
+Supported providers:
 
-## Features
+- `basic-fetch` for lightweight HTTP fetches
+- `crawlee` for resilient HTML crawling
+- `stagehand` when a browser agent is available
 
-- **Provenance tracking** - Traceable source URLs
-- **Depth analysis** - Content length validation
-- **Specificity checks** - Title presence and stub detection
-- **Evidence integrity** - Structured data validation
+## Example
 
-## API
-
-```typescript
+```ts
 import { WebExtractor } from "@dantecode/web-extractor";
 
-const extractor = new WebExtractor();
-const result = await extractor.fetch("https://example.com");
+const extractor = new WebExtractor({ projectRoot: process.cwd() });
+const result = await extractor.fetch("https://example.com", {
+  instructions: "Extract the main headline and summary",
+});
+
+console.log(result.metadata.provider);
+console.log(result.markdown);
 ```
 
-## Status
+## Behavior
 
-This package is under active development. APIs may change and features may be unstable.</content>
-<parameter name="filePath">C:\Projects\DanteCode\packages\web-extractor\README.md
+- `basic-fetch` is the default for simple HTTP requests.
+- `stagehand` is preferred for browser rendering when a browser agent is available.
+- `crawlee` is the deterministic fallback when browser rendering is requested but Stagehand is unavailable.
+- Verification warnings are attached when browser-only behavior cannot be honored or when PDSE checks detect low-confidence output.

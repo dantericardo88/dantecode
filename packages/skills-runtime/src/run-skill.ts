@@ -3,6 +3,9 @@ import { makeRunId } from "./skill-run-result.js";
 import type { DanteSkill } from "./dante-skill.js";
 import type { SkillRunContext } from "./skill-run-context.js";
 import type { SkillRunResult } from "./skill-run-result.js";
+import type { EventEngine } from "@dantecode/core";
+import { buildRuntimeEvent } from "@dantecode/runtime-spine";
+import { randomUUID } from "node:crypto";
 
 export interface SkillVerification {
   outcome: "pass" | "fail" | "partial";
@@ -29,6 +32,38 @@ export interface RunSkillOptions {
   /** Injectable executor for scripts (returns commands run, optionally with file receipts for Wave 1 closure) */
   scriptRunner?: (scriptPath: string, context: SkillRunContext) => Promise<ScriptResult | string[]>;
   verification?: SkillVerification;
+  /** Optional event engine for emitting skill load and execution events */
+  eventEngine?: EventEngine;
+  /** Optional task ID for event correlation (generates UUID if not provided) */
+  taskId?: string;
+}
+
+async function emitSkillExecutedEvent(
+  eventEngine: EventEngine | undefined,
+  taskId: string,
+  skill: DanteSkill,
+  result: SkillRunResult,
+  startedAt: string,
+): Promise<void> {
+  if (!eventEngine) return;
+
+  const completedAt = result.completedAt;
+  const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  const success = result.state === "verified" || result.state === "applied";
+
+  await eventEngine.emit(
+    buildRuntimeEvent({
+      kind: "run.skill.executed",
+      taskId,
+      payload: {
+        skillId: result.runId,
+        skillName: skill.name,
+        durationMs,
+        success,
+        error: result.failureReason,
+      },
+    }),
+  );
 }
 
 async function finalizeSkillRun(
@@ -69,9 +104,27 @@ async function finalizeSkillRun(
  * only when explicit verification evidence passes.
  */
 export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
-  const { skill, context } = opts;
+  const { skill, context, eventEngine, taskId } = opts;
   const runId = makeRunId();
   const startedAt = new Date().toISOString();
+  const correlationTaskId = taskId ?? randomUUID();
+
+  // Emit skill.loaded event
+  if (eventEngine) {
+    await eventEngine.emit(
+      buildRuntimeEvent({
+        kind: "run.skill.loaded",
+        taskId: correlationTaskId,
+        payload: {
+          skillId: runId,
+          skillName: skill.name,
+          source: skill.sourceType,
+          license: skill.license,
+          trustTier: skill.metadata?.trustTier ?? "unknown",
+        },
+      }),
+    );
+  }
 
   const hasScripts = Boolean(skill.scripts);
   const hasConcreteExecution = hasScripts && Boolean(opts.scriptRunner) && !context.dryRun;
@@ -91,13 +144,15 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
         ? "Dry-run mode: instructions proposed only."
         : "No concrete execution evidence was captured for this skill run.",
       plainLanguageSummary: context.dryRun
-        ? `Proposed skill "${skill.name}" â€” review instructions before applying.`
-        : `Proposed skill "${skill.name}" â€” instructions are ready for operator review.`,
+        ? `Proposed skill "${skill.name}" - review instructions before applying.`
+        : `Proposed skill "${skill.name}" - instructions are ready for operator review.`,
       startedAt,
       completedAt,
     };
 
-    return finalizeSkillRun(context, proposedResult, undefined);
+    const finalResult = await finalizeSkillRun(context, proposedResult, undefined);
+    await emitSkillExecutedEvent(eventEngine, correlationTaskId, skill, finalResult, startedAt);
+    return finalResult;
   }
 
   try {
@@ -143,8 +198,10 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
       verificationOutcome = "skipped";
     }
 
-    // Only mark as applied if we have successful file operations or verification passes
+    // Executed commands are concrete evidence of application, even when the
+    // runner does not emit file receipts.
     const hasAppliedState =
+      scriptResult.commands.length > 0 ||
       successfulFiles.length > 0 ||
       verification?.outcome === "pass" ||
       verification?.outcome === "partial";
@@ -154,7 +211,7 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
       verificationOutcome = "skipped";
     }
 
-    return finalizeSkillRun(
+    const finalResult = await finalizeSkillRun(
       context,
       {
         runId,
@@ -171,23 +228,26 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
             ? `Skill "${skill.name}" failed during execution.`
             : finalState === "verified"
               ? (verification?.summary ??
-                `Verified skill "${skill.name}" — ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`)
+                `Verified skill "${skill.name}" - ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`)
               : finalState === "partial"
-                ? `Partially applied skill "${skill.name}" — verification is incomplete.`
+                ? `Partially applied skill "${skill.name}" - verification is incomplete.`
                 : finalState === "applied"
-                  ? `Applied skill "${skill.name}" — ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`
-                  : `Proposed skill "${skill.name}" — instructions are ready for review.`,
+                  ? `Applied skill "${skill.name}" - ${scriptResult.commands.length} command(s) executed, ${successfulFiles.length} files touched.`
+                  : `Proposed skill "${skill.name}" - instructions are ready for review.`,
         failureReason,
         startedAt,
         completedAt,
       },
       scriptResult.fileReceipts,
     );
+
+    await emitSkillExecutedEvent(eventEngine, correlationTaskId, skill, finalResult, startedAt);
+    return finalResult;
   } catch (err) {
     const completedAt = new Date().toISOString();
     const message = err instanceof Error ? err.message : String(err);
 
-    return finalizeSkillRun(
+    const failedResult = await finalizeSkillRun(
       context,
       {
         runId,
@@ -199,11 +259,14 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillRunResult> {
         commandsRun: [],
         verificationOutcome: "fail",
         plainLanguageSummary: `Skill "${skill.name}" failed during execution.`,
-        failureReason: `SKILL-007: script execution error â€” ${message}`,
+        failureReason: `SKILL-007: script execution error - ${message}`,
         startedAt,
         completedAt,
       },
       undefined,
     );
+
+    await emitSkillExecutedEvent(eventEngine, correlationTaskId, skill, failedResult, startedAt);
+    return failedResult;
   }
 }

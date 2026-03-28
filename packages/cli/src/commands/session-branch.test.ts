@@ -125,7 +125,7 @@ function makeSession(projectRoot: string, overrides: Partial<Session> = {}): Ses
 function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {}): ReplState {
   return {
     session: makeSession(projectRoot, sessionOverrides),
-    state: {} as DanteCodeState,
+    state: { progressiveDisclosure: { unlocked: true } } as DanteCodeState,
     projectRoot,
     verbose: false,
     enableGit: false,
@@ -156,12 +156,19 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    taskMode: null,
     macroRecording: false,
     macroRecordingName: null,
     macroRecordingSteps: [],
     reasoningOverrideSession: false,
     theme: "default",
   };
+}
+
+function makeLockedState(projectRoot: string, sessionOverrides: Partial<Session> = {}): ReplState {
+  const state = makeState(projectRoot, sessionOverrides);
+  state.state.progressiveDisclosure = { unlocked: false };
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +191,13 @@ describe("/branch command", () => {
     const state = makeState(tempDir);
     await routeSlashCommand("/branch my-branch", state);
     expect(state.session.name).toBe("my-branch");
+  });
+
+  it("/branch stays locked until progressive disclosure is unlocked", async () => {
+    const state = makeLockedState(tempDir);
+    const result = await routeSlashCommand("/branch my-branch", state);
+    expect(result).toContain("/branch is unlocked after 3 successful sessions.");
+    expect(state.session.name).toBe("parent-session");
   });
 
   it("branch preserves last 5 messages from parent", async () => {
@@ -315,6 +329,13 @@ describe("/name command", () => {
     const result = await routeSlashCommand("/name my-session", state);
     expect(state.session.name).toBe("my-session");
     expect(result).toContain("my-session");
+  });
+
+  it("/name stays locked until progressive disclosure is unlocked", async () => {
+    const state = makeLockedState(tempDir);
+    const result = await routeSlashCommand("/name my-session", state);
+    expect(result).toContain("/name is unlocked after 3 successful sessions.");
+    expect(state.session.name).toBe("parent-session");
   });
 
   it("/name with no argument shows current session name", async () => {

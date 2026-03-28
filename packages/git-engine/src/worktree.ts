@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { execFileSync } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { WorktreeSpec } from "@dantecode/config-types";
 
@@ -67,6 +68,41 @@ function getRepoRoot(cwd: string): string {
   return git(["rev-parse", "--show-toplevel"], cwd);
 }
 
+/**
+ * Ensure the internal DanteCode worktree folder does not dirty the main repo.
+ * We use `.git/info/exclude` so callers do not need to commit ignore rules.
+ */
+function ensureInternalWorktreePathIgnored(repoRoot: string): void {
+  const excludePath = path.resolve(
+    repoRoot,
+    git(["rev-parse", "--git-path", "info/exclude"], repoRoot),
+  );
+  const pattern = ".dantecode/worktrees/";
+  let current = "";
+
+  try {
+    current = readFileSync(excludePath, "utf-8");
+  } catch (error: unknown) {
+    const err = error as { code?: string };
+    if (err.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  if (
+    current
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .includes(pattern)
+  ) {
+    return;
+  }
+
+  mkdirSync(path.dirname(excludePath), { recursive: true });
+  const prefix = current.endsWith("\n") || current.length === 0 ? "" : "\n";
+  appendFileSync(excludePath, `${prefix}${pattern}\n`, "utf-8");
+}
+
 // ----------------------------------------------------------------------------
 // Public API
 // ----------------------------------------------------------------------------
@@ -81,6 +117,7 @@ function getRepoRoot(cwd: string): string {
  */
 export function createWorktree(spec: WorktreeSpec): WorktreeCreateResult {
   const repoRoot = getRepoRoot(spec.directory);
+  ensureInternalWorktreePathIgnored(repoRoot);
 
   // Resolve the worktree directory to an absolute path relative to repo root
   const worktreeDir = path.resolve(repoRoot, ".dantecode", "worktrees", spec.sessionId);

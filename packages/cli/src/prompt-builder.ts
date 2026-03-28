@@ -21,7 +21,16 @@ import {
 import type { ReasoningTier } from "@dantecode/core";
 import { createMemoryOrchestrator, type MemoryOrchestrator } from "@dantecode/memory-engine";
 import { getGlobalLogger, type AuditLogger } from "@dantecode/debug-trail";
-import { YELLOW, RED, DIM, RESET, PLANNING_INSTRUCTION } from "./agent-loop-constants.js";
+import {
+  YELLOW,
+  RED,
+  DIM,
+  RESET,
+  PLANNING_INSTRUCTION,
+  OBSERVE_ONLY_MODE_INSTRUCTION,
+  DIAGNOSE_ONLY_INSTRUCTION,
+  TASK_BOUNDARY_INSTRUCTION,
+} from "./agent-loop-constants.js";
 import { compactMessages } from "./verification-pipeline.js";
 
 // ---- Types ----
@@ -175,6 +184,32 @@ export async function buildPreLoopContext(
   // Per-session Prometheus-compatible metrics collector.
   // Records per-round latency for observability dashboards.
   const metricsCollector = new MetricsCollector();
+
+  // Detect keywords in task description, set metadata.taskMode or config flag.
+  // Inject new boundary instruction when mode active. Loop stops after.
+  if (!config.taskMode && durablePrompt) {
+    const lower = durablePrompt.toLowerCase();
+    if (lower.includes("run and observe only") || lower.includes("observe only")) {
+      if (config.replState) config.replState.taskMode = "observe-only";
+      config.taskMode = "observe-only";
+    } else if (lower.includes("run and observe")) {
+      if (config.replState) config.replState.taskMode = "run-and-observe";
+      config.taskMode = "run-and-observe";
+    } else if (lower.includes("diagnose only") || lower.includes("diagnose-only")) {
+      if (config.replState) config.replState.taskMode = "diagnose-only";
+      config.taskMode = "diagnose-only";
+    }
+  }
+
+  if (config.taskMode) {
+    const instr =
+      config.taskMode === "observe-only"
+        ? OBSERVE_ONLY_MODE_INSTRUCTION
+        : config.taskMode === "diagnose-only"
+          ? DIAGNOSE_ONLY_INSTRUCTION
+          : TASK_BOUNDARY_INSTRUCTION;
+    messages.push({ role: "system" as const, content: instr });
+  }
 
   return {
     historicalFailures,

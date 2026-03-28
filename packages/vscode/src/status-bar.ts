@@ -22,6 +22,13 @@ export interface StatusBarState {
   activeTasks: number;
   /** Whether the status bar is in an error state. */
   hasError: boolean;
+  /** Index readiness for semantic search (Wave 3 Task 3.2). */
+  indexReadiness?: {
+    status: "indexing" | "ready" | "error";
+    progress: number; // 0-100
+  };
+  /** Context pressure percentage (0-100) (Wave 3 Task 3.3). */
+  contextPressure?: number;
 }
 
 /** Info payload for the updateStatusBarInfo() convenience method. */
@@ -30,6 +37,11 @@ export interface StatusBarInfo {
   contextPercent?: number;
   activeTasks?: number;
   hasError?: boolean;
+  indexReadiness?: {
+    status: "indexing" | "ready" | "error";
+    progress: number;
+  };
+  contextPressure?: number;
 }
 
 const GATE_ICONS: Record<GateStatus, string> = {
@@ -70,6 +82,8 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     contextPercent: 0,
     activeTasks: 0,
     hasError: false,
+    indexReadiness: undefined,
+    contextPressure: undefined,
   };
 
   item.command = "dantecode.openChat";
@@ -137,20 +151,46 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
   if (info.hasError !== undefined) {
     state.hasError = info.hasError;
   }
+  if (info.indexReadiness !== undefined) {
+    state.indexReadiness = info.indexReadiness;
+  }
+  if (info.contextPressure !== undefined) {
+    state.contextPressure = info.contextPressure;
+  }
   renderStatusBar(state);
 }
 
 /**
  * Build the status bar display text. Exported for testing.
  *
- * Format: "DanteCode | grok-3 | 23% ctx | 2 tasks"
+ * Format: "DanteCode | grok-3 | idx: ✓ | ctx: 72% | 2 tasks"
  *   - model segment is always shown
+ *   - index readiness shown when available
+ *   - context pressure shown when available
  *   - context segment shown when > 0%
  *   - tasks segment shown when > 0
  */
 export function formatStatusBarText(state: StatusBarState): string {
   const shortModel = formatModelName(state.currentModel);
   const parts: string[] = ["DanteCode", shortModel];
+
+  // Index readiness badge (Wave 3 Task 3.2)
+  if (state.indexReadiness) {
+    const { status, progress } = state.indexReadiness;
+    if (status === "ready") {
+      parts.push("idx: ✓");
+    } else if (status === "error") {
+      parts.push("idx: ✗");
+    } else {
+      // indexing
+      parts.push(`idx: ${progress}%`);
+    }
+  }
+
+  // Context pressure badge (Wave 3 Task 3.3)
+  if (state.contextPressure !== undefined) {
+    parts.push(`ctx: ${state.contextPressure}%`);
+  }
 
   if (state.contextPercent > 0) {
     parts.push(`${state.contextPercent}% ctx`);
@@ -167,17 +207,32 @@ export function formatStatusBarText(state: StatusBarState): string {
  * Determine the status bar color based on current state.
  * Exported for testing.
  *
- *  - "red"    → error state or PDSE gate failed
- *  - "yellow" → context usage >75% or gate pending
+ *  - "red"    → error state, PDSE gate failed, or context pressure >80%
+ *  - "yellow" → context usage >75%, gate pending, or context pressure 50-80%
  *  - "green"  → healthy (everything normal)
  */
 export function getStatusBarColor(state: StatusBarState): "green" | "yellow" | "red" {
   if (state.hasError || state.gateStatus === "failed") {
     return "red";
   }
-  if (state.contextPercent > 75 || state.gateStatus === "pending") {
+
+  // Context pressure takes priority over contextPercent (Wave 3 Task 3.3)
+  if (state.contextPressure !== undefined && state.contextPressure >= 80) {
+    return "red";
+  }
+
+  if (state.indexReadiness?.status === "error") {
+    return "red";
+  }
+
+  if (
+    state.contextPercent > 75 ||
+    state.gateStatus === "pending" ||
+    (state.contextPressure !== undefined && state.contextPressure >= 50)
+  ) {
     return "yellow";
   }
+
   return "green";
 }
 
@@ -191,7 +246,8 @@ function renderStatusBar(state: StatusBarState): void {
   const tierLabel = state.modelTier === "capable" ? " [capable]" : "";
 
   item.text = `${gateIcon} ${formatStatusBarText(state)}${tierLabel}${sandboxLabel}${costLabel}`;
-  item.tooltip = [
+
+  const tooltipLines = [
     `Model: ${state.currentModel}`,
     `Tier: ${state.modelTier}`,
     `Context: ${state.contextPercent}%`,
@@ -199,9 +255,31 @@ function renderStatusBar(state: StatusBarState): void {
     GATE_TOOLTIPS[gateStatus],
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
-    "",
-    "Click to open DanteCode sidebar",
-  ].join("\n");
+  ];
+
+  // Add index readiness to tooltip (Wave 3 Task 3.2)
+  if (state.indexReadiness) {
+    const { status, progress } = state.indexReadiness;
+    if (status === "ready") {
+      tooltipLines.push("Index: Ready");
+    } else if (status === "error") {
+      tooltipLines.push("Index: Error");
+    } else {
+      tooltipLines.push(`Index: Indexing (${progress}%)`);
+    }
+  }
+
+  // Add context pressure to tooltip (Wave 3 Task 3.3)
+  if (state.contextPressure !== undefined) {
+    const pressureStatus =
+      state.contextPressure >= 80 ? "Critical" : state.contextPressure >= 50 ? "High" : "Normal";
+    tooltipLines.push(`Context Pressure: ${state.contextPressure}% (${pressureStatus})`);
+  }
+
+  tooltipLines.push("");
+  tooltipLines.push("Click to open DanteCode sidebar");
+
+  item.tooltip = tooltipLines.join("\n");
 
   // Theme-aware colors based on health state
   item.backgroundColor = undefined;

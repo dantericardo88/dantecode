@@ -121,6 +121,32 @@ describe("generateSessionReport - without pdseResults", () => {
     expect(call.markdown).toContain("3 file operation(s)");
   });
 
+  it("lists actual written files in the report manifest when file paths are available", async () => {
+    const session: Session = {
+      ...makeSession(1),
+      messages: [
+        {
+          id: "assistant-write",
+          role: "assistant",
+          content: "done",
+          toolUse: {
+            name: "Write",
+            input: { file_path: "src/actual.ts" },
+            id: "tool-1",
+          },
+          tokensUsed: 100,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+
+    await generateSessionReport(baseCtx(session));
+
+    const call = vi.mocked(writeRunReport).mock.calls[0]![0];
+    expect(call.markdown).toContain("src/actual.ts");
+    expect(call.markdown).not.toContain("No files were changed.");
+  });
+
   it("report markdown does NOT include PDSE line when no results", async () => {
     await generateSessionReport(baseCtx(makeSession(1)));
     const call = vi.mocked(writeRunReport).mock.calls[0]![0];
@@ -170,7 +196,7 @@ describe("generateSessionReport - with pdseResults (Gap FC-2)", () => {
     ];
     await generateSessionReport({ ...baseCtx(makeSession(2)), pdseResults });
     const call = vi.mocked(writeRunReport).mock.calls[0]![0];
-    expect(call.markdown).toContain("FAILED");
+    expect(call.markdown).toContain("PARTIAL");
     expect(call.markdown).toContain("**Execution truth:** applied -> failed");
     expect(call.markdown).toContain("need attention");
   });
@@ -214,5 +240,39 @@ describe("generateSessionReport - with pdseResults (Gap FC-2)", () => {
     expect(call.markdown).toContain("**Execution truth:** applied -> failed -> restored");
     expect(call.markdown).toContain("Restored workspace to checkpoint before mutation batch.");
     expect(call.markdown).toContain("restore");
+  });
+
+  it("downgrades an otherwise verified session when claimed files were not actually written", async () => {
+    const session: Session = {
+      ...makeSession(1),
+      messages: [
+        {
+          id: "assistant-claim",
+          role: "assistant",
+          content: "I updated src/claimed.ts and finished the fix.",
+          timestamp: new Date().toISOString(),
+        },
+        {
+          id: "assistant-write",
+          role: "assistant",
+          content: "done",
+          toolUse: {
+            name: "Write",
+            input: { file_path: "src/actual.ts" },
+            id: "tool-1",
+          },
+          tokensUsed: 100,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    };
+    const pdseResults = [{ file: "src/actual.ts", pdseScore: 95, passed: true }];
+
+    await generateSessionReport({ ...baseCtx(session), pdseResults });
+
+    const call = vi.mocked(writeRunReport).mock.calls[0]![0];
+    expect(call.markdown).toContain("PARTIAL");
+    expect(call.markdown).toContain("Mutation scope drift");
+    expect(call.markdown).toContain("src/claimed.ts");
   });
 });

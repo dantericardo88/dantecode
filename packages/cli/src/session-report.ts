@@ -6,12 +6,16 @@
 
 import {
   RunReportAccumulator,
+  assessMutationScope,
   estimateRunCost,
   serializeRunReportToMarkdown,
+  summarizeMutationScope,
   type RunReportExecutionStage,
   writeRunReport,
 } from "@dantecode/core";
 import type { Session } from "@dantecode/config-types";
+import { isAbsolute, relative } from "node:path";
+import { extractClaimedFiles } from "./verification-pipeline.js";
 
 // Tool names that indicate "meaningful work" (file mutations)
 const MUTATION_TOOLS = new Set(["Write", "Edit", "GitCommit", "NotebookEdit"]);
@@ -39,6 +43,79 @@ interface SessionReportContext {
    * plain REPL sessions (not just /magic or /party runs).
    */
   pdseResults?: PdseResult[];
+}
+
+const FILE_MUTATION_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
+
+function normalizeReportPath(filePath: string, projectRoot: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  if (isAbsolute(filePath)) {
+    const rel = relative(projectRoot, filePath).replace(/\\/g, "/");
+    return rel.startsWith("..") ? normalized : rel;
+  }
+  return normalized.replace(/^\.\//, "");
+}
+
+function collectActualWrittenFiles(session: Session, projectRoot: string): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
+
+  for (const message of session.messages) {
+    if (message.role !== "assistant" || !message.toolUse) {
+      continue;
+    }
+    if (!FILE_MUTATION_TOOLS.has(message.toolUse.name)) {
+      continue;
+    }
+    const input = message.toolUse.input as Record<string, unknown> | undefined;
+    const rawPath =
+      (typeof input?.["file_path"] === "string" ? input["file_path"] : undefined) ??
+      (typeof input?.["notebook_path"] === "string" ? input["notebook_path"] : undefined);
+    if (!rawPath) {
+      continue;
+    }
+    const normalized = normalizeReportPath(rawPath, projectRoot);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      files.push(normalized);
+    }
+  }
+
+  return files;
+}
+
+function extractMessageText(message: Session["messages"][number]): string {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  return message.content
+    .map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
+    .join("\n");
+}
+
+function collectClaimedFiles(session: Session, projectRoot: string): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
+
+  for (const message of session.messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const filePath of extractClaimedFiles(extractMessageText(message))) {
+      const normalized = normalizeReportPath(filePath, projectRoot);
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        files.push(normalized);
+      }
+    }
+  }
+
+  return files;
+}
+
+function combineAttention(...parts: Array<string | undefined>): string | undefined {
+  const filtered = parts.filter((part): part is string => Boolean(part?.trim()));
+  return filtered.length > 0 ? filtered.join(" ") : undefined;
 }
 
 function buildExecutionStages(ctx: SessionReportContext): RunReportExecutionStage[] {
@@ -94,6 +171,13 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
     }
 
     const mutationCount = countMutationToolCalls(ctx.session);
+    const actualFiles = collectActualWrittenFiles(ctx.session, ctx.projectRoot);
+    const claimedFiles = collectClaimedFiles(ctx.session, ctx.projectRoot);
+    const mutationScope = assessMutationScope({
+      actualFiles,
+      claimedFiles,
+    });
+    const mutationScopeLine = summarizeMutationScope(mutationScope);
     const totalTokens = ctx.session.messages.reduce((sum, m) => sum + (m.tokensUsed ?? 0), 0);
     const inputTokens = Math.round(totalTokens * 0.66);
     const outputTokens = Math.round(totalTokens * 0.34);
@@ -109,6 +193,10 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
     acc.beginEntry("REPL Session", "interactive");
     acc.recordTokenUsage(inputTokens, outputTokens);
     acc.recordExecutionStages(buildExecutionStages(ctx));
+    if (actualFiles.length > 0) {
+      acc.recordFilesModified(actualFiles.map((path) => ({ path, added: 0, removed: 0 })));
+      acc.addToManifest(actualFiles.map((path) => ({ action: "modified" as const, path })));
+    }
 
     if (ctx.mode) {
       acc.recordMode(ctx.mode);
@@ -144,16 +232,30 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
       const verificationLine = allPassed
         ? `PDSE ${avgScore}/100 - all ${ctx.pdseResults.length} file(s) verified`
         : `PDSE ${avgScore}/100 - ${ctx.pdseResults.filter((result) => !result.passed).length} file(s) need attention`;
+      const scopeLine = mutationScopeLine
+        ? `Mutation scope drift: ${mutationScopeLine}`
+        : undefined;
       const restoreLine = ctx.restoreSummary ? ` ${ctx.restoreSummary}` : "";
+      const driftSuffix = scopeLine ? " Mutation scope drift detected." : "";
 
       acc.completeEntry({
-        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. ${verificationLine}${restoreLine}`,
+        status: allPassed && !scopeLine ? "complete" : "partial",
+        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. ${verificationLine}${restoreLine}${driftSuffix}`,
         failureReason: allPassed ? undefined : verificationLine,
+        actionNeeded: combineAttention(allPassed ? undefined : verificationLine, scopeLine),
       });
     } else {
+      const scopeLine = mutationScopeLine
+        ? `Mutation scope drift: ${mutationScopeLine}`
+        : undefined;
+      const driftSuffix = scopeLine ? " Mutation scope drift detected." : "";
       acc.completeEntry({
-        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. Changes were applied without verification.`,
-        actionNeeded: "Verify the applied changes before treating the run as complete.",
+        status: "partial",
+        summary: `Interactive session - ${mutationCount} file operation(s), ${ctx.session.messages.length} messages, ${Math.round(ctx.sessionDurationMs / 1000)}s. Changes were applied without verification.${driftSuffix}`,
+        actionNeeded: combineAttention(
+          "Verify the applied changes before treating the run as complete.",
+          scopeLine,
+        ),
       });
     }
 
@@ -167,7 +269,7 @@ export async function generateSessionReport(ctx: SessionReportContext): Promise<
       timestamp: report.completedAt,
     });
 
-    return writeResult.success ? writeResult.path : null;
+    return writeResult.success ? (writeResult.path ?? null) : null;
   } catch {
     // Non-fatal - never break session exit.
     return null;

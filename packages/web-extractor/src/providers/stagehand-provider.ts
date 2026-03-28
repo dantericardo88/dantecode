@@ -27,10 +27,12 @@ export class StagehandProvider implements FetchProvider {
       url,
       markdown: html,
       metadata: {
+        provider: this.name,
         finalUrl: url,
         status: 200,
         renderMode: "browser",
         cacheHit: false,
+        preActionsApplied: Array.isArray(options.preActions) && options.preActions.length > 0,
         extractedAt: new Date().toISOString(),
       },
     };

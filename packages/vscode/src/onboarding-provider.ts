@@ -463,6 +463,17 @@ export class OnboardingProvider {
   <div class="logo">DanteCode</div>
   <p class="subtitle">Model-agnostic AI coding agent with DanteForge quality gates</p>
 
+  <h2>Agent Modes</h2>
+  <p class="info-note">DanteCode supports multiple modes to control what the agent can do:</p>
+  <ul class="info-note" style="margin-left: 20px; margin-top: 8px; margin-bottom: 16px; line-height: 1.6;">
+    <li><strong>Plan</strong> (read-only) - Analysis and planning without making changes</li>
+    <li><strong>Review</strong> (read-only) - Code review and recommendations only</li>
+    <li><strong>Apply</strong> (default) - Full implementation with safety checks</li>
+    <li><strong>Autoforge</strong> - Automated workflows with DanteForge verification</li>
+    <li><strong>YOLO</strong> - Maximum autonomy with minimal confirmation</li>
+  </ul>
+  <p class="info-note">You can change modes anytime by clicking the mode badge in the chat header or via settings.</p>
+
   <h2>API Keys</h2>
   <p class="info-note">Keys are stored securely in your OS keychain via VS Code SecretStorage. Only add keys for providers you want to use.</p>
   ${providerRows}

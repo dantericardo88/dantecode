@@ -13,3 +13,14 @@ export { emitSkillReceipt, persistSkillReceipt } from "./skill-receipt.js";
 export { buildSkillReport } from "./skill-report.js";
 export type { LedgerLink } from "./skill-ledger-link.js";
 export { linkToEvidenceChain } from "./skill-ledger-link.js";
+export type {
+  SkillChain,
+  SkillStep,
+  SkillOutputRef,
+  ChainResult,
+  ChainStepResult,
+  ExecuteChainOptions,
+  SkillChainGating,
+  SkillFailureStrategy,
+} from "./skill-chain.js";
+export { executeChain, resolveInput, resolveOutputRef, handleGateFailure } from "./skill-chain.js";

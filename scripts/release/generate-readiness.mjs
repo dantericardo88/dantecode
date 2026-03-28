@@ -28,7 +28,9 @@ const envGates = readEnvGates(process.env);
 const externalEvidence = readExternalGateEvidence(repoRoot, { currentCommitSha: commitSha });
 const persistedEvidence = readPersistedGateEvidence(repoRoot, { currentCommitSha: commitSha });
 const releaseDoctorEvidence = readReleaseDoctorEvidence(repoRoot, { currentCommitSha: commitSha });
-const quickstartProofEvidence = readQuickstartProofEvidence(repoRoot, { currentCommitSha: commitSha });
+const quickstartProofEvidence = readQuickstartProofEvidence(repoRoot, {
+  currentCommitSha: commitSha,
+});
 const gates = mergeGateSources(envGates, externalEvidence.gates, persistedEvidence.gates);
 const artifact = buildReadinessArtifact({
   commitSha,
@@ -36,9 +38,10 @@ const artifact = buildReadinessArtifact({
   releaseDoctorReceipt: releaseDoctorEvidence.receipt,
   quickstartProofReceipt: quickstartProofEvidence.receipt,
   generatedAt: new Date().toISOString(),
-  unknownMessage: persistedEvidence.sourcePath || externalEvidence.sourcePaths.length > 0
-    ? "Some gates are still unknown for the current commit. Run the remaining external checks or CI jobs to resolve them."
-    : "No gate evidence exists for the current commit. Run `npm run release:check` locally or rerun CI with GATE_* env vars set.",
+  unknownMessage:
+    persistedEvidence.sourcePath || externalEvidence.sourcePaths.length > 0
+      ? "Some gates are still unknown for the current commit. Run the remaining external checks or CI jobs to resolve them."
+      : "No gate evidence exists for the current commit. Run `npm run release:check` locally or rerun CI with GATE_* env vars set.",
 });
 const outputPaths = writeReadinessArtifact(repoRoot, artifact);
 
@@ -61,8 +64,7 @@ console.log(
       ...externalEvidence.sourcePaths,
     ]
       .filter(Boolean)
-      .join(", ") ||
-    "env-only / none"
+      .join(", ") || "env-only / none"
   }\n`,
 );
 
@@ -82,7 +84,10 @@ if (artifact.blockers.length > 0) {
   }
 }
 
-if (Array.isArray(artifact.openRequirements?.publicReady) && artifact.openRequirements.publicReady.length > 0) {
+if (
+  Array.isArray(artifact.openRequirements?.publicReady) &&
+  artifact.openRequirements.publicReady.length > 0
+) {
   console.log("\nOpen requirements (publicReady):");
   for (const requirement of artifact.openRequirements.publicReady) {
     console.log(`  - ${requirement}`);

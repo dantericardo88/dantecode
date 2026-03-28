@@ -178,5 +178,22 @@ export const PLAN_MODE_INSTRUCTION =
   "Rules:\n" +
   "- You may use Read, Glob, Grep, WebSearch, and WebFetch to explore the codebase\n" +
   "- You may NOT use Write, Edit, Bash, GitCommit, or any tool that modifies files\n" +
+  "- Strictly enforce task boundaries: no adjacent exploration/fixes unless explicitly asked\n" +
   "- After generating your plan, summarize it clearly for user approval\n" +
   "- Wait for the user to approve before proceeding with any implementation";
+
+export const TASK_BOUNDARY_INSTRUCTION =
+  "STRICT TASK BOUNDARY INSTRUCTION: Instruct model to stop after completion, propose next steps only for out of scope, refuse edits/builds/fallbacks/exploration. " +
+  "Integrate with existing PLAN_MODE_INSTRUCTION. Ensure no stubs.\n\n" +
+  "Stay strictly within the exact requested task. Prohibited: file edits, builds, fallback providers, adjacent exploration. " +
+  "After completing task, STOP and report ONLY results. No further actions.";
+
+export const OBSERVE_ONLY_MODE_INSTRUCTION =
+  "STRICT OBSERVE_ONLY_MODE INSTRUCTION: Instruct model to stop after completion, propose next steps only for out of scope, refuse edits/builds/fallbacks/exploration. " +
+  "Integrate with existing PLAN_MODE_INSTRUCTION. Ensure no stubs.\n\n" +
+  "Observe and report findings without any modifications. Use only read tools. After completion stop and report only.";
+
+export const DIAGNOSE_ONLY_INSTRUCTION =
+  "STRICT DIAGNOSE_ONLY INSTRUCTION: Instruct model to stop after completion, propose next steps only for out of scope, refuse edits/builds/fallbacks/exploration. " +
+  "Integrate with existing PLAN_MODE_INSTRUCTION. Ensure no stubs.\n\n" +
+  "Diagnose problems but do not fix or edit. Use reads only. After completion, stop and report observations with evidence.";

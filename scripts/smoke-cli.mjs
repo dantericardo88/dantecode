@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuildArtifacts, getCatalogPackageById } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
@@ -26,9 +27,7 @@ function runNode(args, cwd) {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
-if (!existsSync(cliEntry)) {
-  throw new Error(`Built CLI entry not found at ${cliEntry}. Run "npm run build" first.`);
-}
+ensureBuildArtifacts(repoRoot, [getCatalogPackageById(repoRoot, "cli")]);
 
 const tempProject = mkdtempSync(join(tmpdir(), "dantecode-cli-smoke-"));
 

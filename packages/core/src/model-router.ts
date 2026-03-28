@@ -56,11 +56,9 @@ export interface GenerateOptions {
   maxTokens?: number;
   /** System prompt prepended to the conversation. */
   system?: string;
-  /** Optional task type key used to look up per-task model overrides. */
   taskType?: string;
-  /** Abort signal for cancellation support. */
+  taskMode?: string;
   abortSignal?: AbortSignal;
-  /** Thinking budget for providers that support extended reasoning. */
   thinkingBudget?: number;
 }
 
@@ -191,7 +189,6 @@ export class ModelRouterImpl {
    */
   async generate(messages: CoreMessage[], options: GenerateOptions = {}): Promise<string> {
     const modelConfig = this.resolveModelConfig(options.taskType);
-    const fallbacks = this.routerConfig.fallback;
 
     // Try the primary model first
     const primaryResult = await this.tryGenerate(modelConfig, messages, options);
@@ -199,7 +196,11 @@ export class ModelRouterImpl {
       this.resetFallbackState();
       return primaryResult.text;
     }
+    if (this.isObserveOnly(options)) {
+      throw primaryResult.error;
+    }
 
+    const fallbacks = this.routerConfig.fallback;
     // Cascade through fallbacks
     for (const fallbackConfig of fallbacks) {
       this.logEntry(fallbackConfig, "fallback", 0);
@@ -233,7 +234,6 @@ export class ModelRouterImpl {
     options: GenerateOptions = {},
   ): Promise<StreamTextResult<Record<string, never>, never>> {
     const modelConfig = this.resolveModelConfig(options.taskType);
-    const fallbacks = this.routerConfig.fallback;
 
     // Try the primary model first
     const primaryResult = await this.tryStream(modelConfig, messages, options);
@@ -241,7 +241,11 @@ export class ModelRouterImpl {
       this.resetFallbackState();
       return primaryResult.stream;
     }
+    if (this.isObserveOnly(options)) {
+      throw primaryResult.error;
+    }
 
+    const fallbacks = this.routerConfig.fallback;
     // Cascade through fallbacks
     for (const fallbackConfig of fallbacks) {
       this.logEntry(fallbackConfig, "fallback", 0);
@@ -285,15 +289,17 @@ export class ModelRouterImpl {
       );
     }
 
-    const fallbacks = this.routerConfig.fallback;
-
     // Try the primary model
     const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
       this.resetFallbackState();
       return primaryResult.stream;
     }
+    if (this.isObserveOnly(options)) {
+      throw primaryResult.error;
+    }
 
+    const fallbacks = this.routerConfig.fallback;
     // Cascade through fallback models that support tool calls
     for (const fallbackConfig of fallbacks) {
       if (!fallbackConfig.supportsToolCalls) continue;
@@ -327,6 +333,11 @@ export class ModelRouterImpl {
       }
     }
     return this.routerConfig.default;
+  }
+
+  private isObserveOnly(options: GenerateOptions): boolean {
+    const mode = options.taskMode ?? options.taskType;
+    return mode === "observe-only" || mode === "diagnose-only";
   }
 
   private buildProviderOptions(

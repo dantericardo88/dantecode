@@ -27,6 +27,12 @@ import type { MergeCandidatePatch } from "./merge-confidence.js";
 import { FleetBudget } from "./fleet-budget.js";
 import type { FleetBudgetReport } from "./fleet-budget.js";
 import { TaskRedistributor } from "./task-redistributor.js";
+import {
+  createWorktree,
+  removeWorktree,
+  mergeWorktree,
+} from "@dantecode/git-engine";
+import type { WorktreeCreateResult, WorktreeMergeResult } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -124,6 +130,14 @@ export type OrchestratorEvents = {
   "budget:agent-limit": [{ agentId: string; report: FleetBudgetReport }];
   /** Emitted when TaskRedistributor finds a redistribution candidate for an idle lane. */
   redistribution: [{ fromLaneId: string; toLaneId: string; subObjective: string }];
+  /** Emitted when a worktree is created for a lane. */
+  "worktree:created": [{ laneId: string; worktreePath: string; worktreeBranch: string }];
+  /** Emitted when a worktree is successfully merged back to the target branch. */
+  "worktree:merged": [
+    { laneId: string; worktreeBranch: string; targetBranch: string; commitSha: string },
+  ];
+  /** Emitted when a worktree is cleaned up (removed). */
+  "worktree:cleaned": [{ laneId: string; worktreePath: string; reason: "success" | "failure" }];
   error: [{ message: string; context?: string }];
 };
 
@@ -303,10 +317,13 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   /**
    * Assign a lane to the best available agent.
    * Must be called while status is "running".
+   *
+   * Creates a unique worktree for the lane if one is not already provided in the request.
+   * Worktree branch pattern: council/<sessionId>/<laneId>
    */
   async assignLane(request: LaneAssignmentRequest) {
     this.assertStatus("running");
-    if (!this.router) throw new Error("Router not initialized");
+    if (!this.router || !this.runState) throw new Error("Router not initialized");
 
     // Enforce maxNestingDepth: prevent runaway recursive sub-agent hierarchies.
     const maxDepth = this._config.maxNestingDepth ?? Infinity;
@@ -318,12 +335,59 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       );
     }
 
-    const result = await this.router.assignLane(request);
+    // Create a unique worktree for this lane if not provided.
+    // The worktree path must be determined before calling router.assignLane
+    // because the router creates the AgentSessionState which requires worktreePath.
+    let worktreeInfo: WorktreeCreateResult | null = null;
+    let finalWorktreePath = request.worktreePath;
+    let worktreeBranch: string | undefined = undefined;
+
+    if (!request.worktreePath || request.worktreePath === this.runState.repoRoot) {
+      // Generate a temporary laneId for worktree creation.
+      // The actual laneId will be assigned by the router.
+      const tempLaneId = `lane-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      try {
+        worktreeInfo = await this.createWorktreeForLane(
+          tempLaneId,
+          this.runState.runId,
+          request.baseBranch ?? this.options.baseBranch,
+        );
+        finalWorktreePath = worktreeInfo.directory;
+        worktreeBranch = worktreeInfo.branch;
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to create worktree for lane: ${msg}`);
+      }
+    }
+
+    // Update the request with the final worktree path
+    const modifiedRequest = { ...request, worktreePath: finalWorktreePath };
+
+    const result = await this.router.assignLane(modifiedRequest);
+
     if (result.accepted) {
-      this.observer?.register(result.laneId, result.agentKind, request.worktreePath);
+      // Update the session with worktree metadata
+      const session = this.runState.agents.find((s) => s.laneId === result.laneId);
+      if (session && worktreeBranch) {
+        session.worktreeBranch = worktreeBranch;
+      }
+
+      this.observer?.register(result.laneId, result.agentKind, finalWorktreePath);
       this.emit("lane:assigned", { laneId: result.laneId, agentKind: result.agentKind });
       await this.persistRunState();
+    } else if (worktreeInfo) {
+      // Assignment failed — clean up the created worktree
+      try {
+        await this.cleanupFailedWorktree(
+          worktreeInfo.branch, // Use branch as temp identifier
+          worktreeInfo.directory,
+          false, // Don't preserve on assignment failure
+        );
+      } catch {
+        // Best effort cleanup — don't fail the assignment call
+      }
     }
+
     return result;
   }
 
@@ -611,6 +675,111 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     return this._budget.report();
   }
 
+  /**
+   * Create a worktree for a lane with branch pattern: council/<sessionId>/<laneId>
+   * Emits worktree:created event on success.
+   *
+   * @param laneId - Lane identifier
+   * @param sessionId - Session identifier (typically runId)
+   * @param baseBranch - Base branch to branch from (default: "main")
+   * @returns Worktree creation result with path and branch name
+   */
+  async createWorktreeForLane(
+    laneId: string,
+    sessionId: string,
+    baseBranch: string = "main",
+  ): Promise<WorktreeCreateResult> {
+    if (!this.runState) throw new Error("No active run state");
+
+    const worktreeBranch = `council/${sessionId}/${laneId}`;
+    const result = createWorktree({
+      directory: this.runState.repoRoot,
+      sessionId: laneId, // Used as worktree directory name
+      branch: worktreeBranch,
+      baseBranch,
+    });
+
+    this.emit("worktree:created", {
+      laneId,
+      worktreePath: result.directory,
+      worktreeBranch: result.branch,
+    });
+
+    return result;
+  }
+
+  /**
+   * Merge a lane's worktree back into the target branch and clean up.
+   * Only called for successful lanes that pass PDSE verification.
+   * Emits worktree:merged and worktree:cleaned events.
+   *
+   * @param laneId - Lane identifier
+   * @param worktreePath - Absolute path to the worktree
+   * @param worktreeBranch - Branch name in the worktree
+   * @param targetBranch - Target branch to merge into (default: "main")
+   * @returns Merge result with commit SHA
+   */
+  async mergeAndCleanupWorktree(
+    laneId: string,
+    worktreePath: string,
+    worktreeBranch: string,
+    targetBranch: string = "main",
+  ): Promise<WorktreeMergeResult> {
+    if (!this.runState) throw new Error("No active run state");
+
+    const mergeResult = mergeWorktree(worktreePath, targetBranch, this.runState.repoRoot);
+
+    this.emit("worktree:merged", {
+      laneId,
+      worktreeBranch,
+      targetBranch,
+      commitSha: mergeResult.mergeCommitHash,
+    });
+
+    this.emit("worktree:cleaned", {
+      laneId,
+      worktreePath,
+      reason: "success",
+    });
+
+    return mergeResult;
+  }
+
+  /**
+   * Clean up a failed lane's worktree without merging.
+   * Preserves the worktree for manual inspection on failure.
+   * Emits worktree:cleaned event.
+   *
+   * @param laneId - Lane identifier
+   * @param worktreePath - Absolute path to the worktree
+   * @param preserve - If true, log but don't remove (for manual review). Default: true
+   */
+  async cleanupFailedWorktree(
+    laneId: string,
+    worktreePath: string,
+    preserve: boolean = true,
+  ): Promise<void> {
+    if (preserve) {
+      // Log for operator but don't remove — allows manual investigation
+      this.emitError(
+        `Lane ${laneId} failed — worktree preserved at ${worktreePath} for manual review`,
+        "worktree-cleanup",
+      );
+    } else {
+      try {
+        removeWorktree(worktreePath);
+        this.emit("worktree:cleaned", {
+          laneId,
+          worktreePath,
+          reason: "failure",
+        });
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.emitError(`Failed to remove worktree ${worktreePath}: ${msg}`, "worktree-cleanup");
+      }
+    }
+  }
+
   // --------------------------------------------------------------------------
   // Private
   // --------------------------------------------------------------------------
@@ -843,6 +1012,18 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             // Verify before persisting — ensures pdseScore is set on cap-failed lanes
             // so the merge gate can correctly exclude them (undefined scores pass the gate).
             await this.verifyLaneOutput(session.laneId).catch(() => {});
+
+            // Cleanup capped lane's worktree (preserve for manual review)
+            if (session.worktreeBranch && session.worktreePath) {
+              await this.cleanupFailedWorktree(
+                session.laneId,
+                session.worktreePath,
+                true, // Preserve on budget cap
+              ).catch(() => {
+                /* best effort */
+              });
+            }
+
             await this.persistRunState();
             continue;
           }
@@ -875,8 +1056,46 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
           // PDSE verification (auto, fail-closed — never crashes the poll loop).
           // Awaited so pdseScore / verificationPassed are persisted immediately after.
-          await this.verifyLaneOutput(session.laneId).catch(() => {});
+          const verifyResult = await this.verifyLaneOutput(session.laneId).catch(() => ({
+            passed: false,
+            score: 0,
+            findings: ["Verification crashed"],
+          }));
           await this.persistRunState();
+
+          // Worktree merge/cleanup: only merge if verification passed and worktree was created.
+          // Failed lanes preserve worktree for manual review.
+          if (
+            session.worktreeBranch &&
+            session.worktreePath &&
+            verifyResult.passed &&
+            this.runState
+          ) {
+            try {
+              await this.mergeAndCleanupWorktree(
+                session.laneId,
+                session.worktreePath,
+                session.worktreeBranch,
+                this.options.baseBranch,
+              );
+            } catch (error: unknown) {
+              const msg = error instanceof Error ? error.message : String(error);
+              this.emitError(
+                `Failed to merge worktree for lane ${session.laneId}: ${msg}`,
+                "worktree-merge",
+              );
+              // Don't fail the lane — merge failure is an operator problem, not a lane problem
+            }
+          } else if (session.worktreeBranch && session.worktreePath) {
+            // Verification failed — preserve worktree for manual investigation
+            await this.cleanupFailedWorktree(
+              session.laneId,
+              session.worktreePath,
+              true, // Preserve on verification failure
+            ).catch(() => {
+              /* best effort */
+            });
+          }
 
           // ── TaskRedistributor: spawn a new lane using the completing agent ──
           // When a lane finishes, check if any still-running lanes have work
@@ -1027,6 +1246,18 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
             session.status = status.status === "aborted" ? "aborted" : "failed";
             if (status.progressSummary) session.errorMessage = status.progressSummary;
             this._unpauseWaiters(session.laneId);
+
+            // Cleanup failed lane's worktree (preserve for manual review)
+            if (session.worktreeBranch && session.worktreePath) {
+              await this.cleanupFailedWorktree(
+                session.laneId,
+                session.worktreePath,
+                true, // Preserve on failure
+              ).catch(() => {
+                /* best effort */
+              });
+            }
+
             await this.persistRunState();
           }
         } else if (status.status === "capped" || status.status === "stalled") {

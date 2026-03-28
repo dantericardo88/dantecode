@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuildArtifacts, getCatalogPackageById } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
@@ -67,10 +68,7 @@ function test(name, fn) {
 
 // ─── Pre-flight ───────────────────────────────────────────────────────────────
 
-if (!existsSync(cliEntry)) {
-  console.error(`Built CLI entry not found at ${cliEntry}. Run "npm run build" first.`);
-  process.exit(1);
-}
+ensureBuildArtifacts(repoRoot, [getCatalogPackageById(repoRoot, "cli")]);
 
 console.log("External project smoke tests\n");
 

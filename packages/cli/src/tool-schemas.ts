@@ -6,6 +6,11 @@
 // ============================================================================
 
 import { z } from "zod";
+import {
+  getModeToolExclusions,
+  normalizeApprovalMode,
+  type CanonicalApprovalMode,
+} from "@dantecode/core";
 
 /**
  * A tool schema compatible with the AI SDK's streamText({ tools }) parameter.
@@ -18,11 +23,18 @@ export interface ToolSchema {
 }
 
 /**
- * Returns AI SDK-compatible tool schemas for all available tools.
- * These are Zod-schema versions of the JSON Schema definitions in tools.ts.
- * When mcpTools are provided, they are merged with native tools.
+ * Returns AI SDK-compatible tool schemas for all available tools, filtered by
+ * the current approval mode. In `plan` and `review` modes, mutation tools
+ * (Write, Edit, Bash, etc.) are excluded BEFORE the model sees them — the model
+ * cannot call tools it never received.
+ *
+ * When mcpTools are provided, they are merged with native tools (and also
+ * subject to mode-based filtering).
  */
-export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<string, ToolSchema> {
+export function getAISDKTools(
+  mcpTools?: Record<string, ToolSchema>,
+  mode?: CanonicalApprovalMode | string,
+): Record<string, ToolSchema> {
   const nativeTools: Record<string, ToolSchema> = {
     Read: {
       description: "Read a file from disk. Returns content with line numbers.",
@@ -358,8 +370,23 @@ export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<str
   };
 
   // Merge MCP tools when available
+  let allTools: Record<string, ToolSchema> = nativeTools;
   if (mcpTools && Object.keys(mcpTools).length > 0) {
-    return { ...nativeTools, ...mcpTools };
+    allTools = { ...nativeTools, ...mcpTools };
   }
-  return nativeTools;
+
+  // Filter out excluded tools based on mode
+  if (mode) {
+    const canonical = normalizeApprovalMode(mode);
+    if (canonical) {
+      const exclusions = getModeToolExclusions(canonical);
+      if (exclusions.length > 0) {
+        return Object.fromEntries(
+          Object.entries(allTools).filter(([name]) => !exclusions.includes(name)),
+        );
+      }
+    }
+  }
+
+  return allTools;
 }

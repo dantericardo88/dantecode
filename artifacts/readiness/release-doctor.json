@@ -1,18 +1,22 @@
 {
   "source": "release-doctor",
-  "commitSha": "1a12b55b1313afc3b13a76f762a631cfd35165e3",
-  "generatedAt": "2026-03-26T17:52:41.470Z",
+  "commitSha": "6b9b62cd1bc4755a8cf66ca5700599e576e801ad",
+  "gitCommit": "6b9b62cd1bc4755a8cf66ca5700599e576e801ad",
+  "timestamp": "2026-03-28T15:55:42.583Z",
+  "generatedAt": "2026-03-28T15:55:42.583Z",
   "summary": {
-    "readyCount": 11,
-    "actionCount": 4,
-    "blockerCount": 2,
+    "readyCount": 10,
+    "actionCount": 5,
+    "blockerCount": 3,
     "blockers": [
+      "GitHub CI for 6b9b62cd1bc4 concluded failure.",
       "No provider credentials detected for the live model-router smoke test.",
       "No npm publish auth token detected locally or in GitHub Actions secrets."
     ],
     "actions": [
-      "Working tree has 81 uncommitted path(s).",
-      "Readiness: private-ready (commit 1a12b55b1313).",
+      "Working tree has 169 uncommitted path(s).",
+      "Built core runtime artifact is missing.",
+      "Readiness: private-ready (commit 6b9b62cd1bc4).",
       "README quickstart proof is present but still has unresolved follow-up actions.",
       "VSCE_PAT is not set locally or in GitHub Actions secrets."
     ]
@@ -63,7 +67,7 @@
     {
       "section": "Repo",
       "status": "ACTION",
-      "label": "Working tree has 81 uncommitted path(s).",
+      "label": "Working tree has 169 uncommitted path(s).",
       "detail": "This is fine during development, but review or commit the release set before pushing.",
       "action": "Run `git status --short` and commit the release-ready changes you want to publish."
     },
@@ -76,10 +80,10 @@
     },
     {
       "section": "External Validation",
-      "status": "READY",
-      "label": "GitHub CI for 1a12b55b1313 concluded success.",
+      "status": "BLOCKER",
+      "label": "GitHub CI for 6b9b62cd1bc4 concluded failure.",
       "detail": "Public release proof should include a successful CI run for the same commit being evaluated.",
-      "action": "CI proof is recorded for this commit."
+      "action": "Push the current commit, wait for ci.yml to finish green, then rerun the release doctor."
     },
     {
       "section": "Artifacts",
@@ -90,8 +94,8 @@
     },
     {
       "section": "Artifacts",
-      "status": "READY",
-      "label": "Built core runtime artifact exists.",
+      "status": "ACTION",
+      "label": "Built core runtime artifact is missing.",
       "detail": "The live provider smoke check expects the built core runtime.",
       "action": "Run `npm run build` before `npm run smoke:provider -- --require-provider`."
     },
@@ -104,10 +108,17 @@
     },
     {
       "section": "Artifacts",
+      "status": "READY",
+      "label": "All readiness artifacts are fresh (same commit)",
+      "detail": "Current commit: 6b9b62c",
+      "action": null
+    },
+    {
+      "section": "Artifacts",
       "status": "ACTION",
-      "label": "Readiness: private-ready (commit 1a12b55b1313).",
-      "detail": "Repo proof is private-ready. Public-ready still requires: Gate \"liveProvider\" must pass. Current status: unknown.; Release doctor blocker: No provider credentials detected for the live model-router smoke test.; Release doctor blocker: No npm publish auth token detected locally or in GitHub Actions secrets.",
-      "action": "Close the remaining public-ready requirements, then rerun `npm run release:generate`."
+      "label": "Readiness: private-ready (commit 6b9b62cd1bc4).",
+      "detail": "Repo proof is private-ready. Public-ready still requires: Gate \"liveProvider\" must pass. Current status: unknown.; Release doctor blocker: GitHub CI for 6b9b62cd1bc4 concluded failure.; Release doctor blocker: No provider credentials detected for the live model-router smoke test.",
+      "action": "Close the remaining public-ready requirements, then rerun `npm run release:sync`."
     },
     {
       "section": "Artifacts",

@@ -378,7 +378,12 @@ vi.mock("@dantecode/core", () => {
     // globalApprovalGateway — required because tool-executor.ts calls peekDecision
     globalApprovalGateway: {
       peekDecision: vi.fn(() => "auto_approve"),
-      check: vi.fn(() => ({ decision: "auto_approve", warnings: [], matchedRules: [], enforcedRules: [] })),
+      check: vi.fn(() => ({
+        decision: "auto_approve",
+        warnings: [],
+        matchedRules: [],
+        enforcedRules: [],
+      })),
       configure: vi.fn(),
       reset: vi.fn(),
       approveToolCall: vi.fn(),
@@ -386,8 +391,12 @@ vi.mock("@dantecode/core", () => {
       clearApprovedToolCalls: vi.fn(),
       setEnabled: vi.fn(),
       setRules: vi.fn(),
-      get enabled() { return false; },
-      get rules() { return []; },
+      get enabled() {
+        return false;
+      },
+      get rules() {
+        return [];
+      },
     },
     // UXEngine — required because stream-renderer.ts imports it from @dantecode/core
     UXEngine: class MockUXEngine {
@@ -605,6 +614,16 @@ vi.mock("@dantecode/core", () => {
         };
       }
     },
+    // createRunIntake — RunIntake creation before first model call
+    createRunIntake: vi.fn((userPrompt: string, sessionId: string, parentRunId?: string) => ({
+      runId: `run_${Date.now()}_${sessionId.replace(/-/g, "").slice(0, 9)}`,
+      userAsk: userPrompt,
+      classification: "change",
+      requestedScope: [],
+      allowedBoundary: { maxFiles: 10, paths: [] },
+      parentRunId,
+      timestamp: new Date().toISOString(),
+    })),
   };
 });
 
@@ -4253,5 +4272,14 @@ describe("skill discovery: system message injection", () => {
       | undefined;
     const allContent = (callArgs?.messages ?? []).map((m) => m.content).join("\n");
     expect(allContent).not.toContain("## Available Skills");
+  });
+
+  it("boundary logic uses real integration for run-only diagnose-only no-edit no-build no-fallback refuses branch without permission surfaces out-of-scope as proposed next step", async () => {
+    const { TASK_BOUNDARY_INSTRUCTION, OBSERVE_ONLY_MODE_INSTRUCTION, DIAGNOSE_ONLY_INSTRUCTION } =
+      await import("./agent-loop-constants.js");
+    expect(TASK_BOUNDARY_INSTRUCTION).toContain("out of scope");
+    expect(TASK_BOUNDARY_INSTRUCTION).toContain("propose next steps");
+    expect(OBSERVE_ONLY_MODE_INSTRUCTION).toContain("out of scope");
+    expect(DIAGNOSE_ONLY_INSTRUCTION).toContain("out of scope");
   });
 });

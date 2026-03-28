@@ -2528,7 +2528,9 @@ describe("runFearSetEngine — onEvent RuntimeEvent emission", () => {
       EXPLICIT_TRIGGER,
       {
         ...makeMockCallbacks(),
-        onEvent: (e) => { externalEvents.push(e.kind); },
+        onEvent: (e) => {
+          externalEvents.push(e.kind);
+        },
       },
       { config: { ...ENABLED_FEARSET_CONFIG } },
     );

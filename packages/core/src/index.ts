@@ -79,6 +79,15 @@ export {
 export { estimateTokens, estimateMessageTokens, getContextUtilization } from "./token-counter.js";
 export type { ContextUtilization } from "./token-counter.js";
 
+// ─── Context Condenser ───────────────────────────────────────────────────────
+
+export {
+  calculatePressure,
+  condenseContext,
+  estimateMessageTokens as estimateMessageTokensFromMessage,
+} from "./context-condenser.js";
+export type { ContextPressure, CondenseOptions, CondenseResult } from "./context-condenser.js";
+
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 
 export {
@@ -137,6 +146,15 @@ export {
   formatRepoMap,
 } from "./repo-map-ast.js";
 export type { SymbolDefinition, ImportEdge, RankedFile, RepoMapOptions } from "./repo-map-ast.js";
+
+export { RepoMapTreeSitter } from "./repo-map-tree-sitter.js";
+export type { TreeSitterParser } from "./repo-map-tree-sitter.js";
+
+export { TypeScriptParser } from "./parsers/typescript-parser.js";
+export { JavaScriptParser } from "./parsers/javascript-parser.js";
+export { PythonParser } from "./parsers/python-parser.js";
+export { GoParser } from "./parsers/go-parser.js";
+export { RustParser } from "./parsers/rust-parser.js";
 
 // ─── Architect Planner ──────────────────────────────────────────────────────
 
@@ -217,6 +235,29 @@ export type {
   EventTriggerOptions,
 } from "./event-triggers.js";
 export { slugifyTitle } from "./event-triggers.js";
+
+// ─── Event Engine ────────────────────────────────────────────────────────────
+
+export { EventEngine } from "./event-engine.js";
+export type {
+  DanteEvent,
+  RuntimeBackedDanteEvent,
+  DanteEventType,
+  LegacyDanteEventType,
+  WorkflowDefinition,
+  EventQueueEntry,
+  EventEngineOptions,
+  ProcessNextResult,
+} from "./event-engine.js";
+
+// ─── Durable Event Store ─────────────────────────────────────────────────────
+
+export { JsonlEventStore } from "./durable-event-store.js";
+export type {
+  DurableEventStore,
+  EventFilter,
+  StoredEvent,
+} from "./durable-event-store.js";
 
 // ─── Credential Vault ────────────────────────────────────────────────────────
 export { CredentialVault } from "./credential-vault.js";
@@ -314,7 +355,11 @@ export type {
 
 // ─── Event-Sourced Checkpointer ─────────────────────────────────────────────
 
-export { EventSourcedCheckpointer, hashCheckpointContent } from "./checkpointer.js";
+export {
+  EventSourcedCheckpointer,
+  hashCheckpointContent,
+  resumeFromCheckpoint,
+} from "./checkpointer.js";
 export type {
   Checkpoint,
   CheckpointMetadata,
@@ -323,7 +368,18 @@ export type {
   CheckpointEvent,
   CheckpointListOptions,
   EventSourcedCheckpointerOptions,
+  ResumeContext,
 } from "./checkpointer.js";
+
+// ─── Recovery Manager ───────────────────────────────────────────────────────
+
+export { RecoveryManager, formatStaleSessionSummary, filterSessionsByStatus, sortSessionsByTime } from "./recovery-manager.js";
+export type {
+  SessionStatus,
+  StaleSession,
+  RecoveryOptions,
+  SessionRecoveryResult,
+} from "./recovery-manager.js";
 
 // ─── Loop Detector ──────────────────────────────────────────────────────────
 
@@ -465,6 +521,11 @@ export type { RerankContext, RankedSearchResult, RerankOptions } from "./search-
 
 export { SemanticSearchCache } from "./search-cache.js";
 export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";
+
+// ─── Semantic Index ────────────────────────────────────────────────────────
+
+export { BackgroundSemanticIndex } from "./semantic-index.js";
+export type { SemanticIndex, IndexReadiness, IndexEntry, BackgroundSemanticIndexOptions } from "./semantic-index.js";
 
 // ─── Council Orchestrator ────────────────────────────────────────────────────
 
@@ -713,7 +774,17 @@ export {
 export type {
   ApprovalGatewayConfig,
   ApprovalRule,
+  PermissionAwareCheckResult,
 } from "./tool-runtime/approval-gateway.js";
+export {
+  buildApprovalGatewayProfile,
+  getModeToolExclusions,
+  isExecutionApprovalMode,
+  normalizeApprovalMode,
+} from "./approval-modes.js";
+export type { ApprovalModeInput, CanonicalApprovalMode } from "./approval-modes.js";
+export { assessMutationScope, summarizeMutationScope } from "./mutation-scope.js";
+export type { MutationScopeAssessment, MutationScopeInput } from "./mutation-scope.js";
 export { globalToolScheduler } from "./tool-runtime/tool-scheduler.js";
 
 // ─── Verification Stores ──────────────────────────────────────────────────────
@@ -769,6 +840,7 @@ export type {
   RunReportTests,
   RunReportManifestEntry,
   RunReportAccumulatorOptions,
+  RunReportSkillExecution,
 } from "./run-report.js";
 export { writeRunReport, reportFileName } from "./run-report-writer.js";
 export type { WriteRunReportOptions } from "./run-report-writer.js";
@@ -963,6 +1035,16 @@ export type {
   VerificationRegression,
 } from "./verification-trend-tracker.js";
 
+// ─── Run Intake ────────────────────────────────────────────────────────────
+
+export { createRunIntake, classifyTask, extractScopeFromPrompt, TaskClassSchema } from "./run-intake.js";
+export type { RunIntake, TaskClass, AllowedBoundary } from "./run-intake.js";
+
+// ─── Boundary Tracker ─────────────────────────────────────────────────────
+
+export { checkBoundaryDrift, formatDriftMessage, BoundaryTracker } from "./boundary-tracker.js";
+export type { BoundaryState, BoundaryDriftOptions } from "./boundary-tracker.js";
+
 // ─── Durable Execution ──────────────────────────────────────────────────────
 
 export {
@@ -971,3 +1053,89 @@ export {
   clearAllCheckpoints,
 } from "./durable-execution.js";
 export type { ExecutionCheckpoint, DurableExecutionOptions } from "./durable-execution.js";
+
+// ─── Permission Engine ──────────────────────────────────────────────────────
+
+export {
+  PermissionDecisionSchema,
+  SpecifierKindSchema,
+  parseRule,
+  parseRules,
+  inferSpecifierKind,
+  serializeRule,
+  evaluatePermission,
+  evaluatePermissionDecision,
+  ruleMatches,
+  matchGlob,
+  globToRegex,
+  loadPermissionConfig,
+  savePermissionConfig,
+  normalizeConfigFile,
+  mergePermissionRules,
+  DEFAULT_PERMISSION_CONFIG,
+} from "./permission-engine/index.js";
+export type {
+  PermissionDecision,
+  SpecifierKind,
+  PermissionRule,
+  PermissionCheck,
+  PermissionConfig,
+  PermissionEvaluationResult,
+  PermissionConfigFile,
+} from "./permission-engine/index.js";
+
+// ─── Readiness Freshness Guard ───────────────────────────────────────────────
+
+export {
+  checkReadinessFreshness,
+  warnStaleArtifacts,
+  enforceFreshnessInCI,
+  getCurrentCommit,
+  calculateDuration,
+} from "./readiness/freshness-guard.js";
+export type { ReadinessArtifact, FreshnessCheckResult } from "./readiness/freshness-guard.js";
+
+// ─── Repair Loop ──────────────────────────────────────────────────────────────
+
+export { runLintRepair, formatLintErrors } from "./repair-loop/lint-repair.js";
+export type { LintConfig, LintResult, RunLintRepairOptions } from "./repair-loop/lint-repair.js";
+
+export {
+  parseESLintOutput,
+  parsePrettierOutput,
+  parseTSCOutput,
+  parseLintOutput,
+} from "./repair-loop/lint-parsers.js";
+export type { LintError } from "./repair-loop/lint-parsers.js";
+
+export { runTestRepair, formatTestFailures } from "./repair-loop/test-repair.js";
+export type { TestConfig, TestResult, RunTestRepairOptions } from "./repair-loop/test-repair.js";
+
+export {
+  parseVitestOutput,
+  parseJestOutput,
+  parsePytestOutput,
+  parseGoTestOutput,
+  parseTestOutput,
+} from "./repair-loop/test-parsers.js";
+export type { TestFailure } from "./repair-loop/test-parsers.js";
+
+export { runFinalGate, formatFinalGateResult } from "./repair-loop/final-gate.js";
+export type { FinalGateConfig, FinalGateResult, RunFinalGateOptions } from "./repair-loop/final-gate.js";
+
+// ─── Doc-Code Drift ───────────────────────────────────────────────────────────
+
+export {
+  detectDrift,
+  extractDocSignatures,
+  extractCodeParameters,
+  symbolToCodeSymbol,
+  compareSignatures,
+} from "./drift/doc-code-drift.js";
+export type {
+  DriftCheck,
+  DocParameter,
+  DocSymbol,
+  CodeParameter,
+  CodeSymbol,
+} from "./drift/doc-code-drift.js";

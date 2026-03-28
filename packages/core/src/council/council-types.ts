@@ -203,6 +203,16 @@ export interface AgentSessionState {
    * Updated on each poll cycle when the adapter reports cost.
    */
   costUsd?: number;
+  /**
+   * Git branch name for this lane's worktree (e.g. "council/<sessionId>/<laneId>").
+   * Populated when worktree is created for the lane.
+   */
+  worktreeBranch?: string;
+  /**
+   * Git checkpoint reference for recovery (e.g. commit SHA or stash ref).
+   * Populated during checkpoint operations for durable recovery.
+   */
+  checkpointRef?: string;
 }
 
 // ----------------------------------------------------------------------------

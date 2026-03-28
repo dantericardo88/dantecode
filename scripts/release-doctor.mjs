@@ -27,6 +27,45 @@ const statusPriority = {
 };
 const commitSha = resolveCommitSha(repoRoot, process.env);
 
+/**
+ * Check freshness of readiness artifacts (inline version for scripts)
+ */
+function checkArtifactFreshness(artifactPaths, currentCommit) {
+  const artifacts = [];
+  for (const artifactPath of artifactPaths) {
+    const fullPath = resolve(repoRoot, artifactPath);
+    if (!existsSync(fullPath)) {
+      artifacts.push({
+        name: artifactPath.split(/[/\\]/).pop(),
+        stale: true,
+        staleDuration: "missing file",
+      });
+      continue;
+    }
+
+    try {
+      const content = readFileSync(fullPath, "utf-8");
+      const artifact = JSON.parse(content);
+      const artifactCommit = artifact.gitCommit || artifact.commitSha || "";
+      const stale = artifactCommit !== currentCommit;
+      artifacts.push({
+        name: artifactPath.split(/[/\\]/).pop(),
+        stale,
+        staleDuration: stale
+          ? `commit ${artifactCommit.slice(0, 7)} != ${currentCommit.slice(0, 7)}`
+          : undefined,
+      });
+    } catch {
+      artifacts.push({
+        name: artifactPath.split(/[/\\]/).pop(),
+        stale: true,
+        staleDuration: "parse error",
+      });
+    }
+  }
+  return artifacts;
+}
+
 function parseArgs(argv) {
   return {
     strict: argv.includes("--strict"),
@@ -228,7 +267,9 @@ function printSection(title, checks) {
 
 const args = parseArgs(process.argv);
 const checks = [];
-const quickstartProof = readQuickstartProofEvidence(repoRoot, { currentCommitSha: commitSha }).receipt;
+const quickstartProof = readQuickstartProofEvidence(repoRoot, {
+  currentCommitSha: commitSha,
+}).receipt;
 const externalGateEvidence = readExternalGateEvidence(repoRoot, { currentCommitSha: commitSha });
 const liveProviderReceipt = externalGateEvidence.receipts?.liveProvider ?? null;
 
@@ -346,7 +387,14 @@ if (ghVersionResult.status === 0) {
 const ciProof = readCiProof(repoSlug, commitSha);
 {
   const ciCheck = classifyCiProofCheck({ ciProof, repoSlug, commitSha });
-  addCheck(checks, "External Validation", ciCheck.status, ciCheck.label, ciCheck.detail, ciCheck.action);
+  addCheck(
+    checks,
+    "External Validation",
+    ciCheck.status,
+    ciCheck.label,
+    ciCheck.detail,
+    ciCheck.action,
+  );
 }
 
 const cliArtifactPath = join(repoRoot, "packages", "cli", "dist", "index.js");
@@ -407,7 +455,52 @@ if (readinessArtifactCheck.status !== "READY") {
     readinessArtifactCheck.detail,
     readinessArtifactCheck.action,
   );
-} else {
+}
+
+// Check freshness of readiness artifacts (same-commit guard)
+const artifactPaths = [
+  "artifacts/readiness/current-readiness.json",
+  "artifacts/readiness/quickstart-proof.json",
+  "artifacts/readiness/release-doctor.json",
+];
+try {
+  const artifacts = checkArtifactFreshness(artifactPaths, commitSha);
+  const staleArtifacts = artifacts.filter((a) => a.stale);
+
+  if (staleArtifacts.length > 0) {
+    const staleNames = staleArtifacts.map((a) => a.name).join(", ");
+    const oldestDuration = staleArtifacts[0]?.staleDuration ?? "unknown";
+
+    addCheck(
+      checks,
+      "Artifacts",
+      args.strict || process.env.CI ? "BLOCKER" : "ACTION",
+      `${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? " is" : "s are"} stale`,
+      `Stale: ${staleNames} (${oldestDuration})`,
+      "Run `npm run generate-readiness` to refresh artifacts.",
+    );
+  } else {
+    addCheck(
+      checks,
+      "Artifacts",
+      "READY",
+      "All readiness artifacts are fresh (same commit)",
+      `Current commit: ${commitSha.slice(0, 7)}`,
+      null,
+    );
+  }
+} catch (error) {
+  addCheck(
+    checks,
+    "Artifacts",
+    "ACTION",
+    "Failed to check readiness artifact freshness",
+    error instanceof Error ? error.message : String(error),
+    "Ensure git is working and artifacts exist.",
+  );
+}
+
+if (readinessArtifactCheck.status === "READY") {
   const readiness = readinessArtifact;
   const s = readiness.status;
   const sha = String(readiness.commitSha ?? "").slice(0, 12);
@@ -462,21 +555,21 @@ if (readinessArtifactCheck.status !== "READY") {
 }
 
 const quickstartSummary = quickstartProof?.summary ?? {};
-  addCheck(
-    checks,
-    "Artifacts",
-    !quickstartProof
-      ? "BLOCKER"
-      : quickstartSummary.canClaimQuickstart
-        ? "READY"
-        : Array.isArray(quickstartSummary.blockers) && quickstartSummary.blockers.length > 0
-          ? "BLOCKER"
-          : "ACTION",
-    !quickstartProof
-      ? "README quickstart proof receipt is missing for the current commit."
-      : quickstartSummary.canClaimQuickstart
-        ? "README quickstart proof is recorded for the current commit."
-        : "README quickstart proof is present but still has unresolved follow-up actions.",
+addCheck(
+  checks,
+  "Artifacts",
+  !quickstartProof
+    ? "BLOCKER"
+    : quickstartSummary.canClaimQuickstart
+      ? "READY"
+      : Array.isArray(quickstartSummary.blockers) && quickstartSummary.blockers.length > 0
+        ? "BLOCKER"
+        : "ACTION",
+  !quickstartProof
+    ? "README quickstart proof receipt is missing for the current commit."
+    : quickstartSummary.canClaimQuickstart
+      ? "README quickstart proof is recorded for the current commit."
+      : "README quickstart proof is present but still has unresolved follow-up actions.",
   !quickstartProof
     ? "Public release proof should include a same-commit quickstart receipt generated from real smoke commands."
     : quickstartSummary.canClaimQuickstart
@@ -485,7 +578,7 @@ const quickstartSummary = quickstartProof?.summary ?? {};
         ? quickstartSummary.blockers.join(" ")
         : Array.isArray(quickstartSummary.actions) && quickstartSummary.actions.length > 0
           ? quickstartSummary.actions.join(" ")
-        : "The quickstart proof receipt exists, but it does not yet support the public claim.",
+          : "The quickstart proof receipt exists, but it does not yet support the public claim.",
   !quickstartProof || !quickstartSummary.canClaimQuickstart
     ? "Run `npm run release:prove-quickstart` to generate same-commit quickstart proof."
     : "Quickstart proof is already recorded for this commit.",
@@ -515,7 +608,14 @@ const hasGitHubNpmToken = githubSecrets.includes("NPM_TOKEN");
     npmAuthState,
     hasGitHubNpmToken,
   });
-  addCheck(checks, "External Validation", npmCheck.status, npmCheck.label, npmCheck.detail, npmCheck.action);
+  addCheck(
+    checks,
+    "External Validation",
+    npmCheck.status,
+    npmCheck.label,
+    npmCheck.detail,
+    npmCheck.action,
+  );
 }
 
 const hasVsceSecret = githubSecrets.includes("VSCE_PAT");

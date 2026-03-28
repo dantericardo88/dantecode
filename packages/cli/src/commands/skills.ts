@@ -31,8 +31,9 @@ import { discoverSkillsWithScopes } from "@dantecode/skills-registry";
 import { exportAgentSkill } from "@dantecode/skills-export";
 import type { ExportableSkill } from "@dantecode/skills-export";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
-import { runSkill, makeRunContext, makeProvenance } from "@dantecode/skills-runtime";
-import type { DanteSkill } from "@dantecode/skills-runtime";
+import { runSkill, makeRunContext, makeProvenance, executeChain } from "@dantecode/skills-runtime";
+import type { DanteSkill, SkillChain as SkillChainDef } from "@dantecode/skills-runtime";
+import { mergeVisibleSkills } from "../skill-visibility.js";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -117,6 +118,9 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
     case "run":
       await skillsRun(args.slice(1), projectRoot);
       break;
+    case "chain":
+      await skillsChain(args.slice(1), projectRoot);
+      break;
     default:
       process.stdout.write(`${RED}Unknown skills sub-command: ${subCommand}${RESET}\n`);
       process.stdout.write(`\n${BOLD}Usage:${RESET}\n`);
@@ -146,6 +150,7 @@ export async function runSkillsCommand(args: string[], projectRoot: string): Pro
       process.stdout.write(
         `  dantecode skills convert <source> --to dantecode  Convert via DanteForge\n`,
       );
+      process.stdout.write(`  dantecode skills chain <name> --input "text"  Execute a skill chain\n`);
       process.stdout.write(
         `  dantecode skills wrap <name>                 Wrap an existing skill\n`,
       );
@@ -204,12 +209,13 @@ async function skillsList(projectRoot: string): Promise<void> {
   });
 
   const registered = await listSkills(projectRoot);
+  const visibleSkills = mergeVisibleSkills(discovered, registered);
 
   process.stdout.write(
     `\n${BOLD}Skill Discovery (deterministic precedence: project > user > compat):${RESET}\n`,
   );
 
-  if (discovered.length === 0) {
+  if (visibleSkills.length === 0) {
     process.stdout.write(
       `\n${DIM}No skills discovered.${RESET}\n` +
         `${DIM}Use 'dantecode skills import' to import skills from Claude, Continue.dev, or OpenCode.${RESET}\n\n`,
@@ -217,7 +223,7 @@ async function skillsList(projectRoot: string): Promise<void> {
     return;
   }
 
-  process.stdout.write(`\n${BOLD}Discovered Skills (${discovered.length}):${RESET}\n\n`);
+  process.stdout.write(`\n${BOLD}Visible Skills (${visibleSkills.length}):${RESET}\n\n`);
 
   // Table header
   const nameWidth = 24;
@@ -231,7 +237,7 @@ async function skillsList(projectRoot: string): Promise<void> {
     `  ${"─".repeat(nameWidth)} ${"─".repeat(scopeWidth)} ${"─".repeat(statusWidth)} ${"─".repeat(30)}\n`,
   );
 
-  for (const skill of discovered) {
+  for (const skill of visibleSkills) {
     const scopeColors = {
       project: GREEN,
       user: CYAN,
@@ -273,7 +279,7 @@ async function skillsList(projectRoot: string): Promise<void> {
   // Show registered skills info if different
   if (registered.length !== discovered.filter((s) => s.winningScope !== "none").length) {
     process.stdout.write(
-      `\n${BOLD}Note:${RESET} ${DIM}${registered.length} skills installed, ${discovered.length} skills total discovered${RESET}\n`,
+      `\n${BOLD}Note:${RESET} ${DIM}${registered.length} skills installed, ${discovered.length} native skills discovered${RESET}\n`,
     );
   }
 
@@ -1547,4 +1553,144 @@ async function skillsCompose(args: string[], projectRoot: string): Promise<void>
       `\n${DIM}Chain builder: add steps interactively using the /skill-chain API${RESET}\n\n`,
     );
   }
+}
+
+/**
+ * Execute a skill chain from a JSON definition file.
+ * Usage: dantecode skills chain <name> [--input "initial input"]
+ */
+async function skillsChain(args: string[], projectRoot: string): Promise<void> {
+  const chainName = args[0];
+  if (!chainName) {
+    process.stdout.write(`${RED}Usage: dantecode skills chain <name> [--input "text"]${RESET}\n`);
+    return;
+  }
+
+  // Parse optional --input flag
+  let initialInput = "";
+  const inputIndex = args.indexOf("--input");
+  if (inputIndex !== -1 && args[inputIndex + 1]) {
+    initialInput = args[inputIndex + 1]!;
+  }
+
+  // Load chain definition from .dantecode/skills/chains/<name>.json
+  const chainPath = join(projectRoot, ".dantecode", "skills", "chains", `${chainName}.json`);
+
+  let chainDef: SkillChainDef;
+  try {
+    const chainContent = await readFile(chainPath, "utf-8");
+    chainDef = JSON.parse(chainContent) as SkillChainDef;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stdout.write(`${RED}Failed to load chain "${chainName}": ${message}${RESET}\n`);
+    process.stdout.write(`${DIM}Expected path: ${chainPath}${RESET}\n`);
+    process.stdout.write(`\n${BOLD}Example chain definition (JSON):${RESET}\n`);
+    process.stdout.write(`${DIM}{\n`);
+    process.stdout.write(`  "name": "review-and-test",\n`);
+    process.stdout.write(`  "description": "Review PR then run tests",\n`);
+    process.stdout.write(`  "steps": [\n`);
+    process.stdout.write(`    {\n`);
+    process.stdout.write(`      "skillName": "review-pr",\n`);
+    process.stdout.write(`      "input": "$initial",\n`);
+    process.stdout.write(`      "onFailure": "abort"\n`);
+    process.stdout.write(`    },\n`);
+    process.stdout.write(`    {\n`);
+    process.stdout.write(`      "skillName": "run-tests",\n`);
+    process.stdout.write(`      "input": "$previous.filesTouched",\n`);
+    process.stdout.write(`      "onFailure": "prompt"\n`);
+    process.stdout.write(`    }\n`);
+    process.stdout.write(`  ],\n`);
+    process.stdout.write(`  "gating": "pdse",\n`);
+    process.stdout.write(`  "pdseThreshold": 70\n`);
+    process.stdout.write(`}${RESET}\n\n`);
+    return;
+  }
+
+  process.stdout.write(`\n${BOLD}Executing Skill Chain: ${chainDef.name}${RESET}\n`);
+  if (chainDef.description) {
+    process.stdout.write(`${DIM}${chainDef.description}${RESET}\n`);
+  }
+  process.stdout.write(`${DIM}Steps: ${chainDef.steps.length} | Gating: ${chainDef.gating}${RESET}\n\n`);
+
+  // Skill loader function
+  const skillLoader = async (name: string) => {
+    const skillDef = await getSkill(name, projectRoot);
+    if (!skillDef) {
+      return null;
+    }
+
+    const danteskill: DanteSkill = {
+      name: skillDef.frontmatter.name,
+      description: skillDef.frontmatter.description ?? "",
+      sourceType: "native",
+      sourceRef: skillDef.sourcePath ?? name,
+      license: "MIT",
+      instructions: skillDef.instructions,
+      allowedTools: skillDef.frontmatter.tools,
+      provenance: makeProvenance({
+        sourceType: "native",
+        sourceRef: skillDef.sourcePath ?? name,
+        license: "MIT",
+      }),
+    };
+
+    return danteskill;
+  };
+
+  // Base context
+  const context = makeRunContext({
+    skillName: chainDef.name,
+    mode: "apply",
+    projectRoot,
+    dryRun: false,
+  });
+
+  // Execute chain
+  const startTime = Date.now();
+  const result = await executeChain({
+    chain: chainDef,
+    initialInput,
+    context,
+    skillLoader,
+  });
+
+  const durationSec = ((Date.now() - startTime) / 1000).toFixed(2);
+
+  // Display results
+  process.stdout.write(`\n${BOLD}Chain Execution Complete${RESET}\n`);
+  process.stdout.write(
+    `${DIM}Duration: ${durationSec}s | Success: ${result.success ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`}${RESET}\n\n`,
+  );
+
+  // Display per-step results
+  process.stdout.write(`${BOLD}Step Results:${RESET}\n`);
+  for (const stepResult of result.stepResults) {
+    const statusIcon = stepResult.failed ? `${RED}✗${RESET}` : `${GREEN}✓${RESET}`;
+    const gateBadge =
+      chainDef.gating === "pdse"
+        ? stepResult.gateApproved
+          ? `${GREEN}[PASS ${stepResult.pdseScore ?? "N/A"}]${RESET}`
+          : `${RED}[FAIL ${stepResult.pdseScore ?? "N/A"}]${RESET}`
+        : "";
+
+    process.stdout.write(
+      `  ${stepResult.stepIndex + 1}. ${statusIcon} ${YELLOW}${stepResult.skillName}${RESET} ${gateBadge}\n`,
+    );
+    process.stdout.write(
+      `     ${DIM}State: ${stepResult.result.state} | Files: ${stepResult.result.filesTouched.length} | Commands: ${stepResult.result.commandsRun.length}${RESET}\n`,
+    );
+
+    if (stepResult.failed && stepResult.failureReason) {
+      process.stdout.write(`     ${RED}${stepResult.failureReason}${RESET}\n`);
+    }
+  }
+
+  if (!result.success && result.failureReason) {
+    process.stdout.write(`\n${RED}Chain failed: ${result.failureReason}${RESET}\n`);
+    if (result.failedAtStep !== undefined) {
+      process.stdout.write(`${DIM}Failed at step ${result.failedAtStep + 1}${RESET}\n`);
+    }
+  }
+
+  process.stdout.write("\n");
 }

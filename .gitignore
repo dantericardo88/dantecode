@@ -26,3 +26,4 @@ packages/temp-*/
 status.txt
 results.tsv
 vitest-error.txt
+.danteforge/oss-repos/

@@ -450,6 +450,7 @@ export function computeReadinessStatus(gates, options = {}) {
 export function buildReadinessArtifact(options) {
   const gates = createGateRecord(options.gates);
   const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const commitSha = options.commitSha ?? "unknown";
   const releaseDoctor = summarizeReleaseDoctor(options.releaseDoctorReceipt);
   const quickstartProof = summarizeQuickstartProof(options.quickstartProofReceipt);
   const { status, blockers, openRequirements } = computeReadinessStatus(gates, {
@@ -461,7 +462,9 @@ export function buildReadinessArtifact(options) {
   return {
     status,
     scope: "repo-proof",
-    commitSha: options.commitSha ?? "unknown",
+    commitSha,
+    gitCommit: commitSha, // Alias for freshness guard compatibility
+    timestamp: generatedAt, // Alias for freshness guard compatibility
     generatedAt,
     gates,
     blockers,
@@ -512,10 +515,14 @@ export function writeExternalGateReceipt(repoRoot, options) {
 
 export function writeReleaseDoctorReceipt(repoRoot, options) {
   const filePath = resolve(repoRoot, "artifacts/readiness", RELEASE_DOCTOR_RECEIPT_FILE);
+  const commitSha = options.commitSha ?? "unknown";
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
   const artifact = {
     source: options.source ?? "release-doctor",
-    commitSha: options.commitSha ?? "unknown",
-    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    commitSha,
+    gitCommit: commitSha, // Alias for freshness guard compatibility
+    timestamp: generatedAt, // Alias for freshness guard compatibility
+    generatedAt,
     summary: {
       readyCount: Number(options.summary?.readyCount ?? 0),
       actionCount: Number(options.summary?.actionCount ?? 0),
@@ -535,6 +542,8 @@ export function writeReleaseDoctorReceipt(repoRoot, options) {
 export function writeQuickstartProofReceipt(repoRoot, options) {
   const filePath = resolve(repoRoot, "artifacts/readiness", QUICKSTART_PROOF_RECEIPT_FILE);
   const mdPath = resolve(repoRoot, "artifacts/readiness", "quickstart-proof.md");
+  const commitSha = options.commitSha ?? "unknown";
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
   const status =
     Number(options.summary?.blockerCount ?? 0) > 0
       ? "fail"
@@ -543,8 +552,10 @@ export function writeQuickstartProofReceipt(repoRoot, options) {
         : "pass";
   const artifact = {
     source: options.source ?? "quickstart-proof",
-    commitSha: options.commitSha ?? "unknown",
-    generatedAt: options.generatedAt ?? new Date().toISOString(),
+    commitSha,
+    gitCommit: commitSha, // Alias for freshness guard compatibility
+    timestamp: generatedAt, // Alias for freshness guard compatibility
+    generatedAt,
     status,
     readmeQuickstart: {
       sourcePath: options.readmeQuickstart?.sourcePath ?? null,
@@ -561,7 +572,9 @@ export function writeQuickstartProofReceipt(repoRoot, options) {
   };
 
   const stepRows = artifact.steps
-    .map((step) => `| ${step.name} | ${step.status} | ${step.command ?? ""} | ${step.detail ?? ""} |`)
+    .map(
+      (step) => `| ${step.name} | ${step.status} | ${step.command ?? ""} | ${step.detail ?? ""} |`,
+    )
     .join("\n");
   const mdContent =
     `# DanteCode Quickstart Proof\n\n` +

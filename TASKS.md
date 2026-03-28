@@ -1,108 +1,99 @@
-# TASKS.md - OSS v1 Execution Checklist
+# TASKS.md - Nova Program Execution Checklist
 
-**Date:** 2026-03-27
+**Date:** `2026-03-27`  
+**Baseline commit:** `6b9b62cd1bc4`
 
 ## Legend
 
 - `[x]` complete
 - `[ ]` pending
-- `[!]` blocked on external credentials or services
+- `[!]` blocked on external systems, credentials, or real-world evidence
 
-## Phase 1 - Repo truth
+## Program Merge Foundation
 
-- [x] Fix workspace test discovery so package `test` scripts run correctly
-- [x] Repair `packages/core/src/integration.test.ts` for current `ModelConfig`
-- [x] Replace unsafe `Function` test helper types in desktop and sandbox tests
-- [x] Fix Windows GStack execution for shell built-ins like `echo`
-- [x] Make root npm gates canonical: build, typecheck, lint, test, coverage
+- [x] Complete the recombination PRD and make it the constitutional product document
+- [x] Retain release-recovery work as a parallel evidence lane instead of a separate roadmap
+- [x] Lock the program rule that CLI and VS Code parity is required for every major phase
+- [x] Lock the program rule that DanteForge remains the only truth authority
+- [x] Forbid extraction before Phase A closure and same-commit truth gates are green
 
-## Phase 2 - Product and docs alignment
+## Baseline Recovery Work Already Complete
 
-- [x] Rewrite public messaging around portable skills and model-agnostic runtime behavior
-- [x] Add canonical [VISION.md](VISION.md)
-- [x] Standardize docs on `.dantecode/STATE.yaml`
-- [x] Remove Bun-first instructions from public docs
-- [x] Mark VS Code as preview primary surface and desktop as experimental
-- [x] Remove the stale root `STATE.yaml` artifact
-- [x] Add a machine-readable `release-matrix.json` and `npm run release:matrix`
+- [x] Make `release-matrix.json` the canonical release catalog
+- [x] Convert release, smoke, publish, and score scripts to catalog-driven behavior
+- [x] Refactor readiness/scoring to require same-commit evidence
+- [x] Promote `@dantecode/web-extractor` to the supported GA path
+- [x] Implement a real `CrawleeProvider` and repair package exports/docs/tests
+- [x] Make smoke and packaging flows self-sufficient from a clean clone
+- [x] Reduce default `/help` to a curated tier-1 command surface
+- [x] Add GitLab CI and CircleCI examples and extend validation to Node 24
+- [x] Add scoring evidence manifests under `artifacts/scoring/`
+- [x] Fix internal worktree handling so generated worktrees do not dirty the main repo
+- [x] Regenerate readiness and score artifacts for the baseline commit
 
-## Phase 3 - Release path alignment
+## Wave 1 - Task-Boundary Obedience + Hard Mode System
 
-- [x] Make npm the official install path
-- [x] Align `scripts/install.sh` with npm package distribution
-- [x] Update publish workflow to validate root gates
-- [x] Ensure publish workflow can be run as a dry-run path
-- [x] Add `npm run release:doctor` for git, auth, provider, and publish readiness
+- [x] Canonicalize the user-facing mode model to `plan`, `review`, `apply`, `autoforge`, and `yolo`
+- [x] Make `plan` mode write-impossible by architecture
+- [x] Make `review` mode non-mutating by architecture
+- [ ] Tighten the approval/profile contract across CLI, policy, and VS Code surfaces
+- [ ] Add explicit boundary-drift detection between user ask, planned scope, and actual mutations
+- [x] Add run/report output that explains when boundary drift was prevented or detected
+- [ ] Add tests for zero-write guarantees, approval/profile regressions, drift detection, and CLI/VS Code parity
 
-## Phase 4 - External acceptance
+## Wave 2 - Durable Truth Substrate + Worktree Recovery
 
-- [x] Set real git identity for public history
-- [x] CI green — all 9 CI jobs passing on GitHub Actions (feat/all-nines, run 23518615698)
-- [!] Add `NPM_TOKEN`
-- [!] Add `VSCE_PAT` for optional preview VS Code extension publish
-- [ ] Run `npm run smoke:provider -- --require-provider` with real credentials
-- [x] Add a scripted fixture-based Claude-style skill import acceptance pass
+- [ ] Consolidate run lifecycle state around the durable-run path
+- [ ] Normalize event emission, checkpointing, replay, resume, and fork onto the same durable-truth model
+- [ ] Tie reports, receipts, and readiness artifacts to the same run/commit/worktree lineage
+- [ ] Add user-visible recovery state to CLI and VS Code surfaces
+- [ ] Add tests for interrupted-run resume, checkpoint restore, replay fidelity, and worktree cleanup/merge behavior
 
-## Phase 5 - Market leader features (Day 4-6)
+## Wave 3 - Skills Runtime v2 + Repo Awareness v2
 
-- [x] MCP protocol: `@dantecode/mcp` package (client, server, tool-bridge, config)
-- [x] MCP CLI integration: `/mcp` command, tool-schemas merging, agent-loop dispatch
-- [x] Background agent runner: `BackgroundAgentRunner` with queue and concurrency
-- [x] Background agents CLI: `/bg` command (enqueue, list, cancel, clear)
-- [x] Semantic code indexing: `CodeIndex` with TF-IDF and chunking
-- [x] Code search CLI: `/index` and `/search` commands
-- [x] Chat persistence: `SessionStore` file-based sessions
-- [x] VS Code sidebar SessionStore integration (replaced globalState)
-- [x] VS Code command polish: PDSE diagnostics fix, GStack STATE.yaml, Lessons empty-state, Init check
-- [x] VS Code streaming UX: diff truncation, cancellation flag, error recovery
-- [x] Integration tests: CLI + MCP (19 new tests)
-- [x] vitest.config: MCP package added to coverage gate
-- [x] Documentation: README features table, SPEC new packages, TASKS Phase 5, CHANGELOG
-- [x] Runtime catalog: model + provider metadata for UI dropdowns (7 providers, 22 models, 3 surfaces)
-- [x] First GitHub push + CI green (all 8 jobs: format, typecheck, lint, test x3, windows-smoke, anti-stub)
-- [x] Tag v1.0.0-beta.1
+- [ ] Add explicit `skill_loaded` and `skill_used` attribution with provenance and trust metadata
+- [ ] Apply policy checks equally to skills, subagents, tools, and path/command execution
+- [ ] Add report/receipt coverage for skill load/use and composition
+- [ ] Expose deterministic repo map as the immediate codebase contract
+- [ ] Expose semantic index/search as the background augmentation contract
+- [ ] Surface index readiness and context pressure in CLI and VS Code
+- [ ] Add tests for skill attribution, policy enforcement, repo map generation, semantic search quality, and context condensing
 
-## Phase 6 - Competitive gap-closing sprint (Day 7)
+## Wave 4 - Repair Loop + Contract/Hygiene Sync
 
-- [x] WS1 Memory Bridge: auto-inject DanteForge lessons into system prompt, DANTE.md project notes, /remember command
-- [x] WS2 Self-Healing Loop: structured error parser (TS/ESLint/Vitest), targeted fix prompts, error signature tracking
-- [x] WS3 Event Gateway: webhook HTTP server (GitHub/Slack/API), /listen command, issue-to-PR wiring
-- [x] WS4 Speed Completions: streaming FIM, debounce 500→200ms, multiline config, cache 50→100
-- [x] WS5 Context Guardian: getContextUtilization(), CLI context meter, /compact, VS Code context bar
-- [x] WS6 Autonomy Wire: EnqueueOptions (autoCommit/createPR), postCompletionHook, /bg --pr flag
-- [x] Integration: 68 new tests (1,303→1,371), 16/16 typecheck, DanteForge binary rebuilt
-- [x] Push to GitHub + CI green
+- [ ] Add an Aider-style post-apply lint/test repair loop
+- [ ] Enforce diff/undo discipline around apply and recovery paths
+- [ ] Fail closed when root docs or generated readiness/scoring artifacts drift from code
+- [ ] Merge the remaining release-recovery deliverables into the recombination roadmap and remove duplicate planning language
+- [ ] Add tests for repair-loop success/failure, undo safety, readiness freshness, scoring freshness, and doc-vs-code drift
+- [ ] Re-run GF-01 through GF-06 on real repos before claiming recombination success
 
-## Current local baseline
+## Parallel Evidence Lane - External Release and Score Proof
 
-- [x] `npm run typecheck` — passes clean
-- [x] `npm run lint` — all packages, zero violations
-- [x] `npm run test` — all tests pass
-- [x] `npm run build` — all 26 packages built clean
-- [x] `npm run smoke:cli` — passes without API keys (DANTECODE_NONINTERACTIVE)
-- [x] `npm run smoke:install` — passes (packs and installs all publishable packages)
-- [x] `npm run smoke:skill-import` — passes without API keys
-- [x] `npm run smoke:external` — 7/7 fixture projects pass
+- [!] Get the release candidate SHA green on GitHub Actions
+- [!] Produce same-commit `windowsSmoke`, `publishDryRun`, and `liveProvider` receipts
+- [!] Configure `NPM_TOKEN`
+- [ ] Configure `VSCE_PAT` only if preview VS Code publishing is part of the release claim
+- [!] Record stopwatch docs trials in `artifacts/scoring/docs-time-to-value.json`
+- [!] Add receipt-backed benchmark evidence for verification score dimensions
+- [!] Record real external-user sessions in `artifacts/scoring/external-users.json`
+- [!] Record real third-party skills in `artifacts/scoring/skill-ecosystem.json`
 
-## Completed verification artifacts (P2/P3 closure)
+## Phase B - DanteForge Extraction
 
-- [x] `artifacts/verification/samples/` — real DanteForge pipeline output (sample-pass.json, sample-stub-fail.json, README.md)
-- [x] `scripts/generate-verification-samples.mjs` — regenerate via `npm run generate:samples`
-- [x] `scripts/release-doctor.mjs` — Artifacts section now reads and reports `current-readiness.json`
-- [x] `artifacts/readiness/quickstart-proof.json` / `artifacts/readiness/quickstart-proof.md` — generated via `npm run release:prove-quickstart` for same-commit README quickstart proof
+- [ ] Start extraction only after all Phase A waves are complete and same-commit truth gates are green
+- [ ] Move truth-centric interfaces to the narrowed DanteForge boundary: `verify`, `seal`, `timeline`, `replay`, `policy-check`, `skill-verify`, `skill-forge`, `lesson-store`
+- [ ] Keep user-facing mode/session/search/skill/provider/report UX in DanteCode
+- [ ] Add extraction tests that prove no second verification path remains in DanteCode
 
-## Gap Closure (2026-03-27)
+## Phase C - Post-Extraction Productization
 
-- [x] Completed checkpointer.ts trust/recovery path with deduplication and apply receipt handling
-- [x] Added comprehensive tests for checkpointer apply receipts
-- [x] De-scoped web extractor stub (removed crawlee-provider.ts stub)
-- [x] Synchronized SCORING.md with current gates (typecheck, tests now pass)
-- [x] Synchronized TASKS.md baseline with current readiness
+- [ ] Finish packaging around the narrowed DanteForge interface
+- [ ] Validate product surfaces and readiness claims against the extracted boundary
+- [ ] Keep commercialization work from reintroducing duplicated truth logic
 
-## Notes
+## Release Claim Guardrails
 
-- The coverage gate is scoped to the stable runtime packages for OSS v1.
-- Preview and experimental surfaces still run in the shared test suite and should continue gaining coverage over time.
-- 26 packages currently live under `packages/`; OSS v1 ships the CLI and npm runtime packages first, keeps VS Code as preview, and leaves desktop out of ship scope.
-- P2 verification spine is implemented and locally proven. Public ship proof still depends on the generated readiness surface staying green for same-commit external gates.
-- P3 CLI golden flows are implemented and locally proven. Public GA remains partial until the provider-backed real run gate passes and the generated readiness artifact reaches `public-ready`.
+- [x] Do not claim `public-ready` until same-commit external gates and credentials are actually proven
+- [x] Do not claim 9+ across all scoring dimensions until real evidence exists for the currently zero-scored dimensions
+- [x] Do not begin extraction while any Phase A wave remains incomplete

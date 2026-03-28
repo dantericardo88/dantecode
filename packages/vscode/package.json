@@ -90,6 +90,16 @@
           "id": "dantecode.repoMap",
           "name": "Repo Map",
           "type": "tree"
+        },
+        {
+          "id": "dantecode.checkpointTree",
+          "name": "Checkpoints",
+          "type": "tree"
+        },
+        {
+          "id": "dantecode.skillsTree",
+          "name": "Skills",
+          "type": "tree"
         }
       ]
     },
@@ -188,6 +198,48 @@
         "command": "dantecode.setupApiKeys",
         "title": "DanteCode: Setup API Keys",
         "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.resumeSession",
+        "title": "DanteCode: Resume Session",
+        "category": "DanteCode",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "dantecode.forkSession",
+        "title": "DanteCode: Fork Session",
+        "category": "DanteCode",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "dantecode.deleteCheckpoint",
+        "title": "DanteCode: Delete Checkpoint",
+        "category": "DanteCode",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "dantecode.refreshCheckpoints",
+        "title": "DanteCode: Refresh Checkpoints",
+        "category": "DanteCode",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "dantecode.executeSkill",
+        "title": "DanteCode: Execute Skill",
+        "category": "DanteCode",
+        "icon": "$(play)"
+      },
+      {
+        "command": "dantecode.executeSkillChain",
+        "title": "DanteCode: Execute Skill Chain",
+        "category": "DanteCode",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "dantecode.refreshSkills",
+        "title": "DanteCode: Refresh Skills",
+        "category": "DanteCode",
+        "icon": "$(refresh)"
       }
     ],
     "keybindings": [
@@ -297,6 +349,40 @@
           "command": "dantecode.runPDSE",
           "group": "dantecode",
           "when": "editorFocus"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "dantecode.refreshCheckpoints",
+          "when": "view == dantecode.checkpointTree",
+          "group": "navigation"
+        },
+        {
+          "command": "dantecode.refreshSkills",
+          "when": "view == dantecode.skillsTree",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "dantecode.resumeSession",
+          "when": "view == dantecode.checkpointTree && viewItem == checkpoint-resumable",
+          "group": "inline"
+        },
+        {
+          "command": "dantecode.forkSession",
+          "when": "view == dantecode.checkpointTree",
+          "group": "checkpoint@1"
+        },
+        {
+          "command": "dantecode.deleteCheckpoint",
+          "when": "view == dantecode.checkpointTree",
+          "group": "checkpoint@2"
+        },
+        {
+          "command": "dantecode.executeSkill",
+          "when": "view == dantecode.skillsTree && viewItem == skill",
+          "group": "inline"
         }
       ]
     },

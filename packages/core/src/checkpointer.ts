@@ -15,6 +15,7 @@ import {
   type CheckpointWorkspaceContext as RuntimeCheckpointWorkspaceContext,
   type ApplyReceipt,
 } from "@dantecode/runtime-spine";
+import type { DurableEventStore, StoredEvent } from "./durable-event-store.js";
 
 // ----------------------------------------------------------------------------
 // Types — LangGraph-inspired
@@ -34,6 +35,12 @@ export interface Checkpoint {
   channelValues: Record<string, unknown>;
   /** Monotonic version per channel for conflict detection. */
   channelVersions: Record<string, number>;
+  /** Wave 2: Last event ID at checkpoint time (for event replay). */
+  eventId?: number;
+  /** Wave 2: Git ref if worktree is active. */
+  worktreeRef?: string;
+  /** Wave 2: Git stash hash for rollback support. */
+  gitSnapshotHash?: string;
 }
 
 /** Metadata about how the checkpoint was created. */
@@ -186,6 +193,8 @@ export class EventSourcedCheckpointer {
   private pendingWrites: PendingWrite[] = [];
   /** Replay/workspace envelope persisted with the current base state. */
   private currentRuntimeEnvelope: CheckpointRuntimeEnvelope = {};
+  /** Wave 2: Channel version tracking for versioned checkpoints. */
+  private channelVersions: Map<string, number> = new Map();
 
   constructor(
     projectRoot: string,
@@ -210,15 +219,28 @@ export class EventSourcedCheckpointer {
    * Creates a new checkpoint (base state snapshot).
    * Writes base_state.json and appends a checkpoint event to the log.
    * Returns the checkpoint ID.
+   *
+   * Wave 2: Accepts optional eventId, worktreeRef, gitSnapshotHash for versioned checkpoints.
    */
   async put(
     channelValues: Record<string, unknown>,
     metadata: CheckpointMetadata,
     channelVersions?: Record<string, number>,
     runtimeEnvelope: Omit<CheckpointRuntimeEnvelope, "replaySummary"> = {},
+    wave2Fields?: {
+      eventId?: number;
+      worktreeRef?: string;
+      gitSnapshotHash?: string;
+    },
   ): Promise<string> {
     const id = randomUUID().slice(0, 12);
     const parentId = this.currentCheckpoint?.id;
+
+    // Merge tracked channel versions with auto-bumped channel value versions
+    const mergedChannelVersions = channelVersions ?? {
+      ...this.bumpVersions(channelValues),
+      ...Object.fromEntries(this.channelVersions),
+    };
 
     const checkpoint: Checkpoint = {
       v: CHECKPOINT_FORMAT_VERSION,
@@ -226,7 +248,10 @@ export class EventSourcedCheckpointer {
       ts: new Date().toISOString(),
       step: metadata.step,
       channelValues,
-      channelVersions: channelVersions ?? this.bumpVersions(channelValues),
+      channelVersions: mergedChannelVersions,
+      eventId: wave2Fields?.eventId,
+      worktreeRef: wave2Fields?.worktreeRef,
+      gitSnapshotHash: wave2Fields?.gitSnapshotHash,
     };
 
     const fullMetadata: CheckpointMetadata = {
@@ -385,12 +410,42 @@ export class EventSourcedCheckpointer {
   }
 
   // --------------------------------------------------------------------------
+  // Wave 2: Channel Version Tracking
+  // --------------------------------------------------------------------------
+
+  /**
+   * Update a channel's version (increment by 1).
+   * Used to track changes to specific state channels (e.g., "tool-output", "model-output").
+   */
+  updateChannel(name: string): void {
+    const current = this.channelVersions.get(name) ?? 0;
+    this.channelVersions.set(name, current + 1);
+  }
+
+  /**
+   * Get the current version for a channel.
+   * Returns 0 if the channel has never been updated.
+   */
+  getChannelVersion(name: string): number {
+    return this.channelVersions.get(name) ?? 0;
+  }
+
+  /**
+   * Get all channel versions as a record.
+   * Returns a copy to prevent external mutation.
+   */
+  getAllChannelVersions(): Record<string, number> {
+    return Object.fromEntries(this.channelVersions);
+  }
+
+  // --------------------------------------------------------------------------
   // Resume — OpenHands-style load base + replay events
   // --------------------------------------------------------------------------
 
   /**
    * Resumes a session from disk.
    * Loads base_state.json, then replays all events from the event log directory.
+   * Wave 2: Restores channel versions from checkpoint.
    * Returns the number of events replayed, or 0 if no session found.
    */
   async resume(): Promise<number> {
@@ -404,6 +459,12 @@ export class EventSourcedCheckpointer {
       replaySummary: tuple.replaySummary,
       workspaceContext: tuple.workspaceContext,
     };
+
+    // Wave 2: Restore channel versions from checkpoint
+    this.channelVersions.clear();
+    for (const [channel, version] of Object.entries(tuple.checkpoint.channelVersions)) {
+      this.channelVersions.set(channel, version);
+    }
 
     return this.nextEventIndex;
   }
@@ -520,8 +581,21 @@ export class EventSourcedCheckpointer {
       const events = await this.scanEventLog();
 
       for (const event of events) {
-        if (event.kind === "write") {
-          writes.push(event.data as PendingWrite);
+        const pendingWrite = pendingWriteFromEvent(event);
+        if (!pendingWrite) {
+          continue;
+        }
+
+        const isDuplicateApplyReceipt =
+          pendingWrite.channel === "apply_receipt" &&
+          writes.some(
+            (write) =>
+              write.channel === "apply_receipt" &&
+              (write.value as ApplyReceipt).stepId === (pendingWrite.value as ApplyReceipt).stepId,
+          );
+
+        if (!isDuplicateApplyReceipt) {
+          writes.push(pendingWrite);
         }
       }
 
@@ -648,6 +722,76 @@ export class EventSourcedCheckpointer {
 }
 
 // ----------------------------------------------------------------------------
+// Wave 2: Resume Context and Helper Functions
+// ----------------------------------------------------------------------------
+
+/**
+ * Context returned when resuming from a checkpoint.
+ * Contains the checkpoint state plus events to replay.
+ */
+export interface ResumeContext {
+  /** The loaded checkpoint. */
+  checkpoint: Checkpoint;
+  /** Checkpoint metadata. */
+  metadata: CheckpointMetadata;
+  /** Pending writes from the checkpoint. */
+  pendingWrites: PendingWrite[];
+  /** Events to replay (events after checkpoint.eventId). */
+  replayEvents: AsyncIterable<StoredEvent>;
+  /** Number of events available for replay. */
+  replayEventCount: number;
+}
+
+/**
+ * Load a checkpoint and prepare for resume by fetching events after checkpoint.eventId.
+ *
+ * Wave 2 Task 2.3: Resume from checkpoint with event replay.
+ *
+ * @param projectRoot - Project root directory
+ * @param sessionId - Session ID to resume
+ * @param eventStore - Event store to fetch replay events from
+ * @param options - Optional checkpointer options (for testing)
+ * @returns ResumeContext with checkpoint + replay events, or null if not found
+ */
+export async function resumeFromCheckpoint(
+  projectRoot: string,
+  sessionId: string,
+  eventStore: DurableEventStore,
+  options?: EventSourcedCheckpointerOptions,
+): Promise<ResumeContext | null> {
+  // Load checkpoint from disk
+  const checkpointer = new EventSourcedCheckpointer(projectRoot, sessionId, options);
+  const tuple = await checkpointer.getTuple();
+
+  if (!tuple) {
+    return null;
+  }
+
+  const { checkpoint, metadata, pendingWrites } = tuple;
+
+  // If checkpoint has eventId, fetch events after that point
+  const afterId = checkpoint.eventId ?? 0;
+
+  // Get replay events as async iterable
+  const replayEvents = eventStore.search({ afterId });
+
+  // Count replay events (we need to iterate once to count)
+  const countIterator = eventStore.search({ afterId });
+  let replayEventCount = 0;
+  for await (const _event of countIterator) {
+    replayEventCount++;
+  }
+
+  return {
+    checkpoint,
+    metadata,
+    pendingWrites,
+    replayEvents,
+    replayEventCount,
+  };
+}
+
+// ----------------------------------------------------------------------------
 // Utilities
 // ----------------------------------------------------------------------------
 
@@ -679,4 +823,40 @@ function parseWorkspaceContext(value: unknown): CheckpointWorkspaceContext | und
   }
   const parsed = CheckpointWorkspaceContextSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
+}
+
+function pendingWriteFromEvent(event: CheckpointEvent): PendingWrite | null {
+  if (event.kind === "write") {
+    return event.data as PendingWrite;
+  }
+
+  if (event.kind !== "action" || !event.data || typeof event.data !== "object") {
+    return null;
+  }
+
+  const maybeReceipt = (event.data as { receipt?: unknown }).receipt;
+  if (!looksLikeApplyReceipt(maybeReceipt)) {
+    return null;
+  }
+
+  return {
+    taskId: maybeReceipt.stepId,
+    channel: "apply_receipt",
+    value: maybeReceipt,
+    timestamp: maybeReceipt.appliedAt,
+  };
+}
+
+function looksLikeApplyReceipt(value: unknown): value is ApplyReceipt {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const receipt = value as Partial<ApplyReceipt>;
+  return (
+    typeof receipt.stepId === "string" &&
+    typeof receipt.state === "string" &&
+    Array.isArray(receipt.affectedFiles) &&
+    typeof receipt.appliedAt === "string"
+  );
 }

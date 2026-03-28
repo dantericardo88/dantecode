@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   createWorktree,
+  isGitClean,
   removeWorktree,
   listWorktrees,
   mergeWorktree,
@@ -114,6 +115,22 @@ describe("worktree management", () => {
       const entries = listWorktrees(repoDir);
       const wtEntry = entries.find((e) => e.branch === "wt-list-test");
       expect(wtEntry).toBeDefined();
+    });
+
+    it("keeps the main repo clean after creating an internal worktree", () => {
+      const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: repoDir,
+        encoding: "utf-8",
+      }).trim();
+
+      createWorktree({
+        branch: "wt-clean-test",
+        baseBranch: currentBranch,
+        sessionId: "session-clean",
+        directory: repoDir,
+      });
+
+      expect(isGitClean(repoDir)).toBe(true);
     });
 
     it("throws when branch already exists", () => {

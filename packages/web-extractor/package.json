@@ -1,9 +1,7 @@
 {
   "name": "@dantecode/web-extractor",
   "version": "0.9.2",
-  "description": "⚠️ EXPERIMENTAL (Wave 6) - Production-grade, intelligent page analysis and extraction engine for DanteCode",
-  "experimental": true,
-  "outOfShipScope": true,
+  "description": "Production-grade, intelligent page analysis and extraction engine for DanteCode",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
@@ -22,6 +20,7 @@
   "dependencies": {
     "@dantecode/core": "0.9.2",
     "@dantecode/runtime-spine": "0.9.2",
+    "crawlee": "^3.14.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {

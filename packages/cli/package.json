@@ -45,6 +45,7 @@
     "@ai-sdk/openai": "^1.0.0",
     "@octokit/rest": "^20.1.2",
     "cheerio": "^1.0.0",
+    "crawlee": "^3.14.1",
     "dockerode": "^4.0.0",
     "node-fetch": "^3.3.0",
     "sql.js": "^1.11.0",

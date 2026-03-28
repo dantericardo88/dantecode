@@ -557,7 +557,10 @@ export async function runFearSetEngine(
   const capturedEvents: RuntimeEvent[] = [];
   const trackingCallbacks: FearSetCallbacks = {
     ...callbacks,
-    onEvent: (e) => { capturedEvents.push(e); callbacks.onEvent?.(e); },
+    onEvent: (e) => {
+      capturedEvents.push(e);
+      callbacks.onEvent?.(e);
+    },
   };
 
   emitEvent(trackingCallbacks, "fearset.triggered", resultId, {

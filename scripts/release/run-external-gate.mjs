@@ -44,8 +44,12 @@ const GATE_RUNNERS = {
 };
 
 function usage() {
-  console.log("Usage: node scripts/release/run-external-gate.mjs <windowsSmoke|liveProvider|publishDryRun> [--dry]");
-  console.log("  --dry  Check pre-conditions only (credentials, platform) without running the gate.");
+  console.log(
+    "Usage: node scripts/release/run-external-gate.mjs <windowsSmoke|liveProvider|publishDryRun> [--dry]",
+  );
+  console.log(
+    "  --dry  Check pre-conditions only (credentials, platform) without running the gate.",
+  );
 }
 
 const args = process.argv.slice(2);

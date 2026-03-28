@@ -29,10 +29,12 @@ export class BasicFetchProvider implements FetchProvider {
         url,
         markdown: text, // Raw text for now, will be cleaned by MarkdownCleaner
         metadata: {
+          provider: this.name,
           finalUrl: response.url,
           status: response.status,
           renderMode: "http",
           cacheHit: false,
+          preActionsApplied: false,
           extractedAt: new Date().toISOString(),
         },
       };

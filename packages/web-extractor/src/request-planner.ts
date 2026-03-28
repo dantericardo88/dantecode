@@ -2,6 +2,10 @@ import { RenderMode, WebFetchOptions } from "./types.js";
 
 export class RequestPlanner {
   plan(url: string, options: WebFetchOptions): { renderMode: RenderMode } {
+    if ((options.preActions?.length ?? 0) > 0) {
+      return { renderMode: "browser-actions" };
+    }
+
     // 1. Explicitly forced browser
     if (options.forceBrowser) {
       return { renderMode: "browser" };

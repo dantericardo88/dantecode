@@ -6,7 +6,12 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { globalToolScheduler, adaptToolResult, formatEvidenceSummary, globalApprovalGateway } from "@dantecode/core";
+import {
+  globalToolScheduler,
+  adaptToolResult,
+  formatEvidenceSummary,
+  globalApprovalGateway,
+} from "@dantecode/core";
 import type { SecurityEngine, SecretsScanner } from "@dantecode/core";
 import type { DurableRunStore } from "@dantecode/core";
 import type {
@@ -233,6 +238,23 @@ export async function executeToolBatch(
       toolResults.push(blockMsg);
       continue;
     }
+    // Check taskMode from policy or context; integrate with new policy rules for observe-only
+    const effectiveTaskMode = config.taskMode;
+    if (
+      effectiveTaskMode &&
+      (effectiveTaskMode === "observe-only" || effectiveTaskMode === "diagnose-only")
+    ) {
+      const blockedTools = ["Write", "Edit", "Bash", "GitCommit", "SubAgent"];
+      if (
+        blockedTools.includes(toolCall.name) ||
+        (toolCall.name === "Bash" &&
+          /build|turbo|npm run|fallback/.test(String(toolCall.input?.command || "")))
+      ) {
+        const proposedMsg = `TASK BOUNDARY ENFORCED (${effectiveTaskMode}): No edits, builds, fallback or exploration. Proposed next step: report observations only and stop.`;
+        toolResults.push(proposedMsg);
+        continue;
+      }
+    }
 
     // Pre-tool safety hook (Ruflo/ccswarm pattern): block dangerous Bash commands
     if (toolCall.name === "Bash") {
@@ -426,7 +448,7 @@ export async function executeToolBatch(
             if (!config.silent) {
               process.stderr.write(
                 `\n${YELLOW}[pre-mutation-snapshot] warn: snapshot for ${preMutTarget} failed` +
-                ` — /undo Tier 1 unavailable for this file (in-memory fallback active)${RESET}\n`,
+                  ` — /undo Tier 1 unavailable for this file (in-memory fallback active)${RESET}\n`,
               );
             }
           }

@@ -4,30 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runNpm, spawnNpm } from "./npm-runner.mjs";
+import { ensureBuildArtifacts, getCatalogPackagesForPurpose } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
-
-const publishablePackages = [
-  "packages/config-types",
-  "packages/runtime-spine",
-  "packages/core",
-  "packages/danteforge",
-  "packages/git-engine",
-  "packages/skill-adapter",
-  "packages/sandbox",
-  "packages/evidence-chain",
-  "packages/memory-engine",
-  "packages/debug-trail",
-  "packages/dante-gaslight",
-  "packages/dante-skillbook",
-  "packages/dante-sandbox",
-  "packages/ux-polish",
-  "packages/web-extractor",
-  "packages/web-research",
-  "packages/agent-orchestrator",
-  "packages/cli",
-];
+const publishablePackages = getCatalogPackagesForPurpose(repoRoot, "installSmoke");
 
 const packDir = mkdtempSync(join(tmpdir(), "dantecode-pack-smoke-"));
 const installRoot = mkdtempSync(join(tmpdir(), "dantecode-install-smoke-"));
@@ -62,20 +43,26 @@ function runNode(args, cwd) {
 }
 
 try {
+  ensureBuildArtifacts(repoRoot, publishablePackages);
+
   writeFileSync(
     join(installRoot, "package.json"),
     '{ "name": "dantecode-install-smoke", "version": "1.0.0" }\n',
   );
   mkdirSync(projectDir, { recursive: true });
 
-  const tarballs = publishablePackages.map((packagePath) => {
-    const packageDir = join(repoRoot, packagePath);
+  const tarballs = publishablePackages.map((packageEntry) => {
+    const packageDir = join(repoRoot, packageEntry.workspace);
     const result = spawnNpm(["pack", "--json", "--pack-destination", packDir], packageDir);
     const combinedOutput = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
     if (result.error) {
       throw new Error(
-        [`npm pack failed for ${packagePath}`, result.error.message, combinedOutput.trim()]
+        [
+          `npm pack failed for ${packageEntry.workspace}`,
+          result.error.message,
+          combinedOutput.trim(),
+        ]
           .filter(Boolean)
           .join("\n\n"),
       );
@@ -83,7 +70,9 @@ try {
 
     if (result.status !== 0) {
       throw new Error(
-        [`npm pack failed for ${packagePath}`, combinedOutput.trim()].filter(Boolean).join("\n\n"),
+        [`npm pack failed for ${packageEntry.workspace}`, combinedOutput.trim()]
+          .filter(Boolean)
+          .join("\n\n"),
       );
     }
 
@@ -91,7 +80,9 @@ try {
     const tarball = entries.at(-1)?.filename;
 
     if (!tarball) {
-      throw new Error(`Could not find tarball name in npm pack output for ${packagePath}.`);
+      throw new Error(
+        `Could not find tarball name in npm pack output for ${packageEntry.workspace}.`,
+      );
     }
 
     return join(packDir, tarball);

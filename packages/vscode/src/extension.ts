@@ -27,6 +27,8 @@ import { OnboardingProvider } from "./onboarding-provider.js";
 import { RepoMapTreeDataProvider } from "./repo-map-tree-provider.js";
 import { CheckpointManager } from "./checkpoint-manager.js";
 import { DiffReviewProvider, type PendingDiffReview } from "./diff-review-provider.js";
+import { CheckpointTreeDataProvider } from "./checkpoint-tree-provider.js";
+import { SkillsTreeDataProvider } from "./skills-tree-provider.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 
@@ -40,6 +42,9 @@ let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
 let checkpointManager: CheckpointManager | undefined;
 let diffReviewProvider: DiffReviewProvider | undefined;
+let checkpointTreeProvider: CheckpointTreeDataProvider | undefined;
+let skillsTreeProvider: SkillsTreeDataProvider | undefined;
+let semanticIndex: { start: () => Promise<void>; getReadiness: () => { status: "indexing" | "ready" | "error"; progress: number } } | undefined;
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -61,6 +66,54 @@ export function activate(context: vscode.ExtensionContext): void {
       treeDataProvider: treeProvider,
     });
     context.subscriptions.push(repoTree);
+
+    // ── Checkpoint tree ──
+    checkpointTreeProvider = new CheckpointTreeDataProvider(projectRoot);
+    const checkpointTree = vscode.window.createTreeView("dantecode.checkpointTree", {
+      treeDataProvider: checkpointTreeProvider,
+      showCollapseAll: false,
+    });
+    context.subscriptions.push(checkpointTree);
+
+    // ── Skills tree (Wave 3 Task 3.6) ──
+    skillsTreeProvider = new SkillsTreeDataProvider(projectRoot);
+    const skillsTree = vscode.window.createTreeView("dantecode.skillsTree", {
+      treeDataProvider: skillsTreeProvider,
+      showCollapseAll: false,
+    });
+    context.subscriptions.push(skillsTree);
+
+    // ── Background Semantic Index (Wave 3 Task 3.6) ──
+    // Start indexing in background (non-blocking)
+    void (async () => {
+      try {
+        const { BackgroundSemanticIndex } = await import("@dantecode/core");
+        semanticIndex = new BackgroundSemanticIndex({
+          projectRoot,
+          sessionId: "vscode-session",
+        });
+        await semanticIndex.start();
+
+        // Update status bar periodically with index readiness
+        const currentIndex = semanticIndex; // Capture in closure
+        const indexInterval = setInterval(() => {
+          if (currentIndex && statusBarState) {
+            const readiness = currentIndex.getReadiness();
+            if (readiness) {
+              updateStatusBarInfo(statusBarState, { indexReadiness: readiness });
+            }
+          }
+        }, 2000);
+
+        context.subscriptions.push({
+          dispose: () => {
+            clearInterval(indexInterval);
+          },
+        });
+      } catch (error) {
+        console.error("Failed to start semantic index:", error);
+      }
+    })();
   }
 
   // ── Sidebar providers ──
@@ -212,6 +265,9 @@ export function deactivate(): void {
   completionProvider = undefined;
   checkpointManager = undefined;
   diffReviewProvider = undefined;
+  checkpointTreeProvider = undefined;
+  skillsTreeProvider = undefined;
+  semanticIndex = undefined;
 
   if (diagnosticProvider) {
     diagnosticProvider.clearAll();
@@ -244,6 +300,13 @@ function registerCommands(context: vscode.ExtensionContext): void {
     ["dantecode.listCheckpoints", commandListCheckpoints],
     ["dantecode.rewindCheckpoint", commandRewindCheckpoint],
     ["dantecode.setupApiKeys", commandSetupApiKeys],
+    ["dantecode.resumeSession", (sessionId?: unknown) => commandResumeSession(sessionId as string | undefined)],
+    ["dantecode.forkSession", (sessionId?: unknown) => commandForkSession(sessionId as string | undefined)],
+    ["dantecode.deleteCheckpoint", (sessionId?: unknown) => commandDeleteCheckpoint(sessionId as string | undefined)],
+    ["dantecode.refreshCheckpoints", commandRefreshCheckpoints],
+    ["dantecode.executeSkill", (skillName?: unknown) => commandExecuteSkill(skillName as string | undefined)],
+    ["dantecode.executeSkillChain", (chainName?: unknown) => commandExecuteSkillChain(chainName as string | undefined)],
+    ["dantecode.refreshSkills", commandRefreshSkills],
   ];
 
   for (const [id, handler] of commands) {
@@ -795,4 +858,527 @@ function clearPendingDiff(): void {
   pendingDiffFilePath = undefined;
   pendingDiffNewContent = undefined;
   pendingDiffOldContent = undefined;
+}
+
+// ─── Checkpoint/Resume Commands ──────────────────────────────────────────────
+
+async function commandResumeSession(sessionId?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  try {
+    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } = await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+    const resumableSessions = staleSessions.filter((s) => s.status === "resumable");
+
+    // If sessionId provided, try to find it
+    let targetSession;
+    if (sessionId) {
+      targetSession = resumableSessions.find(
+        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
+      );
+      if (!targetSession) {
+        void vscode.window.showWarningMessage(`DanteCode: Session ${sessionId} is not resumable`);
+        return;
+      }
+    } else {
+      // Show quick pick if no sessionId provided
+      if (resumableSessions.length === 0) {
+        void vscode.window.showInformationMessage("DanteCode: No resumable sessions found");
+        return;
+      }
+
+      const selection = await vscode.window.showQuickPick(
+        resumableSessions.map((s) => {
+          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
+          const eventInfo = s.lastEventId !== undefined ? ` • ${s.lastEventId} events` : "";
+          return {
+            label: s.sessionId.slice(0, 12),
+            description: timestamp,
+            detail: `Step ${s.step ?? 0}${eventInfo}`,
+            sessionId: s.sessionId,
+          };
+        }),
+        { placeHolder: "Select a session to resume" },
+      );
+
+      if (!selection) {
+        return;
+      }
+
+      targetSession = resumableSessions.find((s) => s.sessionId === selection.sessionId);
+    }
+
+    if (!targetSession) {
+      void vscode.window.showWarningMessage("DanteCode: Session not found");
+      return;
+    }
+
+    // Load checkpoint and event store
+    const eventStore = new JsonlEventStore(projectRoot, targetSession.sessionId);
+    const resumeContext = await resumeFromCheckpoint(
+      projectRoot,
+      targetSession.sessionId,
+      eventStore,
+    );
+
+    if (!resumeContext) {
+      void vscode.window.showErrorMessage(
+        `DanteCode: Failed to load checkpoint for session ${targetSession.sessionId}`,
+      );
+      return;
+    }
+
+    void vscode.window.showInformationMessage(
+      `DanteCode: Resumed session ${targetSession.sessionId.slice(0, 12)} from step ${resumeContext.checkpoint.step} with ${resumeContext.replayEventCount} replay events`,
+    );
+
+    // Refresh checkpoint tree
+    await checkpointTreeProvider?.refresh();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Resume failed — ${msg}`);
+  }
+}
+
+async function commandForkSession(sessionId?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  try {
+    const { RecoveryManager, EventSourcedCheckpointer } = await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+
+    // Find session (allow any status for forking)
+    let targetSession;
+    if (sessionId) {
+      targetSession = staleSessions.find(
+        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
+      );
+      if (!targetSession) {
+        void vscode.window.showWarningMessage(`DanteCode: Session ${sessionId} not found`);
+        return;
+      }
+    } else {
+      // Show quick pick
+      if (staleSessions.length === 0) {
+        void vscode.window.showInformationMessage("DanteCode: No sessions available to fork");
+        return;
+      }
+
+      const selection = await vscode.window.showQuickPick(
+        staleSessions.map((s) => {
+          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
+          const statusIcon = s.status === "resumable" ? "✓" : s.status === "stale" ? "⚠" : "✗";
+          return {
+            label: `${statusIcon} ${s.sessionId.slice(0, 12)}`,
+            description: `${s.status} • ${timestamp}`,
+            detail: `Step ${s.step ?? 0}`,
+            sessionId: s.sessionId,
+          };
+        }),
+        { placeHolder: "Select a session to fork" },
+      );
+
+      if (!selection) {
+        return;
+      }
+
+      targetSession = staleSessions.find((s) => s.sessionId === selection.sessionId);
+    }
+
+    if (!targetSession) {
+      void vscode.window.showWarningMessage("DanteCode: Session not found");
+      return;
+    }
+
+    // Load checkpoint
+    const checkpointer = new EventSourcedCheckpointer(projectRoot, targetSession.sessionId);
+    const tuple = await checkpointer.getTuple();
+
+    if (!tuple) {
+      void vscode.window.showErrorMessage(
+        `DanteCode: Failed to load checkpoint for session ${targetSession.sessionId}`,
+      );
+      return;
+    }
+
+    const { checkpoint } = tuple;
+
+    // Create new branch from checkpoint's worktree ref (or current HEAD)
+    const baseRef = checkpoint.worktreeRef || "HEAD";
+    const timestamp = Date.now();
+    const newBranchName = `fork-${targetSession.sessionId.slice(0, 8)}-${timestamp}`;
+
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["branch", newBranchName, baseRef], {
+      cwd: projectRoot,
+      encoding: "utf8",
+    });
+
+    const switchToNew = await vscode.window.showInformationMessage(
+      `DanteCode: Forked session to branch ${newBranchName}`,
+      "Switch to Branch",
+      "Stay Here",
+    );
+
+    if (switchToNew === "Switch to Branch") {
+      execFileSync("git", ["checkout", newBranchName], {
+        cwd: projectRoot,
+        encoding: "utf8",
+      });
+      void vscode.window.showInformationMessage(`DanteCode: Switched to ${newBranchName}`);
+    }
+
+    // Refresh checkpoint tree
+    await checkpointTreeProvider?.refresh();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Fork failed — ${msg}`);
+  }
+}
+
+async function commandDeleteCheckpoint(sessionId?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot || !checkpointTreeProvider) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  try {
+    const { RecoveryManager } = await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+
+    let targetSession;
+    if (sessionId) {
+      targetSession = staleSessions.find(
+        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
+      );
+    } else {
+      // Show quick pick
+      if (staleSessions.length === 0) {
+        void vscode.window.showInformationMessage("DanteCode: No checkpoints to delete");
+        return;
+      }
+
+      const selection = await vscode.window.showQuickPick(
+        staleSessions.map((s) => {
+          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
+          return {
+            label: s.sessionId.slice(0, 12),
+            description: `${s.status} • ${timestamp}`,
+            sessionId: s.sessionId,
+          };
+        }),
+        { placeHolder: "Select a checkpoint to delete" },
+      );
+
+      if (!selection) {
+        return;
+      }
+
+      targetSession = staleSessions.find((s) => s.sessionId === selection.sessionId);
+    }
+
+    if (!targetSession) {
+      void vscode.window.showWarningMessage("DanteCode: Checkpoint not found");
+      return;
+    }
+
+    // Confirm deletion
+    const confirm = await vscode.window.showWarningMessage(
+      `Delete checkpoint ${targetSession.sessionId.slice(0, 12)}?`,
+      { modal: true },
+      "Delete",
+      "Cancel",
+    );
+
+    if (confirm !== "Delete") {
+      return;
+    }
+
+    // Delete checkpoint directory
+    const { rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints", targetSession.sessionId);
+    await rm(checkpointDir, { recursive: true, force: true });
+
+    // Delete event log
+    const eventLog = join(projectRoot, ".dantecode", "events", `${targetSession.sessionId}.jsonl`);
+    await rm(eventLog, { force: true });
+
+    void vscode.window.showInformationMessage(
+      `DanteCode: Deleted checkpoint ${targetSession.sessionId.slice(0, 12)}`,
+    );
+
+    // Refresh checkpoint tree
+    await checkpointTreeProvider.refresh();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Delete failed — ${msg}`);
+  }
+}
+
+async function commandRefreshCheckpoints(): Promise<void> {
+  if (!checkpointTreeProvider) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  await checkpointTreeProvider.refresh();
+  const count = checkpointTreeProvider.getCheckpointCount();
+  const resumableCount = checkpointTreeProvider.getResumableCount();
+  void vscode.window.showInformationMessage(
+    `DanteCode: Found ${count} checkpoint(s), ${resumableCount} resumable`,
+  );
+}
+
+// ─── Skill Commands (Wave 3 Task 3.6) ────────────────────────────────────────
+
+async function commandExecuteSkill(skillName?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  try {
+    const { listSkills, getSkill } = await import("@dantecode/skill-adapter");
+    const { runSkill, makeRunContext, makeProvenance } = await import("@dantecode/skills-runtime");
+
+    // If no skill name provided, show picker
+    if (!skillName) {
+      const skills = await listSkills(projectRoot);
+      if (skills.length === 0) {
+        void vscode.window.showInformationMessage("DanteCode: No skills found");
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        skills.map((s) => ({
+          label: s.name,
+          description: s.importSource || "",
+          detail: s.description,
+          skillName: s.name,
+        })),
+        {
+          placeHolder: "Select a skill to execute",
+          matchOnDescription: true,
+          matchOnDetail: true,
+        },
+      );
+
+      if (!selected) {
+        return;
+      }
+
+      skillName = selected.skillName;
+    }
+
+    // Execute skill
+    void vscode.window.showInformationMessage(`DanteCode: Executing skill "${skillName}"...`);
+
+    // Load skill definition
+    const skillDef = await getSkill(skillName, projectRoot);
+    if (!skillDef) {
+      void vscode.window.showErrorMessage(`DanteCode: Skill "${skillName}" not found`);
+      return;
+    }
+
+    // Convert to DanteSkill format
+    const skill = {
+      name: skillDef.frontmatter.name,
+      description: skillDef.frontmatter.description ?? "",
+      sourceType: "native" as const,
+      sourceRef: skillDef.sourcePath ?? skillName,
+      license: "MIT",
+      instructions: skillDef.instructions,
+      commandOverrides: [],
+      provenance: makeProvenance({
+        sourceType: "native",
+        sourceRef: skillDef.sourcePath ?? skillName,
+        originalName: skillDef.frontmatter.name,
+        license: "MIT",
+      }),
+    };
+
+    const context = makeRunContext({ skillName, projectRoot });
+    const result = await runSkill({ skill, context });
+
+    // Show result
+    if (result.state === "applied" || result.state === "verified") {
+      void vscode.window.showInformationMessage(
+        `DanteCode: Skill "${skillName}" completed successfully`,
+      );
+    } else {
+      void vscode.window.showWarningMessage(
+        `DanteCode: Skill "${skillName}" completed with state: ${result.state}`,
+      );
+    }
+
+    // Show output in channel
+    const outputChannel = vscode.window.createOutputChannel(`DanteCode: ${skillName}`);
+    outputChannel.appendLine(`Skill: ${skillName}`);
+    outputChannel.appendLine(`State: ${result.state}`);
+    outputChannel.appendLine(`Summary: ${result.plainLanguageSummary}`);
+    if (result.commandsRun.length > 0) {
+      outputChannel.appendLine(`\nCommands:\n${result.commandsRun.join("\n")}`);
+    }
+    if (result.filesTouched.length > 0) {
+      outputChannel.appendLine(`\nFiles:\n${result.filesTouched.join("\n")}`);
+    }
+    outputChannel.show();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(`DanteCode: Skill execution failed — ${msg}`);
+  }
+}
+
+async function commandExecuteSkillChain(chainName?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { executeChain, makeRunContext, makeProvenance } = await import("@dantecode/skills-runtime");
+    const { getSkill } = await import("@dantecode/skill-adapter");
+
+    // If no chain name provided, show picker
+    if (!chainName) {
+      const { readdir } = await import("node:fs/promises");
+      const chainsDir = join(projectRoot, ".dantecode", "skills", "chains");
+
+      let chainFiles: string[] = [];
+      try {
+        chainFiles = await readdir(chainsDir);
+        chainFiles = chainFiles.filter((f) => f.endsWith(".json"));
+      } catch {
+        void vscode.window.showInformationMessage("DanteCode: No skill chains found");
+        return;
+      }
+
+      if (chainFiles.length === 0) {
+        void vscode.window.showInformationMessage("DanteCode: No skill chains found");
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        chainFiles.map((f) => ({
+          label: f.replace(".json", ""),
+          description: "Skill chain",
+          chainName: f.replace(".json", ""),
+        })),
+        {
+          placeHolder: "Select a skill chain to execute",
+        },
+      );
+
+      if (!selected) {
+        return;
+      }
+
+      chainName = selected.chainName;
+    }
+
+    // Load chain definition
+    const chainPath = join(projectRoot, ".dantecode", "skills", "chains", `${chainName}.json`);
+    const chainContent = await readFile(chainPath, "utf-8");
+    const chain = JSON.parse(chainContent);
+
+    // Get initial input from user
+    const initialInput = await vscode.window.showInputBox({
+      prompt: `Enter initial input for chain "${chainName}"`,
+      placeHolder: "Chain input (optional)",
+    });
+
+    if (initialInput === undefined) {
+      return;
+    }
+
+    // Execute chain
+    void vscode.window.showInformationMessage(`DanteCode: Executing chain "${chainName}"...`);
+
+    // Create a context for chain execution - use a placeholder skill name
+    const context = makeRunContext({ skillName: `chain:${chainName}`, projectRoot });
+
+    const result = await executeChain({
+      chain,
+      initialInput: initialInput || "",
+      context,
+      skillLoader: async (name: string) => {
+        const skillDef = await getSkill(name, projectRoot);
+        if (!skillDef) {
+          return null;
+        }
+
+        return {
+          name: skillDef.frontmatter.name,
+          description: skillDef.frontmatter.description ?? "",
+          sourceType: "native" as const,
+          sourceRef: skillDef.sourcePath ?? name,
+          license: "MIT",
+          instructions: skillDef.instructions,
+          commandOverrides: [],
+          provenance: makeProvenance({
+            sourceType: "native",
+            sourceRef: skillDef.sourcePath ?? name,
+            originalName: skillDef.frontmatter.name,
+            license: "MIT",
+          }),
+        };
+      },
+    });
+
+    // Show result
+    if (result.success) {
+      void vscode.window.showInformationMessage(
+        `DanteCode: Chain "${chainName}" completed successfully (${result.stepResults.length} steps)`,
+      );
+    } else {
+      void vscode.window.showWarningMessage(
+        `DanteCode: Chain "${chainName}" failed at step ${result.failedAtStep !== undefined ? result.failedAtStep + 1 : "unknown"}`,
+      );
+    }
+
+    // Show output in channel
+    const outputChannel = vscode.window.createOutputChannel(`DanteCode: ${chainName}`);
+    outputChannel.appendLine(`Chain: ${chainName}`);
+    outputChannel.appendLine(`Success: ${result.success}`);
+    outputChannel.appendLine(`Steps completed: ${result.stepResults.length}`);
+    outputChannel.appendLine("");
+
+    for (const stepResult of result.stepResults) {
+      outputChannel.appendLine(`Step ${stepResult.stepIndex + 1}: ${stepResult.skillName}`);
+      outputChannel.appendLine(`  State: ${stepResult.result.state}`);
+      outputChannel.appendLine(`  Summary: ${stepResult.result.plainLanguageSummary.substring(0, 200)}${stepResult.result.plainLanguageSummary.length > 200 ? "..." : ""}`);
+    }
+
+    outputChannel.show();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(`DanteCode: Chain execution failed — ${msg}`);
+  }
+}
+
+async function commandRefreshSkills(): Promise<void> {
+  if (!skillsTreeProvider) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  skillsTreeProvider.refresh();
+  void vscode.window.showInformationMessage("DanteCode: Skills refreshed");
 }

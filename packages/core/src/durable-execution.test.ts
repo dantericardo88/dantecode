@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import {
   DurableExecutionCheckpointSchema,
   CheckpointWorkspaceContextSchema,
+  type ApplyReceipt,
 } from "@dantecode/runtime-spine";
 import {
   DurableExecutionEngine,
@@ -26,6 +27,16 @@ function makeTmpRoot(): string {
   const dir = join(tmpdir(), `durable-exec-test-${randomUUID().slice(0, 8)}`);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function makeReceipt(stepId: string): ApplyReceipt {
+  return {
+    stepId,
+    state: "success",
+    affectedFiles: [],
+    appliedAt: new Date().toISOString(),
+    verification: "passed",
+  };
 }
 
 function makeEngine(
@@ -401,10 +412,10 @@ describe("listCheckpoints()", () => {
       projectRoot,
     });
 
-    await engine1.checkpoint(0, ["step-0"]);
+    await engine1.checkpoint(0, [makeReceipt("step-0")]);
     // Small delay to ensure different savedAt timestamps
     await new Promise((r) => setTimeout(r, 5));
-    await engine2.checkpoint(1, ["step-0", "step-1"]);
+    await engine2.checkpoint(1, [makeReceipt("step-0"), makeReceipt("step-1")]);
 
     const all = await listCheckpoints(projectRoot);
     expect(all).toHaveLength(2);
@@ -491,8 +502,8 @@ describe("clearAllCheckpoints()", () => {
       projectRoot,
     });
 
-    await engine1.checkpoint(0, ["step-0"]);
-    await engine2.checkpoint(0, ["step-0"]);
+    await engine1.checkpoint(0, [makeReceipt("step-0")]);
+    await engine2.checkpoint(0, [makeReceipt("step-0")]);
 
     expect(await listCheckpoints(projectRoot)).toHaveLength(2);
 

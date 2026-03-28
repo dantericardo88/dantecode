@@ -308,7 +308,10 @@ describe("DanteGaslightIntegration FearSet surface E2E", () => {
     expect(replay.length).toBe(0);
 
     // Step 5 — retrieve lessons and run second maybeFearSet with them injected
-    const retrieved = skillbook.getRelevantSkills({ keywords: ["database", "schema", "migration"] }, 5);
+    const retrieved = skillbook.getRelevantSkills(
+      { keywords: ["database", "schema", "migration"] },
+      5,
+    );
     expect(retrieved.length).toBeGreaterThan(0);
 
     const priorLessons = retrieved.map((s) => s.title);

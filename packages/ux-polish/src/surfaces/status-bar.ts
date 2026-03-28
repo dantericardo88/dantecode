@@ -32,6 +32,15 @@ export interface StatusBarState {
   featureFlags?: string[];
   /** Session elapsed time in milliseconds. */
   elapsedMs?: number;
+  /** Current approval mode: "review" | "apply" | "autoforge" | "plan" | "yolo" */
+  approvalMode?: string;
+  /** Index readiness for semantic search. */
+  indexReadiness?: {
+    status: "indexing" | "ready" | "error";
+    progress: number; // 0-100
+  };
+  /** Context pressure percentage (0-100) */
+  contextPressure?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +80,20 @@ export class StatusBar {
     // Model label
     parts.push(`${c.info}${this.state.modelLabel}${c.reset}`);
 
+    // Approval mode with color coding
+    if (this.state.approvalMode) {
+      const mode = this.state.approvalMode;
+      const modeColor =
+        mode === "plan" || mode === "review"
+          ? c.info // cyan for read-only/safe modes
+          : mode === "apply"
+            ? c.warning // yellow for caution
+            : mode === "autoforge"
+              ? c.error // red for autonomous
+              : "\x1b[35m"; // magenta for yolo (fallback color)
+      parts.push(`${modeColor}mode:${mode}${c.reset}`);
+    }
+
     // Token count
     const tokenStr = formatNumber(this.state.tokensUsed);
     const tokenDisplay = this.state.tokenBudget
@@ -97,6 +120,31 @@ export class StatusBar {
       const pdseColor =
         this.state.pdseScore >= 85 ? c.success : this.state.pdseScore >= 70 ? c.warning : c.error;
       parts.push(`${pdseColor}PDSE: ${this.state.pdseScore}${c.reset}`);
+    }
+
+    // Index readiness
+    if (this.state.indexReadiness) {
+      const { status, progress } = this.state.indexReadiness;
+      if (status === "ready") {
+        parts.push(`${c.success}idx: ✓${c.reset}`);
+      } else if (status === "error") {
+        parts.push(`${c.error}idx: ✗${c.reset}`);
+      } else {
+        // indexing
+        const idxColor = progress >= 80 ? c.success : progress >= 40 ? c.warning : c.muted;
+        parts.push(`${idxColor}idx: ${progress}%${c.reset}`);
+      }
+    }
+
+    // Context pressure badge
+    if (this.state.contextPressure !== undefined) {
+      const pressureColor =
+        this.state.contextPressure >= 80
+          ? c.error // red for >80%
+          : this.state.contextPressure >= 50
+            ? c.warning // yellow for 50-80%
+            : c.success; // green for <50%
+      parts.push(`${pressureColor}ctx: ${this.state.contextPressure}%${c.reset}`);
     }
 
     // Elapsed time

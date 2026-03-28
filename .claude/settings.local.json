@@ -243,7 +243,8 @@
       "Bash(npx vitest run packages/dante-sandbox/src/native-sandbox.test.ts packages/dante-sandbox/src/approval-engine.test.ts packages/core/src/credential-vault.test.ts packages/debug-trail/src/export-engine.sarif.test.ts)",
       "Bash(node count-tests.mjs)",
       "Bash(npx vitest run packages/core/src/github-client.test.ts packages/cli/src/commands/review.test.ts --reporter=verbose)",
-      "Bash(npm test --workspace=packages/web-research --workspace=packages/memory-engine --workspace=packages/debug-trail --workspace=packages/evidence-chain)"
+      "Bash(npm test --workspace=packages/web-research --workspace=packages/memory-engine --workspace=packages/debug-trail --workspace=packages/evidence-chain)",
+      "WebSearch"
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [

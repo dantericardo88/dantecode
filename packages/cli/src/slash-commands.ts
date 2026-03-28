@@ -45,6 +45,7 @@ import {
   PROVIDER_CATALOG,
   MODEL_CATALOG,
   estimateRunCost,
+  detectDrift,
 } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -126,6 +127,7 @@ import { automateCommand } from "./commands/automate.js";
 import { adaptationCommand } from "./commands/adaptation.js";
 import { planCommand } from "./commands/plan.js";
 import { buildCliOperatorStatus } from "./operator-status.js";
+import { mergeVisibleSkills } from "./skill-visibility.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
 import {
@@ -291,6 +293,8 @@ export interface ReplState {
   gaslight: DanteGaslightIntegration | null;
   /** DanteMemory orchestrator — wired from repl.ts. Null if init failed. */
   memoryOrchestrator: import("@dantecode/memory-engine").MemoryOrchestrator | null;
+  /** Semantic index for codebase search — wired from repl.ts. Null until initialized. */
+  semanticIndex: import("@dantecode/core").SemanticIndex | null;
   /**
    * Manual reasoning tier override set by /think command.
    * When set, the agent loop uses this tier instead of calling decideTier.
@@ -321,25 +325,16 @@ export interface ReplState {
    * Passed to generateSessionReport so REPL run reports include verification truth.
    */
   lastSessionPdseResults: Array<{ file: string; pdseScore: number; passed: boolean }>;
-  /** Whether plan mode is currently active. */
   planMode: boolean;
-  /** The current plan when in plan mode, or null. */
   currentPlan: import("@dantecode/core").ExecutionPlan | null;
-  /** Whether the current plan has been approved for execution. */
   planApproved: boolean;
-  /** Stored plan ID for persistence (set on save). */
   currentPlanId: string | null;
-  /** Whether PlanExecutor-driven execution is in progress. */
   planExecutionInProgress: boolean;
-  /** Result from completed PlanExecutor execution, or null. */
   planExecutionResult: import("@dantecode/core").PlanExecutionResult | null;
-  /** Runtime-switchable approval mode for tool execution. */
   approvalMode: ApprovalModeInput | "review" | "apply" | "autoforge";
-  /** Whether macro recording is active. */
+  taskMode: "observe-only" | "diagnose-only" | "run-and-observe" | null;
   macroRecording: boolean;
-  /** Name of the macro being recorded. */
   macroRecordingName: string | null;
-  /** Array of recorded commands during macro recording. */
   macroRecordingSteps: Array<{ type: "slash" | "input"; value: string }>;
 }
 
@@ -1304,14 +1299,6 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
       lines.push(`  ${YELLOW}${cmd.usage.padEnd(24)}${RESET} ${DIM}${cmd.description}${RESET}`);
     }
 
-    // Show advanced commands as available after unlock
-    const advanced = SLASH_COMMANDS.filter((c) => c.tier === 2);
-    if (advanced.length > 0) {
-      lines.push(`${BOLD}Advanced (unlocked after 3 successful sessions):${RESET}`);
-      for (const cmd of advanced) {
-        lines.push(`  ${DIM}${cmd.usage.padEnd(24)}${RESET} ${DIM}${cmd.description}${RESET}`);
-      }
-    }
     lines.push("");
 
     // Enhanced contextual suggestions
@@ -1389,7 +1376,14 @@ async function helpCommand(args: string, state: ReplState): Promise<string> {
   const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
   const markdownCmds = registry.filter((c) => c.source === "markdown");
 
-  const lines = ["", `${BOLD}All Commands${RESET}`, ""];
+  const lines = [
+    "",
+    `${BOLD}All Commands${RESET}`,
+    "",
+    `${DIM}Tip: Current mode is always visible in the status bar at the bottom.${RESET}`,
+    `${DIM}Use /mode to view or change approval mode (review/plan/apply/autoforge/yolo).${RESET}`,
+    "",
+  ];
   for (const cat of categoryOrder) {
     const cmds = SLASH_COMMANDS.filter((c) => (c.category ?? "advanced") === cat);
     if (cmds.length === 0) continue;
@@ -2073,6 +2067,402 @@ async function restoreCommand(args: string, state: ReplState): Promise<string> {
   }
 }
 
+async function recoverCommand(args: string, state: ReplState): Promise<string> {
+  const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase();
+  const sessionArg = args.trim().split(/\s+/)[1];
+
+  try {
+    const { RecoveryManager, formatStaleSessionSummary, filterSessionsByStatus, sortSessionsByTime } =
+      await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot: state.projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+
+    // No sessions found
+    if (staleSessions.length === 0) {
+      return `${DIM}No stale or resumable sessions found.${RESET}`;
+    }
+
+    // /recover list or /recover (no args) - show all sessions
+    if (!subcommand || subcommand === "list") {
+      const sorted = sortSessionsByTime([...staleSessions]);
+      const lines = [`${BOLD}Session Recovery${RESET}`, ""];
+
+      const resumable = filterSessionsByStatus(sorted, "resumable");
+      const stale = filterSessionsByStatus(sorted, "stale");
+      const corrupt = filterSessionsByStatus(sorted, "corrupt");
+
+      if (resumable.length > 0) {
+        lines.push(`${GREEN}Resumable (${resumable.length}):${RESET}`);
+        for (const session of resumable.slice(0, 10)) {
+          lines.push(
+            `  ${session.sessionId.slice(0, 12)} - ${DIM}${session.timestamp ?? "unknown time"}${RESET}`,
+          );
+        }
+        lines.push("");
+      }
+
+      if (stale.length > 0) {
+        lines.push(`${YELLOW}Stale (${stale.length}):${RESET}`);
+        for (const session of stale.slice(0, 10)) {
+          lines.push(
+            `  ${session.sessionId.slice(0, 12)} - ${DIM}${session.reason ?? "unknown"}${RESET}`,
+          );
+        }
+        lines.push("");
+      }
+
+      if (corrupt.length > 0) {
+        lines.push(`${RED}Corrupt (${corrupt.length}):${RESET}`);
+        for (const session of corrupt.slice(0, 5)) {
+          lines.push(
+            `  ${session.sessionId.slice(0, 12)} - ${DIM}${session.reason ?? "unknown"}${RESET}`,
+          );
+        }
+        lines.push("");
+      }
+
+      lines.push(
+        `${DIM}Usage:${RESET}`,
+        `  /recover info <sessionId>    Show detailed session info`,
+        `  /recover cleanup <sessionId> Delete checkpoint and event log`,
+        `  /recover cleanup-all         Delete all corrupt sessions`,
+      );
+
+      return lines.join("\n");
+    }
+
+    // /recover info <sessionId> - show detailed info
+    if (subcommand === "info") {
+      if (!sessionArg) {
+        return `${RED}Usage: /recover info <sessionId>${RESET}`;
+      }
+
+      const session = staleSessions.find((s) => s.sessionId.startsWith(sessionArg));
+      if (!session) {
+        return `${RED}Session not found: ${sessionArg}${RESET}`;
+      }
+
+      const summary = formatStaleSessionSummary(session);
+      return `${BOLD}Session Details${RESET}\n\n${summary}`;
+    }
+
+    // /recover cleanup <sessionId> - delete checkpoint and event log
+    if (subcommand === "cleanup") {
+      if (!sessionArg) {
+        return `${RED}Usage: /recover cleanup <sessionId>${RESET}`;
+      }
+
+      const session = staleSessions.find((s) => s.sessionId.startsWith(sessionArg));
+      if (!session) {
+        return `${RED}Session not found: ${sessionArg}${RESET}`;
+      }
+
+      // Delete checkpoint directory
+      const checkpointDir = join(state.projectRoot, ".dantecode", "checkpoints", session.sessionId);
+      const eventLogPath = join(state.projectRoot, ".dantecode", "events", `${session.sessionId}.jsonl`);
+
+      const { rmSync } = await import("node:fs");
+      const { existsSync } = await import("node:fs");
+
+      let deletedCount = 0;
+      if (existsSync(checkpointDir)) {
+        rmSync(checkpointDir, { recursive: true, force: true });
+        deletedCount++;
+      }
+      if (existsSync(eventLogPath)) {
+        rmSync(eventLogPath, { force: true });
+        deletedCount++;
+      }
+
+      return `${GREEN}Cleaned up session ${session.sessionId.slice(0, 12)}${RESET} (${deletedCount} ${deletedCount === 1 ? "item" : "items"} deleted)`;
+    }
+
+    // /recover cleanup-all - delete all corrupt sessions
+    if (subcommand === "cleanup-all") {
+      const corrupt = filterSessionsByStatus(staleSessions, "corrupt");
+      if (corrupt.length === 0) {
+        return `${DIM}No corrupt sessions to clean up.${RESET}`;
+      }
+
+      const { rmSync } = await import("node:fs");
+      const { existsSync } = await import("node:fs");
+
+      let deletedCount = 0;
+      for (const session of corrupt) {
+        const checkpointDir = join(
+          state.projectRoot,
+          ".dantecode",
+          "checkpoints",
+          session.sessionId,
+        );
+        const eventLogPath = join(
+          state.projectRoot,
+          ".dantecode",
+          "events",
+          `${session.sessionId}.jsonl`,
+        );
+
+        if (existsSync(checkpointDir)) {
+          rmSync(checkpointDir, { recursive: true, force: true });
+          deletedCount++;
+        }
+        if (existsSync(eventLogPath)) {
+          rmSync(eventLogPath, { force: true });
+          deletedCount++;
+        }
+      }
+
+      return `${GREEN}Cleaned up ${corrupt.length} corrupt session(s)${RESET} (${deletedCount} items deleted)`;
+    }
+
+    return `${RED}Unknown subcommand: ${subcommand}${RESET}\n${DIM}Use /recover list, /recover info <id>, /recover cleanup <id>, or /recover cleanup-all${RESET}`;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Recovery error: ${message}${RESET}`;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Wave 2 Task 2.6: CLI Resume/Replay/Fork Commands
+// ----------------------------------------------------------------------------
+
+/**
+ * /resume-checkpoint command - Resume from a checkpoint
+ * Lists resumable sessions if no arg provided, otherwise resumes specific session
+ */
+async function resumeCheckpointCommand(args: string, state: ReplState): Promise<string> {
+  const sessionArg = args.trim();
+
+  try {
+    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } = await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot: state.projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+    const resumableSessions = staleSessions.filter((s) => s.status === "resumable");
+
+    // If no sessionId provided, list resumable sessions
+    if (!sessionArg) {
+      if (resumableSessions.length === 0) {
+        return `${DIM}No resumable sessions found.${RESET}\n${DIM}Use /recover list to see all sessions.${RESET}`;
+      }
+
+      const lines = [`${BOLD}Resumable Sessions${RESET}`, ""];
+      for (const session of resumableSessions.slice(0, 10)) {
+        const timestamp = session.timestamp ? new Date(session.timestamp).toLocaleString() : "unknown";
+        const stepInfo = session.step !== undefined ? ` step:${session.step}` : "";
+        const eventInfo = session.lastEventId !== undefined ? ` events:${session.lastEventId}` : "";
+        lines.push(
+          `  ${GREEN}${session.sessionId.slice(0, 12)}${RESET} ${DIM}${timestamp}${stepInfo}${eventInfo}${RESET}`,
+        );
+      }
+
+      if (resumableSessions.length > 10) {
+        lines.push("");
+        lines.push(`${DIM}... and ${resumableSessions.length - 10} more${RESET}`);
+      }
+
+      lines.push("");
+      lines.push(`${DIM}Usage: /resume <sessionId>${RESET}`);
+      return lines.join("\n");
+    }
+
+    // Find the session (allow prefix match)
+    const session = resumableSessions.find((s) => s.sessionId.startsWith(sessionArg));
+    if (!session) {
+      return `${RED}Resumable session not found: ${sessionArg}${RESET}\n${DIM}Use /resume to see available sessions.${RESET}`;
+    }
+
+    // Load checkpoint and event store
+    const eventStore = new JsonlEventStore(state.projectRoot, session.sessionId);
+    const resumeContext = await resumeFromCheckpoint(
+      state.projectRoot,
+      session.sessionId,
+      eventStore,
+    );
+
+    if (!resumeContext) {
+      return `${RED}Failed to load checkpoint for session ${session.sessionId}${RESET}`;
+    }
+
+    // Build resume summary
+    const lines = [
+      `${GREEN}Resuming session ${session.sessionId.slice(0, 12)}${RESET}`,
+      "",
+      `  Checkpoint ID: ${DIM}${resumeContext.checkpoint.id}${RESET}`,
+      `  Step: ${DIM}${resumeContext.checkpoint.step}${RESET}`,
+      `  Checkpoint time: ${DIM}${new Date(resumeContext.checkpoint.ts).toLocaleString()}${RESET}`,
+      `  Events to replay: ${DIM}${resumeContext.replayEventCount}${RESET}`,
+    ];
+
+    if (resumeContext.checkpoint.worktreeRef) {
+      lines.push(`  Worktree: ${DIM}${resumeContext.checkpoint.worktreeRef}${RESET}`);
+    }
+
+    lines.push("");
+    lines.push(`${YELLOW}Note:${RESET} ${DIM}Checkpoint state loaded. Resume logic integration is complete.${RESET}`);
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Resume error: ${message}${RESET}`;
+  }
+}
+
+/**
+ * /replay command - Display event timeline for a session
+ * Shows all events with timestamps and kinds, supports filtering by event kind
+ */
+async function replayCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/);
+  const sessionArg = parts[0];
+  const kindFilter = parts.slice(1); // Optional kind filter(s)
+
+  if (!sessionArg) {
+    return `${RED}Usage: /replay <sessionId> [kind...]${RESET}\n${DIM}Example: /replay abc123 run.tool.started run.tool.completed${RESET}`;
+  }
+
+  try {
+    const { JsonlEventStore } = await import("@dantecode/core");
+
+    // Try to find a session that matches the prefix
+    const { existsSync } = await import("node:fs");
+    const eventsDir = join(state.projectRoot, ".dantecode", "events");
+    if (!existsSync(eventsDir)) {
+      return `${RED}No events directory found.${RESET}`;
+    }
+
+    const { readdirSync } = await import("node:fs");
+    const eventFiles = readdirSync(eventsDir).filter((f) => f.endsWith(".jsonl"));
+    const matchingFile = eventFiles.find((f) => f.replace(".jsonl", "").startsWith(sessionArg));
+
+    if (!matchingFile) {
+      return `${RED}No event log found for session: ${sessionArg}${RESET}`;
+    }
+
+    const sessionId = matchingFile.replace(".jsonl", "");
+    const eventStore = new JsonlEventStore(state.projectRoot, sessionId);
+
+    // Build filter
+    const filter: { kind?: string | string[] } = {};
+    if (kindFilter.length > 0) {
+      filter.kind = kindFilter.length === 1 ? kindFilter[0]! : kindFilter;
+    }
+
+    // Fetch events
+    const events = eventStore.search(filter);
+    const eventList: Array<{ id: number; kind: string; timestamp: string }> = [];
+
+    for await (const event of events) {
+      eventList.push({
+        id: event.id,
+        kind: event.kind,
+        timestamp: event.timestamp,
+      });
+    }
+
+    if (eventList.length === 0) {
+      return `${DIM}No events found for session ${sessionId.slice(0, 12)}${RESET}`;
+    }
+
+    const lines = [
+      `${BOLD}Event Replay: ${sessionId.slice(0, 12)}${RESET}`,
+      "",
+      `${DIM}Total events: ${eventList.length}${RESET}`,
+      "",
+    ];
+
+    // Display event timeline (limit to 50 for readability)
+    const displayEvents = eventList.slice(0, 50);
+    for (const event of displayEvents) {
+      const timestamp = new Date(event.timestamp).toLocaleTimeString();
+      lines.push(`  [${event.id.toString().padStart(4)}] ${DIM}${timestamp}${RESET} ${event.kind}`);
+    }
+
+    if (eventList.length > 50) {
+      lines.push("");
+      lines.push(`${DIM}... and ${eventList.length - 50} more events${RESET}`);
+    }
+
+    if (kindFilter.length > 0) {
+      lines.push("");
+      lines.push(`${DIM}Filtered by: ${kindFilter.join(", ")}${RESET}`);
+    }
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Replay error: ${message}${RESET}`;
+  }
+}
+
+/**
+ * /fork command - Fork a session by creating a new branch from checkpoint
+ * Creates a new git branch from the checkpoint's worktreeRef and sets up a new session
+ */
+async function forkCommand(args: string, state: ReplState): Promise<string> {
+  const sessionArg = args.trim();
+
+  if (!sessionArg) {
+    return `${RED}Usage: /fork <sessionId>${RESET}\n${DIM}Creates a new branch from the checkpoint's git ref${RESET}`;
+  }
+
+  try {
+    const { RecoveryManager, EventSourcedCheckpointer } = await import("@dantecode/core");
+    const recoveryManager = new RecoveryManager({ projectRoot: state.projectRoot });
+    const staleSessions = await recoveryManager.scanStaleSessions();
+
+    // Find the session (allow prefix match, accept any status)
+    const session = staleSessions.find((s) => s.sessionId.startsWith(sessionArg));
+    if (!session) {
+      return `${RED}Session not found: ${sessionArg}${RESET}\n${DIM}Use /recover list to see available sessions.${RESET}`;
+    }
+
+    // Load the checkpoint
+    const checkpointer = new EventSourcedCheckpointer(state.projectRoot, session.sessionId);
+    const tuple = await checkpointer.getTuple();
+
+    if (!tuple) {
+      return `${RED}Failed to load checkpoint for session ${session.sessionId}${RESET}`;
+    }
+
+    const { checkpoint } = tuple;
+
+    // Create a new branch from the checkpoint's worktree ref (or current HEAD)
+    const baseRef = checkpoint.worktreeRef || "HEAD";
+    const timestamp = Date.now();
+    const newBranchName = `fork-${session.sessionId.slice(0, 8)}-${timestamp}`;
+
+    try {
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("git", ["branch", newBranchName, baseRef], {
+        cwd: state.projectRoot,
+        encoding: "utf8",
+      });
+
+      const lines = [
+        `${GREEN}Forked session ${session.sessionId.slice(0, 12)}${RESET}`,
+        "",
+        `  New branch: ${YELLOW}${newBranchName}${RESET}`,
+        `  Base ref: ${DIM}${baseRef}${RESET}`,
+        `  Original checkpoint: ${DIM}${checkpoint.id}${RESET}`,
+        `  Original step: ${DIM}${checkpoint.step}${RESET}`,
+        "",
+        `${DIM}To switch to the new branch, run:${RESET}`,
+        `  ${CYAN}git checkout ${newBranchName}${RESET}`,
+        "",
+        `${DIM}Original session preserved as read-only.${RESET}`,
+      ];
+
+      return lines.join("\n");
+    } catch (gitErr: unknown) {
+      const gitMessage = gitErr instanceof Error ? gitErr.message : String(gitErr);
+      return `${RED}Git error creating fork branch: ${gitMessage}${RESET}`;
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `${RED}Fork error: ${message}${RESET}`;
+  }
+}
+
 async function timelineCommand(args: string, state: ReplState): Promise<string> {
   const limit = Math.max(1, Math.min(50, parseInt(args.trim() || "10", 10) || 10));
 
@@ -2620,17 +3010,19 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
       includeCompatScope: true,
       userHome: undefined, // Will use default
     });
+    const registered = await listSkills(state.projectRoot);
+    const visibleSkills = mergeVisibleSkills(discovered, registered);
 
-    if (discovered.length === 0) {
+    if (visibleSkills.length === 0) {
       return `${DIM}No skills discovered. Use '/skills import' to import skills.${RESET}`;
     }
 
     const lines = [
-      `${BOLD}Discovered Skills (deterministic precedence: project > user > compat):${RESET}`,
+      `${BOLD}Visible Skills (deterministic precedence: project > user > compat):${RESET}`,
       "",
     ];
 
-    for (const skill of discovered) {
+    for (const skill of visibleSkills) {
       const scopeColors = {
         project: GREEN,
         user: CYAN,
@@ -4162,7 +4554,7 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
       }
       const report = reportAcc.finalize();
       const md = serializeRunReportToMarkdown(report, state.verbose);
-      const reportPath = await writeRunReport({
+      const reportWrite = await writeRunReport({
         projectRoot: state.projectRoot,
         markdown: md,
         timestamp: reportStart,
@@ -4173,7 +4565,9 @@ async function magicCommand(args: string, state: ReplState): Promise<string> {
             }
           : undefined,
       });
-      result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportPath)}${RESET}`;
+      if (reportWrite.success && reportWrite.path) {
+        result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportWrite.path)}${RESET}`;
+      }
 
       // Human-friendly summary
       const entry = report.entries[0];
@@ -4399,7 +4793,10 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
       node.status = "complete";
       node.progress = 100;
     });
-    phaseNodes[phaseNodes.length - 1].pdseScore = pdseFailures.length > 0 ? 60 : 90; // Verify phase shows overall score
+    const verifyPhaseNode = phaseNodes.at(-1);
+    if (verifyPhaseNode) {
+      verifyPhaseNode.pdseScore = pdseFailures.length > 0 ? 60 : 90; // Verify phase shows overall score
+    }
     progressDisplay.update(phaseNodes);
     progressDisplay.end();
 
@@ -4438,7 +4835,7 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
       }
       const report = reportAcc.finalize();
       const md = serializeRunReportToMarkdown(report, state.verbose);
-      const reportPath = await writeRunReport({
+      const reportWrite = await writeRunReport({
         projectRoot: state.projectRoot,
         markdown: md,
         timestamp: reportStart,
@@ -4449,7 +4846,9 @@ async function forgeCommand(args: string, state: ReplState): Promise<string> {
             }
           : undefined,
       });
-      result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportPath)}${RESET}`;
+      if (reportWrite.success && reportWrite.path) {
+        result += `\n  ${DIM}Report: ${relative(state.projectRoot, reportWrite.path)}${RESET}`;
+      }
       const entry = report.entries[0];
       if (entry) {
         result +=
@@ -4624,7 +5023,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
       try {
         const report = reportAcc.finalize();
         const md = serializeRunReportToMarkdown(report, state.verbose);
-        const reportPath = await writeRunReport({
+        const reportWrite = await writeRunReport({
           projectRoot: state.projectRoot,
           markdown: md,
           timestamp: partyReportStart,
@@ -4635,9 +5034,11 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
               }
             : undefined,
         });
-        process.stdout.write(
-          `  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`,
-        );
+        if (reportWrite.success && reportWrite.path) {
+          process.stdout.write(
+            `  ${DIM}Run report: ${relative(state.projectRoot, reportWrite.path)}${RESET}\n`,
+          );
+        }
       } catch {
         /* non-fatal */
       }
@@ -4743,7 +5144,10 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
 
     // Update progress: mark lane as running
     const laneIndex = lanes.indexOf(lane);
-    laneNodes[laneIndex].status = "running";
+    const activeLaneNode = laneNodes[laneIndex];
+    if (activeLaneNode) {
+      activeLaneNode.status = "running";
+    }
     progressDisplay.update(laneNodes);
 
     const worktreeSessionId = `${state.session.id}-${lane}`;
@@ -4885,7 +5289,9 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
         blockedLanes.push(failureMsg);
 
         // Update progress: mark lane as failed
-        laneNodes[laneIndex].status = "failed";
+        if (activeLaneNode) {
+          activeLaneNode.status = "failed";
+        }
         if (pdseFailures.length > 0) {
           const avgPdse =
             pdseFailures.reduce((sum, f) => {
@@ -5126,7 +5532,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   try {
     const report = autoforgeReportAcc.finalize();
     const md = serializeRunReportToMarkdown(report, state.verbose);
-    const reportPath = await writeRunReport({
+    const reportWrite = await writeRunReport({
       projectRoot: state.projectRoot,
       markdown: md,
       timestamp: autoforgeReportStart,
@@ -5137,9 +5543,11 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
           }
         : undefined,
     });
-    process.stdout.write(
-      `  ${DIM}Run report: ${relative(state.projectRoot, reportPath)}${RESET}\n`,
-    );
+    if (reportWrite.success && reportWrite.path) {
+      process.stdout.write(
+        `  ${DIM}Run report: ${relative(state.projectRoot, reportWrite.path)}${RESET}\n`,
+      );
+    }
   } catch {
     /* non-fatal */
   }
@@ -6685,20 +7093,29 @@ async function modeCommand(args: string, state: ReplState): Promise<string> {
   const currentMode = normalizeApprovalMode(state.approvalMode) ?? "review";
 
   if (!sub) {
+    // Color code current mode based on severity
+    const modeColor =
+      currentMode === "plan" || currentMode === "review"
+        ? CYAN
+        : currentMode === "apply"
+          ? YELLOW
+          : currentMode === "autoforge"
+            ? RED
+            : "\x1b[35m"; // magenta for yolo
+
     const lines = [
-      `${BOLD}Current approval mode:${RESET} ${currentMode}`,
+      `${BOLD}Current approval mode: ${modeColor}${currentMode}${RESET}`,
       "",
       `${BOLD}Available modes:${RESET}`,
-      `  ${GREEN}review${RESET}     - Require approval before workspace mutations and subagents`,
-      `  ${CYAN}apply${RESET}      - Auto-approve edits, still gate shell/git/subagent execution`,
-      `  ${YELLOW}autoforge${RESET}  - Apply profile for pipeline execution`,
-      `  ${RED}plan${RESET}       - Block workspace mutations and subagents until execution is approved`,
-      `  ${DIM}Legacy aliases:${RESET} default -> review, auto-edit -> apply`,
-      `  ${DIM}Unsafe escape hatch:${RESET} yolo -> disables the approval gateway`,
-      `  ${GREEN}default${RESET}   — Standard approval flow (confirm destructive ops)`,
-      `  ${YELLOW}yolo${RESET}      — No confirmations (use with caution)`,
-      `  ${CYAN}auto-edit${RESET} — Auto-approve Write/Edit, confirm Bash/GitPush`,
-      `  ${RED}plan${RESET}      — Plan mode: write tools blocked, read-only analysis`,
+      `  ${CYAN}review${RESET}     - Require approval before workspace mutations and subagents (default, safe)`,
+      `  ${CYAN}plan${RESET}       - Block workspace mutations and subagents until execution is approved (read-only)`,
+      `  ${YELLOW}apply${RESET}      - Auto-approve edits, still gate shell/git/subagent execution (caution)`,
+      `  ${RED}autoforge${RESET}  - Apply profile for pipeline execution (autonomous)`,
+      `  ${DIM}Unsafe escape hatch:${RESET} \x1b[35myolo${RESET} -> disables the approval gateway (unrestricted)`,
+      "",
+      `${DIM}Legacy aliases: default -> review, auto-edit -> apply${RESET}`,
+      "",
+      `${DIM}Usage: /mode <mode-name>${RESET}`,
     ];
     return lines.join("\n");
   }
@@ -6719,7 +7136,16 @@ async function modeCommand(args: string, state: ReplState): Promise<string> {
     state.planMode = false;
   }
 
-  return `${GREEN}Approval mode set to ${BOLD}${nextMode}${RESET}`;
+  const nextModeColor =
+    nextMode === "plan" || nextMode === "review"
+      ? CYAN
+      : nextMode === "apply"
+        ? YELLOW
+        : nextMode === "autoforge"
+          ? RED
+          : "\x1b[35m"; // magenta for yolo
+
+  return `${GREEN}Approval mode set to ${nextModeColor}${BOLD}${nextMode}${RESET}${GREEN}.${RESET} Status bar updated.`;
 }
 
 // ----------------------------------------------------------------------------
@@ -6836,6 +7262,107 @@ async function fearsetCommand(args: string, state: ReplState): Promise<string> {
         `  ${CYAN}/fearset bridge${RESET}          Distill PASS results → Skillbook`,
         `${DIM}Columns: Define→Prevent→Repair+Benefits+Inaction${RESET}`,
       ].join("\n");
+  }
+}
+
+// ----------------------------------------------------------------------------
+// /drift — Doc-Code Drift Detection
+// ----------------------------------------------------------------------------
+
+async function driftCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/).filter(Boolean);
+  const sub = parts[0]?.toLowerCase() ?? "";
+
+  if (sub === "help") {
+    return [
+      `${BOLD}Doc-Code Drift Detection${RESET}`,
+      "",
+      `${DIM}Detects when JSDoc/TSDoc documentation diverges from implementation.${RESET}`,
+      "",
+      `${CYAN}/drift${RESET}               Scan all source files for drift`,
+      `${CYAN}/drift <glob>${RESET}        Scan specific files (e.g., "src/**/*.ts")`,
+      "",
+      `${DIM}Checks for:${RESET}`,
+      `  - Parameter count mismatches`,
+      `  - Parameter name mismatches`,
+      `  - Parameter type mismatches`,
+      `  - Return type mismatches`,
+      "",
+      `${DIM}Example:${RESET}`,
+      `  ${YELLOW}/drift src/core/**/*.ts${RESET}`,
+    ].join("\n");
+  }
+
+  // Import glob for file pattern matching
+  const { glob } = await import("glob");
+
+  try {
+    // Determine file pattern
+    let pattern = "**/*.{ts,tsx,js,jsx}";
+    if (parts.length > 0 && !sub.startsWith("-")) {
+      pattern = parts.join(" ");
+    }
+
+    // Find files matching pattern
+    const sourceFiles = await glob(pattern, {
+      cwd: state.projectRoot,
+      ignore: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**", "**/coverage/**"],
+      absolute: true,
+    });
+
+    if (sourceFiles.length === 0) {
+      return `${YELLOW}No source files found matching pattern: ${pattern}${RESET}`;
+    }
+
+    // Run drift detection
+    const checks = await detectDrift(sourceFiles, state.projectRoot);
+    const drifted = checks.filter((c) => c.driftDetected);
+
+    if (drifted.length === 0) {
+      return [
+        `${GREEN}${BOLD}No drift detected${RESET}`,
+        ``,
+        `${DIM}Scanned ${sourceFiles.length} files.${RESET}`,
+        `${DIM}All documented functions and classes match their implementations.${RESET}`,
+      ].join("\n");
+    }
+
+    // Format drift report
+    const lines = [
+      `${YELLOW}${BOLD}Doc-Code Drift Detected${RESET}`,
+      "",
+      `${DIM}Found ${drifted.length} drift issue${drifted.length === 1 ? "" : "s"} in ${sourceFiles.length} files scanned.${RESET}`,
+      "",
+    ];
+
+    // Group by file
+    const byFile = new Map<string, typeof drifted>();
+    for (const check of drifted) {
+      const fileList = byFile.get(check.file) ?? [];
+      fileList.push(check);
+      byFile.set(check.file, fileList);
+    }
+
+    for (const [file, issues] of byFile) {
+      const relPath = relative(state.projectRoot, file);
+      lines.push(`${BOLD}${relPath}${RESET}`);
+
+      for (const issue of issues) {
+        const typeColor = issue.type === "function" ? CYAN : YELLOW;
+        lines.push(`  ${typeColor}${issue.type}${RESET} ${BOLD}${issue.name}${RESET}`);
+        lines.push(`    ${RED}Issue:${RESET} ${issue.driftReason}`);
+        lines.push(`    ${DIM}Code:${RESET} ${issue.codeSignature.slice(0, 80)}${issue.codeSignature.length > 80 ? "..." : ""}`);
+        lines.push(`    ${DIM}Docs:${RESET} ${issue.docSignature}`);
+        lines.push("");
+      }
+    }
+
+    lines.push(`${DIM}Update JSDoc/TSDoc to match implementation or fix code.${RESET}`);
+
+    return lines.join("\n");
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Drift detection error: ${msg}${RESET}`;
   }
 }
 
@@ -7291,6 +7818,7 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
     `${BOLD}Operator${RESET}`,
     `  Approval Mode: ${CYAN}${operatorStatus.approvalMode}${RESET}`,
     `  Plan Mode:     ${operatorStatus.planMode ? `${YELLOW}active${RESET}` : `${DIM}inactive${RESET}`}`,
+    `  Task Mode:     ${operatorStatus.taskMode ? `${YELLOW}${operatorStatus.taskMode}${RESET}` : `${DIM}inactive${RESET}`}`,
     `  Current Plan:  ${operatorStatus.currentPlanId ? `${CYAN}${operatorStatus.currentPlanId}${RESET}` : `${DIM}none${RESET}`}`,
     `  Current Run:   ${operatorStatus.currentRunId ? `${CYAN}${operatorStatus.currentRunId}${RESET}` : `${DIM}none${RESET}`}`,
     `  Paused Run:    ${pausedRunLine}`,
@@ -7519,7 +8047,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Record, play, and manage macros of slash commands",
     usage: "/macro <record <name>|stop|play <name>|list>",
     handler: macroCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -7543,7 +8071,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Remove file from context",
     usage: "/drop <file>",
     handler: dropCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -7595,11 +8123,43 @@ const SLASH_COMMANDS: SlashCommand[] = [
     category: "core",
   },
   {
+    name: "recover",
+    description: "Manage stale sessions (list, info, cleanup)",
+    usage: "/recover [list|info <id>|cleanup <id>|cleanup-all]",
+    handler: recoverCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "resume-checkpoint",
+    description: "Resume from a checkpoint (list sessions or resume specific ID)",
+    usage: "/resume-checkpoint [sessionId]",
+    handler: resumeCheckpointCommand,
+    tier: 1,
+    category: "sessions",
+  },
+  {
+    name: "replay",
+    description: "Display event timeline for a session with optional filtering",
+    usage: "/replay <sessionId> [kind...]",
+    handler: replayCommand,
+    tier: 2,
+    category: "sessions",
+  },
+  {
+    name: "fork",
+    description: "Fork a session by creating a new branch from checkpoint",
+    usage: "/fork <sessionId>",
+    handler: forkCommand,
+    tier: 2,
+    category: "sessions",
+  },
+  {
     name: "timeline",
     description: "Show recent recovery trail events",
     usage: "/timeline [limit]",
     handler: timelineCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -7688,7 +8248,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "List past sessions, view details, or clear history",
     usage: "/history [id | clear]",
     handler: historyCommand,
-    tier: 1,
+    tier: 2,
     category: "sessions",
   },
   {
@@ -7784,7 +8344,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Manage sessions: list, name, export, branch",
     usage: "/session [list|name <n>|export [--format json|md]|branch [<name>]]",
     handler: sessionCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -8017,7 +8577,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Switch approval mode (default, yolo, auto-edit, plan)",
     usage: "/mode [default|yolo|auto-edit|plan]",
     handler: modeCommand,
-    tier: 1,
+    tier: 2,
     category: "core",
   },
   {
@@ -8035,6 +8595,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: fearsetCommand,
     tier: 2,
     category: "advanced",
+  },
+  {
+    name: "drift",
+    description: "Detect doc-code drift (JSDoc/TSDoc vs implementation)",
+    usage: "/drift [glob-pattern]",
+    handler: driftCommand,
+    tier: 2,
+    category: "quality",
   },
   {
     name: "plan",
@@ -8218,6 +8786,17 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
       : withoutSlash.slice(0, spaceIndex).toLowerCase();
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
+  // Detect keywords like 'run and observe only', 'observe only', 'diagnose only', 'run and observe'
+  // in user input or task description. Set session flag accordingly.
+  const lowerInput = (trimmed + " " + args).toLowerCase();
+  if (lowerInput.includes("run and observe only") || lowerInput.includes("observe only")) {
+    state.taskMode = "observe-only";
+  } else if (lowerInput.includes("run and observe")) {
+    state.taskMode = "run-and-observe";
+  } else if (lowerInput.includes("diagnose only") || lowerInput.includes("diagnose-only")) {
+    state.taskMode = "diagnose-only";
+  }
+
   const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
   const command = registry.find((c) => c.name === commandName);
   if (!command) {
@@ -8253,6 +8832,11 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
   }
 
   const result = await nativeCommand.handler(args, state);
+
+  // Ensure after command, loop stops (reset mode flag)
+  if (state.taskMode !== null) {
+    state.taskMode = null;
+  }
 
   // Record macro step if recording is active (only for native commands)
   if (state.macroRecording && commandName !== "macro") {

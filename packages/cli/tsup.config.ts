@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/slash-commands.ts"],
   format: ["esm"],
   dts: false, // CLI binary doesn't need .d.ts for end users
   banner: {
@@ -31,6 +31,7 @@ export default defineConfig({
     "@modelcontextprotocol/sdk",
     "@octokit/rest",
     "cheerio",
+    "crawlee",
     "dockerode",
     "node-fetch",
     "sql.js",

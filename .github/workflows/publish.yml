@@ -16,15 +16,30 @@ permissions:
   id-token: write
 
 jobs:
+  catalog:
+    name: Release catalog
+    runs-on: ubuntu-latest
+    outputs:
+      primary_node: ${{ steps.catalog.outputs.primary_node }}
+      windows_node: ${{ steps.catalog.outputs.windows_node }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: catalog
+        shell: bash
+        run: |
+          echo "primary_node=$(node -e "const matrix = require('./release-matrix.json'); process.stdout.write(String(matrix.ci.primaryNodeVersion));")" >> "$GITHUB_OUTPUT"
+          echo "windows_node=$(node -e "const matrix = require('./release-matrix.json'); process.stdout.write(String(matrix.ci.windowsNodeVersion));")" >> "$GITHUB_OUTPUT"
+
   validate:
     name: Validate
+    needs: catalog
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ needs.catalog.outputs.primary_node }}
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
 
@@ -69,13 +84,14 @@ jobs:
 
   windows-smoke:
     name: Windows smoke
+    needs: catalog
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ needs.catalog.outputs.windows_node }}
           cache: "npm"
 
       - name: Install dependencies
@@ -101,7 +117,7 @@ jobs:
 
   sync-readiness:
     name: Sync readiness
-    needs: [validate, windows-smoke]
+    needs: [catalog, validate, windows-smoke]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -109,7 +125,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ needs.catalog.outputs.primary_node }}
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
 
@@ -137,55 +153,35 @@ jobs:
 
   publish-npm:
     name: Publish to npm
-    needs: sync-readiness
+    needs: [catalog, sync-readiness]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ needs.catalog.outputs.primary_node }}
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build all packages
-        run: npm run build
-
       - name: Publish npm workspaces
-        run: |
-          DRY_RUN_FLAG=""
-          if [ "${{ github.event.inputs.dry-run }}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
-          fi
-
-          for workspace in \
-            packages/config-types \
-            packages/core \
-            packages/mcp \
-            packages/danteforge \
-            packages/git-engine \
-            packages/skill-adapter \
-            packages/sandbox \
-            packages/cli
-          do
-            npm publish --workspace "$workspace" --access public --provenance ${DRY_RUN_FLAG}
-          done
+        run: node scripts/publish-all.mjs --npm-only ${{ github.event.inputs.dry-run == 'true' && '--dry-run' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-vscode:
     name: Publish VS Code Extension
-    needs: sync-readiness
+    needs: [catalog, sync-readiness]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ needs.catalog.outputs.primary_node }}
           cache: "npm"
 
       - name: Install dependencies

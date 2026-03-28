@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // ============================================================================
-// Orchestrated publish: npm for all packages, vsce for VS Code extension.
+// Orchestrated publish: npm for all catalog-backed packages, vsce for preview.
 // Usage: node scripts/publish-all.mjs [--dry-run] [--npm-only] [--vsce-only]
 // ============================================================================
 
 import { execSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnNpm } from "./npm-runner.mjs";
+import { ensureBuildArtifacts, getCatalogPackagesForPurpose } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
@@ -16,40 +18,40 @@ const dryRun = args.includes("--dry-run");
 const npmOnly = args.includes("--npm-only");
 const vsceOnly = args.includes("--vsce-only");
 
-// Packages in dependency order (config-types first, cli last)
-const npmPackages = [
-  "packages/config-types",
-  "packages/core",
-  "packages/git-engine",
-  "packages/sandbox",
-  "packages/danteforge",
-  "packages/skill-adapter",
-  "packages/mcp",
-  "packages/cli",
-];
+const npmPackages = getCatalogPackagesForPurpose(repoRoot, "npmPublish");
 
-function run(cmd, cwd) {
-  console.log(`  $ ${cmd}`);
-  if (!dryRun) {
-    execSync(cmd, { cwd, stdio: "inherit" });
+function runNpmLogged(args, cwd) {
+  console.log(`  $ npm ${args.join(" ")}`);
+  const result = spawnNpm(args, cwd);
+  const combinedOutput = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  if (combinedOutput.trim().length > 0) {
+    process.stdout.write(combinedOutput);
+    if (!combinedOutput.endsWith("\n")) {
+      process.stdout.write("\n");
+    }
+  }
+
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`npm ${args.join(" ")} failed in ${cwd}`);
   }
 }
 
 function publishNpm() {
   console.log("\n=== Publishing npm packages ===\n");
 
-  for (const pkgPath of npmPackages) {
-    const pkgDir = join(repoRoot, pkgPath);
-    console.log(`\n--- ${pkgPath} ---`);
+  ensureBuildArtifacts(repoRoot, npmPackages);
 
-    // Build first
-    run("npm run build", pkgDir);
-
-    // Publish
-    const publishCmd = dryRun
-      ? "npm publish --dry-run --access public"
-      : "npm publish --access public";
-    run(publishCmd, pkgDir);
+  for (const packageEntry of npmPackages) {
+    const pkgDir = join(repoRoot, packageEntry.workspace);
+    console.log(`\n--- ${packageEntry.workspace} ---`);
+    runNpmLogged(
+      ["publish", ...(dryRun ? ["--dry-run"] : []), "--access", "public", "--provenance"],
+      pkgDir,
+    );
   }
 }
 
@@ -58,12 +60,12 @@ function publishVSCE() {
 
   const vscodePath = join(repoRoot, "packages/vscode");
 
-  // Build extension
-  run("npm run build", vscodePath);
-
-  // Package with vsce
-  const vsceCmd = dryRun ? "npx vsce package" : "npx vsce publish";
-  run(vsceCmd, vscodePath);
+  runNpmLogged(["run", "build"], vscodePath);
+  const vsceCmd = dryRun ? "npx --yes @vscode/vsce package" : "npx --yes @vscode/vsce publish";
+  console.log(`  $ ${vsceCmd}`);
+  if (!dryRun) {
+    execSync(vsceCmd, { cwd: vscodePath, stdio: "inherit" });
+  }
 }
 
 // Pre-flight checks
@@ -83,9 +85,9 @@ function preflight() {
 
   // Run full verification
   console.log("Running verification suite...");
-  run("npm run typecheck", repoRoot);
-  run("npm run lint", repoRoot);
-  run("npm test", repoRoot);
+  runNpmLogged(["run", "typecheck"], repoRoot);
+  runNpmLogged(["run", "lint"], repoRoot);
+  runNpmLogged(["test"], repoRoot);
 
   console.log("\nPre-flight checks passed.\n");
 }

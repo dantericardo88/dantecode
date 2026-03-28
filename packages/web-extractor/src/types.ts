@@ -17,10 +17,13 @@ export interface WebFetchResult {
   markdown: string;
   structuredData?: Record<string, unknown>;
   metadata: {
+    provider?: string;
     title?: string;
     finalUrl?: string;
     status?: number;
     renderMode: RenderMode;
+    requestedRenderMode?: RenderMode;
+    preActionsApplied?: boolean;
     cacheHit: boolean;
     extractedAt: string;
     relevanceScore?: number;

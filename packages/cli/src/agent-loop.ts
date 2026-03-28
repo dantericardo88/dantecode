@@ -26,8 +26,13 @@ import {
   verifyCompletion,
   deriveWaveExpectations,
   isValidWaveCompletion,
+  createRunIntake,
+  BoundaryTracker,
+  formatDriftMessage,
+  calculatePressure,
+  condenseContext,
 } from "@dantecode/core";
-import type { WorkflowExecutionContext, WaveOrchestratorState } from "@dantecode/core";
+import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
 import { recordSuccessPattern, detectAndRecordPatterns } from "@dantecode/danteforge";
 import { runDanteForge } from "./danteforge-pipeline.js";
@@ -193,15 +198,10 @@ export interface AgentLoopConfig {
    * and tier outcomes are recorded back via recordTierOutcome.
    */
   replState?: import("./slash-commands.js").ReplState;
-  /** SSE emitter for serve mode. When set, stdout writes become SSE events. */
   eventEmitter?: import("./serve/session-emitter.js").SessionEventEmitter;
-  /** Session ID routing key for eventEmitter. Required when eventEmitter is set. */
   eventSessionId?: string;
-  /**
-   * When true, write tools are actively gated (plan mode is in effect but
-   * the plan has not yet been approved). Set by repl.ts from ReplState.
-   */
   planModeActive?: boolean;
+  taskMode?: string;
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -558,6 +558,21 @@ async function _runAgentLoopCore(
     !!config.silent,
   );
 
+  // ---- RunIntake: capture intent boundary before any model call ----
+  const runIntake: RunIntake = createRunIntake(
+    durablePrompt,
+    session.id,
+    config.runId,
+  );
+  if (config.verbose) {
+    emitOrWrite(
+      `${DIM}[run-intake] id=${runIntake.runId} class=${runIntake.classification} scope=${runIntake.requestedScope.length} paths${RESET}\n`,
+    );
+  }
+
+  // ---- Boundary Tracker: detect scope drift across tool rounds ----
+  const boundaryTracker = new BoundaryTracker(runIntake);
+
   while (maxToolRounds > 0) {
     // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
     if (
@@ -616,6 +631,34 @@ async function _runAgentLoopCore(
     currentRoundTier = roundCtx.currentRoundTier;
     thinkingBudget = roundCtx.thinkingBudget;
 
+    // Context condensing: check pressure and condense if needed
+    const contextWindow = config.state.model.default.contextWindow ?? 200000;
+    const pressure = calculatePressure(messages, contextWindow);
+
+    if (pressure.status === "red" && messages.length > 10) {
+      if (!config.silent) {
+        emitOrWrite(
+          `\n${YELLOW}[context-pressure: ${pressure.percent}%]${RESET} ${DIM}Condensing context to reduce token usage...${RESET}\n`,
+        );
+      }
+
+      const condensed = await condenseContext(messages, contextWindow, {
+        preserveRecentRounds: 3,
+        targetPercent: 50,
+      });
+
+      messages = condensed.messages;
+
+      if (!config.silent) {
+        const reduction = Math.round(
+          ((condensed.beforeTokens - condensed.afterTokens) / condensed.beforeTokens) * 100,
+        );
+        emitOrWrite(
+          `${GREEN}[condensed]${RESET} ${DIM}${condensed.roundsCondensed} rounds → reduced ${reduction}% (${condensed.beforeTokens} → ${condensed.afterTokens} tokens)${RESET}\n`,
+        );
+      }
+    }
+
     // Generate response from model (streaming with tool calling support)
     let responseText = "";
     let toolCalls: ExtractedToolCall[] = [];
@@ -644,7 +687,7 @@ async function _runAgentLoopCore(
         if (useNativeTools) {
           // Native AI SDK tool calling: stream with Zod-schema tools
           try {
-            const aiSdkTools = getAISDKTools(config.mcpTools);
+            const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
             const streamResult = await router.streamWithTools(messages, aiSdkTools, {
               system: systemPrompt,
               maxTokens: config.state.model.default.maxTokens,
@@ -729,14 +772,19 @@ async function _runAgentLoopCore(
             })
           : config.selfImprovement;
 
-        // Fallback pipeline guard: abort if primary model unavailable for too many consecutive rounds
-        if (router.isUsingFallback() && isPipelineWorkflow) {
+        // Fallback pipeline guard + no-fallback enforcement for taskMode (observe-only)
+        if (
+          router.isUsingFallback() &&
+          (isPipelineWorkflow ||
+            (config.taskMode &&
+              (config.taskMode === "observe-only" || config.taskMode === "diagnose-only")))
+        ) {
           fallbackPipelineRounds++;
           if (fallbackPipelineRounds >= MAX_FALLBACK_PIPELINE_ROUNDS) {
             const fbModel = router.getFallbackModelId() ?? "unknown-fallback";
             if (!config.silent) {
               process.stdout.write(
-                `${RED}\n⛔ Pipeline aborted: primary model unavailable ` +
+                `${RED}\n⛔ ${config.taskMode ? config.taskMode.toUpperCase() : "Pipeline"} aborted: primary model unavailable ` +
                   `(${fbModel} fallback used for ${fallbackPipelineRounds} consecutive rounds). ` +
                   `Please retry when the primary model recovers.\n${RESET}`,
               );
@@ -1029,8 +1077,31 @@ async function _runAgentLoopCore(
       }
     }
 
-    // If no tool calls, we're done with this turn
+    // If no tool calls, we're done with this turn. Detect mode for observe-only.
     if (toolCalls.length === 0) {
+      const completionPattern =
+        /(?:completed?|finished|observed|diagnosed|report(?:ed)?|findings|results only|stop)/i;
+      if (
+        config.taskMode &&
+        (config.taskMode === "observe-only" || config.taskMode === "diagnose-only") &&
+        completionPattern.test(cleanText)
+      ) {
+        // stop after requested command completes, report only, no follow-up or exploration
+        if (!config.silent)
+          process.stdout.write(
+            `${GREEN}[${config.taskMode}] Task complete - reporting only, stopping.${RESET}\n`,
+          );
+        const assistantMessage: SessionMessage = {
+          id: randomUUID(),
+          role: "assistant",
+          content: responseText,
+          timestamp: new Date().toISOString(),
+          modelId: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+          tokensUsed: totalTokensUsed,
+        };
+        session.messages.push(assistantMessage);
+        break;
+      }
       // Parse error nudge: if all <tool_use> blocks were malformed JSON, the model
       // thinks it ran tools but NOTHING executed. Report the errors so the model
       // can fix its JSON and retry — this prevents silent ENOENT in subsequent rounds.
@@ -1285,11 +1356,52 @@ async function _runAgentLoopCore(
       return session;
     }
 
+    // ---- Boundary drift check: detect scope expansion after file mutations ----
+    const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
+    if (wroteCode && touchedFiles.length > 0) {
+      boundaryTracker.recordMutations(touchedFiles);
+      const boundaryState = boundaryTracker.check();
+      if (boundaryState.driftDetected) {
+        if (!config.silent) {
+          emitOrWrite(
+            `\n${YELLOW}[boundary-drift] ${boundaryState.expansionPercent.toFixed(0)}% expansion — ` +
+              `${boundaryState.outOfScopeFiles.length} file(s) outside original scope${RESET}\n`,
+          );
+        }
+        // In interactive TTY mode (non-serve, non-silent), prompt for approval
+        if (!config.eventEmitter && process.stdin.isTTY !== false) {
+          const shouldContinue = await confirmDestructive(
+            formatDriftMessage(boundaryState),
+            {
+              operation: "Boundary Drift",
+              detail: `${boundaryState.outOfScopeFiles.length} file(s) mutated outside declared scope`,
+            },
+          );
+          if (!shouldContinue) {
+            if (!config.silent) {
+              emitOrWrite(
+                `\n${RED}[boundary-drift] User declined expanded scope — halting execution.${RESET}\n`,
+              );
+            }
+            const driftMsg: SessionMessage = {
+              id: randomUUID(),
+              role: "assistant",
+              content:
+                `Execution paused: boundary drift detected (${boundaryState.expansionPercent.toFixed(0)}% expansion). ` +
+                `Out-of-scope files: ${boundaryState.outOfScopeFiles.join(", ")}. User declined to continue.`,
+              timestamp: new Date().toISOString(),
+            };
+            session.messages.push(driftMsg);
+            return session;
+          }
+        }
+      }
+    }
+
     // Reflection loop (aider/Cursor pattern): after code edits, auto-run
     // the project's configured lint/test/build commands. If any fail,
     // parse the output into structured errors and inject a targeted fix
     // prompt so the model can fix specific issues instead of guessing.
-    const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
     if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
       const verifyCommands = getVerifyCommands(config.state);
       let verificationPassed = true;

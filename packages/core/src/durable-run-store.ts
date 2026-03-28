@@ -77,11 +77,15 @@ export class DurableRunStore {
     };
 
     await this.persistRun(run, options.session, []);
-    await this.persistCheckpoint(run, {
-      source: "input",
-      step: 0,
-      triggerCommand: options.prompt,
-    }, options.session);
+    await this.persistCheckpoint(
+      run,
+      {
+        source: "input",
+        step: 0,
+        triggerCommand: options.prompt,
+      },
+      options.session,
+    );
 
     return run;
   }
@@ -96,11 +100,15 @@ export class DurableRunStore {
     });
 
     await this.persistRun(next, payload.session, evidence);
-    await this.persistCheckpoint(next, {
-      source: "loop",
-      step: evidence.length,
-      triggerCommand: current.prompt,
-    }, payload.session);
+    await this.persistCheckpoint(
+      next,
+      {
+        source: "loop",
+        step: evidence.length,
+        triggerCommand: current.prompt,
+      },
+      payload.session,
+    );
 
     return next;
   }
@@ -118,12 +126,16 @@ export class DurableRunStore {
     });
 
     await this.persistRun(next, payload.session, evidence);
-    await this.persistCheckpoint(next, {
-      source: "update",
-      step: evidence.length,
-      triggerCommand: current.prompt,
-      extra: { pauseReason: payload.reason },
-    }, payload.session);
+    await this.persistCheckpoint(
+      next,
+      {
+        source: "update",
+        step: evidence.length,
+        triggerCommand: current.prompt,
+        extra: { pauseReason: payload.reason },
+      },
+      payload.session,
+    );
 
     return next;
   }
@@ -138,11 +150,15 @@ export class DurableRunStore {
     });
 
     await this.persistRun(next, payload.session, evidence);
-    await this.persistCheckpoint(next, {
-      source: "update",
-      step: evidence.length,
-      triggerCommand: current.prompt,
-    }, payload.session);
+    await this.persistCheckpoint(
+      next,
+      {
+        source: "update",
+        step: evidence.length,
+        triggerCommand: current.prompt,
+      },
+      payload.session,
+    );
 
     return next;
   }
@@ -157,11 +173,15 @@ export class DurableRunStore {
     });
 
     await this.persistRun(next, payload.session, evidence);
-    await this.persistCheckpoint(next, {
-      source: "update",
-      step: evidence.length,
-      triggerCommand: current.prompt,
-    }, payload.session);
+    await this.persistCheckpoint(
+      next,
+      {
+        source: "update",
+        step: evidence.length,
+        triggerCommand: current.prompt,
+      },
+      payload.session,
+    );
 
     return next;
   }

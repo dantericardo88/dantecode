@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnNpm } from "./npm-runner.mjs";
+import { getCatalogPackagesForPurpose } from "./release/catalog.mjs";
 import {
   buildReadinessArtifact,
   mapReleaseCheckResultsToGates,
@@ -23,9 +24,14 @@ import {
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
+const versionAlignmentPackages = getCatalogPackagesForPurpose(repoRoot, "versionAlignment");
+const dependencyCyclePackages = getCatalogPackagesForPurpose(repoRoot, "dependencyCycles");
+const exportCheckPackages = getCatalogPackagesForPurpose(repoRoot, "exportShape");
+const docsAndLicensePackages = getCatalogPackagesForPurpose(repoRoot, "docsAndLicense");
 
 const results = [];
 let anyFailed = false;
+let artifactStatus = null;
 
 function check(num, name, fn) {
   try {
@@ -74,19 +80,14 @@ check(4, "Anti-stub scan", () => {
 check(5, "Version alignment", () => {
   const rootPkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8"));
   const rootVersion = rootPkg.version;
-  const packagesDir = join(repoRoot, "packages");
   const mismatched = [];
 
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("temp-") || entry.name.startsWith("scratch-")) continue;
-    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
-    const pkgPath = join(packagesDir, entry.name, "package.json");
-    if (!existsSync(pkgPath)) continue;
+  for (const packageEntry of versionAlignmentPackages) {
+    const pkgPath = join(repoRoot, packageEntry.workspace, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     if (!pkg.version) continue;
     if (pkg.version !== rootVersion) {
-      mismatched.push(`${entry.name}: ${pkg.version}`);
+      mismatched.push(`${packageEntry.id}: ${pkg.version}`);
     }
   }
 
@@ -125,14 +126,10 @@ check(7, "CLI commands registered (10+)", () => {
 });
 
 check(8, "No circular dependencies", () => {
-  const packagesDir = join(repoRoot, "packages");
   const pkgNames = new Map();
 
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
-    const pkgPath = join(packagesDir, entry.name, "package.json");
-    if (!existsSync(pkgPath)) continue;
+  for (const packageEntry of dependencyCyclePackages) {
+    const pkgPath = join(repoRoot, packageEntry.workspace, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     const deps = Object.keys(pkg.dependencies ?? {}).filter((dep) => dep.startsWith("@dantecode/"));
     pkgNames.set(pkg.name, deps);
@@ -168,19 +165,16 @@ check(8, "No circular dependencies", () => {
 });
 
 check(9, "Export verification (index.ts)", () => {
-  const packagesDir = join(repoRoot, "packages");
   const missing = [];
 
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
-    const indexPath = join(packagesDir, entry.name, "src", "index.ts");
+  for (const packageEntry of exportCheckPackages) {
+    const indexPath = join(repoRoot, packageEntry.workspace, "src", "index.ts");
     if (!existsSync(indexPath)) continue;
     const content = readFileSync(indexPath, "utf-8");
     const hasExport = /\bexport\b/.test(content);
     const isPureEntryPoint = !hasExport && /\bmain\s*\(/.test(content);
     if (!hasExport && !isPureEntryPoint) {
-      missing.push(entry.name);
+      missing.push(packageEntry.id);
     }
   }
 
@@ -191,31 +185,26 @@ check(9, "Export verification (index.ts)", () => {
 });
 
 check(10, "License + README present", () => {
-  const packagesDir = join(repoRoot, "packages");
   const missingLicense = [];
   const missingReadme = [];
 
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("temp-") || entry.name.startsWith("scratch-")) continue;
-    if (entry.name === "web-extractor") continue; // Wave 6 - experimental, out-of-ship scope
-    const pkgPath = join(packagesDir, entry.name, "package.json");
-    if (!existsSync(pkgPath)) continue;
+  for (const packageEntry of docsAndLicensePackages) {
+    const pkgPath = join(repoRoot, packageEntry.workspace, "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     if (pkg.private) continue;
     if (!pkg.name) continue;
 
-    const dir = join(packagesDir, entry.name);
+    const dir = join(repoRoot, packageEntry.workspace);
     const hasLicenseFile = existsSync(join(dir, "LICENSE")) || existsSync(join(dir, "LICENSE.md"));
     const hasLicenseField = typeof pkg.license === "string" && pkg.license.length > 0;
     if (!hasLicenseFile && !hasLicenseField) {
-      missingLicense.push(entry.name);
+      missingLicense.push(packageEntry.id);
     }
 
     const hasReadmeFile = existsSync(join(dir, "README.md"));
     const hasDescription = typeof pkg.description === "string" && pkg.description.length > 0;
     if (!hasReadmeFile && !hasDescription) {
-      missingReadme.push(entry.name);
+      missingReadme.push(packageEntry.id);
     }
   }
 
@@ -249,12 +238,6 @@ const failed = results.filter((result) => !result.passed).length;
 console.log("\n" + "=".repeat(50));
 console.log(`Passed: ${passed}  Failed: ${failed}`);
 
-if (anyFailed) {
-  console.log("\nRelease gate FAILED. Fix the above issues before release.");
-} else {
-  console.log("\nRelease gate PASSED. Ready for release.");
-}
-
 try {
   const commitSha = resolveCommitSha(repoRoot, process.env);
   const externalEvidence = readExternalGateEvidence(repoRoot, { currentCommitSha: commitSha });
@@ -287,6 +270,7 @@ try {
       "Some gates are still unknown for the current commit. Run the remaining external checks or CI jobs to resolve them.",
   });
   const outputPaths = writeReadinessArtifact(repoRoot, artifact);
+  artifactStatus = artifact.status;
 
   console.log(`\nReadiness receipt updated: ${localReceipt.filePath}`);
   console.log(`Readiness artifact updated: ${outputPaths.jsonPath}`);
@@ -294,6 +278,20 @@ try {
   console.log(`  Commit: ${commitSha.slice(0, 12)}`);
 } catch (err) {
   console.log(`\nNote: Could not update readiness artifact - ${err.message}`);
+}
+
+if (anyFailed) {
+  console.log("\nRelease gate FAILED. Fix the above issues before release.");
+} else if (artifactStatus === "public-ready") {
+  console.log("\nRelease gate PASSED. Same-commit public release proof is green.");
+} else if (artifactStatus === "private-ready") {
+  console.log(
+    "\nRelease gate PASSED locally. Private-ready proof is satisfied, but public release proof is still pending.",
+  );
+} else {
+  console.log(
+    "\nRelease gate PASSED locally. External same-commit proof is still pending before a public-ready claim.",
+  );
 }
 
 if (anyFailed) process.exit(1);

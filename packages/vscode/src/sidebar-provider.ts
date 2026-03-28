@@ -10,6 +10,7 @@ import {
   resolve as pathResolve,
   relative as pathRelative,
   basename as pathBasename,
+  isAbsolute as pathIsAbsolute,
 } from "node:path";
 import type {
   ChatSessionFile,
@@ -25,6 +26,8 @@ import {
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
+  assessMutationScope,
+  summarizeMutationScope,
   createSelfImprovementContext,
   detectSelfImprovementContext,
   getContextUtilization,
@@ -52,6 +55,14 @@ import {
   type ToolResult,
   type ToolExecutionContext,
 } from "./agent-tools.js";
+import {
+  createAgentApprovalGateway,
+  DEFAULT_AGENT_CONFIG,
+  evaluateAgentToolAccess,
+  isExecutionAgentMode,
+  normalizeAgentConfig,
+  type AgentConfig,
+} from "./agent-config.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,24 +138,6 @@ interface WebviewOutboundMessage {
 // ─── Agent Mode & Permission Types ──────────────────────────────────────────
 
 /** Agent execution modes — Plan (read-only), Build (default), YOLO (full autonomous). */
-type AgentMode = "plan" | "build" | "yolo";
-
-/** Permission levels for tool categories. */
-type PermissionLevel = "allow" | "ask" | "deny";
-
-/** Persisted agent configuration stored in globalState + .dantecode/config.json. */
-interface AgentConfig {
-  agentMode: AgentMode;
-  permissions: {
-    edit: PermissionLevel;
-    bash: PermissionLevel;
-    tools: PermissionLevel;
-  };
-  maxToolRounds: number;
-  runUntilComplete: boolean;
-  showLiveDiffs: boolean;
-}
-
 interface SidebarHostCallbacks {
   onCostUpdate?: (update: {
     model: string;
@@ -160,18 +153,6 @@ interface SidebarHostCallbacks {
     hasError?: boolean;
   }) => void;
 }
-
-/** Default config for new users. */
-const DEFAULT_AGENT_CONFIG: AgentConfig = {
-  agentMode: "build",
-  permissions: { edit: "allow", bash: "ask", tools: "allow" },
-  maxToolRounds: 15,
-  runUntilComplete: false,
-  showLiveDiffs: true,
-};
-
-/** Read-only tools allowed in Plan mode. */
-const PLAN_MODE_TOOLS = new Set(["Read", "ListDir", "Glob", "Grep"]);
 
 /** Maps model provider names to SecretStorage key names. */
 const PROVIDER_SECRET_KEYS: Record<string, string> = {
@@ -224,6 +205,32 @@ const SETTINGS_PROVIDERS = Array.from(SETTINGS_PROVIDER_IDS)
  * - Skill activation from the webview
  */
 
+function normalizeMutationPath(filePath: string, projectRoot: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  if (pathIsAbsolute(filePath)) {
+    const relativePath = pathRelative(projectRoot, filePath).replace(/\\/g, "/");
+    return relativePath.startsWith("..") ? normalized : relativePath;
+  }
+  return normalized.replace(/^\.\//, "");
+}
+
+function extractClaimedFiles(text: string): string[] {
+  const patterns = [
+    /(?:updated|modified|edited|wrote|created|changed)\s+[`"']?([^\s`"',]+\.\w{1,6})/gi,
+    /(?:Write|Edit)\s+(?:to\s+)?[`"']?([^\s`"',]+\.\w{1,6})/g,
+  ];
+  const files = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const filePath = match[1]!;
+      if (filePath.length > 3 && !filePath.startsWith("http") && !filePath.startsWith("//")) {
+        files.add(filePath);
+      }
+    }
+  }
+  return [...files];
+}
+
 export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.chatView";
 
@@ -246,6 +253,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private pendingRequiredRounds = 0;
   /** Currently active skill name. Enables universal pipeline continuation for all skills. */
   private activeSkill: string | null = null;
+  /** Current approval mode (plan, review, apply, autoforge, yolo). Defaults to apply. */
+  private approvalMode: string = "apply";
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly secrets: vscode.SecretStorage,
@@ -258,10 +267,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     this.currentChatId = this.generateChatId();
 
     // Restore agent config from globalState
-    const savedConfig = this.globalState.get<AgentConfig>("dantecode.agentConfig");
+    const savedConfig = this.globalState.get<Partial<AgentConfig>>("dantecode.agentConfig");
     if (savedConfig) {
-      this.agentConfig = { ...DEFAULT_AGENT_CONFIG, ...savedConfig };
+      this.agentConfig = normalizeAgentConfig(savedConfig);
     }
+
+    // Restore approval mode from globalState
+    this.approvalMode = this.globalState.get<string>("dantecode.approvalMode", "apply");
 
     // Register virtual document provider for diff "before" content
     vscode.workspace.registerTextDocumentContentProvider("dantecode-diff", {
@@ -509,7 +521,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
     // Resolve agent mode settings
-    const { agentMode, permissions, runUntilComplete } = this.agentConfig;
+    const { agentMode, runUntilComplete } = this.agentConfig;
+    const approvalGateway = createAgentApprovalGateway(agentMode);
     // Dynamic round budget: pipeline workflows (/magic, /autoforge, /party) can
     // request more rounds via requiredRounds. YOLO mode gets 50, runUntilComplete
     // gets 30, pipeline gets its requested budget, otherwise use the user's setting.
@@ -519,6 +532,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         ? Math.max(pipelineRounds, 50)
         : agentMode === "yolo"
           ? 50
+          : agentMode === "autoforge"
+            ? Math.max(this.agentConfig.maxToolRounds, 30)
           : runUntilComplete
             ? 30
             : this.agentConfig.maxToolRounds;
@@ -596,7 +611,25 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       );
       systemParts.push("Do NOT write, edit, or execute any commands. Analyze and plan only.");
       systemParts.push(
-        "Present a detailed implementation plan the user can approve before switching to Build mode.",
+        "Present a detailed implementation plan the user can approve before switching to a write-capable mode.",
+      );
+      systemParts.push("");
+    } else if (agentMode === "review") {
+      systemParts.push("## Mode: REVIEW");
+      systemParts.push(
+        "You can execute the task, but workspace mutations, shell execution, and subagents require explicit operator approval.",
+      );
+      systemParts.push(
+        "Inspect what you need, then emit the necessary tool calls instead of only describing the work.",
+      );
+      systemParts.push("");
+    } else if (agentMode === "autoforge") {
+      systemParts.push("## Mode: AUTOFORGE");
+      systemParts.push(
+        "Execute the task end-to-end with strong autonomy. File edits can proceed directly, but shell, git, and subagent actions still require approval.",
+      );
+      systemParts.push(
+        "Plan briefly, then keep moving through tool rounds until the task is complete or a real blocker is confirmed.",
       );
       systemParts.push("");
     } else if (agentMode === "yolo") {
@@ -622,12 +655,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       );
       systemParts.push("");
     } else {
-      systemParts.push("## Mode: BUILD");
+      systemParts.push("## Mode: APPLY");
       systemParts.push(
         "When the user asks you to build, implement, or fix something, USE tools immediately.",
       );
       systemParts.push(
         "Do NOT just describe what you would do. Actually do it with <tool_use> blocks.",
+      );
+      systemParts.push(
+        "File edits can proceed directly, but shell, git, and subagent actions still require approval.",
       );
       if (runUntilComplete) {
         systemParts.push(
@@ -723,7 +759,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     systemParts.push(`Co-Authored-By: DanteCode (${modelLabel}) <noreply@dantecode.dev>`);
     systemParts.push("");
 
-    systemParts.push(getToolDefinitionsPrompt());
+    systemParts.push(getToolDefinitionsPrompt(this.approvalMode));
 
     // Inject workspace context so the model knows about the open project
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -787,17 +823,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         } else {
           if (stagedCount > 0) {
             systemParts.push(
-              `**Staged (${stagedCount}):** ${gitStatus.staged.map((e) => e.path).join(", ")}`,
+              `**Staged (${stagedCount}):** ${gitStatus.staged.map((e: { path: string }) => e.path).join(", ")}`,
             );
           }
           if (unstagedCount > 0) {
             systemParts.push(
-              `**Modified (${unstagedCount}):** ${gitStatus.unstaged.map((e) => e.path).join(", ")}`,
+              `**Modified (${unstagedCount}):** ${gitStatus.unstaged.map((e: { path: string }) => e.path).join(", ")}`,
             );
           }
           if (untrackedCount > 0) {
             systemParts.push(
-              `**Untracked (${untrackedCount}):** ${gitStatus.untracked.map((e) => e.path).join(", ")}`,
+              `**Untracked (${untrackedCount}):** ${gitStatus.untracked.map((e: { path: string }) => e.path).join(", ")}`,
             );
           }
         }
@@ -915,7 +951,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // D6: Select model tier before each request
         const tier = router.selectTier({
           estimatedInputTokens: router.estimateTokens(agentMessages.map((m) => m.content).join("")),
-          taskType: agentMode === "yolo" ? "autoforge" : "chat",
+          taskType: agentMode === "yolo" || agentMode === "autoforge" ? "autoforge" : "chat",
           consecutiveGstackFailures: 0,
           filesInScope: touchedFiles.length,
           forceCapable: false,
@@ -1180,7 +1216,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             continue;
           }
-          const isExecutionMode = agentMode === "yolo" || agentMode === "build";
+          const isExecutionMode = isExecutionAgentMode(agentMode);
           const needsExecutionNudge =
             isExecutionMode &&
             executedToolsThisTurn === 0 &&
@@ -1283,6 +1319,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
 
           this.messages.push({ role: "assistant", content: fullResponse });
+          this.reconcileClaimedFileWrites(
+            fullResponse,
+            touchedFiles,
+            projectRoot,
+            isPipelineWorkflow,
+          );
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
           if (roundNumber <= 1) {
@@ -1325,27 +1367,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             },
           });
 
-          // Mode-aware tool filtering
-          const isWriteTool = toolCall.name === "Write" || toolCall.name === "Edit";
-          const isBashTool = toolCall.name === "Bash";
+          const modeCheck = approvalGateway.check(toolCall.name, toolCall.input);
+          if (modeCheck.decision === "auto_deny") {
+            toolResultParts.push(
+              `Tool "${toolCall.name}" blocked: ${modeCheck.reason ?? "Approval mode denied the tool call."}`,
+            );
+            continue;
+          }
 
-          if (agentMode === "plan" && !PLAN_MODE_TOOLS.has(toolCall.name)) {
+          const toolAccess = evaluateAgentToolAccess(this.agentConfig, toolCall.name);
+          if (toolAccess.decision === "deny") {
             toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: Plan mode only allows read-only tools.`,
+              `Tool "${toolCall.name}" blocked: ${toolAccess.reasons[0] ?? "Permissions denied the tool call."}`,
             );
             continue;
           }
-          if (permissions.edit === "deny" && isWriteTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: File editing is denied by permissions.`,
+
+          const approvalReasons: string[] = [];
+          if (modeCheck.decision === "requires_approval") {
+            approvalReasons.push(
+              modeCheck.reason ?? `Mode ${agentMode} requires operator approval for this tool.`,
             );
-            continue;
           }
-          if (permissions.bash === "deny" && isBashTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`,
+          if (toolAccess.decision === "ask") {
+            approvalReasons.push(...toolAccess.reasons);
+          }
+          if (approvalReasons.length > 0) {
+            const approved = await this.requestToolApproval(
+              toolCall.name,
+              this.summarizeToolInput(toolCall.name, toolCall.input),
+              approvalReasons,
             );
-            continue;
+            if (!approved) {
+              toolResultParts.push(
+                `Tool "${toolCall.name}" blocked: operator denied approval.`,
+              );
+              continue;
+            }
+            approvalGateway.approveToolCall(toolCall.name, toolCall.input);
           }
 
           // Write size guard: block large Write payloads on existing files (force Edit).
@@ -1533,7 +1592,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           };
           let result: ToolResult;
           try {
-            result = await executeTool(toolCall.name, toolCall.input, projectRoot, toolContext);
+            result = await executeTool(
+              toolCall.name,
+              toolCall.input,
+              projectRoot,
+              toolContext,
+              this.approvalMode,
+            );
           } finally {
             clearInterval(heartbeat);
           }
@@ -2066,23 +2131,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // --------------------------------------------------------------------------
 
   private async handleSaveAgentConfig(partial: Partial<AgentConfig>): Promise<void> {
-    // Merge incoming values
-    if (partial.agentMode) this.agentConfig.agentMode = partial.agentMode;
-    if (partial.permissions) {
-      this.agentConfig.permissions = { ...this.agentConfig.permissions, ...partial.permissions };
-    }
-    if (typeof partial.maxToolRounds === "number")
-      this.agentConfig.maxToolRounds = partial.maxToolRounds;
-    if (typeof partial.runUntilComplete === "boolean")
-      this.agentConfig.runUntilComplete = partial.runUntilComplete;
-    if (typeof partial.showLiveDiffs === "boolean")
-      this.agentConfig.showLiveDiffs = partial.showLiveDiffs;
+    this.agentConfig = normalizeAgentConfig({
+      ...this.agentConfig,
+      ...partial,
+      permissions: partial.permissions
+        ? { ...this.agentConfig.permissions, ...partial.permissions }
+        : this.agentConfig.permissions,
+    });
 
-    // Apply YOLO presets
-    if (this.agentConfig.agentMode === "yolo") {
-      this.agentConfig.permissions = { edit: "allow", bash: "allow", tools: "allow" };
-      this.agentConfig.maxToolRounds = 50;
-      this.agentConfig.runUntilComplete = true;
+    // Update approval mode if provided
+    if (partial.agentMode) {
+      this.approvalMode = partial.agentMode;
+      await this.globalState.update("dantecode.approvalMode", this.approvalMode);
     }
 
     // Persist to globalState
@@ -2115,6 +2175,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       type: "mode_update",
       payload: { mode: this.agentConfig.agentMode },
     });
+  }
+
+  private async requestToolApproval(
+    toolName: string,
+    summary: string,
+    reasons: string[],
+  ): Promise<boolean> {
+    const detail = reasons.join("\n- ");
+    const selection = await vscode.window.showWarningMessage(
+      `DanteCode wants to run ${toolName}${summary ? ` ${summary}` : ""}.\n\n- ${detail}`,
+      { modal: true },
+      "Allow once",
+      "Block",
+    );
+    return selection === "Allow once";
   }
 
   // --------------------------------------------------------------------------
@@ -2400,6 +2475,49 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       payload: { model: this.currentModel },
     });
     this.hostCallbacks.onModelChange?.(this.currentModel);
+  }
+
+  private reconcileClaimedFileWrites(
+    fullResponse: string,
+    touchedFiles: string[],
+    projectRoot: string,
+    isPipelineWorkflow: boolean,
+  ): void {
+    if (touchedFiles.length === 0) {
+      return;
+    }
+
+    const claimedFiles = extractClaimedFiles(fullResponse).map((filePath) =>
+      normalizeMutationPath(filePath, projectRoot),
+    );
+    if (claimedFiles.length === 0) {
+      return;
+    }
+
+    const actualFiles = touchedFiles.map((filePath) => normalizeMutationPath(filePath, projectRoot));
+    const mutationScope = assessMutationScope({
+      actualFiles,
+      claimedFiles,
+    });
+    const scopeSummary = summarizeMutationScope(mutationScope);
+    if (!scopeSummary || mutationScope.unverifiedClaims.length === 0) {
+      return;
+    }
+
+    const tag = isPipelineWorkflow ? "confab-block" : "confab-diff";
+    this.postMessage({
+      type: "chat_response_chunk",
+      payload: {
+        chunk: `\n\n---\n> **${tag}** ${scopeSummary}\n\n`,
+        partial: "",
+      },
+    });
+    this.messages.push({
+      role: "assistant",
+      content:
+        `WARNING: I claimed changes to ${mutationScope.unverifiedClaims.length} file(s) that were not actually written: ` +
+        `${mutationScope.unverifiedClaims.join(", ")}. These claims are retracted.`,
+    });
   }
 
   /** Send memory info (lesson count + session count) to the webview. */
@@ -3510,17 +3628,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       letter-spacing: 0.5px;
     }
     .mode-badge.plan { background: var(--vscode-charts-blue); color: #fff; }
-    .mode-badge.build { background: var(--vscode-charts-green); color: #fff; }
+    .mode-badge.review { background: var(--vscode-charts-yellow, #d4a017); color: #1a1a1a; }
+    .mode-badge.apply { background: var(--vscode-charts-green); color: #fff; }
+    .mode-badge.autoforge { background: var(--vscode-charts-purple, #7c5cff); color: #fff; }
     .mode-badge.yolo { background: var(--vscode-charts-orange, #e8912d); color: #fff; }
 
     /* ---- Mode Selector (in settings) ---- */
     .mode-selector {
       display: flex;
+      flex-wrap: wrap;
       gap: 4px;
       margin-bottom: 8px;
     }
     .mode-btn {
-      flex: 1;
+      flex: 1 1 calc(33.33% - 4px);
       padding: 8px 4px;
       font-size: 11px;
       font-weight: 600;
@@ -3627,7 +3748,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <div class="header">
     <div class="header-left">
       <span class="header-title">DanteCode Chat</span>
-      <span class="mode-badge build" id="mode-badge">BUILD</span>
+      <span class="mode-badge apply" id="mode-badge">APPLY</span>
       <span class="pdse-badge" id="pdse-badge">
         PDSE: <span id="pdse-score">--</span>
       </span>
@@ -3694,9 +3815,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             <span class="mode-icon">&#128270;</span>Plan
             <span class="mode-desc">Read-only analysis</span>
           </button>
-          <button class="mode-btn active" data-mode="build">
-            <span class="mode-icon">&#128736;</span>Build
-            <span class="mode-desc">Edit with permissions</span>
+          <button class="mode-btn" data-mode="review">
+            <span class="mode-icon">&#128269;</span>Review
+            <span class="mode-desc">Ask before changes</span>
+          </button>
+          <button class="mode-btn active" data-mode="apply">
+            <span class="mode-icon">&#128736;</span>Apply
+            <span class="mode-desc">Edit, gate shell</span>
+          </button>
+          <button class="mode-btn" data-mode="autoforge">
+            <span class="mode-icon">&#129302;</span>Autoforge
+            <span class="mode-desc">Strong autonomy</span>
           </button>
           <button class="mode-btn" data-mode="yolo">
             <span class="mode-icon">&#9889;</span>YOLO
@@ -3710,7 +3839,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       <!-- Permissions -->
       <div class="settings-section" id="permissions-section">
         <h4>Permissions</h4>
-        <p>Control what the agent can do. YOLO mode overrides all to "allow".</p>
+        <p>Control what the agent can do. Modes can still add stronger approval gates.</p>
         <div class="perm-row">
           <span class="perm-label">File Edit (Write/Edit)</span>
           <select class="perm-select" id="perm-edit" data-perm="edit">
@@ -3833,7 +3962,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       let currentAssistantEl = null;
       var streamBuffer = ''; // accumulates all content for current assistant message
       var pendingImagePreviews = []; // { dataUrl, fileName }
-      var currentAgentMode = 'build';
+      var currentAgentMode = 'apply';
+
+      function applyModeLocks(mode) {
+        var isYolo = mode === 'yolo';
+        var isPlan = mode === 'plan';
+        permEdit.disabled = isYolo || isPlan;
+        permBash.disabled = isYolo || isPlan;
+        permTools.disabled = isYolo;
+      }
 
       // ---- Toast ----
       function showToast(msg, durationMs) {
@@ -4071,6 +4208,22 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       });
 
       // ---- Settings ----
+      // ---- Mode Badge (click to change mode) ----
+      if (modeBadge) {
+        modeBadge.addEventListener('click', function() {
+          vscode.postMessage({ type: 'open_settings', payload: {} });
+          settingsOverlay.classList.add('visible');
+          // Auto-scroll to mode selector
+          setTimeout(function() {
+            if (modeSelector) {
+              modeSelector.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 100);
+        });
+        modeBadge.style.cursor = 'pointer';
+        modeBadge.title = 'Click to change mode';
+      }
+
       document.getElementById('btn-settings').addEventListener('click', function() {
         vscode.postMessage({ type: 'open_settings', payload: {} });
         settingsOverlay.classList.add('visible');
@@ -4081,6 +4234,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       });
 
       // ---- Agent Mode selector ----
+      function updateModeBadge(mode) {
+        if (!modeBadge) return;
+        modeBadge.className = 'mode-badge ' + mode;
+        modeBadge.textContent = mode.toUpperCase();
+      }
+
       modeSelector.addEventListener('click', function(e) {
         var btn = e.target.closest('.mode-btn');
         if (!btn) return;
@@ -4091,21 +4250,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         modeSelector.querySelectorAll('.mode-btn').forEach(function(b) { b.classList.remove('active'); });
         btn.classList.add('active');
         currentAgentMode = mode;
+        updateModeBadge(mode);
 
-        // In YOLO mode, force all permissions to allow and disable dropdowns
         if (mode === 'yolo') {
           permEdit.value = 'allow'; permBash.value = 'allow'; permTools.value = 'allow';
-          permEdit.disabled = true; permBash.disabled = true; permTools.disabled = true;
           toggleRunComplete.checked = true;
-        } else {
-          permEdit.disabled = false; permBash.disabled = false; permTools.disabled = false;
-        }
-
-        // In Plan mode, force edit+bash to deny
-        if (mode === 'plan') {
+        } else if (mode === 'plan') {
           permEdit.value = 'deny'; permBash.value = 'deny';
-          permEdit.disabled = true; permBash.disabled = true;
+        } else if (mode === 'autoforge') {
+          toggleRunComplete.checked = true;
         }
+        applyModeLocks(mode);
 
         // Save
         vscode.postMessage({
@@ -4662,7 +4817,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
           case 'agent_config_data':
             var cfg = message.payload.config || {};
-            currentAgentMode = cfg.agentMode || 'build';
+            currentAgentMode = cfg.agentMode || 'apply';
             // Update mode selector buttons
             modeSelector.querySelectorAll('.mode-btn').forEach(function(b) {
               b.classList.toggle('active', b.dataset.mode === currentAgentMode);
@@ -4676,16 +4831,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             // Update toggles
             toggleRunComplete.checked = !!cfg.runUntilComplete;
             toggleLiveDiffs.checked = cfg.showLiveDiffs !== false; // default true
-            // Disable controls based on mode
-            var isYolo = currentAgentMode === 'yolo';
-            var isPlan = currentAgentMode === 'plan';
-            permEdit.disabled = isYolo || isPlan;
-            permBash.disabled = isYolo || isPlan;
-            permTools.disabled = isYolo;
+            applyModeLocks(currentAgentMode);
             break;
 
           case 'mode_update':
-            var m = message.payload.mode || 'build';
+            var m = message.payload.mode || 'apply';
             modeBadge.textContent = m.toUpperCase();
             modeBadge.className = 'mode-badge ' + m;
             break;

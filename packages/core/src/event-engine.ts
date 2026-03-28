@@ -12,6 +12,7 @@ import {
   type RuntimeEvent,
   type RuntimeEventKind,
 } from "@dantecode/runtime-spine";
+import type { DurableEventStore } from "./durable-event-store.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,6 +101,8 @@ export interface EventEngineOptions {
   maxQueueSize?: number;
   /** Maximum retry attempts per event before it is dropped. Default: 3. */
   maxAttempts?: number;
+  /** Optional durable event store for persistence. */
+  eventStore?: DurableEventStore;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,13 +142,15 @@ export class EventEngine {
   private readonly workflows: Map<string, WorkflowDefinition> = new Map();
   private readonly queue: EventQueueEntry[] = [];
   private readonly processedEvents: DanteEvent[] = [];
-  private readonly options: Required<EventEngineOptions>;
+  private readonly options: Required<Omit<EventEngineOptions, "eventStore">>;
+  private readonly eventStore?: DurableEventStore;
 
   constructor(options: EventEngineOptions = {}) {
     this.options = {
       maxQueueSize: options.maxQueueSize ?? 1000,
       maxAttempts: options.maxAttempts ?? 3,
     };
+    this.eventStore = options.eventStore;
   }
 
   // -------------------------------------------------------------------------
@@ -277,10 +282,7 @@ export class EventEngine {
    *
    * If the queue is at capacity the event is still returned but not enqueued.
    */
-  enqueueRuntimeEvent(
-    runtimeEvent: RuntimeEvent,
-    source = "runtime",
-  ): RuntimeBackedDanteEvent {
+  enqueueRuntimeEvent(runtimeEvent: RuntimeEvent, source = "runtime"): RuntimeBackedDanteEvent {
     const event = this.createRuntimeEvent(runtimeEvent, source);
 
     if (this.queue.length < this.options.maxQueueSize) {
@@ -294,6 +296,26 @@ export class EventEngine {
     }
 
     return event;
+  }
+
+  /**
+   * Emit a runtime event to the event store (if configured).
+   *
+   * This method persists the event to durable storage without enqueueing it
+   * for workflow processing. Use this for audit trails and replay capabilities.
+   *
+   * @returns The event ID from the store, or undefined if no store configured
+   */
+  async emit(runtimeEvent: RuntimeEvent): Promise<number | undefined> {
+    if (!this.eventStore) return undefined;
+    return await this.eventStore.append(runtimeEvent);
+  }
+
+  /**
+   * Get the configured event store (if any).
+   */
+  getEventStore(): DurableEventStore | undefined {
+    return this.eventStore;
   }
 
   // -------------------------------------------------------------------------

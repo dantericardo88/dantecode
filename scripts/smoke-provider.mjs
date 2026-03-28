@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuildArtifacts, getCatalogPackageById } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, "..");
@@ -88,9 +89,7 @@ function normalizeOutput(text) {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-if (!existsSync(coreEntry)) {
-  throw new Error(`Built core entry not found at ${coreEntry}. Run "npm run build" first.`);
-}
+ensureBuildArtifacts(repoRoot, [getCatalogPackageById(repoRoot, "core")]);
 
 const args = parseArgs(process.argv);
 const provider = findAvailableProvider(args.provider);

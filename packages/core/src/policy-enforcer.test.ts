@@ -382,4 +382,92 @@ describe("PolicyEnforcer", () => {
     // applyPolicySet using old set id should fail (policySets cleared).
     expect(() => enforcer.applyPolicySet(set.id)).toThrow(/unknown policy set/i);
   });
+
+  it("enforces task boundary rules for observe-only and diagnose-only without mocks", () => {
+    const enforcer = new PolicyEnforcer();
+    const obsReq: PolicyRequest = {
+      resourceType: "file",
+      resource: "src/foo.ts",
+      action: "write",
+      metadata: { taskMode: "observe-only" },
+    };
+    let decision = enforcer.evaluate(obsReq);
+    expect(decision.effect).toBe("deny");
+    expect(decision.matchedRules.some((r) => r.id.includes("taskmode"))).toBe(true);
+    expect(decision.reasons.some((r) => r.includes("taskMode") || r.includes("boundary"))).toBe(
+      true,
+    );
+
+    const diagReq: PolicyRequest = {
+      resourceType: "tool",
+      resource: "Edit",
+      action: "execute",
+      metadata: { taskMode: "diagnose-only" },
+    };
+    decision = enforcer.evaluate(diagReq);
+    expect(decision.effect).toBe("deny");
+    expect(
+      decision.matchedRules.some((r) => r.id.includes("taskmode-deny-mutation-diagnose")),
+    ).toBe(true);
+
+    const runReq: PolicyRequest = {
+      resourceType: "file",
+      resource: "src/foo.ts",
+      action: "write",
+      metadata: { taskMode: "run-only" },
+    };
+    decision = enforcer.evaluate(runReq);
+    expect(decision.effect).toBe("deny");
+
+    const noEditReq: PolicyRequest = {
+      resourceType: "tool",
+      resource: "Edit",
+      action: "edit",
+      metadata: { taskMode: "run-only" },
+    };
+    expect(enforcer.evaluate(noEditReq).effect).toBe("deny");
+
+    const noBuildReq: PolicyRequest = {
+      resourceType: "command",
+      resource: "npm run build",
+      action: "exec",
+      metadata: { taskMode: "run-only" },
+    };
+    expect(enforcer.evaluate(noBuildReq).effect).toBe("deny");
+
+    const noFallbackReq: PolicyRequest = {
+      resourceType: "tool",
+      resource: "fallback",
+      action: "execute",
+      metadata: { taskMode: "diagnose-only" },
+    };
+    expect(enforcer.evaluate(noFallbackReq).effect).toBe("deny");
+
+    const noBranchReq: PolicyRequest = {
+      resourceType: "command",
+      resource: "git checkout -b newbranch",
+      action: "exec",
+      metadata: { permission: "none" },
+    };
+    expect(enforcer.evaluate(noBranchReq).effect).toBe("deny");
+
+    const normalReq: PolicyRequest = {
+      resourceType: "file",
+      resource: "src/foo.ts",
+      action: "write",
+      metadata: {},
+    };
+    expect(enforcer.evaluate(normalReq).effect).toBe("allow");
+
+    enforcer.setTaskMode("run-only");
+    const setModeReq: PolicyRequest = {
+      resourceType: "file",
+      resource: "src/foo.ts",
+      action: "write",
+    };
+    decision = enforcer.evaluate(setModeReq);
+    expect(decision.effect).toBe("deny");
+    expect(decision.matchedRules.some((r) => r.id.includes("taskmode"))).toBe(true);
+    enforcer.setTaskMode(null);
+  });
 });

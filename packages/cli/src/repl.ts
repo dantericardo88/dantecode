@@ -163,9 +163,9 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
     : undefined;
   // Lazy-init gaslight on first prompt submission (sync construction, no delay)
   agentConfig.gaslight = getOrInitGaslight(replState);
-  // Wire replState for /think override and reasoning feedback loop
   agentConfig.replState = replState;
   agentConfig.planModeActive = replState.planMode && !replState.planApproved;
+  agentConfig.taskMode = replState.taskMode ?? undefined;
 }
 
 // ----------------------------------------------------------------------------
@@ -309,6 +309,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     waveState: null,
     gaslight: null, // lazy-init: created on first prompt or /gaslight command
     memoryOrchestrator: null, // lazy-init: created on first /memory or /compact command
+    semanticIndex: null, // eager-init: started below in background
     modelAdaptationStore: null, // D-12: lazy-init below
     verificationTrendTracker: null, // lazy-init: created on first PDSE recording or /trend command
     lastSessionPdseResults: [],
@@ -323,6 +324,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "review",
+    taskMode: null,
     macroRecording: false,
     macroRecordingName: null,
     macroRecordingSteps: [],
@@ -372,6 +374,48 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // DanteMemory: deferred to first use via getOrInitMemory() in lazy-init.ts.
   // /memory and /compact call it lazily; null until then.
+
+  // Background Semantic Index: Start indexing in background (non-blocking)
+  try {
+    const { BackgroundSemanticIndex } = await import("@dantecode/core");
+    const semanticIndex = new BackgroundSemanticIndex({
+      projectRoot: options.projectRoot,
+      sessionId: session.id,
+    });
+    replState.semanticIndex = semanticIndex;
+    // Non-blocking: start returns immediately, indexing happens in background
+    await semanticIndex.start();
+  } catch {
+    // Non-fatal — semantic index is optional
+  }
+
+  // Wave 2: Scan for stale sessions on startup and offer recovery if found
+  if (!options.silent) {
+    try {
+      const { RecoveryManager } = await import("@dantecode/core");
+      const recoveryManager = new RecoveryManager({ projectRoot: options.projectRoot });
+      const staleSessions = await recoveryManager.scanStaleSessions();
+
+      if (staleSessions.length > 0) {
+        const resumable = staleSessions.filter((s) => s.status === "resumable");
+        const stale = staleSessions.filter((s) => s.status === "stale");
+        const corrupt = staleSessions.filter((s) => s.status === "corrupt");
+
+        if (resumable.length > 0 || stale.length > 0) {
+          process.stdout.write(
+            `\n${DIM}Found ${resumable.length} resumable and ${stale.length} stale session(s).${RESET}\n` +
+              `${DIM}Use /recover to review and restore sessions.${RESET}\n`,
+          );
+        }
+
+        if (corrupt.length > 0 && options.verbose) {
+          process.stdout.write(`${DIM}Note: ${corrupt.length} corrupt session(s) detected.${RESET}\n`);
+        }
+      }
+    } catch {
+      // Non-fatal — recovery scanning is optional
+    }
+  }
 
   // --continue / -C: restore the most recent session from disk
   if (options.resumeFromLastSession) {
@@ -456,6 +500,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     tokensUsed: 0,
     sandboxMode,
     sessionName: options.sessionName ?? session.id.slice(0, 8),
+    approvalMode: replState.approvalMode,
   };
   const statusBar = new StatusBar(initialStatusBarState, themeEngine);
 
@@ -566,7 +611,15 @@ export async function startRepl(options: ReplOptions): Promise<void> {
               (s, m) => s + (m.tokensUsed ?? 0),
               0,
             );
-            statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+            const indexReadiness = replState.semanticIndex?.getReadiness();
+            statusBar.update({
+              tokensUsed: totalTokens,
+              elapsedMs: Date.now() - sessionStartMs,
+              approvalMode: replState.approvalMode,
+              indexReadiness: indexReadiness
+                ? { status: indexReadiness.status, progress: indexReadiness.progress }
+                : undefined,
+            });
             rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
             statusBar.draw();
           });
@@ -595,7 +648,15 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     await processInput(line, replState, agentConfig, rl, () => {
       currentRoundCount++;
       const totalTokens = replState.session.messages.reduce((s, m) => s + (m.tokensUsed ?? 0), 0);
-      statusBar.update({ tokensUsed: totalTokens, elapsedMs: Date.now() - sessionStartMs });
+      const indexReadiness = replState.semanticIndex?.getReadiness();
+      statusBar.update({
+        tokensUsed: totalTokens,
+        elapsedMs: Date.now() - sessionStartMs,
+        approvalMode: replState.approvalMode,
+        indexReadiness: indexReadiness
+          ? { status: indexReadiness.status, progress: indexReadiness.progress }
+          : undefined,
+      });
       rl.setPrompt(buildCurrentPrompt(currentRoundCount, currentPdseScore));
       statusBar.draw();
     });
@@ -711,21 +772,42 @@ async function processInput(
       if (replState.pendingAgentPrompt) {
         const agentPrompt = replState.pendingAgentPrompt;
         replState.pendingAgentPrompt = null;
+        const lower = agentPrompt.toLowerCase();
+        if (
+          lower.includes("observe only") ||
+          lower.includes("run and observe") ||
+          lower.includes("run and observe only")
+        ) {
+          replState.taskMode = "observe-only";
+        } else if (lower.includes("diagnose only") || lower.includes("diagnose-only")) {
+          replState.taskMode = "diagnose-only";
+        }
         syncAgentLoopConfig(replState, agentConfig);
         replState.activeAbortController = new AbortController();
         agentConfig.abortSignal = replState.activeAbortController.signal;
         replState.session = await runAgentLoop(agentPrompt, replState.session, agentConfig);
+        replState.taskMode = null;
         replState.pendingResumeRunId = null;
         replState.pendingExpectedWorkflow = null;
         replState.pendingWorkflowContext = null;
         replState.activeAbortController = null;
       }
     } else {
-      // Route to agent loop
+      const lower = input.toLowerCase();
+      if (
+        lower.includes("observe only") ||
+        lower.includes("run and observe") ||
+        lower.includes("run and observe only")
+      ) {
+        replState.taskMode = "observe-only";
+      } else if (lower.includes("diagnose only") || lower.includes("diagnose-only")) {
+        replState.taskMode = "diagnose-only";
+      }
       syncAgentLoopConfig(replState, agentConfig);
       replState.activeAbortController = new AbortController();
       agentConfig.abortSignal = replState.activeAbortController.signal;
       replState.session = await runAgentLoop(input, replState.session, agentConfig);
+      replState.taskMode = null;
       replState.pendingResumeRunId = null;
       replState.pendingExpectedWorkflow = null;
       replState.pendingWorkflowContext = null;

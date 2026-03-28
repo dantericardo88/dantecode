@@ -32,6 +32,7 @@ export interface ReadinessSnapshot {
 export interface OperatorStatusSnapshot {
   approvalMode: string;
   planMode: boolean;
+  taskMode: string | null;
   currentPlanId: string | null;
   currentPlanStatus: string | null;
   currentPlanGoal: string | null;
@@ -176,13 +177,14 @@ export async function buildCliOperatorStatus(state: ReplState): Promise<Operator
   return {
     approvalMode: String(state.approvalMode),
     planMode: state.planMode,
+    taskMode: state.taskMode ?? null,
     currentPlanId: state.currentPlanId ?? currentPlan?.id ?? null,
     currentPlanStatus:
       state.currentPlan != null
         ? state.planApproved
           ? "approved"
           : "draft"
-        : currentPlan?.status ?? null,
+        : (currentPlan?.status ?? null),
     currentPlanGoal: state.currentPlan?.goal ?? currentPlan?.plan.goal ?? null,
     currentRunId: state.pendingResumeRunId ?? latestPausedRun?.id ?? null,
     latestPausedDurableRun: toDurableRunSnapshot(
@@ -228,7 +230,10 @@ export async function buildServeOperatorStatus(options: {
 
   return {
     approvalMode: latestSession?.mode ?? "review",
-    planMode: Boolean(currentPlan && ["draft", "approved", "executing"].includes(currentPlan.status)),
+    planMode: Boolean(
+      currentPlan && ["draft", "approved", "executing"].includes(currentPlan.status),
+    ),
+    taskMode: null,
     currentPlanId: currentPlan?.id ?? null,
     currentPlanStatus: currentPlan?.status ?? null,
     currentPlanGoal: currentPlan?.plan.goal ?? null,
@@ -237,7 +242,9 @@ export async function buildServeOperatorStatus(options: {
       latestPausedRun as unknown as Record<string, unknown> | null,
     ),
     contextUtilization:
-      messages.length > 0 ? getContextUtilization(messages, 131072) : createDefaultContextUtilization(),
+      messages.length > 0
+        ? getContextUtilization(messages, 131072)
+        : createDefaultContextUtilization(),
     lastRestoreEvent: null,
     lastPdseSummary: null,
     readiness: await readReadinessSnapshot(options.projectRoot),

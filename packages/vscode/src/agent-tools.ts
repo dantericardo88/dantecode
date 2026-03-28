@@ -17,6 +17,9 @@ import {
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
   resolvePreferredShell,
+  getModeToolExclusions,
+  normalizeApprovalMode,
+  type CanonicalApprovalMode,
 } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
@@ -84,7 +87,8 @@ const SANDBOX_BLOCKED_PATTERNS = [
  * Returns true if the given file path targets DanteCode's own source files,
  * configuration, or constitutional documents.
  *
- * This guard is ALWAYS active regardless of agent mode (plan/build/yolo).
+ * This guard is ALWAYS active regardless of agent mode
+ * (plan/review/apply/autoforge/yolo).
  * It fires before ANY Write or Edit tool dispatch.
  *
  * @param filePath - The file path the agent wants to write (relative or absolute)
@@ -633,7 +637,20 @@ export async function executeTool(
   input: Record<string, unknown>,
   projectRoot: string,
   context?: ToolExecutionContext,
+  mode?: CanonicalApprovalMode | string,
 ): Promise<ToolResult> {
+  // Mode-based tool enforcement: reject excluded tools at runtime
+  if (mode) {
+    const canonical = normalizeApprovalMode(mode);
+    const exclusions = getModeToolExclusions(canonical);
+    if (exclusions.includes(name)) {
+      return {
+        content: `Error: Tool "${name}" is not available in ${canonical} mode. Switch to apply mode to use mutation tools.`,
+        isError: true,
+      };
+    }
+  }
+
   const filePath = input["file_path"] as string | undefined;
   const isFileOp = name === "Write" || name === "Edit";
 
@@ -989,56 +1006,91 @@ export function extractToolCalls(text: string): {
 // Tool Definitions for System Prompt
 // ----------------------------------------------------------------------------
 
-export function getToolDefinitionsPrompt(): string {
+/**
+ * Returns the tool definitions prompt, filtered by approval mode.
+ * In `plan` and `review` modes, mutation tools (Write, Edit, Bash, GitCommit, GitPush)
+ * are excluded from the system prompt so the model cannot call them.
+ *
+ * @param mode - The approval mode (plan, review, apply, autoforge, yolo, or default)
+ * @returns A string containing tool definitions for the system prompt
+ */
+export function getToolDefinitionsPrompt(mode?: CanonicalApprovalMode | string): string {
+  const canonical = normalizeApprovalMode(mode);
+  const exclusions = getModeToolExclusions(canonical);
+
+  // Define all tools with their descriptions
+  const allTools = [
+    {
+      name: "Read",
+      description: "### Read — Read a file from disk with line numbers\n  Input: { \"file_path\": \"path/to/file\", \"offset\": 0, \"limit\": 2000 }",
+    },
+    {
+      name: "Write",
+      description: "### Write — Write content to a file (creates directories)\n  Input: { \"file_path\": \"path/to/file\", \"content\": \"file content here\" }",
+    },
+    {
+      name: "Edit",
+      description: "### Edit — Replace a string in a file\n  Input: { \"file_path\": \"path/to/file\", \"old_string\": \"text to find\", \"new_string\": \"replacement\" }",
+    },
+    {
+      name: "ListDir",
+      description: "### ListDir — List directory contents\n  Input: { \"path\": \"path/to/dir\" }",
+    },
+    {
+      name: "Bash",
+      description: "### Bash — Execute a shell command\n  Input: { \"command\": \"npm test\", \"timeout\": 30000 }",
+    },
+    {
+      name: "Glob",
+      description: "### Glob — Find files matching a glob pattern\n  Input: { \"pattern\": \"**/*.ts\", \"path\": \"src/\" }",
+    },
+    {
+      name: "Grep",
+      description: "### Grep — Search file contents with regex\n  Input: { \"pattern\": \"function.*export\", \"path\": \"src/\", \"-i\": true, \"head_limit\": 30 }",
+    },
+    {
+      name: "GitCommit",
+      description: "### GitCommit — Stage files and create a git commit\n  Input: { \"message\": \"commit summary\", \"files\": [\"optional/file.ts\"] }",
+    },
+    {
+      name: "GitPush",
+      description: "### GitPush — Push a branch to a remote and verify the remote ref\n  Input: { \"remote\": \"origin\", \"branch\": \"main\", \"set_upstream\": true/false }",
+    },
+    {
+      name: "SelfUpdate",
+      description: "### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)\n  Input: { \"dryRun\": true/false }",
+    },
+  ];
+
+  // Filter tools based on mode
+  const availableTools = allTools.filter((tool) => !exclusions.includes(tool.name));
+
+  const toolDescriptions = availableTools.map((tool) => tool.description).join("\n\n");
+
   return `## Available Tools
 
 You can use the following tools by including <tool_use> blocks in your response.
 Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 
-### Read — Read a file from disk with line numbers
-  Input: { "file_path": "path/to/file", "offset": 0, "limit": 2000 }
-
-### Write — Write content to a file (creates directories)
-  Input: { "file_path": "path/to/file", "content": "file content here" }
-
-### Edit — Replace a string in a file
-  Input: { "file_path": "path/to/file", "old_string": "text to find", "new_string": "replacement" }
-
-### ListDir — List directory contents
-  Input: { "path": "path/to/dir" }
-
-### Bash — Execute a shell command
-  Input: { "command": "npm test", "timeout": 30000 }
-
-### Glob — Find files matching a glob pattern
-  Input: { "pattern": "**/*.ts", "path": "src/" }
-
-### Grep — Search file contents with regex
-  Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }
-
-### GitCommit — Stage files and create a git commit
-  Input: { "message": "commit summary", "files": ["optional/file.ts"] }
-
-### GitPush — Push a branch to a remote and verify the remote ref
-  Input: { "remote": "origin", "branch": "main", "set_upstream": true/false }
-
-### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)
-  Input: { "dryRun": true/false }
+${toolDescriptions}
 
 ## CRITICAL: Tool Execution Rules
-- You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.
+${canonical === "plan" || canonical === "review" ? `- You are in READ-ONLY mode (${canonical}). You can analyze, review, and plan, but NOT make changes.
+- Available tools: Read, Grep, Glob, ListDir only.
+- When asked to implement changes, provide detailed plans and recommendations instead.
+- Focus on analysis, architecture review, and generating implementation guidance.
+` : `- You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.
 - When asked to implement, build, fix, or change code: immediately use Read, Edit, Write, Bash tools.
-- When asked to analyze or review: use Read, Grep, Glob to examine the actual code.
 - Read files BEFORE editing them. Understand context first.
 - Use Edit for small changes, Write for new files or complete rewrites.
-- Use Glob or ListDir to explore the project structure.
-- Use Grep to search for specific code patterns.
 - Use Bash to run tests, type-checks, or build commands to verify changes.
 - Prefer GitCommit over raw Bash git commit commands.
 - Use GitPush when the user explicitly asks you to publish verified commits to a remote.
+`}- When asked to analyze or review: use Read, Grep, Glob to examine the actual code.
+- Use Glob or ListDir to explore the project structure.
+- Use Grep to search for specific code patterns.
 - You can chain multiple tool calls in one response.
 - After tool results come back, analyze them and continue your task.
-- NEVER respond with only a plan or description when the user asks you to build something. Take action immediately.
 
 Example of correct behavior:
 User: "Add a logger to the app"

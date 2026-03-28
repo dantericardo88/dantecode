@@ -1,2 +1,12 @@
-// Direct export for tool-runtime compatibility
-export { DurableRunStore } from "../durable-run-store.js";
+import { DurableRunStore } from "../durable-run-store.js";
+
+let durableRunStoreSingleton: DurableRunStore | null = null;
+
+export function getDurableRunStore(projectRoot: string): DurableRunStore {
+  if (!durableRunStoreSingleton) {
+    durableRunStoreSingleton = new DurableRunStore(projectRoot);
+  }
+  return durableRunStoreSingleton;
+}
+
+export { DurableRunStore };

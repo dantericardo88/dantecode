@@ -99,6 +99,20 @@ export interface RunReportManifestEntry {
   diff?: string;
 }
 
+export interface RunReportSkillExecution {
+  name: string;
+  success: boolean;
+  pdse?: number;
+}
+
+export interface RunReportRepairSummary {
+  lintAttempts: number;
+  testAttempts: number;
+  finalGatePassed: boolean;
+  pdseScore?: number;
+  rollbackOffered: boolean;
+}
+
 export interface RunReport {
   project: string;
   command: string;
@@ -113,6 +127,12 @@ export interface RunReport {
   environment: { nodeVersion: string; os: string };
   /** Cryptographic seal hash from evidence-chain EvidenceSealer. Shown in report footer. */
   sealHash?: string;
+  /** Skills loaded during this run (provenance tracked via events) */
+  skillsLoaded?: string[];
+  /** Skills executed during this run with success/PDSE tracking */
+  skillsExecuted?: RunReportSkillExecution[];
+  /** Summary of repair loop activity (lint → test → final gate) */
+  repairSummary?: RunReportRepairSummary;
 }
 
 const EXECUTION_STAGE_ORDER: RunReportExecutionStage[] = [
@@ -517,7 +537,12 @@ export class RunReportAccumulator {
 
   /** Add files to the global manifest. */
   addToManifest(
-    items: Array<{ action: "created" | "modified" | "deleted"; path: string; lines?: number }>,
+    items: Array<{
+      action: "created" | "modified" | "deleted";
+      path: string;
+      lines?: number;
+      diff?: string;
+    }>,
   ): void {
     this.report.filesManifest.push(...items);
   }

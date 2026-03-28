@@ -5,6 +5,7 @@
 
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, extname } from "node:path";
+import { RepoMapTreeSitter } from "./repo-map-tree-sitter.js";
 
 export interface SymbolDefinition {
   name: string;
@@ -28,6 +29,7 @@ export interface RankedFile {
 export interface RepoMapOptions {
   maxTokenBudget?: number;
   excludePatterns?: string[];
+  useTreeSitter?: boolean;
 }
 
 const SYMBOL_PATTERNS: Array<{
@@ -245,10 +247,14 @@ export async function buildRepoMap(
 ): Promise<RankedFile[]> {
   const excludePatterns = [...DEFAULT_EXCLUDE, ...(options.excludePatterns ?? [])];
   const files = await collectSourceFiles(projectRoot, excludePatterns);
+  const useTreeSitter = options.useTreeSitter ?? true;
 
   const allSymbols = new Map<string, SymbolDefinition[]>();
   const allImports: ImportEdge[] = [];
   const relPaths: string[] = [];
+
+  // Initialize tree-sitter extractor if enabled
+  const treeSitterExtractor = useTreeSitter ? new RepoMapTreeSitter() : null;
 
   for (const fullPath of files) {
     try {
@@ -256,7 +262,10 @@ export async function buildRepoMap(
       const relPath = relative(projectRoot, fullPath);
       relPaths.push(relPath);
 
-      const symbols = extractSymbolDefinitions(content, relPath);
+      // Use tree-sitter if available, otherwise fall back to regex
+      const symbols = treeSitterExtractor
+        ? treeSitterExtractor.extractSymbols(content, relPath)
+        : extractSymbolDefinitions(content, relPath);
       allSymbols.set(relPath, symbols);
 
       const imports = extractImports(content, relPath);

@@ -197,6 +197,7 @@ function makeState(projectRoot: string): ReplState {
     planExecutionInProgress: false,
     planExecutionResult: null,
     approvalMode: "default",
+    taskMode: null,
     macroRecording: false,
     macroRecordingName: null,
     macroRecordingSteps: [],
@@ -260,6 +261,7 @@ describe("/party --autoforge", () => {
       worktreeBranch: "lane-branch",
       targetBranch: "main",
       mergeCommitHash: "abc123",
+      mainBranchClean: true,
     });
     mockRemoveWorktree.mockReturnValue(undefined);
   });
@@ -390,6 +392,30 @@ describe("/party --autoforge", () => {
     expect(output).toContain("run-resume");
     expect(state.pendingAgentPrompt).toBe("continue");
     expect(state.pendingResumeRunId).toBe("run-resume");
+  });
+});
+
+describe("/help progressive disclosure", () => {
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-help-"));
+  });
+
+  it("shows only the tier-1 command surface before unlock", async () => {
+    const state = makeState(projectRoot);
+    state.state.progressiveDisclosure = {
+      unlocked: false,
+    } as DanteCodeState["progressiveDisclosure"];
+
+    const help = await routeSlashCommand("/help", state);
+
+    expect(help).toContain("/help");
+    expect(help).toContain("/plan");
+    expect(help).toContain("/cost");
+    expect(help).not.toContain("/macro");
+    expect(help).not.toMatch(/\/mode\b/);
+    expect(help).toContain("/help --all");
   });
 });
 
@@ -1298,5 +1324,325 @@ describe("/undo, /restore, and /timeline recovery flow", () => {
     );
     expect(output).toContain("before:snap-before-app");
     expect(output).toContain("after:snap-after-app");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// Wave 2 Task 2.6: CLI Resume/Replay/Fork Commands Tests
+// ----------------------------------------------------------------------------
+
+describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-wave2-"));
+    state = makeState(projectRoot);
+
+    // Create checkpoint directory structure
+    const checkpointsDir = join(projectRoot, ".dantecode", "checkpoints");
+    const eventsDir = join(projectRoot, ".dantecode", "events");
+    await mkdir(checkpointsDir, { recursive: true });
+    await mkdir(eventsDir, { recursive: true });
+  });
+
+  // Helper to create a mock checkpoint
+  async function createMockCheckpoint(sessionId: string, options?: {
+    step?: number;
+    eventId?: number;
+    worktreeRef?: string;
+    gitSnapshotHash?: string;
+  }) {
+    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints", sessionId);
+    await mkdir(checkpointDir, { recursive: true });
+
+    const checkpoint = {
+      v: 1,
+      id: `ckpt-${sessionId}`,
+      ts: new Date().toISOString(),
+      step: options?.step ?? 5,
+      channelValues: { test: "value" },
+      channelVersions: { test: 1 },
+      eventId: options?.eventId ?? 10,
+      worktreeRef: options?.worktreeRef,
+      gitSnapshotHash: options?.gitSnapshotHash,
+    };
+
+    const metadata = {
+      source: "input" as const,
+      step: checkpoint.step,
+      parentId: undefined,
+    };
+
+    const checkpointTuple = {
+      checkpoint,
+      metadata,
+      pendingWrites: [],
+    };
+
+    await writeFile(
+      join(checkpointDir, "base_state.json"),
+      JSON.stringify(checkpointTuple, null, 2),
+      "utf-8"
+    );
+
+    return checkpoint;
+  }
+
+  // Helper to create mock event log
+  async function createMockEventLog(sessionId: string, eventCount: number) {
+    const eventLogPath = join(projectRoot, ".dantecode", "events", `${sessionId}.jsonl`);
+    const events: string[] = [];
+
+    for (let i = 1; i <= eventCount; i++) {
+      const event = {
+        id: i,
+        kind: i % 3 === 0 ? "run.tool.completed" : i % 3 === 1 ? "run.tool.started" : "run.checkpoint.saved",
+        timestamp: new Date(Date.now() + i * 1000).toISOString(),
+        payload: { test: `event-${i}` },
+      };
+      events.push(JSON.stringify(event));
+    }
+
+    await writeFile(eventLogPath, events.join("\n") + "\n", "utf-8");
+  }
+
+  describe("/resume-checkpoint", () => {
+    it("lists resumable sessions when no sessionId provided", async () => {
+      const sessionId = "session-abc123";
+      await createMockCheckpoint(sessionId, { step: 3, eventId: 15 });
+      await createMockEventLog(sessionId, 20);
+
+      const output = await routeSlashCommand("/resume-checkpoint", state);
+
+      expect(output).toContain("Resumable Sessions");
+      expect(output).toContain(sessionId.slice(0, 12));
+      expect(output).toContain("step:3");
+      expect(output).toContain("events:15");
+    });
+
+    it("shows usage message when no resumable sessions exist", async () => {
+      const output = await routeSlashCommand("/resume-checkpoint", state);
+
+      expect(output).toContain("No resumable sessions found");
+      expect(output).toContain("/recover list");
+    });
+
+    it("resumes a specific session by full ID", async () => {
+      const sessionId = "session-def456";
+      await createMockCheckpoint(sessionId, { step: 7, eventId: 25 });
+      await createMockEventLog(sessionId, 30);
+
+      const output = await routeSlashCommand(`/resume-checkpoint ${sessionId}`, state);
+
+      expect(output).toContain("Resuming session");
+      expect(output).toContain(sessionId.slice(0, 12));
+      expect(output).toContain("Step:");
+      expect(output).toContain("Events to replay:");
+    });
+
+    it("resumes a session by prefix match", async () => {
+      const sessionId = "session-xyz789";
+      await createMockCheckpoint(sessionId, { step: 2, eventId: 8 });
+      await createMockEventLog(sessionId, 12);
+
+      const output = await routeSlashCommand("/resume-checkpoint session-xyz", state);
+
+      expect(output).toContain("Resuming session");
+      expect(output).toContain(sessionId.slice(0, 12));
+    });
+
+    it("shows checkpoint metadata including worktree ref", async () => {
+      const sessionId = "session-worktree";
+      await createMockCheckpoint(sessionId, {
+        step: 4,
+        eventId: 18,
+        worktreeRef: "refs/heads/feature-branch",
+      });
+      await createMockEventLog(sessionId, 20);
+
+      const output = await routeSlashCommand(`/resume-checkpoint ${sessionId}`, state);
+
+      expect(output).toContain("Worktree:");
+      expect(output).toContain("refs/heads/feature-branch");
+    });
+
+    it("returns error for non-existent session", async () => {
+      const output = await routeSlashCommand("/resume-checkpoint nonexistent", state);
+
+      expect(output).toContain("not found");
+      expect(output).toContain("nonexistent");
+    });
+
+    it("calculates replay event count correctly", async () => {
+      const sessionId = "session-replay-count";
+      await createMockCheckpoint(sessionId, { eventId: 10 });
+      await createMockEventLog(sessionId, 25); // 15 events after checkpoint
+
+      const output = await routeSlashCommand(`/resume-checkpoint ${sessionId}`, state);
+
+      expect(output).toContain("Events to replay: 15");
+    });
+
+    it("lists multiple resumable sessions sorted by time", async () => {
+      await createMockCheckpoint("session-001", { step: 1 });
+      await createMockEventLog("session-001", 5);
+      await createMockCheckpoint("session-002", { step: 2 });
+      await createMockEventLog("session-002", 10);
+      await createMockCheckpoint("session-003", { step: 3 });
+      await createMockEventLog("session-003", 15);
+
+      const output = await routeSlashCommand("/resume-checkpoint", state);
+
+      expect(output).toContain("session-001");
+      expect(output).toContain("session-002");
+      expect(output).toContain("session-003");
+    });
+  });
+
+  describe("/replay", () => {
+    it("displays event timeline for a session", async () => {
+      const sessionId = "session-replay-basic";
+      await createMockEventLog(sessionId, 10);
+
+      const output = await routeSlashCommand(`/replay ${sessionId}`, state);
+
+      expect(output).toContain("Event Replay:");
+      expect(output).toContain(sessionId.slice(0, 12));
+      expect(output).toContain("Total events: 10");
+    });
+
+    it("shows event IDs, timestamps, and kinds", async () => {
+      const sessionId = "session-replay-details";
+      await createMockEventLog(sessionId, 5);
+
+      const output = await routeSlashCommand(`/replay ${sessionId}`, state);
+
+      expect(output).toMatch(/\[\s*1\]/); // Event ID
+      expect(output).toMatch(/run\.tool\./); // Event kind
+      expect(output).toMatch(/\d{1,2}:\d{2}:\d{2}/); // Timestamp
+    });
+
+    it("filters events by single kind", async () => {
+      const sessionId = "session-replay-filter-single";
+      await createMockEventLog(sessionId, 15);
+
+      const output = await routeSlashCommand(`/replay ${sessionId} run.tool.started`, state);
+
+      expect(output).toContain("Filtered by: run.tool.started");
+    });
+
+    it("filters events by multiple kinds", async () => {
+      const sessionId = "session-replay-filter-multi";
+      await createMockEventLog(sessionId, 15);
+
+      const output = await routeSlashCommand(`/replay ${sessionId} run.tool.started run.tool.completed`, state);
+
+      expect(output).toContain("Filtered by: run.tool.started, run.tool.completed");
+    });
+
+    it("limits display to 50 events with overflow message", async () => {
+      const sessionId = "session-replay-overflow";
+      await createMockEventLog(sessionId, 75);
+
+      const output = await routeSlashCommand(`/replay ${sessionId}`, state);
+
+      expect(output).toContain("... and 25 more events");
+    });
+
+    it("returns error when session ID not provided", async () => {
+      const output = await routeSlashCommand("/replay", state);
+
+      expect(output).toContain("Usage:");
+      expect(output).toContain("/replay <sessionId>");
+    });
+
+    it("returns error for non-existent session", async () => {
+      const output = await routeSlashCommand("/replay nonexistent", state);
+
+      expect(output).toContain("No event log found");
+      expect(output).toContain("nonexistent");
+    });
+  });
+
+  describe("/fork", () => {
+    beforeEach(() => {
+      // Mock git branch command
+      mockExecSync.mockImplementation((command: string, args?: string[]) => {
+        if (Array.isArray(args) && args[0] === "branch") {
+          return ""; // Successful branch creation
+        }
+        return "";
+      });
+    });
+
+    it("creates a new branch from checkpoint", async () => {
+      const sessionId = "session-fork-basic";
+      await createMockCheckpoint(sessionId, {
+        step: 5,
+        worktreeRef: "refs/heads/original-branch",
+      });
+
+      const output = await routeSlashCommand(`/fork ${sessionId}`, state);
+
+      expect(output).toContain("Forked session");
+      expect(output).toContain(sessionId.slice(0, 12));
+      expect(output).toContain("New branch:");
+      expect(output).toContain(`fork-${sessionId.slice(0, 8)}`);
+    });
+
+    it("uses checkpoint worktreeRef as base", async () => {
+      const sessionId = "session-fork-worktree";
+      await createMockCheckpoint(sessionId, {
+        worktreeRef: "refs/heads/feature-x",
+      });
+
+      const output = await routeSlashCommand(`/fork ${sessionId}`, state);
+
+      expect(output).toContain("Base ref: refs/heads/feature-x");
+    });
+
+    it("falls back to HEAD when no worktreeRef", async () => {
+      const sessionId = "session-fork-no-ref";
+      await createMockCheckpoint(sessionId, { step: 3 });
+
+      const output = await routeSlashCommand(`/fork ${sessionId}`, state);
+
+      expect(output).toContain("Base ref: HEAD");
+    });
+
+    it("preserves original session as read-only", async () => {
+      const sessionId = "session-fork-preserve";
+      await createMockCheckpoint(sessionId);
+
+      const output = await routeSlashCommand(`/fork ${sessionId}`, state);
+
+      expect(output).toContain("Original session preserved as read-only");
+    });
+
+    it("provides git checkout instructions", async () => {
+      const sessionId = "session-fork-instructions";
+      await createMockCheckpoint(sessionId);
+
+      const output = await routeSlashCommand(`/fork ${sessionId}`, state);
+
+      expect(output).toContain("git checkout");
+      expect(output).toContain(`fork-${sessionId.slice(0, 8)}`);
+    });
+
+    it("returns error when session ID not provided", async () => {
+      const output = await routeSlashCommand("/fork", state);
+
+      expect(output).toContain("Usage:");
+      expect(output).toContain("/fork <sessionId>");
+    });
+
+    it("returns error for non-existent session", async () => {
+      const output = await routeSlashCommand("/fork nonexistent", state);
+
+      expect(output).toContain("Session not found");
+      expect(output).toContain("nonexistent");
+    });
   });
 });

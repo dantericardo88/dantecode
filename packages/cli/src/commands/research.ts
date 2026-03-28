@@ -4,11 +4,20 @@
  * CLI command: dantecode research [--depth=quick|standard|deep] <topic>
  * Also used as the slash command handler for /research.
  */
-import { executeResearch, type ResearchOptions } from "../lib/research-engine.js";
+import type { ResearchOptions } from "../lib/research-engine.js";
 
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
+
+async function executeResearch(
+  topic: string,
+  projectRoot: string,
+  options: ResearchOptions,
+): Promise<string> {
+  const researchEngine = await import("../lib/research-engine.js");
+  return researchEngine.executeResearch(topic, projectRoot, options);
+}
 
 export async function runResearchCommand(subArgs: string[], projectRoot: string): Promise<void> {
   // Strip flags from topic so `--depth=deep` doesn't end up in the search query

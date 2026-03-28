@@ -225,7 +225,6 @@ function buildBuiltinRules(): PolicyRule[] {
       enabled: true,
     },
 
-    // ----- Agent: audit all agent spawning -----------------------------------
     {
       id: "builtin-audit-agent-spawn",
       name: "Audit all agent spawning",
@@ -236,6 +235,99 @@ function buildBuiltinRules(): PolicyRule[] {
       conditions: [{ field: "action", operator: "equals", value: "spawn" }],
       effect: "audit",
       priority: 400,
+      enabled: true,
+    },
+
+    // ----- Task boundary enforcement for observe-only / diagnose-only --------
+    // Rules with high priority (1100) to enforce task boundaries. When
+    // metadata.taskMode (or set via setTaskMode()) is 'observe-only' or
+    // 'diagnose-only', deny modification actions: write, edit, build, fallback,
+    // explore. This prevents the agent from making changes during read-only
+    // or diagnostic phases.
+    {
+      id: "builtin-taskmode-deny-write-observe",
+      name: "Deny writes in observe-only",
+      description:
+        "Blocks write actions when taskMode=observe-only. Part of task " +
+        "boundary enforcement denying write/edit/build/fallback/explore.",
+      resourceType: "file",
+      conditions: [
+        { field: "taskMode", operator: "matches", value: "(run-only|observe-only)" },
+        { field: "action", operator: "equals", value: "write" },
+      ],
+      effect: "deny",
+      priority: 1100,
+      enabled: true,
+    },
+    {
+      id: "builtin-taskmode-deny-mutation-diagnose",
+      name: "Deny mutations in diagnose-only",
+      description:
+        "Blocks Edit and other mutations when taskMode=diagnose-only. Part of " +
+        "task boundary enforcement for write/edit/build/fallback/explore.",
+      resourceType: "tool",
+      conditions: [
+        { field: "taskMode", operator: "matches", value: "(run-only|observe-only|diagnose-only)" },
+        { field: "resource", operator: "equals", value: "Edit" },
+      ],
+      effect: "deny",
+      priority: 1100,
+      enabled: true,
+    },
+    {
+      id: "builtin-taskmode-deny-build-observe",
+      name: "Deny builds in observe-only",
+      description:
+        "Blocks build-related commands when taskMode=observe-only. Part of " +
+        "task boundary enforcement denying write/edit/build/fallback/explore.",
+      resourceType: "command",
+      conditions: [
+        { field: "taskMode", operator: "matches", value: "(run-only|observe-only)" },
+        { field: "resource", operator: "contains", value: "npm run build" },
+      ],
+      effect: "deny",
+      priority: 1100,
+      enabled: true,
+    },
+    {
+      id: "builtin-taskmode-deny-edit-fallback-explore",
+      name: "Deny edit/fallback/explore in restricted modes",
+      description:
+        "Blocks edit, fallback, explore actions in observe-only or " +
+        "diagnose-only modes to uphold task boundaries.",
+      resourceType: "tool",
+      conditions: [
+        { field: "taskMode", operator: "matches", value: "(run-only|observe-only|diagnose-only)" },
+        { field: "action", operator: "equals", value: "edit" },
+      ],
+      effect: "deny",
+      priority: 1100,
+      enabled: true,
+    },
+    {
+      id: "builtin-taskmode-deny-fallback",
+      name: "Deny fallback in restricted modes",
+      description: "Blocks fallback in run-only/diagnose-only to enforce no-fallback constraint.",
+      resourceType: "tool",
+      conditions: [
+        { field: "taskMode", operator: "matches", value: "(run-only|observe-only|diagnose-only)" },
+        { field: "resource", operator: "equals", value: "fallback" },
+      ],
+      effect: "deny",
+      priority: 1100,
+      enabled: true,
+    },
+    {
+      id: "builtin-deny-branch-without-permission",
+      name: "Refuse branch without permission",
+      description: "Refuses to branch or checkout without explicit permission flag.",
+      resourceType: "command",
+      conditions: [
+        { field: "resource", operator: "matches", value: "git.*(branch|checkout|switch)" },
+        { field: "permission", operator: "equals", value: "none" },
+      ],
+      effect: "deny",
+      priority: 1100,
       enabled: true,
     },
   ];
@@ -271,6 +363,8 @@ export class PolicyEnforcer {
   private readonly rules: PolicyRule[];
   private readonly policySets: Map<string, PolicySet>;
   private readonly options: Required<PolicyEnforcerOptions>;
+  /** Current task mode for boundary enforcement if not provided in request metadata. */
+  private _taskMode?: string;
 
   constructor(options: PolicyEnforcerOptions = {}) {
     this.options = {
@@ -302,6 +396,7 @@ export class PolicyEnforcer {
     const timestamp = new Date().toISOString();
 
     const candidates = this.rules
+
       .filter((r) => r.resourceType === request.resourceType && r.enabled)
       .sort((a, b) => b.priority - a.priority);
 
@@ -452,16 +547,43 @@ export class PolicyEnforcer {
   }
 
   // --------------------------------------------------------------------------
+  // Task boundary mode management
+  // --------------------------------------------------------------------------
+
+  /**
+   * Sets the active task mode for boundary enforcement.
+   *
+   * When a {@link PolicyRequest} does not specify `taskMode` in its metadata,
+   * this value is used for rule conditions. This enables denying 'write',
+   * 'edit', 'build', 'fallback', 'explore' actions in 'observe-only' or
+   * 'diagnose-only' modes.
+   *
+   * @param mode - Task mode to set, or `null` to clear.
+   */
+  setTaskMode(mode: "observe-only" | "diagnose-only" | "run-only" | null): void {
+    this._taskMode = mode ?? undefined;
+  }
+
+  /**
+   * Returns the currently configured task mode.
+   */
+  getTaskMode(): string | undefined {
+    return this._taskMode;
+  }
+
+  // --------------------------------------------------------------------------
   // Condition evaluation
   // --------------------------------------------------------------------------
 
   /**
    * Evaluate a single {@link PolicyCondition} against a {@link PolicyRequest}.
    *
-   * Field resolution order:
-   * 1. `"resource"` → `request.resource`
-   * 2. `"action"` → `request.action`
-   * 3. Any other string → `request.metadata?.[field]`
+    * Field resolution order:
+    * 1. `"resource"` → `request.resource`
+    * 2. `"action"` → `request.action`
+    * 3. `"taskMode"` → `request.metadata?.taskMode ?? this._taskMode`
+    * 4. Any other string → `request.metadata?.[field]`
+
    *
    * Operators:
    * - `equals` — strict equality
@@ -483,6 +605,8 @@ export class PolicyEnforcer {
       fieldValue = request.resource;
     } else if (field === "action") {
       fieldValue = request.action;
+    } else if (field === "taskMode") {
+      fieldValue = request.metadata?.taskMode ?? this._taskMode;
     } else {
       fieldValue = request.metadata?.[field];
     }
