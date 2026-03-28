@@ -546,12 +546,24 @@ export class LocalWorkspace extends BaseWorkspace {
     // Normalize path separators to forward slashes
     const normalizedPattern = pattern.replace(/\\/g, "/");
 
-    let regexStr = normalizedPattern
+    // Special case: if pattern starts with **/, handle it before other replacements
+    // **/*.txt should match both "file.txt" and "dir/file.txt"
+    const startsWithDoubleStar = normalizedPattern.startsWith("**/");
+    const patternToConvert = startsWithDoubleStar
+      ? normalizedPattern.substring(3) // Remove the **/ prefix
+      : normalizedPattern;
+
+    let regexStr = patternToConvert
       .replace(/\*\*/g, "<!DOUBLESTAR!>")
       .replace(/\*/g, "[^/]*")
       .replace(/<!DOUBLESTAR!>/g, ".*")
       .replace(/\?/g, "[^/]")
       .replace(/\./g, "\\.");
+
+    // If pattern started with **/, make the directory part optional
+    if (startsWithDoubleStar) {
+      regexStr = `(?:.*/)?${regexStr}`;
+    }
 
     return new RegExp(`^${regexStr}$`);
   }
