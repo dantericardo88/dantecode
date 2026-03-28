@@ -63,12 +63,18 @@ const mockBackgroundTasksList = vi.fn().mockResolvedValue([
 ]);
 
 const mockStatusBarItem = {
+  id: "test-status-bar",
+  alignment: 1, // Left
+  priority: 100,
+  name: "DanteCode Status",
   text: "",
   tooltip: "",
   command: undefined as string | undefined,
   backgroundColor: undefined as unknown,
   color: undefined as unknown,
+  accessibilityInformation: undefined as unknown,
   show: vi.fn(),
+  hide: vi.fn(),
   dispose: vi.fn(),
 };
 
@@ -3125,12 +3131,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: { status: "indexing" as const, progress: 45 },
       contextPressure: undefined,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("idx: 45%");
@@ -3140,12 +3152,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: { status: "ready" as const, progress: 100 },
       contextPressure: undefined,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("idx: ✓");
@@ -3155,12 +3173,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: { status: "error" as const, progress: 0 },
       contextPressure: undefined,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("idx: ✗");
@@ -3170,12 +3194,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: undefined,
       contextPressure: 30,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("ctx: 30%");
@@ -3185,12 +3215,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: undefined,
       contextPressure: 65,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("ctx: 65%");
@@ -3200,12 +3236,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
+      item: mockStatusBarItem,
       currentModel: "grok/grok-3",
+      gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       indexReadiness: undefined,
       contextPressure: 85,
       contextPercent: 0,
       activeTasks: 0,
-    };
+    } as any;
 
     const text = formatStatusBarText(state);
     expect(text).toContain("ctx: 85%");
@@ -3215,12 +3257,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
-      hasError: false,
+      item: mockStatusBarItem,
+      currentModel: "grok/grok-3",
       gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       contextPercent: 0,
+      activeTasks: 0,
       contextPressure: 30,
       indexReadiness: { status: "ready" as const, progress: 100 },
-    };
+    } as any;
 
     expect(getStatusBarColor(state)).toBe("green");
   });
@@ -3229,12 +3277,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
-      hasError: false,
+      item: mockStatusBarItem,
+      currentModel: "grok/grok-3",
       gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       contextPercent: 0,
+      activeTasks: 0,
       contextPressure: 60,
       indexReadiness: { status: "ready" as const, progress: 100 },
-    };
+    } as any;
 
     expect(getStatusBarColor(state)).toBe("yellow");
   });
@@ -3243,12 +3297,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
-      hasError: false,
+      item: mockStatusBarItem,
+      currentModel: "grok/grok-3",
       gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       contextPercent: 0,
+      activeTasks: 0,
       contextPressure: 85,
       indexReadiness: { status: "ready" as const, progress: 100 },
-    };
+    } as any;
 
     expect(getStatusBarColor(state)).toBe("red");
   });
@@ -3257,12 +3317,18 @@ describe("Status Bar Badges (Wave 3)", () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
-      hasError: false,
+      item: mockStatusBarItem,
+      currentModel: "grok/grok-3",
       gateStatus: "none" as const,
+      sandboxEnabled: false,
+      modelTier: "fast" as const,
+      sessionCostUsd: 0,
+      hasError: false,
       contextPercent: 0,
+      activeTasks: 0,
       contextPressure: 30,
       indexReadiness: { status: "error" as const, progress: 0 },
-    };
+    } as any;
 
     expect(getStatusBarColor(state)).toBe("red");
   });

@@ -38,8 +38,8 @@ import {
   scheduleGitTask,
   listScheduledGitTasks,
   stopScheduledGitTask,
-  GitAutomationOrchestrator,
 } from "@dantecode/git-engine";
+import { GitAutomationOrchestrator } from "@dantecode/automation-engine";
 import type {
   GitEventType,
   GitWatchOptions,
@@ -387,7 +387,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
 
       const orchestrator = new UpliftOrchestrator({
         projectRoot,
-        agentRunner: async (_agentRole, agentObjective, worktreeRoot) => {
+        agentRunner: async (_agentRole: string, agentObjective: string, worktreeRoot: string) => {
           // Structured summary for MCP callers; full LLM-backed runner deferred
           // to a session-handoff protocol (future PRD).
           return [
@@ -456,7 +456,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
                 label: `${evt.type} ${evt.data.relativePath}`,
               },
             })
-            .then((queued) => {
+            .then((queued: any) => {
               console.log(`[GitEventWatcher] Queued workflow run ${queued.executionId}:`, evt);
             })
             .catch((error: unknown) => {
@@ -609,7 +609,7 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
                 label: `${provider}:${event}`,
               },
             })
-            .then((queued) => {
+            .then((queued: any) => {
               console.log(`[WebhookListener] Queued workflow run ${queued.executionId}:`, event);
             })
             .catch((error: unknown) => {

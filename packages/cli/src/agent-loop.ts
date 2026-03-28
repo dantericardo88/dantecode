@@ -647,7 +647,7 @@ async function _runAgentLoopCore(
         targetPercent: 50,
       });
 
-      messages = condensed.messages;
+      messages = condensed.messages as { role: "user" | "assistant" | "system"; content: string; }[];
 
       if (!config.silent) {
         const reduction = Math.round(

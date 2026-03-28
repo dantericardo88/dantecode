@@ -12,6 +12,10 @@ const stubContent = `// Auto-generated stub declaration file for @dantecode/agen
 
 export const AgentOrchestrator: any;
 export const createSubAgent: any;
+export class UpliftOrchestrator {
+  constructor(options: any);
+  executeSubTask(parentId: string, role: string, task: string): Promise<string>;
+}
 
 export type SubAgentConfig = any;
 export type OrchestratorOptions = any;

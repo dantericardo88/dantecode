@@ -77,11 +77,19 @@ import {
   stopScheduledGitTask,
   listGitWatchers,
   stopGitWatcher,
-  getTemplate,
-  listTemplates,
-  GitAutomationOrchestrator,
-  FilePatternWatcher,
+  // getTemplate,
+  // listTemplates,
+  // GitAutomationOrchestrator,
+  // FilePatternWatcher,
 } from "@dantecode/git-engine";
+
+// Import from correct packages
+import { GitAutomationOrchestrator } from "@dantecode/automation-engine";
+
+// Mock-only exports (not in real packages yet)
+const getTemplate = vi.fn();
+const listTemplates = vi.fn();
+const FilePatternWatcher = vi.fn();
 
 import { automateCommand, _resetForTesting } from "./automate.js";
 
