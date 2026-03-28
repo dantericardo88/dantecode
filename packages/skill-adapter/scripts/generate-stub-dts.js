@@ -127,8 +127,14 @@ export type BundleResult = any;
 
 // --- Composer ---
 export class SkillChain {
-  constructor(definition: any);
-  execute(context: any): Promise<any>;
+  constructor(name?: string, description?: string);
+  add(skillName: string, params?: Record<string, string>): SkillChain;
+  addGate(gateOrSkillName: any, gate?: any, params?: Record<string, string>): SkillChain;
+  getSteps(): any[];
+  toDefinition(): any;
+  toYAML(): string;
+  static fromYAML(content: string): SkillChain;
+  static fromDefinition(def: any): SkillChain;
 }
 export function executeChain(definition: any, context: any): Promise<any>;
 export function resolveParams(params: any, context: any): any;
