@@ -134,6 +134,7 @@ import { mergeVisibleSkills } from "./skill-visibility.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
 import { countSuccessfulSessions } from "./session-utils.js";
 import { fuzzyFindFile } from "./fuzzy-finder.js";
+import { suggestCommand, enhanceError, formatEnhancedError } from "./error-suggestions.js";
 import {
   configureApprovalMode,
   normalizeApprovalMode,
@@ -8876,7 +8877,21 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
   const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
   const command = registry.find((c) => c.name === commandName);
   if (!command) {
-    return `${RED}Unknown command: /${commandName}${RESET}\n${DIM}Type /help to see available commands.${RESET}`;
+    // Suggest similar commands
+    const availableCommands = registry.map((c) => c.name);
+    const suggestions = suggestCommand(commandName, availableCommands, 0.3);
+
+    let errorMsg = `${RED}Unknown command: /${commandName}${RESET}`;
+
+    if (suggestions.length > 0) {
+      errorMsg += `\n\n${YELLOW}Did you mean one of these?${RESET}`;
+      for (const suggestion of suggestions) {
+        errorMsg += `\n  ${CYAN}/${suggestion}${RESET}`;
+      }
+    }
+
+    errorMsg += `\n\n${DIM}Type /help to see all available commands.${RESET}`;
+    return errorMsg;
   }
 
   if (command.source === "markdown") {
@@ -8907,20 +8922,27 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
     return `${YELLOW}/${commandName} is unlocked after 3 successful sessions.${RESET}\n${DIM}Complete ${remaining} more ${remaining === 1 ? "session" : "sessions"} with /magic to unlock advanced features.${RESET}`;
   }
 
-  const result = await nativeCommand.handler(args, state);
+  // Execute command with enhanced error handling
+  try {
+    const result = await nativeCommand.handler(args, state);
 
-  // Ensure after command, loop stops (reset mode flag)
-  if (state.taskMode !== null) {
-    state.taskMode = null;
+    // Ensure after command, loop stops (reset mode flag)
+    if (state.taskMode !== null) {
+      state.taskMode = null;
+    }
+
+    // Record macro step if recording is active (only for native commands)
+    if (state.macroRecording && commandName !== "macro") {
+      // Don't record macro commands themselves to avoid recursion
+      state.macroRecordingSteps.push({ type: "slash", value: withoutSlash });
+    }
+
+    return result;
+  } catch (error) {
+    // Enhance error with contextual suggestions
+    const enhanced = enhanceError(error as Error, { command: `/${commandName} ${args}`.trim() });
+    return formatEnhancedError(enhanced, true);
   }
-
-  // Record macro step if recording is active (only for native commands)
-  if (state.macroRecording && commandName !== "macro") {
-    // Don't record macro commands themselves to avoid recursion
-    state.macroRecordingSteps.push({ type: "slash", value: withoutSlash });
-  }
-
-  return result;
 }
 
 /**
