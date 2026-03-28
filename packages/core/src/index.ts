@@ -595,7 +595,8 @@ export type {
 } from "./council/merge-confidence.js";
 
 export { MergeBrain } from "./council/merge-brain.js";
-export type { MergeBrainInput, MergeBrainResult, WorktreeHooks } from "./council/merge-brain.js";
+export type { MergeBrainInput, MergeBrainResult } from "./council/merge-brain.js";
+export type { WorktreeHooks } from "@dantecode/runtime-spine"; // Re-export for convenience
 
 export { HandoffEngine as CouncilHandoffEngine } from "./council/handoff-engine.js";
 export type { HandoffCreationOptions, HandoffValidationResult } from "./council/handoff-engine.js";

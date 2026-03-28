@@ -31,7 +31,7 @@
     }
   },
   "scripts": {
-    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup && node scripts/generate-stub-dts.js",
+    "build": "node -e \"['index.d.ts','index.d.ts.map'].forEach(f=>{try{require('fs').unlinkSync('dist/'+f)}catch{}})\" && tsup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",

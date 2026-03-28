@@ -93,15 +93,6 @@ export type {
   StoredAutomationExecutionRecord,
 } from "./automation-store.js";
 
-export { GitAutomationOrchestrator } from "./automation-orchestrator.js";
-export type {
-  AutomationTrigger,
-  WorkflowBackgroundRequest,
-  AutoPullRequestRequest,
-  QueuedAutomationRun,
-  GitAutomationOrchestratorOptions,
-} from "./automation-orchestrator.js";
-
 // ─── Event Normalizer ────────────────────────────────────────────────────────
 
 export {
@@ -152,25 +143,6 @@ export {
   getMergeBase,
 } from "./merge.js";
 export type { MergeAttemptResult, CandidateSnapshot, MergeOptions } from "./merge.js";
-
-// ─── Automation Templates ────────────────────────────────────────────────────
-
-export { getTemplate, listTemplates, BUILT_IN_TEMPLATES } from "./automation-templates.js";
-export type { AutomationDefinition, AutomationTemplate } from "./automation-templates.js";
-
-// ─── File Pattern Watcher ─────────────────────────────────────────────────────
-
-export { FilePatternWatcher, matchGlob } from "./file-pattern-watcher.js";
-export type { FilePatternWatcherOptions, FileChangeEvent } from "./file-pattern-watcher.js";
-
-// ─── Automation Agent Bridge ─────────────────────────────────────────────────
-
-export {
-  runAutomationAgent,
-  substitutePromptVars,
-  PDSE_GATE_THRESHOLD,
-} from "./automation-agent-bridge.js";
-export type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
 // ─── Council Conflict Scanner ───────────────────────────────────────────────
 

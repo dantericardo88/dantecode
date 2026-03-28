@@ -22,17 +22,14 @@ import { CouncilRouter } from "./council-router.js";
 import type { LaneAssignmentRequest, ReassignmentRequest } from "./council-router.js";
 import { WorktreeObserver } from "./worktree-observer.js";
 import { MergeBrain } from "./merge-brain.js";
-import type { MergeBrainResult, WorktreeHooks } from "./merge-brain.js";
+import type { MergeBrainResult } from "./merge-brain.js";
+import type { WorktreeHooks } from "@dantecode/runtime-spine";
 import type { MergeCandidatePatch } from "./merge-confidence.js";
 import { FleetBudget } from "./fleet-budget.js";
 import type { FleetBudgetReport } from "./fleet-budget.js";
 import { TaskRedistributor } from "./task-redistributor.js";
-import {
-  createWorktree,
-  removeWorktree,
-  mergeWorktree,
-} from "@dantecode/git-engine";
-import type { WorktreeCreateResult, WorktreeMergeResult } from "@dantecode/git-engine";
+import type { WorktreeCreateResult, WorktreeMergeResult } from "@dantecode/runtime-spine";
+// Worktree functions now injected via WorktreeHooks - see merge-brain.ts for pattern
 
 // ----------------------------------------------------------------------------
 // Types
@@ -158,6 +155,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private router: CouncilRouter | null = null;
   private observer: WorktreeObserver | null = null;
   private readonly brain: MergeBrain;
+  private readonly worktreeHooks?: import("@dantecode/runtime-spine").WorktreeHooks;
   private readonly options: Required<Omit<CouncilOrchestratorOptions, "worktreeHooks">> &
     Pick<CouncilOrchestratorOptions, "worktreeHooks">;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -189,6 +187,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     super();
     this.adapters = adapters;
     this.ledger = new UsageLedger();
+    this.worktreeHooks = options.worktreeHooks;
     this.brain = new MergeBrain(options.worktreeHooks);
     this._config = options.councilConfig ?? {};
     this._budget = new FleetBudget(this._config.budget ?? {});
@@ -692,7 +691,10 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (!this.runState) throw new Error("No active run state");
 
     const worktreeBranch = `council/${sessionId}/${laneId}`;
-    const result = createWorktree({
+    if (!this.worktreeHooks) {
+      throw new Error("WorktreeHooks required for council worktree operations");
+    }
+    const result = this.worktreeHooks.createWorktree({
       directory: this.runState.repoRoot,
       sessionId: laneId, // Used as worktree directory name
       branch: worktreeBranch,
@@ -726,14 +728,17 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     targetBranch: string = "main",
   ): Promise<WorktreeMergeResult> {
     if (!this.runState) throw new Error("No active run state");
+    if (!this.worktreeHooks) {
+      throw new Error("WorktreeHooks required for council worktree operations");
+    }
 
-    const mergeResult = mergeWorktree(worktreePath, targetBranch, this.runState.repoRoot);
+    const mergeResult = this.worktreeHooks.mergeWorktree(worktreePath, targetBranch);
 
     this.emit("worktree:merged", {
       laneId,
       worktreeBranch,
       targetBranch,
-      commitSha: mergeResult.mergeCommitHash,
+      commitSha: mergeResult.mergeCommitHash || "",
     });
 
     this.emit("worktree:cleaned", {
@@ -767,7 +772,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       );
     } else {
       try {
-        removeWorktree(worktreePath);
+        if (this.worktreeHooks) {
+          this.worktreeHooks.removeWorktree(worktreePath);
+        }
         this.emit("worktree:cleaned", {
           laneId,
           worktreePath,

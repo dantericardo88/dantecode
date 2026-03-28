@@ -8,11 +8,19 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const stubContent = `// Auto-generated stub declaration file
-// TypeScript consumers use this with skipLibCheck: true
-// Real type-checking happens at source level within the package
+const stubContent = `// Auto-generated stub declaration file for @dantecode/git-engine
+// Circular dependency with core prevents automated DTS generation
 
-export * from '../src/index.js';
+export const generateColoredHunk: any;
+export const WorktreeManager: any;
+export const GitRepoMap: any;
+export const AutomationOrchestrator: any;
+export const FilePatternWatcher: any;
+export const matchGlob: any;
+export const runAutomationAgent: any;
+
+export type WorktreeHooks = any;
+export type AutomationDefinition = any;
 `;
 
 const outputPath = join(__dirname, '..', 'dist', 'index.d.ts');

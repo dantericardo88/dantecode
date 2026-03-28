@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { GitConflictResolver } from "../git-conflict-resolver.js";
+import type { WorktreeHooks } from "@dantecode/runtime-spine";
 
 /** Timeout for a single git merge operation (ms). */
 const MERGE_TIMEOUT_MS = 30_000;
@@ -19,17 +20,6 @@ import { MergeConfidenceScorer, type MergeCandidatePatch } from "./merge-confide
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
-
-/** Injected worktree operations — avoids circular dep on @dantecode/git-engine. */
-export interface WorktreeHooks {
-  createWorktree: (spec: {
-    directory: string;
-    sessionId: string;
-    branch: string;
-    baseBranch: string;
-  }) => { directory: string };
-  removeWorktree: (directory: string) => void;
-}
 
 export interface MergeBrainInput {
   runId: string;

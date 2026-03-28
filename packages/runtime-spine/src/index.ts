@@ -8,3 +8,4 @@ export * from "./gaslight-types.js";
 export * from "./sandbox-types.js";
 export * from "./fearset-types.js";
 export * from "./event-emitter-types.js";
+export * from "./worktree-types.js";

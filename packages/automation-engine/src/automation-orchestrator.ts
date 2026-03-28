@@ -11,16 +11,17 @@ import {
   type RepoRootVerificationResult,
 } from "@dantecode/core";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
-import type { AutoPROptions, PRResult } from "./auto-pr-engine.js";
-import { createAutoPR } from "./auto-pr-engine.js";
 import {
+  createAutoPR,
   GitAutomationStore,
+  type AutoPROptions,
+  type PRResult,
   type StoredAutomationExecutionRecord,
   type StoredAutomationTrigger,
-} from "./automation-store.js";
-import { getStatus, type GitStatusResult } from "./commit.js";
-import type { WorkflowOptions, WorkflowResult } from "./local-workflow-runner.js";
-import { runLocalWorkflow } from "./local-workflow-runner.js";
+} from "@dantecode/git-engine";
+import { getStatus, type GitStatusResult } from "@dantecode/git-engine";
+import type { WorkflowOptions, WorkflowResult } from "@dantecode/git-engine";
+import { runLocalWorkflow } from "@dantecode/git-engine";
 import { runAutomationAgent, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
 import type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
 
