@@ -2,8 +2,8 @@
 
 **Status:** blocked  
 **Scope:** repo-proof  
-**Commit:** `7ff510354945`  
-**Generated:** 2026-03-28T15:58:27.059Z
+**Commit:** `83e4b19c9d37`  
+**Generated:** 2026-03-28T18:42:13.760Z
 
 ## Gates
 
@@ -12,7 +12,7 @@
 | typecheck | fail |
 | lint | fail |
 | test | fail |
-| build | fail |
+| build | pass |
 | windowsSmoke | unknown |
 | antiStub | pass |
 | liveProvider | unknown |
@@ -31,14 +31,12 @@
 - Gate "typecheck" failed
 - Gate "lint" failed
 - Gate "test" failed
-- Gate "build" failed
 
 ## Open Requirements (privateReady)
 
 - Gate "typecheck" must pass. Current status: fail.
 - Gate "lint" must pass. Current status: fail.
 - Gate "test" must pass. Current status: fail.
-- Gate "build" must pass. Current status: fail.
 - Gate "windowsSmoke" must pass. Current status: unknown.
 - Gate "publishDryRun" must pass. Current status: unknown.
 
@@ -47,7 +45,6 @@
 - Gate "typecheck" must pass. Current status: fail.
 - Gate "lint" must pass. Current status: fail.
 - Gate "test" must pass. Current status: fail.
-- Gate "build" must pass. Current status: fail.
 - Gate "windowsSmoke" must pass. Current status: unknown.
 - Gate "publishDryRun" must pass. Current status: unknown.
 - Gate "liveProvider" must pass. Current status: unknown.

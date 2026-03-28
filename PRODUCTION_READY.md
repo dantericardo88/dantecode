@@ -41,13 +41,13 @@
 ### Implementation Statistics
 
 **Lines of Code (New Patterns):**
-- PageRank: 1,600 LOC
-- Workspace: 4,600 LOC
-- Graph Workflow: 2,100 LOC
-- Custom Modes: 800 LOC
-- Diff/Undo: 600 LOC
-- Async Tasks: 700 LOC
-- **Total: ~10,400 LOC of new production code**
+- PageRank: 551 LOC
+- Workspace: 2,675 LOC (6 implementation files)
+- Graph Workflow: 1,427 LOC (5 implementation files)
+- Custom Modes: 267 LOC
+- Diff/Undo: 355 LOC
+- Async Tasks: 514 LOC
+- **Total: ~5,789 LOC of new production code**
 
 **Test Coverage:**
 - New tests: ~280

@@ -1188,7 +1188,7 @@ async function commandExecuteSkill(skillName?: string): Promise<void> {
     void vscode.window.showInformationMessage(`DanteCode: Executing skill "${skillName}"...`);
 
     // Load skill definition
-    const skillDef = await getSkill(skillName, projectRoot);
+    const skillDef = await getSkill(skillName as string, projectRoot as string);
     if (!skillDef) {
       void vscode.window.showErrorMessage(`DanteCode: Skill "${skillName}" not found`);
       return;
@@ -1211,7 +1211,7 @@ async function commandExecuteSkill(skillName?: string): Promise<void> {
       }),
     };
 
-    const context = makeRunContext({ skillName, projectRoot });
+    const context = makeRunContext({ skillName: skillName as string, projectRoot: projectRoot as string });
     const result = await runSkill({ skill, context });
 
     // Show result

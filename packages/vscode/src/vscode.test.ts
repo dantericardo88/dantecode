@@ -3121,8 +3121,8 @@ describe("Checkpoint Commands", () => {
 // ============================================================================
 
 describe("Status Bar Badges (Wave 3)", () => {
-  it("shows index readiness badge when indexing", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows index readiness badge when indexing", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3136,8 +3136,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("idx: 45%");
   });
 
-  it("shows index readiness badge when ready", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows index readiness badge when ready", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3151,8 +3151,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("idx: ✓");
   });
 
-  it("shows index readiness badge when error", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows index readiness badge when error", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3166,8 +3166,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("idx: ✗");
   });
 
-  it("shows context pressure badge in green range", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows context pressure badge in green range", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3181,8 +3181,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("ctx: 30%");
   });
 
-  it("shows context pressure badge in yellow range", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows context pressure badge in yellow range", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3196,8 +3196,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("ctx: 65%");
   });
 
-  it("shows context pressure badge in red range", () => {
-    const { formatStatusBarText } = require("./status-bar.js");
+  it("shows context pressure badge in red range", async () => {
+    const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
       currentModel: "grok/grok-3",
@@ -3211,8 +3211,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(text).toContain("ctx: 85%");
   });
 
-  it("getStatusBarColor returns green when pressure is low", () => {
-    const { getStatusBarColor } = require("./status-bar.js");
+  it("getStatusBarColor returns green when pressure is low", async () => {
+    const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
       hasError: false,
@@ -3225,8 +3225,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(getStatusBarColor(state)).toBe("green");
   });
 
-  it("getStatusBarColor returns yellow when pressure is medium", () => {
-    const { getStatusBarColor } = require("./status-bar.js");
+  it("getStatusBarColor returns yellow when pressure is medium", async () => {
+    const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
       hasError: false,
@@ -3239,8 +3239,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(getStatusBarColor(state)).toBe("yellow");
   });
 
-  it("getStatusBarColor returns red when pressure is high", () => {
-    const { getStatusBarColor } = require("./status-bar.js");
+  it("getStatusBarColor returns red when pressure is high", async () => {
+    const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
       hasError: false,
@@ -3253,8 +3253,8 @@ describe("Status Bar Badges (Wave 3)", () => {
     expect(getStatusBarColor(state)).toBe("red");
   });
 
-  it("getStatusBarColor returns red when index has error", () => {
-    const { getStatusBarColor } = require("./status-bar.js");
+  it("getStatusBarColor returns red when index has error", async () => {
+    const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
       hasError: false,
@@ -3330,8 +3330,8 @@ describe("Skills Tree View (Wave 3)", () => {
     const children = await provider.getChildren();
 
     expect(children.length).toBe(2);
-    expect(children[0].skill.name).toBe("skill-a");
-    expect(children[1].skill.name).toBe("skill-b");
+    expect(children[0]?.skill.name).toBe("skill-a");
+    expect(children[1]?.skill.name).toBe("skill-b");
   });
 
   it("SkillsTreeDataProvider returns empty when no project root", async () => {

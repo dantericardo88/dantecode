@@ -1017,7 +1017,7 @@ export function extractToolCalls(text: string): {
  * @returns A string containing tool definitions for the system prompt
  */
 export function getToolDefinitionsPrompt(mode?: CanonicalApprovalMode | string): string {
-  const canonical = normalizeApprovalMode(mode) || "apply";
+  const canonical = (normalizeApprovalMode(mode || "apply") || "apply") as CanonicalApprovalMode;
   const exclusions = getModeToolExclusions(canonical);
 
   // Define all tools with their descriptions
