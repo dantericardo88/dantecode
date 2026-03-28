@@ -183,11 +183,16 @@ export function computeSymbolRanks(
     }
   }
 
+  // Track symbols with only self-references (for self-edge logic later)
+  const symbolsWithOnlySelfRefs = new Set<string>();
+
   // If no references found, use defines as references
   // (Some languages only provide def tags)
   if (references.size === 0) {
     for (const [symbol, files] of defines) {
       references.set(symbol, Array.from(files));
+      // Mark as self-only since we artificially created these
+      symbolsWithOnlySelfRefs.add(symbol);
     }
   }
 
@@ -237,17 +242,19 @@ export function computeSymbolRanks(
       weight *= 10;
     }
 
-    // Boost symbols with conventional naming
-    const isSnake = symbol.includes("_") && /[a-zA-Z]/.test(symbol);
-    const isKebab = symbol.includes("-") && /[a-zA-Z]/.test(symbol);
-    const isCamel = /[A-Z]/.test(symbol) && /[a-z]/.test(symbol);
-    if ((isSnake || isKebab || isCamel) && symbol.length >= 8) {
-      weight *= 10;
-    }
-
-    // Penalize private symbols
+    // Penalize private symbols FIRST (before other boosts)
     if (symbol.startsWith("_")) {
       weight *= 0.1;
+    }
+
+    // Boost symbols with conventional naming (exclude private symbols)
+    if (!symbol.startsWith("_")) {
+      const isSnake = symbol.includes("_") && /[a-zA-Z]/.test(symbol);
+      const isKebab = symbol.includes("-") && /[a-zA-Z]/.test(symbol);
+      const isCamel = /[A-Z]/.test(symbol) && /[a-z]/.test(symbol);
+      if ((isSnake || isKebab || isCamel) && symbol.length >= 8) {
+        weight *= 10;
+      }
     }
 
     // Penalize widely-defined symbols (common names)
@@ -296,19 +303,21 @@ export function computeSymbolRanks(
     }
   }
 
-  // Add self-edges for definitions with no references
-  for (const symbol of defines.keys()) {
-    if (references.has(symbol)) continue;
-
+  // Add self-edges for definitions with only self-references
+  // (symbols marked during the "no references" fallback logic)
+  for (const symbol of symbolsWithOnlySelfRefs) {
     for (const definer of defines.get(symbol)!) {
       const edges = graph.get(definer)!;
       const key = `${definer}:${symbol}`;
-      edges.set(key, {
-        from: definer,
-        to: definer,
-        symbol,
-        weight: 0.1,
-      });
+      // Only add if no edge was created during normal processing
+      if (!edges.has(key)) {
+        edges.set(key, {
+          from: definer,
+          to: definer,
+          symbol,
+          weight: 0.1,
+        });
+      }
     }
   }
 

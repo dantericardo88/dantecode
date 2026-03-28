@@ -13,7 +13,7 @@ import {
   type RepoMapContext,
   type PageRankRepoMapOptions,
 } from "./repo-map-pagerank.js";
-import { buildRepoMap, formatRepoMap, type RankedFile } from "./repo-map-ast.js";
+import { buildRepoMap, formatRepoMap } from "./repo-map-ast.js";
 
 // ---------------------------------------------------------------------------
 // Types
