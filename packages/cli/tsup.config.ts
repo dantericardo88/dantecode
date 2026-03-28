@@ -37,5 +37,12 @@ export default defineConfig({
     "sql.js",
     "yaml",
     "zod",
+    // tree-sitter has native bindings that can't be bundled in ESM
+    "tree-sitter",
+    "tree-sitter-typescript",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-go",
+    "tree-sitter-rust",
   ],
 });
