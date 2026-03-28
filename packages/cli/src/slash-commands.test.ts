@@ -186,6 +186,7 @@ function makeState(projectRoot: string): ReplState {
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    semanticIndex: null,
     verificationTrendTracker: null,
     lastSessionPdseResults: [],
     pdseCache: new Map(),

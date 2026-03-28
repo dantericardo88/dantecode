@@ -22,7 +22,7 @@ import { promisify } from "node:util";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { writeFile, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { createWorktree, removeWorktree } from "@dantecode/git-engine";
+import { createWorktree, removeWorktree, mergeWorktree } from "@dantecode/git-engine";
 
 import {
   saveCouncilRun,
@@ -312,7 +312,7 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
 
   const adapters = buildAdapters(agentKinds, { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree },
+    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
   });
 
   orchestrator.on("error", ({ message, context }) => {
@@ -679,7 +679,7 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   );
   const orchestrator = new CouncilOrchestrator(adapters, {
     allowAutoMerge: autoFlag,
-    worktreeHooks: { createWorktree, removeWorktree },
+    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
 
@@ -878,7 +878,7 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     { bridgeDir, projectRoot },
   );
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree },
+    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
 
@@ -1067,7 +1067,7 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
 
   const adapters = buildAdapters(agentKinds, { projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree },
+    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
   });
 
   orchestrator.on("error", ({ message, context }) => {

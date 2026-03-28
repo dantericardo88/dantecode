@@ -23,7 +23,15 @@ export class GitSkillbookStore {
 
 export class DanteSkillbookIntegration {
   constructor(options?: any);
-  runReflectionLoop(taskResult: any, skills: any[], opts?: any, llmCall?: any): Promise<any>;
+  readonly reviewQueue: any;
+  stats(): any;
+  getRelevantSkills(context: any, limit?: number): any[];
+  triggerReflection(taskResult: any, options?: any, llmCall?: any): Promise<any>;
+  applyProposals(proposals: any[], decisions: any[], opts?: any): { applied: number; queued: number; rejected: number };
+  applyReviewItem(queueId: string): boolean;
+  prune(policy?: any): void;
+  save(): void;
+  reload(): void;
 }
 
 export function getRelevantSkills(skills: any[], context: any, limit?: number): any[];

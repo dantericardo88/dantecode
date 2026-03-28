@@ -31,6 +31,7 @@ export class FilePatternWatcher {
   start(): Promise<void>;
   stop(): void;
   on(event: string, callback: (event: any) => void): void;
+  snapshot(): { watcherId: string; pattern: string; projectRoot: string; status: string };
 }
 
 export function getTemplate(name: string): any;

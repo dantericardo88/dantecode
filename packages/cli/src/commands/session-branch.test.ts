@@ -145,6 +145,7 @@ function makeState(projectRoot: string, sessionOverrides: Partial<Session> = {})
     waveState: null,
     gaslight: null,
     memoryOrchestrator: null,
+    semanticIndex: null,
     verificationTrendTracker: null,
     lastSessionPdseResults: [],
     pdseCache: new Map(),
