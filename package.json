@@ -48,6 +48,11 @@
     "generate:samples": "node scripts/generate-verification-samples.mjs",
     "check:anti-stub": "node scripts/anti-stub-scan.mjs",
     "check:stubs": "node scripts/anti-stub-scan.mjs",
+    "benchmark:swe": "cd benchmarks/swe-bench && python swe_bench_runner.py",
+    "benchmark:providers": "cd benchmarks/providers && node smoke-test.mjs --all",
+    "benchmark:provider": "cd benchmarks/providers && node smoke-test.mjs",
+    "benchmark:speed": "cd benchmarks/speed && node speed-benchmark.mjs",
+    "benchmark:all": "npm run benchmark:providers && npm run benchmark:speed",
     "check:cli-smoke": "node scripts/cli-smoke.mjs",
     "cli": "node packages/cli/dist/index.js",
     "dantecode": "node packages/cli/dist/index.js"
