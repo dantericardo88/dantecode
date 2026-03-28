@@ -21,7 +21,7 @@
     "test": "vitest run --config ../../vitest.package.config.ts",
     "test:coverage": "vitest run --config ../../vitest.package.config.ts --coverage",
     "lint": "eslint src --ext .ts",
-    "clean": "rm -rf dist"
+    "clean": "rimraf dist"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
