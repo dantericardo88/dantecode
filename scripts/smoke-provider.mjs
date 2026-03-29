@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ensureBuildArtifacts, getCatalogPackageById } from "./release/catalog.mjs";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -111,7 +111,7 @@ if (!provider) {
 const providerSpec = PROVIDER_SPECS[provider];
 const modelId = args.modelId ?? providerSpec.modelId;
 
-const { ModelRouterImpl, initializeState } = await import(coreEntry);
+const { ModelRouterImpl, initializeState } = await import(pathToFileURL(coreEntry).href);
 
 const tempProject = mkdtempSync(join(tmpdir(), "dantecode-provider-smoke-"));
 
