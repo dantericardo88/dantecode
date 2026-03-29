@@ -169,3 +169,21 @@ export type {
   DiffResult,
   UndoResult,
 } from "./diff-undo-manager.js";
+
+// ─── Git LFS (Large File Storage) ────────────────────────────────────────────
+
+export {
+  isLfsInstalled,
+  getLfsVersion,
+  isLfsInitialized,
+  initializeLfs,
+  trackPattern,
+  untrackPattern,
+  getTrackedPatterns,
+  isFileTrackedByLfs,
+  getLfsStatus,
+  migrateToLfs,
+  pullLfsFiles,
+  COMMON_LFS_PATTERNS,
+} from "./lfs.js";
+export type { LfsStatus, LfsTrackResult } from "./lfs.js";

@@ -8055,36 +8055,40 @@ async function costCommand(_args: string, state: ReplState): Promise<string> {
 // ----------------------------------------------------------------------------
 
 async function traceCommand(args: string, state: ReplState): Promise<string> {
-  const { cmdLite, ...rest } = parseCmdLine(args);
-  const subcommand = cmdLite;
-  const remainingArgs = rest._ ? rest._.join(" ") : "";
+  const parts = args.trim().split(/\s+/);
+  const subcommand = parts[0] || "";
+  const remainingArgs = parts.slice(1).join(" ");
 
   switch (subcommand) {
     case "list": {
       const { cmdTraceList } = await import("./commands/trace.js");
+      // Parse optional --limit and --status flags
+      const limit = remainingArgs.match(/--limit[=\s](\d+)/)?.[1];
+      const status = remainingArgs.match(/--status[=\s](pending|success|error)/)?.[1];
       await cmdTraceList(state.projectRoot, {
-        limit: rest.limit as number | undefined,
-        status: rest.status as "pending" | "success" | "error" | undefined,
+        limit: limit ? Number(limit) : undefined,
+        status: status as "pending" | "success" | "error" | undefined,
       });
       return "";
     }
     case "show": {
-      if (!remainingArgs) {
+      if (!parts[1]) {
         return `${RED}Usage: /trace show <traceId>${RESET}`;
       }
       const { cmdTraceShow } = await import("./commands/trace.js");
-      await cmdTraceShow(state.projectRoot, remainingArgs);
+      await cmdTraceShow(state.projectRoot, parts[1]);
       return "";
     }
     case "tree": {
-      if (!remainingArgs) {
+      if (!parts[1]) {
         return `${RED}Usage: /trace tree <traceId> [--depth=N] [--events] [--decisions]${RESET}`;
       }
       const { cmdTraceTree } = await import("./commands/trace.js");
-      await cmdTraceTree(state.projectRoot, remainingArgs, {
-        depth: rest.depth as number | undefined,
-        showEvents: rest.events === true,
-        showDecisions: rest.decisions === true,
+      const depth = remainingArgs.match(/--depth[=\s](\d+)/)?.[1];
+      await cmdTraceTree(state.projectRoot, parts[1], {
+        depth: depth ? Number(depth) : undefined,
+        showEvents: remainingArgs.includes("--events"),
+        showDecisions: remainingArgs.includes("--decisions"),
       });
       return "";
     }
@@ -8095,8 +8099,8 @@ async function traceCommand(args: string, state: ReplState): Promise<string> {
     }
     case "clean": {
       const { cmdTraceClean } = await import("./commands/trace.js");
-      const days = rest.days ? Number(rest.days) : 7;
-      await cmdTraceClean(state.projectRoot, days);
+      const days = remainingArgs.match(/--days[=\s](\d+)/)?.[1];
+      await cmdTraceClean(state.projectRoot, days ? Number(days) : 7);
       return "";
     }
     default:
@@ -8106,6 +8110,75 @@ async function traceCommand(args: string, state: ReplState): Promise<string> {
   /trace tree <traceId> [--depth=N] [--events] [--decisions]  - Show trace as tree
   /trace stats                                                  - Show trace statistics
   /trace clean [--days=7]                                       - Clean old traces`;
+  }
+}
+
+async function lfsCommand(args: string, state: ReplState): Promise<string> {
+  const parts = args.trim().split(/\s+/);
+  const subcommand = parts[0] || "";
+  const pattern = parts[1] || "";
+
+  switch (subcommand) {
+    case "status": {
+      const { cmdLfsStatus } = await import("./commands/lfs.js");
+      await cmdLfsStatus(state.projectRoot);
+      return "";
+    }
+    case "init": {
+      const { cmdLfsInit } = await import("./commands/lfs.js");
+      await cmdLfsInit(state.projectRoot);
+      return "";
+    }
+    case "track": {
+      const common = args.match(/--common[=\s](\w+)/)?.[1];
+      if (!pattern && !common) {
+        return `${RED}Usage: /lfs track <pattern> OR /lfs track --common=<category>${RESET}`;
+      }
+      const { cmdLfsTrack } = await import("./commands/lfs.js");
+      await cmdLfsTrack(state.projectRoot, pattern, {
+        common,
+      });
+      return "";
+    }
+    case "untrack": {
+      if (!pattern) {
+        return `${RED}Usage: /lfs untrack <pattern>${RESET}`;
+      }
+      const { cmdLfsUntrack } = await import("./commands/lfs.js");
+      await cmdLfsUntrack(state.projectRoot, pattern);
+      return "";
+    }
+    case "migrate": {
+      if (!pattern) {
+        return `${RED}Usage: /lfs migrate <pattern> [--ref=branch]${RESET}`;
+      }
+      const ref = args.match(/--ref[=\s](\S+)/)?.[1];
+      const { cmdLfsMigrate } = await import("./commands/lfs.js");
+      await cmdLfsMigrate(state.projectRoot, pattern, {
+        ref,
+      });
+      return "";
+    }
+    case "pull": {
+      const { cmdLfsPull } = await import("./commands/lfs.js");
+      await cmdLfsPull(state.projectRoot);
+      return "";
+    }
+    case "patterns": {
+      const { cmdLfsPatterns } = await import("./commands/lfs.js");
+      await cmdLfsPatterns();
+      return "";
+    }
+    default:
+      return `${YELLOW}Usage:${RESET}
+  /lfs status                                - Show Git LFS status
+  /lfs init                                  - Initialize Git LFS
+  /lfs track <pattern>                       - Track pattern with LFS
+  /lfs track --common=<category>             - Track common patterns (images, videos, etc.)
+  /lfs untrack <pattern>                     - Untrack pattern from LFS
+  /lfs migrate <pattern> [--ref=branch]      - Migrate existing files to LFS
+  /lfs pull                                  - Pull LFS files
+  /lfs patterns                              - Show common pattern categories`;
   }
 }
 
@@ -8635,6 +8708,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage:
       "/auto-pr <title> [--body-file path] [--base branch] [--draft] [--changeset patch:pkg1,pkg2] [--background]",
     handler: autoPrCommand,
+    tier: 2,
+    category: "git",
+  },
+  {
+    name: "lfs",
+    description: "Git LFS management (status, track, migrate, pull)",
+    usage: "/lfs <status|init|track|untrack|migrate|pull|patterns> [options]",
+    handler: lfsCommand,
     tier: 2,
     category: "git",
   },
