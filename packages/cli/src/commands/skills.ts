@@ -798,14 +798,16 @@ async function showBridgeDetails(skillName: string, projectRoot: string): Promis
 
 /**
  * Installs a skill from a local path, git URL, or HTTP URL.
- * Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink] [--no-verify]
+ * Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink]
+ *
+ * NOTE: Verification is now MANDATORY and cannot be disabled for security.
  */
 async function skillsInstall(args: string[], projectRoot: string): Promise<void> {
   // Parse args
   const source = args.find((a) => !a.startsWith("--"));
   if (!source) {
     process.stdout.write(
-      `${RED}Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink] [--no-verify]${RESET}\n`,
+      `${RED}Usage: dantecode skills install <source> [--tier guardian|sentinel|sovereign] [--force] [--symlink]${RESET}\n`,
     );
     return;
   }
@@ -826,12 +828,11 @@ async function skillsInstall(args: string[], projectRoot: string): Promise<void>
 
   const force = args.includes("--force");
   const symlink = args.includes("--symlink");
-  const noVerify = args.includes("--no-verify");
 
   process.stdout.write(`\n${DIM}Installing skill from: ${source}...${RESET}\n`);
 
   const result = await installSkill(
-    { source, verify: !noVerify, tier, force, symlink },
+    { source, verify: true, tier, force, symlink },
     projectRoot,
   );
 
@@ -1408,19 +1409,20 @@ async function skillsRun(args: string[], projectRoot: string): Promise<void> {
 
 /**
  * Imports all detected skills from a directory.
- * Usage: dantecode skills import-all <path> [--force] [--no-verify] [--tier guardian|sentinel|sovereign]
+ * Usage: dantecode skills import-all <path> [--force] [--tier guardian|sentinel|sovereign]
+ *
+ * NOTE: Verification is now MANDATORY and cannot be disabled for security.
  */
 async function skillsImportAll(args: string[], projectRoot: string): Promise<void> {
   const scanPath = args.find((a) => !a.startsWith("--"));
   if (!scanPath) {
     process.stdout.write(
-      `${RED}Usage: dantecode skills import-all <path> [--force] [--no-verify] [--tier guardian|sentinel|sovereign]${RESET}\n`,
+      `${RED}Usage: dantecode skills import-all <path> [--force] [--tier guardian|sentinel|sovereign]${RESET}\n`,
     );
     return;
   }
 
   const force = args.includes("--force");
-  const noVerify = args.includes("--no-verify");
 
   let tier: "guardian" | "sentinel" | "sovereign" = "guardian";
   const tierIdx = args.indexOf("--tier");
@@ -1466,7 +1468,7 @@ async function skillsImportAll(args: string[], projectRoot: string): Promise<voi
         process.stdout.write(`  ${DIM}Installing ${skillName}...${RESET} `);
 
         const result = await installSkill(
-          { source: skillPath, verify: !noVerify, tier, force },
+          { source: skillPath, verify: true, tier, force },
           projectRoot,
         );
 

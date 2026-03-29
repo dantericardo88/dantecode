@@ -24,7 +24,7 @@ import { SkillCatalog } from "./catalog.js";
 
 export interface InstallOptions {
   source: string; // local path, git URL, or HTTP URL
-  verify?: boolean; // default: true
+  verify?: boolean; // MANDATORY: always true (option deprecated for security, default: true)
   tier?: "guardian" | "sentinel" | "sovereign"; // required tier, default: "guardian"
   force?: boolean; // install even if verification fails
   symlink?: boolean; // symlink instead of copy
@@ -183,7 +183,12 @@ export async function installSkill(
   options: InstallOptions,
   projectRoot: string,
 ): Promise<InstallResult> {
-  const shouldVerify = options.verify !== false;
+  // MANDATORY VERIFICATION: Always verify skills for security
+  // Warn if caller tried to disable it
+  if (options.verify === false) {
+    console.warn("WARNING: Skill verification cannot be disabled (security policy). Proceeding with verification enabled.");
+  }
+  const shouldVerify = true; // Always verify (mandatory for security)
 
   // Step 1: Resolve source
   let resolvedPath: string;
