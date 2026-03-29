@@ -8051,6 +8051,65 @@ async function costCommand(_args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// Trace Command (Visualization & Inspection)
+// ----------------------------------------------------------------------------
+
+async function traceCommand(args: string, state: ReplState): Promise<string> {
+  const { cmdLite, ...rest } = parseCmdLine(args);
+  const subcommand = cmdLite;
+  const remainingArgs = rest._ ? rest._.join(" ") : "";
+
+  switch (subcommand) {
+    case "list": {
+      const { cmdTraceList } = await import("./commands/trace.js");
+      await cmdTraceList(state.projectRoot, {
+        limit: rest.limit as number | undefined,
+        status: rest.status as "pending" | "success" | "error" | undefined,
+      });
+      return "";
+    }
+    case "show": {
+      if (!remainingArgs) {
+        return `${RED}Usage: /trace show <traceId>${RESET}`;
+      }
+      const { cmdTraceShow } = await import("./commands/trace.js");
+      await cmdTraceShow(state.projectRoot, remainingArgs);
+      return "";
+    }
+    case "tree": {
+      if (!remainingArgs) {
+        return `${RED}Usage: /trace tree <traceId> [--depth=N] [--events] [--decisions]${RESET}`;
+      }
+      const { cmdTraceTree } = await import("./commands/trace.js");
+      await cmdTraceTree(state.projectRoot, remainingArgs, {
+        depth: rest.depth as number | undefined,
+        showEvents: rest.events === true,
+        showDecisions: rest.decisions === true,
+      });
+      return "";
+    }
+    case "stats": {
+      const { cmdTraceStats } = await import("./commands/trace.js");
+      await cmdTraceStats(state.projectRoot);
+      return "";
+    }
+    case "clean": {
+      const { cmdTraceClean } = await import("./commands/trace.js");
+      const days = rest.days ? Number(rest.days) : 7;
+      await cmdTraceClean(state.projectRoot, days);
+      return "";
+    }
+    default:
+      return `${YELLOW}Usage:${RESET}
+  /trace list [--limit=N] [--status=<pending|success|error>]  - List all traces
+  /trace show <traceId>                                         - Show trace details
+  /trace tree <traceId> [--depth=N] [--events] [--decisions]  - Show trace as tree
+  /trace stats                                                  - Show trace statistics
+  /trace clean [--days=7]                                       - Clean old traces`;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
@@ -8646,6 +8705,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Control reasoning effort tier and thinking display mode for session",
     usage: "/think [quick|deep|expert|auto] [--session] | display <mode> | stats | chain [N]",
     handler: thinkCommand,
+    tier: 2,
+    category: "advanced",
+  },
+  {
+    name: "trace",
+    description: "Visualize and inspect execution traces (list, show, tree, stats, clean)",
+    usage: "/trace <list|show|tree|stats|clean> [options]",
+    handler: traceCommand,
     tier: 2,
     category: "advanced",
   },
