@@ -31,6 +31,7 @@ import {
   formatDriftMessage,
   calculatePressure,
   condenseContext,
+  getGlobalTraceLogger,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -294,8 +295,24 @@ async function _runAgentLoopCore(
 
   const loopStartTime = Date.now();
 
-  // ---- Session resume / continuation (extracted to session-manager.ts) ----
-  const resumeResult = await resolveSessionResume(prompt, session, config);
+  // ---- Trace Logger: observable execution traces for explainability ----
+  const traceLogger = getGlobalTraceLogger({
+    projectRoot: session.projectRoot,
+    enabled: true,
+    logToFile: true,
+    logToConsole: false,
+  });
+  const rootSpan = traceLogger.startSpan("agent-loop", "agent", {
+    input: { prompt, sessionId: session.id },
+    metadata: {
+      model: config.state.model.default,
+      projectRoot: session.projectRoot,
+    },
+  });
+
+  try {
+    // ---- Session resume / continuation (extracted to session-manager.ts) ----
+    const resumeResult = await resolveSessionResume(prompt, session, config);
   if (resumeResult.earlyReturn) {
     return resumeResult.session;
   }
@@ -683,6 +700,12 @@ async function _runAgentLoopCore(
         if (useNativeTools) {
           // Native AI SDK tool calling: stream with Zod-schema tools
           try {
+            traceLogger.logEvent(
+              rootSpan.spanId,
+              "info",
+              "Starting model inference with native tools",
+              { round: roundCounter, messageCount: messages.length }
+            );
             const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
             const streamResult = await router.streamWithTools(messages, aiSdkTools, {
               system: systemPrompt,
@@ -1298,6 +1321,11 @@ async function _runAgentLoopCore(
     }
 
     // Execute tool batch (extracted to tool-executor.ts)
+    const toolBatchSpan = traceLogger.startSpan("tool-batch", "tool", {
+      traceId: rootSpan.traceId,
+      parentSpanId: rootSpan.spanId,
+      input: { toolCount: toolCalls.length, round: roundCounter },
+    });
     const execResult = await executeToolBatch(
       toolCalls,
       toolCallParseErrors,
@@ -1347,6 +1375,11 @@ async function _runAgentLoopCore(
     testsRun = execResult.testsRun;
     bashSucceeded = execResult.bashSucceeded;
     const toolResults = execResult.toolResults;
+
+    traceLogger.endSpan(toolBatchSpan.spanId, {
+      status: execResult.action === "return" ? "success" : "success",
+      output: { toolResults: toolResults.length, filesModified, action: execResult.action },
+    });
 
     if (execResult.action === "return") {
       return session;
@@ -1545,6 +1578,20 @@ async function _runAgentLoopCore(
       // Approach memory: record the outcome of this verification cycle
       if (verifyCommands.length > 0) {
         const approachDesc = currentApproachDescription || `approach-${approachLog.length + 1}`;
+
+        // Trace decision: verification outcome
+        traceLogger.logDecision(
+          rootSpan.spanId,
+          "verification",
+          [
+            { name: "pass", score: verificationPassed ? 1.0 : 0.0, reason: "All verification checks passed" },
+            { name: "fail", score: verificationPassed ? 0.0 : 1.0, reason: "One or more verification checks failed" }
+          ],
+          verificationPassed ? "pass" : "fail",
+          verificationPassed ? "Verification successful, proceeding" : "Verification failed, needs fixes",
+          verificationPassed ? 1.0 : 0.0
+        );
+
         if (verificationPassed) {
           approachLog.push({
             description: approachDesc,
@@ -2025,11 +2072,21 @@ async function _runAgentLoopCore(
     // Non-fatal
   }
 
-  // Emit session-complete event for SSE clients in serve mode
-  if (config.eventEmitter && config.eventSessionId) {
-    const msgTokenEst = session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0);
-    config.eventEmitter.emitDone(config.eventSessionId, msgTokenEst, Date.now() - loopStartTime);
-  }
+    // Emit session-complete event for SSE clients in serve mode
+    if (config.eventEmitter && config.eventSessionId) {
+      const msgTokenEst = session.messages.reduce((acc, m) => acc + (m.content?.length ?? 0), 0);
+      config.eventEmitter.emitDone(config.eventSessionId, msgTokenEst, Date.now() - loopStartTime);
+    }
 
-  return session;
+    return session;
+  } finally {
+    // End trace span on all exit paths
+    const loopEndTime = Date.now();
+    traceLogger.endSpan(rootSpan.spanId, {
+      status: "success",
+      output: { sessionId: session.id, messageCount: session.messages.length },
+      metadata: { durationMs: loopEndTime - loopStartTime },
+    });
+    await traceLogger.flush();
+  }
 }

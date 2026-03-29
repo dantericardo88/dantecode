@@ -1200,3 +1200,16 @@ export type {
   AsyncTaskExecutorOptions,
   AsyncTaskExecutorEvents,
 } from "./async-task-executor.js";
+
+// ─── Trace Logger ─────────────────────────────────────────────────────────────
+
+export { TraceLogger, getGlobalTraceLogger, setGlobalTraceLogger, hasGlobalTraceLogger } from "./trace-logger.js";
+export type {
+  TraceSpan,
+  TraceEvent,
+  TraceDecision,
+  TraceSummary,
+  TraceLevel,
+  TraceStatus,
+  TraceLoggerOptions,
+} from "./trace-logger.js";
