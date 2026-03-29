@@ -55,6 +55,15 @@ class SWEBenchRunner:
     """Runner for SWE-bench tests using DanteCode"""
 
     def __init__(self, dantecode_path: str = "dantecode", output_dir: str = "../results", model: Optional[str] = None):
+        # On Windows, try to find the PowerShell script if not explicitly provided
+        if dantecode_path == "dantecode":
+            import platform
+            if platform.system() == "Windows":
+                # Try common npm global install location
+                npm_path = Path.home() / "AppData" / "Roaming" / "npm" / "dantecode.ps1"
+                if npm_path.exists():
+                    dantecode_path = str(npm_path)
+
         self.dantecode_path = dantecode_path
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -125,13 +134,27 @@ class SWEBenchRunner:
             # DanteCode runs in the cwd, so we need to execute from workspace_dir
             # Use --max-rounds to limit execution time
             # Use --silent to minimize output noise
-            cmd = [
-                self.dantecode_path,
-                problem_statement,
-                "--model", self.model,
-                "--max-rounds", "10",  # Limit to 10 rounds
-                "--silent"  # Minimize output
-            ]
+
+            # On Windows, if dantecode is a .ps1 script, we need to invoke it through PowerShell
+            import platform
+            if platform.system() == "Windows" and self.dantecode_path.endswith(".ps1"):
+                cmd = [
+                    "powershell.exe",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", self.dantecode_path,
+                    problem_statement,
+                    "--model", self.model,
+                    "--max-rounds", "10",
+                    "--silent"
+                ]
+            else:
+                cmd = [
+                    self.dantecode_path,
+                    problem_statement,
+                    "--model", self.model,
+                    "--max-rounds", "10",
+                    "--silent"
+                ]
 
             print(f"Running: {self.dantecode_path} \"<problem_statement>\" --model {self.model}")
             proc = subprocess.run(
