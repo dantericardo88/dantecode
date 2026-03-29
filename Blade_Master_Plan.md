@@ -29,7 +29,7 @@
 6. Model Flexibility: 8.8/10 (gap: -0.2)
 7. Verification/Trust: 8.8/10 (gap: -0.2) ⬆️ **IMPROVED +0.2**
 8. Extensibility: 8.6/10 (gap: 0.0)
-9. Agentic Depth: 8.5/10 (gap: -0.5) ⬆️ **IMPROVED +0.4**
+9. Agentic Depth: 8.7/10 (gap: -0.3) ⬆️ **IMPROVED +0.6**
 10. Git/Repo Awareness: 8.4/10 (gap: -0.1)
 11. Benchmark/Real-world: 7.0/10 (gap: -2.0)
 
@@ -197,11 +197,11 @@
    - Make sandbox mandatory (no disable option)
    - Add network isolation policies
 
-3. **Agentic Depth:** 8.5 → 9.0 (1.75h) ✅ **PARTIALLY COMPLETE**
+3. **Agentic Depth:** 8.7 → 9.0 (0.5h) ✅ **NEARLY COMPLETE**
    - ✅ Added observable trace logging (TraceLogger, 400+ LOC, 20 tests)
    - ✅ Agent loop instrumentation (spans, events, decisions)
-   - ⏳ Add trace visualization tool (2h remaining)
-   - ⏳ Document decision trees (30m remaining)
+   - ✅ Trace visualization commands (/trace list/show/tree/stats/clean, 430 LOC)
+   - ⏳ Document decision trees (30m remaining) → reaches 9.0
 
 4. **Verification/Trust:** 8.6 → 9.0 (3.5h)
    - Generate sample verification receipts
@@ -238,22 +238,24 @@
 
 ---
 
-## Current Session Achievements (34 Commits)
+## Current Session Achievements (40 Commits)
 
-### Code Added (3,200+ Lines)
+### Code Added (3,600+ Lines)
 - ✅ fuzzy-finder.ts + tests (370 LOC, 27 tests passing)
 - ✅ error-suggestions.ts + tests (350 LOC, 28 tests passing)
 - ✅ trace-logger.ts + tests (400 LOC, 20 tests passing)
+- ✅ trace visualization commands (430 LOC, 5 subcommands) ⭐ **NEW**
 - ✅ Agent loop instrumentation (observable execution traces)
 - ✅ bench-build-speed.mjs (200 LOC benchmark script)
-- ✅ Build optimizations (code splitting, treeshaking, turbo caching) ⭐ **NEW**
+- ✅ Build optimizations (code splitting, treeshaking, turbo caching)
 - ✅ CI enhancements (caching, external gates)
 - ✅ Windows compatibility fixes
 
-### Documentation Added (3,400+ Lines)
+### Documentation Added (4,000+ Lines)
 - ✅ ARCHITECTURE.md (450 lines)
 - ✅ MULTI_MODEL_GUIDE.md (600 lines)
-- ✅ BUILD_PERFORMANCE.md (600 lines) ⭐ **NEW**
+- ✅ BUILD_PERFORMANCE.md (600 lines)
+- ✅ VERIFICATION_ARCHITECTURE.md (600 lines) ⭐ **NEW**
 - ✅ SPEED_METRICS.md (performance analysis)
 - ✅ SESSION_PROGRESS.md (progress tracking)
 - ✅ DIMENSION_ASSESSMENT.md (comprehensive scoring)
@@ -264,8 +266,9 @@
 - Transparency: 7.2 → 9.0 (+1.8) ✅
 - UX/Ergonomics: 8.0 → 9.0 (+1.0) ✅
 - Security/Sandbox: 8.3 → 9.0 (+0.7) ✅
-- Speed/Efficiency: 7.8 → 9.0 (+1.2) ✅ ⭐ **NEW - COMPLETE**
-- Agentic Depth: 8.1 → 8.5 (+0.4)
+- Speed/Efficiency: 7.8 → 9.0 (+1.2) ✅
+- Agentic Depth: 8.1 → 8.7 (+0.6) ⬆️ **IMPROVED**
+- Verification/Trust: 8.6 → 8.8 (+0.2) ⬆️ **IMPROVED**
 - Model Flexibility: 8.2 → 8.8 (+0.6)
 
 ---

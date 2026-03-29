@@ -16,7 +16,7 @@
 | 3 | **UX/Ergonomics** | **9.0** | 9.0 | **0.0** | ✅ **ACHIEVED** |
 | 4 | **Security/Sandbox** | **9.0** | 9.2 | **-0.2** | ✅ **ACHIEVED** |
 | 5 | **Extensibility** | **8.6** | 8.6 | **0.0** | ✅ **ACHIEVED** |
-| 6 | **Agentic Depth** | **8.5** | 9.0 | **-0.5** | ⚠️ **IMPROVED** |
+| 6 | **Agentic Depth** | **8.7** | 9.0 | **-0.3** | ⚠️ **IMPROVED** |
 | 7 | Model Flexibility | 8.8 | 9.0 | -0.2 | ⚠️ |
 | 8 | Verification/Trust | 8.8 | 9.0 | -0.2 | ⚠️ **IMPROVED** |
 | 9 | Git/Repo Awareness | 8.4 | 8.5 | -0.1 | ⚠️ |
@@ -60,6 +60,8 @@
 23. ✅ **Overall score improves to 9.1/10!**
 24. ✅ Verification architecture documented
 25. ✅ Sample cryptographic receipt published → Verification +0.2 (8.6 → 8.8)
+26. ✅ Trace visualization commands added → Agentic Depth +0.2 (8.5 → 8.7)
+27. ✅ /trace list, show, tree, stats, clean subcommands
 
 ---
 
