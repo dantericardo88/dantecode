@@ -308,10 +308,11 @@ class SWEBenchRunner:
                 f.write(test_patch)
 
             # Apply test patch using git apply
+            # Use just the filename since we're setting cwd to workspace_dir
             print("Applying test patch...")
             apply_result = subprocess.run(
-                ["git", "apply", str(test_patch_file)],
-                cwd=workspace_dir,
+                ["git", "apply", "test.patch"],
+                cwd=str(workspace_dir),  # Ensure it's a string path
                 capture_output=True,
                 text=True
             )
@@ -320,8 +321,8 @@ class SWEBenchRunner:
                 print(f"WARNING: Failed to apply test patch: {apply_result.stderr}")
                 # Try --3way merge as fallback
                 apply_result = subprocess.run(
-                    ["git", "apply", "--3way", str(test_patch_file)],
-                    cwd=workspace_dir,
+                    ["git", "apply", "--3way", "test.patch"],
+                    cwd=str(workspace_dir),  # Ensure it's a string path
                     capture_output=True,
                     text=True
                 )
