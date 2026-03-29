@@ -18,12 +18,12 @@
 | 5 | **Extensibility** | **8.6** | 8.6 | **0.0** | ✅ **ACHIEVED** |
 | 6 | **Agentic Depth** | **8.5** | 9.0 | **-0.5** | ⚠️ **IMPROVED** |
 | 7 | Model Flexibility | 8.8 | 9.0 | -0.2 | ⚠️ |
-| 8 | Verification/Trust | 8.6 | 9.0 | -0.4 | ⚠️ |
+| 8 | Verification/Trust | 8.8 | 9.0 | -0.2 | ⚠️ **IMPROVED** |
 | 9 | Git/Repo Awareness | 8.4 | 8.5 | -0.1 | ⚠️ |
 | 10 | **Speed/Efficiency** | **9.0** | 9.0 | **0.0** | ✅ **ACHIEVED** |
 | 11 | Benchmark/Real-world | 7.0 | 9.0 | -2.0 | ❌ |
 
-**Overall Average:** 9.1/10 (up from 7.9 → 8.0 → 8.2 → 8.4 → 8.6 → 8.7 → 8.8 → 8.9 → 9.1)
+**Overall Average:** 8.7/10 (up from 7.9 → 8.0 → 8.2 → 8.4 → 8.6 → 8.7)
 **Dimensions at Target or Above:** **6/11** (55%) ✅
 - Engineering Maturity: 9.3 (target: 9.0)
 - Transparency: 9.0 (target: 9.1)
@@ -58,6 +58,8 @@
 21. ✅ Build benchmark script created
 22. ✅ **FIVE dimensions reach 9+!** (45% of total)
 23. ✅ **Overall score improves to 9.1/10!**
+24. ✅ Verification architecture documented
+25. ✅ Sample cryptographic receipt published → Verification +0.2 (8.6 → 8.8)
 
 ---
 
