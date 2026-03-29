@@ -16,13 +16,13 @@ if (-not $env:GROK_API_KEY) {
     exit 1
 }
 
-Write-Host "✓ GROK_API_KEY is set" -ForegroundColor Green
+Write-Host "[OK] GROK_API_KEY is set" -ForegroundColor Green
 Write-Host ""
 
 # Check Python version
 try {
     $pythonVersion = python --version 2>&1
-    Write-Host "✓ Python version: $pythonVersion" -ForegroundColor Green
+    Write-Host "[OK] Python version: $pythonVersion" -ForegroundColor Green
 } catch {
     Write-Host "ERROR: python not found" -ForegroundColor Red
     exit 1
@@ -33,7 +33,7 @@ Write-Host ""
 Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
 try {
     pip install -q datasets huggingface-hub 2>&1 | Out-Null
-    Write-Host "✓ Dependencies installed" -ForegroundColor Green
+    Write-Host "[OK] Dependencies installed" -ForegroundColor Green
 } catch {
     Write-Host "ERROR: Failed to install Python dependencies" -ForegroundColor Red
     exit 1
@@ -42,13 +42,13 @@ Write-Host ""
 
 # Create results directory
 New-Item -ItemType Directory -Force -Path "results" | Out-Null
-Write-Host "✓ Results directory ready" -ForegroundColor Green
+Write-Host "[OK] Results directory ready" -ForegroundColor Green
 Write-Host ""
 
 # Check if DanteCode CLI is available
 $dantecodePath = Get-Command dantecode -ErrorAction SilentlyContinue
 if ($dantecodePath) {
-    Write-Host "✓ DanteCode CLI found at: $($dantecodePath.Path)" -ForegroundColor Green
+    Write-Host "[OK] DanteCode CLI found at: $($dantecodePath.Path)" -ForegroundColor Green
 } else {
     Write-Host "WARNING: dantecode CLI not found in PATH" -ForegroundColor Yellow
     Write-Host "The benchmark will attempt to find it in node_modules" -ForegroundColor Yellow
@@ -83,10 +83,10 @@ $exitCode = $LASTEXITCODE
 Write-Host ""
 Write-Host "===================================" -ForegroundColor Cyan
 if ($exitCode -eq 0) {
-    Write-Host "✓ Benchmark completed successfully!" -ForegroundColor Green
+    Write-Host "[OK] Benchmark completed successfully!" -ForegroundColor Green
     Write-Host "Results saved in ./results/" -ForegroundColor White
 } else {
-    Write-Host "✗ Benchmark failed with exit code $exitCode" -ForegroundColor Red
+    Write-Host "[FAIL] Benchmark failed with exit code $exitCode" -ForegroundColor Red
 }
 Write-Host "===================================" -ForegroundColor Cyan
 
