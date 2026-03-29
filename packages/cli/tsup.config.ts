@@ -4,6 +4,9 @@ export default defineConfig({
   entry: ["src/index.ts", "src/slash-commands.ts"],
   format: ["esm"],
   dts: false, // CLI binary doesn't need .d.ts for end users
+  splitting: true, // Enable code splitting for faster incremental builds
+  treeshake: true, // Remove unused code
+  minify: false, // Keep readable for debugging (minify in production build)
   banner: {
     js: "#!/usr/bin/env node",
   },

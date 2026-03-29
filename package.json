@@ -31,6 +31,7 @@
     "smoke:external": "node scripts/smoke-external.mjs",
     "publish:dry-run": "node scripts/publish-dry-run.mjs",
     "measure:scores": "node scripts/measure-scores.mjs",
+    "bench:build": "node scripts/bench-build-speed.mjs",
     "release:check": "node scripts/release-check.mjs",
     "release:check:full": "npm run build && npm run typecheck && npm run lint && npm run format:check && npm test && npm run test:coverage && npm run release:quickstart-proof && npm run smoke:external && npm run publish:dry-run",
     "release:check:strict": "npm run release:check:full",
