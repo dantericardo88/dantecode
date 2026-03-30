@@ -5,9 +5,7 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { BaseWorkspace } from "./workspace.js";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - dante-sandbox types not available during build
-import { DanteSandbox, sandboxRun } from "@dantecode/dante-sandbox";
+import { sandboxRun, getEngine } from "@dantecode/dante-sandbox";
 import type {
   WorkspaceConfig,
   WorkspaceSnapshot,
@@ -62,7 +60,7 @@ export class ContainerWorkspace extends BaseWorkspace {
 
     try {
       // Check if DanteSandbox is available
-      const engine = DanteSandbox.getEngine();
+      const engine = getEngine();
       if (!engine) {
         throw new Error("DanteSandbox not initialized");
       }
