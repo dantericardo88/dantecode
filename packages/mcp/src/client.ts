@@ -8,6 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { MCPConfig, MCPServerConfig, MCPToolDefinition } from "@dantecode/config-types";
 import { getEnabledServers } from "./config.js";
+import { retryWithBackoff, RetryableErrors } from "@dantecode/core";
 
 /** Internal state per connected server. */
 interface ConnectedServer {
@@ -52,10 +53,24 @@ export class MCPClientManager {
       transport = new SSEClientTransport(new URL(serverConfig.url!));
     }
 
-    await client.connect(transport);
+    await retryWithBackoff(
+      async () => client.connect(transport),
+      {
+        maxRetries: 3,
+        baseDelayMs: 1000,
+        retryableErrors: RetryableErrors.networkOnly,
+      },
+    );
 
     // Discover tools from this server
-    const toolsResult = await client.listTools();
+    const toolsResult = await retryWithBackoff(
+      async () => client.listTools(),
+      {
+        maxRetries: 2,
+        baseDelayMs: 500,
+        retryableErrors: RetryableErrors.serverAndRateLimit,
+      },
+    );
     const tools: MCPToolDefinition[] = (toolsResult.tools ?? []).map((t) => ({
       name: t.name,
       description: t.description ?? "",
@@ -100,7 +115,14 @@ export class MCPClientManager {
       throw new Error(`MCP server "${serverName}" not connected`);
     }
 
-    const result = await server.client.callTool({ name: toolName, arguments: args });
+    const result = await retryWithBackoff(
+      async () => server.client.callTool({ name: toolName, arguments: args }),
+      {
+        maxRetries: 3,
+        baseDelayMs: 1000,
+        retryableErrors: RetryableErrors.serverAndRateLimit,
+      },
+    );
 
     // Extract text content from the MCP response
     const contents = result.content as Array<{ type: string; text?: string }>;

@@ -1201,9 +1201,23 @@ export type {
   AsyncTaskExecutorEvents,
 } from "./async-task-executor.js";
 
+// ─── Async Queue ──────────────────────────────────────────────────────────────
+
+export { AsyncQueue, work } from "./async-queue.js";
+
+// ─── Retry with Backoff ───────────────────────────────────────────────────────
+
+export { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
+export type { RetryOptions } from "./retry-with-backoff.js";
+
 // ─── Trace Logger ─────────────────────────────────────────────────────────────
 
-export { TraceLogger, getGlobalTraceLogger, setGlobalTraceLogger, hasGlobalTraceLogger } from "./trace-logger.js";
+export {
+  TraceLogger,
+  getGlobalTraceLogger,
+  setGlobalTraceLogger,
+  hasGlobalTraceLogger,
+} from "./trace-logger.js";
 export type {
   TraceSpan,
   TraceEvent,

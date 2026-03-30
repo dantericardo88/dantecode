@@ -20,6 +20,7 @@ import type {
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
 import { CredentialVault } from "./credential-vault.js";
+import { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
 
 // ─── Vault singleton ──────────────────────────────────────────────────────────
 let _vaultInstance: CredentialVault | null = null;
@@ -447,15 +448,28 @@ export class ModelRouterImpl {
 
       this.logEntry(config, "attempt", 0);
 
-      const result = await generateText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-      });
+      const result = await retryWithBackoff(
+        async () =>
+          generateText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: config.temperature,
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(providerOptions ? { providerOptions } : {}),
+          }),
+        {
+          maxRetries: 3,
+          baseDelayMs: 1000,
+          maxDelayMs: 30000,
+          retryableErrors: RetryableErrors.serverAndRateLimit,
+          onRetry: (attempt, error, delayMs) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+          },
+        },
+      );
 
       const durationMs = Date.now() - startTime;
       this.logEntry(config, "success", durationMs);
@@ -512,26 +526,39 @@ export class ModelRouterImpl {
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: config.temperature,
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(providerOptions ? { providerOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          // D6: Track cost for this streaming request
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+              // D6: Track cost for this streaming request
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+            },
+          }),
+        {
+          maxRetries: 3,
+          baseDelayMs: 1000,
+          maxDelayMs: 30000,
+          retryableErrors: RetryableErrors.serverAndRateLimit,
+          onRetry: (attempt, error, delayMs) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+          },
         },
-      });
+      );
 
       return {
         success: true,
@@ -570,26 +597,39 @@ export class ModelRouterImpl {
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        tools,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            tools,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: config.temperature,
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(providerOptions ? { providerOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+            },
+          }),
+        {
+          maxRetries: 3,
+          baseDelayMs: 1000,
+          maxDelayMs: 30000,
+          retryableErrors: RetryableErrors.serverAndRateLimit,
+          onRetry: (attempt, error, delayMs) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+          },
         },
-      });
+      );
 
       return { success: true, stream: result as StreamTextResult<T, never> };
     } catch (err: unknown) {
