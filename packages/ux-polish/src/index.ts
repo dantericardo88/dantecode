@@ -109,6 +109,19 @@ export { UXPreferences, PREFERENCE_DEFAULTS } from "./preferences/ux-preferences
 export type { UXPreferencesOptions } from "./preferences/ux-preferences.js";
 
 // ---------------------------------------------------------------------------
+// Interactive Components
+// ---------------------------------------------------------------------------
+
+export { Spinner, SPINNERS } from "./components/spinner.js";
+export type { SpinnerOptions, SpinnerFrames, SpinnerName } from "./components/spinner.js";
+
+export { ToastManager, toasts } from "./components/toast.js";
+export type { Toast, ToastOptions, ToastLevel } from "./components/toast.js";
+
+export { showMenu } from "./components/menu.js";
+export type { MenuItem, MenuOptions } from "./components/menu.js";
+
+// ---------------------------------------------------------------------------
 // Surfaces
 // ---------------------------------------------------------------------------
 
