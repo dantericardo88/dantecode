@@ -9,10 +9,12 @@ export interface WorktreeCreateResult {
 }
 
 export interface WorktreeMergeResult {
-  success: boolean;
-  mergedBranch?: string;
-  mergeCommitHash?: string;
-  conflicts?: string[];
+  merged: boolean;
+  worktreeBranch: string;
+  targetBranch: string;
+  mergeCommitHash: string;
+  worktreeClean: boolean;
+  mainBranchClean: boolean;
 }
 
 export interface WorktreeEntry {
@@ -29,5 +31,9 @@ export interface WorktreeHooks {
     baseBranch: string;
   }) => WorktreeCreateResult;
   removeWorktree: (directory: string) => void;
-  mergeWorktree: (directory: string, targetBranch: string) => WorktreeMergeResult;
+  mergeWorktree: (
+    directory: string,
+    targetBranch: string,
+    projectRoot: string,
+  ) => WorktreeMergeResult;
 }

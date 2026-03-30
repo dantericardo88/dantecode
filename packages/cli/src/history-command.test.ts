@@ -206,6 +206,7 @@ function makeReplState(overrides?: Partial<ReplState>): ReplState {
     macroRecordingName: null,
     macroRecordingSteps: [],
     theme: "default",
+    semanticIndex: null,
     ...overrides,
   };
 }

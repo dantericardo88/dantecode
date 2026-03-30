@@ -660,7 +660,7 @@ function runVerification(ctx: ServerContext): RouteHandler {
           if (detections.length === 0) {
             return { passed: true, overallScore: 100, findings: [] };
           }
-          const best = detections.sort((a, b) => b.confidence - a.confidence)[0]!;
+          const best = detections.sort((a: any, b: any) => b.confidence - a.confidence)[0]!;
           const filePath = best.paths[0] ?? join(ctx.projectRoot, f);
           const parsed = await parseUniversalSkill(filePath, best.format);
           const result = await verifySkill(parsed);

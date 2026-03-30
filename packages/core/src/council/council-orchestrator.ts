@@ -732,7 +732,11 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       throw new Error("WorktreeHooks required for council worktree operations");
     }
 
-    const mergeResult = this.worktreeHooks.mergeWorktree(worktreePath, targetBranch);
+    const mergeResult = this.worktreeHooks.mergeWorktree(
+      worktreePath,
+      targetBranch,
+      this.runState.repoRoot,
+    );
 
     this.emit("worktree:merged", {
       laneId,

@@ -31,6 +31,8 @@ export type AuditLoggerFn = (event: any) => void;
 
 // Fallback (No Docker)
 export class LocalExecutor {
+  constructor(projectRoot: string, auditLogger: any);
+  run(command: string, timeoutMs?: number): Promise<any>;
   execute(command: string): Promise<any>;
 }
 `;

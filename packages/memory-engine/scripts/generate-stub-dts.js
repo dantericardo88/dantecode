@@ -13,7 +13,7 @@ const stubContent = `// Auto-generated stub declaration file for @dantecode/memo
 export class MemoryOrchestrator {
   constructor(options?: any);
   initialize(): Promise<void>;
-  memoryStore(key: string, value: any, scope?: any): Promise<any>;
+  memoryStore(key: string, value: any, scope?: any, meta?: any): Promise<any>;
   memoryRecall(query: string, limit?: number, scope?: any): Promise<any>;
   memorySummarize(sessionId: string): Promise<any>;
   memoryPrune(threshold?: number): Promise<any>;

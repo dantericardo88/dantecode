@@ -74,9 +74,9 @@ import {
 import {
   listSkills,
   getSkill,
-  SkillCatalog,
   installSkill,
   verifySkill,
+  SkillCatalog,
 } from "@dantecode/skill-adapter";
 import {
   getStatus,
@@ -2422,7 +2422,7 @@ async function replayCommand(args: string, state: ReplState): Promise<string> {
       eventList.push({
         id: event.id,
         kind: event.kind,
-        timestamp: event.timestamp,
+        timestamp: event.at,
       });
     }
 

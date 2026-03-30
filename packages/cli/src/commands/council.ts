@@ -312,7 +312,11 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
 
   const adapters = buildAdapters(agentKinds, { bridgeDir, projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    worktreeHooks: {
+      createWorktree,
+      removeWorktree,
+      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+    },
   });
 
   orchestrator.on("error", ({ message, context }) => {
@@ -679,7 +683,11 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
   );
   const orchestrator = new CouncilOrchestrator(adapters, {
     allowAutoMerge: autoFlag,
-    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    worktreeHooks: {
+      createWorktree,
+      removeWorktree,
+      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+    },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
 
@@ -878,7 +886,11 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     { bridgeDir, projectRoot },
   );
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    worktreeHooks: {
+      createWorktree,
+      removeWorktree,
+      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+    },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
 
@@ -1067,7 +1079,11 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
 
   const adapters = buildAdapters(agentKinds, { projectRoot });
   const orchestrator = new CouncilOrchestrator(adapters, {
-    worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    worktreeHooks: {
+      createWorktree,
+      removeWorktree,
+      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+    },
   });
 
   orchestrator.on("error", ({ message, context }) => {

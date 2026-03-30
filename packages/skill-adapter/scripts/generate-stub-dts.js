@@ -86,9 +86,9 @@ export function getDanteCodeTargetPath(manifest: any): string | null;
 export function sanitizeSlug(slug: string): string;
 
 // --- SkillBridge Import Bridge ---
-export function importSkillBridgeBundle(bundlePath: string, options?: any): Promise<any>;
-export function listBridgeWarnings(skillName: string): any[];
-export function validateBridgeSkill(skillName: string): any;
+export function importSkillBridgeBundle(options: any): Promise<any>;
+export function listBridgeWarnings(skillName: string, projectRoot: string): Promise<any>;
+export function validateBridgeSkill(skillName: string, projectRoot: string): Promise<boolean>;
 export function checkBridgeManifestIntegrity(manifestPath: string): any;
 export type ImportBridgeOptions = any;
 export type ImportBridgeResult = any;
@@ -111,14 +111,22 @@ export type VerifyOptions = any;
 
 // --- Marketplace ---
 export class SkillCatalog {
-  constructor();
+  constructor(projectRoot: string);
   load(): Promise<void>;
+  save(): Promise<void>;
   search(query: string): any[];
-  getEntry(id: string): any;
+  filterByTag(tag: string): any[];
+  filterBySource(source: any): any[];
+  filterByTier(tier: string): any[];
+  filterByTierMinimum(minimumTier: string): any[];
+  upsert(entry: any): void;
+  remove(name: string): boolean;
+  getAll(): any[];
+  get(name: string): any | null;
 }
-export function installSkill(entryId: string, options?: any): Promise<any>;
-export function bundleSkill(skillName: string, options?: any): Promise<any>;
-export function exportSkillToDirectory(skillName: string, targetDir: string): Promise<void>;
+export function installSkill(options: any, projectRoot: string): Promise<any>;
+export function bundleSkill(options: any, projectRoot: string): Promise<any>;
+export function exportSkillToDirectory(entry: any, outputPath: string, projectRoot: string): Promise<any>;
 export type CatalogEntry = any;
 export type InstallOptions = any;
 export type InstallResult = any;
