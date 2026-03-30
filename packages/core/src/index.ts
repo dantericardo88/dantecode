@@ -1210,6 +1210,23 @@ export { AsyncQueue, work } from "./async-queue.js";
 export { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
 export type { RetryOptions } from "./retry-with-backoff.js";
 
+// ─── Observability ────────────────────────────────────────────────────────────
+
+export { MetricCounter, TraceRecorder, HealthSurface } from "@dantecode/observability";
+export type {
+  Metric,
+  MetricValue,
+  MetricType,
+  Span,
+  SpanAttributes,
+  SpanStatus,
+  TraceRecord,
+  HealthStatus,
+  HealthCheckResult as ObservabilityHealthCheckResult,
+  HealthReport,
+  HealthCheckFn,
+} from "@dantecode/observability";
+
 // ─── Trace Logger ─────────────────────────────────────────────────────────────
 
 export {
