@@ -265,19 +265,66 @@ class SWEBenchRunner:
                 print(f"ERROR: Failed to checkout commit: {checkout_result.stderr}")
                 return False
 
-            # Install dependencies if requirements.txt or setup.py exists
+            # Install dependencies - try multiple common patterns
+            installed_something = False
+
+            # 1. Install from requirements.txt if it exists
             if (workspace_dir / "requirements.txt").exists():
                 print("Installing Python dependencies...")
                 subprocess.run(
                     ["pip", "install", "-q", "-r", "requirements.txt"],
                     cwd=workspace_dir,
                     capture_output=True,
-                    timeout=300  # 5 minute timeout for pip install
+                    timeout=300
                 )
-            elif (workspace_dir / "setup.py").exists():
+                installed_something = True
+
+            # 2. Install from setup.py (development mode)
+            if (workspace_dir / "setup.py").exists():
                 print("Installing package in development mode...")
                 subprocess.run(
                     ["pip", "install", "-q", "-e", "."],
+                    cwd=workspace_dir,
+                    capture_output=True,
+                    timeout=300
+                )
+                installed_something = True
+
+            # 3. Install test dependencies (common patterns)
+            test_req_files = [
+                "requirements-dev.txt",
+                "test-requirements.txt",
+                "dev-requirements.txt",
+                ".requirements-dev.txt"
+            ]
+            for test_req in test_req_files:
+                if (workspace_dir / test_req).exists():
+                    print(f"Installing test dependencies from {test_req}...")
+                    subprocess.run(
+                        ["pip", "install", "-q", "-r", test_req],
+                        cwd=workspace_dir,
+                        capture_output=True,
+                        timeout=300
+                    )
+                    installed_something = True
+                    break
+
+            # 4. Install common test dependencies for astropy and similar projects
+            # This handles the "hypothesis" module error we saw
+            if "astropy" in repo.lower():
+                print("Installing common astropy test dependencies...")
+                subprocess.run(
+                    ["pip", "install", "-q", "hypothesis", "pytest-astropy", "pytest-xdist", "pytest-cov"],
+                    cwd=workspace_dir,
+                    capture_output=True,
+                    timeout=300
+                )
+
+            # 5. Try setup.py with [test] extras if available
+            if (workspace_dir / "setup.py").exists() and not installed_something:
+                print("Installing package with test extras...")
+                subprocess.run(
+                    ["pip", "install", "-q", "-e", ".[test]"],
                     cwd=workspace_dir,
                     capture_output=True,
                     timeout=300
