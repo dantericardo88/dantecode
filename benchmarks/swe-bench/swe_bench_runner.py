@@ -130,6 +130,16 @@ class SWEBenchRunner:
                 print(f"✗ Environment setup failed")
                 return result
 
+            # CRITICAL: Apply test patch BEFORE running DanteCode
+            # The test patch adds tests to the original code
+            # DanteCode will then try to make those tests pass
+            print("Applying test patch...")
+            patch_success = self._apply_test_patch(instance, workspace_dir)
+            if not patch_success:
+                result.error = "Failed to apply test patch"
+                print(f"✗ Test patch failed to apply")
+                return result
+
             # Run DanteCode with the problem statement
             # DanteCode runs in the cwd, so we need to execute from workspace_dir
             # Use --max-rounds to limit execution time
@@ -192,9 +202,8 @@ class SWEBenchRunner:
             if pdse_match:
                 result.pdse_score = float(pdse_match.group(1))
 
-            # Run SWE-bench evaluation to check if solution passes
-            # (Simplified - real implementation would run test suite)
-            tests_passed = self._evaluate_solution(instance, workspace_dir)
+            # Run the tests to check if DanteCode's solution passes
+            tests_passed = self._run_tests(instance, workspace_dir)
             result.pass_rate = 1.0 if tests_passed else 0.0
 
             print(f"✓ Completed in {elapsed:.1f}s - {'PASSED' if tests_passed else 'FAILED'}")
@@ -340,8 +349,8 @@ class SWEBenchRunner:
             print(f"ERROR during environment setup: {e}")
             return False
 
-    def _evaluate_solution(self, instance: Dict[str, Any], workspace_dir: Path) -> bool:
-        """Evaluate if the solution passes SWE-bench tests"""
+    def _apply_test_patch(self, instance: Dict[str, Any], workspace_dir: Path) -> bool:
+        """Apply the test patch to add tests to the repository"""
         try:
             # Extract test information from instance
             test_patch = instance.get("test_patch", "")
@@ -356,10 +365,9 @@ class SWEBenchRunner:
 
             # Apply test patch using git apply
             # Use just the filename since we're setting cwd to workspace_dir
-            print("Applying test patch...")
             apply_result = subprocess.run(
                 ["git", "apply", "test.patch"],
-                cwd=str(workspace_dir),  # Ensure it's a string path
+                cwd=str(workspace_dir),
                 capture_output=True,
                 text=True
             )
@@ -369,7 +377,7 @@ class SWEBenchRunner:
                 # Try --3way merge as fallback
                 apply_result = subprocess.run(
                     ["git", "apply", "--3way", "test.patch"],
-                    cwd=str(workspace_dir),  # Ensure it's a string path
+                    cwd=str(workspace_dir),
                     capture_output=True,
                     text=True
                 )
@@ -377,6 +385,16 @@ class SWEBenchRunner:
                     print(f"ERROR: Could not apply test patch even with --3way")
                     return False
 
+            print("✓ Test patch applied successfully")
+            return True
+
+        except Exception as e:
+            print(f"ERROR applying test patch: {e}")
+            return False
+
+    def _run_tests(self, instance: Dict[str, Any], workspace_dir: Path) -> bool:
+        """Run the tests to check if DanteCode's solution passes"""
+        try:
             # Determine test command based on repo
             # Most SWE-bench repos use pytest, but some use unittest or other runners
             repo_name = instance.get("repo", "")
