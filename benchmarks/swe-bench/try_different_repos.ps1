@@ -3,14 +3,14 @@
 
 param(
     [int]$Limit = 5,
-    [int]$Offset = 10  # Skip first 10 (likely all astropy)
+    [int]$Offset = 50  # Skip first 50 to get past astropy
 )
 
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host "SWE-bench - Try Different Repos" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Skipping first $Offset instances (astropy)" -ForegroundColor Yellow
+Write-Host "Skipping first $Offset instances (get past astropy)" -ForegroundColor Yellow
 Write-Host "Testing next $Limit instances with Grok" -ForegroundColor Yellow
 Write-Host ""
 
