@@ -554,6 +554,7 @@ def main():
     parser.add_argument("--subset", choices=["verified", "full"], default="verified",
                        help="Dataset subset to use (default: verified)")
     parser.add_argument("--limit", type=int, help="Limit number of instances to run")
+    parser.add_argument("--offset", type=int, default=0, help="Skip first N instances (default: 0)")
     parser.add_argument("--dantecode", default="dantecode", help="Path to dantecode CLI")
     parser.add_argument("--output-dir", default="../results", help="Output directory for results")
     parser.add_argument("--model", default="grok/grok-3", help="Model to use (default: grok/grok-3)")
@@ -561,7 +562,7 @@ def main():
     args = parser.parse_args()
 
     runner = SWEBenchRunner(dantecode_path=args.dantecode, output_dir=args.output_dir, model=args.model)
-    summary = runner.run_benchmark(subset=args.subset, limit=args.limit)
+    summary = runner.run_benchmark(subset=args.subset, limit=args.limit, offset=args.offset)
 
     # Exit with success if pass rate >= 75%
     sys.exit(0 if summary.pass_rate >= 0.75 else 1)
