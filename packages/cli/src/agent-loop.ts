@@ -95,8 +95,27 @@ import {
   type SessionEvidenceTracker,
 } from "./evidence-chain-bridge.js";
 import { discoverSkills, SkillRegistry } from "@dantecode/skills-registry";
+import { MetricCounter, TraceRecorder } from "@dantecode/core";
 
 // Types re-exported from extracted modules are imported above.
+
+// ─── Observability ──────────────────────────────────────────────────────────
+
+/** Module-level metrics collector for agent loop telemetry */
+const agentMetrics = new MetricCounter();
+
+/** Module-level trace recorder for distributed tracing */
+const agentTracer = new TraceRecorder();
+
+/** Export metrics for CLI commands */
+export function getAgentMetrics() {
+  return agentMetrics.getMetricsDetailed();
+}
+
+/** Export traces for CLI commands */
+export function getAgentTraces() {
+  return agentTracer.getTraces();
+}
 
 // ----------------------------------------------------------------------------
 // Types
@@ -313,803 +332,1022 @@ async function _runAgentLoopCore(
   try {
     // ---- Session resume / continuation (extracted to session-manager.ts) ----
     const resumeResult = await resolveSessionResume(prompt, session, config);
-  if (resumeResult.earlyReturn) {
-    return resumeResult.session;
-  }
-  const { durableRunStore } = resumeResult;
-  const workflowName = resumeResult.workflowName ?? "agent-loop";
-  const durablePrompt = resumeResult.durablePrompt;
-  let { replayToolCalls } = resumeResult;
-  session = resumeResult.session;
-
-  let durableRun = resumeResult.durableRunId
-    ? await durableRunStore.loadRun(resumeResult.durableRunId)
-    : null;
-  if (!durableRun) {
-    durableRun = await durableRunStore.initializeRun({
-      runId: resumeResult.durableRunId,
-      session,
-      prompt: durablePrompt,
-      workflow: workflowName,
-    });
-  }
-
-  // ---- Evidence Chain: session-scoped cryptographic audit trail ----
-  const evidenceTracker: SessionEvidenceTracker = createSessionEvidenceTracker(session.id);
-
-  // Append user message
-  const userMessage: SessionMessage = {
-    id: randomUUID(),
-    role: "user",
-    content: durablePrompt,
-    timestamp: new Date().toISOString(),
-  };
-  session.messages.push(userMessage);
-
-  // Build the model router
-  const routerConfig = {
-    default: config.state.model.default,
-    fallback: config.state.model.fallback,
-    overrides: config.state.model.taskOverrides,
-  };
-  const router = new ModelRouterImpl(routerConfig, session.projectRoot, session.id);
-  const lexicalComplexity = router.analyzeComplexity(durablePrompt);
-  let thinkingBudget = deriveThinkingBudget(config.state.model.default, lexicalComplexity);
-  if (config.replState && thinkingBudget !== undefined) {
-    config.replState.lastThinkingBudget = thinkingBudget;
-  }
-  let localSandboxBridge: SandboxBridge | null = null;
-
-  // Build system prompt
-  let systemPrompt = await buildSystemPrompt(session, config);
-
-  // D-12A: Apply model adaptation overrides (only in "active" mode)
-  let adaptationMode = process.env.DANTE_MODEL_ADAPTATION_MODE ?? "observe-only";
-  const adaptationDisabled = process.env.DANTE_DISABLE_MODEL_ADAPTATION === "1";
-  // Validate mode — fall back to observe-only on invalid value
-  if (!adaptationDisabled && !["observe-only", "staged", "active"].includes(adaptationMode)) {
-    process.stderr.write(
-      `[D-12A] WARNING: Invalid DANTE_MODEL_ADAPTATION_MODE="${adaptationMode}". ` +
-        `Valid values: observe-only, staged, active. Defaulting to observe-only.\n`,
-    );
-    adaptationMode = "observe-only";
-  }
-  if (
-    !adaptationDisabled &&
-    adaptationMode === "active" &&
-    config.replState?.modelAdaptationStore
-  ) {
-    // Reload to pick up CLI approve/reject changes between rounds
-    await config.replState.modelAdaptationStore.reload();
-    const modelKey = {
-      provider: config.state.model.default.provider,
-      modelId: config.state.model.default.modelId,
-    };
-    const activeOverrides = config.replState.modelAdaptationStore.getActiveOverrides(modelKey);
-    if (activeOverrides.length > 0) {
-      systemPrompt = applyOverrides(systemPrompt, activeOverrides);
+    if (resumeResult.earlyReturn) {
+      return resumeResult.session;
     }
-  }
+    const { durableRunStore } = resumeResult;
+    const workflowName = resumeResult.workflowName ?? "agent-loop";
+    const durablePrompt = resumeResult.durablePrompt;
+    let { replayToolCalls } = resumeResult;
+    session = resumeResult.session;
 
-  // Convert session messages to the format expected by the AI SDK
-  let messages = session.messages.map((msg) => ({
-    role: msg.role as "user" | "assistant" | "system",
-    content:
-      typeof msg.content === "string"
-        ? msg.content
-        : msg.content.map((b) => b.text || "").join("\n"),
-  }));
-
-  // Tool call loop: keep sending to the model until no more tool calls
-  // Dynamic round budget: pipeline orchestrators can request more rounds via requiredRounds.
-  // When a skill is active (skillActive), default to 50 rounds to ensure completion.
-  let maxToolRounds = config.requiredRounds
-    ? Math.max(config.requiredRounds, 15)
-    : config.skillActive
-      ? 50
-      : 15;
-  let totalTokensUsed = 0;
-  const touchedFiles: string[] = [];
-  // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
-  const recentToolSignatures: string[] = [];
-  const MAX_FALLBACK_PIPELINE_ROUNDS = 2;
-  // Reflection loop (aider/Cursor pattern): auto-retry verification after code edits
-  const MAX_VERIFY_RETRIES = 3;
-  let verifyRetries = 0;
-  // Self-healing loop: track error signatures to detect repeated identical failures
-  let lastErrorSignature = "";
-  let sameErrorCount = 0;
-  // sessionFailureCount: monotonically increasing failure counter — never resets.
-  // Unlike sameErrorCount (which resets on signature change), this accumulates ALL
-  // verification failures regardless of whether the error signature changes.
-  // Feeds the FearSet repeated-failure channel which needs total failure count.
-  let sessionFailureCount = 0;
-  let executionNudges = 0;
-  const MAX_EXECUTION_NUDGES = 2;
-  let executedToolsThisTurn = 0;
-  // ExecutionPolicy (DTR Phase 6): track completed tool names for dependency gating
-  const completedToolsThisTurn = new Set<string>();
-  // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
-  let pipelineContinuationNudges = 0;
-  // CLI auto-continuation: refill round budget when exhausted mid-pipeline
-  let autoContinuations = 0;
-  const MAX_AUTO_CONTINUATIONS = 3;
-  // Effective self-improvement policy: may be restricted when on a fallback model
-  let effectiveSelfImprovement: SelfImprovementContext | null | undefined = config.selfImprovement;
-  // Fallback pipeline guard: tracks consecutive rounds spent on a fallback model
-  let fallbackPipelineRounds = 0;
-  // Anti-confabulation guards
-  let consecutiveEmptyRounds = 0;
-  let confabulationNudges = 0;
-  // Wave deliverables verification: max retries per wave before force-advancing
-  const MAX_WAVE_VERIFY_RETRIES = 2;
-  let waveVerifyRetries = 0;
-  const isPipelineWorkflow =
-    config.skillActive ||
-    EXECUTION_WORKFLOW_PATTERN.test(durablePrompt) ||
-    isExecutionContinuationPrompt(durablePrompt, session);
-
-  // ---- Feature: Planning phase (for complex tasks) ----
-  // Inject planning instruction before first model call when complexity >= 0.7
-  const planningEnabled = lexicalComplexity >= 0.7;
-  let planGenerated = false;
-
-  // ---- Feature: Approach memory ----
-  // Track what approaches were tried and their outcomes within this session
-  const approachLog: ApproachLogEntry[] = [];
-  let currentApproachDescription = "";
-  let currentApproachToolCalls = 0;
-
-  // ---- Pre-loop context assembly (extracted to prompt-builder.ts) ----
-  const {
-    historicalFailures,
-    reasoningChain,
-    autonomyEngine,
-    sessionPersistentMemory,
-    persistentApproachMemory: persistentMemory,
-    securityEngine,
-    secretsScanner,
-    memoryOrchestrator,
-    memoryInitialized,
-    auditLogger,
-    metricsCollector,
-  } = await buildPreLoopContext(durablePrompt, session, config, messages);
-  let currentRoundTier: import("@dantecode/core").ReasoningTier = "quick";
-
-  // ---- Feature: Task complexity classification (informational) ----
-  const taskComplexityRouter = new TaskComplexityRouter();
-  const taskSignals = {
-    promptTokens: Math.ceil(durablePrompt.length / 4),
-    fileCount: session.activeFiles?.length ?? 0,
-    hasReasoning: (reasoningChain?.getStepCount() ?? 0) > 0,
-    hasSecurity: false,
-    hasMultiFile: (session.activeFiles?.length ?? 0) > 1,
-    estimatedOutputTokens: Math.ceil(durablePrompt.length / 8),
-  };
-  const complexityDecision = taskComplexityRouter.classify(taskSignals);
-  const complexityTier = complexityDecision.complexity;
-  if (config.verbose) {
-    emitOrWrite(
-      `${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`,
-    );
-  }
-
-  // ---- Feature: Skill Discovery ----
-  try {
-    const discoveredEntries = await discoverSkills({ projectRoot: session.projectRoot });
-    if (discoveredEntries.length > 0) {
-      const reg = new SkillRegistry();
-      reg.register(discoveredEntries);
-      for (const col of reg.getCollisions()) {
-        const scopes = col.entries.map((e) => e.scope).join(", ");
-        process.stderr.write(`[SKILL-WARN] Skill collision: "${col.name}" in scopes: ${scopes}\n`);
-      }
-      if (config.verbose) {
-        process.stdout.write(
-          `${DIM}[skills] Discovered ${discoveredEntries.length} skill(s), ${reg.list().length} active${RESET}\n`,
-        );
-      }
-      const activeSkills = reg.list();
-      if (activeSkills.length > 0) {
-        const skillLines = activeSkills.map((s) => {
-          const tag = s.scope === "project" ? "[PRJ]" : s.scope === "user" ? "[USR]" : "[LIB]";
-          return `- ${tag} **${s.name}** (${s.slug})`;
-        });
-        messages.push({
-          role: "system" as const,
-          content: [
-            "## Available Skills",
-            "",
-            "The following skills are installed and active in this project:",
-            ...skillLines,
-            "",
-            "To execute a skill, reference it by name or use `/skills run <name>`.",
-          ].join("\n"),
-        });
-      }
-    }
-  } catch {
-    // Non-fatal — skill discovery never blocks a session
-  }
-
-  // ---- Feature: Pivot logic ----
-  // Track consecutive failures with similar error signatures for strategy change.
-  // This is different from the existing tier escalation — it's about changing
-  // strategy, not just using a better model.
-  let consecutiveSameSignatureFailures = 0;
-  let lastPivotErrorSignature = "";
-
-  // Per-tool error tracking: prevents infinite retries of failing tools
-  const toolErrorCounts = new Map<string, number>();
-
-  // ---- Feature: Progress tracking ----
-  // Simple counters emitted to the session periodically
-  let toolCallsThisTurn = 0;
-  let filesModified = 0;
-  let testsRun = 0;
-  let bashSucceeded = 0;
-  let roundCounter = 0;
-  let lastMajorEditGatePassed = true;
-  const readTracker = new Map<string, string>();
-  const editAttempts = new Map<string, number>();
-
-  const evidenceLedger: ExecutionEvidence[] = [];
-  let lastConfirmedStep = "Started execution.";
-  let lastSuccessfulTool: string | undefined;
-  let lastSuccessfulToolResult: string | undefined;
-  let transientTimeoutRetries = 0;
-  const maxTransientRetries = config.timeoutPolicy?.transientRetries ?? 1;
-
-  if (config.verbose && thinkingBudget) {
-    process.stdout.write(
-      `${DIM}[thinking: ${config.state.model.default.provider}/${config.state.model.default.modelId}, budget=${thinkingBudget}]${RESET}\n`,
-    );
-  }
-
-  // Planning phase (extracted to prompt-builder.ts)
-  injectPlanningPhase(
-    messages,
-    planningEnabled,
-    lexicalComplexity,
-    historicalFailures,
-    !!config.silent,
-  );
-
-  // ---- RunIntake: capture intent boundary before any model call ----
-  const runIntake: RunIntake = createRunIntake(durablePrompt, session.id, config.runId);
-  if (config.verbose) {
-    emitOrWrite(
-      `${DIM}[run-intake] id=${runIntake.runId} class=${runIntake.classification} scope=${runIntake.requestedScope.length} paths${RESET}\n`,
-    );
-  }
-
-  // ---- Boundary Tracker: detect scope drift across tool rounds ----
-  const boundaryTracker = new BoundaryTracker(runIntake);
-
-  while (maxToolRounds > 0) {
-    // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
-    if (
-      maxToolRounds <= 1 &&
-      isPipelineWorkflow &&
-      autoContinuations < MAX_AUTO_CONTINUATIONS &&
-      filesModified > 0
-    ) {
-      autoContinuations++;
-      maxToolRounds += config.skillActive ? 50 : 15;
-      messages.push({
-        role: "user" as const,
-        content: "Continue executing remaining steps. Do not summarize — keep working.",
+    let durableRun = resumeResult.durableRunId
+      ? await durableRunStore.loadRun(resumeResult.durableRunId)
+      : null;
+    if (!durableRun) {
+      durableRun = await durableRunStore.initializeRun({
+        runId: resumeResult.durableRunId,
+        session,
+        prompt: durablePrompt,
+        workflow: workflowName,
       });
-      if (!config.silent) {
-        emitOrWrite(
-          `\n${YELLOW}[auto-continue ${autoContinuations}/${MAX_AUTO_CONTINUATIONS}]${RESET} ${DIM}(rounds low mid-pipeline — refilling budget)${RESET}\n`,
-        );
+    }
+
+    // ---- Evidence Chain: session-scoped cryptographic audit trail ----
+    const evidenceTracker: SessionEvidenceTracker = createSessionEvidenceTracker(session.id);
+
+    // Append user message
+    const userMessage: SessionMessage = {
+      id: randomUUID(),
+      role: "user",
+      content: durablePrompt,
+      timestamp: new Date().toISOString(),
+    };
+    session.messages.push(userMessage);
+
+    // Build the model router
+    const routerConfig = {
+      default: config.state.model.default,
+      fallback: config.state.model.fallback,
+      overrides: config.state.model.taskOverrides,
+    };
+    const router = new ModelRouterImpl(routerConfig, session.projectRoot, session.id);
+    const lexicalComplexity = router.analyzeComplexity(durablePrompt);
+    let thinkingBudget = deriveThinkingBudget(config.state.model.default, lexicalComplexity);
+    if (config.replState && thinkingBudget !== undefined) {
+      config.replState.lastThinkingBudget = thinkingBudget;
+    }
+    let localSandboxBridge: SandboxBridge | null = null;
+
+    // Build system prompt
+    let systemPrompt = await buildSystemPrompt(session, config);
+
+    // D-12A: Apply model adaptation overrides (only in "active" mode)
+    let adaptationMode = process.env.DANTE_MODEL_ADAPTATION_MODE ?? "observe-only";
+    const adaptationDisabled = process.env.DANTE_DISABLE_MODEL_ADAPTATION === "1";
+    // Validate mode — fall back to observe-only on invalid value
+    if (!adaptationDisabled && !["observe-only", "staged", "active"].includes(adaptationMode)) {
+      process.stderr.write(
+        `[D-12A] WARNING: Invalid DANTE_MODEL_ADAPTATION_MODE="${adaptationMode}". ` +
+          `Valid values: observe-only, staged, active. Defaulting to observe-only.\n`,
+      );
+      adaptationMode = "observe-only";
+    }
+    if (
+      !adaptationDisabled &&
+      adaptationMode === "active" &&
+      config.replState?.modelAdaptationStore
+    ) {
+      // Reload to pick up CLI approve/reject changes between rounds
+      await config.replState.modelAdaptationStore.reload();
+      const modelKey = {
+        provider: config.state.model.default.provider,
+        modelId: config.state.model.default.modelId,
+      };
+      const activeOverrides = config.replState.modelAdaptationStore.getActiveOverrides(modelKey);
+      if (activeOverrides.length > 0) {
+        systemPrompt = applyOverrides(systemPrompt, activeOverrides);
       }
     }
 
-    maxToolRounds--;
-    roundCounter++;
-    const _roundStartMs = Date.now();
-    // Record previous round's outcome (skip round 1: tier not yet decided on first pass)
-    if (roundCounter > 1) {
-      reasoningChain.recordTierOutcome(
-        currentRoundTier,
-        sameErrorCount === 0 ? 0.9 : sameErrorCount <= 2 ? 0.75 : 0.6,
+    // Convert session messages to the format expected by the AI SDK
+    let messages = session.messages.map((msg) => ({
+      role: msg.role as "user" | "assistant" | "system",
+      content:
+        typeof msg.content === "string"
+          ? msg.content
+          : msg.content.map((b) => b.text || "").join("\n"),
+    }));
+
+    // Tool call loop: keep sending to the model until no more tool calls
+    // Dynamic round budget: pipeline orchestrators can request more rounds via requiredRounds.
+    // When a skill is active (skillActive), default to 50 rounds to ensure completion.
+    let maxToolRounds = config.requiredRounds
+      ? Math.max(config.requiredRounds, 15)
+      : config.skillActive
+        ? 50
+        : 15;
+    let totalTokensUsed = 0;
+    const touchedFiles: string[] = [];
+    // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
+    const recentToolSignatures: string[] = [];
+    const MAX_FALLBACK_PIPELINE_ROUNDS = 2;
+    // Reflection loop (aider/Cursor pattern): auto-retry verification after code edits
+    const MAX_VERIFY_RETRIES = 3;
+    let verifyRetries = 0;
+    // Self-healing loop: track error signatures to detect repeated identical failures
+    let lastErrorSignature = "";
+    let sameErrorCount = 0;
+    // sessionFailureCount: monotonically increasing failure counter — never resets.
+    // Unlike sameErrorCount (which resets on signature change), this accumulates ALL
+    // verification failures regardless of whether the error signature changes.
+    // Feeds the FearSet repeated-failure channel which needs total failure count.
+    let sessionFailureCount = 0;
+    let executionNudges = 0;
+    const MAX_EXECUTION_NUDGES = 2;
+    let executedToolsThisTurn = 0;
+    // ExecutionPolicy (DTR Phase 6): track completed tool names for dependency gating
+    const completedToolsThisTurn = new Set<string>();
+    // Pipeline continuation: prevent premature wrap-up during multi-step pipelines
+    let pipelineContinuationNudges = 0;
+    // CLI auto-continuation: refill round budget when exhausted mid-pipeline
+    let autoContinuations = 0;
+    const MAX_AUTO_CONTINUATIONS = 3;
+    // Effective self-improvement policy: may be restricted when on a fallback model
+    let effectiveSelfImprovement: SelfImprovementContext | null | undefined =
+      config.selfImprovement;
+    // Fallback pipeline guard: tracks consecutive rounds spent on a fallback model
+    let fallbackPipelineRounds = 0;
+    // Anti-confabulation guards
+    let consecutiveEmptyRounds = 0;
+    let confabulationNudges = 0;
+    // Wave deliverables verification: max retries per wave before force-advancing
+    const MAX_WAVE_VERIFY_RETRIES = 2;
+    let waveVerifyRetries = 0;
+    const isPipelineWorkflow =
+      config.skillActive ||
+      EXECUTION_WORKFLOW_PATTERN.test(durablePrompt) ||
+      isExecutionContinuationPrompt(durablePrompt, session);
+
+    // ---- Feature: Planning phase (for complex tasks) ----
+    // Inject planning instruction before first model call when complexity >= 0.7
+    const planningEnabled = lexicalComplexity >= 0.7;
+    let planGenerated = false;
+
+    // ---- Feature: Approach memory ----
+    // Track what approaches were tried and their outcomes within this session
+    const approachLog: ApproachLogEntry[] = [];
+    let currentApproachDescription = "";
+    let currentApproachToolCalls = 0;
+
+    // ---- Pre-loop context assembly (extracted to prompt-builder.ts) ----
+    const {
+      historicalFailures,
+      reasoningChain,
+      autonomyEngine,
+      sessionPersistentMemory,
+      persistentApproachMemory: persistentMemory,
+      securityEngine,
+      secretsScanner,
+      memoryOrchestrator,
+      memoryInitialized,
+      auditLogger,
+      metricsCollector,
+    } = await buildPreLoopContext(durablePrompt, session, config, messages);
+    let currentRoundTier: import("@dantecode/core").ReasoningTier = "quick";
+
+    // ---- Feature: Task complexity classification (informational) ----
+    const taskComplexityRouter = new TaskComplexityRouter();
+    const taskSignals = {
+      promptTokens: Math.ceil(durablePrompt.length / 4),
+      fileCount: session.activeFiles?.length ?? 0,
+      hasReasoning: (reasoningChain?.getStepCount() ?? 0) > 0,
+      hasSecurity: false,
+      hasMultiFile: (session.activeFiles?.length ?? 0) > 1,
+      estimatedOutputTokens: Math.ceil(durablePrompt.length / 8),
+    };
+    const complexityDecision = taskComplexityRouter.classify(taskSignals);
+    const complexityTier = complexityDecision.complexity;
+    if (config.verbose) {
+      emitOrWrite(
+        `${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`,
       );
     }
 
-    // Per-round context injection (extracted to prompt-builder.ts)
-    const roundCtx = await injectRoundContext(
-      messages,
-      {
-        roundCounter,
-        sameErrorCount,
-        toolCallsThisTurn,
-        filesModified,
-        lastSuccessfulTool,
-        lastConfirmedStep,
-        durablePrompt,
-        config,
-        reasoningChain,
-        autonomyEngine,
-        memoryOrchestrator,
-        memoryInitialized,
-        secretsScanner,
-        session,
-        thinkingBudget,
-        lexicalComplexity,
-      },
-      emitOrWrite,
-    );
-    currentRoundTier = roundCtx.currentRoundTier;
-    thinkingBudget = roundCtx.thinkingBudget;
-
-    // Context condensing: check pressure and condense if needed
-    const contextWindow = config.state.model.default.contextWindow ?? 200000;
-    const pressure = calculatePressure(messages, contextWindow);
-
-    if (pressure.status === "red" && messages.length > 10) {
-      if (!config.silent) {
-        emitOrWrite(
-          `\n${YELLOW}[context-pressure: ${pressure.percent}%]${RESET} ${DIM}Condensing context to reduce token usage...${RESET}\n`,
-        );
+    // ---- Feature: Skill Discovery ----
+    try {
+      const discoveredEntries = await discoverSkills({ projectRoot: session.projectRoot });
+      if (discoveredEntries.length > 0) {
+        const reg = new SkillRegistry();
+        reg.register(discoveredEntries);
+        for (const col of reg.getCollisions()) {
+          const scopes = col.entries.map((e) => e.scope).join(", ");
+          process.stderr.write(
+            `[SKILL-WARN] Skill collision: "${col.name}" in scopes: ${scopes}\n`,
+          );
+        }
+        if (config.verbose) {
+          process.stdout.write(
+            `${DIM}[skills] Discovered ${discoveredEntries.length} skill(s), ${reg.list().length} active${RESET}\n`,
+          );
+        }
+        const activeSkills = reg.list();
+        if (activeSkills.length > 0) {
+          const skillLines = activeSkills.map((s) => {
+            const tag = s.scope === "project" ? "[PRJ]" : s.scope === "user" ? "[USR]" : "[LIB]";
+            return `- ${tag} **${s.name}** (${s.slug})`;
+          });
+          messages.push({
+            role: "system" as const,
+            content: [
+              "## Available Skills",
+              "",
+              "The following skills are installed and active in this project:",
+              ...skillLines,
+              "",
+              "To execute a skill, reference it by name or use `/skills run <name>`.",
+            ].join("\n"),
+          });
+        }
       }
-
-      const condensed = await condenseContext(messages, contextWindow, {
-        preserveRecentRounds: 3,
-        targetPercent: 50,
-      });
-
-      messages = condensed.messages as { role: "user" | "assistant" | "system"; content: string }[];
-
-      if (!config.silent) {
-        const reduction = Math.round(
-          ((condensed.beforeTokens - condensed.afterTokens) / condensed.beforeTokens) * 100,
-        );
-        emitOrWrite(
-          `${GREEN}[condensed]${RESET} ${DIM}${condensed.roundsCondensed} rounds → reduced ${reduction}% (${condensed.beforeTokens} → ${condensed.afterTokens} tokens)${RESET}\n`,
-        );
-      }
+    } catch {
+      // Non-fatal — skill discovery never blocks a session
     }
 
-    // Generate response from model (streaming with tool calling support)
-    let responseText = "";
-    let toolCalls: ExtractedToolCall[] = [];
-    let toolCallParseErrors: string[] = []; // malformed <tool_use> blocks from this round
-    let cleanText = "";
-    try {
-      if (replayToolCalls.length > 0) {
-        responseText = "Replaying pending durable tool calls after background task completion.";
-        cleanText = responseText;
-        toolCalls = replayToolCalls;
-        replayToolCalls = [];
-      } else {
-        const renderer = new StreamRenderer({
-          silent: !!config.silent,
-          modelLabel: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
-          reasoningTier: currentRoundTier,
-          thinkingBudget: thinkingBudget,
+    // ---- Feature: Pivot logic ----
+    // Track consecutive failures with similar error signatures for strategy change.
+    // This is different from the existing tier escalation — it's about changing
+    // strategy, not just using a better model.
+    let consecutiveSameSignatureFailures = 0;
+    let lastPivotErrorSignature = "";
+
+    // Per-tool error tracking: prevents infinite retries of failing tools
+    const toolErrorCounts = new Map<string, number>();
+
+    // ---- Feature: Progress tracking ----
+    // Simple counters emitted to the session periodically
+    let toolCallsThisTurn = 0;
+    let filesModified = 0;
+    let testsRun = 0;
+    let bashSucceeded = 0;
+    let roundCounter = 0;
+    let lastMajorEditGatePassed = true;
+    const readTracker = new Map<string, string>();
+    const editAttempts = new Map<string, number>();
+
+    const evidenceLedger: ExecutionEvidence[] = [];
+    let lastConfirmedStep = "Started execution.";
+    let lastSuccessfulTool: string | undefined;
+    let lastSuccessfulToolResult: string | undefined;
+    let transientTimeoutRetries = 0;
+    const maxTransientRetries = config.timeoutPolicy?.transientRetries ?? 1;
+
+    if (config.verbose && thinkingBudget) {
+      process.stdout.write(
+        `${DIM}[thinking: ${config.state.model.default.provider}/${config.state.model.default.modelId}, budget=${thinkingBudget}]${RESET}\n`,
+      );
+    }
+
+    // Planning phase (extracted to prompt-builder.ts)
+    injectPlanningPhase(
+      messages,
+      planningEnabled,
+      lexicalComplexity,
+      historicalFailures,
+      !!config.silent,
+    );
+
+    // ---- RunIntake: capture intent boundary before any model call ----
+    const runIntake: RunIntake = createRunIntake(durablePrompt, session.id, config.runId);
+    if (config.verbose) {
+      emitOrWrite(
+        `${DIM}[run-intake] id=${runIntake.runId} class=${runIntake.classification} scope=${runIntake.requestedScope.length} paths${RESET}\n`,
+      );
+    }
+
+    // ---- Boundary Tracker: detect scope drift across tool rounds ----
+    const boundaryTracker = new BoundaryTracker(runIntake);
+
+    while (maxToolRounds > 0) {
+      // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
+      if (
+        maxToolRounds <= 1 &&
+        isPipelineWorkflow &&
+        autoContinuations < MAX_AUTO_CONTINUATIONS &&
+        filesModified > 0
+      ) {
+        autoContinuations++;
+        maxToolRounds += config.skillActive ? 50 : 15;
+        messages.push({
+          role: "user" as const,
+          content: "Continue executing remaining steps. Do not summarize — keep working.",
         });
-        renderer.printHeader();
-        if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
-          displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
+        if (!config.silent) {
+          emitOrWrite(
+            `\n${YELLOW}[auto-continue ${autoContinuations}/${MAX_AUTO_CONTINUATIONS}]${RESET} ${DIM}(rounds low mid-pipeline — refilling budget)${RESET}\n`,
+          );
         }
-        const useNativeTools = config.state.model.default.supportsToolCalls;
-        let nativeSuccess = false;
+      }
 
-        if (useNativeTools) {
-          // Native AI SDK tool calling: stream with Zod-schema tools
-          try {
-            traceLogger.logEvent(
-              rootSpan.spanId,
-              "info",
-              "Starting model inference with native tools",
-              { round: roundCounter, messageCount: messages.length }
-            );
-            const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
-            const streamResult = await router.streamWithTools(messages, aiSdkTools, {
-              system: systemPrompt,
-              maxTokens: config.state.model.default.maxTokens,
-              abortSignal: config.abortSignal,
-              ...(thinkingBudget ? { thinkingBudget } : {}),
-            });
-            for await (const part of streamResult.fullStream) {
-              if (part.type === "text-delta") {
-                renderer.write(part.textDelta);
-                config.onToken?.(part.textDelta);
-                config.eventEmitter?.emitToken(config.eventSessionId ?? "", part.textDelta);
-              } else if (part.type === "reasoning") {
-                if (config.verbose) {
-                  process.stdout.write(`${DIM}[reasoning] ${part.textDelta}${RESET}\n`);
+      maxToolRounds--;
+      roundCounter++;
+      const _roundStartMs = Date.now();
+
+      // ─── Observability: Start round span ───
+      const roundSpan = agentTracer.startSpan("agent.round", {
+        roundNumber: roundCounter,
+        sessionId: session.id,
+        model: config.state.model.default.modelId,
+        provider: config.state.model.default.provider,
+      });
+      agentMetrics.increment("agent.rounds.total");
+      // Record previous round's outcome (skip round 1: tier not yet decided on first pass)
+      if (roundCounter > 1) {
+        reasoningChain.recordTierOutcome(
+          currentRoundTier,
+          sameErrorCount === 0 ? 0.9 : sameErrorCount <= 2 ? 0.75 : 0.6,
+        );
+      }
+
+      // Per-round context injection (extracted to prompt-builder.ts)
+      const roundCtx = await injectRoundContext(
+        messages,
+        {
+          roundCounter,
+          sameErrorCount,
+          toolCallsThisTurn,
+          filesModified,
+          lastSuccessfulTool,
+          lastConfirmedStep,
+          durablePrompt,
+          config,
+          reasoningChain,
+          autonomyEngine,
+          memoryOrchestrator,
+          memoryInitialized,
+          secretsScanner,
+          session,
+          thinkingBudget,
+          lexicalComplexity,
+        },
+        emitOrWrite,
+      );
+      currentRoundTier = roundCtx.currentRoundTier;
+      thinkingBudget = roundCtx.thinkingBudget;
+
+      // Context condensing: check pressure and condense if needed
+      const contextWindow = config.state.model.default.contextWindow ?? 200000;
+      const pressure = calculatePressure(messages, contextWindow);
+
+      if (pressure.status === "red" && messages.length > 10) {
+        if (!config.silent) {
+          emitOrWrite(
+            `\n${YELLOW}[context-pressure: ${pressure.percent}%]${RESET} ${DIM}Condensing context to reduce token usage...${RESET}\n`,
+          );
+        }
+
+        const condensed = await condenseContext(messages, contextWindow, {
+          preserveRecentRounds: 3,
+          targetPercent: 50,
+        });
+
+        messages = condensed.messages as {
+          role: "user" | "assistant" | "system";
+          content: string;
+        }[];
+
+        if (!config.silent) {
+          const reduction = Math.round(
+            ((condensed.beforeTokens - condensed.afterTokens) / condensed.beforeTokens) * 100,
+          );
+          emitOrWrite(
+            `${GREEN}[condensed]${RESET} ${DIM}${condensed.roundsCondensed} rounds → reduced ${reduction}% (${condensed.beforeTokens} → ${condensed.afterTokens} tokens)${RESET}\n`,
+          );
+        }
+      }
+
+      // Generate response from model (streaming with tool calling support)
+      let responseText = "";
+      let toolCalls: ExtractedToolCall[] = [];
+      let toolCallParseErrors: string[] = []; // malformed <tool_use> blocks from this round
+      let cleanText = "";
+      try {
+        if (replayToolCalls.length > 0) {
+          responseText = "Replaying pending durable tool calls after background task completion.";
+          cleanText = responseText;
+          toolCalls = replayToolCalls;
+          replayToolCalls = [];
+        } else {
+          const renderer = new StreamRenderer({
+            silent: !!config.silent,
+            modelLabel: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            reasoningTier: currentRoundTier,
+            thinkingBudget: thinkingBudget,
+          });
+          renderer.printHeader();
+          if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
+            displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
+          }
+          const useNativeTools = config.state.model.default.supportsToolCalls;
+          let nativeSuccess = false;
+
+          if (useNativeTools) {
+            // Native AI SDK tool calling: stream with Zod-schema tools
+            try {
+              traceLogger.logEvent(
+                rootSpan.spanId,
+                "info",
+                "Starting model inference with native tools",
+                { round: roundCounter, messageCount: messages.length },
+              );
+              const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
+              const streamResult = await router.streamWithTools(messages, aiSdkTools, {
+                system: systemPrompt,
+                maxTokens: config.state.model.default.maxTokens,
+                abortSignal: config.abortSignal,
+                ...(thinkingBudget ? { thinkingBudget } : {}),
+              });
+              for await (const part of streamResult.fullStream) {
+                if (part.type === "text-delta") {
+                  renderer.write(part.textDelta);
+                  config.onToken?.(part.textDelta);
+                  config.eventEmitter?.emitToken(config.eventSessionId ?? "", part.textDelta);
+                } else if (part.type === "reasoning") {
+                  if (config.verbose) {
+                    process.stdout.write(`${DIM}[reasoning] ${part.textDelta}${RESET}\n`);
+                  }
+                } else if (part.type === "tool-call") {
+                  toolCalls.push({
+                    id: part.toolCallId,
+                    name: part.toolName,
+                    input: part.args as Record<string, unknown>,
+                  });
                 }
-              } else if (part.type === "tool-call") {
-                toolCalls.push({
-                  id: part.toolCallId,
-                  name: part.toolName,
-                  input: part.args as Record<string, unknown>,
-                });
               }
+              responseText = renderer.getFullText();
+              renderer.finish();
+              cleanText = responseText;
+              nativeSuccess = true;
+            } catch {
+              // Native tool calling failed — fall through to XML fallback
+              renderer.reset();
             }
-            responseText = renderer.getFullText();
-            renderer.finish();
-            cleanText = responseText;
-            nativeSuccess = true;
-          } catch {
-            // Native tool calling failed — fall through to XML fallback
-            renderer.reset();
           }
-        }
 
-        if (!nativeSuccess) {
-          // XML parsing fallback: stream text, then extract tool calls from response
-          try {
-            const streamResult = await router.stream(messages, {
-              system: systemPrompt,
-              maxTokens: config.state.model.default.maxTokens,
-              abortSignal: config.abortSignal,
-              ...(thinkingBudget ? { thinkingBudget } : {}),
-            });
-            for await (const chunk of streamResult.textStream) {
-              renderer.write(chunk);
-              config.onToken?.(chunk);
+          if (!nativeSuccess) {
+            // XML parsing fallback: stream text, then extract tool calls from response
+            try {
+              const streamResult = await router.stream(messages, {
+                system: systemPrompt,
+                maxTokens: config.state.model.default.maxTokens,
+                abortSignal: config.abortSignal,
+                ...(thinkingBudget ? { thinkingBudget } : {}),
+              });
+              for await (const chunk of streamResult.textStream) {
+                renderer.write(chunk);
+                config.onToken?.(chunk);
+              }
+              responseText = renderer.getFullText();
+              renderer.finish();
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              if (isTimeoutError(message)) {
+                throw err;
+              }
+              // Fallback to blocking generate if streaming is not supported
+              renderer.reset();
+              if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
+                displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
+              }
+              responseText = await router.generate(messages, {
+                system: systemPrompt,
+                maxTokens: config.state.model.default.maxTokens,
+                ...(thinkingBudget ? { thinkingBudget } : {}),
+              });
             }
-            responseText = renderer.getFullText();
-            renderer.finish();
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (isTimeoutError(message)) {
-              throw err;
-            }
-            // Fallback to blocking generate if streaming is not supported
-            renderer.reset();
-            if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
-              displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
-            }
-            responseText = await router.generate(messages, {
-              system: systemPrompt,
-              maxTokens: config.state.model.default.maxTokens,
-              ...(thinkingBudget ? { thinkingBudget } : {}),
-            });
-          }
-          const extracted = extractToolCalls(responseText);
-          cleanText = extracted.cleanText;
-          toolCalls = extracted.toolCalls;
-          toolCallParseErrors = extracted.parseErrors;
-          if (extracted.parseErrors.length > 0 && !config.silent) {
-            process.stdout.write(
-              `${RED}[tool-parse-error] ${extracted.parseErrors.length} malformed <tool_use> block(s) — will report to model${RESET}\n`,
-            );
-          }
-        }
-
-        totalTokensUsed += responseText.length; // Approximate token count
-
-        // Recompute effective self-improvement policy based on current fallback state
-        effectiveSelfImprovement = router.isUsingFallback()
-          ? detectSelfImprovementContext(durablePrompt, session.projectRoot, {
-              usingFallbackModel: true,
-            })
-          : config.selfImprovement;
-
-        // Fallback pipeline guard + no-fallback enforcement for taskMode (observe-only)
-        if (
-          router.isUsingFallback() &&
-          (isPipelineWorkflow ||
-            (config.taskMode &&
-              (config.taskMode === "observe-only" || config.taskMode === "diagnose-only")))
-        ) {
-          fallbackPipelineRounds++;
-          if (fallbackPipelineRounds >= MAX_FALLBACK_PIPELINE_ROUNDS) {
-            const fbModel = router.getFallbackModelId() ?? "unknown-fallback";
-            if (!config.silent) {
+            const extracted = extractToolCalls(responseText);
+            cleanText = extracted.cleanText;
+            toolCalls = extracted.toolCalls;
+            toolCallParseErrors = extracted.parseErrors;
+            if (extracted.parseErrors.length > 0 && !config.silent) {
               process.stdout.write(
-                `${RED}\n⛔ ${config.taskMode ? config.taskMode.toUpperCase() : "Pipeline"} aborted: primary model unavailable ` +
-                  `(${fbModel} fallback used for ${fallbackPipelineRounds} consecutive rounds). ` +
-                  `Please retry when the primary model recovers.\n${RESET}`,
+                `${RED}[tool-parse-error] ${extracted.parseErrors.length} malformed <tool_use> block(s) — will report to model${RESET}\n`,
               );
             }
-            break;
           }
-        } else if (!router.isUsingFallback()) {
-          fallbackPipelineRounds = 0;
-        }
-      }
 
-      // Model-assisted complexity scoring: extract on first response
-      if (!router.getModelRatedComplexity()) {
-        const modelScore = router.extractModelComplexityRating(responseText, durablePrompt);
-        if (config.verbose && modelScore !== null) {
-          process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
-        }
-      }
+          totalTokensUsed += responseText.length; // Approximate token count
 
-      // D-12A: Model adaptation — observe quirks (all modes except disabled)
-      if (!adaptationDisabled && config.replState?.modelAdaptationStore) {
-        const modelKey = {
-          provider: config.state.model.default.provider,
-          modelId: config.state.model.default.modelId,
-        };
-        const promptType =
-          toolCalls.length > 0 ? ("tool-call" as const) : ("implementation" as const);
-        const workflow =
-          config.replState.activeSkill ?? config.replState.pendingExpectedWorkflow ?? "repl";
-        const adaptStore = config.replState.modelAdaptationStore;
-        try {
-          const newDrafts = await observeAndAdapt(
-            adaptStore,
-            responseText,
-            {
-              modelKey,
-              promptType,
-              toolCallsInRound: toolCalls.length,
-              hadToolCalls: toolCalls.length > 0,
-              sessionId: session.id,
-              workflow: workflow as import("@dantecode/core").WorkflowType,
-              commandName: config.replState.activeSkill ?? undefined,
-              promptTemplateVersion: "1.3.0",
-            },
-            (event) => {
-              if (process.env.DANTECODE_DEBUG) {
-                process.stderr.write(
-                  `[D-12A] ${event.kind}${event.reason ? `: ${event.reason}` : ""}\n`,
+          // Recompute effective self-improvement policy based on current fallback state
+          effectiveSelfImprovement = router.isUsingFallback()
+            ? detectSelfImprovementContext(durablePrompt, session.projectRoot, {
+                usingFallbackModel: true,
+              })
+            : config.selfImprovement;
+
+          // Fallback pipeline guard + no-fallback enforcement for taskMode (observe-only)
+          if (
+            router.isUsingFallback() &&
+            (isPipelineWorkflow ||
+              (config.taskMode &&
+                (config.taskMode === "observe-only" || config.taskMode === "diagnose-only")))
+          ) {
+            fallbackPipelineRounds++;
+            if (fallbackPipelineRounds >= MAX_FALLBACK_PIPELINE_ROUNDS) {
+              const fbModel = router.getFallbackModelId() ?? "unknown-fallback";
+              if (!config.silent) {
+                process.stdout.write(
+                  `${RED}\n⛔ ${config.taskMode ? config.taskMode.toUpperCase() : "Pipeline"} aborted: primary model unavailable ` +
+                    `(${fbModel} fallback used for ${fallbackPipelineRounds} consecutive rounds). ` +
+                    `Please retry when the primary model recovers.\n${RESET}`,
                 );
               }
-            },
-          );
+              break;
+            }
+          } else if (!router.isUsingFallback()) {
+            fallbackPipelineRounds = 0;
+          }
+        }
 
-          if (newDrafts.length > 0 && adaptationMode === "staged") {
-            const { processNewDrafts, getGlobalAdaptationRateLimiter } =
-              await import("@dantecode/core");
-            await processNewDrafts(adaptStore, newDrafts, {
-              rateLimiter: getGlobalAdaptationRateLimiter(),
-              logger: (event) => {
+        // Model-assisted complexity scoring: extract on first response
+        if (!router.getModelRatedComplexity()) {
+          const modelScore = router.extractModelComplexityRating(responseText, durablePrompt);
+          if (config.verbose && modelScore !== null) {
+            process.stdout.write(`${DIM}[complexity: model=${modelScore.toFixed(2)}]${RESET}\n`);
+          }
+        }
+
+        // D-12A: Model adaptation — observe quirks (all modes except disabled)
+        if (!adaptationDisabled && config.replState?.modelAdaptationStore) {
+          const modelKey = {
+            provider: config.state.model.default.provider,
+            modelId: config.state.model.default.modelId,
+          };
+          const promptType =
+            toolCalls.length > 0 ? ("tool-call" as const) : ("implementation" as const);
+          const workflow =
+            config.replState.activeSkill ?? config.replState.pendingExpectedWorkflow ?? "repl";
+          const adaptStore = config.replState.modelAdaptationStore;
+          try {
+            const newDrafts = await observeAndAdapt(
+              adaptStore,
+              responseText,
+              {
+                modelKey,
+                promptType,
+                toolCallsInRound: toolCalls.length,
+                hadToolCalls: toolCalls.length > 0,
+                sessionId: session.id,
+                workflow: workflow as import("@dantecode/core").WorkflowType,
+                commandName: config.replState.activeSkill ?? undefined,
+                promptTemplateVersion: "1.3.0",
+              },
+              (event) => {
                 if (process.env.DANTECODE_DEBUG) {
                   process.stderr.write(
-                    `[D-12A] ${event.kind}${event.quirkKey ? ` [${event.quirkKey}]` : ""}${event.decision ? ` → ${event.decision}` : ""}\n`,
+                    `[D-12A] ${event.kind}${event.reason ? `: ${event.reason}` : ""}\n`,
                   );
                 }
               },
-            });
-          }
-        } catch (err) {
-          if (process.env.DANTECODE_DEBUG) {
-            process.stderr.write(
-              `[D-12A] pipeline error: ${err instanceof Error ? err.message : String(err)}\n`,
             );
+
+            if (newDrafts.length > 0 && adaptationMode === "staged") {
+              const { processNewDrafts, getGlobalAdaptationRateLimiter } =
+                await import("@dantecode/core");
+              await processNewDrafts(adaptStore, newDrafts, {
+                rateLimiter: getGlobalAdaptationRateLimiter(),
+                logger: (event) => {
+                  if (process.env.DANTECODE_DEBUG) {
+                    process.stderr.write(
+                      `[D-12A] ${event.kind}${event.quirkKey ? ` [${event.quirkKey}]` : ""}${event.decision ? ` → ${event.decision}` : ""}\n`,
+                    );
+                  }
+                },
+              });
+            }
+          } catch (err) {
+            if (process.env.DANTECODE_DEBUG) {
+              process.stderr.write(
+                `[D-12A] pipeline error: ${err instanceof Error ? err.message : String(err)}\n`,
+              );
+            }
+          }
+
+          // D-12A Gap 2: Periodic rollback check for promoted overrides (active mode only)
+          const rollbackInterval =
+            parseInt(process.env.DANTE_ADAPTATION_ROLLBACK_CHECK_INTERVAL ?? "10", 10) || 10;
+          if (
+            adaptationMode === "active" &&
+            roundCounter > 0 &&
+            roundCounter % rollbackInterval === 0
+          ) {
+            import("@dantecode/core")
+              .then(
+                async ({
+                  checkPromotedOverrides,
+                  getGlobalAdaptationRateLimiter,
+                  detectQuirks,
+                }) => {
+                  const results = await checkPromotedOverrides(
+                    adaptStore,
+                    {
+                      rateLimiter: getGlobalAdaptationRateLimiter(),
+                      logger: (event) => {
+                        if (process.env.DANTECODE_DEBUG) {
+                          process.stderr.write(
+                            `[D-12A rollback] ${event.kind} ${event.quirkKey ?? ""} ${event.reason ?? ""}\n`,
+                          );
+                        }
+                      },
+                    },
+                    (response, context) =>
+                      detectQuirks(response, { ...context, sessionId: session.id } as Parameters<
+                        typeof detectQuirks
+                      >[1]),
+                  );
+                  if (results.length > 0 && process.env.DANTECODE_DEBUG) {
+                    process.stderr.write(`[D-12A] rolled back ${results.length} override(s)\n`);
+                  }
+                },
+              )
+              .catch(() => {
+                /* non-fatal */
+              });
           }
         }
 
-        // D-12A Gap 2: Periodic rollback check for promoted overrides (active mode only)
-        const rollbackInterval =
-          parseInt(process.env.DANTE_ADAPTATION_ROLLBACK_CHECK_INTERVAL ?? "10", 10) || 10;
-        if (
-          adaptationMode === "active" &&
-          roundCounter > 0 &&
-          roundCounter % rollbackInterval === 0
-        ) {
-          import("@dantecode/core")
-            .then(
-              async ({ checkPromotedOverrides, getGlobalAdaptationRateLimiter, detectQuirks }) => {
-                const results = await checkPromotedOverrides(
-                  adaptStore,
-                  {
-                    rateLimiter: getGlobalAdaptationRateLimiter(),
-                    logger: (event) => {
-                      if (process.env.DANTECODE_DEBUG) {
-                        process.stderr.write(
-                          `[D-12A rollback] ${event.kind} ${event.quirkKey ?? ""} ${event.reason ?? ""}\n`,
-                        );
-                      }
-                    },
-                  },
-                  (response, context) =>
-                    detectQuirks(response, { ...context, sessionId: session.id } as Parameters<
-                      typeof detectQuirks
-                    >[1]),
-                );
-                if (results.length > 0 && process.env.DANTECODE_DEBUG) {
-                  process.stderr.write(`[D-12A] rolled back ${results.length} override(s)\n`);
-                }
-              },
-            )
-            .catch(() => {
-              /* non-fatal */
+        // Planning phase: track whether the first response contains a plan
+        if (planningEnabled && !planGenerated) {
+          planGenerated = true;
+          // Capture the plan description from the first response for approach memory
+          const planMatch = responseText.match(/(?:plan|approach|strategy)[:\s]*([\s\S]{10,200})/i);
+          if (planMatch) {
+            currentApproachDescription = planMatch[1]!.trim().slice(0, 150);
+          } else {
+            currentApproachDescription = responseText.slice(0, 150).trim();
+          }
+        }
+
+        transientTimeoutRetries = 0;
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+
+        if (isTimeoutError(errorMessage)) {
+          if (transientTimeoutRetries < maxTransientRetries) {
+            transientTimeoutRetries++;
+            messages.push({
+              role: "user" as const,
+              content:
+                "SYSTEM: The last model call timed out. Retry from the last confirmed step and continue executing without summarizing.",
             });
-        }
-      }
+            continue;
+          }
 
-      // Planning phase: track whether the first response contains a plan
-      if (planningEnabled && !planGenerated) {
-        planGenerated = true;
-        // Capture the plan description from the first response for approach memory
-        const planMatch = responseText.match(/(?:plan|approach|strategy)[:\s]*([\s\S]{10,200})/i);
-        if (planMatch) {
-          currentApproachDescription = planMatch[1]!.trim().slice(0, 150);
-        } else {
-          currentApproachDescription = responseText.slice(0, 150).trim();
-        }
-      }
+          const pauseNotice =
+            `Execution paused for durable run ${durableRun.id} after repeated model timeout. ` +
+            `Type continue or /resume ${durableRun.id} to keep going.`;
 
-      transientTimeoutRetries = 0;
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
-
-      if (isTimeoutError(errorMessage)) {
-        if (transientTimeoutRetries < maxTransientRetries) {
-          transientTimeoutRetries++;
-          messages.push({
-            role: "user" as const,
-            content:
-              "SYSTEM: The last model call timed out. Retry from the last confirmed step and continue executing without summarizing.",
+          await durableRunStore.pauseRun(durableRun.id, {
+            reason: "model_timeout",
+            session,
+            touchedFiles,
+            lastConfirmedStep,
+            lastSuccessfulTool,
+            nextAction: "Retry from the last confirmed step.",
+            message: pauseNotice,
+            evidence: evidenceLedger,
           });
-          continue;
+
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: pauseNotice,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (localSandboxBridge) {
+            await localSandboxBridge.shutdown();
+          }
+
+          return session;
         }
 
-        const pauseNotice =
-          `Execution paused for durable run ${durableRun.id} after repeated model timeout. ` +
-          `Type continue or /resume ${durableRun.id} to keep going.`;
-
-        await durableRunStore.pauseRun(durableRun.id, {
-          reason: "model_timeout",
+        const errorMsg: SessionMessage = {
+          id: randomUUID(),
+          role: "assistant",
+          content: `I encountered an error communicating with the model: ${errorMessage}`,
+          timestamp: new Date().toISOString(),
+        };
+        session.messages.push(errorMsg);
+        await durableRunStore.failRun(durableRun.id, {
           session,
           touchedFiles,
           lastConfirmedStep,
           lastSuccessfulTool,
-          nextAction: "Retry from the last confirmed step.",
-          message: pauseNotice,
+          nextAction: "Resolve the model error before retrying.",
+          message: errorMessage,
           evidence: evidenceLedger,
         });
-
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: pauseNotice,
-          timestamp: new Date().toISOString(),
-        });
-
         if (localSandboxBridge) {
           await localSandboxBridge.shutdown();
         }
-
         return session;
       }
 
-      const errorMsg: SessionMessage = {
-        id: randomUUID(),
-        role: "assistant",
-        content: `I encountered an error communicating with the model: ${errorMessage}`,
-        timestamp: new Date().toISOString(),
-      };
-      session.messages.push(errorMsg);
-      await durableRunStore.failRun(durableRun.id, {
-        session,
-        touchedFiles,
-        lastConfirmedStep,
-        lastSuccessfulTool,
-        nextAction: "Resolve the model error before retrying.",
-        message: errorMessage,
-        evidence: evidenceLedger,
-      });
-      if (localSandboxBridge) {
-        await localSandboxBridge.shutdown();
+      // ---- Anti-confabulation: empty response circuit breaker ----
+      // If the model returned no text and no tool calls, track consecutive empties
+      // and abort after MAX_CONSECUTIVE_EMPTY_ROUNDS (Grok empty-response fix).
+      if (responseText.trim().length === 0 && toolCalls.length === 0) {
+        consecutiveEmptyRounds++;
+        if (!config.silent) {
+          process.stdout.write(
+            `\n${YELLOW}[confab-guard] empty response (${consecutiveEmptyRounds}/${MAX_CONSECUTIVE_EMPTY_ROUNDS})${RESET}\n`,
+          );
+        }
+        if (consecutiveEmptyRounds >= MAX_CONSECUTIVE_EMPTY_ROUNDS) {
+          process.stdout.write(
+            `\n${RED}${BOLD}[confab-guard] ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses — aborting${RESET}\n`,
+          );
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: `The model returned ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses. This typically indicates a model compatibility issue. Try a different model or simplify your request.`,
+            timestamp: new Date().toISOString(),
+          });
+          break;
+        }
+        messages.push({ role: "assistant" as const, content: "(empty response)" });
+        messages.push({ role: "user" as const, content: EMPTY_RESPONSE_WARNING });
+        continue;
       }
-      return session;
-    }
-
-    // ---- Anti-confabulation: empty response circuit breaker ----
-    // If the model returned no text and no tool calls, track consecutive empties
-    // and abort after MAX_CONSECUTIVE_EMPTY_ROUNDS (Grok empty-response fix).
-    if (responseText.trim().length === 0 && toolCalls.length === 0) {
-      consecutiveEmptyRounds++;
-      if (!config.silent) {
-        process.stdout.write(
-          `\n${YELLOW}[confab-guard] empty response (${consecutiveEmptyRounds}/${MAX_CONSECUTIVE_EMPTY_ROUNDS})${RESET}\n`,
-        );
+      if (toolCalls.length > 0) {
+        consecutiveEmptyRounds = 0;
       }
-      if (consecutiveEmptyRounds >= MAX_CONSECUTIVE_EMPTY_ROUNDS) {
-        process.stdout.write(
-          `\n${RED}${BOLD}[confab-guard] ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses — aborting${RESET}\n`,
-        );
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: `The model returned ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses. This typically indicates a model compatibility issue. Try a different model or simplify your request.`,
-          timestamp: new Date().toISOString(),
-        });
-        break;
+
+      // Display the assistant's text response (suppressed in silent mode)
+      if (cleanText.length > 0 && !config.silent) {
+        emitOrWrite(`${cleanText}\n`, "token");
       }
-      messages.push({ role: "assistant" as const, content: "(empty response)" });
-      messages.push({ role: "user" as const, content: EMPTY_RESPONSE_WARNING });
-      continue;
-    }
-    if (toolCalls.length > 0) {
-      consecutiveEmptyRounds = 0;
-    }
 
-    // Display the assistant's text response (suppressed in silent mode)
-    if (cleanText.length > 0 && !config.silent) {
-      emitOrWrite(`${cleanText}\n`, "token");
-    }
-
-    // ---- Confidence-gated escalation ----
-    // When confidenceGating is enabled, scan the model output for a structured
-    // low-confidence signal. If confidence < threshold, pause and ask the user
-    // whether to continue. Non-TTY environments skip the gate (CI/CD safety).
-    //
-    // Recognized signal formats (either format in response text triggers detection):
-    //   <!-- DANTE_CONFIDENCE: 0.3 reason="..." -->
-    //   [CONFIDENCE:0.3 reason="..."]
-    if (config.confidenceGating && cleanText.length > 0) {
-      try {
-        const cgThreshold = config.confidenceGating.threshold ?? 0.5;
-        // Match HTML comment style: <!-- DANTE_CONFIDENCE: 0.35 reason="..." -->
-        const htmlMatch = cleanText.match(
-          /<!--\s*DANTE_CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\s*-->/i,
-        );
-        // Match bracket style: [CONFIDENCE:0.35 reason="..."]
-        const bracketMatch = cleanText.match(
-          /\[CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\]/i,
-        );
-        const match = htmlMatch ?? bracketMatch;
-        if (match) {
-          const parsedScore = parseFloat(match[1] ?? "1");
-          const reason = match[2] ?? "unspecified";
-          if (Number.isFinite(parsedScore) && parsedScore < cgThreshold) {
-            if (!config.silent) {
-              process.stdout.write(
-                `\n${YELLOW}[confidence-gate] Low confidence signal detected: ${parsedScore.toFixed(2)} < ${cgThreshold} (reason: ${reason})${RESET}\n`,
-              );
-            }
-            if (
-              config.confidenceGating.mode === "on-request" &&
-              !config.eventEmitter &&
-              process.stdin.isTTY !== false
-            ) {
-              const shouldContinue = await confirmDestructive(
-                "Agent expressed low confidence — continue anyway?",
-                {
-                  operation: `Confidence: ${parsedScore.toFixed(2)} (threshold: ${cgThreshold})`,
-                  detail: `Reason: ${reason}`,
-                },
-              );
-              if (!shouldContinue) {
-                if (!config.silent) {
-                  process.stdout.write(
-                    `\n${RED}[confidence-gate] Escalation: user chose not to continue (confidence ${parsedScore.toFixed(2)}).${RESET}\n`,
-                  );
+      // ---- Confidence-gated escalation ----
+      // When confidenceGating is enabled, scan the model output for a structured
+      // low-confidence signal. If confidence < threshold, pause and ask the user
+      // whether to continue. Non-TTY environments skip the gate (CI/CD safety).
+      //
+      // Recognized signal formats (either format in response text triggers detection):
+      //   <!-- DANTE_CONFIDENCE: 0.3 reason="..." -->
+      //   [CONFIDENCE:0.3 reason="..."]
+      if (config.confidenceGating && cleanText.length > 0) {
+        try {
+          const cgThreshold = config.confidenceGating.threshold ?? 0.5;
+          // Match HTML comment style: <!-- DANTE_CONFIDENCE: 0.35 reason="..." -->
+          const htmlMatch = cleanText.match(
+            /<!--\s*DANTE_CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\s*-->/i,
+          );
+          // Match bracket style: [CONFIDENCE:0.35 reason="..."]
+          const bracketMatch = cleanText.match(
+            /\[CONFIDENCE\s*:\s*([0-9.]+)(?:\s+reason="([^"]*)")?\]/i,
+          );
+          const match = htmlMatch ?? bracketMatch;
+          if (match) {
+            const parsedScore = parseFloat(match[1] ?? "1");
+            const reason = match[2] ?? "unspecified";
+            if (Number.isFinite(parsedScore) && parsedScore < cgThreshold) {
+              if (!config.silent) {
+                process.stdout.write(
+                  `\n${YELLOW}[confidence-gate] Low confidence signal detected: ${parsedScore.toFixed(2)} < ${cgThreshold} (reason: ${reason})${RESET}\n`,
+                );
+              }
+              if (
+                config.confidenceGating.mode === "on-request" &&
+                !config.eventEmitter &&
+                process.stdin.isTTY !== false
+              ) {
+                const shouldContinue = await confirmDestructive(
+                  "Agent expressed low confidence — continue anyway?",
+                  {
+                    operation: `Confidence: ${parsedScore.toFixed(2)} (threshold: ${cgThreshold})`,
+                    detail: `Reason: ${reason}`,
+                  },
+                );
+                if (!shouldContinue) {
+                  if (!config.silent) {
+                    process.stdout.write(
+                      `\n${RED}[confidence-gate] Escalation: user chose not to continue (confidence ${parsedScore.toFixed(2)}).${RESET}\n`,
+                    );
+                  }
+                  const escalationMsg: SessionMessage = {
+                    id: randomUUID(),
+                    role: "assistant",
+                    content: `Execution paused: agent expressed low confidence (${parsedScore.toFixed(2)}) and user declined to continue. Reason: ${reason}`,
+                    timestamp: new Date().toISOString(),
+                  };
+                  session.messages.push(escalationMsg);
+                  return session;
                 }
-                const escalationMsg: SessionMessage = {
-                  id: randomUUID(),
-                  role: "assistant",
-                  content: `Execution paused: agent expressed low confidence (${parsedScore.toFixed(2)}) and user declined to continue. Reason: ${reason}`,
-                  timestamp: new Date().toISOString(),
-                };
-                session.messages.push(escalationMsg);
-                return session;
               }
             }
           }
+        } catch {
+          // Non-fatal: confidence-gate failure must never block the agent response
         }
-      } catch {
-        // Non-fatal: confidence-gate failure must never block the agent response
       }
-    }
 
-    // If no tool calls, we're done with this turn. Detect mode for observe-only.
-    if (toolCalls.length === 0) {
-      const completionPattern =
-        /(?:completed?|finished|observed|diagnosed|report(?:ed)?|findings|results only|stop)/i;
-      if (
-        config.taskMode &&
-        (config.taskMode === "observe-only" || config.taskMode === "diagnose-only") &&
-        completionPattern.test(cleanText)
-      ) {
-        // stop after requested command completes, report only, no follow-up or exploration
-        if (!config.silent)
-          process.stdout.write(
-            `${GREEN}[${config.taskMode}] Task complete - reporting only, stopping.${RESET}\n`,
-          );
+      // If no tool calls, we're done with this turn. Detect mode for observe-only.
+      if (toolCalls.length === 0) {
+        const completionPattern =
+          /(?:completed?|finished|observed|diagnosed|report(?:ed)?|findings|results only|stop)/i;
+        if (
+          config.taskMode &&
+          (config.taskMode === "observe-only" || config.taskMode === "diagnose-only") &&
+          completionPattern.test(cleanText)
+        ) {
+          // stop after requested command completes, report only, no follow-up or exploration
+          if (!config.silent)
+            process.stdout.write(
+              `${GREEN}[${config.taskMode}] Task complete - reporting only, stopping.${RESET}\n`,
+            );
+          const assistantMessage: SessionMessage = {
+            id: randomUUID(),
+            role: "assistant",
+            content: responseText,
+            timestamp: new Date().toISOString(),
+            modelId: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            tokensUsed: totalTokensUsed,
+          };
+          session.messages.push(assistantMessage);
+          break;
+        }
+        // Parse error nudge: if all <tool_use> blocks were malformed JSON, the model
+        // thinks it ran tools but NOTHING executed. Report the errors so the model
+        // can fix its JSON and retry — this prevents silent ENOENT in subsequent rounds.
+        if (toolCallParseErrors.length > 0) {
+          const errorSummary = toolCallParseErrors
+            .map((e, i) => `  Block ${i + 1}: ${e}`)
+            .join("\n");
+          messages.push({ role: "assistant" as const, content: responseText });
+          messages.push({
+            role: "user" as const,
+            content:
+              `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) contained malformed JSON and were NOT executed:\n${errorSummary}\n\n` +
+              `No files were written. No commands ran. REQUIRED: Fix the JSON and re-emit the tool call(s).\n` +
+              `Common fixes:\n` +
+              `  - Escape double quotes inside string values: " → \\"\n` +
+              `  - Escape backslashes: \\ → \\\\\n` +
+              `  - Escape newlines inside string values: use \\n not a real newline\n` +
+              `  - Avoid unescaped special chars in JSON string values`,
+          });
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${RED}[tool-parse-error] ${toolCallParseErrors.length} block(s) malformed — forcing retry${RESET}\n`,
+            );
+          }
+          continue;
+        }
+        if (
+          executedToolsThisTurn === 0 &&
+          (promptRequestsToolExecution(durablePrompt) ||
+            isExecutionContinuationPrompt(durablePrompt, session)) &&
+          responseNeedsToolExecutionNudge(responseText) &&
+          executionNudges < MAX_EXECUTION_NUDGES &&
+          maxToolRounds > 0
+        ) {
+          executionNudges++;
+          messages.push({
+            role: "assistant",
+            content: responseText,
+          });
+          messages.push({
+            role: "user",
+            content:
+              "You described the intended work but did not use any tools. Stop narrating and actually execute the next step with Read, Write, Edit, Bash, Glob, Grep, GitCommit, GitPush, or TodoWrite. Only claim file changes after a successful tool result.",
+          });
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${YELLOW}[nudge: execute with tools]${RESET} ${DIM}(no tool calls were emitted)${RESET}\n`,
+            );
+          }
+          continue;
+        }
+
+        // Wave completion check: if the model signals [WAVE COMPLETE] and we have
+        // wave orchestration active, advance to the next wave instead of stopping.
+        // Gate: require meaningful work (file writes or successful Bash commands),
+        // not just read-only tool calls which don't constitute wave completion.
+        if (
+          config.waveState &&
+          isValidWaveCompletion(responseText) &&
+          (filesModified > 0 || bashSucceeded > 0) &&
+          maxToolRounds > 0
+        ) {
+          const waveState = config.waveState;
+          const completedWave = getCurrentWave(waveState);
+
+          // Verify wave deliverables before advancing
+          if (completedWave) {
+            try {
+              const waveExpectations = deriveWaveExpectations(completedWave);
+              if (waveExpectations.expectedFiles && waveExpectations.expectedFiles.length > 0) {
+                const waveVerification = await verifyCompletion(
+                  session.projectRoot,
+                  waveExpectations,
+                );
+                if (waveVerification.verdict === "failed") {
+                  waveVerifyRetries++;
+                  if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
+                    if (!config.silent) {
+                      process.stdout.write(
+                        `\n${RED}[wave-verify] Wave ${completedWave.number} failed (${waveVerifyRetries}/${MAX_WAVE_VERIFY_RETRIES}): ${waveVerification.summary}${RESET}\n`,
+                      );
+                    }
+                    messages.push({ role: "assistant" as const, content: responseText });
+                    messages.push({
+                      role: "user" as const,
+                      content: `WAVE VERIFICATION FAILED: ${waveVerification.summary}\n\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
+                    });
+                    continue;
+                  }
+                  // Max retries exceeded — force-advance with warning
+                  if (!config.silent) {
+                    process.stdout.write(
+                      `\n${YELLOW}[wave-verify] Max retries exceeded — force-advancing past wave ${completedWave.number}${RESET}\n`,
+                    );
+                  }
+                }
+              }
+            } catch {
+              // Non-fatal — proceed with wave advancement
+            }
+          }
+
+          // Reset wave verify retries on successful advancement
+          waveVerifyRetries = 0;
+          const hasMore = advanceWave(waveState);
+          if (!config.silent && completedWave) {
+            process.stdout.write(
+              `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
+            );
+          }
+          if (hasMore) {
+            // Inject next wave prompt and continue
+            const nextWavePrompt = buildWavePrompt(waveState);
+            messages.push({ role: "assistant" as const, content: responseText });
+            messages.push({ role: "user" as const, content: nextWavePrompt });
+            if (!config.silent) {
+              const next = getCurrentWave(waveState);
+              process.stdout.write(
+                `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+              );
+            }
+            // Reset per-wave counters
+            pipelineContinuationNudges = 0;
+            confabulationNudges = 0;
+            continue;
+          }
+          // All waves complete — fall through to normal break
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
+            );
+          }
+        }
+
+        // Pipeline continuation nudge: if we're in a pipeline workflow (e.g., /magic,
+        // /autoforge) and the model emitted a summary-like response with no tool calls
+        // but has clearly done work (executedToolsThisTurn > 0), it may be wrapping up
+        // prematurely. Force it to continue unless we've already nudged too many times.
+        if (
+          isPipelineWorkflow &&
+          executedToolsThisTurn > 0 &&
+          maxToolRounds > 0 &&
+          pipelineContinuationNudges < MAX_PIPELINE_CONTINUATION_NUDGES &&
+          PREMATURE_SUMMARY_PATTERN.test(responseText)
+        ) {
+          pipelineContinuationNudges++;
+          messages.push({
+            role: "assistant",
+            content: responseText,
+          });
+          messages.push({
+            role: "user",
+            content: PIPELINE_CONTINUATION_INSTRUCTION,
+          });
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${YELLOW}[pipeline continuation ${pipelineContinuationNudges}/${MAX_PIPELINE_CONTINUATION_NUDGES}]${RESET} ${DIM}(model stopped mid-pipeline — nudging to continue)${RESET}\n`,
+            );
+          }
+          continue;
+        }
+
+        // Anti-confabulation gate v2: fires in two scenarios:
+        // 1. Classic: model claims completion (regex match) but filesModified === 0
+        // 2. Reads-only: model did only reads (executedToolsThisTurn > 0), filesModified === 0,
+        //    AND either Grok-specific fake-verification text detected OR we're in round 3+.
+        //    Grok's pattern: read files → narrate "turbo typecheck: PASS" → stop without writing.
+        const isGrokConfab = GROK_CONFAB_PATTERN.test(responseText);
+        const isClassicConfab = PREMATURE_SUMMARY_PATTERN.test(responseText) || isGrokConfab;
+        const isReadsOnlyConfab = executedToolsThisTurn > 0 && (isGrokConfab || roundCounter >= 3);
+        if (
+          isPipelineWorkflow &&
+          filesModified === 0 &&
+          confabulationNudges < MAX_CONFABULATION_NUDGES &&
+          (isClassicConfab || isReadsOnlyConfab)
+        ) {
+          confabulationNudges++;
+          messages.push({ role: "assistant" as const, content: responseText });
+          messages.push({ role: "user" as const, content: CONFABULATION_WARNING });
+          if (!config.silent) {
+            const reason =
+              isReadsOnlyConfab && !isClassicConfab ? "reads-only pattern" : "fake completion";
+            process.stdout.write(
+              `\n${RED}[confab-guard v2] ${reason} — 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
+            );
+          }
+          continue;
+        }
+
         const assistantMessage: SessionMessage = {
           id: randomUUID(),
           role: "assistant",
@@ -1121,60 +1359,432 @@ async function _runAgentLoopCore(
         session.messages.push(assistantMessage);
         break;
       }
-      // Parse error nudge: if all <tool_use> blocks were malformed JSON, the model
-      // thinks it ran tools but NOTHING executed. Report the errors so the model
-      // can fix its JSON and retry — this prevents silent ENOENT in subsequent rounds.
-      if (toolCallParseErrors.length > 0) {
-        const errorSummary = toolCallParseErrors.map((e, i) => `  Block ${i + 1}: ${e}`).join("\n");
-        messages.push({ role: "assistant" as const, content: responseText });
-        messages.push({
-          role: "user" as const,
-          content:
-            `SYSTEM ERROR: ${toolCallParseErrors.length} <tool_use> block(s) contained malformed JSON and were NOT executed:\n${errorSummary}\n\n` +
-            `No files were written. No commands ran. REQUIRED: Fix the JSON and re-emit the tool call(s).\n` +
-            `Common fixes:\n` +
-            `  - Escape double quotes inside string values: " → \\"\n` +
-            `  - Escape backslashes: \\ → \\\\\n` +
-            `  - Escape newlines inside string values: use \\n not a real newline\n` +
-            `  - Avoid unescaped special chars in JSON string values`,
-        });
-        if (!config.silent) {
-          process.stdout.write(
-            `\n${RED}[tool-parse-error] ${toolCallParseErrors.length} block(s) malformed — forcing retry${RESET}\n`,
-          );
-        }
-        continue;
+
+      // Execute tool batch (extracted to tool-executor.ts)
+      const toolBatchSpan = traceLogger.startSpan("tool-batch", "tool", {
+        traceId: rootSpan.traceId,
+        parentSpanId: rootSpan.spanId,
+        input: { toolCount: toolCalls.length, round: roundCounter },
+      });
+      const execResult = await executeToolBatch(
+        toolCalls,
+        toolCallParseErrors,
+        {
+          session,
+          config,
+          roundCounter,
+          maxToolRounds,
+          durableRun,
+          durableRunStore,
+          workflowName,
+          isPipelineWorkflow,
+          touchedFiles,
+          evidenceLedger,
+          lastConfirmedStep,
+          lastSuccessfulTool,
+          lastSuccessfulToolResult,
+          filesModified,
+          toolCallsThisTurn,
+          executedToolsThisTurn,
+          completedToolsThisTurn,
+          recentToolSignatures,
+          readTracker,
+          editAttempts,
+          lastMajorEditGatePassed,
+          effectiveSelfImprovement,
+          securityEngine,
+          secretsScanner,
+          localSandboxBridge,
+          testsRun,
+          bashSucceeded,
+          currentApproachToolCalls,
+          toolErrorCounts,
+        },
+        runAgentLoop,
+      );
+      // Write back updated state
+      filesModified = execResult.filesModified;
+      toolCallsThisTurn = execResult.toolCallsThisTurn;
+      executedToolsThisTurn = execResult.executedToolsThisTurn;
+      currentApproachToolCalls = execResult.currentApproachToolCalls;
+      lastConfirmedStep = execResult.lastConfirmedStep;
+      lastSuccessfulTool = execResult.lastSuccessfulTool;
+      lastSuccessfulToolResult = execResult.lastSuccessfulToolResult;
+      lastMajorEditGatePassed = execResult.lastMajorEditGatePassed;
+      localSandboxBridge = execResult.localSandboxBridge;
+      testsRun = execResult.testsRun;
+      bashSucceeded = execResult.bashSucceeded;
+      const toolResults = execResult.toolResults;
+
+      traceLogger.endSpan(toolBatchSpan.spanId, {
+        status: execResult.action === "return" ? "success" : "success",
+        output: { toolResults: toolResults.length, filesModified, action: execResult.action },
+      });
+
+      // ─── Observability: Track tool execution metrics ───
+      agentMetrics.increment("agent.tool_calls.total", toolCalls.length);
+      for (const toolCall of toolCalls) {
+        agentMetrics.increment(`agent.tool_calls.${toolCall.name}`);
       }
-      if (
-        executedToolsThisTurn === 0 &&
-        (promptRequestsToolExecution(durablePrompt) ||
-          isExecutionContinuationPrompt(durablePrompt, session)) &&
-        responseNeedsToolExecutionNudge(responseText) &&
-        executionNudges < MAX_EXECUTION_NUDGES &&
-        maxToolRounds > 0
-      ) {
-        executionNudges++;
-        messages.push({
-          role: "assistant",
-          content: responseText,
-        });
-        messages.push({
-          role: "user",
-          content:
-            "You described the intended work but did not use any tools. Stop narrating and actually execute the next step with Read, Write, Edit, Bash, Glob, Grep, GitCommit, GitPush, or TodoWrite. Only claim file changes after a successful tool result.",
-        });
-        if (!config.silent) {
-          process.stdout.write(
-            `\n${YELLOW}[nudge: execute with tools]${RESET} ${DIM}(no tool calls were emitted)${RESET}\n`,
-          );
-        }
-        continue;
+      // Track context usage (gauge metrics for current state)
+      const contextWindowSize = config.state.model.default.contextWindow ?? 200000;
+      agentMetrics.gauge("agent.context_tokens.used", totalTokensUsed);
+      agentMetrics.gauge("agent.context_tokens.remaining", contextWindowSize - totalTokensUsed);
+
+      if (execResult.action === "return") {
+        agentMetrics.increment("agent.rounds.success");
+        agentTracer.endSpan(roundSpan.id);
+        return session;
       }
 
-      // Wave completion check: if the model signals [WAVE COMPLETE] and we have
-      // wave orchestration active, advance to the next wave instead of stopping.
-      // Gate: require meaningful work (file writes or successful Bash commands),
-      // not just read-only tool calls which don't constitute wave completion.
+      // ---- Boundary drift check: detect scope expansion after file mutations ----
+      const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
+      if (wroteCode && touchedFiles.length > 0) {
+        boundaryTracker.recordMutations(touchedFiles);
+        const boundaryState = boundaryTracker.check();
+        if (boundaryState.driftDetected) {
+          if (!config.silent) {
+            emitOrWrite(
+              `\n${YELLOW}[boundary-drift] ${boundaryState.expansionPercent.toFixed(0)}% expansion — ` +
+                `${boundaryState.outOfScopeFiles.length} file(s) outside original scope${RESET}\n`,
+            );
+          }
+          // In interactive TTY mode (non-serve, non-silent), prompt for approval
+          if (!config.eventEmitter && process.stdin.isTTY !== false) {
+            const shouldContinue = await confirmDestructive(formatDriftMessage(boundaryState), {
+              operation: "Boundary Drift",
+              detail: `${boundaryState.outOfScopeFiles.length} file(s) mutated outside declared scope`,
+            });
+            if (!shouldContinue) {
+              if (!config.silent) {
+                emitOrWrite(
+                  `\n${RED}[boundary-drift] User declined expanded scope — halting execution.${RESET}\n`,
+                );
+              }
+              const driftMsg: SessionMessage = {
+                id: randomUUID(),
+                role: "assistant",
+                content:
+                  `Execution paused: boundary drift detected (${boundaryState.expansionPercent.toFixed(0)}% expansion). ` +
+                  `Out-of-scope files: ${boundaryState.outOfScopeFiles.join(", ")}. User declined to continue.`,
+                timestamp: new Date().toISOString(),
+              };
+              session.messages.push(driftMsg);
+              return session;
+            }
+          }
+        }
+      }
+
+      // Reflection loop (aider/Cursor pattern): after code edits, auto-run
+      // the project's configured lint/test/build commands. If any fail,
+      // parse the output into structured errors and inject a targeted fix
+      // prompt so the model can fix specific issues instead of guessing.
+      if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
+        const verifyCommands = getVerifyCommands(config.state);
+        let verificationPassed = true;
+        let verificationErrorSig = "";
+        let verificationRetriesExhausted = false;
+
+        for (const vc of verifyCommands) {
+          try {
+            const vcResult = await executeTool(
+              "Bash",
+              { command: vc.command },
+              session.projectRoot,
+              session.id,
+            );
+            evidenceLedger.push(buildExecutionEvidence("Bash", { command: vc.command }, vcResult));
+            if (vcResult.isError) {
+              verifyRetries++;
+              verificationPassed = false;
+              verificationRetriesExhausted = verifyRetries >= MAX_VERIFY_RETRIES;
+
+              // Evidence Chain: record verification failure receipt
+              try {
+                evidenceTracker.recordVerificationFailure(
+                  vc.name,
+                  vc.command,
+                  "", // errorSig computed below; basic receipt captures the failure event
+                  verifyRetries,
+                  MAX_VERIFY_RETRIES,
+                );
+              } catch {
+                // Evidence recording is non-fatal
+              }
+
+              // Self-healing: parse errors into structured format for targeted fixes
+              const parsedErrors = parseVerificationErrors(vcResult.content);
+              let retryMessage: string;
+
+              if (parsedErrors.length > 0) {
+                // Targeted fix prompt: tell the model exactly which errors to fix
+                const fixPrompt = formatErrorsForFixPrompt(parsedErrors);
+                retryMessage = `AUTO-VERIFY (${vc.name}) FAILED — ${parsedErrors.length} structured error(s) detected:\n\n${fixPrompt}\n\n(attempt ${verifyRetries}/${MAX_VERIFY_RETRIES})`;
+
+                // Track error signature to detect repeated identical failures
+                const errorSig = computeErrorSignature(parsedErrors);
+                verificationErrorSig = errorSig;
+                if (errorSig === lastErrorSignature) {
+                  sameErrorCount++;
+                  sessionFailureCount++;
+                  if (sameErrorCount >= 2) {
+                    // Same errors persisting across retries — escalate model tier
+                    const reason = `Persistent verification signature ${errorSig} repeated ${sameErrorCount + 1} times`;
+                    if ("escalateTier" in router && typeof router.escalateTier === "function") {
+                      router.escalateTier(reason);
+                    } else {
+                      router.forceCapable();
+                    }
+                    retryMessage += `\n\nWARNING: These same errors have persisted for ${sameErrorCount + 1} consecutive retries. The model tier has been escalated. Previous attempts failed with signature ${errorSig}. Try a fundamentally different approach to fix these issues.`;
+                    if (config.verbose) {
+                      process.stdout.write(
+                        `\n${YELLOW}[self-heal: tier escalated to capable — same errors ${sameErrorCount + 1}x]${RESET}\n`,
+                      );
+                    }
+                  }
+                } else {
+                  sameErrorCount = 0;
+                  sessionFailureCount++; // different sig = still a failure
+                }
+                lastErrorSignature = errorSig;
+
+                // Pivot logic: track consecutive failures with the same error signature
+                // for strategy change (different from tier escalation — this is about
+                // fundamentally changing the approach, not just using a better model)
+                if (verificationErrorSig === lastPivotErrorSignature) {
+                  consecutiveSameSignatureFailures++;
+                } else {
+                  consecutiveSameSignatureFailures = 1;
+                  lastPivotErrorSignature = verificationErrorSig;
+                }
+
+                if (consecutiveSameSignatureFailures >= 2) {
+                  retryMessage += `\n\n${PIVOT_INSTRUCTION}`;
+                  if (!config.silent) {
+                    process.stdout.write(
+                      `\n${YELLOW}[pivot: same error signature ${consecutiveSameSignatureFailures}x — requesting strategy change]${RESET}\n`,
+                    );
+                  }
+                  // Include approach memory in the pivot prompt
+                  if (approachLog.length > 0) {
+                    const failedApproaches = approachLog
+                      .filter((a) => a.outcome === "failed")
+                      .map((a) => `  - ${a.description} (${a.toolCalls} tool calls)`)
+                      .join("\n");
+                    if (failedApproaches) {
+                      retryMessage += `\n\nPreviously failed approaches:\n${failedApproaches}`;
+                    }
+                  }
+                }
+
+                if (config.verbose) {
+                  process.stdout.write(
+                    `${DIM}[self-heal: parsed ${parsedErrors.length} error(s) from ${vc.name} output]${RESET}\n`,
+                  );
+                }
+              } else {
+                // Fallback: parser found nothing structured, inject raw output as before
+                retryMessage = `AUTO-VERIFY (${vc.name}) FAILED:\n${vcResult.content}\n\nFix the errors above. (attempt ${verifyRetries}/${MAX_VERIFY_RETRIES})`;
+              }
+
+              toolResults.push(retryMessage);
+              process.stdout.write(
+                `\n${YELLOW}[verify: ${vc.name} FAILED]${RESET} ${DIM}(retry ${verifyRetries}/${MAX_VERIFY_RETRIES})${RESET}\n`,
+              );
+            } else {
+              // Verification passed — reset error signature tracking
+              lastErrorSignature = "";
+              sameErrorCount = 0;
+              lastConfirmedStep = `Verified ${vc.name}`;
+
+              // Evidence Chain: record verification pass receipt
+              try {
+                evidenceTracker.recordVerificationPass(vc.name, vc.command);
+              } catch {
+                // Evidence recording is non-fatal
+              }
+
+              process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
+            }
+          } catch {
+            // Verification command failed to execute, skip
+          }
+        }
+
+        const checkpointAfterVerification = config.checkpointPolicy?.afterVerification ?? true;
+        if (checkpointAfterVerification) {
+          await durableRunStore.checkpoint(durableRun.id, {
+            session,
+            touchedFiles,
+            lastConfirmedStep,
+            lastSuccessfulTool,
+            nextAction: verificationPassed
+              ? "Proceed to the next implementation step."
+              : "Fix the reported verification issues before continuing.",
+            evidence: evidenceLedger,
+          });
+          evidenceLedger.length = 0;
+        }
+
+        // Approach memory: record the outcome of this verification cycle
+        if (verifyCommands.length > 0) {
+          const approachDesc = currentApproachDescription || `approach-${approachLog.length + 1}`;
+
+          // Trace decision: verification outcome
+          traceLogger.logDecision(
+            rootSpan.spanId,
+            "verification",
+            [
+              {
+                name: "pass",
+                score: verificationPassed ? 1.0 : 0.0,
+                reason: "All verification checks passed",
+              },
+              {
+                name: "fail",
+                score: verificationPassed ? 0.0 : 1.0,
+                reason: "One or more verification checks failed",
+              },
+            ],
+            verificationPassed ? "pass" : "fail",
+            verificationPassed
+              ? "Verification successful, proceeding"
+              : "Verification failed, needs fixes",
+            verificationPassed ? 1.0 : 0.0,
+          );
+
+          if (verificationPassed) {
+            approachLog.push({
+              description: approachDesc,
+              outcome: "success",
+              toolCalls: currentApproachToolCalls,
+            });
+            // Persist success to cross-session memory
+            persistentMemory
+              .record({
+                description: approachDesc,
+                outcome: "success",
+                toolCalls: currentApproachToolCalls,
+                sessionId: session.id,
+              })
+              .catch(() => {});
+            // Reset pivot tracking on success
+            consecutiveSameSignatureFailures = 0;
+            lastPivotErrorSignature = "";
+          } else {
+            approachLog.push({
+              description: approachDesc,
+              outcome: "failed",
+              toolCalls: currentApproachToolCalls,
+            });
+            // Persist failure to cross-session memory
+            persistentMemory
+              .record({
+                description: approachDesc,
+                outcome: "failed",
+                errorSignature: lastErrorSignature || undefined,
+                toolCalls: currentApproachToolCalls,
+                sessionId: session.id,
+              })
+              .catch(() => {});
+
+            // Inject approach memory into the retry prompt so the model knows what was tried
+            if (approachLog.length > 1) {
+              const lastFailed = approachLog[approachLog.length - 1]!;
+              toolResults.push(
+                `Previously tried: ${lastFailed.description} — failed. Try a different approach.`,
+              );
+            }
+          }
+          // Reset for the next approach
+          currentApproachDescription = "";
+          currentApproachToolCalls = 0;
+        }
+
+        // ConfidenceSynthesizer: after the verification cycle, synthesize a
+        // structured confidence decision. If the decision is "block" and the
+        // same error has persisted across 2+ retries, escalate immediately and
+        // exhaust retries rather than burning more rounds on an unrecoverable state.
+        if (!verificationPassed) {
+          try {
+            const synthesis = synthesizeConfidence({
+              pdseScore: 0, // score unknown at CLI level; use sameErrorCount as signal
+              metrics: [],
+              railFindings: [],
+              critiqueTrace: [],
+            });
+            // Only block when the same error signature has repeated enough times
+            // to indicate a genuinely unrecoverable state.
+            if (synthesis.decision === "block" && sameErrorCount >= 2) {
+              const blockMsg =
+                `[ConfidenceSynthesizer] Decision: BLOCK — same failure signature repeated ` +
+                `${sameErrorCount + 1} times with no recovery. Escalating and stopping retries.`;
+              process.stdout.write(`\n${RED}${blockMsg}${RESET}\n`);
+              toolResults.push(blockMsg);
+              verificationRetriesExhausted = true;
+            }
+          } catch {
+            // Synthesizer errors must not break the recovery loop
+          }
+        } else if (verificationPassed && config.verbose) {
+          // Verification passed — emit a synthesizer "pass" signal in verbose mode
+          try {
+            const synthesis = synthesizeConfidence({
+              pdseScore: 1.0,
+              metrics: [],
+              railFindings: [],
+              critiqueTrace: [],
+            });
+            process.stdout.write(
+              `${DIM}[ConfidenceSynthesizer] Decision: ${synthesis.decision} — continuing normally${RESET}\n`,
+            );
+          } catch {
+            // Ignore
+          }
+        }
+
+        if (!verificationPassed && verificationRetriesExhausted) {
+          const verificationPauseNotice =
+            `Execution paused for durable run ${durableRun.id} because verification failed ${MAX_VERIFY_RETRIES} times. ` +
+            `Type continue or /resume ${durableRun.id} after addressing the reported verification issues.`;
+
+          await durableRunStore.pauseRun(durableRun.id, {
+            reason: "verification_failed",
+            session,
+            touchedFiles,
+            lastConfirmedStep,
+            lastSuccessfulTool,
+            nextAction: "Fix the verification issues and then continue the durable run.",
+            message: verificationPauseNotice,
+            evidence: checkpointAfterVerification ? [] : evidenceLedger,
+          });
+          if (!checkpointAfterVerification) {
+            evidenceLedger.length = 0;
+          }
+
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: verificationPauseNotice,
+            timestamp: new Date().toISOString(),
+          });
+
+          if (localSandboxBridge) {
+            await localSandboxBridge.shutdown();
+          }
+
+          return session;
+        }
+      } else if (wroteCode && verifyRetries >= MAX_VERIFY_RETRIES) {
+        toolResults.push(
+          `SYSTEM: Verification has failed ${MAX_VERIFY_RETRIES} times. Stop retrying and ask the user for guidance.`,
+        );
+      }
+
+      // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
+      // in a response that also had tool calls, advance to the next wave now.
+      // Gate: require meaningful work (file writes or successful Bash commands).
       if (
         config.waveState &&
         isValidWaveCompletion(responseText) &&
@@ -1185,6 +1795,7 @@ async function _runAgentLoopCore(
         const completedWave = getCurrentWave(waveState);
 
         // Verify wave deliverables before advancing
+        let waveVerifyPassed = true;
         if (completedWave) {
           try {
             const waveExpectations = deriveWaveExpectations(completedWave);
@@ -1196,20 +1807,17 @@ async function _runAgentLoopCore(
               if (waveVerification.verdict === "failed") {
                 waveVerifyRetries++;
                 if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
+                  waveVerifyPassed = false;
                   if (!config.silent) {
                     process.stdout.write(
                       `\n${RED}[wave-verify] Wave ${completedWave.number} failed (${waveVerifyRetries}/${MAX_WAVE_VERIFY_RETRIES}): ${waveVerification.summary}${RESET}\n`,
                     );
                   }
-                  messages.push({ role: "assistant" as const, content: responseText });
-                  messages.push({
-                    role: "user" as const,
-                    content: `WAVE VERIFICATION FAILED: ${waveVerification.summary}\n\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
-                  });
-                  continue;
-                }
-                // Max retries exceeded — force-advance with warning
-                if (!config.silent) {
+                  toolResults.push(
+                    `WAVE VERIFICATION FAILED: ${waveVerification.summary}\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
+                  );
+                } else if (!config.silent) {
+                  // Max retries exceeded — force-advance with warning
                   process.stdout.write(
                     `\n${YELLOW}[wave-verify] Max retries exceeded — force-advancing past wave ${completedWave.number}${RESET}\n`,
                   );
@@ -1221,856 +1829,361 @@ async function _runAgentLoopCore(
           }
         }
 
-        // Reset wave verify retries on successful advancement
-        waveVerifyRetries = 0;
-        const hasMore = advanceWave(waveState);
-        if (!config.silent && completedWave) {
-          process.stdout.write(
-            `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
-          );
-        }
-        if (hasMore) {
-          // Inject next wave prompt and continue
-          const nextWavePrompt = buildWavePrompt(waveState);
-          messages.push({ role: "assistant" as const, content: responseText });
-          messages.push({ role: "user" as const, content: nextWavePrompt });
-          if (!config.silent) {
-            const next = getCurrentWave(waveState);
+        if (waveVerifyPassed) {
+          waveVerifyRetries = 0;
+          const hasMore = advanceWave(waveState);
+          if (!config.silent && completedWave) {
             process.stdout.write(
-              `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
+              `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
             );
           }
-          // Reset per-wave counters
-          pipelineContinuationNudges = 0;
-          confabulationNudges = 0;
-          continue;
-        }
-        // All waves complete — fall through to normal break
-        if (!config.silent) {
-          process.stdout.write(
-            `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
-          );
-        }
-      }
-
-      // Pipeline continuation nudge: if we're in a pipeline workflow (e.g., /magic,
-      // /autoforge) and the model emitted a summary-like response with no tool calls
-      // but has clearly done work (executedToolsThisTurn > 0), it may be wrapping up
-      // prematurely. Force it to continue unless we've already nudged too many times.
-      if (
-        isPipelineWorkflow &&
-        executedToolsThisTurn > 0 &&
-        maxToolRounds > 0 &&
-        pipelineContinuationNudges < MAX_PIPELINE_CONTINUATION_NUDGES &&
-        PREMATURE_SUMMARY_PATTERN.test(responseText)
-      ) {
-        pipelineContinuationNudges++;
-        messages.push({
-          role: "assistant",
-          content: responseText,
-        });
-        messages.push({
-          role: "user",
-          content: PIPELINE_CONTINUATION_INSTRUCTION,
-        });
-        if (!config.silent) {
-          process.stdout.write(
-            `\n${YELLOW}[pipeline continuation ${pipelineContinuationNudges}/${MAX_PIPELINE_CONTINUATION_NUDGES}]${RESET} ${DIM}(model stopped mid-pipeline — nudging to continue)${RESET}\n`,
-          );
-        }
-        continue;
-      }
-
-      // Anti-confabulation gate v2: fires in two scenarios:
-      // 1. Classic: model claims completion (regex match) but filesModified === 0
-      // 2. Reads-only: model did only reads (executedToolsThisTurn > 0), filesModified === 0,
-      //    AND either Grok-specific fake-verification text detected OR we're in round 3+.
-      //    Grok's pattern: read files → narrate "turbo typecheck: PASS" → stop without writing.
-      const isGrokConfab = GROK_CONFAB_PATTERN.test(responseText);
-      const isClassicConfab = PREMATURE_SUMMARY_PATTERN.test(responseText) || isGrokConfab;
-      const isReadsOnlyConfab = executedToolsThisTurn > 0 && (isGrokConfab || roundCounter >= 3);
-      if (
-        isPipelineWorkflow &&
-        filesModified === 0 &&
-        confabulationNudges < MAX_CONFABULATION_NUDGES &&
-        (isClassicConfab || isReadsOnlyConfab)
-      ) {
-        confabulationNudges++;
-        messages.push({ role: "assistant" as const, content: responseText });
-        messages.push({ role: "user" as const, content: CONFABULATION_WARNING });
-        if (!config.silent) {
-          const reason =
-            isReadsOnlyConfab && !isClassicConfab ? "reads-only pattern" : "fake completion";
-          process.stdout.write(
-            `\n${RED}[confab-guard v2] ${reason} — 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
-          );
-        }
-        continue;
-      }
-
-      const assistantMessage: SessionMessage = {
-        id: randomUUID(),
-        role: "assistant",
-        content: responseText,
-        timestamp: new Date().toISOString(),
-        modelId: `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
-        tokensUsed: totalTokensUsed,
-      };
-      session.messages.push(assistantMessage);
-      break;
-    }
-
-    // Execute tool batch (extracted to tool-executor.ts)
-    const toolBatchSpan = traceLogger.startSpan("tool-batch", "tool", {
-      traceId: rootSpan.traceId,
-      parentSpanId: rootSpan.spanId,
-      input: { toolCount: toolCalls.length, round: roundCounter },
-    });
-    const execResult = await executeToolBatch(
-      toolCalls,
-      toolCallParseErrors,
-      {
-        session,
-        config,
-        roundCounter,
-        maxToolRounds,
-        durableRun,
-        durableRunStore,
-        workflowName,
-        isPipelineWorkflow,
-        touchedFiles,
-        evidenceLedger,
-        lastConfirmedStep,
-        lastSuccessfulTool,
-        lastSuccessfulToolResult,
-        filesModified,
-        toolCallsThisTurn,
-        executedToolsThisTurn,
-        completedToolsThisTurn,
-        recentToolSignatures,
-        readTracker,
-        editAttempts,
-        lastMajorEditGatePassed,
-        effectiveSelfImprovement,
-        securityEngine,
-        secretsScanner,
-        localSandboxBridge,
-        testsRun,
-        bashSucceeded,
-        currentApproachToolCalls,
-        toolErrorCounts,
-      },
-      runAgentLoop,
-    );
-    // Write back updated state
-    filesModified = execResult.filesModified;
-    toolCallsThisTurn = execResult.toolCallsThisTurn;
-    executedToolsThisTurn = execResult.executedToolsThisTurn;
-    currentApproachToolCalls = execResult.currentApproachToolCalls;
-    lastConfirmedStep = execResult.lastConfirmedStep;
-    lastSuccessfulTool = execResult.lastSuccessfulTool;
-    lastSuccessfulToolResult = execResult.lastSuccessfulToolResult;
-    lastMajorEditGatePassed = execResult.lastMajorEditGatePassed;
-    localSandboxBridge = execResult.localSandboxBridge;
-    testsRun = execResult.testsRun;
-    bashSucceeded = execResult.bashSucceeded;
-    const toolResults = execResult.toolResults;
-
-    traceLogger.endSpan(toolBatchSpan.spanId, {
-      status: execResult.action === "return" ? "success" : "success",
-      output: { toolResults: toolResults.length, filesModified, action: execResult.action },
-    });
-
-    if (execResult.action === "return") {
-      return session;
-    }
-
-    // ---- Boundary drift check: detect scope expansion after file mutations ----
-    const wroteCode = toolCalls.some((tc) => tc.name === "Write" || tc.name === "Edit");
-    if (wroteCode && touchedFiles.length > 0) {
-      boundaryTracker.recordMutations(touchedFiles);
-      const boundaryState = boundaryTracker.check();
-      if (boundaryState.driftDetected) {
-        if (!config.silent) {
-          emitOrWrite(
-            `\n${YELLOW}[boundary-drift] ${boundaryState.expansionPercent.toFixed(0)}% expansion — ` +
-              `${boundaryState.outOfScopeFiles.length} file(s) outside original scope${RESET}\n`,
-          );
-        }
-        // In interactive TTY mode (non-serve, non-silent), prompt for approval
-        if (!config.eventEmitter && process.stdin.isTTY !== false) {
-          const shouldContinue = await confirmDestructive(formatDriftMessage(boundaryState), {
-            operation: "Boundary Drift",
-            detail: `${boundaryState.outOfScopeFiles.length} file(s) mutated outside declared scope`,
-          });
-          if (!shouldContinue) {
+          if (hasMore) {
+            const nextWavePrompt = buildWavePrompt(waveState);
+            toolResults.push(`SYSTEM: Wave complete. Next wave instructions:\n\n${nextWavePrompt}`);
             if (!config.silent) {
-              emitOrWrite(
-                `\n${RED}[boundary-drift] User declined expanded scope — halting execution.${RESET}\n`,
+              const next = getCurrentWave(waveState);
+              process.stdout.write(
+                `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
               );
             }
-            const driftMsg: SessionMessage = {
-              id: randomUUID(),
-              role: "assistant",
-              content:
-                `Execution paused: boundary drift detected (${boundaryState.expansionPercent.toFixed(0)}% expansion). ` +
-                `Out-of-scope files: ${boundaryState.outOfScopeFiles.join(", ")}. User declined to continue.`,
-              timestamp: new Date().toISOString(),
-            };
-            session.messages.push(driftMsg);
-            return session;
-          }
-        }
-      }
-    }
-
-    // Reflection loop (aider/Cursor pattern): after code edits, auto-run
-    // the project's configured lint/test/build commands. If any fail,
-    // parse the output into structured errors and inject a targeted fix
-    // prompt so the model can fix specific issues instead of guessing.
-    if (wroteCode && verifyRetries < MAX_VERIFY_RETRIES) {
-      const verifyCommands = getVerifyCommands(config.state);
-      let verificationPassed = true;
-      let verificationErrorSig = "";
-      let verificationRetriesExhausted = false;
-
-      for (const vc of verifyCommands) {
-        try {
-          const vcResult = await executeTool(
-            "Bash",
-            { command: vc.command },
-            session.projectRoot,
-            session.id,
-          );
-          evidenceLedger.push(buildExecutionEvidence("Bash", { command: vc.command }, vcResult));
-          if (vcResult.isError) {
-            verifyRetries++;
-            verificationPassed = false;
-            verificationRetriesExhausted = verifyRetries >= MAX_VERIFY_RETRIES;
-
-            // Evidence Chain: record verification failure receipt
-            try {
-              evidenceTracker.recordVerificationFailure(
-                vc.name,
-                vc.command,
-                "", // errorSig computed below; basic receipt captures the failure event
-                verifyRetries,
-                MAX_VERIFY_RETRIES,
-              );
-            } catch {
-              // Evidence recording is non-fatal
-            }
-
-            // Self-healing: parse errors into structured format for targeted fixes
-            const parsedErrors = parseVerificationErrors(vcResult.content);
-            let retryMessage: string;
-
-            if (parsedErrors.length > 0) {
-              // Targeted fix prompt: tell the model exactly which errors to fix
-              const fixPrompt = formatErrorsForFixPrompt(parsedErrors);
-              retryMessage = `AUTO-VERIFY (${vc.name}) FAILED — ${parsedErrors.length} structured error(s) detected:\n\n${fixPrompt}\n\n(attempt ${verifyRetries}/${MAX_VERIFY_RETRIES})`;
-
-              // Track error signature to detect repeated identical failures
-              const errorSig = computeErrorSignature(parsedErrors);
-              verificationErrorSig = errorSig;
-              if (errorSig === lastErrorSignature) {
-                sameErrorCount++;
-                sessionFailureCount++;
-                if (sameErrorCount >= 2) {
-                  // Same errors persisting across retries — escalate model tier
-                  const reason = `Persistent verification signature ${errorSig} repeated ${sameErrorCount + 1} times`;
-                  if ("escalateTier" in router && typeof router.escalateTier === "function") {
-                    router.escalateTier(reason);
-                  } else {
-                    router.forceCapable();
-                  }
-                  retryMessage += `\n\nWARNING: These same errors have persisted for ${sameErrorCount + 1} consecutive retries. The model tier has been escalated. Previous attempts failed with signature ${errorSig}. Try a fundamentally different approach to fix these issues.`;
-                  if (config.verbose) {
-                    process.stdout.write(
-                      `\n${YELLOW}[self-heal: tier escalated to capable — same errors ${sameErrorCount + 1}x]${RESET}\n`,
-                    );
-                  }
-                }
-              } else {
-                sameErrorCount = 0;
-                sessionFailureCount++; // different sig = still a failure
-              }
-              lastErrorSignature = errorSig;
-
-              // Pivot logic: track consecutive failures with the same error signature
-              // for strategy change (different from tier escalation — this is about
-              // fundamentally changing the approach, not just using a better model)
-              if (verificationErrorSig === lastPivotErrorSignature) {
-                consecutiveSameSignatureFailures++;
-              } else {
-                consecutiveSameSignatureFailures = 1;
-                lastPivotErrorSignature = verificationErrorSig;
-              }
-
-              if (consecutiveSameSignatureFailures >= 2) {
-                retryMessage += `\n\n${PIVOT_INSTRUCTION}`;
-                if (!config.silent) {
-                  process.stdout.write(
-                    `\n${YELLOW}[pivot: same error signature ${consecutiveSameSignatureFailures}x — requesting strategy change]${RESET}\n`,
-                  );
-                }
-                // Include approach memory in the pivot prompt
-                if (approachLog.length > 0) {
-                  const failedApproaches = approachLog
-                    .filter((a) => a.outcome === "failed")
-                    .map((a) => `  - ${a.description} (${a.toolCalls} tool calls)`)
-                    .join("\n");
-                  if (failedApproaches) {
-                    retryMessage += `\n\nPreviously failed approaches:\n${failedApproaches}`;
-                  }
-                }
-              }
-
-              if (config.verbose) {
-                process.stdout.write(
-                  `${DIM}[self-heal: parsed ${parsedErrors.length} error(s) from ${vc.name} output]${RESET}\n`,
-                );
-              }
-            } else {
-              // Fallback: parser found nothing structured, inject raw output as before
-              retryMessage = `AUTO-VERIFY (${vc.name}) FAILED:\n${vcResult.content}\n\nFix the errors above. (attempt ${verifyRetries}/${MAX_VERIFY_RETRIES})`;
-            }
-
-            toolResults.push(retryMessage);
+            // Reset per-wave counters
+            pipelineContinuationNudges = 0;
+            confabulationNudges = 0;
+          } else if (!config.silent) {
             process.stdout.write(
-              `\n${YELLOW}[verify: ${vc.name} FAILED]${RESET} ${DIM}(retry ${verifyRetries}/${MAX_VERIFY_RETRIES})${RESET}\n`,
+              `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
             );
-          } else {
-            // Verification passed — reset error signature tracking
-            lastErrorSignature = "";
-            sameErrorCount = 0;
-            lastConfirmedStep = `Verified ${vc.name}`;
-
-            // Evidence Chain: record verification pass receipt
-            try {
-              evidenceTracker.recordVerificationPass(vc.name, vc.command);
-            } catch {
-              // Evidence recording is non-fatal
-            }
-
-            process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
           }
-        } catch {
-          // Verification command failed to execute, skip
         }
       }
 
-      const checkpointAfterVerification = config.checkpointPolicy?.afterVerification ?? true;
-      if (checkpointAfterVerification) {
+      // ---- DanteMemory: retain tool round outcome for cross-session recall ----
+      if (memoryInitialized && toolCalls.length > 0) {
+        const touchedFilesList = touchedFiles
+          .slice(0, 3)
+          .map((f: string) => f.split("/").pop())
+          .join(", ");
+        const roundSummary = `Round ${roundCounter}: ${toolCalls.length} tool(s)${touchedFilesList ? ` | files: ${touchedFilesList}` : ""}`;
+        if (secretsScanner.scan(roundSummary).clean) {
+          memoryOrchestrator
+            .memoryStore(`round-${roundCounter}-${session.id}`, roundSummary, "session", {
+              source: session.id,
+              summary: roundSummary,
+              tags: ["round"],
+            })
+            .catch(() => {}); // fire-and-forget, non-fatal
+        }
+      }
+
+      // Add tool results to messages for the next model call
+      const assistantToolMessage = {
+        role: "assistant" as const,
+        content: responseText,
+      };
+      messages.push(assistantToolMessage);
+
+      const toolResultsMessage = {
+        role: "user" as const,
+        content: `Tool execution results:\n\n${toolResults.join("\n\n---\n\n")}`,
+      };
+      messages.push(toolResultsMessage);
+
+      if ((config.checkpointPolicy?.afterToolBatch ?? true) && toolCalls.length > 0) {
         await durableRunStore.checkpoint(durableRun.id, {
           session,
           touchedFiles,
           lastConfirmedStep,
           lastSuccessfulTool,
-          nextAction: verificationPassed
-            ? "Proceed to the next implementation step."
-            : "Fix the reported verification issues before continuing.",
+          nextAction: "Continue executing the next planned step.",
           evidence: evidenceLedger,
         });
         evidenceLedger.length = 0;
       }
 
-      // Approach memory: record the outcome of this verification cycle
-      if (verifyCommands.length > 0) {
-        const approachDesc = currentApproachDescription || `approach-${approachLog.length + 1}`;
+      // Record per-round latency metric
+      metricsCollector.recordTiming("agent.round.latency", Date.now() - _roundStartMs);
 
-        // Trace decision: verification outcome
-        traceLogger.logDecision(
-          rootSpan.spanId,
-          "verification",
-          [
-            { name: "pass", score: verificationPassed ? 1.0 : 0.0, reason: "All verification checks passed" },
-            { name: "fail", score: verificationPassed ? 0.0 : 1.0, reason: "One or more verification checks failed" }
-          ],
-          verificationPassed ? "pass" : "fail",
-          verificationPassed ? "Verification successful, proceeding" : "Verification failed, needs fixes",
-          verificationPassed ? 1.0 : 0.0
-        );
-
-        if (verificationPassed) {
-          approachLog.push({
-            description: approachDesc,
-            outcome: "success",
-            toolCalls: currentApproachToolCalls,
-          });
-          // Persist success to cross-session memory
-          persistentMemory
-            .record({
-              description: approachDesc,
-              outcome: "success",
-              toolCalls: currentApproachToolCalls,
-              sessionId: session.id,
-            })
-            .catch(() => {});
-          // Reset pivot tracking on success
-          consecutiveSameSignatureFailures = 0;
-          lastPivotErrorSignature = "";
-        } else {
-          approachLog.push({
-            description: approachDesc,
-            outcome: "failed",
-            toolCalls: currentApproachToolCalls,
-          });
-          // Persist failure to cross-session memory
-          persistentMemory
-            .record({
-              description: approachDesc,
-              outcome: "failed",
-              errorSignature: lastErrorSignature || undefined,
-              toolCalls: currentApproachToolCalls,
-              sessionId: session.id,
-            })
-            .catch(() => {});
-
-          // Inject approach memory into the retry prompt so the model knows what was tried
-          if (approachLog.length > 1) {
-            const lastFailed = approachLog[approachLog.length - 1]!;
-            toolResults.push(
-              `Previously tried: ${lastFailed.description} — failed. Try a different approach.`,
-            );
-          }
-        }
-        // Reset for the next approach
-        currentApproachDescription = "";
-        currentApproachToolCalls = 0;
-      }
-
-      // ConfidenceSynthesizer: after the verification cycle, synthesize a
-      // structured confidence decision. If the decision is "block" and the
-      // same error has persisted across 2+ retries, escalate immediately and
-      // exhaust retries rather than burning more rounds on an unrecoverable state.
-      if (!verificationPassed) {
-        try {
-          const synthesis = synthesizeConfidence({
-            pdseScore: 0, // score unknown at CLI level; use sameErrorCount as signal
-            metrics: [],
-            railFindings: [],
-            critiqueTrace: [],
-          });
-          // Only block when the same error signature has repeated enough times
-          // to indicate a genuinely unrecoverable state.
-          if (synthesis.decision === "block" && sameErrorCount >= 2) {
-            const blockMsg =
-              `[ConfidenceSynthesizer] Decision: BLOCK — same failure signature repeated ` +
-              `${sameErrorCount + 1} times with no recovery. Escalating and stopping retries.`;
-            process.stdout.write(`\n${RED}${blockMsg}${RESET}\n`);
-            toolResults.push(blockMsg);
-            verificationRetriesExhausted = true;
-          }
-        } catch {
-          // Synthesizer errors must not break the recovery loop
-        }
-      } else if (verificationPassed && config.verbose) {
-        // Verification passed — emit a synthesizer "pass" signal in verbose mode
-        try {
-          const synthesis = synthesizeConfidence({
-            pdseScore: 1.0,
-            metrics: [],
-            railFindings: [],
-            critiqueTrace: [],
-          });
-          process.stdout.write(
-            `${DIM}[ConfidenceSynthesizer] Decision: ${synthesis.decision} — continuing normally${RESET}\n`,
-          );
-        } catch {
-          // Ignore
-        }
-      }
-
-      if (!verificationPassed && verificationRetriesExhausted) {
-        const verificationPauseNotice =
-          `Execution paused for durable run ${durableRun.id} because verification failed ${MAX_VERIFY_RETRIES} times. ` +
-          `Type continue or /resume ${durableRun.id} after addressing the reported verification issues.`;
-
-        await durableRunStore.pauseRun(durableRun.id, {
-          reason: "verification_failed",
-          session,
-          touchedFiles,
-          lastConfirmedStep,
-          lastSuccessfulTool,
-          nextAction: "Fix the verification issues and then continue the durable run.",
-          message: verificationPauseNotice,
-          evidence: checkpointAfterVerification ? [] : evidenceLedger,
-        });
-        if (!checkpointAfterVerification) {
-          evidenceLedger.length = 0;
-        }
-
-        session.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: verificationPauseNotice,
-          timestamp: new Date().toISOString(),
-        });
-
-        if (localSandboxBridge) {
-          await localSandboxBridge.shutdown();
-        }
-
-        return session;
-      }
-    } else if (wroteCode && verifyRetries >= MAX_VERIFY_RETRIES) {
-      toolResults.push(
-        `SYSTEM: Verification has failed ${MAX_VERIFY_RETRIES} times. Stop retrying and ask the user for guidance.`,
-      );
+      // ─── Observability: End round span (normal completion) ───
+      agentMetrics.increment("agent.rounds.success");
+      agentTracer.endSpan(roundSpan.id);
     }
 
-    // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
-    // in a response that also had tool calls, advance to the next wave now.
-    // Gate: require meaningful work (file writes or successful Bash commands).
-    if (
-      config.waveState &&
-      isValidWaveCompletion(responseText) &&
-      (filesModified > 0 || bashSucceeded > 0) &&
-      maxToolRounds > 0
-    ) {
-      const waveState = config.waveState;
-      const completedWave = getCurrentWave(waveState);
-
-      // Verify wave deliverables before advancing
-      let waveVerifyPassed = true;
-      if (completedWave) {
-        try {
-          const waveExpectations = deriveWaveExpectations(completedWave);
-          if (waveExpectations.expectedFiles && waveExpectations.expectedFiles.length > 0) {
-            const waveVerification = await verifyCompletion(session.projectRoot, waveExpectations);
-            if (waveVerification.verdict === "failed") {
-              waveVerifyRetries++;
-              if (waveVerifyRetries <= MAX_WAVE_VERIFY_RETRIES) {
-                waveVerifyPassed = false;
-                if (!config.silent) {
-                  process.stdout.write(
-                    `\n${RED}[wave-verify] Wave ${completedWave.number} failed (${waveVerifyRetries}/${MAX_WAVE_VERIFY_RETRIES}): ${waveVerification.summary}${RESET}\n`,
-                  );
-                }
-                toolResults.push(
-                  `WAVE VERIFICATION FAILED: ${waveVerification.summary}\nExpected files not found: ${waveVerification.failed.join(", ")}\nFix these issues before claiming [WAVE COMPLETE].`,
-                );
-              } else if (!config.silent) {
-                // Max retries exceeded — force-advance with warning
-                process.stdout.write(
-                  `\n${YELLOW}[wave-verify] Max retries exceeded — force-advancing past wave ${completedWave.number}${RESET}\n`,
-                );
-              }
+    // Diff-based anti-confabulation: compare claimed vs actual file changes.
+    // Always runs (not verbose-only) — in pipeline mode, logs a red warning.
+    if (touchedFiles.length > 0) {
+      const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+      if (lastAssistant) {
+        const claimedFiles = extractClaimedFiles(lastAssistant.content);
+        if (claimedFiles.length > 0) {
+          const actualSet = new Set(touchedFiles.map((f) => f.replace(/\\/g, "/")));
+          const unverified = claimedFiles.filter(
+            (f: string) => !actualSet.has(f.replace(/\\/g, "/")),
+          );
+          if (unverified.length > 0) {
+            const color = isPipelineWorkflow ? RED : YELLOW;
+            const tag = isPipelineWorkflow ? "confab-block" : "confab-diff";
+            process.stdout.write(
+              `\n${color}[${tag}] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
+            );
+            // In pipeline mode, append a retraction to the session transcript
+            // so the model's false claims are corrected in the conversation history.
+            if (isPipelineWorkflow) {
+              session.messages.push({
+                id: randomUUID(),
+                role: "assistant",
+                content: `WARNING: I claimed changes to ${unverified.length} file(s) that were not actually written: ${unverified.join(", ")}. These claims are retracted.`,
+                timestamp: new Date().toISOString(),
+              });
             }
           }
-        } catch {
-          // Non-fatal — proceed with wave advancement
-        }
-      }
-
-      if (waveVerifyPassed) {
-        waveVerifyRetries = 0;
-        const hasMore = advanceWave(waveState);
-        if (!config.silent && completedWave) {
-          process.stdout.write(
-            `\n${GREEN}[wave ${completedWave.number}/${waveState.waves.length} complete: ${completedWave.title}]${RESET}\n`,
-          );
-        }
-        if (hasMore) {
-          const nextWavePrompt = buildWavePrompt(waveState);
-          toolResults.push(`SYSTEM: Wave complete. Next wave instructions:\n\n${nextWavePrompt}`);
-          if (!config.silent) {
-            const next = getCurrentWave(waveState);
-            process.stdout.write(
-              `${CYAN}[advancing to wave ${next?.number}/${waveState.waves.length}: ${next?.title}]${RESET}\n`,
-            );
-          }
-          // Reset per-wave counters
-          pipelineContinuationNudges = 0;
-          confabulationNudges = 0;
-        } else if (!config.silent) {
-          process.stdout.write(
-            `\n${GREEN}${BOLD}[all ${waveState.waves.length} waves complete]${RESET}\n`,
-          );
         }
       }
     }
 
-    // ---- DanteMemory: retain tool round outcome for cross-session recall ----
-    if (memoryInitialized && toolCalls.length > 0) {
-      const touchedFilesList = touchedFiles
-        .slice(0, 3)
-        .map((f: string) => f.split("/").pop())
-        .join(", ");
-      const roundSummary = `Round ${roundCounter}: ${toolCalls.length} tool(s)${touchedFilesList ? ` | files: ${touchedFilesList}` : ""}`;
-      if (secretsScanner.scan(roundSummary).clean) {
-        memoryOrchestrator
-          .memoryStore(`round-${roundCounter}-${session.id}`, roundSummary, "session", {
-            source: session.id,
-            summary: roundSummary,
-            tags: ["round"],
-          })
-          .catch(() => {}); // fire-and-forget, non-fatal
-      }
-    }
-
-    // Add tool results to messages for the next model call
-    const assistantToolMessage = {
-      role: "assistant" as const,
-      content: responseText,
-    };
-    messages.push(assistantToolMessage);
-
-    const toolResultsMessage = {
-      role: "user" as const,
-      content: `Tool execution results:\n\n${toolResults.join("\n\n---\n\n")}`,
-    };
-    messages.push(toolResultsMessage);
-
-    if ((config.checkpointPolicy?.afterToolBatch ?? true) && toolCalls.length > 0) {
-      await durableRunStore.checkpoint(durableRun.id, {
-        session,
-        touchedFiles,
-        lastConfirmedStep,
-        lastSuccessfulTool,
-        nextAction: "Continue executing the next planned step.",
-        evidence: evidenceLedger,
-      });
-      evidenceLedger.length = 0;
-    }
-
-    // Record per-round latency metric
-    metricsCollector.recordTiming("agent.round.latency", Date.now() - _roundStartMs);
-  }
-
-  // Diff-based anti-confabulation: compare claimed vs actual file changes.
-  // Always runs (not verbose-only) — in pipeline mode, logs a red warning.
-  if (touchedFiles.length > 0) {
-    const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-    if (lastAssistant) {
-      const claimedFiles = extractClaimedFiles(lastAssistant.content);
-      if (claimedFiles.length > 0) {
-        const actualSet = new Set(touchedFiles.map((f) => f.replace(/\\/g, "/")));
-        const unverified = claimedFiles.filter(
-          (f: string) => !actualSet.has(f.replace(/\\/g, "/")),
-        );
-        if (unverified.length > 0) {
-          const color = isPipelineWorkflow ? RED : YELLOW;
-          const tag = isPipelineWorkflow ? "confab-block" : "confab-diff";
-          process.stdout.write(
-            `\n${color}[${tag}] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
-          );
-          // In pipeline mode, append a retraction to the session transcript
-          // so the model's false claims are corrected in the conversation history.
-          if (isPipelineWorkflow) {
-            session.messages.push({
-              id: randomUUID(),
-              role: "assistant",
-              content: `WARNING: I claimed changes to ${unverified.length} file(s) that were not actually written: ${unverified.join(", ")}. These claims are retracted.`,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      }
-    }
-  }
-
-  // Post-loop deliverables verification: verify expected files exist on disk.
-  // For wave sessions, aggregate all wave expectations. For non-wave pipelines,
-  // verify files claimed by the model. Non-fatal — logs result, does not crash.
-  if (touchedFiles.length > 0) {
-    try {
-      let deliverableExpectedFiles: string[] = [];
-      if (config.waveState) {
-        // Aggregate expectations from all waves
-        for (const wave of config.waveState.waves) {
-          const waveExp = deriveWaveExpectations(wave);
-          if (waveExp.expectedFiles) deliverableExpectedFiles.push(...waveExp.expectedFiles);
-        }
-      } else if (isPipelineWorkflow) {
-        // Use claimed files from last assistant message
-        const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-        if (lastAssistant) {
-          deliverableExpectedFiles = extractClaimedFiles(lastAssistant.content);
-        }
-      }
-      if (deliverableExpectedFiles.length > 0) {
-        const uniqueExpected = [...new Set(deliverableExpectedFiles)];
-        const finalVerification = await verifyCompletion(session.projectRoot, {
-          expectedFiles: uniqueExpected,
-          intentDescription: "Session deliverables",
-        });
-        if (!config.silent) {
-          const vIcon =
-            finalVerification.verdict === "complete"
-              ? GREEN
-              : finalVerification.verdict === "partial"
-                ? YELLOW
-                : RED;
-          process.stdout.write(`\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`);
-        }
-      }
-    } catch {
-      // Non-fatal
-    }
-  }
-
-  // Run DanteForge pipeline on touched files
-  if (touchedFiles.length > 0) {
-    process.stdout.write(`\n${CYAN}${BOLD}DanteForge Pipeline${RESET}\n`);
-
-    for (const filePath of touchedFiles) {
+    // Post-loop deliverables verification: verify expected files exist on disk.
+    // For wave sessions, aggregate all wave expectations. For non-wave pipelines,
+    // verify files claimed by the model. Non-fatal — logs result, does not crash.
+    if (touchedFiles.length > 0) {
       try {
-        const content = await readFile(filePath, "utf-8");
-        const { passed, summary, pdseScore } = await runDanteForge(
-          content,
-          filePath,
-          session.projectRoot,
-          config.verbose,
-        );
-        process.stdout.write(`\n${DIM}File: ${filePath}${RESET}\n${summary}\n`);
-
-        // Evidence Chain: record PDSE score receipt for each DanteForge verification
-        try {
-          evidenceTracker.recordPdseScore(filePath, passed, summary);
-        } catch {
-          // Evidence recording is non-fatal
+        let deliverableExpectedFiles: string[] = [];
+        if (config.waveState) {
+          // Aggregate expectations from all waves
+          for (const wave of config.waveState.waves) {
+            const waveExp = deriveWaveExpectations(wave);
+            if (waveExp.expectedFiles) deliverableExpectedFiles.push(...waveExp.expectedFiles);
+          }
+        } else if (isPipelineWorkflow) {
+          // Use claimed files from last assistant message
+          const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
+          if (lastAssistant) {
+            deliverableExpectedFiles = extractClaimedFiles(lastAssistant.content);
+          }
         }
-
-        // Trend tracker: record PDSE score for regression detection
-        if (config.replState?.verificationTrendTracker) {
-          config.replState.verificationTrendTracker.record("pdse", pdseScore);
-        }
-
-        // Session run report: accumulate per-file PDSE results so the REPL
-        // session report surfaces verification truth, not just mutation counts.
-        if (config.replState) {
-          config.replState.lastSessionPdseResults.push({ file: filePath, pdseScore, passed });
-        }
-
-        if (passed) {
-          await recordSuccessPattern(
-            {
-              pattern: `DanteForge pass: ${filePath}`,
-              correction:
-                "Preserve the verified structure that passed anti-stub, constitution, and PDSE checks.",
-              filePattern: filePath,
-              language: config.state.project.language || undefined,
-              framework: config.state.project.framework,
-              occurrences: 1,
-              lastSeen: new Date().toISOString(),
-            },
-            session.projectRoot,
-          );
-        }
-
-        // Track file in session active files
-        if (!session.activeFiles.includes(filePath)) {
-          session.activeFiles.push(filePath);
+        if (deliverableExpectedFiles.length > 0) {
+          const uniqueExpected = [...new Set(deliverableExpectedFiles)];
+          const finalVerification = await verifyCompletion(session.projectRoot, {
+            expectedFiles: uniqueExpected,
+            intentDescription: "Session deliverables",
+          });
+          if (!config.silent) {
+            const vIcon =
+              finalVerification.verdict === "complete"
+                ? GREEN
+                : finalVerification.verdict === "partial"
+                  ? YELLOW
+                  : RED;
+            process.stdout.write(`\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`);
+          }
         }
       } catch {
-        process.stdout.write(`${DIM}Could not read ${filePath} for DanteForge analysis${RESET}\n`);
+        // Non-fatal
       }
     }
-  }
 
-  // Record patterns from this conversation for future lesson injection
-  try {
-    const conversationMessages = session.messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content:
-          typeof m.content === "string" ? m.content : m.content.map((b) => b.text || "").join("\n"),
-      }));
-    await detectAndRecordPatterns(conversationMessages, session.projectRoot);
-  } catch {
-    // Non-fatal: pattern detection failure should not break the session
-  }
+    // Run DanteForge pipeline on touched files
+    if (touchedFiles.length > 0) {
+      process.stdout.write(`\n${CYAN}${BOLD}DanteForge Pipeline${RESET}\n`);
 
-  // Update session timestamp
-  session.updatedAt = new Date().toISOString();
+      for (const filePath of touchedFiles) {
+        try {
+          const content = await readFile(filePath, "utf-8");
+          agentMetrics.increment("agent.forge.invocations");
+          const { passed, summary, pdseScore } = await runDanteForge(
+            content,
+            filePath,
+            session.projectRoot,
+            config.verbose,
+          );
+          process.stdout.write(`\n${DIM}File: ${filePath}${RESET}\n${summary}\n`);
 
-  // Persist acquired artifacts (downloads, archives) alongside the durable run record
-  const acquiredArtifacts = globalArtifactStore
-    .getByKind("download")
-    .concat(globalArtifactStore.getByKind("archive_extract"));
-  if (acquiredArtifacts.length > 0) {
+          // Evidence Chain: record PDSE score receipt for each DanteForge verification
+          try {
+            evidenceTracker.recordPdseScore(filePath, passed, summary);
+          } catch {
+            // Evidence recording is non-fatal
+          }
+
+          // Trend tracker: record PDSE score for regression detection
+          if (config.replState?.verificationTrendTracker) {
+            config.replState.verificationTrendTracker.record("pdse", pdseScore);
+          }
+
+          // Session run report: accumulate per-file PDSE results so the REPL
+          // session report surfaces verification truth, not just mutation counts.
+          if (config.replState) {
+            config.replState.lastSessionPdseResults.push({ file: filePath, pdseScore, passed });
+          }
+
+          if (passed) {
+            await recordSuccessPattern(
+              {
+                pattern: `DanteForge pass: ${filePath}`,
+                correction:
+                  "Preserve the verified structure that passed anti-stub, constitution, and PDSE checks.",
+                filePattern: filePath,
+                language: config.state.project.language || undefined,
+                framework: config.state.project.framework,
+                occurrences: 1,
+                lastSeen: new Date().toISOString(),
+              },
+              session.projectRoot,
+            );
+          }
+
+          // Track file in session active files
+          if (!session.activeFiles.includes(filePath)) {
+            session.activeFiles.push(filePath);
+          }
+        } catch {
+          process.stdout.write(
+            `${DIM}Could not read ${filePath} for DanteForge analysis${RESET}\n`,
+          );
+        }
+      }
+    }
+
+    // Record patterns from this conversation for future lesson injection
     try {
-      await durableRunStore.persistArtifacts(durableRun.id, acquiredArtifacts);
+      const conversationMessages = session.messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content:
+            typeof m.content === "string"
+              ? m.content
+              : m.content.map((b) => b.text || "").join("\n"),
+        }));
+      await detectAndRecordPatterns(conversationMessages, session.projectRoot);
     } catch {
-      /* Non-fatal — artifact log is informational */
+      // Non-fatal: pattern detection failure should not break the session
     }
-  }
 
-  // ---- Session-end persistence (extracted to session-manager.ts) ----
-  await persistSessionEnd({
-    durableRunStore,
-    durableRun,
-    session,
-    touchedFiles,
-    lastConfirmedStep,
-    lastSuccessfulTool,
-    evidenceLedger,
-    localSandboxBridge,
-    filesModified,
-    durablePrompt,
-    sessionPersistentMemory,
-    autonomyEngine,
-  });
+    // Update session timestamp
+    session.updatedAt = new Date().toISOString();
 
-  // ---- DanteGaslight + DanteFearSet: post-loop refinement ----
-  if (config.gaslight) {
-    const gaslightResult = await runGaslightBridge({
-      config,
-      session,
-      durablePrompt,
-      router,
-      verifyRetries,
-      sessionFailureCount,
-      silent: !!config.silent,
-    });
-    if (gaslightResult.aborted) {
-      return session;
-    }
-  }
-
-  // ---- DanteMemory: session-end persist + prune ----
-  if (memoryInitialized) {
-    try {
-      const sessionSummaryValue = `${durablePrompt.slice(0, 120)} | files: ${filesModified}`;
-      if (secretsScanner.scan(sessionSummaryValue).clean) {
-        await memoryOrchestrator.memoryStore(
-          `session::${session.id}`,
-          sessionSummaryValue,
-          "project", // project scope persists cross-session
-          {
-            source: session.id,
-            summary: sessionSummaryValue,
-            tags: ["session-summary"],
-          },
-        );
+    // Persist acquired artifacts (downloads, archives) alongside the durable run record
+    const acquiredArtifacts = globalArtifactStore
+      .getByKind("download")
+      .concat(globalArtifactStore.getByKind("archive_extract"));
+    if (acquiredArtifacts.length > 0) {
+      try {
+        await durableRunStore.persistArtifacts(durableRun.id, acquiredArtifacts);
+      } catch {
+        /* Non-fatal — artifact log is informational */
       }
-      await memoryOrchestrator.memoryPrune();
+    }
+
+    // ---- Session-end persistence (extracted to session-manager.ts) ----
+    await persistSessionEnd({
+      durableRunStore,
+      durableRun,
+      session,
+      touchedFiles,
+      lastConfirmedStep,
+      lastSuccessfulTool,
+      evidenceLedger,
+      localSandboxBridge,
+      filesModified,
+      durablePrompt,
+      sessionPersistentMemory,
+      autonomyEngine,
+    });
+
+    // ---- DanteGaslight + DanteFearSet: post-loop refinement ----
+    if (config.gaslight) {
+      agentMetrics.increment("agent.gaslight.triggered");
+      const gaslightResult = await runGaslightBridge({
+        config,
+        session,
+        durablePrompt,
+        router,
+        verifyRetries,
+        sessionFailureCount,
+        silent: !!config.silent,
+      });
+      if (gaslightResult.aborted) {
+        return session;
+      }
+    }
+
+    // ---- DanteMemory: session-end persist + prune ----
+    if (memoryInitialized) {
+      try {
+        const sessionSummaryValue = `${durablePrompt.slice(0, 120)} | files: ${filesModified}`;
+        if (secretsScanner.scan(sessionSummaryValue).clean) {
+          await memoryOrchestrator.memoryStore(
+            `session::${session.id}`,
+            sessionSummaryValue,
+            "project", // project scope persists cross-session
+            {
+              source: session.id,
+              summary: sessionSummaryValue,
+              tags: ["session-summary"],
+            },
+          );
+        }
+        await memoryOrchestrator.memoryPrune();
+      } catch {
+        // Non-fatal
+      }
+    }
+    // ---- debug-trail: flush session audit log ----
+    try {
+      await auditLogger.flush({ endSession: true });
     } catch {
       // Non-fatal
     }
-  }
-  // ---- debug-trail: flush session audit log ----
-  try {
-    await auditLogger.flush({ endSession: true });
-  } catch {
-    // Non-fatal
-  }
 
-  // ---- Evidence Chain: seal session and surface sealHash ----
-  try {
-    const sealConfig: Record<string, unknown> = {
-      sessionId: session.id,
-      modelId: config.state.model.default.modelId,
-      provider: config.state.model.default.provider,
-    };
-    const seal = evidenceTracker.seal(sealConfig, filesModified, roundCounter);
-    (session as unknown as Record<string, unknown>)._sealHash = seal.sealHash;
-  } catch {
-    // Non-fatal
-  }
+    // ---- Observability: Session-end telemetry ----
+    try {
+      const sessionMetrics = agentMetrics.getMetricsDetailed();
+      const sessionTraces = agentTracer.getTraces();
+
+      // Log to audit trail
+      await auditLogger.log(
+        "workflow_event",
+        "agent-loop",
+        "Session observability telemetry collected",
+        {
+          eventType: "session.observability",
+          metrics: sessionMetrics,
+          traceCount: sessionTraces.length,
+          totalDuration: sessionTraces.reduce((sum, t) => {
+            const traceDuration = t.spans.reduce((s, span) => s + (span.duration || 0), 0);
+            return sum + traceDuration;
+          }, 0),
+        },
+      );
+
+      // Optional: Export for external analysis
+      if (process.env.DANTECODE_EXPORT_TELEMETRY === "1") {
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const telemetryDir = path.join(session.projectRoot, ".dantecode", "telemetry");
+        await fs.mkdir(telemetryDir, { recursive: true });
+        const telemetryPath = path.join(telemetryDir, `session-${session.id}.json`);
+        await fs.writeFile(
+          telemetryPath,
+          JSON.stringify({ metrics: sessionMetrics, traces: sessionTraces }, null, 2),
+          "utf-8",
+        );
+      }
+    } catch {
+      // Non-fatal - telemetry export failure should not block session completion
+    }
+
+    // ---- Evidence Chain: seal session and surface sealHash ----
+    try {
+      const sealConfig: Record<string, unknown> = {
+        sessionId: session.id,
+        modelId: config.state.model.default.modelId,
+        provider: config.state.model.default.provider,
+      };
+      const seal = evidenceTracker.seal(sealConfig, filesModified, roundCounter);
+      (session as unknown as Record<string, unknown>)._sealHash = seal.sealHash;
+    } catch {
+      // Non-fatal
+    }
 
     // Emit session-complete event for SSE clients in serve mode
     if (config.eventEmitter && config.eventSessionId) {

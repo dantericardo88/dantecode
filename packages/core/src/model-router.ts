@@ -21,6 +21,25 @@ import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
 import { CredentialVault } from "./credential-vault.js";
 import { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
+import { MetricCounter, TraceRecorder } from "@dantecode/observability";
+
+// ─── Observability ──────────────────────────────────────────────────────────
+
+/** Module-level metrics collector for model router telemetry */
+const routerMetrics = new MetricCounter();
+
+/** Module-level trace recorder for distributed tracing */
+const routerTracer = new TraceRecorder();
+
+/** Export metrics for CLI commands */
+export function getRouterMetrics() {
+  return routerMetrics.getMetricsDetailed();
+}
+
+/** Export traces for CLI commands */
+export function getRouterTraces() {
+  return routerTracer.getTraces();
+}
 
 // ─── Vault singleton ──────────────────────────────────────────────────────────
 let _vaultInstance: CredentialVault | null = null;
@@ -440,6 +459,14 @@ export class ModelRouterImpl {
   > {
     const startTime = Date.now();
 
+    // ─── Observability: Start generation span ───
+    const genSpan = routerTracer.startSpan("model.generate", {
+      provider: config.provider,
+      modelId: config.modelId,
+      messageCount: messages.length,
+    });
+    routerMetrics.increment("model.requests.total");
+
     try {
       const builder = this.resolveProvider(config);
       const enrichedConfig = await this._enrichConfigApiKey(config);
@@ -467,6 +494,7 @@ export class ModelRouterImpl {
           onRetry: (attempt, error, delayMs) => {
             const msg = error instanceof Error ? error.message : String(error);
             this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+            routerMetrics.increment("model.requests.retried");
           },
         },
       );
@@ -479,6 +507,17 @@ export class ModelRouterImpl {
       const outputTokens = result.usage?.completionTokens ?? 0;
       this.recordRequestCost(inputTokens, outputTokens, this._currentTier, config.provider);
 
+      // ─── Observability: Track success metrics ───
+      routerMetrics.increment("model.requests.success");
+      routerMetrics.increment("model.tokens.prompt", inputTokens);
+      routerMetrics.increment("model.tokens.completion", outputTokens);
+      routerMetrics.increment("model.tokens.total", inputTokens + outputTokens);
+      routerMetrics.gauge("model.latency.ms", durationMs);
+
+      // Estimate cost (USD)
+      const costUsd = this.estimateCostUsd(inputTokens, outputTokens, config.provider, this._currentTier);
+      routerMetrics.increment("model.cost.usd", costUsd);
+
       // Record the generation event in the audit log
       await this.recordAuditEvent(
         config,
@@ -487,11 +526,17 @@ export class ModelRouterImpl {
         result.usage?.totalTokens ?? 0,
       );
 
+      routerTracer.endSpan(genSpan.id);
       return { success: true, text: result.text };
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
+
+      // ─── Observability: Track error metrics ───
+      routerMetrics.increment("model.requests.error");
+      routerTracer.endSpan(genSpan.id, error);
+
       return { success: false, text: "", error };
     }
   }
@@ -933,6 +978,46 @@ export class ModelRouterImpl {
       modelTier: this._currentTier,
       tokensUsedSession: this._sessionTokensUsed,
     };
+  }
+
+  /**
+   * Estimates the cost in USD for a given request without recording it.
+   * Used for observability metrics.
+   */
+  private estimateCostUsd(
+    inputTokens: number,
+    outputTokens: number,
+    provider: string,
+    tier: "fast" | "capable",
+  ): number {
+    let inputRate: number;
+    let outputRate: number;
+    switch (provider) {
+      case "anthropic":
+        inputRate = ANTHROPIC_INPUT_PER_MTK;
+        outputRate = ANTHROPIC_OUTPUT_PER_MTK;
+        break;
+      case "openai":
+        inputRate = OPENAI_INPUT_PER_MTK;
+        outputRate = OPENAI_OUTPUT_PER_MTK;
+        break;
+      case "google":
+        inputRate = GOOGLE_INPUT_PER_MTK;
+        outputRate = GOOGLE_OUTPUT_PER_MTK;
+        break;
+      case "groq":
+        inputRate = GROQ_INPUT_PER_MTK;
+        outputRate = GROQ_OUTPUT_PER_MTK;
+        break;
+      case "ollama":
+        return 0;
+      default:
+        // grok and custom — use tier-based grok rates
+        inputRate = tier === "capable" ? GROK_CAPABLE_INPUT_PER_MTK : GROK_FAST_INPUT_PER_MTK;
+        outputRate = tier === "capable" ? GROK_CAPABLE_OUTPUT_PER_MTK : GROK_FAST_OUTPUT_PER_MTK;
+        break;
+    }
+    return (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
   }
 
   /**
