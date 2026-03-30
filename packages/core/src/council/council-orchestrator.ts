@@ -29,6 +29,7 @@ import { FleetBudget } from "./fleet-budget.js";
 import type { FleetBudgetReport } from "./fleet-budget.js";
 import { TaskRedistributor } from "./task-redistributor.js";
 import type { WorktreeCreateResult, WorktreeMergeResult } from "@dantecode/runtime-spine";
+import { HealthSurface } from "@dantecode/observability";
 // Worktree functions now injected via WorktreeHooks - see merge-brain.ts for pattern
 
 // ----------------------------------------------------------------------------
@@ -179,6 +180,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private readonly _redistributor: TaskRedistributor;
   /** Fleet-plus configuration (nesting depth, PDSE threshold, budget). */
   private readonly _config: CouncilConfig;
+  /** Health surface for council + lane health checks */
+  private readonly _health: HealthSurface;
 
   constructor(
     adapters: Map<AgentKind, CouncilAgentAdapter>,
@@ -192,6 +195,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this._config = options.councilConfig ?? {};
     this._budget = new FleetBudget(this._config.budget ?? {});
     this._redistributor = new TaskRedistributor();
+    this._health = new HealthSurface();
+    this._health.setTimeout(3000); // 3 second timeout for health checks
     this.options = {
       pollIntervalMs: options.pollIntervalMs ?? 15_000,
       baseBranch: options.baseBranch ?? "main",
@@ -265,6 +270,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.transition("running");
     this.observer.start();
     this.startPolling();
+
+    // Register health checks for observability
+    this.registerHealthChecks();
 
     return runState.runId;
   }
@@ -1314,5 +1322,60 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
       this._lastPersistError = msg;
       this.emitError(`Failed to persist run state: ${msg}`, "state-store");
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Observability: Health Checks
+  // --------------------------------------------------------------------------
+
+  /**
+   * Register health checks for council components.
+   * Called from start() to enable runtime health monitoring.
+   */
+  private registerHealthChecks(): void {
+    // Clear existing checks (in case of resume)
+    this._health.clear();
+
+    // Health check: Fleet budget
+    this._health.registerCheck("fleet-budget", async () => {
+      const report = this._budget.report();
+      // budgetRemaining = -1 means unlimited
+      if (report.budgetRemaining === -1) return "healthy";
+      // Exhausted if no budget remaining
+      if (report.budgetRemaining <= 0) return "unhealthy";
+      // Degraded if less than 20% remaining (assuming some initial budget)
+      // Note: We don't know the initial budget, so we just check if very low
+      if (report.budgetRemaining < 1000) return "degraded";
+      return "healthy";
+    });
+
+    // Health check: Per-lane health (checks if any lanes are in error/failed state)
+    this._health.registerCheck("lanes", async () => {
+      if (!this.runState) return "healthy";
+
+      const failedCount = this.runState.agents.filter(
+        (a) => a.status === "failed" || a.status === "aborted",
+      ).length;
+      const totalCount = this.runState.agents.length;
+
+      if (failedCount === totalCount && totalCount > 0) return "unhealthy"; // All lanes failed
+      if (failedCount > 0) return "degraded"; // Some lanes failed
+      return "healthy";
+    });
+
+    // Health check: Orchestrator state
+    this._health.registerCheck("orchestrator-state", async () => {
+      if (this.status === "failed") return "unhealthy";
+      if (this.status === "blocked") return "degraded";
+      return "healthy";
+    });
+  }
+
+  /**
+   * Get current health report for all registered checks.
+   * Useful for CLI commands and monitoring dashboards.
+   */
+  async getHealthReport() {
+    return this._health.runChecks();
   }
 }
