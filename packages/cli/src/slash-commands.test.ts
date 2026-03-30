@@ -1581,7 +1581,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
   describe("/fork", () => {
     beforeEach(() => {
       // Mock git branch command
-      mockExecSync.mockImplementation((command: string, args?: string[]) => {
+      mockExecSync.mockImplementation((_command: string, args?: string[]) => {
         if (Array.isArray(args) && args[0] === "branch") {
           return ""; // Successful branch creation
         }

@@ -3666,7 +3666,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
       try {
         const viz = mo.memoryVisualize();
         const recallAll = await mo.memoryRecall("*", 1000);
-        const memories = recallAll.results.map((r) => ({
+        const memories = recallAll.results.map((r: any) => ({
           key: r.key,
           scope: r.scope,
           value: r.value,
@@ -3684,7 +3684,7 @@ async function memoryCommand(args: string, state: ReplState): Promise<string> {
           const tableHeader = `| Key | Scope | Summary | Score | Recalls |\n| --- | ----- | ------- | ----- | ------- |\n`;
           const rows = memories
             .map(
-              (m) =>
+              (m: any) =>
                 `| ${m.key} | ${m.scope} | ${(m.summary ?? String(m.value)).slice(0, 60)} | ${m.score.toFixed(2)} | ${m.recallCount} |`,
             )
             .join("\n");
@@ -8827,7 +8827,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/drift [glob-pattern]",
     handler: driftCommand,
     tier: 2,
-    category: "quality",
+    category: "verification",
   },
   {
     name: "plan",
