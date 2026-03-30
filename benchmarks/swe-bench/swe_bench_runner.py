@@ -328,7 +328,7 @@ class SWEBenchRunner:
             if "astropy" in repo.lower():
                 print("Installing common astropy test dependencies...")
                 subprocess.run(
-                    ["pip", "install", "-q", "hypothesis", "pytest-astropy", "pytest-xdist", "pytest-cov"],
+                    ["pip", "install", "-q", "pyerfa", "hypothesis", "pytest-astropy", "pytest-xdist", "pytest-cov", "numpy", "scipy"],
                     cwd=workspace_dir,
                     capture_output=True,
                     timeout=300
