@@ -24,7 +24,7 @@ export const SPINNERS = {
 export type SpinnerName = keyof typeof SPINNERS;
 
 export interface SpinnerFrames {
-  frames: string[];
+  frames: readonly string[];
   interval?: number;
 }
 
@@ -75,7 +75,7 @@ export class Spinner {
   private text: string;
   private color: keyof typeof COLORS;
   private stream: NodeJS.WriteStream;
-  private frames: string[];
+  private frames: readonly string[];
   private interval: number;
   private frameIndex = 0;
   private timer: NodeJS.Timeout | null = null;

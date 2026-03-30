@@ -70,10 +70,9 @@ export class ToastManager {
   private readonly maxVisible = 3;
   private readonly defaultDuration = 3000; // 3 seconds
   private idCounter = 0;
-  private theme: ThemeEngine;
 
-  constructor(options?: { theme?: ThemeEngine }) {
-    this.theme = options?.theme ?? new ThemeEngine();
+  constructor(_options?: { theme?: ThemeEngine }) {
+    // Theme support reserved for future use
   }
 
   /**
@@ -178,7 +177,9 @@ export class ToastManager {
     if (visible.length >= this.maxVisible) {
       // Dismiss oldest toast
       const oldest = visible[0];
-      this.dismiss(oldest.id);
+      if (oldest) {
+        this.dismiss(oldest.id);
+      }
     }
 
     // Add toast
