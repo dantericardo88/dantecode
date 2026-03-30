@@ -61,6 +61,8 @@ import type {
   ReasoningChain,
 } from "@dantecode/core";
 import { loadWorkflowCommand, createWorkflowExecutionContext } from "@dantecode/core";
+import { getAgentMetrics, getAgentTraces } from "./agent-loop.js";
+import { getRouterMetrics, getRouterTraces } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runGStack,
@@ -8182,6 +8184,114 @@ async function lfsCommand(args: string, state: ReplState): Promise<string> {
   }
 }
 
+async function metricsCommand(_args: string, _state: ReplState): Promise<string> {
+  const agentMetrics = getAgentMetrics();
+  const routerMetrics = getRouterMetrics();
+
+  let output = `${BOLD}${CYAN}=== Observability Metrics ===${RESET}
+
+${BOLD}${YELLOW}Agent Loop Metrics:${RESET}`;
+
+  if (agentMetrics.length === 0) {
+    output += `\n  ${DIM}(no metrics collected yet)${RESET}`;
+  } else {
+    for (const metric of agentMetrics) {
+      const typeLabel = metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
+      output += `\n  ${typeLabel} ${BOLD}${metric.name}${RESET}: ${metric.value.toLocaleString()}`;
+      const ago = Date.now() - metric.timestamp;
+      output += ` ${DIM}(${Math.floor(ago / 1000)}s ago)${RESET}`;
+    }
+  }
+
+  output += `\n\n${BOLD}${YELLOW}Model Router Metrics:${RESET}`;
+  if (routerMetrics.length === 0) {
+    output += `\n  ${DIM}(no metrics collected yet)${RESET}`;
+  } else {
+    for (const metric of routerMetrics) {
+      const typeLabel = metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
+      output += `\n  ${typeLabel} ${BOLD}${metric.name}${RESET}: ${metric.value.toLocaleString()}`;
+      const ago = Date.now() - metric.timestamp;
+      output += ` ${DIM}(${Math.floor(ago / 1000)}s ago)${RESET}`;
+    }
+  }
+
+  return output;
+}
+
+async function tracesCommand(_args: string, _state: ReplState): Promise<string> {
+  const agentTraces = getAgentTraces();
+  const routerTraces = getRouterTraces();
+
+  // Flatten traces to spans for display
+  const agentSpans = agentTraces.flatMap((t) => t.spans);
+  const routerSpans = routerTraces.flatMap((t) => t.spans);
+
+  let output = `${BOLD}${CYAN}=== Observability Traces ===${RESET}
+
+${BOLD}${YELLOW}Agent Loop Traces:${RESET} ${DIM}(${agentTraces.length} traces, ${agentSpans.length} spans)${RESET}`;
+
+  if (agentSpans.length === 0) {
+    output += `\n  ${DIM}(no traces collected yet)${RESET}`;
+  } else {
+    const recent = agentSpans.slice(-10);
+    for (const span of recent) {
+      const duration = span.duration ? `${span.duration}ms` : "in progress";
+      const status = span.status === "error" ? `${RED}ERROR${RESET}` : `${GREEN}OK${RESET}`;
+      output += `\n  ${status} ${BOLD}${span.name}${RESET} ${DIM}${duration}${RESET}`;
+      if (span.attributes && Object.keys(span.attributes).length > 0) {
+        const meta = Object.entries(span.attributes)
+          .slice(0, 3)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(", ");
+        output += ` ${DIM}(${meta})${RESET}`;
+      }
+    }
+    if (agentSpans.length > 10) {
+      output += `\n  ${DIM}... and ${agentSpans.length - 10} more${RESET}`;
+    }
+  }
+
+  output += `\n\n${BOLD}${YELLOW}Model Router Traces:${RESET} ${DIM}(${routerTraces.length} traces, ${routerSpans.length} spans)${RESET}`;
+  if (routerSpans.length === 0) {
+    output += `\n  ${DIM}(no traces collected yet)${RESET}`;
+  } else {
+    const recent = routerSpans.slice(-10);
+    for (const span of recent) {
+      const duration = span.duration ? `${span.duration}ms` : "in progress";
+      const status = span.status === "error" ? `${RED}ERROR${RESET}` : `${GREEN}OK${RESET}`;
+      output += `\n  ${status} ${BOLD}${span.name}${RESET} ${DIM}${duration}${RESET}`;
+      if (span.attributes && Object.keys(span.attributes).length > 0) {
+        const meta = Object.entries(span.attributes)
+          .slice(0, 3)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(", ");
+        output += ` ${DIM}(${meta})${RESET}`;
+      }
+    }
+    if (routerSpans.length > 10) {
+      output += `\n  ${DIM}... and ${routerSpans.length - 10} more${RESET}`;
+    }
+  }
+
+  return output;
+}
+
+async function healthCommand(_args: string, _state: ReplState): Promise<string> {
+  // Health checks are available during active council execution
+  // For now, show a message about health check categories
+  const output = `${BOLD}${CYAN}=== Council Health Status ===${RESET}
+
+${DIM}Health checks are available during active council execution.${RESET}
+${DIM}Run a council command to see health status.${RESET}
+
+${BOLD}${YELLOW}Health Check Categories:${RESET}
+  • ${BOLD}fleet-budget${RESET} - Fleet budget remaining
+  • ${BOLD}lanes${RESET} - Agent lane status
+  • ${BOLD}orchestrator-state${RESET} - Orchestrator state`;
+
+  return output;
+}
+
 // ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
@@ -8794,6 +8904,30 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Visualize and inspect execution traces (list, show, tree, stats, clean)",
     usage: "/trace <list|show|tree|stats|clean> [options]",
     handler: traceCommand,
+    tier: 2,
+    category: "advanced",
+  },
+  {
+    name: "metrics",
+    description: "Show observability metrics (agent loop + model router)",
+    usage: "/metrics",
+    handler: metricsCommand,
+    tier: 2,
+    category: "advanced",
+  },
+  {
+    name: "traces",
+    description: "Show observability traces (spans and durations)",
+    usage: "/traces",
+    handler: tracesCommand,
+    tier: 2,
+    category: "advanced",
+  },
+  {
+    name: "health",
+    description: "Show council health status",
+    usage: "/health",
+    handler: healthCommand,
     tier: 2,
     category: "advanced",
   },

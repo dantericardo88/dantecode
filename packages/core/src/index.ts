@@ -4,7 +4,7 @@
 
 // ─── Model Router ─────────────────────────────────────────────────────────────
 
-export { ModelRouterImpl, shouldContinueLoop } from "./model-router.js";
+export { ModelRouterImpl, shouldContinueLoop, getRouterMetrics, getRouterTraces } from "./model-router.js";
 export type { GenerateOptions, LoopExitReason } from "./model-router.js";
 
 // ─── Providers ────────────────────────────────────────────────────────────────
