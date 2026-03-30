@@ -485,14 +485,14 @@ class SWEBenchRunner:
             # Default to pytest (most common)
             return ["python", "-m", "pytest", "-xvs"]
 
-    def run_benchmark(self, subset: str = "verified", limit: Optional[int] = None) -> BenchmarkSummary:
+    def run_benchmark(self, subset: str = "verified", limit: Optional[int] = None, offset: int = 0) -> BenchmarkSummary:
         """Run full benchmark suite"""
         run_id = f"swe-bench-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         print(f"\n{'='*80}")
         print(f"Starting SWE-bench run: {run_id}")
         print(f"{'='*80}\n")
 
-        instances = self.load_swe_bench_dataset(subset, limit)
+        instances = self.load_swe_bench_dataset(subset, limit, offset)
         results = []
 
         for i, instance in enumerate(instances, 1):

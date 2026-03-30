@@ -1,0 +1,80 @@
+{
+  "run_id": "swe-bench-20260329-181725",
+  "timestamp": "2026-03-29T18:18:33.237045",
+  "total_instances": 5,
+  "passed": 0,
+  "failed": 0,
+  "errors": 5,
+  "pass_rate": 0.0,
+  "avg_time_seconds": 12.737214851379395,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "avg_pdse_score": null,
+  "results": [
+    {
+      "instance_id": "astropy__astropy-12907",
+      "repo": "astropy/astropy",
+      "issue_number": 0,
+      "problem_statement": "Modeling's `separability_matrix` does not compute separability correctly for nested CompoundModels\nConsider the following model:\r\n\r\n```python\r\nfrom astropy.modeling import models as m\r\nfrom astropy.mo...",
+      "pass_rate": 0.0,
+      "time_seconds": 5.942940950393677,
+      "tokens_used": 0,
+      "cost_usd": 0.0,
+      "pdse_score": null,
+      "error": "[WinError 2] The system cannot find the file specified",
+      "logs": ""
+    },
+    {
+      "instance_id": "astropy__astropy-13033",
+      "repo": "astropy/astropy",
+      "issue_number": 0,
+      "problem_statement": "TimeSeries: misleading exception when required column check fails.\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check out ...",
+      "pass_rate": 0.0,
+      "time_seconds": 5.952517747879028,
+      "tokens_used": 0,
+      "cost_usd": 0.0,
+      "pdse_score": null,
+      "error": "[WinError 2] The system cannot find the file specified",
+      "logs": ""
+    },
+    {
+      "instance_id": "astropy__astropy-13236",
+      "repo": "astropy/astropy",
+      "issue_number": 0,
+      "problem_statement": "Consider removing auto-transform of structured column into NdarrayMixin\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check...",
+      "pass_rate": 0.0,
+      "time_seconds": 5.259547233581543,
+      "tokens_used": 0,
+      "cost_usd": 0.0,
+      "pdse_score": null,
+      "error": "[WinError 2] The system cannot find the file specified",
+      "logs": ""
+    },
+    {
+      "instance_id": "astropy__astropy-13398",
+      "repo": "astropy/astropy",
+      "issue_number": 0,
+      "problem_statement": "A direct approach to ITRS to Observed transformations that stays within the ITRS.\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sur...",
+      "pass_rate": 0.0,
+      "time_seconds": 5.414929151535034,
+      "tokens_used": 0,
+      "cost_usd": 0.0,
+      "pdse_score": null,
+      "error": "[WinError 2] The system cannot find the file specified",
+      "logs": ""
+    },
+    {
+      "instance_id": "astropy__astropy-13453",
+      "repo": "astropy/astropy",
+      "issue_number": 0,
+      "problem_statement": "ASCII table output to HTML does not support supplied \"formats\"\n<!-- This comments are hidden when you submit the issue,\r\nso you do not need to remove them! -->\r\n\r\n<!-- Please be sure to check out our ...",
+      "pass_rate": 0.0,
+      "time_seconds": 41.11613917350769,
+      "tokens_used": 0,
+      "cost_usd": 0.0,
+      "pdse_score": null,
+      "error": "[WinError 2] The system cannot find the file specified",
+      "logs": ""
+    }
+  ]
+}
