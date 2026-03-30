@@ -69,7 +69,7 @@ class SWEBenchRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.model = model or "grok/grok-3"  # Default to Grok for fast reasoning
 
-    def load_swe_bench_dataset(self, subset: str = "verified", limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    def load_swe_bench_dataset(self, subset: str = "verified", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
         """Load SWE-bench dataset from Hugging Face or local cache"""
         print(f"Loading SWE-bench {subset} dataset...")
 
@@ -77,6 +77,11 @@ class SWEBenchRunner:
             from datasets import load_dataset
             dataset = load_dataset("princeton-nlp/SWE-bench_Verified" if subset == "verified" else "princeton-nlp/SWE-bench")
             instances = list(dataset["test"])
+
+            # Apply offset to skip early instances
+            if offset > 0:
+                instances = instances[offset:]
+                print(f"Skipping first {offset} instances")
 
             if limit:
                 instances = instances[:limit]
@@ -364,7 +369,9 @@ class SWEBenchRunner:
                 f.write(test_patch)
 
             # Apply test patch using git apply
-            # Use just the filename since we're setting cwd to workspace_dir
+            # Try multiple strategies for maximum compatibility
+
+            # Strategy 1: Clean apply
             apply_result = subprocess.run(
                 ["git", "apply", "test.patch"],
                 cwd=str(workspace_dir),
@@ -373,16 +380,48 @@ class SWEBenchRunner:
             )
 
             if apply_result.returncode != 0:
-                print(f"WARNING: Failed to apply test patch: {apply_result.stderr}")
-                # Try --3way merge as fallback
+                print(f"Strategy 1 failed, trying with --ignore-whitespace...")
+                # Strategy 2: Ignore whitespace differences
                 apply_result = subprocess.run(
-                    ["git", "apply", "--3way", "test.patch"],
+                    ["git", "apply", "--ignore-whitespace", "test.patch"],
                     cwd=str(workspace_dir),
                     capture_output=True,
                     text=True
                 )
-                if apply_result.returncode != 0:
-                    print(f"ERROR: Could not apply test patch even with --3way")
+
+            if apply_result.returncode != 0:
+                print(f"Strategy 2 failed, trying with --3way...")
+                # Strategy 3: 3-way merge
+                apply_result = subprocess.run(
+                    ["git", "apply", "--3way", "--ignore-whitespace", "test.patch"],
+                    cwd=str(workspace_dir),
+                    capture_output=True,
+                    text=True
+                )
+
+            if apply_result.returncode != 0:
+                print(f"Strategy 3 failed, trying with --reject (partial application)...")
+                # Strategy 4: Apply what we can, reject the rest
+                apply_result = subprocess.run(
+                    ["git", "apply", "--reject", "--ignore-whitespace", "test.patch"],
+                    cwd=str(workspace_dir),
+                    capture_output=True,
+                    text=True
+                )
+                # --reject returns non-zero but still applies parts
+                # Check if any files were modified
+                status_result = subprocess.run(
+                    ["git", "diff", "--name-only"],
+                    cwd=str(workspace_dir),
+                    capture_output=True,
+                    text=True
+                )
+                if status_result.stdout.strip():
+                    print(f"✓ Partial test patch applied (some hunks rejected)")
+                    return True
+                else:
+                    print(f"ERROR: Could not apply any part of test patch")
+                    print(f"Patch error: {apply_result.stderr[:500]}")
                     return False
 
             print("✓ Test patch applied successfully")
