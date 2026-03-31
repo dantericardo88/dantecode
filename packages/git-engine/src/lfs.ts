@@ -239,7 +239,10 @@ export function getLfsStatus(projectRoot: string): LfsStatus {
         stdio: "pipe",
       });
 
-      const lines = output.trim().split("\n").filter((l) => l.trim());
+      const lines = output
+        .trim()
+        .split("\n")
+        .filter((l) => l.trim());
       trackedFiles = lines.length;
 
       // Calculate total size
@@ -275,7 +278,7 @@ export function getLfsStatus(projectRoot: string): LfsStatus {
 export function migrateToLfs(
   projectRoot: string,
   pattern: string,
-  options: { includeRef?: string } = {}
+  options: { includeRef?: string } = {},
 ): { success: boolean; message: string; migratedCount?: number } {
   if (!isLfsInstalled()) {
     return {

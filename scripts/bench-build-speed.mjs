@@ -71,9 +71,15 @@ const noopTime = measure("   No-op build", build);
 
 console.log("\n=== Summary ===");
 console.log(`Cold build:        ${coldTime}ms (baseline)`);
-console.log(`Warm build:        ${warmTime}ms (${Math.round((1 - warmTime / coldTime) * 100)}% faster)`);
-console.log(`Incremental build: ${incrementalTime}ms (${Math.round((1 - incrementalTime / coldTime) * 100)}% faster)`);
-console.log(`No-op build:       ${noopTime}ms (${Math.round((1 - noopTime / coldTime) * 100)}% faster)`);
+console.log(
+  `Warm build:        ${warmTime}ms (${Math.round((1 - warmTime / coldTime) * 100)}% faster)`,
+);
+console.log(
+  `Incremental build: ${incrementalTime}ms (${Math.round((1 - incrementalTime / coldTime) * 100)}% faster)`,
+);
+console.log(
+  `No-op build:       ${noopTime}ms (${Math.round((1 - noopTime / coldTime) * 100)}% faster)`,
+);
 
 console.log("\n=== Speed Grade ===");
 if (noopTime < 2000) {
@@ -108,7 +114,7 @@ const results = {
 
 writeFileSync(
   join(ROOT, "artifacts", "build-speed-benchmark.json"),
-  JSON.stringify(results, null, 2)
+  JSON.stringify(results, null, 2),
 );
 
 console.log("\n✓ Results saved to artifacts/build-speed-benchmark.json");

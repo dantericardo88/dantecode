@@ -186,7 +186,9 @@ export async function installSkill(
   // MANDATORY VERIFICATION: Always verify skills for security
   // Warn if caller tried to disable it
   if (options.verify === false) {
-    console.warn("WARNING: Skill verification cannot be disabled (security policy). Proceeding with verification enabled.");
+    console.warn(
+      "WARNING: Skill verification cannot be disabled (security policy). Proceeding with verification enabled.",
+    );
   }
   const shouldVerify = true; // Always verify (mandatory for security)
 
