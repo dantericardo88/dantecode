@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { generateRepoMap, formatRepoMapForContext, type RepoMapEntry } from "./repo-map.js";
 import { execSync } from "node:child_process";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -116,18 +116,28 @@ describe("repo-map", () => {
     });
 
     it("sorts by modification time (most recent first)", async () => {
-      await writeFile(join(repoDir, "old.ts"), "old");
+      // Write first file with explicit old timestamp
+      const oldPath = join(repoDir, "old.ts");
+      await writeFile(oldPath, "old");
+      const oldTime = new Date("2020-01-01T00:00:00Z");
+      await utimes(oldPath, oldTime, oldTime);
+
       execSync("git add . && git commit -m 'first'", {
         cwd: repoDir,
         stdio: "pipe",
       });
-      // Small delay to ensure different mtime
-      await new Promise((r) => setTimeout(r, 50));
-      await writeFile(join(repoDir, "new.ts"), "new");
+
+      // Write second file with explicit newer timestamp
+      const newPath = join(repoDir, "new.ts");
+      await writeFile(newPath, "new");
+      const newTime = new Date("2024-01-01T00:00:00Z");
+      await utimes(newPath, newTime, newTime);
+
       execSync("git add . && git commit -m 'second'", {
         cwd: repoDir,
         stdio: "pipe",
       });
+
       const entries = generateRepoMap(repoDir);
       expect(entries[0]?.path).toBe("new.ts");
     });
