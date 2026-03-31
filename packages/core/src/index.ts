@@ -93,6 +93,7 @@ export type { ContextPressure, CondenseOptions, CondenseResult } from "./context
 export {
   promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
+  isQuestionPrompt,
 } from "./execution-heuristics.js";
 
 // ─── Session Store ───────────────────────────────────────────────────────────

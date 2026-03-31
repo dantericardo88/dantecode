@@ -36,6 +36,7 @@ import {
   parseModelReference,
   readOrInitializeState,
   responseNeedsToolExecutionNudge,
+  isQuestionPrompt,
   shouldContinueLoop,
   globalToolScheduler,
 } from "@dantecode/core";
@@ -1220,6 +1221,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const needsExecutionNudge =
             isExecutionMode &&
             executedToolsThisTurn === 0 &&
+            !isQuestionPrompt(text) &&
             responseNeedsToolExecutionNudge(fullResponse) &&
             executionNudges < MAX_EXECUTION_NUDGES &&
             maxToolRounds > 1;

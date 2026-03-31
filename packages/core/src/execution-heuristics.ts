@@ -19,6 +19,27 @@ const FAKE_TRANSCRIPT_PATTERN =
 const ARTIFACT_PATTERN =
   /```|`[^`]+\.(?:[a-z0-9]+)`|\b[\w./-]+\.(?:ts|tsx|js|jsx|json|md|py|rb|rs|go|java|css|html|ya?ml|xml|sh|sql)\b/i;
 
+const QUESTION_PATTERN =
+  /^(what|how|why|when|where|who|can you|could you|would you|should|is|are|does|do|explain|describe|tell me|show me|help me understand)/i;
+
+const QUESTION_SUFFIX = /\?/;
+
+const ASSESSMENT_PATTERN =
+  /\b(strengths?|weaknesses?|pros?|cons?|advantages?|disadvantages?|assessment|analysis|review|evaluation|score|rating|dimensions?)\b/i;
+
+/**
+ * Returns true when the user's prompt is asking a question, not requesting execution.
+ * Questions should be answered conversationally without tool execution nudges.
+ */
+export function isQuestionPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  return (
+    QUESTION_PATTERN.test(trimmed) ||
+    QUESTION_SUFFIX.test(trimmed) ||
+    /\b(think about|opinion|thoughts|feedback|assessment|analysis)\b/i.test(trimmed)
+  );
+}
+
 /**
  * Returns true when the user's prompt appears to request actual changes or execution,
  * not just explanation or conversation.
@@ -35,6 +56,11 @@ export function promptRequestsToolExecution(prompt: string): boolean {
 export function responseNeedsToolExecutionNudge(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 60) {
+    return false;
+  }
+
+  // Don't nudge if this looks like an assessment/analysis response
+  if (ASSESSMENT_PATTERN.test(trimmed) && trimmed.length > 200) {
     return false;
   }
 
