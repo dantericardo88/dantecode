@@ -57,7 +57,7 @@ describe("AsyncTaskExecutor", () => {
   describe("startTask", () => {
     it("starts a task and returns a handle", async () => {
       const task = createTask("test-task", { value: 42 });
-      const taskExecutor: TaskExecutor<typeof task.input, number> = async (t) => {
+      const taskExecutor: TaskExecutor<typeof task.input, unknown> = async (t) => {
         return t.input.value * 2;
       };
 
@@ -294,7 +294,7 @@ describe("AsyncTaskExecutor", () => {
         return "completed";
       };
 
-      const _handle = executor.startTask(task, taskExecutor);
+      executor.startTask(task, taskExecutor);
       const result = await executor.waitForCompletion(task.id);
 
       expect(result.success).toBe(true);

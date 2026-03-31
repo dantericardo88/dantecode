@@ -80,7 +80,7 @@ FAIL src/example.test.ts > should work
     });
 
     it("should run baseline tests when configured", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {
@@ -238,7 +238,7 @@ FAIL src/example.test.js
 
   describe("baseline comparison", () => {
     it("should detect new failures (none in baseline)", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {
@@ -275,7 +275,7 @@ FAIL src/b.test.ts > test two
     });
 
     it("should detect new failures (some in baseline)", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {
@@ -318,7 +318,7 @@ FAIL src/new.test.ts > new test
     });
 
     it("should not report new failures if all are in baseline", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         // Both baseline and current have same failures
@@ -389,7 +389,7 @@ FAIL src/new.test.ts > new test
     });
 
     it("should handle all tests passing after baseline failures", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {
@@ -454,7 +454,7 @@ FAIL src/test.ts > test two
     });
 
     it("should compare by file and test name", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {
@@ -560,7 +560,7 @@ FAIL src/b.test.ts > same test name
     });
 
     it("should include failure counts in completed event", async () => {
-      const _callCount = 0;
+      let callCount = 0;
       const mockExec = vi.fn(() => {
         callCount++;
         if (callCount === 1) {

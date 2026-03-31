@@ -257,9 +257,7 @@ export class TraceLogger {
     this.completedSpans.push(span);
 
     if (this.options.logToConsole) {
-      console.log(
-        `[TRACE] End span: ${span.name} (${spanId}) - ${span.status} in ${durationMs}ms`,
-      );
+      console.log(`[TRACE] End span: ${span.name} (${spanId}) - ${span.status} in ${durationMs}ms`);
     }
   }
 

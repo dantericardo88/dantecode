@@ -143,8 +143,8 @@ describe("computeSymbolRanks", () => {
 
     expect(ranked.length).toBe(2);
     // helper should rank higher due to more references
-    expect(ranked[0].symbolName).toBe("helper");
-    expect(ranked[1].symbolName).toBe("util");
+    expect(ranked[0]!.symbolName).toBe("helper");
+    expect(ranked[1]!.symbolName).toBe("util");
   });
 
   it("should boost symbols mentioned in options", () => {
@@ -166,7 +166,7 @@ describe("computeSymbolRanks", () => {
     });
 
     // "rare" should rank higher despite equal reference count
-    expect(ranked[0].symbolName).toBe("rare");
+    expect(ranked[0]!.symbolName).toBe("rare");
   });
 
   it("should boost symbols from chat files", () => {
@@ -194,7 +194,7 @@ describe("computeSymbolRanks", () => {
     });
 
     // chatFunc should rank higher due to chat file boost
-    expect(ranked[0].symbolName).toBe("chatFunc");
+    expect(ranked[0]!.symbolName).toBe("chatFunc");
   });
 
   it("should penalize private symbols", () => {
@@ -220,8 +220,8 @@ describe("computeSymbolRanks", () => {
     const ranked = computeSymbolRanks(tags);
 
     // public should rank higher than _private
-    expect(ranked[0].symbolName).toBe("public");
-    expect(ranked[1].symbolName).toBe("_private");
+    expect(ranked[0]!.symbolName).toBe("public");
+    expect(ranked[1]!.symbolName).toBe("_private");
   });
 
   it("should boost symbols with conventional naming", () => {
@@ -252,7 +252,7 @@ describe("computeSymbolRanks", () => {
     const topTwo = ranked.slice(0, 2).map((r) => r.symbolName);
     expect(topTwo).toContain("long_snake_case_name");
     expect(topTwo).toContain("LongCamelCaseName");
-    expect(ranked[2].symbolName).toBe("x");
+    expect(ranked[2]!.symbolName).toBe("x");
   });
 
   it("should penalize widely-defined symbols", () => {
@@ -276,7 +276,7 @@ describe("computeSymbolRanks", () => {
     const ranked = computeSymbolRanks(tags);
 
     // unique should rank higher than common
-    expect(ranked[0].symbolName).toBe("unique");
+    expect(ranked[0]!.symbolName).toBe("unique");
   });
 
   it("should handle files with no references gracefully", () => {
@@ -296,8 +296,8 @@ describe("computeSymbolRanks", () => {
     // This creates self-referencing edges, so symbols should appear
     expect(ranked.length).toBeGreaterThanOrEqual(1);
     if (ranked.length > 0) {
-      expect(ranked[0].symbolName).toBe("unused");
-      expect(ranked[0].rank).toBeGreaterThan(0);
+      expect(ranked[0]!.symbolName).toBe("unused");
+      expect(ranked[0]!.rank).toBeGreaterThan(0);
     }
   });
 });
