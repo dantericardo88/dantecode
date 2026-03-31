@@ -43,6 +43,13 @@ export interface MergeOptions {
 // Helpers
 // ----------------------------------------------------------------------------
 
+/**
+ * SAFETY NOTE: This helper uses shell interpolation and should NOT be called
+ * with user-controlled input without validation. Branch names must be sanitized.
+ *
+ * TODO: Migrate to execFileSync("git", args[], ...) for shell-injection safety.
+ * See: packages/git-engine/src/commit.ts for reference implementation.
+ */
 function git(args: string, cwd: string): string {
   try {
     return execSync(`git ${args}`, {

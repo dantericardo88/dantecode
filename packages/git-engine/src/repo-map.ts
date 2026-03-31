@@ -175,6 +175,13 @@ const EXTENSION_LANGUAGE_MAP: Readonly<Record<string, string>> = {
 
 /**
  * Execute a git command synchronously in the given working directory.
+ *
+ * SAFETY NOTE: This helper uses shell interpolation. Currently only called
+ * with hardcoded "ls-files" command, which is safe. Do NOT add calls with
+ * user-controlled arguments without migrating to execFileSync first.
+ *
+ * TODO: Migrate to execFileSync("git", args[], ...) for shell-injection safety.
+ * See: packages/git-engine/src/commit.ts for reference implementation.
  */
 function git(args: string, cwd: string): string {
   try {
