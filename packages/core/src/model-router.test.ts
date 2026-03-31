@@ -813,6 +813,7 @@ describe("recordRequestCost", () => {
 describe("shouldContinueLoop", () => {
   const baseConfig: BladeAutoforgeConfig = {
     enabled: true,
+    autoRunOnWrite: false,
     maxIterations: 5,
     gstackCommands: [],
     lessonInjectionEnabled: false,

@@ -1788,10 +1788,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           0, // pdse not checked in chat loop
           {
             enabled: true,
+            autoRunOnWrite: false,
             maxIterations: effectiveMaxRounds,
             gstackCommands: [],
             abortOnSecurityViolation: false,
             lessonInjectionEnabled: false,
+            persistUntilGreen: false,
           },
         );
         this.postMessage({

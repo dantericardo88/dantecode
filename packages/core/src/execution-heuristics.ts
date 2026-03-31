@@ -36,7 +36,7 @@ export function isQuestionPrompt(prompt: string): boolean {
   return (
     QUESTION_PATTERN.test(trimmed) ||
     QUESTION_SUFFIX.test(trimmed) ||
-    /\b(think about|opinion|thoughts|feedback|assessment|analysis)\b/i.test(trimmed)
+    /\b(think|opinion|thoughts|feedback|assessment|analysis|view|perspective|impression|take)\b/i.test(trimmed)
   );
 }
 
