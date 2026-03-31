@@ -12,6 +12,7 @@ import {
   detectSelfImprovementContext,
   promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
+  isQuestionPrompt,
   parseVerificationErrors,
   formatErrorsForFixPrompt,
   computeErrorSignature,
@@ -1187,6 +1188,7 @@ async function _runAgentLoopCore(
         }
         if (
           executedToolsThisTurn === 0 &&
+          !isQuestionPrompt(durablePrompt) &&
           (promptRequestsToolExecution(durablePrompt) ||
             isExecutionContinuationPrompt(durablePrompt, session)) &&
           responseNeedsToolExecutionNudge(responseText) &&
