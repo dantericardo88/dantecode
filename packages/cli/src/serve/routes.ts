@@ -805,16 +805,55 @@ function installSkill(ctx: ServerContext): RouteHandler {
 }
 
 // ---------------------------------------------------------------------------
-// Health
+// Health & Readiness
 // ---------------------------------------------------------------------------
 
 function healthCheck(ctx: ServerContext): RouteHandler {
-  return async () =>
-    ok({
+  return async () => {
+    const memUsage = process.memoryUsage();
+    const hasApiKey = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY);
+
+    return ok({
       status: "ok",
+      timestamp: new Date().toISOString(),
       version: ctx.version,
       uptime: Math.floor((Date.now() - ctx.startTime) / 1000),
+      checks: {
+        memory: {
+          heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+          heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
+          rss: Math.round(memUsage.rss / 1024 / 1024),
+          unit: "MB",
+        },
+        apiKeys: hasApiKey ? "configured" : "missing",
+        sessions: {
+          active: ctx.sessions.size,
+          limit: MAX_SESSIONS,
+        },
+      },
     });
+  };
+}
+
+function readinessCheck(ctx: ServerContext): RouteHandler {
+  return async () => {
+    // Readiness: can we accept traffic?
+    const hasApiKey = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY);
+    const isReady = hasApiKey && ctx.sessions.size < MAX_SESSIONS;
+
+    if (isReady) {
+      return ok({ ready: true, timestamp: new Date().toISOString() });
+    } else {
+      return {
+        status: 503,
+        body: {
+          ready: false,
+          timestamp: new Date().toISOString(),
+          reason: !hasApiKey ? "No API keys configured" : "Session limit reached",
+        },
+      };
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -859,6 +898,7 @@ export function buildRoutes(router: Router, context: ServerContext): void {
   router.get("/api/skills", listSkills(context));
   router.post("/api/skills/install", installSkill(context));
 
-  // Health
+  // Health & Readiness
   router.get("/api/health", healthCheck(context));
+  router.get("/api/ready", readinessCheck(context));
 }
