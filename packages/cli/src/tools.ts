@@ -4,14 +4,13 @@
 // ============================================================================
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
-import { execSync, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import {
   appendAuditEvent,
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
-  resolvePreferredShell,
   acquireUrl,
   acquireArchive,
 } from "@dantecode/core";
