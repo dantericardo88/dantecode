@@ -18,6 +18,7 @@ import {
   DEFAULT_GASLIGHT_CONFIG,
 } from "@dantecode/dante-gaslight";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
+import { logger } from "@dantecode/core";
 
 // ────────────────────────────────────────────────────────
 // ANSI helpers
@@ -237,6 +238,8 @@ ${BOLD}Closed loop:${RESET}
 export async function runGaslightCommand(args: string[], projectRoot: string): Promise<void> {
   const sub = args[0]?.toLowerCase();
   const rest = args.slice(1);
+
+  logger.info({ command: "gaslight", subcommand: sub, projectRoot }, "Running gaslight command");
 
   switch (sub) {
     case "on":

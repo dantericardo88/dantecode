@@ -22,6 +22,7 @@ import {
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import { runFearSetEngine } from "@dantecode/dante-gaslight";
 import { createFearSetLLMCallbacks } from "../fearset-callbacks.js";
+import { logger } from "@dantecode/core";
 
 // ────────────────────────────────────────────────────────
 // ANSI helpers
@@ -213,6 +214,10 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
       lessons = distillFearSetLesson(result);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { command: "fearset bridge", resultId: result.id, error: err },
+        "Distillation failed",
+      );
       console.error(`${RED}Distillation failed for ${result.id}: ${msg}${RESET}`);
       continue;
     }
@@ -225,6 +230,10 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
       store.markDistilled(result.id);
       totalLessons += applied.applied;
 
+      logger.info(
+        { command: "fearset bridge", resultId: result.id, lessonsDistilled: applied.applied },
+        "FearSet lessons distilled to Skillbook",
+      );
       console.log(
         `\n${GREEN}${BOLD}FearSet → Skillbook: ${applied.applied} lesson(s) distilled${RESET}`,
       );
@@ -238,6 +247,10 @@ async function cmdBridge(args: string[], projectRoot: string): Promise<void> {
         );
       }
     } else {
+      logger.warn(
+        { command: "fearset bridge", resultId: result.id },
+        "applyProposals returned 0 applied",
+      );
       console.error(`${RED}applyProposals returned 0 applied for ${result.id}${RESET}`);
     }
   }
@@ -271,13 +284,16 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
   // Build callbacks — LLM by default, structural-only fallback with --offline
   let callbacks: FearSetCallbacks = {};
   if (offline) {
+    logger.info({ command: "fearset run", offline: true, context }, "Running offline mode");
     console.log(`${DIM}Running offline (structural only — no LLM analysis).${RESET}\n`);
   } else {
     try {
       callbacks = await createFearSetLLMCallbacks(projectRoot);
+      logger.info({ command: "fearset run", offline: false, context }, "Running with LLM analysis");
       console.log(`${DIM}Running with LLM analysis (use --offline for structural only).${RESET}\n`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      logger.warn({ command: "fearset run", error: err, context }, "LLM setup failed, falling back to offline");
       console.warn(
         `${YELLOW}LLM setup failed (${msg}) — falling back to structural-only mode.${RESET}\n`,
       );

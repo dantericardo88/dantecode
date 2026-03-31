@@ -8,6 +8,7 @@ import {
   buildRepoMap,
   ModelRouterImpl,
   readOrInitializeState,
+  logger,
 } from "@dantecode/core";
 import type { GitHubIssue } from "@dantecode/core";
 
@@ -424,6 +425,7 @@ export async function runTriageCommand(args: string[], projectRoot: string): Pro
 
   const issueNumber = parseInt(sub, 10);
   if (isNaN(issueNumber) || issueNumber <= 0) {
+    logger.error({ command: "triage", input: sub }, "Invalid issue number");
     console.error(`${RED}Error: Issue number must be a positive integer, got: "${sub}"${RESET}`);
     console.error(`${DIM}Usage: dantecode triage <issue#> [--post-labels] [--no-llm]${RESET}`);
     return;
@@ -432,6 +434,7 @@ export async function runTriageCommand(args: string[], projectRoot: string): Pro
   const postLabels = args.includes("--post-labels");
   const useLLM = !args.includes("--no-llm");
 
+  logger.info({ command: "triage", issueNumber, postLabels, useLLM, projectRoot }, "Starting issue triage");
   console.log(`\n${DIM}Fetching issue #${issueNumber}...${RESET}`);
 
   try {
@@ -439,9 +442,21 @@ export async function runTriageCommand(args: string[], projectRoot: string): Pro
       postLabels,
       useLLM,
     });
+    logger.info(
+      {
+        command: "triage",
+        issueNumber,
+        priority: result.priority,
+        effort: result.effort,
+        confidence: result.confidence,
+        postedToGitHub: result.postedToGitHub,
+      },
+      "Triage completed successfully",
+    );
     console.log(formatTriageOutput(result));
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ command: "triage", issueNumber, error: err }, "Triage failed");
     console.error(`${RED}Triage error: ${msg}${RESET}`);
   }
 }

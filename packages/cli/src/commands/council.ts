@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { join } from "node:path";
-import { exec, execSync } from "node:child_process";
+import { exec, execSync, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { writeFile, readFile } from "node:fs/promises";
@@ -35,6 +35,7 @@ import {
   AntigravityAdapter,
   BridgeListener,
   readOrInitializeState,
+  logger,
 } from "@dantecode/core";
 import type {
   AgentKind,
@@ -320,6 +321,7 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   });
 
   orchestrator.on("error", ({ message, context }) => {
+    logger.error({ command: "council start", context, message }, "Council orchestrator error");
     console.error(`${RED}[council] ${context ?? "error"}: ${message}${RESET}`);
   });
 
@@ -360,7 +362,7 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
       try {
-        execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+        execFileSync("git", ["worktree", "prune"], { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
       } catch {
         /* non-fatal */
       }
@@ -1124,7 +1126,7 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
       try {
-        execSync("git worktree prune", { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+        execFileSync("git", ["worktree", "prune"], { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
       } catch {
         /* non-fatal */
       }

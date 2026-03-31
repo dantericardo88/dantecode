@@ -16,7 +16,18 @@ vi.mock("node:child_process", async () => {
 });
 
 vi.mock("@dantecode/core", async () => {
-  return vi.importActual<object>("../../../core/src/runtime-update.ts");
+  const runtimeUpdate = await vi.importActual<object>("../../../core/src/runtime-update.ts");
+  return {
+    ...runtimeUpdate,
+    logger: {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+    },
+  };
 });
 
 import { runSelfUpdateCommand } from "./self-update.js";

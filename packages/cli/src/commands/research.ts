@@ -5,6 +5,7 @@
  * Also used as the slash command handler for /research.
  */
 import type { ResearchOptions } from "../lib/research-engine.js";
+import { logger } from "@dantecode/core";
 
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
@@ -35,13 +36,16 @@ export async function runResearchCommand(subArgs: string[], projectRoot: string)
   const depthFlag = subArgs.find((a) => a.startsWith("--depth="));
   const depth = (depthFlag?.split("=")[1] as ResearchOptions["depth"]) ?? "standard";
 
+  logger.info({ command: "research", topic, depth, projectRoot }, "Starting research");
   console.log(`${BOLD}Researching:${RESET} ${topic} ${DIM}[${depth}]${RESET}\n`);
 
   try {
     const output = await executeResearch(topic, projectRoot, { depth });
+    logger.info({ command: "research", topic, depth }, "Research completed successfully");
     console.log(output);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ command: "research", topic, depth, error: err }, "Research failed");
     console.error(`Research failed: ${msg}`);
     process.exit(1);
   }

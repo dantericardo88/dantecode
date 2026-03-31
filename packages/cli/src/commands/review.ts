@@ -3,7 +3,7 @@
 // Automated PR review pipeline using DanteForge PDSE + constitutional scoring.
 // ============================================================================
 
-import { GitHubClient } from "@dantecode/core";
+import { GitHubClient, logger } from "@dantecode/core";
 import type { GitHubIssue, PRFile } from "@dantecode/core";
 import { parseDiffHunks } from "@dantecode/git-engine";
 import { runDanteForge } from "../danteforge-pipeline.js";
@@ -367,6 +367,7 @@ export async function runReviewCommand(args: string[], projectRoot: string): Pro
 
   const prNumber = parseInt(sub, 10);
   if (isNaN(prNumber) || prNumber <= 0) {
+    logger.error({ command: "review", input: sub }, "Invalid PR number");
     console.error(`${RED}Error: PR number must be a positive integer, got: "${sub}"${RESET}`);
     console.error(`${DIM}Usage: dantecode review <PR#> [--post] [--severity=normal]${RESET}`);
     return;
@@ -378,6 +379,10 @@ export async function runReviewCommand(args: string[], projectRoot: string): Pro
   const severity = (severityArg?.split("=")[1] ?? "normal") as ReviewOptions["severity"];
   const verbose = args.includes("--verbose") || args.includes("-v");
 
+  logger.info(
+    { command: "review", prNumber, postComments, severity, verbose, projectRoot },
+    "Starting PR review",
+  );
   console.log(`\n${DIM}Fetching PR #${prNumber} files...${RESET}`);
 
   try {
@@ -386,6 +391,18 @@ export async function runReviewCommand(args: string[], projectRoot: string): Pro
       severity,
       verbose,
     });
+    logger.info(
+      {
+        command: "review",
+        prNumber,
+        overallScore: result.overallScore,
+        recommendation: result.recommendation,
+        bugsFound: result.bugs.length,
+        stubViolations: result.stubViolations,
+        postedToGitHub: result.postedToGitHub,
+      },
+      "PR review completed",
+    );
     if (jsonOutput) {
       console.log(
         JSON.stringify({
@@ -402,6 +419,7 @@ export async function runReviewCommand(args: string[], projectRoot: string): Pro
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ command: "review", prNumber, error: err }, "PR review failed");
     console.error(`${RED}Review error: ${msg}${RESET}`);
   }
 }

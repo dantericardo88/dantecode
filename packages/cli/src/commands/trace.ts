@@ -12,6 +12,7 @@
 import { readdir, readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceSummary } from "@dantecode/core";
+import { logger } from "@dantecode/core";
 
 const CYAN = "\x1b[36m";
 const GREEN = "\x1b[32m";
@@ -97,8 +98,10 @@ export async function cmdTraceList(
     }
   } catch (error: any) {
     if (error.code === "ENOENT") {
+      logger.debug({ command: "trace list", traceDir }, "No traces directory found");
       console.log(`${DIM}No traces directory found at ${traceDir}${RESET}`);
     } else {
+      logger.error({ command: "trace list", error, traceDir }, "Error reading traces");
       console.error(`${RED}Error reading traces: ${error.message}${RESET}`);
     }
   }
@@ -158,9 +161,11 @@ export async function cmdTraceShow(projectRoot: string, traceId: string): Promis
     }
   } catch (error: any) {
     if (error.code === "ENOENT") {
+      logger.warn({ command: "trace show", traceId }, "Trace not found");
       console.error(`${RED}Trace not found: ${traceId}${RESET}`);
       console.log(`${DIM}Use 'dantecode trace list' to see available traces${RESET}`);
     } else {
+      logger.error({ command: "trace show", error, traceId }, "Error reading trace");
       console.error(`${RED}Error reading trace: ${error.message}${RESET}`);
     }
   }
@@ -243,8 +248,10 @@ export async function cmdTraceTree(
     console.log();
   } catch (error: any) {
     if (error.code === "ENOENT") {
+      logger.warn({ command: "trace tree", traceId }, "Trace not found");
       console.error(`${RED}Trace not found: ${traceId}${RESET}`);
     } else {
+      logger.error({ command: "trace tree", error, traceId }, "Error reading trace");
       console.error(`${RED}Error reading trace: ${error.message}${RESET}`);
     }
   }
@@ -307,8 +314,10 @@ export async function cmdTraceStats(projectRoot: string): Promise<void> {
     console.log();
   } catch (error: any) {
     if (error.code === "ENOENT") {
+      logger.debug({ command: "trace stats" }, "No traces directory found");
       console.log(`${DIM}No traces directory found${RESET}`);
     } else {
+      logger.error({ command: "trace stats", error }, "Error reading traces");
       console.error(`${RED}Error reading traces: ${error.message}${RESET}`);
     }
   }
@@ -337,11 +346,14 @@ export async function cmdTraceClean(projectRoot: string, daysOld: number = 7): P
       }
     }
 
+    logger.info({ command: "trace clean", removed, daysOld }, "Trace cleanup completed");
     console.log(`${GREEN}Removed ${removed} trace(s) older than ${daysOld} days${RESET}`);
   } catch (error: any) {
     if (error.code === "ENOENT") {
+      logger.debug({ command: "trace clean" }, "No traces directory found");
       console.log(`${DIM}No traces directory found${RESET}`);
     } else {
+      logger.error({ command: "trace clean", error, daysOld }, "Error cleaning traces");
       console.error(`${RED}Error cleaning traces: ${error.message}${RESET}`);
     }
   }

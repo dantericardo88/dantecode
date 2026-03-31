@@ -10,6 +10,7 @@
 
 import { ExportEngine } from "@dantecode/debug-trail";
 import type { ExportFormat } from "@dantecode/debug-trail";
+import { logger } from "@dantecode/core";
 
 // ────────────────────────────────────────────────────────
 // ANSI helpers
@@ -49,6 +50,7 @@ async function cmdExport(args: string[]): Promise<void> {
   const outputPath = positionals[1];
 
   if (!format) {
+    logger.error({ command: "audit export", validFormats }, "Missing format parameter");
     console.error(
       `${YELLOW}Usage: dantecode audit export <format> <outputPath> [--session <id>]${RESET}`,
     );
@@ -57,11 +59,13 @@ async function cmdExport(args: string[]): Promise<void> {
   }
 
   if (!validFormats.includes(format as ExportFormat)) {
+    logger.error({ command: "audit export", format, validFormats }, "Invalid format specified");
     console.error(`${YELLOW}Invalid format "${format}". Valid: ${validFormats.join(", ")}${RESET}`);
     process.exit(1);
   }
 
   if (!sessionId) {
+    logger.error({ command: "audit export" }, "Missing session ID parameter");
     console.error(`${YELLOW}--session <id> is required${RESET}`);
     process.exit(1);
   }
@@ -73,6 +77,18 @@ async function cmdExport(args: string[]): Promise<void> {
     outputPath,
     includeCompleteness: true,
   });
+
+  logger.info(
+    {
+      command: "audit export",
+      sessionId,
+      format,
+      path: result.path,
+      eventCount: result.eventCount,
+      completenessScore: result.completenessScore,
+    },
+    "Audit export completed successfully",
+  );
 
   console.log(`\n${BOLD}Audit Export Complete${RESET}`);
   console.log(`  ${GREEN}Exported to:${RESET} ${CYAN}${result.path}${RESET}`);

@@ -21,7 +21,7 @@ import { startServer } from "../serve/server.js";
 import { runAgentLoop } from "../agent-loop.js";
 import type { AgentLoopConfig } from "../agent-loop.js";
 import type { AgentRunnerOpts } from "../serve/routes.js";
-import { readOrInitializeState, ModelRouterImpl } from "@dantecode/core";
+import { readOrInitializeState, ModelRouterImpl, logger } from "@dantecode/core";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -291,6 +291,16 @@ export async function startServe(config: ServeConfig): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.on("error", reject);
     server.listen(config.port, config.host, () => {
+      logger.info(
+        {
+          command: "serve",
+          host: config.host,
+          port: config.port,
+          authEnabled: !!config.authToken,
+          projectRoot: config.projectRoot,
+        },
+        "DanteCode HTTP server started",
+      );
       if (!config.silent) {
         console.log(`DanteCode HTTP server running on http://${config.host}:${config.port}`);
         console.log(`  GET  /health`);

@@ -32,6 +32,14 @@ vi.mock("@dantecode/core", () => ({
       taskOverrides: {},
     },
   }),
+  logger: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 function makeIssue(

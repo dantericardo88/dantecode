@@ -2,7 +2,7 @@
 // @dantecode/cli - Self-Update Command
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -11,6 +11,7 @@ import {
   detectInstallContext,
   type DetectedInstallContext,
   type SelfUpdatePlan,
+  logger,
 } from "@dantecode/core";
 
 export type SelfUpdateOptions = {
@@ -24,6 +25,11 @@ export async function runSelfUpdateCommand(cwd: string, options: SelfUpdateOptio
   const runtimePath = options.runtimePath ?? fileURLToPath(import.meta.url);
   const installContext = detectInstallContext({ runtimePath, cwd });
   const plan = buildSelfUpdatePlan(installContext);
+
+  logger.info(
+    { command: "self-update", installKind: installContext.kind, dryRun, verbose },
+    "Starting self-update",
+  );
 
   const log = (message: string) => {
     if (verbose) {
@@ -51,11 +57,13 @@ export async function runSelfUpdateCommand(cwd: string, options: SelfUpdateOptio
         printPlan(plan);
         return;
       case "vscode_extension_host":
+        logger.info({ command: "self-update", installKind: "vscode_extension_host" }, "VSCode extension self-update skipped");
         console.log("[self-update] Use the VS Code extension command surface to update DanteCode.");
         return;
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    logger.error({ command: "self-update", error: err }, "Self-update failed");
     console.error(`[self-update] FAILED: ${message}`);
     process.exitCode = 1;
   }
@@ -128,7 +136,7 @@ async function runRepoCheckoutUpdate(
   }
 
   log(`Checking git status in ${repoRoot}`);
-  const dirtyStatus = runCommand("git status --porcelain", repoRoot).trim();
+  const dirtyStatus = runCommand(["git", "status", "--porcelain"], repoRoot).trim();
   if (dirtyStatus.length > 0) {
     console.error(
       "[self-update] Refusing to update a dirty repo checkout. Commit or stash your changes first.",
@@ -139,7 +147,7 @@ async function runRepoCheckoutUpdate(
 
   const { remote, branch } = resolveGitUpstream(repoRoot);
   log(`Pulling ${remote}/${branch}`);
-  execSync(`git pull --ff-only "${remote}" "${branch}"`, {
+  execFileSync("git", ["pull", "--ff-only", remote, branch], {
     cwd: repoRoot,
     stdio: "inherit",
   });
@@ -181,7 +189,7 @@ async function runRepoCheckoutUpdate(
 
   try {
     log(`Installing ${vsixName} with the VS Code CLI...`);
-    execSync(`code --install-extension "${vsixName}" --force`, {
+    execFileSync("code", ["--install-extension", vsixName, "--force"], {
       cwd: vscodeRoot,
       stdio: "inherit",
       timeout: 120000,
@@ -213,7 +221,7 @@ function runGlobalCliUpdate(log: (message: string) => void): void {
 function resolveGitUpstream(repoRoot: string): { remote: string; branch: string } {
   try {
     const upstream = runCommand(
-      "git rev-parse --abbrev-ref --symbolic-full-name @{upstream}",
+      ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
       repoRoot,
     ).trim();
     const [remote, ...branchParts] = upstream.split("/");
@@ -224,15 +232,15 @@ function resolveGitUpstream(repoRoot: string): { remote: string; branch: string 
     // Fall through to local branch detection.
   }
 
-  const branch = runCommand("git rev-parse --abbrev-ref HEAD", repoRoot).trim();
+  const branch = runCommand(["git", "rev-parse", "--abbrev-ref", "HEAD"], repoRoot).trim();
   if (!branch || branch === "HEAD") {
     throw new Error("Unable to resolve the current branch or upstream for this checkout.");
   }
   return { remote: "origin", branch };
 }
 
-function runCommand(command: string, cwd: string): string {
-  return execSync(command, {
+function runCommand(args: string[], cwd: string): string {
+  return execFileSync(args[0]!, args.slice(1), {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],

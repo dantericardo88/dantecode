@@ -19,6 +19,7 @@ import {
   pullLfsFiles,
   COMMON_LFS_PATTERNS,
 } from "@dantecode/git-engine";
+import { logger } from "@dantecode/core";
 
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
@@ -34,9 +35,15 @@ const BOLD = "\x1b[1m";
 export async function cmdLfsStatus(projectRoot: string): Promise<void> {
   const status = getLfsStatus(projectRoot);
 
+  logger.info(
+    { command: "lfs status", projectRoot, installed: status.installed, initialized: status.initialized },
+    "Checking LFS status",
+  );
+
   console.log(`\n${BOLD}Git LFS Status${RESET}\n`);
 
   if (!status.installed) {
+    logger.warn({ command: "lfs status" }, "Git LFS is not installed");
     console.log(`${RED}✗ Git LFS is not installed${RESET}`);
     console.log(`${DIM}Install from: https://git-lfs.github.com/${RESET}\n`);
     return;
@@ -80,8 +87,10 @@ export async function cmdLfsInit(projectRoot: string): Promise<void> {
   const result = initializeLfs(projectRoot);
 
   if (result.success) {
+    logger.info({ command: "lfs init", projectRoot }, "Git LFS initialized successfully");
     console.log(`${GREEN}✓ ${result.message}${RESET}`);
   } else {
+    logger.error({ command: "lfs init", projectRoot, message: result.message }, "Failed to initialize Git LFS");
     console.error(`${RED}✗ ${result.message}${RESET}`);
     process.exit(1);
   }
@@ -99,12 +108,14 @@ export async function cmdLfsTrack(
   if (options.common) {
     const category = options.common as keyof typeof COMMON_LFS_PATTERNS;
     if (!(category in COMMON_LFS_PATTERNS)) {
+      logger.error({ command: "lfs track", category }, "Unknown common pattern category");
       console.error(`${RED}Unknown common pattern category: ${category}${RESET}`);
       console.log(`${DIM}Available: ${Object.keys(COMMON_LFS_PATTERNS).join(", ")}${RESET}`);
       process.exit(1);
     }
 
     const patterns = COMMON_LFS_PATTERNS[category];
+    logger.info({ command: "lfs track", category, patternCount: patterns.length }, "Tracking common patterns");
     console.log(`${CYAN}Tracking ${patterns.length} ${category} patterns...${RESET}\n`);
 
     let succeeded = 0;
@@ -114,10 +125,12 @@ export async function cmdLfsTrack(
         console.log(`${GREEN}✓${RESET} ${p}`);
         succeeded++;
       } else {
+        logger.warn({ command: "lfs track", pattern: p, message: result.message }, "Failed to track pattern");
         console.log(`${RED}✗${RESET} ${p}: ${result.message}`);
       }
     }
 
+    logger.info({ command: "lfs track", category, succeeded, total: patterns.length }, "Common patterns tracking completed");
     console.log(`\n${GREEN}Tracked ${succeeded}/${patterns.length} patterns${RESET}`);
     return;
   }

@@ -15,6 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import type { UpdateOperation } from "@dantecode/dante-skillbook";
+import { logger } from "@dantecode/core";
 
 // ────────────────────────────────────────────────────────
 // ANSI helpers
@@ -79,6 +80,7 @@ function cmdReview(projectRoot: string): void {
 function cmdApprove(args: string[], projectRoot: string): void {
   const id = args[0];
   if (!id) {
+    logger.error({ command: "skillbook approve" }, "Missing queue ID parameter");
     console.error(`${RED}Usage: dantecode skillbook approve <queue-id>${RESET}`);
     process.exit(1);
   }
@@ -89,9 +91,11 @@ function cmdApprove(args: string[], projectRoot: string): void {
   const ok = integration.applyReviewItem(id);
 
   if (ok) {
+    logger.info({ command: "skillbook approve", id, projectRoot }, "Review item approved and applied");
     console.log(`${GREEN}Approved and applied: ${id}${RESET}`);
     console.log(`${DIM}Skillbook updated. Run 'git commit' to persist.${RESET}`);
   } else {
+    logger.error({ command: "skillbook approve", id }, "Review item not found or not pending");
     console.error(`${RED}Item not found or not pending: ${id}${RESET}`);
     process.exit(1);
   }
@@ -100,6 +104,7 @@ function cmdApprove(args: string[], projectRoot: string): void {
 function cmdReject(args: string[], projectRoot: string): void {
   const id = args[0];
   if (!id) {
+    logger.error({ command: "skillbook reject" }, "Missing queue ID parameter");
     console.error(`${RED}Usage: dantecode skillbook reject <queue-id>${RESET}`);
     process.exit(1);
   }
@@ -109,10 +114,12 @@ function cmdReject(args: string[], projectRoot: string): void {
   const item = pending.find((i: { id: string }) => i.id === id);
 
   if (!item) {
+    logger.error({ command: "skillbook reject", id }, "Review item not found or not pending");
     console.error(`${RED}Item not found or not pending: ${id}${RESET}`);
     process.exit(1);
   }
 
+  logger.info({ command: "skillbook reject", id }, "Review item rejected");
   integration.reviewQueue.reject(id);
   console.log(`${YELLOW}Rejected: ${id}${RESET}`);
 }
@@ -120,6 +127,7 @@ function cmdReject(args: string[], projectRoot: string): void {
 function cmdLearnNow(args: string[], projectRoot: string): void {
   const text = args.join(" ").trim();
   if (!text) {
+    logger.error({ command: "skillbook learn-now" }, "Missing lesson text");
     console.error(
       `${RED}Usage: dantecode skillbook learn-now <freeform text describing the lesson>${RESET}`,
     );
@@ -145,11 +153,13 @@ function cmdLearnNow(args: string[], projectRoot: string): void {
   const result = integration.applyProposals([proposal], ["pass"]);
 
   if (result.applied > 0) {
+    logger.info({ command: "skillbook learn-now", skillId: proposal.candidateSkill.id, projectRoot }, "Skill added to skillbook");
     console.log(`${GREEN}Skill added to DanteSkillbook.${RESET}`);
     console.log(`  Section:  general`);
     console.log(`  Trust:    70%`);
     console.log(`${DIM}Run 'git commit' to persist.${RESET}`);
   } else {
+    logger.error({ command: "skillbook learn-now", projectRoot }, "Failed to add skill");
     console.error(`${RED}Failed to add skill.${RESET}`);
     process.exit(1);
   }
