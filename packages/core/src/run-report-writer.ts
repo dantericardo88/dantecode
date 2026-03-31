@@ -5,6 +5,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { logger } from "./enterprise-logger.js";
 
 export interface WriteRunReportOptions {
   /** Project root directory. */
@@ -69,7 +70,7 @@ export async function writeRunReport(opts: WriteRunReportOptions): Promise<Write
     // Non-fatal — log error, return failure indicator for honesty
     const errorMessage = err instanceof Error ? err.message : String(err);
     if (process.env.DANTECODE_DEBUG) {
-      console.error("[run-report-writer] Failed to write report:", err);
+      logger.error({ error: err, filePath }, "Failed to write run report");
     }
 
     return { success: false, error: errorMessage };

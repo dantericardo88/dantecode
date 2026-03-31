@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { logger } from "./enterprise-logger.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -217,7 +218,7 @@ export class TraceLogger {
     }
 
     if (this.options.logToConsole) {
-      console.log(`[TRACE] Start span: ${name} (${spanId})`);
+      logger.debug({ spanId, name, type, traceId }, "TRACE: Start span");
     }
 
     return span;
@@ -257,7 +258,10 @@ export class TraceLogger {
     this.completedSpans.push(span);
 
     if (this.options.logToConsole) {
-      console.log(`[TRACE] End span: ${span.name} (${spanId}) - ${span.status} in ${durationMs}ms`);
+      logger.debug(
+        { spanId, name: span.name, status: span.status, durationMs },
+        "TRACE: End span"
+      );
     }
   }
 
@@ -290,7 +294,7 @@ export class TraceLogger {
     this.events.push(event);
 
     if (this.options.logToConsole) {
-      console.log(`[TRACE] ${level.toUpperCase()}: ${message}`);
+      logger.debug({ spanId, level, traceId: span.traceId, data }, `TRACE: ${message}`);
     }
   }
 
@@ -327,7 +331,10 @@ export class TraceLogger {
     this.decisions.push(decision);
 
     if (this.options.logToConsole) {
-      console.log(`[TRACE] Decision at ${point}: ${selected} (confidence: ${confidence ?? "N/A"})`);
+      logger.debug(
+        { spanId, point, selected, confidence, traceId: span.traceId },
+        "TRACE: Decision"
+      );
     }
   }
 

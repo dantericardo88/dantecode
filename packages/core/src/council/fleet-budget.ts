@@ -11,6 +11,8 @@
 // Design: purely synchronous (no async, no IO) — just arithmetic and state.
 // ============================================================================
 
+import { logger } from "../enterprise-logger.js";
+
 // ----------------------------------------------------------------------------
 // Configuration
 // ----------------------------------------------------------------------------
@@ -137,9 +139,15 @@ export class FleetBudget {
     // Guard against backward-moving cumulative values (caller bug or session restart).
     // Clamp to 0 delta — never subtract from fleet totals. Warn but don't throw.
     if (tokens < existing.tokens || costUsd < existing.cost) {
-      console.warn(
-        `[FleetBudget] cumulative regression for ${agentId}: ` +
-          `tokens ${existing.tokens}→${tokens}, cost ${existing.cost}→${costUsd}`,
+      logger.warn(
+        {
+          agentId,
+          existingTokens: existing.tokens,
+          newTokens: tokens,
+          existingCost: existing.cost,
+          newCost: costUsd,
+        },
+        "FleetBudget cumulative regression detected"
       );
     }
 

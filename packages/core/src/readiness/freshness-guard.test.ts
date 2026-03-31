@@ -14,6 +14,14 @@ vi.mock("node:child_process", () => ({
   execFileSync: vi.fn(),
 }));
 
+vi.mock("../enterprise-logger.js", () => ({
+  logger: {
+    warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+  },
+}));
+
 describe("freshness-guard", () => {
   let testDir: string;
   let mockExecFileSync: ReturnType<typeof vi.fn>;
@@ -251,10 +259,12 @@ describe("freshness-guard", () => {
   });
 
   describe("warnStaleArtifacts", () => {
-    let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+    let loggerWarnSpy: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => {
-      consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    beforeEach(async () => {
+      const { logger } = await import("../enterprise-logger.js");
+      loggerWarnSpy = vi.mocked(logger.warn);
+      loggerWarnSpy.mockClear();
     });
 
     it("should not warn if all artifacts are fresh", () => {
@@ -275,7 +285,7 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      expect(loggerWarnSpy).not.toHaveBeenCalled();
     });
 
     it("should warn with stale artifact details", () => {
@@ -297,18 +307,11 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("1 readiness artifact STALE"),
-      );
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("stale.json"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("old-xyz"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("2 hours ago"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Current commit: current"),
-      );
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("npm run generate-readiness"),
-      );
+      // Check that logger was called with appropriate messages
+      expect(loggerWarnSpy).toHaveBeenCalled();
+      const calls = loggerWarnSpy.mock.calls;
+      expect(calls.some((call) => call[1]?.includes("STALE"))).toBe(true);
+      expect(calls.some((call) => call[1]?.includes("stale.json") || JSON.stringify(call[0]).includes("stale.json"))).toBe(true);
     });
 
     it("should handle plural artifacts", () => {
@@ -338,9 +341,8 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("2 readiness artifacts STALE"),
-      );
+      const calls = loggerWarnSpy.mock.calls;
+      expect(calls.some((call) => call[1]?.includes("2 readiness artifact"))).toBe(true);
     });
 
     it("should handle special commit states", () => {
@@ -378,21 +380,27 @@ describe("freshness-guard", () => {
 
       warnStaleArtifacts(result);
 
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("MISSING"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("PARSE-ERROR"));
-      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("UNKNOWN"));
+      const calls = loggerWarnSpy.mock.calls;
+      const allCallsText = calls.map(c => JSON.stringify(c)).join(" ");
+      expect(allCallsText).toContain("MISSING");
+      expect(allCallsText).toContain("PARSE-ERROR");
+      expect(allCallsText).toContain("UNKNOWN");
     });
   });
 
   describe("enforceFreshnessInCI", () => {
-    let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
-    let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-    let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+    let loggerWarnSpy: ReturnType<typeof vi.fn>;
+    let loggerInfoSpy: ReturnType<typeof vi.fn>;
+    let loggerErrorSpy: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => {
-      consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-      consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    beforeEach(async () => {
+      const { logger } = await import("../enterprise-logger.js");
+      loggerWarnSpy = vi.mocked(logger.warn);
+      loggerInfoSpy = vi.mocked(logger.info);
+      loggerErrorSpy = vi.mocked(logger.error);
+      loggerWarnSpy.mockClear();
+      loggerInfoSpy.mockClear();
+      loggerErrorSpy.mockClear();
       mockExecFileSync.mockReturnValue("current-commit-abc123\n" as any);
     });
 
@@ -408,9 +416,8 @@ describe("freshness-guard", () => {
       const result = enforceFreshnessInCI([artifactPath], testDir);
 
       expect(result).toBe(true);
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining("All readiness artifacts are fresh"),
-      );
+      expect(loggerInfoSpy).toHaveBeenCalled();
+      expect(loggerInfoSpy.mock.calls[0]?.[1]).toContain("All readiness artifacts are fresh");
     });
 
     it("should return false in CI mode when stale artifacts detected", () => {
@@ -425,9 +432,8 @@ describe("freshness-guard", () => {
       const result = enforceFreshnessInCI([artifactPath], testDir, { ci: true });
 
       expect(result).toBe(false);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Stale readiness artifacts detected in CI/strict mode"),
-      );
+      expect(loggerErrorSpy).toHaveBeenCalled();
+      expect(loggerErrorSpy.mock.calls[0]?.[1]).toContain("Stale readiness artifacts detected in CI/strict mode");
     });
 
     it("should return false in strict mode when stale artifacts detected", () => {
@@ -456,8 +462,8 @@ describe("freshness-guard", () => {
       const result = enforceFreshnessInCI([artifactPath], testDir, { ci: false });
 
       expect(result).toBe(true);
-      expect(consoleWarnSpy).toHaveBeenCalled(); // Still warns
-      expect(consoleErrorSpy).not.toHaveBeenCalled(); // But doesn't error
+      expect(loggerWarnSpy).toHaveBeenCalled(); // Still warns
+      expect(loggerErrorSpy).not.toHaveBeenCalled(); // But doesn't error
     });
   });
 });

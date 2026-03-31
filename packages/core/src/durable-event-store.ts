@@ -14,6 +14,7 @@ import { resolve, dirname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import type { RuntimeEvent } from "@dantecode/runtime-spine";
+import { logger } from "./enterprise-logger.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -205,7 +206,7 @@ export class JsonlEventStore implements DurableEventStore {
         event = JSON.parse(line) as StoredEvent;
       } catch (_err) {
         // Skip corrupted line with warning
-        console.warn(`[JsonlEventStore] Skipping corrupted line: ${line.slice(0, 100)}`);
+        logger.warn({ sessionId: this.sessionId, linePreview: line.slice(0, 100) }, "Skipping corrupted line in event store");
         continue;
       }
 

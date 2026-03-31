@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { logger } from "../enterprise-logger.js";
 
 export interface ReadinessArtifact {
   name: string;
@@ -149,8 +150,12 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
     return;
   }
 
-  console.warn(
-    `\n⚠️  ${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE:`,
+  logger.warn(
+    {
+      staleCount: staleArtifacts.length,
+      currentCommit: result.currentCommit.slice(0, 7),
+    },
+    `${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE`
   );
 
   for (const artifact of staleArtifacts) {
@@ -163,11 +168,20 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
             ? "UNKNOWN"
             : artifact.gitCommit.slice(0, 7);
 
-    console.warn(`   - ${artifact.name}: commit ${commitDisplay} (${artifact.staleDuration})`);
+    logger.warn(
+      {
+        artifactName: artifact.name,
+        commit: commitDisplay,
+        staleDuration: artifact.staleDuration,
+      },
+      `Stale artifact: ${artifact.name}`
+    );
   }
 
-  console.warn(`   Current commit: ${result.currentCommit.slice(0, 7)}`);
-  console.warn(`   Action: npm run generate-readiness\n`);
+  logger.warn(
+    { currentCommit: result.currentCommit.slice(0, 7) },
+    "Action required: npm run generate-readiness"
+  );
 }
 
 /**
@@ -184,12 +198,15 @@ export function enforceFreshnessInCI(
   warnStaleArtifacts(result);
 
   if (!result.allFresh && (options.ci || options.strict)) {
-    console.error("❌ Stale readiness artifacts detected in CI/strict mode");
+    logger.error(
+      { staleCount: result.staleCount, ci: options.ci, strict: options.strict },
+      "Stale readiness artifacts detected in CI/strict mode"
+    );
     return false;
   }
 
   if (result.allFresh) {
-    console.log("✅ All readiness artifacts are fresh");
+    logger.info({ artifactCount: result.artifacts.length }, "All readiness artifacts are fresh");
   }
 
   // In non-CI mode, return true even if stale (warnings already shown)
