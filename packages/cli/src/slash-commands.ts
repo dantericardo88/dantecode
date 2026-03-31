@@ -5,7 +5,7 @@
 
 import { readFile, writeFile, readdir, mkdir, rm } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import {
@@ -42,6 +42,10 @@ import {
   globalApprovalGateway,
   globalToolScheduler,
   updateStateYaml,
+  readStateYaml,
+  writeStateYaml,
+  initializeState,
+  stateYamlExists,
   PROVIDER_CATALOG,
   MODEL_CATALOG,
   estimateRunCost,
@@ -3461,7 +3465,7 @@ async function worktreeCommand(_args: string, state: ReplState): Promise<string>
     let baseBranch: string;
 
     try {
-      baseBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+      baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: state.projectRoot,
         encoding: "utf-8",
       }).trim();
@@ -4305,7 +4309,7 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         // Revert the file write since git became dirty
         try {
           // Check if we can safely revert by comparing git status
-          const gitDiffOutput = execSync("git diff --name-only", {
+          const gitDiffOutput = execFileSync("git", ["diff", "--name-only"], {
             cwd: state.projectRoot,
             encoding: "utf-8",
           })
@@ -4318,7 +4322,8 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
 
           if (unexpectedChanges.length > 0) {
             // Unexpected changes - revert everything
-            execSync("git checkout -- . && git clean -fd", { cwd: state.projectRoot });
+            execFileSync("git", ["checkout", "--", "."], { cwd: state.projectRoot });
+            execFileSync("git", ["clean", "-fd"], { cwd: state.projectRoot });
             result.succeeded = false;
             lines[1] = `${RED}${BOLD}Autoforge: DID NOT PASS${RESET}`;
             lines.push(
@@ -5117,7 +5122,7 @@ async function partyCommand(args: string, state: ReplState): Promise<string> {
   }
 
   const lanes = ["orchestrator", "planner", "coder", "tester", "reviewer", "deployer"] as const;
-  const baseBranch = execSync("git rev-parse --abbrev-ref HEAD", {
+  const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
     cwd: state.projectRoot,
     encoding: "utf-8",
   }).trim();
@@ -7815,6 +7820,337 @@ async function onboardCommand(args: string, state: ReplState): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// /setup — Interactive setup wizard with configuration and validation
+// ---------------------------------------------------------------------------
+
+async function setupCommand(args: string, state: ReplState): Promise<string> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
+
+  try {
+    // Helper functions
+    const ask = (question: string): Promise<string> => {
+      return new Promise((resolve) => {
+        rl.question(`${CYAN}?${RESET} ${question} `, (answer) => {
+          resolve(answer.trim());
+        });
+      });
+    };
+
+    const askYN = async (question: string, defaultYes = true): Promise<boolean> => {
+      const hint = defaultYes ? "[Y/n]" : "[y/N]";
+      const answer = await ask(`${question} ${DIM}${hint}${RESET}`);
+      if (answer === "") return defaultYes;
+      return /^y/i.test(answer);
+    };
+
+    const askChoice = async (
+      question: string,
+      options: string[],
+      defaultIndex = 0,
+    ): Promise<number> => {
+      process.stdout.write(`\n${BOLD}${question}${RESET}\n`);
+      options.forEach((opt, i) => {
+        const marker = i === defaultIndex ? `${GREEN}>${RESET}` : " ";
+        process.stdout.write(`  ${marker} ${DIM}${i + 1}.${RESET} ${opt}\n`);
+      });
+      const hint = `${DIM}(1–${options.length}, default: ${defaultIndex + 1})${RESET}`;
+      const answer = await ask(`Select ${hint}`);
+      const num = parseInt(answer, 10);
+      if (isNaN(num) || num < 1 || num > options.length) return defaultIndex;
+      return num - 1;
+    };
+
+    const printHeader = (title: string): void => {
+      process.stdout.write(`\n${CYAN}${BOLD}${title}${RESET}\n`);
+      process.stdout.write(`${DIM}${"─".repeat(60)}${RESET}\n`);
+    };
+
+    const printSuccess = (msg: string): void => {
+      process.stdout.write(`${GREEN}✓${RESET} ${msg}\n`);
+    };
+
+    const printWarning = (msg: string): void => {
+      process.stdout.write(`${YELLOW}⚠${RESET} ${msg}\n`);
+    };
+
+    const printError = (msg: string): void => {
+      process.stdout.write(`${RED}✗${RESET} ${msg}\n`);
+    };
+
+    // Welcome
+    printHeader("DanteCode Interactive Setup Wizard");
+    process.stdout.write(`Welcome! This wizard will help you configure DanteCode.\n`);
+    process.stdout.write(`${DIM}Project: ${state.projectRoot}${RESET}\n`);
+
+    // Check if already initialized
+    const exists = await stateYamlExists(state.projectRoot);
+    if (exists && !args.includes("--force")) {
+      const reconfigure = await askYN(
+        "Configuration already exists. Do you want to reconfigure?",
+        false,
+      );
+      if (!reconfigure) {
+        return `${YELLOW}Setup cancelled.${RESET} ${DIM}Use /setup --force to force reconfiguration.${RESET}`;
+      }
+    }
+
+    const currentState = exists ? await readStateYaml(state.projectRoot) : null;
+
+    // Step 1: API Key Configuration
+    printHeader("Step 1 of 5 — API Key Configuration");
+
+    const apiKeys: Record<string, string | undefined> = {};
+    const providerList = [
+      { name: "Anthropic (Claude)", envKey: "ANTHROPIC_API_KEY" },
+      { name: "OpenAI (GPT)", envKey: "OPENAI_API_KEY" },
+      { name: "GitHub", envKey: "GITHUB_TOKEN" },
+      { name: "xAI (Grok)", envKey: "XAI_API_KEY" },
+      { name: "Google (Gemini)", envKey: "GEMINI_API_KEY" },
+    ];
+
+    for (const provider of providerList) {
+      const existing = process.env[provider.envKey];
+      if (existing) {
+        printSuccess(`${provider.envKey} is set in environment`);
+      } else {
+        printWarning(`${provider.envKey} not found in environment`);
+        const configure = await askYN(`Configure ${provider.name} now?`, false);
+        if (configure) {
+          const key = await ask(`Enter your ${provider.envKey}:`);
+          if (key) {
+            apiKeys[provider.envKey] = key;
+            printSuccess(`${provider.envKey} configured (will be saved to .env)`);
+          }
+        }
+      }
+    }
+
+    // Step 2: Model Selection
+    printHeader("Step 2 of 5 — Model Selection");
+
+    const modelOptions = [
+      "claude-sonnet-4-6 (Anthropic) — recommended for quality",
+      "claude-haiku-4-5-20251001 (Anthropic) — fast & cheap",
+      "grok-3 (xAI) — high capability",
+      "gpt-4o (OpenAI) — balanced performance",
+      "gemini-2.0-flash (Google) — large context",
+      "Skip — keep existing or default",
+    ];
+
+    const selectedModelIdx = await askChoice(
+      "Which AI model would you like to use?",
+      modelOptions,
+      0,
+    );
+
+    const modelMappings: Array<{
+      provider: "anthropic" | "openai" | "grok" | "google";
+      modelId: string;
+      contextWindow: number;
+    }> = [
+      { provider: "anthropic", modelId: "claude-sonnet-4-6", contextWindow: 200000 },
+      { provider: "anthropic", modelId: "claude-haiku-4-5-20251001", contextWindow: 200000 },
+      { provider: "grok", modelId: "grok-3", contextWindow: 131072 },
+      { provider: "openai", modelId: "gpt-4o", contextWindow: 128000 },
+      { provider: "google", modelId: "gemini-2.0-flash", contextWindow: 1000000 },
+    ];
+
+    let selectedModel = modelMappings[selectedModelIdx];
+
+    // Step 3: Project Initialization
+    printHeader("Step 3 of 5 — Project Initialization");
+
+    const enableAutoforge = await askYN("Enable DanteForge auto-orchestration?", true);
+    const enableSandbox = await askYN("Enable sandbox mode (Docker required)?", false);
+    const enableGit = await askYN("Enable Git auto-commit?", true);
+
+    // Step 4: Configuration Validation
+    printHeader("Step 4 of 5 — Validating Configuration");
+
+    const validationIssues: string[] = [];
+
+    // Check API keys
+    if (selectedModel) {
+      const requiredEnvKeys: Record<string, string> = {
+        anthropic: "ANTHROPIC_API_KEY",
+        openai: "OPENAI_API_KEY",
+        grok: "XAI_API_KEY",
+        google: "GEMINI_API_KEY",
+      };
+
+      const requiredKey = requiredEnvKeys[selectedModel.provider];
+      if (requiredKey && !process.env[requiredKey] && !apiKeys[requiredKey]) {
+        validationIssues.push(
+          `Missing API key: ${requiredKey} (required for ${selectedModel.provider})`,
+        );
+      }
+    }
+
+    // Check Docker for sandbox
+    if (enableSandbox) {
+      try {
+        execSync("docker --version", { stdio: "ignore" });
+        printSuccess("Docker detected and available");
+      } catch {
+        validationIssues.push("Docker not found (required for sandbox mode)");
+        printWarning("Docker not found — sandbox mode may not work");
+      }
+    }
+
+    // Check Git
+    if (enableGit) {
+      try {
+        execSync("git --version", { stdio: "ignore" });
+        printSuccess("Git detected and available");
+      } catch {
+        validationIssues.push("Git not found (required for auto-commit)");
+      }
+    }
+
+    if (validationIssues.length > 0) {
+      process.stdout.write(`\n${YELLOW}Validation Issues:${RESET}\n`);
+      for (const issue of validationIssues) {
+        printWarning(issue);
+      }
+      const proceed = await askYN("\nProceed with setup anyway?", true);
+      if (!proceed) {
+        return `${YELLOW}Setup cancelled.${RESET}`;
+      }
+    } else {
+      printSuccess("All validation checks passed");
+    }
+
+    // Step 5: Save Configuration
+    printHeader("Step 5 of 5 — Saving Configuration");
+
+    // Build updated state
+    let newState = currentState || (await initializeState(state.projectRoot));
+
+    if (selectedModel) {
+      newState.model.default = {
+        provider: selectedModel.provider,
+        modelId: selectedModel.modelId,
+        maxTokens: 8192,
+        temperature: 0.1,
+        contextWindow: selectedModel.contextWindow,
+        supportsVision: selectedModel.provider === "anthropic" || selectedModel.provider === "openai",
+        supportsToolCalls: true,
+      };
+    }
+
+    newState.autoforge.enabled = enableAutoforge;
+    newState.sandbox.enabled = enableSandbox;
+    newState.git.autoCommit = enableGit;
+
+    // Save STATE.yaml
+    await writeStateYaml(state.projectRoot, newState);
+    printSuccess("Configuration saved to .dantecode/STATE.yaml");
+
+    // Save API keys to .env if any were configured
+    if (Object.keys(apiKeys).length > 0) {
+      const envPath = join(state.projectRoot, ".env");
+      let envContent = "";
+      try {
+        envContent = await readFile(envPath, "utf-8");
+      } catch {
+        // File doesn't exist, start fresh
+      }
+
+      for (const [key, value] of Object.entries(apiKeys)) {
+        if (value) {
+          const regex = new RegExp(`^${key}=.*$`, "m");
+          if (regex.test(envContent)) {
+            envContent = envContent.replace(regex, `${key}=${value}`);
+          } else {
+            envContent += `\n${key}=${value}`;
+          }
+        }
+      }
+
+      await writeFile(envPath, envContent.trim() + "\n");
+      printSuccess("API keys saved to .env");
+      printWarning("Remember to add .env to .gitignore!");
+    }
+
+    // Step 6: Health Checks
+    printHeader("Running Health Checks");
+
+    const healthChecks = [];
+
+    // Model catalog check
+    try {
+      if (selectedModel) {
+        const catalog = getProviderCatalogEntry(selectedModel.provider);
+        if (catalog) {
+          healthChecks.push({ name: "Model catalog", status: "ok" });
+        }
+      }
+    } catch {
+      healthChecks.push({ name: "Model catalog", status: "warning" });
+    }
+
+    // DanteForge check
+    if (enableAutoforge) {
+      try {
+        await import("@dantecode/danteforge");
+        healthChecks.push({ name: "DanteForge", status: "ok" });
+      } catch {
+        healthChecks.push({ name: "DanteForge", status: "warning" });
+      }
+    }
+
+    // Sandbox check
+    if (enableSandbox) {
+      try {
+        execSync("docker ps", { stdio: "ignore" });
+        healthChecks.push({ name: "Docker daemon", status: "ok" });
+      } catch {
+        healthChecks.push({ name: "Docker daemon", status: "error" });
+      }
+    }
+
+    for (const check of healthChecks) {
+      if (check.status === "ok") {
+        printSuccess(`${check.name}: OK`);
+      } else if (check.status === "warning") {
+        printWarning(`${check.name}: Warning`);
+      } else {
+        printError(`${check.name}: Failed`);
+      }
+    }
+
+    // Summary
+    printHeader("Setup Complete");
+    process.stdout.write(`\n${BOLD}Configuration Summary:${RESET}\n`);
+    if (selectedModel) {
+      process.stdout.write(`  Model:       ${BOLD}${selectedModel.provider}/${selectedModel.modelId}${RESET}\n`);
+    }
+    process.stdout.write(
+      `  DanteForge:  ${enableAutoforge ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}\n`,
+    );
+    process.stdout.write(
+      `  Sandbox:     ${enableSandbox ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}\n`,
+    );
+    process.stdout.write(
+      `  Git:         ${enableGit ? `${GREEN}auto-commit${RESET}` : `${DIM}manual${RESET}`}\n`,
+    );
+    process.stdout.write(`\n${GREEN}Setup complete!${RESET} ${DIM}You're ready to start.${RESET}\n`);
+    process.stdout.write(`${DIM}Try: /magic build a todo app${RESET}\n\n`);
+
+    return "";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `${RED}Setup failed: ${message}${RESET}`;
+  } finally {
+    rl.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // /score — Score C/D measurement (OnRamp v1.3)
 // ---------------------------------------------------------------------------
 
@@ -7970,7 +8306,7 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
     getStatus(state.projectRoot);
     // Try to get branch name
     try {
-      const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: state.projectRoot,
         encoding: "utf8",
         stdio: "pipe",
@@ -8496,6 +8832,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/onboard [--force]",
     handler: onboardCommand,
     tier: 2,
+    category: "core",
+  },
+  {
+    name: "setup",
+    description: "Interactive configuration wizard with API keys, model selection, and health checks",
+    usage: "/setup [--force]",
+    handler: setupCommand,
+    tier: 1,
     category: "core",
   },
   {
