@@ -16,6 +16,7 @@ import { buildRoutes } from "./routes.js";
 import { SessionEventEmitter } from "./session-emitter.js";
 import { createSSEStream } from "./sse-stream.js";
 import { checkAuth, unauthorizedResponse } from "./auth.js";
+import { globalMetrics } from "./metrics.js";
 import type { AuthConfig } from "./auth.js";
 import type {
   ServerContext,
@@ -131,6 +132,28 @@ function sendJSON(
   res.end(body);
 }
 
+/** Send any response (handles both JSON and text). */
+function sendResponse(
+  res: ServerResponse,
+  status: number,
+  data: unknown,
+  extraHeaders?: Record<string, string>,
+): void {
+  // If data is already a string and Content-Type is set, send as-is
+  if (typeof data === "string" && extraHeaders?.["Content-Type"]) {
+    const body = data;
+    res.writeHead(status, {
+      "Content-Length": Buffer.byteLength(body),
+      ...CORS_HEADERS,
+      ...extraHeaders,
+    });
+    res.end(body);
+  } else {
+    // Default to JSON
+    sendJSON(res, status, data, extraHeaders);
+  }
+}
+
 /** Parse a URL into path + query object. */
 function parseURL(rawUrl: string): { path: string; query: Record<string, string> } {
   const qMark = rawUrl.indexOf("?");
@@ -198,6 +221,7 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
   buildRoutes(router, context);
 
   const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const requestStartTime = Date.now();
     const method = (req.method?.toUpperCase() ?? "GET") as
       | "GET"
       | "POST"
@@ -293,9 +317,22 @@ export async function startServer(options: ServeOptions): Promise<DanteCodeServe
         headers,
       });
 
-      sendJSON(res, result.status, result.body, { ...result.headers, ...corsOverride });
+      // Record metrics
+      const duration = Date.now() - requestStartTime;
+      globalMetrics.recordRequest(method, path, result.status, duration);
+
+      // Track errors
+      if (result.status >= 400) {
+        const errorType = result.status >= 500 ? "server_error" : "client_error";
+        globalMetrics.recordError(errorType, path);
+      }
+
+      sendResponse(res, result.status, result.body, { ...result.headers, ...corsOverride });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      const duration = Date.now() - requestStartTime;
+      globalMetrics.recordRequest(method, path, 500, duration);
+      globalMetrics.recordError("uncaught_exception", path);
       sendJSON(res, 500, { error: "Internal server error", message }, corsOverride);
     }
   });

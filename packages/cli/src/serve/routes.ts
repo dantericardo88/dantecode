@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { buildServeOperatorStatus, readSessionDurableRunSnapshot } from "../operator-status.js";
+import { globalMetrics } from "./metrics.js";
 
 /** Session IDs must be alphanumeric + dash/underscore, max 64 chars (blocks path traversal). */
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -680,6 +681,12 @@ function runVerification(ctx: ServerContext): RouteHandler {
         ? results.reduce((sum, r) => sum + r.overallScore, 0) / results.length
         : null;
     const allFindings = results.flatMap((r) => r.findings);
+
+    // Record PDSE score metrics
+    if (avgScore !== null) {
+      globalMetrics.recordPDSE(avgScore);
+    }
+
     return ok({
       projectRoot: ctx.projectRoot,
       files: safeFiles,
@@ -856,6 +863,17 @@ function readinessCheck(ctx: ServerContext): RouteHandler {
   };
 }
 
+function getMetrics(ctx: ServerContext): RouteHandler {
+  return async () => {
+    const metricsText = globalMetrics.export(ctx.sessions);
+    return {
+      status: 200,
+      body: metricsText,
+      headers: { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" },
+    };
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -901,4 +919,7 @@ export function buildRoutes(router: Router, context: ServerContext): void {
   // Health & Readiness
   router.get("/api/health", healthCheck(context));
   router.get("/api/ready", readinessCheck(context));
+
+  // Metrics
+  router.get("/api/metrics", getMetrics(context));
 }

@@ -429,6 +429,37 @@ describe("DanteCode HTTP Server — Integration — agent response sync", () => 
     await syncServer.stop();
   });
 
+  it("GET /api/metrics returns Prometheus text format", async () => {
+    // Make a few requests to populate metrics
+    await httpRequest(syncPort, "GET", "/api/health");
+    await httpRequest(syncPort, "GET", "/api/status");
+    await httpRequest(syncPort, "POST", "/api/sessions", JSON.stringify({ name: "test" }));
+
+    const res = await httpRequest(syncPort, "GET", "/api/metrics");
+    expect(res.status).toBe(200);
+
+    // Response should be plain text (httpRequest puts it in { raw } when it can't parse JSON)
+    const metricsText = (res.body["raw"] as string) || "";
+    expect(typeof metricsText).toBe("string");
+    expect(metricsText.length).toBeGreaterThan(0);
+
+    // Check for key Prometheus metric types
+    expect(metricsText).toContain("# HELP http_requests_total");
+    expect(metricsText).toContain("# TYPE http_requests_total counter");
+    expect(metricsText).toContain("# HELP http_request_duration_seconds");
+    expect(metricsText).toContain("# TYPE http_request_duration_seconds summary");
+    expect(metricsText).toContain("# HELP active_sessions_total");
+    expect(metricsText).toContain("# TYPE active_sessions_total gauge");
+    expect(metricsText).toContain("# HELP process_resident_memory_bytes");
+    expect(metricsText).toContain("# HELP process_cpu_seconds_total");
+    expect(metricsText).toContain("# HELP dantecode_uptime_seconds");
+
+    // Verify it contains actual metric data (not just headers)
+    expect(metricsText).toMatch(/http_requests_total\{.*\} \d+/);
+    expect(metricsText).toMatch(/process_resident_memory_bytes \d+/);
+    expect(metricsText).toMatch(/dantecode_uptime_seconds \d+/);
+  });
+
   it("second POST /message after agent run completes returns 202 (abortController cleared)", async () => {
     const created = await httpRequest(
       syncPort,
