@@ -2,7 +2,7 @@
 // @dantecode/git-engine — Repository Map Generation (Aider-derived)
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { join, extname, sep } from "node:path";
 
@@ -174,18 +174,13 @@ const EXTENSION_LANGUAGE_MAP: Readonly<Record<string, string>> = {
 // ----------------------------------------------------------------------------
 
 /**
- * Execute a git command synchronously in the given working directory.
- *
- * SAFETY NOTE: This helper uses shell interpolation. Currently only called
- * with hardcoded "ls-files" command, which is safe. Do NOT add calls with
- * user-controlled arguments without migrating to execFileSync first.
- *
- * TODO: Migrate to execFileSync("git", args[], ...) for shell-injection safety.
- * See: packages/git-engine/src/commit.ts for reference implementation.
+ * Execute a git command safely using execFileSync to prevent shell injection.
+ * @param args - Array of git arguments (NOT including 'git' itself)
+ * @param cwd - Working directory
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -195,7 +190,7 @@ function git(args: string, cwd: string): string {
     const err = error as { stderr?: string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr.trim() : "";
     const msg = stderr || err.message || "Unknown git error";
-    throw new Error(`git ${args.split(" ")[0]}: ${msg}`);
+    throw new Error(`git ${args[0] ?? "command"}: ${msg}`);
   }
 }
 
@@ -277,7 +272,7 @@ export function generateRepoMap(projectRoot: string, options?: RepoMapOptions): 
   const ignorePatterns = [...DEFAULT_IGNORE_PATTERNS, ...extraPatterns];
 
   // Get all tracked files from git
-  const raw = git("ls-files", projectRoot);
+  const raw = git(["ls-files"], projectRoot);
 
   if (!raw) {
     return [];

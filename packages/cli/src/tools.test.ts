@@ -19,15 +19,21 @@ const {
 } = vi.hoisted(() => {
   const mockDanteSandboxIsReady = vi.fn(() => false);
   const mockDanteSandboxExecute = vi.fn();
+  const mockExecSync = vi.fn();
+  // Make mockExecFile use the same implementation as mockExecSync for backward compatibility
+  // since we changed from execSync(cmd) to execFileSync(cmd, args[])
+  const mockExecFile = vi.fn((...args: unknown[]) => {
+    return mockExecSync(...args);
+  });
   return {
     mockReadFile: vi.fn(),
     mockWriteFile: vi.fn(),
     mockMkdir: vi.fn(),
     mockReaddir: vi.fn(),
     mockStat: vi.fn(),
-    mockExecSync: vi.fn(),
+    mockExecSync,
     mockExec: vi.fn(),
-    mockExecFile: vi.fn(),
+    mockExecFile,
     mockAppendAuditEvent: vi.fn().mockResolvedValue(undefined),
     mockResolvePreferredShell: vi.fn(() => "/bin/bash"),
     mockAutoCommit: vi.fn(),
@@ -52,6 +58,7 @@ vi.mock("node:child_process", async () => {
     execSync: (...args: unknown[]) => mockExecSync(...args),
     exec: (...args: unknown[]) => mockExec(...args),
     execFile: (...args: unknown[]) => mockExecFile(...args),
+    execFileSync: (...args: unknown[]) => mockExecFile(...args),
   };
 });
 
@@ -934,10 +941,10 @@ describe("GitHubSearch tool", () => {
     expect(result.content).toContain("Bug: crash on startup");
     expect(result.content).toContain("OPEN");
     expect(result.content).toContain("user/repo");
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining("gh search issues"),
-      expect.objectContaining({ cwd: "/proj" }),
-    );
+    // Now uses execFileSync with array args: ["search", "issues", query, ...]
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[0]).toBe("gh");
+    expect(call[1]).toEqual(expect.arrayContaining(["search", "issues"]));
   });
 
   it("returns no results message when search returns empty", async () => {
@@ -1047,10 +1054,11 @@ describe("GitHubOps tool", () => {
     expect(result.isError).toBe(false);
     expect(result.content).toContain("PR created");
     expect(result.content).toContain("pull/99");
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining("gh pr create"),
-      expect.objectContaining({ cwd: "/proj" }),
-    );
+    // Now uses execFileSync with array args
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[0]).toBe("gh");
+    expect(call[1]).toEqual(expect.arrayContaining(["pr", "create"]));
+    expect(call[2]).toMatchObject({ cwd: "/proj" });
   });
 
   it("creates a draft PR with base branch", async () => {
@@ -1064,9 +1072,10 @@ describe("GitHubOps tool", () => {
     );
 
     expect(result.isError).toBe(false);
-    const cmd = mockExecSync.mock.calls[0]![0] as string;
-    expect(cmd).toContain("--draft");
-    expect(cmd).toContain("--base");
+    // Now uses execFileSync with array args
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[1]).toEqual(expect.arrayContaining(["--draft"]));
+    expect(call[1]).toEqual(expect.arrayContaining(["--base"]));
   });
 
   it("returns error when create_pr missing title", async () => {
@@ -1117,8 +1126,9 @@ describe("GitHubOps tool", () => {
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("reviewed (approve)");
-    const cmd = mockExecSync.mock.calls[0]![0] as string;
-    expect(cmd).toContain("--approve");
+    // Now uses execFileSync with array args
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[1]).toEqual(expect.arrayContaining(["--approve"]));
   });
 
   it("rejects invalid review action", async () => {
@@ -1144,8 +1154,9 @@ describe("GitHubOps tool", () => {
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("merged (squash)");
-    const cmd = mockExecSync.mock.calls[0]![0] as string;
-    expect(cmd).toContain("--squash");
+    // Now uses execFileSync with array args
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[1]).toEqual(expect.arrayContaining(["--squash"]));
   });
 
   it("rejects invalid merge method", async () => {
@@ -1211,8 +1222,9 @@ describe("GitHubOps tool", () => {
 
     expect(result.isError).toBe(false);
     expect(result.content).toContain("Issue created");
-    const cmd = mockExecSync.mock.calls[0]![0] as string;
-    expect(cmd).toContain("--label");
+    // Now uses execFileSync with array args
+    const call = mockExecSync.mock.calls[0]!;
+    expect(call[1]).toEqual(expect.arrayContaining(["--label"]));
   });
 
   it("comments on an issue", async () => {

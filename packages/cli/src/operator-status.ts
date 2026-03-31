@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { DurableRunStore, PlanStore, getContextUtilization } from "@dantecode/core";
@@ -58,7 +58,7 @@ interface ServeSessionLike {
 
 function readGitHead(projectRoot: string): string | null {
   try {
-    return execSync("git rev-parse HEAD", {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: projectRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],

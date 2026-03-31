@@ -4,7 +4,7 @@
 // ============================================================================
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import {
   appendAuditEvent,
@@ -1361,33 +1361,32 @@ async function toolGitHubSearch(
     };
   }
 
-  // Build gh command based on search type
-  let command: string;
+  // Build gh command arguments based on search type
+  let args: string[];
   switch (searchType) {
     case "repos":
-      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount,language,updatedAt`;
+      args = ["search", "repos", query, "--limit", String(limit), "--json", "name,url,description,stargazersCount,language,updatedAt"];
       break;
     case "code":
-      command = `gh search code ${JSON.stringify(query)} --limit ${limit} --json repository,path,textMatches`;
+      args = ["search", "code", query, "--limit", String(limit), "--json", "repository,path,textMatches"];
       break;
     case "issues":
-      command = `gh search issues ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+      args = ["search", "issues", query, "--limit", String(limit), "--json", "title,url,state,repository,createdAt,labels"];
       break;
     case "prs":
-      command = `gh search prs ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+      args = ["search", "prs", query, "--limit", String(limit), "--json", "title,url,state,repository,createdAt,labels"];
       break;
     default:
-      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount`;
+      args = ["search", "repos", query, "--limit", String(limit), "--json", "name,url,description,stargazersCount"];
   }
 
   try {
-    const result = execSync(command, {
+    const result = execFileSync("gh", args, {
       cwd: projectRoot,
       encoding: "utf-8",
       timeout: 30000,
       maxBuffer: 5 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: resolvePreferredShell(),
     });
 
     // Parse JSON output from gh
@@ -1562,16 +1561,17 @@ const API_FIRST_ACTIONS = new Set([
 ]);
 
 /**
- * Execute a `gh` command and return stdout. Throws on failure.
+ * Execute a `gh` command safely and return stdout. Throws on failure.
+ * @param args - Array of arguments for gh CLI
+ * @param projectRoot - Working directory
  */
-function execGh(command: string, projectRoot: string): string {
-  return execSync(command, {
+function execGh(args: string[], projectRoot: string): string {
+  return execFileSync("gh", args, {
     cwd: projectRoot,
     encoding: "utf-8",
     timeout: 30000,
     maxBuffer: 5 * 1024 * 1024,
     stdio: ["pipe", "pipe", "pipe"],
-    shell: resolvePreferredShell(),
   });
 }
 
@@ -1731,11 +1731,11 @@ async function toolGitHubOps(
         const draft = input["draft"] as boolean | undefined;
         if (!title) return { content: "Error: title is required for create_pr", isError: true };
 
-        const args = [`gh pr create --title ${JSON.stringify(title)}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
-        if (base) args.push(`--base ${JSON.stringify(base)}`);
+        const args = ["pr", "create", "--title", title];
+        if (body) args.push("--body", body);
+        if (base) args.push("--base", base);
         if (draft) args.push("--draft");
-        const out = execGh(args.join(" "), projectRoot);
+        const out = execGh(args, projectRoot);
         return { content: `PR created:\n${out.trim()}`, isError: false };
       }
 
@@ -1743,7 +1743,7 @@ async function toolGitHubOps(
         const number = input["number"] as number | undefined;
         if (!number) return { content: "Error: number is required for view_pr", isError: true };
         const out = execGh(
-          `gh pr view ${number} --json title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles`,
+          ["pr", "view", String(number), "--json", "title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles"],
           projectRoot,
         );
         const pr = JSON.parse(out);
@@ -1772,9 +1772,9 @@ async function toolGitHubOps(
           };
         }
 
-        const args = [`gh pr review ${number} --${ra}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
-        const out = execGh(args.join(" "), projectRoot);
+        const args = ["pr", "review", String(number), `--${ra}`];
+        if (body) args.push("--body", body);
+        const out = execGh(args, projectRoot);
         return { content: `PR #${number} reviewed (${ra}):\n${out.trim()}`, isError: false };
       }
 
@@ -1792,7 +1792,7 @@ async function toolGitHubOps(
           };
         }
 
-        const out = execGh(`gh pr merge ${number} --${mm}`, projectRoot);
+        const out = execGh(["pr", "merge", String(number), `--${mm}`], projectRoot);
         return { content: `PR #${number} merged (${mm}):\n${out.trim()}`, isError: false };
       }
 
@@ -1801,7 +1801,7 @@ async function toolGitHubOps(
         const limit =
           typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const out = execGh(
-          `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,headRefName`,
+          ["pr", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,author,createdAt,headRefName"],
           projectRoot,
         );
         const prs = JSON.parse(out) as Array<{
@@ -1831,13 +1831,13 @@ async function toolGitHubOps(
         const labels = input["labels"] as string[] | string | undefined;
         if (!title) return { content: "Error: title is required for create_issue", isError: true };
 
-        const args = [`gh issue create --title ${JSON.stringify(title)}`];
-        if (body) args.push(`--body ${JSON.stringify(body)}`);
+        const args = ["issue", "create", "--title", title];
+        if (body) args.push("--body", body);
         if (labels) {
           const labelList = Array.isArray(labels) ? labels.join(",") : labels;
-          args.push(`--label ${JSON.stringify(labelList)}`);
+          args.push("--label", labelList);
         }
-        const out = execGh(args.join(" "), projectRoot);
+        const out = execGh(args, projectRoot);
         return { content: `Issue created:\n${out.trim()}`, isError: false };
       }
 
@@ -1849,7 +1849,7 @@ async function toolGitHubOps(
         if (!body) return { content: "Error: body is required for comment_issue", isError: true };
 
         const out = execGh(
-          `gh issue comment ${number} --body ${JSON.stringify(body)}`,
+          ["issue", "comment", String(number), "--body", body],
           projectRoot,
         );
         return { content: `Comment added to #${number}:\n${out.trim()}`, isError: false };
@@ -1860,9 +1860,9 @@ async function toolGitHubOps(
         const reason = input["reason"] as string | undefined;
         if (!number) return { content: "Error: number is required for close_issue", isError: true };
 
-        const args = [`gh issue close ${number}`];
-        if (reason) args.push(`--reason ${JSON.stringify(reason)}`);
-        const out = execGh(args.join(" "), projectRoot);
+        const args = ["issue", "close", String(number)];
+        if (reason) args.push("--reason", reason);
+        const out = execGh(args, projectRoot);
         return { content: `Issue #${number} closed:\n${out.trim()}`, isError: false };
       }
 
@@ -1872,13 +1872,13 @@ async function toolGitHubOps(
           typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const labels = input["labels"] as string[] | string | undefined;
         const args = [
-          `gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`,
+          "issue", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,author,createdAt,labels",
         ];
         if (labels) {
           const labelList = Array.isArray(labels) ? labels.join(",") : labels;
-          args.push(`--label ${JSON.stringify(labelList)}`);
+          args.push("--label", labelList);
         }
-        const out = execGh(args.join(" "), projectRoot);
+        const out = execGh(args, projectRoot);
         const issues = JSON.parse(out) as Array<{
           number?: number;
           title?: string;
@@ -1908,9 +1908,9 @@ async function toolGitHubOps(
         if (!workflow)
           return { content: "Error: workflow is required for trigger_workflow", isError: true };
 
-        const args = [`gh workflow run ${JSON.stringify(workflow)}`];
-        if (ref) args.push(`--ref ${JSON.stringify(ref)}`);
-        const out = execGh(args.join(" "), projectRoot);
+        const args = ["workflow", "run", workflow];
+        if (ref) args.push("--ref", ref);
+        const out = execGh(args, projectRoot);
         return {
           content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`,
           isError: false,
@@ -1922,7 +1922,7 @@ async function toolGitHubOps(
         if (!runId) return { content: "Error: run_id is required for view_run", isError: true };
 
         const out = execGh(
-          `gh run view ${runId} --json status,conclusion,name,url,createdAt,updatedAt,headBranch,event`,
+          ["run", "view", String(runId), "--json", "status,conclusion,name,url,createdAt,updatedAt,headBranch,event"],
           projectRoot,
         );
         const run = JSON.parse(out);

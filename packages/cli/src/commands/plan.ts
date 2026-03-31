@@ -13,7 +13,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   PlanStore,
   PlanExecutor,
@@ -221,7 +221,7 @@ function tokenizeGoal(goal: string): string[] {
 
 function readChangedFiles(projectRoot: string): string[] {
   try {
-    const output = execSync("git status --short", {
+    const output = execFileSync("git", ["status", "--short"], {
       cwd: projectRoot,
       encoding: "utf8",
     });

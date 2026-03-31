@@ -4,7 +4,7 @@
 // Used by the Council Overlap Detector and Merge Brain.
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -52,16 +52,13 @@ export interface SymbolDiffEntry {
 // ----------------------------------------------------------------------------
 
 /**
- * SAFETY NOTE: This helper uses shell interpolation and should NOT be called
- * with user-controlled input without validation. Branch names and file paths
- * must be sanitized before use.
- *
- * TODO: Migrate to execFileSync("git", args[], ...) for shell-injection safety.
- * See: packages/git-engine/src/commit.ts for reference implementation.
+ * Execute git command safely using execFileSync to prevent shell injection.
+ * @param args - Array of git arguments (NOT including 'git' itself)
+ * @param cwd - Working directory
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -129,7 +126,7 @@ function parseConflictHunks(content: string): ConflictHunk[] {
  */
 export function listConflictedFiles(repoRoot: string): string[] {
   try {
-    const raw = git("diff --name-only --diff-filter=U", repoRoot);
+    const raw = git(["diff", "--name-only", "--diff-filter=U"], repoRoot);
     return raw ? raw.split("\n").filter(Boolean) : [];
   } catch {
     return [];
@@ -188,7 +185,7 @@ export function diffSymbols(
   let files = filePaths;
   if (!files) {
     try {
-      const raw = git(`diff --name-only ${branchA}...${branchB}`, repoRoot);
+      const raw = git(["diff", "--name-only", `${branchA}...${branchB}`], repoRoot);
       files = raw ? raw.split("\n").filter(Boolean) : [];
     } catch {
       return [];
@@ -202,7 +199,7 @@ export function diffSymbols(
 
   for (const filePath of files) {
     try {
-      const diffRaw = git(`diff ${branchA}...${branchB} -- "${filePath}"`, repoRoot);
+      const diffRaw = git(["diff", `${branchA}...${branchB}`, "--", filePath], repoRoot);
       const added: string[] = [];
       const removed: string[] = [];
 
@@ -248,8 +245,8 @@ export function diffSymbols(
 export function predictConflicts(repoRoot: string, branchA: string, branchB: string): string[] {
   try {
     // Find merge base
-    const base = git(`merge-base ${branchA} ${branchB}`, repoRoot);
-    const raw = git(`merge-tree ${base} ${branchA} ${branchB}`, repoRoot);
+    const base = git(["merge-base", branchA, branchB], repoRoot);
+    const raw = git(["merge-tree", base, branchA, branchB], repoRoot);
 
     // merge-tree outputs conflict markers if there are conflicts
     const conflictFiles: string[] = [];

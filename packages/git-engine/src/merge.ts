@@ -4,7 +4,7 @@
 // Provides candidate preservation, safe merge attempts, and rollback.
 // ============================================================================
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -44,15 +44,13 @@ export interface MergeOptions {
 // ----------------------------------------------------------------------------
 
 /**
- * SAFETY NOTE: This helper uses shell interpolation and should NOT be called
- * with user-controlled input without validation. Branch names must be sanitized.
- *
- * TODO: Migrate to execFileSync("git", args[], ...) for shell-injection safety.
- * See: packages/git-engine/src/commit.ts for reference implementation.
+ * Execute git command safely using execFileSync to prevent shell injection.
+ * @param args - Array of git arguments (NOT including 'git' itself)
+ * @param cwd - Working directory
  */
-function git(args: string, cwd: string): string {
+function git(args: string[], cwd: string): string {
   try {
-    return execSync(`git ${args}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
@@ -64,7 +62,7 @@ function git(args: string, cwd: string): string {
   }
 }
 
-function gitSafe(args: string, cwd: string): string {
+function gitSafe(args: string[], cwd: string): string {
   try {
     return git(args, cwd);
   } catch {
@@ -90,7 +88,7 @@ export async function preserveCandidate(
   branch: string,
   outputDir: string,
 ): Promise<CandidateSnapshot> {
-  const headCommit = gitSafe(`rev-parse ${branch}`, repoRoot);
+  const headCommit = gitSafe(["rev-parse", branch], repoRoot);
   const safeBranchName = branch.replace(/[^a-z0-9-]/gi, "_");
   const patchFile = `${safeBranchName}-${headCommit.slice(0, 8)}.patch`;
   const patchPath = join(outputDir, patchFile);
@@ -99,8 +97,8 @@ export async function preserveCandidate(
 
   // Use format-patch to produce a portable patch
   try {
-    const baseMerge = gitSafe(`merge-base HEAD ${branch}`, repoRoot);
-    const patch = git(`diff ${baseMerge} ${branch}`, repoRoot);
+    const baseMerge = gitSafe(["merge-base", "HEAD", branch], repoRoot);
+    const patch = git(["diff", baseMerge, branch], repoRoot);
     await writeFile(patchPath, patch, "utf-8");
   } catch {
     await writeFile(patchPath, "", "utf-8");
@@ -133,7 +131,7 @@ export function attemptMerge(
 
   // Ensure we're on the target branch
   try {
-    git(`checkout "${targetBranch}"`, repoRoot);
+    git(["checkout", targetBranch], repoRoot);
   } catch (_err: unknown) {
     return {
       success: false,
@@ -142,21 +140,27 @@ export function attemptMerge(
     };
   }
 
-  const mergeFlags = noFf ? "--no-ff" : "--ff";
-  const msgFlag = message ? `--message "${message.replace(/"/g, '\\"')}"` : "--no-edit";
+  const mergeArgs = ["merge"];
+  mergeArgs.push(noFf ? "--no-ff" : "--ff");
+  if (message) {
+    mergeArgs.push("--message", message);
+  } else {
+    mergeArgs.push("--no-edit");
+  }
+  mergeArgs.push(sourceBranch);
 
   try {
-    git(`merge ${mergeFlags} ${msgFlag} "${sourceBranch}"`, repoRoot);
-    const mergeCommitHash = gitSafe("rev-parse HEAD", repoRoot);
+    git(mergeArgs, repoRoot);
+    const mergeCommitHash = gitSafe(["rev-parse", "HEAD"], repoRoot);
     return { success: true, mergeCommitHash, conflictedFiles: [], aborted: false };
   } catch {
     // Check for conflicts
-    const conflictedRaw = gitSafe("diff --name-only --diff-filter=U", repoRoot);
+    const conflictedRaw = gitSafe(["diff", "--name-only", "--diff-filter=U"], repoRoot);
     const conflictedFiles = conflictedRaw ? conflictedRaw.split("\n").filter(Boolean) : [];
 
     if (abortOnConflict || conflictedFiles.length > 0) {
       try {
-        git("merge --abort", repoRoot);
+        git(["merge", "--abort"], repoRoot);
       } catch {
         // ignore abort errors
       }
@@ -172,7 +176,7 @@ export function attemptMerge(
  * Only call this if you are certain the last commit was the merge.
  */
 export function rollbackMerge(repoRoot: string): void {
-  git("reset --hard HEAD~1", repoRoot);
+  git(["reset", "--hard", "HEAD~1"], repoRoot);
 }
 
 /**
@@ -192,9 +196,9 @@ export function applyPatch(
     writeFileSync(tmpFile, patchContent, "utf-8");
 
     if (dryRun) {
-      git(`apply --check "${tmpFile}"`, repoRoot);
+      git(["apply", "--check", tmpFile], repoRoot);
     } else {
-      git(`apply "${tmpFile}"`, repoRoot);
+      git(["apply", tmpFile], repoRoot);
     }
 
     return { success: true };
@@ -215,7 +219,7 @@ export function applyPatch(
  */
 export function getMergedBranches(repoRoot: string, targetBranch: string): string[] {
   try {
-    const raw = git(`branch --merged "${targetBranch}"`, repoRoot);
+    const raw = git(["branch", "--merged", targetBranch], repoRoot);
     return raw
       .split("\n")
       .map((b) => b.replace(/^\*?\s+/, "").trim())
@@ -229,5 +233,5 @@ export function getMergedBranches(repoRoot: string, targetBranch: string): strin
  * Get the common ancestor (merge base) of two branches.
  */
 export function getMergeBase(repoRoot: string, branchA: string, branchB: string): string {
-  return gitSafe(`merge-base "${branchA}" "${branchB}"`, repoRoot);
+  return gitSafe(["merge-base", branchA, branchB], repoRoot);
 }

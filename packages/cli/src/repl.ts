@@ -8,7 +8,7 @@ import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
@@ -251,7 +251,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
     // C1: Print git branch + session status bar after the welcome banner
     try {
-      const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
         cwd: process.cwd(),
         encoding: "utf-8",
         stdio: "pipe",
