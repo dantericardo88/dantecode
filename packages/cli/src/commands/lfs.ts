@@ -38,9 +38,7 @@ export async function cmdLfsStatus(projectRoot: string): Promise<void> {
 
   if (!status.installed) {
     console.log(`${RED}✗ Git LFS is not installed${RESET}`);
-    console.log(
-      `${DIM}Install from: https://git-lfs.github.com/${RESET}\n`
-    );
+    console.log(`${DIM}Install from: https://git-lfs.github.com/${RESET}\n`);
     return;
   }
 
@@ -95,15 +93,13 @@ export async function cmdLfsInit(projectRoot: string): Promise<void> {
 export async function cmdLfsTrack(
   projectRoot: string,
   pattern: string,
-  options: { common?: string } = {}
+  options: { common?: string } = {},
 ): Promise<void> {
   // Handle common patterns
   if (options.common) {
     const category = options.common as keyof typeof COMMON_LFS_PATTERNS;
     if (!(category in COMMON_LFS_PATTERNS)) {
-      console.error(
-        `${RED}Unknown common pattern category: ${category}${RESET}`
-      );
+      console.error(`${RED}Unknown common pattern category: ${category}${RESET}`);
       console.log(`${DIM}Available: ${Object.keys(COMMON_LFS_PATTERNS).join(", ")}${RESET}`);
       process.exit(1);
     }
@@ -141,10 +137,7 @@ export async function cmdLfsTrack(
 /**
  * Untrack pattern from LFS
  */
-export async function cmdLfsUntrack(
-  projectRoot: string,
-  pattern: string
-): Promise<void> {
+export async function cmdLfsUntrack(projectRoot: string, pattern: string): Promise<void> {
   const result = untrackPattern(projectRoot, pattern);
 
   if (result.success) {
@@ -161,7 +154,7 @@ export async function cmdLfsUntrack(
 export async function cmdLfsMigrate(
   projectRoot: string,
   pattern: string,
-  options: { ref?: string } = {}
+  options: { ref?: string } = {},
 ): Promise<void> {
   console.log(`${CYAN}Migrating "${pattern}" to Git LFS...${RESET}`);
   console.log(`${DIM}This may take a while for large files${RESET}\n`);

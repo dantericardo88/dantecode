@@ -83,9 +83,7 @@ describe("enhanceError", () => {
 
   it("enhances memory errors", () => {
     const enhanced = enhanceError("JavaScript heap out of memory");
-    expect(
-      enhanced.suggestions.some((s) => s.message.includes("memory limit")),
-    ).toBe(true);
+    expect(enhanced.suggestions.some((s) => s.message.includes("memory limit"))).toBe(true);
   });
 
   it("enhances TypeScript errors", () => {

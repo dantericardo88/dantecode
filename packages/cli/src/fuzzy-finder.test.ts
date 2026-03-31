@@ -196,9 +196,7 @@ describe("fuzzyFilter edge cases", () => {
   });
 
   it("preserves metadata in matches", () => {
-    const items: FuzzyItem[] = [
-      { label: "test", value: "1", metadata: { foo: "bar" } },
-    ];
+    const items: FuzzyItem[] = [{ label: "test", value: "1", metadata: { foo: "bar" } }];
     const matches = fuzzyFilter(items, "test");
     expect(matches[0]!.metadata).toEqual({ foo: "bar" });
   });

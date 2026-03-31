@@ -106,7 +106,7 @@ function cmdReject(args: string[], projectRoot: string): void {
 
   const integration = new DanteSkillbookIntegration({ cwd: projectRoot, gitStage: false });
   const pending = integration.reviewQueue.getPending();
-  const item = pending.find((i) => i.id === id);
+  const item = pending.find((i: { id: string }) => i.id === id);
 
   if (!item) {
     console.error(`${RED}Item not found or not pending: ${id}${RESET}`);

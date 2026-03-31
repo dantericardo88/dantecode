@@ -103,6 +103,8 @@ export interface ReplOptions {
   sessionName?: string;
   /** --plan-first: auto-enter plan mode for all prompts. */
   planFirst?: boolean;
+  /** --yolo: auto-approve all actions (non-interactive mode). */
+  yolo?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -323,7 +325,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     currentPlanId: null,
     planExecutionInProgress: false,
     planExecutionResult: null,
-    approvalMode: "review",
+    approvalMode: options.yolo ? "yolo" : "review",
     taskMode: null,
     macroRecording: false,
     macroRecordingName: null,
@@ -891,6 +893,14 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
 
   if (options.enableSandbox) {
     agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
+  }
+
+  // CRITICAL: For non-interactive mode, create a minimal replState with approval mode
+  // Without this, tools wait for user approval which hangs in subprocess/SWE-bench
+  if (options.yolo) {
+    agentConfig.replState = {
+      approvalMode: "yolo",
+    } as any; // Minimal stub - agent-loop only checks approvalMode field
   }
 
   // Run the agent loop once

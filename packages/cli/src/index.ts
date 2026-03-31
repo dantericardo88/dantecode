@@ -75,6 +75,8 @@ interface ParsedArgs {
   sessionName: string | undefined;
   /** --plan-first: generate and approve a plan before executing */
   planFirst: boolean;
+  /** --yolo: auto-approve all actions (non-interactive mode) */
+  yolo: boolean;
 }
 
 /**
@@ -105,6 +107,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     fearSetBlockOnNoGo: false,
     sessionName: undefined,
     planFirst: false,
+    yolo: false,
   };
 
   const commands = new Set([
@@ -219,6 +222,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--plan-first") {
       result.planFirst = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--yolo") {
+      result.yolo = true;
       i += 1;
       continue;
     }
@@ -357,6 +366,7 @@ async function main(): Promise<void> {
     fearSetBlockOnNoGo: parsed.fearSetBlockOnNoGo,
     sessionName: parsed.sessionName,
     planFirst: parsed.planFirst,
+    yolo: parsed.yolo,
   };
 
   // Route to the appropriate command

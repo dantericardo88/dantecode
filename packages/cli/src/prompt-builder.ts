@@ -159,7 +159,7 @@ export async function buildPreLoopContext(
       if (recallResult.results.length > 0) {
         const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
         const now = Date.now();
-        const memoryLines = recallResult.results.map((m) => {
+        const memoryLines = recallResult.results.map((m: any) => {
           const storedAt = (m.meta?.storedAt as string | undefined) ?? m.createdAt;
           const isStale = now - new Date(storedAt).getTime() > THIRTY_DAYS_MS;
           const staleFlag = isStale ? " [STALE: >30 days old]" : "";

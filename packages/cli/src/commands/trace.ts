@@ -37,7 +37,7 @@ interface TraceTreeOptions {
  */
 export async function cmdTraceList(
   projectRoot: string,
-  options: TraceListOptions = {}
+  options: TraceListOptions = {},
 ): Promise<void> {
   const traceDir = join(projectRoot, ".dantecode", "traces");
 
@@ -81,15 +81,19 @@ export async function cmdTraceList(
       const duration = summary.durationMs ? `${summary.durationMs}ms` : "in progress";
 
       console.log(
-        `${CYAN}${summary.traceId.slice(0, 8)}${RESET} ${statusColor}${summary.status}${RESET} ${DIM}${duration}${RESET}`
+        `${CYAN}${summary.traceId.slice(0, 8)}${RESET} ${statusColor}${summary.status}${RESET} ${DIM}${duration}${RESET}`,
       );
-      console.log(`  Spans: ${summary.totalSpans} | Events: ${summary.totalEvents} | Decisions: ${summary.totalDecisions}`);
+      console.log(
+        `  Spans: ${summary.totalSpans} | Events: ${summary.totalEvents} | Decisions: ${summary.totalDecisions}`,
+      );
       console.log(`  Started: ${new Date(summary.startTime).toLocaleString()}`);
       console.log();
     }
 
     if (filtered.length > limit) {
-      console.log(`${DIM}... and ${filtered.length - limit} more. Use --limit to see more.${RESET}\n`);
+      console.log(
+        `${DIM}... and ${filtered.length - limit} more. Use --limit to see more.${RESET}\n`,
+      );
     }
   } catch (error: any) {
     if (error.code === "ENOENT") {
@@ -112,7 +116,9 @@ export async function cmdTraceShow(projectRoot: string, traceId: string): Promis
     const summary = JSON.parse(content) as TraceSummary;
 
     console.log(`\n${BOLD}Trace: ${summary.traceId}${RESET}\n`);
-    console.log(`Status: ${summary.status === "success" ? GREEN : summary.status === "error" ? RED : YELLOW}${summary.status}${RESET}`);
+    console.log(
+      `Status: ${summary.status === "success" ? GREEN : summary.status === "error" ? RED : YELLOW}${summary.status}${RESET}`,
+    );
     console.log(`Duration: ${summary.durationMs ?? "in progress"}ms`);
     console.log(`Started: ${new Date(summary.startTime).toLocaleString()}`);
     if (summary.endTime) {
@@ -130,10 +136,9 @@ export async function cmdTraceShow(projectRoot: string, traceId: string): Promis
       console.log(`${BOLD}Recent Events:${RESET}`);
       const recentEvents = summary.events.slice(-5);
       for (const event of recentEvents) {
-        const levelColor =
-          event.level === "error" ? RED : event.level === "info" ? CYAN : DIM;
+        const levelColor = event.level === "error" ? RED : event.level === "info" ? CYAN : DIM;
         console.log(
-          `  ${levelColor}[${event.level}]${RESET} ${event.message} ${DIM}(${new Date(event.timestamp).toLocaleTimeString()})${RESET}`
+          `  ${levelColor}[${event.level}]${RESET} ${event.message} ${DIM}(${new Date(event.timestamp).toLocaleTimeString()})${RESET}`,
         );
       }
       console.log();
@@ -142,9 +147,10 @@ export async function cmdTraceShow(projectRoot: string, traceId: string): Promis
     if (summary.decisions.length > 0) {
       console.log(`${BOLD}Decisions:${RESET}`);
       for (const decision of summary.decisions) {
-        const confidence = decision.confidence !== undefined ? ` (${(decision.confidence * 100).toFixed(0)}%)` : "";
+        const confidence =
+          decision.confidence !== undefined ? ` (${(decision.confidence * 100).toFixed(0)}%)` : "";
         console.log(
-          `  ${CYAN}${decision.point}${RESET}: ${GREEN}${decision.selected}${RESET}${confidence}`
+          `  ${CYAN}${decision.point}${RESET}: ${GREEN}${decision.selected}${RESET}${confidence}`,
         );
         console.log(`    Reason: ${DIM}${decision.reason}${RESET}`);
       }
@@ -166,7 +172,7 @@ export async function cmdTraceShow(projectRoot: string, traceId: string): Promis
 export async function cmdTraceTree(
   projectRoot: string,
   traceId: string,
-  options: TraceTreeOptions = {}
+  options: TraceTreeOptions = {},
 ): Promise<void> {
   const traceDir = join(projectRoot, ".dantecode", "traces");
   const traceFile = join(traceDir, `${traceId}.json`);
@@ -190,7 +196,9 @@ export async function cmdTraceTree(
         span.status === "success" ? GREEN : span.status === "error" ? RED : YELLOW;
       const duration = span.durationMs !== undefined ? ` ${DIM}(${span.durationMs}ms)${RESET}` : "";
 
-      console.log(`${prefix}${CYAN}${span.name}${RESET} ${statusColor}${span.status}${RESET}${duration}`);
+      console.log(
+        `${prefix}${CYAN}${span.name}${RESET} ${statusColor}${span.status}${RESET}${duration}`,
+      );
 
       // Show events if requested
       if (options.showEvents) {
@@ -207,7 +215,7 @@ export async function cmdTraceTree(
         for (const decision of spanDecisions) {
           const decisionIndent = indent + (isLast ? "    " : "│   ");
           console.log(
-            `${decisionIndent}${YELLOW}⚡ ${decision.point}: ${decision.selected}${RESET}`
+            `${decisionIndent}${YELLOW}⚡ ${decision.point}: ${decision.selected}${RESET}`,
           );
         }
       }

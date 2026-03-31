@@ -128,7 +128,7 @@ beforeEach(() => {
           .mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
       }) as unknown as GitAutomationOrchestrator,
   );
-  MockFilePatternWatcher.mockImplementation((): FilePatternWatcher => {
+  MockFilePatternWatcher.mockImplementation((): any => {
     _mockWatcherStart = vi.fn();
     _mockWatcherSnapshot = vi.fn().mockReturnValue({ watcherId: "fpw-mock-id" });
     _mockWatcherOn = vi.fn();
@@ -137,7 +137,7 @@ beforeEach(() => {
       stop: vi.fn(),
       snapshot: _mockWatcherSnapshot,
       on: _mockWatcherOn,
-    } as unknown as FilePatternWatcher;
+    } as unknown as any;
   });
 });
 
