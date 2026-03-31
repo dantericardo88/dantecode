@@ -83,8 +83,9 @@ describe("Model Router Observability", () => {
         expect(costMetric.type).toBe("counter");
         expect(costMetric.value).toBeGreaterThanOrEqual(0);
 
-        // Cost should be non-negative
-        expect(costMetric.value).toBeFinite();
+        // Cost should be non-negative and finite
+        expect(typeof costMetric.value).toBe("number");
+        expect(Number.isFinite(costMetric.value)).toBe(true);
       }
 
       // Validate cost estimation logic (unit test level)
@@ -165,10 +166,8 @@ describe("Model Router Observability", () => {
           if ("provider" in span.attributes) {
             expect(typeof span.attributes.provider).toBe("string");
 
-            // Provider should be one of the known providers
-            const validProviders = ["anthropic", "openai", "grok", "google", "groq", "ollama", "custom"];
+            // Provider should be a non-empty string
             if (typeof span.attributes.provider === "string") {
-              // Could be any provider, just validate it's a string
               expect(span.attributes.provider.length).toBeGreaterThan(0);
             }
           }
@@ -196,9 +195,10 @@ describe("Model Router Observability", () => {
 
         // Completed spans should have end time and duration
         if (span.status === "completed" || span.status === "error") {
+          expect(span.endTime).toBeDefined();
           expect(span.endTime).toBeGreaterThan(0);
           expect(span.duration).toBeGreaterThan(0);
-          expect(span.duration).toBe(span.endTime - span.startTime);
+          expect(span.duration).toBe(span.endTime! - span.startTime);
         }
 
         // Error spans should have error property

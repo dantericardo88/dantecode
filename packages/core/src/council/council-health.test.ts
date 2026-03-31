@@ -8,9 +8,9 @@
  * - Orchestrator state health
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { CouncilOrchestrator } from "./council-orchestrator.js";
-import type { HealthReport, HealthStatus } from "@dantecode/observability";
+import type { HealthStatus } from "@dantecode/observability";
 
 describe("Council Health Checks", () => {
   describe("Health Check Structure", () => {

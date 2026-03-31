@@ -9,9 +9,8 @@
  * - Error handling
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { getAgentMetrics, getAgentTraces } from "./agent-loop.js";
-import type { MetricCounter, TraceRecorder } from "@dantecode/observability";
 
 describe("Agent Loop Observability", () => {
   beforeEach(() => {
@@ -147,11 +146,12 @@ describe("Agent Loop Observability", () => {
 
       for (const span of completedSpans) {
         // Completed spans should have endTime and duration
+        expect(span.endTime).toBeDefined();
         expect(span.endTime).toBeGreaterThan(0);
         expect(span.duration).toBeGreaterThan(0);
 
         // Duration should match endTime - startTime
-        expect(span.duration).toBe(span.endTime - span.startTime);
+        expect(span.duration).toBe(span.endTime! - span.startTime);
       }
     });
 

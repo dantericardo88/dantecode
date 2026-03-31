@@ -56,7 +56,7 @@ describe("retryWithBackoff", () => {
     const fn = vi.fn().mockRejectedValue(new Error("fail"));
     const delays: number[] = [];
 
-    const onRetry = vi.fn((attempt: number, error: unknown, delayMs: number) => {
+    const onRetry = vi.fn((_attempt: number, _error: unknown, delayMs: number) => {
       delays.push(delayMs);
     });
 
