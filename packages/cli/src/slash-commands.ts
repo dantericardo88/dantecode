@@ -3,7 +3,7 @@
 // Each slash command is a function that operates on the REPL state.
 // ============================================================================
 
-import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, rm } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -7917,6 +7917,175 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
 }
 
 // ----------------------------------------------------------------------------
+// /troubleshoot — Diagnose common setup issues
+// ----------------------------------------------------------------------------
+
+async function troubleshootCommand(_args: string, state: ReplState): Promise<string> {
+  const issues: string[] = [];
+  const warnings: string[] = [];
+  const info: string[] = [];
+
+  // Check 1: API Keys
+  const providerName = state.state.model.default.provider;
+  const apiKeyEnvVars: Record<string, string> = {
+    openai: "OPENAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    grok: "XAI_API_KEY",
+    groq: "GROQ_API_KEY",
+    gemini: "GEMINI_API_KEY",
+    cohere: "COHERE_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    ollama: "OLLAMA_BASE_URL",
+  };
+
+  const requiredKey = apiKeyEnvVars[providerName];
+  if (requiredKey) {
+    const keyValue = process.env[requiredKey];
+    if (!keyValue) {
+      issues.push(
+        `Missing API key: ${requiredKey} (required for provider '${providerName}')`,
+      );
+      info.push(`Set via: export ${requiredKey}=your-key-here`);
+      info.push(`Or run: /model select to choose a different provider`);
+    } else if (keyValue.length < 10) {
+      warnings.push(
+        `API key ${requiredKey} looks invalid (too short: ${keyValue.length} chars)`,
+      );
+    } else {
+      info.push(`API key ${requiredKey}: ${GREEN}OK${RESET} (${keyValue.slice(0, 8)}...)`);
+    }
+  } else if (providerName === "ollama") {
+    const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    info.push(`Ollama URL: ${ollamaUrl}`);
+    try {
+      // Quick health check (don't actually call, just note it)
+      info.push(`${DIM}Run 'curl ${ollamaUrl}/api/tags' to verify Ollama is running${RESET}`);
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  // Check 2: Git repository
+  try {
+    getStatus(state.projectRoot);
+    // Try to get branch name
+    try {
+      const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+        cwd: state.projectRoot,
+        encoding: "utf8",
+        stdio: "pipe",
+      }).trim();
+      info.push(`Git repository: ${GREEN}OK${RESET} (branch: ${branch})`);
+    } catch {
+      info.push(`Git repository: ${GREEN}OK${RESET} (detached HEAD)`);
+    }
+  } catch (err) {
+    warnings.push(
+      `Not a git repository: ${state.projectRoot}`,
+    );
+    info.push(`Initialize with: git init`);
+  }
+
+  // Check 3: Node.js version
+  const nodeVersion = process.version;
+  const majorVersion = parseInt(nodeVersion.slice(1).split(".")[0] || "0", 10);
+  if (majorVersion < 18) {
+    issues.push(`Node.js version ${nodeVersion} is too old (require >= 18.0.0)`);
+    info.push(`Upgrade Node.js: https://nodejs.org/`);
+  } else {
+    info.push(`Node.js version: ${GREEN}OK${RESET} (${nodeVersion})`);
+  }
+
+  // Check 4: Write permissions
+  try {
+    const testFile = join(state.projectRoot, ".dantecode", ".write-test");
+    await mkdir(join(state.projectRoot, ".dantecode"), { recursive: true });
+    await writeFile(testFile, "test", "utf8");
+    await rm(testFile, { force: true });
+    info.push(`Write permissions: ${GREEN}OK${RESET} (.dantecode/ writable)`);
+  } catch (err) {
+    issues.push(
+      `Cannot write to ${join(state.projectRoot, ".dantecode")}`,
+    );
+    info.push(`Check directory permissions and try: mkdir -p .dantecode`);
+  }
+
+  // Check 5: DanteForge binary (if available)
+  try {
+    const result = execSync("dantecode-forge --version 2>&1", {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 2000,
+    });
+    const version = result.trim();
+    info.push(`DanteForge binary: ${GREEN}OK${RESET} (${version})`);
+  } catch {
+    warnings.push(
+      `DanteForge binary not found in PATH`,
+    );
+    info.push(`${DIM}This is optional — some features require the binary${RESET}`);
+  }
+
+  // Check 6: Context window utilization
+  const contextUtil = getContextUtilization(
+    state.session.messages.map((m) => ({
+      role: m.role,
+      content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+    })),
+    state.state.model.default.contextWindow,
+  );
+  if (contextUtil.percent > 90) {
+    warnings.push(
+      `Context window is ${contextUtil.percent.toFixed(0)}% full`,
+    );
+    info.push(`Run /compact to free up space`);
+  } else if (contextUtil.percent > 75) {
+    warnings.push(
+      `Context window is ${contextUtil.percent.toFixed(0)}% full (approaching limit)`,
+    );
+  } else {
+    info.push(`Context usage: ${GREEN}OK${RESET} (${contextUtil.percent.toFixed(0)}% used)`);
+  }
+
+  // Format output
+  const lines: string[] = ["", `${BOLD}DanteCode Troubleshoot${RESET}`, ""];
+
+  if (issues.length > 0) {
+    lines.push(`${BOLD}${RED}Issues Found${RESET}`);
+    for (const issue of issues) {
+      lines.push(`  ${RED}✗${RESET} ${issue}`);
+    }
+    lines.push("");
+  }
+
+  if (warnings.length > 0) {
+    lines.push(`${BOLD}${YELLOW}Warnings${RESET}`);
+    for (const warning of warnings) {
+      lines.push(`  ${YELLOW}⚠${RESET} ${warning}`);
+    }
+    lines.push("");
+  }
+
+  if (info.length > 0) {
+    lines.push(`${BOLD}System Info${RESET}`);
+    for (const item of info) {
+      lines.push(`  ${item}`);
+    }
+    lines.push("");
+  }
+
+  if (issues.length === 0 && warnings.length === 0) {
+    lines.push(`${GREEN}All checks passed! No issues detected.${RESET}`);
+    lines.push("");
+  }
+
+  lines.push(`${DIM}For more help, visit: https://github.com/dantericardo88/dantecode${RESET}`);
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // /theme — Switch terminal theme with live preview
 // ----------------------------------------------------------------------------
 
@@ -8342,6 +8511,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Show DanteCode version, features, and health status",
     usage: "/status",
     handler: statusCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "troubleshoot",
+    description: "Diagnose common setup issues (API keys, git, permissions, etc.)",
+    usage: "/troubleshoot",
+    handler: troubleshootCommand,
     tier: 1,
     category: "core",
   },
