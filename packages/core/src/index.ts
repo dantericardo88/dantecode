@@ -1245,3 +1245,8 @@ export type {
   TraceStatus,
   TraceLoggerOptions,
 } from "./trace-logger.js";
+
+// ─── Enterprise Logger ────────────────────────────────────────────────────────
+
+export { EnterpriseLogger, logger } from "./enterprise-logger.js";
+export type { LogLevel, LogContext, LogEntry, LoggerConfig } from "./enterprise-logger.js";
