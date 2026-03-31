@@ -1,0 +1,21 @@
+{
+  "id": "run-15227787-ad9e-4100-a683-4c04e94cc109-1774886744096",
+  "projectRoot": "C:\\Projects\\DanteCode",
+  "sessionId": "15227787-ad9e-4100-a683-4c04e94cc109",
+  "prompt": "What is 2+2?",
+  "workflow": "agent-loop",
+  "status": "completed",
+  "createdAt": "2026-03-30T16:05:44.096Z",
+  "updatedAt": "2026-03-30T16:05:46.109Z",
+  "touchedFiles": [],
+  "evidenceCount": 0,
+  "lastConfirmedStep": "Started execution.",
+  "nextAction": "Run completed.",
+  "resumeHint": {
+    "runId": "run-15227787-ad9e-4100-a683-4c04e94cc109-1774886744096",
+    "summary": "Execution paused before completion.",
+    "lastConfirmedStep": "Started execution.",
+    "nextAction": "Run completed.",
+    "continueCommand": "continue"
+  }
+}

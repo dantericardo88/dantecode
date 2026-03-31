@@ -244,7 +244,9 @@
       "Bash(node count-tests.mjs)",
       "Bash(npx vitest run packages/core/src/github-client.test.ts packages/cli/src/commands/review.test.ts --reporter=verbose)",
       "Bash(npm test --workspace=packages/web-research --workspace=packages/memory-engine --workspace=packages/debug-trail --workspace=packages/evidence-chain)",
-      "WebSearch"
+      "WebSearch",
+      "Skill(autoresearch)",
+      "Skill(autoresearch:*)"
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [
