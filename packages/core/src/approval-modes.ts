@@ -4,7 +4,7 @@ import {
   type ApprovalRule,
 } from "./tool-runtime/approval-gateway.js";
 
-export type CanonicalApprovalMode = "review" | "apply" | "autoforge" | "plan" | "yolo";
+export type CanonicalApprovalMode = "review" | "apply" | "autoforge" | "plan" | "yolo" | "chat";
 export type ApprovalModeInput = CanonicalApprovalMode | "default" | "auto-edit";
 
 const REVIEW_APPROVAL_TOOLS = [
@@ -41,13 +41,15 @@ export function normalizeApprovalMode(mode: string): CanonicalApprovalMode | nul
       return "plan";
     case "yolo":
       return "yolo";
+    case "chat":
+      return "chat";
     default:
       return null;
   }
 }
 
 export function isExecutionApprovalMode(mode: CanonicalApprovalMode): boolean {
-  return mode !== "plan";
+  return mode !== "plan" && mode !== "chat";
 }
 
 /**
@@ -65,6 +67,7 @@ export function getModeToolExclusions(mode: CanonicalApprovalMode): string[] {
   switch (mode) {
     case "plan":
     case "review":
+    case "chat":
       return ["Write", "Edit", "NotebookEdit", "Bash", "GitCommit", "GitPush", "SubAgent"];
     case "apply":
     case "autoforge":
@@ -105,6 +108,20 @@ export function buildApprovalGatewayProfile(mode: ApprovalModeInput): ApprovalGa
         ...DEFAULT_APPROVAL_RULES,
         toolOnlyRule(
           "Plan mode blocks workspace mutations and subagents until the operator approves execution.",
+          PLAN_DENIED_TOOLS,
+          "auto_deny",
+        ),
+      ],
+    };
+  }
+
+  if (normalized === "chat") {
+    return {
+      enabled: true,
+      rules: [
+        ...DEFAULT_APPROVAL_RULES,
+        toolOnlyRule(
+          "Chat mode is conversational only — workspace mutations and subagents are denied.",
           PLAN_DENIED_TOOLS,
           "auto_deny",
         ),

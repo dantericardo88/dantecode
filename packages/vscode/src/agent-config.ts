@@ -59,7 +59,8 @@ export function normalizeAgentMode(mode: string | null | undefined): AgentMode {
     raw === "apply" ||
     raw === "autoforge" ||
     raw === "plan" ||
-    raw === "yolo"
+    raw === "yolo" ||
+    raw === "chat"
   ) {
     return raw;
   }
@@ -90,6 +91,10 @@ export function normalizeAgentConfig(
   };
 
   if (merged.agentMode === "plan") {
+    merged.permissions = { ...merged.permissions, edit: "deny", bash: "deny" };
+  }
+
+  if (merged.agentMode === "chat") {
     merged.permissions = { ...merged.permissions, edit: "deny", bash: "deny" };
   }
 

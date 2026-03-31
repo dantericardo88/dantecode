@@ -655,6 +655,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         "Only report actual tool results. If a task requires more steps, use more tools — do not skip steps by pretending they happened.",
       );
       systemParts.push("");
+    } else if (agentMode === "chat") {
+      systemParts.push("## Mode: CHAT (Conversational)");
+      systemParts.push(
+        "You are in CHAT mode. Answer questions conversationally using read-only tools.",
+      );
+      systemParts.push(
+        "You can use Read, Glob, Grep to explore the codebase, but do NOT write, edit, or execute commands.",
+      );
+      systemParts.push(
+        "Focus on providing helpful explanations, analysis, and guidance rather than making changes.",
+      );
+      systemParts.push("");
     } else {
       systemParts.push("## Mode: APPLY");
       systemParts.push(
@@ -3634,6 +3646,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     .mode-badge.apply { background: var(--vscode-charts-green); color: #fff; }
     .mode-badge.autoforge { background: var(--vscode-charts-purple, #7c5cff); color: #fff; }
     .mode-badge.yolo { background: var(--vscode-charts-orange, #e8912d); color: #fff; }
+    .mode-badge.chat { background: var(--vscode-charts-blue, #0078d4); color: #fff; }
 
     /* ---- Mode Selector (in settings) ---- */
     .mode-selector {
@@ -3833,6 +3846,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             <span class="mode-icon">&#9889;</span>YOLO
             <span class="mode-desc">Full autonomous</span>
           </button>
+          <button class="mode-btn" data-mode="chat">
+            <span class="mode-icon">&#128172;</span>Chat
+            <span class="mode-desc">Conversational only</span>
+          </button>
         </div>
       </div>
 
@@ -3969,8 +3986,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       function applyModeLocks(mode) {
         var isYolo = mode === 'yolo';
         var isPlan = mode === 'plan';
-        permEdit.disabled = isYolo || isPlan;
-        permBash.disabled = isYolo || isPlan;
+        var isChat = mode === 'chat';
+        permEdit.disabled = isYolo || isPlan || isChat;
+        permBash.disabled = isYolo || isPlan || isChat;
         permTools.disabled = isYolo;
       }
 
