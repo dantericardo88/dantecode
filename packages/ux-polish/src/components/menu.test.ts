@@ -65,13 +65,13 @@ describe("Menu", () => {
       },
     ];
 
-    expect(items[0].label).toBe("Option 1");
-    expect(items[0].value).toBe("opt1");
-    expect(items[0].description).toBe("First option");
-    expect(items[0].disabled).toBe(false);
+    expect(items[0]!.label).toBe("Option 1");
+    expect(items[0]!.value).toBe("opt1");
+    expect(items[0]!.description).toBe("First option");
+    expect(items[0]!.disabled).toBe(false);
 
-    expect(items[1].label).toBe("Option 2");
-    expect(items[1].disabled).toBe(true);
+    expect(items[1]!.label).toBe("Option 2");
+    expect(items[1]!.disabled).toBe(true);
   });
 
   it("supports generic value types", () => {
@@ -81,9 +81,9 @@ describe("Menu", () => {
       { label: "Three", value: 3 },
     ];
 
-    expect(items[0].value).toBe(1);
-    expect(items[1].value).toBe(2);
-    expect(items[2].value).toBe(3);
+    expect(items[0]!.value).toBe(1);
+    expect(items[1]!.value).toBe(2);
+    expect(items[2]!.value).toBe(3);
   });
 
   it("supports object values", () => {
@@ -97,8 +97,8 @@ describe("Menu", () => {
       { label: "file2.ts", value: { path: "file2.ts", size: 200 } },
     ];
 
-    expect(items[0].value.path).toBe("file1.ts");
-    expect(items[1].value.size).toBe(200);
+    expect(items[0]!.value.path).toBe("file1.ts");
+    expect(items[1]!.value.size).toBe(200);
   });
 
   it("default options are applied correctly", async () => {
@@ -136,8 +136,8 @@ describe("Menu", () => {
 
     const enabled = items.filter((i) => !i.disabled);
     expect(enabled).toHaveLength(2);
-    expect(enabled[0].value).toBe("e1");
-    expect(enabled[1].value).toBe("e2");
+    expect(enabled[0]!.value).toBe("e1");
+    expect(enabled[1]!.value).toBe("e2");
   });
 
   it("supports items with descriptions", () => {
@@ -154,8 +154,8 @@ describe("Menu", () => {
       },
     ];
 
-    expect(items[0].description).toBe("This is the first option");
-    expect(items[1].description).toBe("This is the second option");
+    expect(items[0]!.description).toBe("This is the first option");
+    expect(items[1]!.description).toBe("This is the second option");
   });
 
   it("search query filtering logic would work (simulated)", () => {
@@ -173,8 +173,8 @@ describe("Menu", () => {
     );
 
     expect(filtered).toHaveLength(2);
-    expect(filtered[0].value).toBe("apple");
-    expect(filtered[1].value).toBe("apricot");
+    expect(filtered[0]!.value).toBe("apple");
+    expect(filtered[1]!.value).toBe("apricot");
   });
 
   it("navigation bounds are respected (simulated)", () => {

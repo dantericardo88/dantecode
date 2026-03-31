@@ -34,7 +34,7 @@ describe("ToastManager", () => {
   });
 
   it("auto-dismisses after duration", async () => {
-    const toast = manager.info("Auto-dismiss test", { duration: 100 });
+    manager.info("Auto-dismiss test", { duration: 100 });
 
     expect(manager.getVisible()).toHaveLength(1);
 
@@ -74,8 +74,9 @@ describe("ToastManager", () => {
     vi.advanceTimersByTime(10000);
 
     // Should still be visible
-    expect(manager.getVisible()).toHaveLength(1);
-    expect(manager.getVisible()[0].id).toBe(toast.id);
+    const visible = manager.getVisible();
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.id).toBe(toast.id);
   });
 
   it("action callbacks fire correctly", () => {
@@ -135,8 +136,9 @@ describe("ToastManager", () => {
 
     const toast = toasts.success("Singleton test");
 
-    expect(toasts.getVisible()).toHaveLength(1);
-    expect(toasts.getVisible()[0].id).toBe(toast.id);
+    const visible = toasts.getVisible();
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.id).toBe(toast.id);
 
     toasts.clear();
     expect(toasts.getVisible()).toHaveLength(0);
@@ -149,11 +151,7 @@ describe("ToastManager", () => {
 
     manager.dismiss(toast.id);
 
-    // Get from internal map (after dismiss)
-    const allToasts = manager.getAll();
-    const dismissedToast = allToasts.find((t) => t.id === toast.id);
-
-    // Toast is removed from map after dismiss, so it won't be in getAll()
+    // Toast is removed from map after dismiss
     // This is expected behavior
     expect(manager.getVisible()).toHaveLength(0);
   });

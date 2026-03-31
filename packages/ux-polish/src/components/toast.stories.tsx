@@ -4,7 +4,7 @@
  * Demonstrates CLI Toast notification system with different levels
  */
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { ToastManager } from "./toast.js";
 import AnsiToHtml from "ansi-to-html";

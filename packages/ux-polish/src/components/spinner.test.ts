@@ -7,7 +7,7 @@ import { Spinner, SPINNERS } from "./spinner.js";
 import { Writable } from "node:stream";
 
 describe("Spinner", () => {
-  let mockStream: Writable;
+  let mockStream: NodeJS.WriteStream;
   let writtenData: string[];
 
   beforeEach(() => {
@@ -18,7 +18,7 @@ describe("Spinner", () => {
         callback();
         return true;
       },
-    });
+    }) as unknown as NodeJS.WriteStream;
 
     // Mock TTY detection
     vi.stubGlobal("process", {

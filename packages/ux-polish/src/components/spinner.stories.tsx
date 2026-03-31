@@ -4,7 +4,7 @@
  * Demonstrates CLI Spinner component with different states and options
  */
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { Spinner, SPINNERS } from "./spinner.js";
 import AnsiToHtml from "ansi-to-html";

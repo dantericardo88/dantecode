@@ -4,7 +4,7 @@
  * Tests for AsyncQueue concurrency control
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { work, AsyncQueue } from "./async-queue.js";
 
 describe("AsyncQueue - functional API", () => {
