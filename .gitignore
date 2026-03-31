@@ -27,3 +27,7 @@ status.txt
 results.tsv
 vitest-error.txt
 .danteforge/oss-repos/
+
+# Playwright & Vitest reports
+playwright-report/
+test-results/

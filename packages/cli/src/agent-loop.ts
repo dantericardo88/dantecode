@@ -1982,8 +1982,8 @@ async function _runAgentLoopCore(
       }
     }
 
-    // Run DanteForge pipeline on touched files
-    if (touchedFiles.length > 0) {
+    // Run DanteForge pipeline on touched files (if enabled)
+    if (touchedFiles.length > 0 && config.state.autoforge.autoRunOnWrite) {
       process.stdout.write(`\n${CYAN}${BOLD}DanteForge Pipeline${RESET}\n`);
 
       for (const filePath of touchedFiles) {

@@ -91,7 +91,10 @@ function cmdApprove(args: string[], projectRoot: string): void {
   const ok = integration.applyReviewItem(id);
 
   if (ok) {
-    logger.info({ command: "skillbook approve", id, projectRoot }, "Review item approved and applied");
+    logger.info(
+      { command: "skillbook approve", id, projectRoot },
+      "Review item approved and applied",
+    );
     console.log(`${GREEN}Approved and applied: ${id}${RESET}`);
     console.log(`${DIM}Skillbook updated. Run 'git commit' to persist.${RESET}`);
   } else {
@@ -153,7 +156,10 @@ function cmdLearnNow(args: string[], projectRoot: string): void {
   const result = integration.applyProposals([proposal], ["pass"]);
 
   if (result.applied > 0) {
-    logger.info({ command: "skillbook learn-now", skillId: proposal.candidateSkill.id, projectRoot }, "Skill added to skillbook");
+    logger.info(
+      { command: "skillbook learn-now", skillId: proposal.candidateSkill.id, projectRoot },
+      "Skill added to skillbook",
+    );
     console.log(`${GREEN}Skill added to DanteSkillbook.${RESET}`);
     console.log(`  Section:  general`);
     console.log(`  Trust:    70%`);

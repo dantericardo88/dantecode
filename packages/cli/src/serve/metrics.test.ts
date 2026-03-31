@@ -21,8 +21,12 @@ describe("MetricsCollector", () => {
 
       const output = collector.export(new Map());
       expect(output).toContain("http_requests_total");
-      expect(output).toMatch(/http_requests_total.*method="POST".*endpoint="\/api\/sessions".*status="201".*1/);
-      expect(output).toMatch(/http_requests_total.*method="GET".*endpoint="\/api\/sessions\/:id".*status="200".*1/);
+      expect(output).toMatch(
+        /http_requests_total.*method="POST".*endpoint="\/api\/sessions".*status="201".*1/,
+      );
+      expect(output).toMatch(
+        /http_requests_total.*method="GET".*endpoint="\/api\/sessions\/:id".*status="200".*1/,
+      );
     });
 
     it("should normalize endpoint paths", () => {

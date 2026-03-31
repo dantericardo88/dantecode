@@ -10,8 +10,8 @@ import type { ModelConfig } from "@dantecode/config-types";
  * Builds a Grok language model provider using xAI's OpenAI-compatible endpoint.
  *
  * Resolves the API key from `config.apiKey`, `XAI_API_KEY`, or `GROK_API_KEY`.
- * Uses the `@ai-sdk/openai` package with `compatibility: "compatible"` mode
- * and the xAI base URL `https://api.x.ai/v1`.
+ * Uses the `@ai-sdk/openai` package with `compatibility: "strict"` mode
+ * to enable usage tracking via stream_options, and the xAI base URL `https://api.x.ai/v1`.
  *
  * @param config - Model configuration specifying modelId and optional apiKey.
  * @returns A configured LanguageModelV1 instance for the specified Grok model.
@@ -31,7 +31,7 @@ export function buildGrokProvider(config: ModelConfig): LanguageModelV1 {
   const provider = createOpenAI({
     apiKey,
     baseURL: "https://api.x.ai/v1",
-    compatibility: "compatible",
+    compatibility: "strict",  // Enable stream_options for usage tracking
     headers: {
       "X-Client": "dantecode/1.0.0",
     },

@@ -53,24 +53,18 @@ export class MCPClientManager {
       transport = new SSEClientTransport(new URL(serverConfig.url!));
     }
 
-    await retryWithBackoff(
-      async () => client.connect(transport),
-      {
-        maxRetries: 3,
-        baseDelayMs: 1000,
-        retryableErrors: RetryableErrors.networkOnly,
-      },
-    );
+    await retryWithBackoff(async () => client.connect(transport), {
+      maxRetries: 3,
+      baseDelayMs: 1000,
+      retryableErrors: RetryableErrors.networkOnly,
+    });
 
     // Discover tools from this server
-    const toolsResult = await retryWithBackoff(
-      async () => client.listTools(),
-      {
-        maxRetries: 2,
-        baseDelayMs: 500,
-        retryableErrors: RetryableErrors.serverAndRateLimit,
-      },
-    );
+    const toolsResult = await retryWithBackoff(async () => client.listTools(), {
+      maxRetries: 2,
+      baseDelayMs: 500,
+      retryableErrors: RetryableErrors.serverAndRateLimit,
+    });
     const tools: MCPToolDefinition[] = (toolsResult.tools ?? []).map((t) => ({
       name: t.name,
       description: t.description ?? "",

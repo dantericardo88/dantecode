@@ -57,9 +57,7 @@ export async function work<T, R>(
   };
 
   // Start workers up to concurrency limit
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () =>
-    executeNext(),
-  );
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => executeNext());
 
   await Promise.all(workers);
 

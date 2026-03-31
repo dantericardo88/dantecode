@@ -247,7 +247,15 @@ function calculateLatencyMetrics(latencies: number[]): LatencyMetrics {
   const count = sorted.length;
 
   if (count === 0) {
-    return { p50: undefined, p95: undefined, p99: undefined, min: undefined, max: undefined, mean: 0, count: 0 };
+    return {
+      p50: undefined,
+      p95: undefined,
+      p99: undefined,
+      min: undefined,
+      max: undefined,
+      mean: 0,
+      count: 0,
+    };
   }
 
   const sum = sorted.reduce((acc, val) => acc + val, 0);
@@ -288,33 +296,53 @@ function printLoadTestReport(results: LoadTestResults): void {
   console.log(`  Throughput:          ${results.throughput.toFixed(2)} req/s`);
 
   console.log("\n⏱️  LATENCY DISTRIBUTION:");
-  console.log(`  Min:                 ${results.latency.min !== undefined ? formatLatency(results.latency.min) : "N/A"}`);
-  console.log(`  P50 (Median):        ${results.latency.p50 !== undefined ? formatLatency(results.latency.p50) : "N/A"}`);
-  console.log(`  P95:                 ${results.latency.p95 !== undefined ? formatLatency(results.latency.p95) : "N/A"}`);
-  console.log(`  P99:                 ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`);
-  console.log(`  Max:                 ${results.latency.max !== undefined ? formatLatency(results.latency.max) : "N/A"}`);
+  console.log(
+    `  Min:                 ${results.latency.min !== undefined ? formatLatency(results.latency.min) : "N/A"}`,
+  );
+  console.log(
+    `  P50 (Median):        ${results.latency.p50 !== undefined ? formatLatency(results.latency.p50) : "N/A"}`,
+  );
+  console.log(
+    `  P95:                 ${results.latency.p95 !== undefined ? formatLatency(results.latency.p95) : "N/A"}`,
+  );
+  console.log(
+    `  P99:                 ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`,
+  );
+  console.log(
+    `  Max:                 ${results.latency.max !== undefined ? formatLatency(results.latency.max) : "N/A"}`,
+  );
   console.log(`  Mean:                ${formatLatency(results.latency.mean)}`);
 
   console.log("\n💾 MEMORY METRICS:");
   console.log(`  Before RSS:          ${formatBytes(results.memoryBefore.rss)}`);
   console.log(`  After RSS:           ${formatBytes(results.memoryAfter.rss)}`);
   console.log(`  Peak RSS:            ${formatBytes(results.memoryPeak.rss)}`);
-  console.log(`  RSS Growth:          ${formatBytes(results.memoryGrowth.rss)} (${results.memoryGrowth.percentRssGrowth.toFixed(2)}%)`);
+  console.log(
+    `  RSS Growth:          ${formatBytes(results.memoryGrowth.rss)} (${results.memoryGrowth.percentRssGrowth.toFixed(2)}%)`,
+  );
 
   console.log("\n🧠 HEAP METRICS:");
   console.log(`  Before Heap:         ${formatBytes(results.memoryBefore.heapUsed)}`);
   console.log(`  After Heap:          ${formatBytes(results.memoryAfter.heapUsed)}`);
   console.log(`  Peak Heap:           ${formatBytes(results.memoryPeak.heapUsed)}`);
-  console.log(`  Heap Growth:         ${formatBytes(results.memoryGrowth.heapUsed)} (${results.memoryGrowth.percentHeapGrowth.toFixed(2)}%)`);
+  console.log(
+    `  Heap Growth:         ${formatBytes(results.memoryGrowth.heapUsed)} (${results.memoryGrowth.percentHeapGrowth.toFixed(2)}%)`,
+  );
 
   console.log("\n✅ SUCCESS CRITERIA:");
   const p99Pass = results.latency.p99 !== undefined && results.latency.p99 < 10000;
   const errorRatePass = results.errorRate < 0.01;
   const memoryLeakPass = results.memoryGrowth.percentRssGrowth < 10;
 
-  console.log(`  P99 Latency < 10s:   ${p99Pass ? "✅ PASS" : "❌ FAIL"} (${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"})`);
-  console.log(`  Error Rate < 1%:     ${errorRatePass ? "✅ PASS" : "❌ FAIL"} (${(results.errorRate * 100).toFixed(2)}%)`);
-  console.log(`  Memory Growth < 10%: ${memoryLeakPass ? "✅ PASS" : "❌ FAIL"} (${results.memoryGrowth.percentRssGrowth.toFixed(2)}%)`);
+  console.log(
+    `  P99 Latency < 10s:   ${p99Pass ? "✅ PASS" : "❌ FAIL"} (${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"})`,
+  );
+  console.log(
+    `  Error Rate < 1%:     ${errorRatePass ? "✅ PASS" : "❌ FAIL"} (${(results.errorRate * 100).toFixed(2)}%)`,
+  );
+  console.log(
+    `  Memory Growth < 10%: ${memoryLeakPass ? "✅ PASS" : "❌ FAIL"} (${results.memoryGrowth.percentRssGrowth.toFixed(2)}%)`,
+  );
 
   console.log("\n" + "=".repeat(80) + "\n");
 }
@@ -356,7 +384,8 @@ async function runSession(
     totalLatency: latencies.reduce((sum, l) => sum + l, 0),
     minLatency: latencies.length > 0 ? Math.min(...latencies) : undefined,
     maxLatency: latencies.length > 0 ? Math.max(...latencies) : undefined,
-    avgLatency: latencies.length > 0 ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length : 0,
+    avgLatency:
+      latencies.length > 0 ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length : 0,
   };
 }
 
@@ -537,14 +566,20 @@ describe("Load Testing Framework", () => {
       }
 
       const memoryAfter = captureMemory();
-      const avgLatency = latencies.length > 0 ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length : 0;
+      const avgLatency =
+        latencies.length > 0 ? latencies.reduce((sum, l) => sum + l, 0) / latencies.length : 0;
       const sortedLatencies = [...latencies].sort((a, b) => a - b);
-      const p95Latency = sortedLatencies.length > 0 ? sortedLatencies[Math.floor(sortedLatencies.length * 0.95)] : undefined;
+      const p95Latency =
+        sortedLatencies.length > 0
+          ? sortedLatencies[Math.floor(sortedLatencies.length * 0.95)]
+          : undefined;
 
       console.log(`\n📊 Large Context Test:`);
       console.log(`  Messages:            ${messageCount}`);
       console.log(`  Avg Latency:         ${formatLatency(avgLatency)}`);
-      console.log(`  P95 Latency:         ${p95Latency !== undefined ? formatLatency(p95Latency) : "N/A"}`);
+      console.log(
+        `  P95 Latency:         ${p95Latency !== undefined ? formatLatency(p95Latency) : "N/A"}`,
+      );
       console.log(`  Memory Growth:       ${formatBytes(memoryAfter.rss - memoryBefore.rss)}`);
 
       expect(session.messages.length).toBeGreaterThan(0);
@@ -598,14 +633,17 @@ describe("Load Testing Framework", () => {
       // Calculate RSS growth trend
       const firstSnapshot = memorySnapshots[0] ?? 0;
       const lastSnapshot = memorySnapshots[measurementRounds - 1] ?? 0;
-      const growthPercent = firstSnapshot > 0 ? ((lastSnapshot - firstSnapshot) / firstSnapshot) * 100 : 0;
+      const growthPercent =
+        firstSnapshot > 0 ? ((lastSnapshot - firstSnapshot) / firstSnapshot) * 100 : 0;
 
       console.log(`\n📊 Memory Leak Detection:`);
       console.log(`  Warmup Rounds:       ${warmupRounds}`);
       console.log(`  Measurement Rounds:  ${measurementRounds}`);
       console.log(`  First RSS:           ${formatBytes(firstSnapshot)}`);
       console.log(`  Last RSS:            ${formatBytes(lastSnapshot)}`);
-      console.log(`  Growth:              ${formatBytes(lastSnapshot - firstSnapshot)} (${growthPercent.toFixed(2)}%)`);
+      console.log(
+        `  Growth:              ${formatBytes(lastSnapshot - firstSnapshot)} (${growthPercent.toFixed(2)}%)`,
+      );
 
       // RSS should stabilize (< 10% growth after warmup)
       expect(growthPercent).toBeLessThan(10);
@@ -627,7 +665,9 @@ describe("Load Testing Framework", () => {
       console.log(`\n📊 Extreme Load Test:`);
       console.log(`  Total Requests:      ${results.totalRequests}`);
       console.log(`  Error Rate:          ${(results.errorRate * 100).toFixed(2)}%`);
-      console.log(`  P99 Latency:         ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`);
+      console.log(
+        `  P99 Latency:         ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`,
+      );
 
       // System should not crash, even if error rate is higher
       expect(results.totalRequests).toBe(2500);
@@ -655,8 +695,12 @@ describe("Load Testing Framework", () => {
 
       console.log(`\n📊 Optimal Concurrency (50 sessions):`);
       console.log(`  Throughput:          ${results.throughput.toFixed(2)} req/s`);
-      console.log(`  P50 Latency:         ${results.latency.p50 !== undefined ? formatLatency(results.latency.p50) : "N/A"}`);
-      console.log(`  P99 Latency:         ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`);
+      console.log(
+        `  P50 Latency:         ${results.latency.p50 !== undefined ? formatLatency(results.latency.p50) : "N/A"}`,
+      );
+      console.log(
+        `  P99 Latency:         ${results.latency.p99 !== undefined ? formatLatency(results.latency.p99) : "N/A"}`,
+      );
 
       expect(results.throughput).toBeGreaterThan(1); // At least 1 req/s
       expect(results.latency.p99).toBeDefined();

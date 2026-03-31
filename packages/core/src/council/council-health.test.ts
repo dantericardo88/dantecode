@@ -39,7 +39,7 @@ describe("Council Health Checks", () => {
 
       // Counts should sum to total
       expect(health.healthyCount + health.degradedCount + health.unhealthyCount).toBe(
-        health.totalChecks
+        health.totalChecks,
       );
     });
 

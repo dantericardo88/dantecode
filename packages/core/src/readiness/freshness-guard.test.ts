@@ -311,7 +311,12 @@ describe("freshness-guard", () => {
       expect(loggerWarnSpy).toHaveBeenCalled();
       const calls = loggerWarnSpy.mock.calls;
       expect(calls.some((call) => call[1]?.includes("STALE"))).toBe(true);
-      expect(calls.some((call) => call[1]?.includes("stale.json") || JSON.stringify(call[0]).includes("stale.json"))).toBe(true);
+      expect(
+        calls.some(
+          (call) =>
+            call[1]?.includes("stale.json") || JSON.stringify(call[0]).includes("stale.json"),
+        ),
+      ).toBe(true);
     });
 
     it("should handle plural artifacts", () => {
@@ -381,7 +386,7 @@ describe("freshness-guard", () => {
       warnStaleArtifacts(result);
 
       const calls = loggerWarnSpy.mock.calls;
-      const allCallsText = calls.map(c => JSON.stringify(c)).join(" ");
+      const allCallsText = calls.map((c) => JSON.stringify(c)).join(" ");
       expect(allCallsText).toContain("MISSING");
       expect(allCallsText).toContain("PARSE-ERROR");
       expect(allCallsText).toContain("UNKNOWN");
@@ -433,7 +438,9 @@ describe("freshness-guard", () => {
 
       expect(result).toBe(false);
       expect(loggerErrorSpy).toHaveBeenCalled();
-      expect(loggerErrorSpy.mock.calls[0]?.[1]).toContain("Stale readiness artifacts detected in CI/strict mode");
+      expect(loggerErrorSpy.mock.calls[0]?.[1]).toContain(
+        "Stale readiness artifacts detected in CI/strict mode",
+      );
     });
 
     it("should return false in strict mode when stale artifacts detected", () => {

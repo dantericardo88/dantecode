@@ -57,7 +57,10 @@ export async function runSelfUpdateCommand(cwd: string, options: SelfUpdateOptio
         printPlan(plan);
         return;
       case "vscode_extension_host":
-        logger.info({ command: "self-update", installKind: "vscode_extension_host" }, "VSCode extension self-update skipped");
+        logger.info(
+          { command: "self-update", installKind: "vscode_extension_host" },
+          "VSCode extension self-update skipped",
+        );
         console.log("[self-update] Use the VS Code extension command surface to update DanteCode.");
         return;
     }

@@ -293,7 +293,10 @@ async function cmdRun(args: string[], projectRoot: string): Promise<void> {
       console.log(`${DIM}Running with LLM analysis (use --offline for structural only).${RESET}\n`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn({ command: "fearset run", error: err, context }, "LLM setup failed, falling back to offline");
+      logger.warn(
+        { command: "fearset run", error: err, context },
+        "LLM setup failed, falling back to offline",
+      );
       console.warn(
         `${YELLOW}LLM setup failed (${msg}) — falling back to structural-only mode.${RESET}\n`,
       );

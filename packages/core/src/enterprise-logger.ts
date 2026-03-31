@@ -119,7 +119,7 @@ export class EnterpriseLogger {
       console.log(
         `${color}[${entry.level.toUpperCase()}]${reset} ${entry.timestamp} ${entry.message}`,
         entry.context ? JSON.stringify(entry.context, null, 2) : "",
-        entry.error ? `\nError: ${entry.error.message}\n${entry.error.stack || ""}` : ""
+        entry.error ? `\nError: ${entry.error.message}\n${entry.error.stack || ""}` : "",
       );
     } else {
       // JSON format for production (machine-readable)

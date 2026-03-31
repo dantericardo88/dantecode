@@ -258,10 +258,7 @@ export class TraceLogger {
     this.completedSpans.push(span);
 
     if (this.options.logToConsole) {
-      logger.debug(
-        { spanId, name: span.name, status: span.status, durationMs },
-        "TRACE: End span"
-      );
+      logger.debug({ spanId, name: span.name, status: span.status, durationMs }, "TRACE: End span");
     }
   }
 
@@ -333,7 +330,7 @@ export class TraceLogger {
     if (this.options.logToConsole) {
       logger.debug(
         { spanId, point, selected, confidence, traceId: span.traceId },
-        "TRACE: Decision"
+        "TRACE: Decision",
       );
     }
   }

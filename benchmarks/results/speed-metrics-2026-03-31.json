@@ -1,0 +1,320 @@
+{
+  "timestamp": "2026-03-31T14:06:30.133Z",
+  "iterations": 5,
+  "totalTasks": 5,
+  "measurements": [
+    {
+      "taskId": "simple-function",
+      "taskName": "Simple Function",
+      "category": "generation",
+      "iterations": 5,
+      "successfulRuns": 5,
+      "failedRuns": 0,
+      "p50TotalMs": 347.76039999999995,
+      "p95TotalMs": 368.57750000000004,
+      "p99TotalMs": 368.57750000000004,
+      "minTotalMs": 342.2795000000001,
+      "maxTotalMs": 368.57750000000004,
+      "avgTotalMs": 352.82654,
+      "p50FirstTokenMs": 333.2073999999999,
+      "p95FirstTokenMs": 352.4472,
+      "p99FirstTokenMs": 352.4472,
+      "minFirstTokenMs": 328.20870000000014,
+      "maxFirstTokenMs": 352.4472,
+      "avgFirstTokenMs": 338.13733999999994,
+      "rawMeasurements": [
+        {
+          "taskId": "simple-function",
+          "success": true,
+          "timeToFirstTokenMs": 352.4472,
+          "totalTimeMs": 368.57750000000004,
+          "outputLength": 278,
+          "error": null
+        },
+        {
+          "taskId": "simple-function",
+          "success": true,
+          "timeToFirstTokenMs": 332.2527999999999,
+          "totalTimeMs": 347.76039999999995,
+          "outputLength": 278,
+          "error": null
+        },
+        {
+          "taskId": "simple-function",
+          "success": true,
+          "timeToFirstTokenMs": 333.2073999999999,
+          "totalTimeMs": 347.05859999999996,
+          "outputLength": 278,
+          "error": null
+        },
+        {
+          "taskId": "simple-function",
+          "success": true,
+          "timeToFirstTokenMs": 328.20870000000014,
+          "totalTimeMs": 342.2795000000001,
+          "outputLength": 278,
+          "error": null
+        },
+        {
+          "taskId": "simple-function",
+          "success": true,
+          "timeToFirstTokenMs": 344.5705999999998,
+          "totalTimeMs": 358.45669999999996,
+          "outputLength": 278,
+          "error": null
+        }
+      ]
+    },
+    {
+      "taskId": "bug-fix",
+      "taskName": "Bug Fix",
+      "category": "fix",
+      "iterations": 5,
+      "successfulRuns": 5,
+      "failedRuns": 0,
+      "p50TotalMs": 350.09410000000025,
+      "p95TotalMs": 361.11940000000004,
+      "p99TotalMs": 361.11940000000004,
+      "minTotalMs": 346.1719000000003,
+      "maxTotalMs": 361.11940000000004,
+      "avgTotalMs": 352.29278000000016,
+      "p50FirstTokenMs": 333.1559,
+      "p95FirstTokenMs": 343.8870999999999,
+      "p99FirstTokenMs": 343.8870999999999,
+      "minFirstTokenMs": 332.3755000000001,
+      "maxFirstTokenMs": 343.8870999999999,
+      "avgFirstTokenMs": 336.57948,
+      "rawMeasurements": [
+        {
+          "taskId": "bug-fix",
+          "success": true,
+          "timeToFirstTokenMs": 333.1559,
+          "totalTimeMs": 349.0649000000001,
+          "outputLength": 317,
+          "error": null
+        },
+        {
+          "taskId": "bug-fix",
+          "success": true,
+          "timeToFirstTokenMs": 332.61360000000013,
+          "totalTimeMs": 350.09410000000025,
+          "outputLength": 317,
+          "error": null
+        },
+        {
+          "taskId": "bug-fix",
+          "success": true,
+          "timeToFirstTokenMs": 332.3755000000001,
+          "totalTimeMs": 346.1719000000003,
+          "outputLength": 317,
+          "error": null
+        },
+        {
+          "taskId": "bug-fix",
+          "success": true,
+          "timeToFirstTokenMs": 343.8870999999999,
+          "totalTimeMs": 361.11940000000004,
+          "outputLength": 317,
+          "error": null
+        },
+        {
+          "taskId": "bug-fix",
+          "success": true,
+          "timeToFirstTokenMs": 340.86529999999993,
+          "totalTimeMs": 355.0136000000002,
+          "outputLength": 317,
+          "error": null
+        }
+      ]
+    },
+    {
+      "taskId": "test-gen",
+      "taskName": "Test Generation",
+      "category": "generation",
+      "iterations": 5,
+      "successfulRuns": 5,
+      "failedRuns": 0,
+      "p50TotalMs": 344.6085000000003,
+      "p95TotalMs": 357.3577000000005,
+      "p99TotalMs": 357.3577000000005,
+      "minTotalMs": 343.9636999999998,
+      "maxTotalMs": 357.3577000000005,
+      "avgTotalMs": 348.8780200000002,
+      "p50FirstTokenMs": 331.04129999999986,
+      "p95FirstTokenMs": 339.3718000000008,
+      "p99FirstTokenMs": 339.3718000000008,
+      "minFirstTokenMs": 329.6038999999996,
+      "maxFirstTokenMs": 339.3718000000008,
+      "avgFirstTokenMs": 333.5668400000001,
+      "rawMeasurements": [
+        {
+          "taskId": "test-gen",
+          "success": true,
+          "timeToFirstTokenMs": 329.6038999999996,
+          "totalTimeMs": 343.9636999999998,
+          "outputLength": 272,
+          "error": null
+        },
+        {
+          "taskId": "test-gen",
+          "success": true,
+          "timeToFirstTokenMs": 330.8638000000001,
+          "totalTimeMs": 344.3607000000002,
+          "outputLength": 272,
+          "error": null
+        },
+        {
+          "taskId": "test-gen",
+          "success": true,
+          "timeToFirstTokenMs": 336.95340000000033,
+          "totalTimeMs": 357.3577000000005,
+          "outputLength": 272,
+          "error": null
+        },
+        {
+          "taskId": "test-gen",
+          "success": true,
+          "timeToFirstTokenMs": 339.3718000000008,
+          "totalTimeMs": 354.09950000000026,
+          "outputLength": 272,
+          "error": null
+        },
+        {
+          "taskId": "test-gen",
+          "success": true,
+          "timeToFirstTokenMs": 331.04129999999986,
+          "totalTimeMs": 344.6085000000003,
+          "outputLength": 272,
+          "error": null
+        }
+      ]
+    },
+    {
+      "taskId": "refactor",
+      "taskName": "Refactoring",
+      "category": "refactor",
+      "iterations": 5,
+      "successfulRuns": 5,
+      "failedRuns": 0,
+      "p50TotalMs": 342.28899999999976,
+      "p95TotalMs": 351.83290000000034,
+      "p99TotalMs": 351.83290000000034,
+      "minTotalMs": 337.59380000000056,
+      "maxTotalMs": 351.83290000000034,
+      "avgTotalMs": 344.59050000000025,
+      "p50FirstTokenMs": 328.59189999999944,
+      "p95FirstTokenMs": 337.8751000000002,
+      "p99FirstTokenMs": 337.8751000000002,
+      "minFirstTokenMs": 323.7444000000005,
+      "maxFirstTokenMs": 337.8751000000002,
+      "avgFirstTokenMs": 330.0178200000002,
+      "rawMeasurements": [
+        {
+          "taskId": "refactor",
+          "success": true,
+          "timeToFirstTokenMs": 337.8751000000002,
+          "totalTimeMs": 351.83290000000034,
+          "outputLength": 342,
+          "error": null
+        },
+        {
+          "taskId": "refactor",
+          "success": true,
+          "timeToFirstTokenMs": 323.7444000000005,
+          "totalTimeMs": 337.59380000000056,
+          "outputLength": 342,
+          "error": null
+        },
+        {
+          "taskId": "refactor",
+          "success": true,
+          "timeToFirstTokenMs": 328.59189999999944,
+          "totalTimeMs": 342.28899999999976,
+          "outputLength": 342,
+          "error": null
+        },
+        {
+          "taskId": "refactor",
+          "success": true,
+          "timeToFirstTokenMs": 334.09750000000076,
+          "totalTimeMs": 349.08510000000024,
+          "outputLength": 342,
+          "error": null
+        },
+        {
+          "taskId": "refactor",
+          "success": true,
+          "timeToFirstTokenMs": 325.78020000000015,
+          "totalTimeMs": 342.15170000000035,
+          "outputLength": 342,
+          "error": null
+        }
+      ]
+    },
+    {
+      "taskId": "explain",
+      "taskName": "Code Explanation",
+      "category": "explain",
+      "iterations": 5,
+      "successfulRuns": 5,
+      "failedRuns": 0,
+      "p50TotalMs": 348.33349999999973,
+      "p95TotalMs": 355.0653000000002,
+      "p99TotalMs": 355.0653000000002,
+      "minTotalMs": 338.3591000000006,
+      "maxTotalMs": 355.0653000000002,
+      "avgTotalMs": 346.7124200000002,
+      "p50FirstTokenMs": 331.72279999999955,
+      "p95FirstTokenMs": 339.4515999999994,
+      "p99FirstTokenMs": 339.4515999999994,
+      "minFirstTokenMs": 324.64230000000043,
+      "maxFirstTokenMs": 339.4515999999994,
+      "avgFirstTokenMs": 332.0891,
+      "rawMeasurements": [
+        {
+          "taskId": "explain",
+          "success": true,
+          "timeToFirstTokenMs": 331.72279999999955,
+          "totalTimeMs": 348.33349999999973,
+          "outputLength": 311,
+          "error": null
+        },
+        {
+          "taskId": "explain",
+          "success": true,
+          "timeToFirstTokenMs": 339.4515999999994,
+          "totalTimeMs": 355.0653000000002,
+          "outputLength": 311,
+          "error": null
+        },
+        {
+          "taskId": "explain",
+          "success": true,
+          "timeToFirstTokenMs": 329.52130000000034,
+          "totalTimeMs": 343.39350000000013,
+          "outputLength": 311,
+          "error": null
+        },
+        {
+          "taskId": "explain",
+          "success": true,
+          "timeToFirstTokenMs": 324.64230000000043,
+          "totalTimeMs": 338.3591000000006,
+          "outputLength": 311,
+          "error": null
+        },
+        {
+          "taskId": "explain",
+          "success": true,
+          "timeToFirstTokenMs": 335.1075000000001,
+          "totalTimeMs": 348.41070000000036,
+          "outputLength": 311,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "overallAvgP50Ms": 346.6171,
+  "overallAvgP95Ms": 358.79056000000026,
+  "overallAvgFirstTokenMs": 334.078116
+}

@@ -147,7 +147,7 @@ export class FleetBudget {
           existingCost: existing.cost,
           newCost: costUsd,
         },
-        "FleetBudget cumulative regression detected"
+        "FleetBudget cumulative regression detected",
       );
     }
 

@@ -56,6 +56,7 @@ const AutoforgeConfigSchema = z.object({
   gstackCommands: z.array(GStackCommandSchema),
   lessonInjectionEnabled: z.boolean(),
   abortOnSecurityViolation: z.boolean(),
+  autoRunOnWrite: z.boolean(),
 });
 
 const GitConfigSchema = z.object({
@@ -64,6 +65,7 @@ const GitConfigSchema = z.object({
   worktreeEnabled: z.boolean(),
   worktreeBase: z.string(),
   signCommits: z.boolean(),
+  dirtyCommitBeforeEdit: z.boolean(),
 });
 
 const SandboxConfigSchema = z.object({
@@ -103,6 +105,11 @@ const LessonsConfigSchema = z.object({
   maxPerProject: z.number().int().positive(),
   autoInject: z.boolean(),
   minSeverity: z.enum(["info", "warning", "error", "critical"]),
+});
+
+const AutonomyConfigSchema = z.object({
+  metaReasoningEnabled: z.boolean(),
+  metaReasoningInterval: z.number().int().positive(),
 });
 
 const ProjectConfigSchema = z.object({
@@ -146,6 +153,7 @@ export const DanteCodeStateSchema = z.object({
   audit: AuditConfigSchema,
   sessionHistory: z.array(SessionHistoryEntrySchema),
   lessons: LessonsConfigSchema,
+  autonomy: AutonomyConfigSchema,
   project: ProjectConfigSchema,
 });
 
@@ -339,13 +347,15 @@ export async function initializeState(
       gstackCommands,
       lessonInjectionEnabled: true,
       abortOnSecurityViolation: true,
+      autoRunOnWrite: false, // Disable auto-verification by default
     },
     git: {
-      autoCommit: true,
+      autoCommit: false, // Disable auto-commit by default
       commitPrefix: "dantecode:",
       worktreeEnabled: true,
       worktreeBase: ".dantecode/worktrees",
       signCommits: false,
+      dirtyCommitBeforeEdit: false, // Disable auto-snapshots by default
     },
     sandbox: {
       enabled: true,
@@ -381,6 +391,10 @@ export async function initializeState(
       maxPerProject: 500,
       autoInject: true,
       minSeverity: "warning",
+    },
+    autonomy: {
+      metaReasoningEnabled: false, // Disable autonomous meta-reasoning by default
+      metaReasoningInterval: 15,
     },
     project: {
       name: "",

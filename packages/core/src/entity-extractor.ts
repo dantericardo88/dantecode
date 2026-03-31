@@ -68,7 +68,10 @@ ${text}
         category: (parsed.category as ExtractionResult["category"]) ?? "context",
       };
     } catch (err) {
-      logger.warn({ error: err, textLength: text.length }, "Entity extractor failed, falling back to heuristics");
+      logger.warn(
+        { error: err, textLength: text.length },
+        "Entity extractor failed, falling back to heuristics",
+      );
       return {
         summary: text.slice(0, 200) + (text.length > 200 ? "..." : ""),
         entities: [this.extractHeuristicTag(text)],

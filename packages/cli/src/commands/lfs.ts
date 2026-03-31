@@ -36,7 +36,12 @@ export async function cmdLfsStatus(projectRoot: string): Promise<void> {
   const status = getLfsStatus(projectRoot);
 
   logger.info(
-    { command: "lfs status", projectRoot, installed: status.installed, initialized: status.initialized },
+    {
+      command: "lfs status",
+      projectRoot,
+      installed: status.installed,
+      initialized: status.initialized,
+    },
     "Checking LFS status",
   );
 
@@ -90,7 +95,10 @@ export async function cmdLfsInit(projectRoot: string): Promise<void> {
     logger.info({ command: "lfs init", projectRoot }, "Git LFS initialized successfully");
     console.log(`${GREEN}✓ ${result.message}${RESET}`);
   } else {
-    logger.error({ command: "lfs init", projectRoot, message: result.message }, "Failed to initialize Git LFS");
+    logger.error(
+      { command: "lfs init", projectRoot, message: result.message },
+      "Failed to initialize Git LFS",
+    );
     console.error(`${RED}✗ ${result.message}${RESET}`);
     process.exit(1);
   }
@@ -115,7 +123,10 @@ export async function cmdLfsTrack(
     }
 
     const patterns = COMMON_LFS_PATTERNS[category];
-    logger.info({ command: "lfs track", category, patternCount: patterns.length }, "Tracking common patterns");
+    logger.info(
+      { command: "lfs track", category, patternCount: patterns.length },
+      "Tracking common patterns",
+    );
     console.log(`${CYAN}Tracking ${patterns.length} ${category} patterns...${RESET}\n`);
 
     let succeeded = 0;
@@ -125,12 +136,18 @@ export async function cmdLfsTrack(
         console.log(`${GREEN}✓${RESET} ${p}`);
         succeeded++;
       } else {
-        logger.warn({ command: "lfs track", pattern: p, message: result.message }, "Failed to track pattern");
+        logger.warn(
+          { command: "lfs track", pattern: p, message: result.message },
+          "Failed to track pattern",
+        );
         console.log(`${RED}✗${RESET} ${p}: ${result.message}`);
       }
     }
 
-    logger.info({ command: "lfs track", category, succeeded, total: patterns.length }, "Common patterns tracking completed");
+    logger.info(
+      { command: "lfs track", category, succeeded, total: patterns.length },
+      "Common patterns tracking completed",
+    );
     console.log(`\n${GREEN}Tracked ${succeeded}/${patterns.length} patterns${RESET}`);
     return;
   }

@@ -155,7 +155,7 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
       staleCount: staleArtifacts.length,
       currentCommit: result.currentCommit.slice(0, 7),
     },
-    `${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE`
+    `${staleArtifacts.length} readiness artifact${staleArtifacts.length === 1 ? "" : "s"} STALE`,
   );
 
   for (const artifact of staleArtifacts) {
@@ -174,13 +174,13 @@ export function warnStaleArtifacts(result: FreshnessCheckResult): void {
         commit: commitDisplay,
         staleDuration: artifact.staleDuration,
       },
-      `Stale artifact: ${artifact.name}`
+      `Stale artifact: ${artifact.name}`,
     );
   }
 
   logger.warn(
     { currentCommit: result.currentCommit.slice(0, 7) },
-    "Action required: npm run generate-readiness"
+    "Action required: npm run generate-readiness",
   );
 }
 
@@ -200,7 +200,7 @@ export function enforceFreshnessInCI(
   if (!result.allFresh && (options.ci || options.strict)) {
     logger.error(
       { staleCount: result.staleCount, ci: options.ci, strict: options.strict },
-      "Stale readiness artifacts detected in CI/strict mode"
+      "Stale readiness artifacts detected in CI/strict mode",
     );
     return false;
   }

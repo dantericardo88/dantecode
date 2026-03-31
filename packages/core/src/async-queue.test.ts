@@ -129,11 +129,7 @@ describe("AsyncQueue - class API", () => {
   });
 
   it("workFns() method processes functions", async () => {
-    const fns = [
-      async () => 1,
-      async () => 2,
-      async () => 3,
-    ];
+    const fns = [async () => 1, async () => 2, async () => 3];
     const results = await queue.workFns(fns, 2);
     expect(results).toEqual([1, 2, 3]);
   });

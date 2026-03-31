@@ -281,6 +281,7 @@ export interface AutoforgeConfig {
   gstackCommands: GStackCommand[];
   lessonInjectionEnabled: boolean;
   abortOnSecurityViolation: boolean;
+  autoRunOnWrite: boolean; // Controls whether DanteForge runs automatically after Write/Edit
 }
 
 /** Extended autoforge config for Blade v1.2. */
@@ -661,6 +662,7 @@ export interface GitConfig {
   worktreeEnabled: boolean;
   worktreeBase: string;
   signCommits: boolean;
+  dirtyCommitBeforeEdit: boolean; // Controls auto-commits before Write/Edit operations
 }
 
 /** Sandbox-related configuration within the DanteCode state. */
@@ -728,6 +730,12 @@ export interface SessionHistoryEntry {
   summary?: string;
 }
 
+/** Autonomy engine configuration for meta-reasoning and goal management. */
+export interface AutonomyConfig {
+  metaReasoningEnabled: boolean; // Controls automatic meta-reasoning
+  metaReasoningInterval: number;  // Steps between meta-reasoning runs (default: 15)
+}
+
 /** Complete DanteCode state object persisted as STATE.yaml. */
 export interface DanteCodeState {
   version: string;
@@ -748,6 +756,7 @@ export interface DanteCodeState {
   audit: AuditConfig;
   sessionHistory: SessionHistoryEntry[];
   lessons: LessonsConfig;
+  autonomy: AutonomyConfig;
   project: ProjectConfig;
   progressiveDisclosure: {
     unlocked: boolean;

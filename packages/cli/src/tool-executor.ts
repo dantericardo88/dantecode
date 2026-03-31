@@ -458,7 +458,11 @@ export async function executeToolBatch(
 
     // Dirty-commit-before-edit (aider pattern): if the agent is about to edit
     // a file that has uncommitted changes, commit those first so /undo works cleanly
-    if (config.enableGit && (toolCall.name === "Write" || toolCall.name === "Edit")) {
+    if (
+      config.enableGit &&
+      config.state.git.dirtyCommitBeforeEdit &&
+      (toolCall.name === "Write" || toolCall.name === "Edit")
+    ) {
       try {
         const targetPath = toolCall.input["file_path"] as string | undefined;
         if (targetPath) {

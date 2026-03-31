@@ -175,10 +175,7 @@ export const RetryableErrors = {
     if (RetryableErrors.networkOnly(error)) return true;
     if (typeof error !== "object" || error === null) return false;
     const err = error as any;
-    return (
-      (typeof err.status === "number" && err.status >= 500) ||
-      err.statusCode >= 500
-    );
+    return (typeof err.status === "number" && err.status >= 500) || err.statusCode >= 500;
   },
 
   /** Retry on rate limit errors (429) */

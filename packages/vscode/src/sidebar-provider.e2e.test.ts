@@ -189,13 +189,15 @@ describe("Sidebar Provider E2E: Execution Loop Fix", () => {
 
       // Test case 3: Question + plan response = NO nudge (question guard wins)
       const questionButPlan = "how would you fix the bug?";
-      const planResponse = "I will read the file first, then update it, and finally run the tests to ensure everything works correctly.";
+      const planResponse =
+        "I will read the file first, then update it, and finally run the tests to ensure everything works correctly.";
 
       expect(isQuestionPrompt(questionButPlan)).toBe(true);
       expect(responseNeedsToolExecutionNudge(planResponse)).toBe(true);
 
       // Question guard prevents nudge even though response looks like plan
-      const questionGuardWins = !isQuestionPrompt(questionButPlan) && responseNeedsToolExecutionNudge(planResponse);
+      const questionGuardWins =
+        !isQuestionPrompt(questionButPlan) && responseNeedsToolExecutionNudge(planResponse);
       expect(questionGuardWins).toBe(false);
     });
   });

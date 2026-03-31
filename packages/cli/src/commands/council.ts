@@ -316,7 +316,8 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     worktreeHooks: {
       createWorktree,
       removeWorktree,
-      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+      mergeWorktree: (dir: string, branch: string, root: string) =>
+        mergeWorktree(dir, branch, root),
     },
   });
 
@@ -362,7 +363,11 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
       try {
-        execFileSync("git", ["worktree", "prune"], { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+        execFileSync("git", ["worktree", "prune"], {
+          cwd: projectRoot,
+          stdio: "pipe",
+          timeout: 10_000,
+        });
       } catch {
         /* non-fatal */
       }
@@ -688,7 +693,8 @@ async function cmdMerge(args: string[], projectRoot: string): Promise<void> {
     worktreeHooks: {
       createWorktree,
       removeWorktree,
-      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+      mergeWorktree: (dir: string, branch: string, root: string) =>
+        mergeWorktree(dir, branch, root),
     },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[merge] ${message}${RESET}`));
@@ -891,7 +897,8 @@ async function cmdResume(args: string[], projectRoot: string): Promise<void> {
     worktreeHooks: {
       createWorktree,
       removeWorktree,
-      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+      mergeWorktree: (dir: string, branch: string, root: string) =>
+        mergeWorktree(dir, branch, root),
     },
   });
   orchestrator.on("error", ({ message }) => console.error(`${RED}[resume] ${message}${RESET}`));
@@ -1084,7 +1091,8 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     worktreeHooks: {
       createWorktree,
       removeWorktree,
-      mergeWorktree: (dir: string, branch: string, root: string) => mergeWorktree(dir, branch, root),
+      mergeWorktree: (dir: string, branch: string, root: string) =>
+        mergeWorktree(dir, branch, root),
     },
   });
 
@@ -1126,7 +1134,11 @@ async function cmdFleet(args: string[], projectRoot: string): Promise<void> {
     } catch (wtErr: unknown) {
       const wtMsg = wtErr instanceof Error ? wtErr.message : String(wtErr);
       try {
-        execFileSync("git", ["worktree", "prune"], { cwd: projectRoot, stdio: "pipe", timeout: 10_000 });
+        execFileSync("git", ["worktree", "prune"], {
+          cwd: projectRoot,
+          stdio: "pipe",
+          timeout: 10_000,
+        });
       } catch {
         /* non-fatal */
       }

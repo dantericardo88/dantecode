@@ -168,9 +168,7 @@ describe("Menu", () => {
 
     // Simulate search for "ap"
     const query = "ap";
-    const filtered = items.filter((item) =>
-      item.label.toLowerCase().includes(query.toLowerCase())
-    );
+    const filtered = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
 
     expect(filtered).toHaveLength(2);
     expect(filtered[0]!.value).toBe("apple");

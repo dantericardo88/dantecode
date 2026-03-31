@@ -29,11 +29,7 @@ export class TraceRecorder {
    * @param parentSpanId - Optional parent span ID for nested spans
    * @returns Span object with unique ID
    */
-  startSpan(
-    name: string,
-    attributes: SpanAttributes = {},
-    parentSpanId?: string,
-  ): Span {
+  startSpan(name: string, attributes: SpanAttributes = {}, parentSpanId?: string): Span {
     const spanId = randomUUID();
     const startTime = Date.now();
 
@@ -99,9 +95,7 @@ export class TraceRecorder {
     if (traceId) {
       const trace = this.traces.get(traceId);
       if (trace) {
-        const hasActiveSpans = trace.spans.some((s) =>
-          this.activeSpans.has(s.id),
-        );
+        const hasActiveSpans = trace.spans.some((s) => this.activeSpans.has(s.id));
         if (!hasActiveSpans) {
           trace.endTime = endTime;
           trace.duration = endTime - trace.startTime;

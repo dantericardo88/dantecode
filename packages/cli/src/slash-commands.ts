@@ -8037,7 +8037,8 @@ async function setupCommand(args: string, state: ReplState): Promise<string> {
         maxTokens: 8192,
         temperature: 0.1,
         contextWindow: selectedModel.contextWindow,
-        supportsVision: selectedModel.provider === "anthropic" || selectedModel.provider === "openai",
+        supportsVision:
+          selectedModel.provider === "anthropic" || selectedModel.provider === "openai",
         supportsToolCalls: true,
       };
     }
@@ -8127,7 +8128,9 @@ async function setupCommand(args: string, state: ReplState): Promise<string> {
     printHeader("Setup Complete");
     process.stdout.write(`\n${BOLD}Configuration Summary:${RESET}\n`);
     if (selectedModel) {
-      process.stdout.write(`  Model:       ${BOLD}${selectedModel.provider}/${selectedModel.modelId}${RESET}\n`);
+      process.stdout.write(
+        `  Model:       ${BOLD}${selectedModel.provider}/${selectedModel.modelId}${RESET}\n`,
+      );
     }
     process.stdout.write(
       `  DanteForge:  ${enableAutoforge ? `${GREEN}enabled${RESET}` : `${DIM}disabled${RESET}`}\n`,
@@ -8138,7 +8141,9 @@ async function setupCommand(args: string, state: ReplState): Promise<string> {
     process.stdout.write(
       `  Git:         ${enableGit ? `${GREEN}auto-commit${RESET}` : `${DIM}manual${RESET}`}\n`,
     );
-    process.stdout.write(`\n${GREEN}Setup complete!${RESET} ${DIM}You're ready to start.${RESET}\n`);
+    process.stdout.write(
+      `\n${GREEN}Setup complete!${RESET} ${DIM}You're ready to start.${RESET}\n`,
+    );
     process.stdout.write(`${DIM}Try: /magic build a todo app${RESET}\n\n`);
 
     return "";
@@ -8278,15 +8283,11 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
   if (requiredKey) {
     const keyValue = process.env[requiredKey];
     if (!keyValue) {
-      issues.push(
-        `Missing API key: ${requiredKey} (required for provider '${providerName}')`,
-      );
+      issues.push(`Missing API key: ${requiredKey} (required for provider '${providerName}')`);
       info.push(`Set via: export ${requiredKey}=your-key-here`);
       info.push(`Or run: /model select to choose a different provider`);
     } else if (keyValue.length < 10) {
-      warnings.push(
-        `API key ${requiredKey} looks invalid (too short: ${keyValue.length} chars)`,
-      );
+      warnings.push(`API key ${requiredKey} looks invalid (too short: ${keyValue.length} chars)`);
     } else {
       info.push(`API key ${requiredKey}: ${GREEN}OK${RESET} (${keyValue.slice(0, 8)}...)`);
     }
@@ -8316,9 +8317,7 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
       info.push(`Git repository: ${GREEN}OK${RESET} (detached HEAD)`);
     }
   } catch (err) {
-    warnings.push(
-      `Not a git repository: ${state.projectRoot}`,
-    );
+    warnings.push(`Not a git repository: ${state.projectRoot}`);
     info.push(`Initialize with: git init`);
   }
 
@@ -8340,9 +8339,7 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
     await rm(testFile, { force: true });
     info.push(`Write permissions: ${GREEN}OK${RESET} (.dantecode/ writable)`);
   } catch (err) {
-    issues.push(
-      `Cannot write to ${join(state.projectRoot, ".dantecode")}`,
-    );
+    issues.push(`Cannot write to ${join(state.projectRoot, ".dantecode")}`);
     info.push(`Check directory permissions and try: mkdir -p .dantecode`);
   }
 
@@ -8356,9 +8353,7 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
     const version = result.trim();
     info.push(`DanteForge binary: ${GREEN}OK${RESET} (${version})`);
   } catch {
-    warnings.push(
-      `DanteForge binary not found in PATH`,
-    );
+    warnings.push(`DanteForge binary not found in PATH`);
     info.push(`${DIM}This is optional — some features require the binary${RESET}`);
   }
 
@@ -8371,14 +8366,10 @@ async function troubleshootCommand(_args: string, state: ReplState): Promise<str
     state.state.model.default.contextWindow,
   );
   if (contextUtil.percent > 90) {
-    warnings.push(
-      `Context window is ${contextUtil.percent.toFixed(0)}% full`,
-    );
+    warnings.push(`Context window is ${contextUtil.percent.toFixed(0)}% full`);
     info.push(`Run /compact to free up space`);
   } else if (contextUtil.percent > 75) {
-    warnings.push(
-      `Context window is ${contextUtil.percent.toFixed(0)}% full (approaching limit)`,
-    );
+    warnings.push(`Context window is ${contextUtil.percent.toFixed(0)}% full (approaching limit)`);
   } else {
     info.push(`Context usage: ${GREEN}OK${RESET} (${contextUtil.percent.toFixed(0)}% used)`);
   }
@@ -8701,7 +8692,8 @@ ${BOLD}${YELLOW}Agent Loop Metrics:${RESET}`;
     output += `\n  ${DIM}(no metrics collected yet)${RESET}`;
   } else {
     for (const metric of agentMetrics) {
-      const typeLabel = metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
+      const typeLabel =
+        metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
       output += `\n  ${typeLabel} ${BOLD}${metric.name}${RESET}: ${metric.value.toLocaleString()}`;
       const ago = Date.now() - metric.timestamp;
       output += ` ${DIM}(${Math.floor(ago / 1000)}s ago)${RESET}`;
@@ -8713,7 +8705,8 @@ ${BOLD}${YELLOW}Agent Loop Metrics:${RESET}`;
     output += `\n  ${DIM}(no metrics collected yet)${RESET}`;
   } else {
     for (const metric of routerMetrics) {
-      const typeLabel = metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
+      const typeLabel =
+        metric.type === "counter" ? `${CYAN}[counter]${RESET}` : `${GREEN}[gauge]${RESET}`;
       output += `\n  ${typeLabel} ${BOLD}${metric.name}${RESET}: ${metric.value.toLocaleString()}`;
       const ago = Date.now() - metric.timestamp;
       output += ` ${DIM}(${Math.floor(ago / 1000)}s ago)${RESET}`;
@@ -8836,7 +8829,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "setup",
-    description: "Interactive configuration wizard with API keys, model selection, and health checks",
+    description:
+      "Interactive configuration wizard with API keys, model selection, and health checks",
     usage: "/setup [--force]",
     handler: setupCommand,
     tier: 1,

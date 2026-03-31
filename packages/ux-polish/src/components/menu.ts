@@ -166,10 +166,7 @@ class Menu<T> {
     if (this.selectedIndex > 0) {
       this.selectedIndex--;
       // Skip disabled items
-      while (
-        this.selectedIndex > 0 &&
-        this.filteredItems[this.selectedIndex]?.disabled
-      ) {
+      while (this.selectedIndex > 0 && this.filteredItems[this.selectedIndex]?.disabled) {
         this.selectedIndex--;
       }
     }
@@ -204,9 +201,7 @@ class Menu<T> {
       this.filteredItems = [...this.items];
     } else {
       const query = this.searchQuery.toLowerCase();
-      this.filteredItems = this.items.filter((item) =>
-        item.label.toLowerCase().includes(query)
-      );
+      this.filteredItems = this.items.filter((item) => item.label.toLowerCase().includes(query));
     }
 
     // Clamp selected index
@@ -249,11 +244,7 @@ class Menu<T> {
       const isDisabled = item.disabled ?? false;
 
       const cursor = isSelected ? SYMBOLS.selected : SYMBOLS.unselected;
-      const checkbox = this.multi
-        ? isChecked
-          ? SYMBOLS.checked
-          : SYMBOLS.unchecked
-        : "";
+      const checkbox = this.multi ? (isChecked ? SYMBOLS.checked : SYMBOLS.unchecked) : "";
 
       const color = isSelected ? COLORS.green : isDisabled ? COLORS.dim : "";
       const reset = color ? COLORS.reset : "";

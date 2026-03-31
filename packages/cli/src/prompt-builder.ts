@@ -468,7 +468,10 @@ export async function injectRoundContext(
 
   // ---- AutonomyEngine: meta-reasoning pass (every 15 steps) ----
   ctx.autonomyEngine.incrementStep();
-  if (ctx.autonomyEngine.shouldRunMetaReasoning()) {
+  if (
+    config.state.autonomy?.metaReasoningEnabled &&
+    ctx.autonomyEngine.shouldRunMetaReasoning()
+  ) {
     try {
       const metaResult = ctx.autonomyEngine.metaReason(
         `round=${ctx.roundCounter}, filesModified=${ctx.filesModified}`,

@@ -206,7 +206,10 @@ export class JsonlEventStore implements DurableEventStore {
         event = JSON.parse(line) as StoredEvent;
       } catch (_err) {
         // Skip corrupted line with warning
-        logger.warn({ sessionId: this.sessionId, linePreview: line.slice(0, 100) }, "Skipping corrupted line in event store");
+        logger.warn(
+          { sessionId: this.sessionId, linePreview: line.slice(0, 100) },
+          "Skipping corrupted line in event store",
+        );
         continue;
       }
 

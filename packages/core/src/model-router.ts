@@ -493,7 +493,12 @@ export class ModelRouterImpl {
           retryableErrors: RetryableErrors.serverAndRateLimit,
           onRetry: (attempt, error, delayMs) => {
             const msg = error instanceof Error ? error.message : String(error);
-            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+            this.logEntry(
+              config,
+              "attempt",
+              delayMs,
+              `Retry ${attempt} after ${delayMs}ms: ${msg}`,
+            );
             routerMetrics.increment("model.requests.retried");
           },
         },
@@ -515,7 +520,12 @@ export class ModelRouterImpl {
       routerMetrics.gauge("model.latency.ms", durationMs);
 
       // Estimate cost (USD)
-      const costUsd = this.estimateCostUsd(inputTokens, outputTokens, config.provider, this._currentTier);
+      const costUsd = this.estimateCostUsd(
+        inputTokens,
+        outputTokens,
+        config.provider,
+        this._currentTier,
+      );
       routerMetrics.increment("model.cost.usd", costUsd);
 
       // Record the generation event in the audit log
@@ -590,7 +600,12 @@ export class ModelRouterImpl {
               const outputTk = usage?.completionTokens ?? 0;
               this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(
+                config,
+                "session_start",
+                durationMs,
+                usage?.totalTokens ?? 0,
+              );
             },
           }),
         {
@@ -600,7 +615,12 @@ export class ModelRouterImpl {
           retryableErrors: RetryableErrors.serverAndRateLimit,
           onRetry: (attempt, error, delayMs) => {
             const msg = error instanceof Error ? error.message : String(error);
-            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+            this.logEntry(
+              config,
+              "attempt",
+              delayMs,
+              `Retry ${attempt} after ${delayMs}ms: ${msg}`,
+            );
           },
         },
       );
@@ -661,7 +681,12 @@ export class ModelRouterImpl {
               const outputTk = usage?.completionTokens ?? 0;
               this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(
+                config,
+                "session_start",
+                durationMs,
+                usage?.totalTokens ?? 0,
+              );
             },
           }),
         {
@@ -671,7 +696,12 @@ export class ModelRouterImpl {
           retryableErrors: RetryableErrors.serverAndRateLimit,
           onRetry: (attempt, error, delayMs) => {
             const msg = error instanceof Error ? error.message : String(error);
-            this.logEntry(config, "attempt", delayMs, `Retry ${attempt} after ${delayMs}ms: ${msg}`);
+            this.logEntry(
+              config,
+              "attempt",
+              delayMs,
+              `Retry ${attempt} after ${delayMs}ms: ${msg}`,
+            );
           },
         },
       );
@@ -970,6 +1000,19 @@ export class ModelRouterImpl {
         break;
     }
     const lastCost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
+
+    // Debug logging to diagnose cost tracking issues
+    console.log("[COST DEBUG]", {
+      inputTokens,
+      outputTokens,
+      provider,
+      tier,
+      inputRate,
+      outputRate,
+      lastCostUsd: lastCost.toFixed(6),
+      sessionTotalUsd: (this._sessionCostUsd + lastCost).toFixed(6),
+    });
+
     this._sessionCostUsd += lastCost;
     this._sessionTokensUsed += inputTokens + outputTokens;
     return {

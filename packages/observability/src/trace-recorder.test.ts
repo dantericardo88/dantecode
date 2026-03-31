@@ -80,9 +80,7 @@ describe("TraceRecorder", () => {
 
     it("updates trace end time when all spans complete", () => {
       const span = recorder.startSpan("test");
-      const traceSpans = recorder.getTraceSpans(
-        Array.from(recorder.getTraces())[0]!.traceId,
-      );
+      const traceSpans = recorder.getTraceSpans(Array.from(recorder.getTraces())[0]!.traceId);
       expect(traceSpans[0]!.id).toBe(span.id);
 
       recorder.endSpan(span.id);

@@ -1364,19 +1364,59 @@ async function toolGitHubSearch(
   let args: string[];
   switch (searchType) {
     case "repos":
-      args = ["search", "repos", query, "--limit", String(limit), "--json", "name,url,description,stargazersCount,language,updatedAt"];
+      args = [
+        "search",
+        "repos",
+        query,
+        "--limit",
+        String(limit),
+        "--json",
+        "name,url,description,stargazersCount,language,updatedAt",
+      ];
       break;
     case "code":
-      args = ["search", "code", query, "--limit", String(limit), "--json", "repository,path,textMatches"];
+      args = [
+        "search",
+        "code",
+        query,
+        "--limit",
+        String(limit),
+        "--json",
+        "repository,path,textMatches",
+      ];
       break;
     case "issues":
-      args = ["search", "issues", query, "--limit", String(limit), "--json", "title,url,state,repository,createdAt,labels"];
+      args = [
+        "search",
+        "issues",
+        query,
+        "--limit",
+        String(limit),
+        "--json",
+        "title,url,state,repository,createdAt,labels",
+      ];
       break;
     case "prs":
-      args = ["search", "prs", query, "--limit", String(limit), "--json", "title,url,state,repository,createdAt,labels"];
+      args = [
+        "search",
+        "prs",
+        query,
+        "--limit",
+        String(limit),
+        "--json",
+        "title,url,state,repository,createdAt,labels",
+      ];
       break;
     default:
-      args = ["search", "repos", query, "--limit", String(limit), "--json", "name,url,description,stargazersCount"];
+      args = [
+        "search",
+        "repos",
+        query,
+        "--limit",
+        String(limit),
+        "--json",
+        "name,url,description,stargazersCount",
+      ];
   }
 
   try {
@@ -1742,7 +1782,13 @@ async function toolGitHubOps(
         const number = input["number"] as number | undefined;
         if (!number) return { content: "Error: number is required for view_pr", isError: true };
         const out = execGh(
-          ["pr", "view", String(number), "--json", "title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles"],
+          [
+            "pr",
+            "view",
+            String(number),
+            "--json",
+            "title,state,url,body,author,reviewDecision,mergeable,additions,deletions,changedFiles",
+          ],
           projectRoot,
         );
         const pr = JSON.parse(out);
@@ -1800,7 +1846,16 @@ async function toolGitHubOps(
         const limit =
           typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const out = execGh(
-          ["pr", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,author,createdAt,headRefName"],
+          [
+            "pr",
+            "list",
+            "--state",
+            state,
+            "--limit",
+            String(limit),
+            "--json",
+            "number,title,state,url,author,createdAt,headRefName",
+          ],
           projectRoot,
         );
         const prs = JSON.parse(out) as Array<{
@@ -1847,10 +1902,7 @@ async function toolGitHubOps(
           return { content: "Error: number is required for comment_issue", isError: true };
         if (!body) return { content: "Error: body is required for comment_issue", isError: true };
 
-        const out = execGh(
-          ["issue", "comment", String(number), "--body", body],
-          projectRoot,
-        );
+        const out = execGh(["issue", "comment", String(number), "--body", body], projectRoot);
         return { content: `Comment added to #${number}:\n${out.trim()}`, isError: false };
       }
 
@@ -1871,7 +1923,14 @@ async function toolGitHubOps(
           typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const labels = input["labels"] as string[] | string | undefined;
         const args = [
-          "issue", "list", "--state", state, "--limit", String(limit), "--json", "number,title,state,url,author,createdAt,labels",
+          "issue",
+          "list",
+          "--state",
+          state,
+          "--limit",
+          String(limit),
+          "--json",
+          "number,title,state,url,author,createdAt,labels",
         ];
         if (labels) {
           const labelList = Array.isArray(labels) ? labels.join(",") : labels;
@@ -1921,7 +1980,13 @@ async function toolGitHubOps(
         if (!runId) return { content: "Error: run_id is required for view_run", isError: true };
 
         const out = execGh(
-          ["run", "view", String(runId), "--json", "status,conclusion,name,url,createdAt,updatedAt,headBranch,event"],
+          [
+            "run",
+            "view",
+            String(runId),
+            "--json",
+            "status,conclusion,name,url,createdAt,updatedAt,headBranch,event",
+          ],
           projectRoot,
         );
         const run = JSON.parse(out);

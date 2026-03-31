@@ -434,7 +434,10 @@ export async function runTriageCommand(args: string[], projectRoot: string): Pro
   const postLabels = args.includes("--post-labels");
   const useLLM = !args.includes("--no-llm");
 
-  logger.info({ command: "triage", issueNumber, postLabels, useLLM, projectRoot }, "Starting issue triage");
+  logger.info(
+    { command: "triage", issueNumber, postLabels, useLLM, projectRoot },
+    "Starting issue triage",
+  );
   console.log(`\n${DIM}Fetching issue #${issueNumber}...${RESET}`);
 
   try {

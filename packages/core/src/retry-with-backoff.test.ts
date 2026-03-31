@@ -230,9 +230,7 @@ describe("RetryableErrors", () => {
       expect(RetryableErrors.networkOnly({ code: "ECONNRESET" })).toBe(true);
       expect(RetryableErrors.networkOnly({ code: "ETIMEDOUT" })).toBe(true);
       expect(RetryableErrors.networkOnly({ code: "ECONNREFUSED" })).toBe(true);
-      expect(
-        RetryableErrors.networkOnly({ message: "fetch failed: network error" }),
-      ).toBe(true);
+      expect(RetryableErrors.networkOnly({ message: "fetch failed: network error" })).toBe(true);
     });
 
     it("returns false for non-network errors", () => {

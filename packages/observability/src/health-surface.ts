@@ -5,12 +5,7 @@
  * Supports async checks with timeouts and aggregation.
  */
 
-import type {
-  HealthCheckFn,
-  HealthCheckResult,
-  HealthReport,
-  HealthStatus,
-} from "./types.js";
+import type { HealthCheckFn, HealthCheckResult, HealthReport, HealthStatus } from "./types.js";
 
 /**
  * HealthSurface - Manages and runs health checks
@@ -87,8 +82,7 @@ export class HealthSurface {
       return {
         name,
         status: "unhealthy" as HealthStatus,
-        message:
-          error instanceof Error ? error.message : String(error),
+        message: error instanceof Error ? error.message : String(error),
         timestamp: endTime,
         duration: endTime - startTime,
         error: error instanceof Error ? error : new Error(String(error)),
@@ -101,13 +95,9 @@ export class HealthSurface {
    * @param timeoutMs - Optional timeout override for all checks
    * @returns Aggregated health report
    */
-  async runChecks(
-    timeoutMs: number = this.defaultTimeout,
-  ): Promise<HealthReport> {
+  async runChecks(timeoutMs: number = this.defaultTimeout): Promise<HealthReport> {
     const checkNames = Array.from(this.checks.keys());
-    const results = await Promise.all(
-      checkNames.map((name) => this.runCheck(name, timeoutMs)),
-    );
+    const results = await Promise.all(checkNames.map((name) => this.runCheck(name, timeoutMs)));
 
     return this.aggregateResults(results);
   }
@@ -143,9 +133,7 @@ export class HealthSurface {
   private aggregateResults(results: HealthCheckResult[]): HealthReport {
     const healthyCount = results.filter((r) => r.status === "healthy").length;
     const degradedCount = results.filter((r) => r.status === "degraded").length;
-    const unhealthyCount = results.filter(
-      (r) => r.status === "unhealthy",
-    ).length;
+    const unhealthyCount = results.filter((r) => r.status === "unhealthy").length;
 
     // Overall status: unhealthy if any unhealthy, degraded if any degraded, else healthy
     let overallStatus: HealthStatus = "healthy";
@@ -172,17 +160,11 @@ export class HealthSurface {
    * @param timeoutMs - Timeout in milliseconds
    * @returns Promise result or timeout error
    */
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-  ): Promise<T> {
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
     return Promise.race([
       promise,
       new Promise<T>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Health check timeout after ${timeoutMs}ms`)),
-          timeoutMs,
-        ),
+        setTimeout(() => reject(new Error(`Health check timeout after ${timeoutMs}ms`)), timeoutMs),
       ),
     ]);
   }
