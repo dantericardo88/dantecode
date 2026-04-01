@@ -236,6 +236,17 @@ vi.mock("@dantecode/core", () => {
   }
 
   return {
+    MetricCounter: vi.fn(() => ({
+      increment: vi.fn(),
+      record: vi.fn(),
+      reset: vi.fn(),
+      get: vi.fn(() => 0),
+    })),
+    TraceRecorder: vi.fn(() => ({
+      startSpan: vi.fn(() => ({ id: "span-1" })),
+      endSpan: vi.fn(),
+      recordEvent: vi.fn(),
+    })),
     ModelRouterImpl: MockModelRouterImpl,
     SessionStore: MockSessionStore,
     DurableRunStore: MockDurableRunStore,

@@ -8,26 +8,37 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock @dantecode/core before importing the module under test
 vi.mock("@dantecode/core", () => ({
-  readOrInitializeState: vi.fn().mockResolvedValue({
-    model: {
-      default: {
-        provider: "grok",
-        modelId: "grok-3",
-        maxTokens: 4096,
-        temperature: 0.1,
-        contextWindow: 131072,
-        supportsVision: false,
-        supportsToolCalls: false,
-      },
-      fallback: [],
-      taskOverrides: {},
-    },
-  }),
-  ModelRouterImpl: vi.fn().mockImplementation(() => ({
-    generate: vi.fn().mockResolvedValue("Hello from DanteCode!"),
-    stream: vi.fn(),
-    getUsage: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0 }),
+  MetricCounter: vi.fn(() => ({
+    increment: vi.fn(),
+    record: vi.fn(),
+    reset: vi.fn(),
+    get: vi.fn(() => 0),
   })),
+  TraceRecorder: vi.fn(() => ({
+    startSpan: vi.fn(() => ({ id: "span-1" })),
+    endSpan: vi.fn(),
+    recordEvent: vi.fn(),
+  })),
+  readOrInitializeState: vi.fn().mockResolvedValue({
+      model: {
+        default: {
+          provider: "grok",
+          modelId: "grok-3",
+          maxTokens: 4096,
+          temperature: 0.1,
+          contextWindow: 131072,
+          supportsVision: false,
+          supportsToolCalls: false,
+        },
+        fallback: [],
+        taskOverrides: {},
+      },
+    }),
+    ModelRouterImpl: vi.fn().mockImplementation(() => ({
+      generate: vi.fn().mockResolvedValue("Hello from DanteCode!"),
+      stream: vi.fn(),
+      getUsage: vi.fn().mockReturnValue({ promptTokens: 0, completionTokens: 0 }),
+    })),
 }));
 
 import { handleHealth, handleModels, handleChatCompletions } from "./commands/serve.js";
