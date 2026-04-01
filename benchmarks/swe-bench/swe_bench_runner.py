@@ -61,7 +61,7 @@ class BenchmarkSummary:
 class SWEBenchRunner:
     """Runner for SWE-bench tests using DanteCode"""
 
-    def __init__(self, dantecode_path: str = "dantecode", output_dir: str = "../results", model: Optional[str] = None):
+    def __init__(self, dantecode_path: str = "dantecode", output_dir: str = "../results", model: Optional[str] = None, enable_retry: bool = True):
         # On Windows, try to find the PowerShell script if not explicitly provided
         if dantecode_path == "dantecode":
             import platform
@@ -75,6 +75,7 @@ class SWEBenchRunner:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.model = model or "grok/grok-3"  # Default to Grok for fast reasoning
+        self.enable_retry = enable_retry
 
     def load_swe_bench_dataset(self, subset: str = "verified", limit: Optional[int] = None, offset: int = 0) -> List[Dict[str, Any]]:
         """Load SWE-bench dataset from Hugging Face or local cache"""
@@ -101,6 +102,27 @@ class SWEBenchRunner:
         except Exception as e:
             print(f"ERROR loading dataset: {e}")
             sys.exit(1)
+
+    def _run_with_retry(self, cmd: List[str], max_retries: int = 3, **kwargs) -> subprocess.CompletedProcess:
+        """Run subprocess command with exponential backoff retry on network failures"""
+        if not self.enable_retry:
+            return subprocess.run(cmd, **kwargs)
+
+        for attempt in range(max_retries):
+            try:
+                return subprocess.run(cmd, **kwargs)
+            except subprocess.TimeoutExpired:
+                raise  # Don't retry timeouts, they're legitimate failures
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                # Exponential backoff: 2s, 4s, 8s
+                wait_time = 2 ** attempt
+                print(f"  [RETRY {attempt + 1}/{max_retries}] Command failed: {e}, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+
+        # Should never reach here due to raise in loop
+        return subprocess.run(cmd, **kwargs)
 
     def run_instance(self, instance: Dict[str, Any], timeout: int = 300) -> BenchmarkResult:
         """Run a single SWE-bench instance with DanteCode"""
@@ -179,7 +201,7 @@ class SWEBenchRunner:
                     "-File", self.dantecode_path,
                     enhanced_prompt,
                     "--model", self.model,
-                    "--max-rounds", "3",
+                    "--max-rounds", "15",  # Increased from 3 to allow complex fixes
                     "--yolo"
                 ]
             else:
@@ -194,7 +216,7 @@ class SWEBenchRunner:
                     cmd = parts + [
                         enhanced_prompt,
                         "--model", self.model,
-                        "--max-rounds", "3",
+                        "--max-rounds", "15",  # Increased from 3 to allow complex fixes
                         "--yolo"
                     ]
                 else:
@@ -202,7 +224,7 @@ class SWEBenchRunner:
                         self.dantecode_path,
                         problem_statement,
                         "--model", self.model,
-                        "--max-rounds", "3",
+                        "--max-rounds", "15",  # Increased from 3 to allow complex fixes
                         "--yolo"
                     ]
 
@@ -316,12 +338,13 @@ class SWEBenchRunner:
             # Clone repository if not already present
             if not (workspace_dir / ".git").exists():
                 print(f"Cloning {repo}...")
-                clone_result = subprocess.run(
+                clone_result = self._run_with_retry(
                     ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, "."],
+                    max_retries=3,
                     cwd=workspace_dir,
                     capture_output=True,
                     text=True,
-                    timeout=120  # 2 minute timeout for clone
+                    timeout=300  # Increased to 5min for large repos (Django, etc.)
                 )
 
                 if clone_result.returncode != 0:
@@ -342,8 +365,9 @@ class SWEBenchRunner:
             if current_commit != base_commit:
                 # Fetch the specific commit (in case depth=1 didn't get it)
                 print(f"Fetching commit {base_commit[:8]}...")
-                subprocess.run(
+                self._run_with_retry(
                     ["git", "fetch", "origin", base_commit],
+                    max_retries=3,
                     cwd=workspace_dir,
                     capture_output=True,
                     text=True,
