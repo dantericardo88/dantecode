@@ -43,7 +43,7 @@
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "@octokit/rest": "^20.1.2",
-    "ai": "^6.0.142",
+    "ai": "^4.0.0",
     "cheerio": "^1.0.0",
     "crawlee": "^3.10.1",
     "dockerode": "^4.0.0",
