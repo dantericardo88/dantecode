@@ -37,7 +37,7 @@ describe("state manager", () => {
       expect(state.pdse.hardViolationsAllowed).toBe(0);
       expect(state.autoforge.enabled).toBe(true);
       expect(state.autoforge.maxIterations).toBeGreaterThanOrEqual(1);
-      expect(state.git.autoCommit).toBe(true);
+      expect(state.git.autoCommit).toBe(false); // Changed to minimal mode (no auto-commits)
       expect(state.agents.maxConcurrent).toBeGreaterThanOrEqual(1);
       expect(state.audit.enabled).toBe(true);
       expect(state.lessons.enabled).toBe(true);
