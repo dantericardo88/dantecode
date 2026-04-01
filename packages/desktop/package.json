@@ -35,10 +35,11 @@
   },
   "dependencies": {
     "@dantecode/config-types": "0.9.2",
-    "@dantecode/core": "0.9.2"
+    "@dantecode/core": "0.9.2",
+    "ai": "6.0.142"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "electron": "^41.1.0",
     "electron-builder": "^26.8.1",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"

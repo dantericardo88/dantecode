@@ -40,15 +40,17 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "ai": "^4.0.0",
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "@octokit/rest": "^20.1.2",
+    "ai": "^6.0.142",
     "cheerio": "^1.0.0",
-    "crawlee": "^3.14.1",
+    "crawlee": "^3.10.1",
     "dockerode": "^4.0.0",
+    "electron": "41.1.0",
     "node-fetch": "^3.3.0",
     "sql.js": "^1.11.0",
+    "vite": "8.0.3",
     "yaml": "^2.7.0",
     "zod": "^3.24.0"
   },
