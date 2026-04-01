@@ -1232,6 +1232,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const isExecutionMode = isExecutionAgentMode(agentMode);
           const needsExecutionNudge =
             isExecutionMode &&
+            isPipelineWorkflow && // ONLY nudge during actual pipelines, not casual questions
             executedToolsThisTurn === 0 &&
             !isQuestionPrompt(text) &&
             responseNeedsToolExecutionNudge(fullResponse) &&
