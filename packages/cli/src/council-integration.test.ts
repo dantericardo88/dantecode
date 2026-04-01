@@ -18,6 +18,7 @@ import type {
   LaneAssignmentRequest,
   SelfLaneExecutor,
 } from "@dantecode/core";
+import { createWorktree, removeWorktree, mergeWorktree } from "@dantecode/git-engine";
 
 // ---------------------------------------------------------------------------
 // Minimal unified diff — gives MergeBrain a truthy unifiedDiff so the single-
@@ -137,7 +138,10 @@ describe("CouncilOrchestrator integration", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([
       ["dantecode", makeStubAdapter("dantecode", "running")],
     ]);
-    orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    });
     orchestrator.on("error", () => {});
 
     const runId = await orchestrator.start({
@@ -165,7 +169,10 @@ describe("CouncilOrchestrator integration", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([
       ["dantecode", makeStubAdapter("dantecode", "running")],
     ]);
-    orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 1,
+      worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    });
     orchestrator.on("error", () => {});
 
     await orchestrator.start({
@@ -206,7 +213,10 @@ describe("CouncilOrchestrator integration", () => {
         }),
       ],
     ]);
-    orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 1 });
+    orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 1,
+      worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    });
     orchestrator.on("error", () => {});
 
     await orchestrator.start({
@@ -237,7 +247,10 @@ describe("CouncilOrchestrator integration", () => {
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([
       ["dantecode", makeStubAdapter("dantecode", "running")],
     ]);
-    orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 999_999 });
+    orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 999_999,
+      worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    });
     orchestrator.on("error", () => {});
     orchestrator.on("state:transition", ({ from, to }) => transitions.push({ from, to }));
 
@@ -271,7 +284,10 @@ describe("CouncilOrchestrator integration", () => {
 
     const dcAdapter = new StubDanteCodeAdapter({ executor: mockExecutor });
     const adapters = new Map<AgentKind, CouncilAgentAdapter>([["dantecode", dcAdapter]]);
-    orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 5 });
+    orchestrator = new CouncilOrchestrator(adapters, {
+      pollIntervalMs: 5,
+      worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
+    });
     orchestrator.on("error", () => {});
 
     await orchestrator.start({

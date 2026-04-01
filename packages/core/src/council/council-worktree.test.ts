@@ -12,7 +12,7 @@ import { CouncilOrchestrator } from "./council-orchestrator.js";
 import type { AgentKind } from "./council-types.js";
 import { DanteCodeAdapter } from "./agent-adapters/dantecode.js";
 import type { SelfLaneExecutor } from "./agent-adapters/dantecode.js";
-import { listWorktrees } from "@dantecode/git-engine";
+import { listWorktrees, createWorktree, removeWorktree, mergeWorktree } from "@dantecode/git-engine";
 
 // ----------------------------------------------------------------------------
 // Test Helpers
@@ -79,6 +79,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -134,6 +135,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const createdEvents: Array<{ laneId: string; worktreePath: string }> = [];
@@ -171,6 +173,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -205,6 +208,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -242,6 +246,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -278,6 +283,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const mergedEvents: Array<{ laneId: string; commitSha: string }> = [];
@@ -316,6 +322,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const cleanedEvents: Array<{ laneId: string; reason: string }> = [];
@@ -352,6 +359,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -385,6 +393,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -659,6 +668,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -695,6 +705,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const cleanedEvents: unknown[] = [];
@@ -742,6 +753,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const errorEvents: Array<{ message: string }> = [];
@@ -785,6 +797,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       const events: string[] = [];
@@ -820,6 +833,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       let capturedEvent: { laneId: string; worktreePath: string; worktreeBranch: string } | null =
@@ -861,6 +875,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       let capturedEvent: {
@@ -920,6 +935,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 50,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -951,6 +967,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
@@ -989,6 +1006,7 @@ describe("CouncilOrchestrator — Worktree Integration", () => {
       const orchestrator = new CouncilOrchestrator(adapters, {
         pollIntervalMs: 100,
         retryBaseDelayMs: 0,
+        worktreeHooks: { createWorktree, removeWorktree, mergeWorktree },
       });
 
       await orchestrator.start({
