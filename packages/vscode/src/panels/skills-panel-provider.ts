@@ -1,20 +1,23 @@
 // ============================================================================
-// Skills Library Panel — Browse, install, verify skills
+// Skills Library Panel — Browse, install, verify skills (DIRECT INTEGRATION)
 // ============================================================================
 
 import * as vscode from "vscode";
 import type { VSCodeCommandBridge } from "../command-bridge.js";
+import { listSkills, importSkillsFromPath, evaluateSkill, getSkillbookStats } from "../core-integrations/skillbook-integration-new.js";
 
 export class SkillsPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.skillsLibraryView";
 
   private view: vscode.WebviewView | undefined;
+  private outputChannel: vscode.OutputChannel;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    // @ts-expect-error - Unused for now, will be used for skill operations
-    private readonly _commandBridge: VSCodeCommandBridge,
-  ) {}
+    _commandBridge: VSCodeCommandBridge,
+  ) {
+    this.outputChannel = vscode.window.createOutputChannel("DanteCode Skills");
+  }
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -41,17 +44,117 @@ export class SkillsPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleCommand(data: { command: string; args?: string }): Promise<void> {
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!projectRoot) {
+      await this.sendMessage({ type: "error", message: "No workspace open" });
+      return;
+    }
+
+    try {
+      switch (data.command) {
+        case "list":
+          await this.listAllSkills(projectRoot);
+          break;
+        case "install":
+          await this.installSkillDialog(projectRoot);
+          break;
+        case "verify":
+          await this.verifySkillDialog(projectRoot);
+          break;
+        case "stats":
+          await this.showStats(projectRoot);
+          break;
+        default:
+          await this.sendMessage({ type: "error", message: `Unknown command: ${data.command}` });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.sendMessage({ type: "error", message });
+    }
+  }
+
+  private async listAllSkills(projectRoot: string): Promise<void> {
+    const skills = await listSkills(projectRoot);
+    await this.sendMessage({
+      type: "skills_list",
+      skills: skills.map(s => ({
+        id: s.id,
+        name: s.title,
+        description: s.content.substring(0, 100),
+      })),
+    });
+  }
+
+  private async installSkillDialog(projectRoot: string): Promise<void> {
+    const skillPath = await vscode.window.showInputBox({
+      prompt: "Enter skill path or URL",
+      placeHolder: "https://example.com/skill.json or ./local/skill.json",
+    });
+
+    if (!skillPath) {
+      return;
+    }
+
+    const count = await importSkillsFromPath(skillPath, projectRoot, this.outputChannel);
+    await this.sendMessage({
+      type: "install_result",
+      count,
+    });
+    // Refresh the list
+    await this.listAllSkills(projectRoot);
+  }
+
+  private async verifySkillDialog(projectRoot: string): Promise<void> {
+    const skills = await listSkills(projectRoot);
+    const skillNames = skills.map(s => s.title);
+
+    const selected = await vscode.window.showQuickPick(skillNames, {
+      placeHolder: "Select skill to verify",
+    });
+
+    if (!selected) {
+      return;
+    }
+
+    const skill = skills.find(s => s.title === selected);
+    if (!skill) {
+      return;
+    }
+
+    const quality = await evaluateSkill(skill.id, projectRoot);
+    await this.sendMessage({
+      type: "verify_result",
+      skillId: skill.id,
+      quality,
+    });
+
+    if (quality) {
+      void vscode.window.showInformationMessage(
+        `Skill "${selected}" quality score: ${quality.score?.toFixed(2) || "N/A"}`
+      );
+    }
+  }
+
+  private async showStats(projectRoot: string): Promise<void> {
+    const stats = await getSkillbookStats(projectRoot);
+    await this.sendMessage({
+      type: "stats_result",
+      totalSkills: stats.totalSkills,
+      avgQuality: stats.avgQuality,
+    });
+  }
+
+  private async sendMessage(message: unknown): Promise<void> {
     if (this.view) {
-      await this.view.webview.postMessage({
-        type: "slash_command",
-        command: data.command,
-        args: data.args,
-      });
+      await this.view.webview.postMessage(message);
     }
   }
 
   private async refreshView(): Promise<void> {
-    // Could load skill list here
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (projectRoot) {
+      await this.listAllSkills(projectRoot);
+    }
   }
 
   private getHtmlForWebview(): string {

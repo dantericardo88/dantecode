@@ -1,9 +1,11 @@
 // ============================================================================
-// Git Operations Panel — Diff viewer, commit history, worktrees
+// Git Operations Panel — Diff viewer, commit history, worktrees (DIRECT INTEGRATION)
 // ============================================================================
 
 import * as vscode from "vscode";
 import type { VSCodeCommandBridge } from "../command-bridge.js";
+import { getDiff, getStatus, autoCommit, type GitStatusResult } from "@dantecode/git-engine";
+import type { GitCommitSpec } from "@dantecode/config-types";
 
 export class GitPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.gitView";
@@ -12,8 +14,7 @@ export class GitPanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    // @ts-expect-error - Unused for now, will be used for git operations
-    private readonly _commandBridge: VSCodeCommandBridge,
+    _commandBridge: VSCodeCommandBridge,
   ) {}
 
   resolveWebviewView(
@@ -41,18 +42,124 @@ export class GitPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleCommand(data: { command: string; args?: string }): Promise<void> {
-    // Forward to command bridge
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!projectRoot) {
+      await this.sendMessage({ type: "error", message: "No workspace open" });
+      return;
+    }
+
+    try {
+      switch (data.command) {
+        case "diff":
+          await this.showDiff(projectRoot);
+          break;
+        case "commit":
+          await this.commitChanges(projectRoot);
+          break;
+        case "status":
+          await this.showStatus(projectRoot);
+          break;
+        case "worktree":
+          await this.createWorktreeDialog(projectRoot);
+          break;
+        default:
+          await this.sendMessage({ type: "error", message: `Unknown command: ${data.command}` });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.sendMessage({ type: "error", message });
+    }
+  }
+
+  private async showDiff(projectRoot: string): Promise<void> {
+    const diff = getDiff(projectRoot);
+    if (!diff || diff.trim().length === 0) {
+      await this.sendMessage({ type: "info", message: "No changes to show" });
+      void vscode.window.showInformationMessage("Git: No uncommitted changes");
+      return;
+    }
+    // Send diff to webview for display (truncate for safety)
+    await this.sendMessage({
+      type: "diff_result",
+      diff: diff.substring(0, 5000)
+    });
+  }
+
+  private async commitChanges(projectRoot: string): Promise<void> {
+    const message = await vscode.window.showInputBox({
+      prompt: "Commit message",
+      placeHolder: "feat: add new feature",
+      validateInput: (value) => {
+        if (value.trim().length < 3) {
+          return "Commit message must be at least 3 characters";
+        }
+        return null;
+      },
+    });
+    if (!message) return;
+
+    const status: GitStatusResult = getStatus(projectRoot);
+    const allFiles = [
+      ...status.staged.map(s => s.path),
+      ...status.unstaged.map(s => s.path),
+    ];
+
+    if (allFiles.length === 0) {
+      void vscode.window.showWarningMessage("No files to commit");
+      return;
+    }
+
+    const spec: GitCommitSpec = {
+      files: allFiles,
+      message,
+      allowEmpty: false,
+      footer: "\u{1F916} Generated with DanteCode VSCode Extension",
+    };
+
+    const result = autoCommit(spec, projectRoot);
+    await this.sendMessage({
+      type: "commit_result",
+      commitHash: result.commitHash,
+      filesCommitted: result.filesCommitted.length,
+    });
+    void vscode.window.showInformationMessage(
+      `Committed ${result.filesCommitted.length} files: ${result.commitHash.substring(0, 7)}`
+    );
+  }
+
+  private async showStatus(projectRoot: string): Promise<void> {
+    const status: GitStatusResult = getStatus(projectRoot);
+    const summary = {
+      staged: status.staged.length,
+      unstaged: status.unstaged.length,
+      untracked: status.untracked.length,
+      conflicted: status.conflicted.length,
+    };
+    await this.sendMessage({ type: "status_result", summary });
+
+    const totalChanges = summary.staged + summary.unstaged + summary.untracked;
+    void vscode.window.showInformationMessage(
+      `Git: ${totalChanges} file(s) with changes (${summary.staged} staged)`
+    );
+  }
+
+  private async createWorktreeDialog(_projectRoot: string): Promise<void> {
+    // Worktree creation is more complex - keep as stub for now
+    await this.sendMessage({ type: "info", message: "Worktree: integration pending" });
+    void vscode.window.showInformationMessage("Worktree: Full integration coming soon");
+  }
+
+  private async sendMessage(message: unknown): Promise<void> {
     if (this.view) {
-      await this.view.webview.postMessage({
-        type: "slash_command",
-        command: data.command,
-        args: data.args,
-      });
+      await this.view.webview.postMessage(message);
     }
   }
 
   private async refreshView(): Promise<void> {
-    // Initial load - could fetch git status here
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (projectRoot) {
+      await this.showStatus(projectRoot);
+    }
   }
 
   private getHtmlForWebview(): string {

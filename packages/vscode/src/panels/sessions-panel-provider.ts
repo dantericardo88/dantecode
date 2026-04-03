@@ -1,19 +1,20 @@
 // ============================================================================
-// Sessions Panel — History, export, import, branching
+// Sessions Panel — History, export, import, branching (DIRECT INTEGRATION)
 // ============================================================================
 
 import * as vscode from "vscode";
 import type { VSCodeCommandBridge } from "../command-bridge.js";
+import { SessionStore, type SessionListEntry } from "@dantecode/core";
 
 export class SessionsPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.sessionsView";
 
   private view: vscode.WebviewView | undefined;
+  private sessionStore: SessionStore | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    // @ts-expect-error - Unused for now, will be used for session operations
-    private readonly _commandBridge: VSCodeCommandBridge,
+    _commandBridge: VSCodeCommandBridge,
   ) {}
 
   resolveWebviewView(
@@ -40,18 +41,104 @@ export class SessionsPanelProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private getSessionStore(projectRoot: string): SessionStore {
+    if (!this.sessionStore) {
+      this.sessionStore = new SessionStore(projectRoot);
+    }
+    return this.sessionStore;
+  }
+
   private async handleCommand(data: { command: string; args?: string }): Promise<void> {
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!projectRoot) {
+      await this.sendMessage({ type: "error", message: "No workspace open" });
+      return;
+    }
+
+    try {
+      switch (data.command) {
+        case "list":
+          await this.listSessions(projectRoot);
+          break;
+        case "resume":
+          if (data.args) {
+            await this.resumeSession(data.args, projectRoot);
+          }
+          break;
+        case "export":
+          if (data.args) {
+            await this.exportSession(data.args, projectRoot);
+          }
+          break;
+        default:
+          await this.sendMessage({ type: "error", message: `Unknown command: ${data.command}` });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.sendMessage({ type: "error", message });
+    }
+  }
+
+  private async listSessions(projectRoot: string): Promise<void> {
+    const store = this.getSessionStore(projectRoot);
+    const sessions: SessionListEntry[] = await store.list();
+
+    await this.sendMessage({
+      type: "sessions_list",
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        messageCount: s.messageCount,
+        summary: s.summary || "No summary available",
+      })),
+    });
+  }
+
+  private async resumeSession(sessionId: string, projectRoot: string): Promise<void> {
+    const store = this.getSessionStore(projectRoot);
+    const session = await store.load(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Fire VS Code command to resume session in chat
+    await vscode.commands.executeCommand("dantecode.resumeSession", session);
+    void vscode.window.showInformationMessage(`Resumed session: ${session.title}`);
+  }
+
+  private async exportSession(sessionId: string, projectRoot: string): Promise<void> {
+    const store = this.getSessionStore(projectRoot);
+    const session = await store.load(sessionId);
+
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const exportPath = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(`${sessionId}.json`),
+      filters: { JSON: ["json"] },
+    });
+
+    if (exportPath) {
+      await vscode.workspace.fs.writeFile(exportPath, Buffer.from(JSON.stringify(session, null, 2)));
+      void vscode.window.showInformationMessage(`Exported to ${exportPath.fsPath}`);
+    }
+  }
+
+  private async sendMessage(message: unknown): Promise<void> {
     if (this.view) {
-      await this.view.webview.postMessage({
-        type: "slash_command",
-        command: data.command,
-        args: data.args,
-      });
+      await this.view.webview.postMessage(message);
     }
   }
 
   private async refreshView(): Promise<void> {
-    // Could load session list here
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (projectRoot) {
+      await this.listSessions(projectRoot);
+    }
   }
 
   private getHtmlForWebview(): string {
