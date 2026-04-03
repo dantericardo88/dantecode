@@ -165,6 +165,21 @@
           "type": "webview",
           "id": "dantecode.sessionsView",
           "name": "Sessions"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.partyProgressView",
+          "name": "Party Mode Progress"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.memoryBrowserView",
+          "name": "Memory Browser"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.automationDashboardView",
+          "name": "Automation Dashboard"
         }
       ]
     },

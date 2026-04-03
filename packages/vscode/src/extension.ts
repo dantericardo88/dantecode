@@ -18,6 +18,9 @@ import { PlanningPanelProvider } from "./planning-panel.js";
 import { GitPanelProvider } from "./panels/git-panel-provider.js";
 import { SkillsPanelProvider } from "./panels/skills-panel-provider.js";
 import { SessionsPanelProvider } from "./panels/sessions-panel-provider.js";
+import { PartyProgressPanel } from "./panels/party-progress-panel.js";
+import { MemoryBrowserPanel } from "./panels/memory-browser-panel.js";
+import { AutomationDashboardPanel } from "./panels/automation-dashboard-panel.js";
 import { MagicPanelProvider } from "./panels/magic-panel.js";
 import { PDSEPanelProvider } from "./panels/pdse-panel.js";
 import { MemoryPanelProvider } from "./panels/memory-panel.js";
@@ -64,6 +67,9 @@ let planningPanelProvider: PlanningPanelProvider | undefined;
 let gitPanelProvider: GitPanelProvider | undefined;
 let skillsPanelProvider: SkillsPanelProvider | undefined;
 let sessionsPanelProvider: SessionsPanelProvider | undefined;
+let partyProgressPanel: PartyProgressPanel | undefined;
+let memoryBrowserPanel: MemoryBrowserPanel | undefined;
+let automationDashboardPanel: AutomationDashboardPanel | undefined;
 let completionProvider: DanteCodeCompletionProvider | undefined;
 let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
@@ -336,6 +342,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(sessionsViewRegistration);
 
+    // ── Phase 3 New Panels: Party Progress, Memory Browser, Automation ──
+    partyProgressPanel = new PartyProgressPanel(extensionUri, context);
+    const partyProgressViewRegistration = vscode.window.registerWebviewViewProvider(
+      PartyProgressPanel.viewType,
+      partyProgressPanel,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(partyProgressViewRegistration);
+
+    memoryBrowserPanel = new MemoryBrowserPanel(extensionUri, context);
+    const memoryBrowserViewRegistration = vscode.window.registerWebviewViewProvider(
+      MemoryBrowserPanel.viewType,
+      memoryBrowserPanel,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(memoryBrowserViewRegistration);
+
+    automationDashboardPanel = new AutomationDashboardPanel(extensionUri, context);
+    const automationDashboardViewRegistration = vscode.window.registerWebviewViewProvider(
+      AutomationDashboardPanel.viewType,
+      automationDashboardPanel,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(automationDashboardViewRegistration);
+
     outputChannel.appendLine("✓ Phase 4 panels registered");
   } else {
     outputChannel.appendLine("⚠ Command bridge not available - Phase 4 panels disabled");
@@ -526,7 +557,7 @@ function registerCommands(context: vscode.ExtensionContext, chatSidebarProvider?
 
   // ── Phase 4 commands (from commands-phase4.ts) ──
   if (chatSidebarProvider) {
-    const phase4Commands = registerPhase4Commands(chatSidebarProvider);
+    const phase4Commands = registerPhase4Commands(chatSidebarProvider, context);
     commands.push(...phase4Commands);
   }
 
