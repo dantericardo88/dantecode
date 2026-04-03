@@ -7,4 +7,6 @@
 !assets/
 !assets/**
 !package.json
+!README.md
 !LICENSE.txt
+!CHANGELOG.md

@@ -609,6 +609,11 @@ vi.mock("@dantecode/core", () => ({
     search: vi.fn(() => Promise.resolve([])),
     isReady: vi.fn(() => ({ ready: false, progress: 0 })),
   })),
+  // CommandPalette — used by command-completion.ts
+  CommandPalette: vi.fn().mockImplementation(() => ({
+    getCommands: vi.fn().mockReturnValue([]),
+    search: vi.fn().mockReturnValue([]),
+  })),
   // DimensionScorer — abstract base class used by SkillQualityScorer in dante-skillbook
   DimensionScorer: class {
     constructor(_options?: Record<string, unknown>) {}
@@ -644,6 +649,7 @@ vi.mock("@dantecode/danteforge", () => ({
   summarizeGStackResults: vi.fn().mockReturnValue("All passed"),
   allGStackPassed: vi.fn().mockReturnValue(true),
   queryLessons: vi.fn().mockResolvedValue([]),
+  recordLesson: vi.fn().mockResolvedValue({ id: "test", pattern: "", correction: "", occurrences: 1, lastSeen: "", severity: "info", type: "pitfall", source: "bootstrap", projectRoot: "/test" }),
   formatLessonsForPrompt: vi.fn().mockReturnValue(""),
 }));
 
@@ -668,11 +674,14 @@ vi.mock("@dantecode/git-engine", () => ({
 }));
 
 vi.mock("@dantecode/skill-adapter", () => ({
+  listSkills: vi.fn().mockResolvedValue([]),
+  getSkill: vi.fn().mockResolvedValue(null),
   importSkills: vi.fn().mockResolvedValue({
     imported: [],
     skipped: [],
     errors: [],
   }),
+  scanClaudeSkills: vi.fn().mockResolvedValue([]),
 }));
 
 // Mock node:fs/promises for executeTool integration tests
@@ -727,6 +736,13 @@ vi.mock("@dantecode/memory-engine", () => ({
     memorySummarize: vi.fn().mockResolvedValue({ summary: "" }),
   }),
   MemoryOrchestrator: vi.fn(),
+}));
+
+// Mock @dantecode/skills-runtime (used by extension.ts for skill execution)
+vi.mock("@dantecode/skills-runtime", () => ({
+  runSkill: vi.fn().mockResolvedValue({ success: true }),
+  makeRunContext: vi.fn().mockReturnValue({}),
+  makeProvenance: vi.fn().mockReturnValue({}),
 }));
 
 // Mock @dantecode/dante-gaslight (used by commands-phase4.ts dynamic imports)
