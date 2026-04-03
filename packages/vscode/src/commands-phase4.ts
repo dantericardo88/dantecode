@@ -3,7 +3,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import { launchPartyMode } from "./core-integrations/party-integration-simple.js";
+import { launchPartyMode } from "./core-integrations/party-integration.js";
 import { getMemoryStats } from "./core-integrations/memory-integration.js";
 import { getDiff, getStatus, autoCommit, type GitStatusResult } from "@dantecode/git-engine";
 import type { GitCommitSpec } from "@dantecode/config-types";

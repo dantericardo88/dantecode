@@ -591,6 +591,23 @@ vi.mock("@dantecode/core", () => ({
     search: vi.fn(() => Promise.resolve([])),
     isReady: vi.fn(() => ({ ready: false, progress: 0 })),
   })),
+  // DimensionScorer — abstract base class used by SkillQualityScorer in dante-skillbook
+  DimensionScorer: class {
+    constructor(_options?: Record<string, unknown>) {}
+    score(_input: unknown): { overall: number; dimensions: Record<string, number> } {
+      return { overall: 0, dimensions: {} };
+    }
+  },
+  // ExecutionPolicyEngine — used by sidebar-provider for tool call governance
+  ExecutionPolicyEngine: vi.fn().mockImplementation(() => ({
+    evaluateNoToolResponse: vi.fn().mockReturnValue({ action: "continue" }),
+    verifyWorkflowCompletion: vi.fn().mockReturnValue({ complete: true }),
+    assessToolCall: vi.fn().mockReturnValue({ decision: "allow" }),
+    recordToolResult: vi.fn(),
+  })),
+  isWorkflowExecutionPrompt: vi.fn().mockReturnValue(false),
+  // readAuditEvents — used by commandShowTraces
+  readAuditEvents: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@dantecode/danteforge", () => ({

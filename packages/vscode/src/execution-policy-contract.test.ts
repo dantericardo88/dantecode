@@ -85,7 +85,7 @@ function createRetryTranscript(): Array<{ result: ToolResultLike }> {
 
 describe("VS Code execution policy delegation contract", () => {
   const sidebarProviderSource = readFileSync(
-    resolve(process.cwd(), "packages/vscode/src/sidebar-provider.ts"),
+    resolve(__dirname, "sidebar-provider.ts"),
     "utf8",
   );
 
