@@ -27,11 +27,9 @@ function getIntegration(projectRoot: string): DanteSkillbookIntegration {
 /**
  * List all skills
  */
-export async function listSkills(_projectRoot: string): Promise<Skill[]> {
-  // DanteSkillbook only has getSkills() via the book, accessed through integration
-  // We need to get all skills - integration has getRelevantSkills but that requires context
-  // For now, return empty array - proper implementation needs skillbook data access
-  return [];
+export async function listSkills(projectRoot: string): Promise<Skill[]> {
+  const inst = getIntegration(projectRoot);
+  return inst.getRelevantSkills({}, 100);
 }
 
 /**

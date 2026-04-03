@@ -65,7 +65,6 @@ import {
   type AgentConfig,
 } from "./agent-config.js";
 import { getCommandCompletionEngine } from "./command-completion.js";
-import type { VSCodeCommandBridge } from "./command-bridge.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -297,7 +296,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     private readonly secrets: vscode.SecretStorage,
     private readonly globalState: vscode.Memento,
     private readonly hostCallbacks: SidebarHostCallbacks = {},
-    private readonly commandBridge?: VSCodeCommandBridge,
   ) {
     const config = vscode.workspace.getConfiguration("dantecode");
     this.currentModel = config.get<string>("defaultModel", DEFAULT_MODEL_ID);
@@ -368,9 +366,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
 
     // ── Attach to command bridge ──
-    if (this.commandBridge) {
-      this.commandBridge.attachWebview(webviewView.webview);
-    }
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewInboundMessage) => {
       await this.handleWebviewMessage(message);
@@ -970,6 +965,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    // ── Skillbook lessons (learned from past sessions) ──
+    if (projectRoot) {
+      try {
+        const lessons = await queryLessons({ projectRoot, limit: 5 });
+        if (lessons.length > 0) {
+          systemParts.push("");
+          systemParts.push("## Lessons Learned");
+          systemParts.push("These are lessons from prior sessions. Apply them when relevant:");
+          for (const lesson of lessons) {
+            systemParts.push(`- **${lesson.pattern}**: ${lesson.correction}`);
+          }
+        }
+      } catch { /* non-critical — lessons may not be available */ }
+    }
+
     // Include files the user explicitly added to context
     if (this.contextFiles.length > 0) {
       systemParts.push("");
@@ -993,8 +1003,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Autonomous Agent Loop — streams response, extracts tool calls, loops
     // ────────────────────────────────────────────────────────────────────────
 
+    // Trim to last N messages to prevent context window overflow on long sessions
+    const MAX_CONTEXT_MESSAGES = 40;
+    const recentMessages = this.messages.length > MAX_CONTEXT_MESSAGES
+      ? this.messages.slice(-MAX_CONTEXT_MESSAGES)
+      : this.messages;
+
     const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
-      ...this.messages.map((msg) => ({
+      ...recentMessages.map((msg) => ({
         role: msg.role as "user" | "assistant",
         content: msg.content,
       })),
@@ -2566,6 +2582,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Execute the command
     await this.handleChatRequest(command);
+  }
+
+  /**
+   * Public entry point for programmatic messages (used by commands-phase4.ts).
+   * Delegates to sendCommandToChat which triggers the full agent loop.
+   */
+  async handleUserMessage(text: string): Promise<void> {
+    await this.sendCommandToChat(text);
   }
 
   // --------------------------------------------------------------------------

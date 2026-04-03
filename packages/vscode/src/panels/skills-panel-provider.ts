@@ -3,7 +3,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import type { VSCodeCommandBridge } from "../command-bridge.js";
+
 import { listSkills, importSkillsFromPath, evaluateSkill, getSkillbookStats } from "../core-integrations/skillbook-integration-new.js";
 
 export class SkillsPanelProvider implements vscode.WebviewViewProvider {
@@ -14,7 +14,6 @@ export class SkillsPanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    _commandBridge: VSCodeCommandBridge,
   ) {
     this.outputChannel = vscode.window.createOutputChannel("DanteCode Skills");
   }

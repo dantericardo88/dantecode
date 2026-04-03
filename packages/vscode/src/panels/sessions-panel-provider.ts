@@ -3,7 +3,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import type { VSCodeCommandBridge } from "../command-bridge.js";
+
 import { SessionStore, type SessionListEntry } from "@dantecode/core";
 
 export class SessionsPanelProvider implements vscode.WebviewViewProvider {
@@ -14,7 +14,6 @@ export class SessionsPanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    _commandBridge: VSCodeCommandBridge,
   ) {}
 
   resolveWebviewView(

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import type { VSCodeCommandBridge } from "../command-bridge.js";
+
 import { getDiff, getStatus, autoCommit, type GitStatusResult } from "@dantecode/git-engine";
 import type { GitCommitSpec } from "@dantecode/config-types";
 
@@ -14,7 +14,6 @@ export class GitPanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    _commandBridge: VSCodeCommandBridge,
   ) {}
 
   resolveWebviewView(

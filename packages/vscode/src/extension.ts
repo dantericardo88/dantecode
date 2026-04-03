@@ -27,7 +27,6 @@ import { MemoryPanelProvider } from "./panels/memory-panel.js";
 import { SearchPanelProvider } from "./panels/search-panel.js";
 import { AgentsPanelProvider } from "./panels/agents-panel.js";
 import { DanteCodeCompletionProvider, disposeInlinePDSEDiagnostics } from "./inline-completion.js";
-import { createCommandBridge, type VSCodeCommandBridge } from "./command-bridge.js";
 import {
   createStatusBar,
   updateStatusBar,
@@ -56,6 +55,7 @@ import {
   registerAgentProgress,
 } from "./ui-enhancements/index.js";
 import { registerPhase4Commands } from "./commands-phase4.js";
+import { InlineEditProvider } from "./inline-edit.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 
@@ -78,13 +78,14 @@ let checkpointManager: CheckpointManager | undefined;
 let diffReviewProvider: DiffReviewProvider | undefined;
 let checkpointTreeProvider: CheckpointTreeDataProvider | undefined;
 let skillsTreeProvider: SkillsTreeDataProvider | undefined;
-let commandBridge: VSCodeCommandBridge | undefined;
 let semanticIndex:
   | {
       start: () => Promise<void>;
       getReadiness: () => { status: "indexing" | "ready" | "error"; progress: number };
     }
   | undefined;
+
+let inlineEditProvider: InlineEditProvider | undefined;
 
 // Phase 5: UX Enhancements registered directly (no need to store return values)
 
@@ -133,16 +134,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   }
 
-  // ── Initialize command bridge ──
-  if (initialSession && initialState) {
-    commandBridge = createCommandBridge(
-      initialSession,
-      initialState,
-      projectRoot,
-      outputChannel,
-    );
-    outputChannel.appendLine("✓ Command bridge initialized");
-  }
+  // Session/state loaded above — used for panel initialization check
+  const sessionReady = Boolean(initialSession && initialState);
 
   if (projectRoot) {
     checkpointManager = new CheckpointManager(projectRoot);
@@ -235,7 +228,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
       },
     },
-    commandBridge,
   );
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatSidebarProvider.viewType,
@@ -317,9 +309,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   context.subscriptions.push(agentsViewRegistration);
 
-  // ── Phase 4 panel providers (require command bridge) ──
-  if (commandBridge) {
-    gitPanelProvider = new GitPanelProvider(extensionUri, commandBridge);
+  // ── Phase 4 panel providers ──
+  if (sessionReady) {
+    gitPanelProvider = new GitPanelProvider(extensionUri);
     const gitViewRegistration = vscode.window.registerWebviewViewProvider(
       GitPanelProvider.viewType,
       gitPanelProvider,
@@ -327,7 +319,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(gitViewRegistration);
 
-    skillsPanelProvider = new SkillsPanelProvider(extensionUri, commandBridge);
+    skillsPanelProvider = new SkillsPanelProvider(extensionUri);
     const skillsViewRegistration = vscode.window.registerWebviewViewProvider(
       SkillsPanelProvider.viewType,
       skillsPanelProvider,
@@ -335,7 +327,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     context.subscriptions.push(skillsViewRegistration);
 
-    sessionsPanelProvider = new SessionsPanelProvider(extensionUri, commandBridge);
+    sessionsPanelProvider = new SessionsPanelProvider(extensionUri);
     const sessionsViewRegistration = vscode.window.registerWebviewViewProvider(
       SessionsPanelProvider.viewType,
       sessionsPanelProvider,
@@ -370,7 +362,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     outputChannel.appendLine("✓ Phase 4 panels registered");
   } else {
-    outputChannel.appendLine("⚠ Command bridge not available - Phase 4 panels disabled");
+    outputChannel.appendLine("⚠ Session/state not available - Phase 4 panels disabled");
   }
 
   // ── Inline completion ──
@@ -380,6 +372,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     completionProvider,
   );
   context.subscriptions.push(completionRegistration);
+
+  // ── Cmd+K Inline Edit Provider ──
+  inlineEditProvider = new InlineEditProvider(context.secrets, DEFAULT_MODEL_ID);
+  context.subscriptions.push(
+    vscode.commands.registerCommand("dantecode.inlineEdit", () => inlineEditProvider?.execute()),
+  );
 
   // ── Inline completion: cache invalidation + accept detection ──
   const docChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {

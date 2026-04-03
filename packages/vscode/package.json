@@ -572,9 +572,21 @@
         "command": "dantecode.testNotification",
         "title": "DanteCode: Test Notification",
         "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.inlineEdit",
+        "title": "DanteCode: Inline Edit (Cmd+K)",
+        "category": "DanteCode",
+        "icon": "$(edit)"
       }
     ],
     "keybindings": [
+      {
+        "command": "dantecode.inlineEdit",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "editorTextFocus && editorHasSelection"
+      },
       {
         "command": "dantecode.openChat",
         "key": "ctrl+alt+d",
