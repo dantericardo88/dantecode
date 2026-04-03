@@ -6,7 +6,8 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
+import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext, readOrInitializeState } from "@dantecode/core";
+import type { Session, DanteCodeState } from "@dantecode/config-types";
 import { OnboardingWizard } from "@dantecode/ux-polish";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
@@ -100,11 +101,53 @@ let pendingDiffOldContent: string | undefined;
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const extensionUri = context.extensionUri;
+
+  // ── Output channel (created early for bridge initialization) ──
+  const outputChannel = vscode.window.createOutputChannel("DanteCode");
+  context.subscriptions.push(outputChannel);
+  outputChannel.appendLine("DanteCode extension activated");
 
   // ── Repo map tree ──
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+
+  // ── Initialize session and state for command bridge ──
+  let initialSession: Session | undefined;
+  let initialState: DanteCodeState | undefined;
+
+  if (projectRoot) {
+    try {
+      // Load existing state or initialize default
+      initialState = await readOrInitializeState(projectRoot);
+
+      // Create initial session
+      initialSession = {
+        id: `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        projectRoot,
+        messages: [],
+        activeFiles: [],
+        readOnlyFiles: [],
+        todoList: [],
+        createdAt: new Date().toISOString(),
+        agentStack: [],
+      };
+    } catch (error) {
+      outputChannel.appendLine(`Warning: Failed to initialize session/state: ${error}`);
+    }
+  }
+
+  // ── Initialize command bridge ──
+  if (initialSession && initialState) {
+    commandBridge = createCommandBridge(
+      initialSession,
+      initialState,
+      projectRoot,
+      outputChannel,
+    );
+    outputChannel.appendLine("✓ Command bridge initialized");
+  }
+
   if (projectRoot) {
     checkpointManager = new CheckpointManager(projectRoot);
     diffReviewProvider = new DiffReviewProvider(projectRoot);
@@ -196,6 +239,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     },
+    commandBridge,
   );
   const chatViewRegistration = vscode.window.registerWebviewViewProvider(
     ChatSidebarProvider.viewType,
@@ -277,40 +321,36 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   context.subscriptions.push(agentsViewRegistration);
 
-  // ── Create command bridge (placeholder - will be initialized after session loads) ──
-  // This will be properly initialized in registerCommands once we have session/state
-
   // ── Phase 4 panel providers (require command bridge) ──
-  // We'll register these after command bridge is initialized
-  // For now, create them with a stub bridge
-  const stubBridge = {
-    attachWebview: () => {},
-    getReplState: () => ({} as any),
-  } as any;
+  if (commandBridge) {
+    gitPanelProvider = new GitPanelProvider(extensionUri, commandBridge);
+    const gitViewRegistration = vscode.window.registerWebviewViewProvider(
+      GitPanelProvider.viewType,
+      gitPanelProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(gitViewRegistration);
 
-  gitPanelProvider = new GitPanelProvider(extensionUri, stubBridge);
-  const gitViewRegistration = vscode.window.registerWebviewViewProvider(
-    GitPanelProvider.viewType,
-    gitPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(gitViewRegistration);
+    skillsPanelProvider = new SkillsPanelProvider(extensionUri, commandBridge);
+    const skillsViewRegistration = vscode.window.registerWebviewViewProvider(
+      SkillsPanelProvider.viewType,
+      skillsPanelProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(skillsViewRegistration);
 
-  skillsPanelProvider = new SkillsPanelProvider(extensionUri, stubBridge);
-  const skillsViewRegistration = vscode.window.registerWebviewViewProvider(
-    SkillsPanelProvider.viewType,
-    skillsPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(skillsViewRegistration);
+    sessionsPanelProvider = new SessionsPanelProvider(extensionUri, commandBridge);
+    const sessionsViewRegistration = vscode.window.registerWebviewViewProvider(
+      SessionsPanelProvider.viewType,
+      sessionsPanelProvider,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    );
+    context.subscriptions.push(sessionsViewRegistration);
 
-  sessionsPanelProvider = new SessionsPanelProvider(extensionUri, stubBridge);
-  const sessionsViewRegistration = vscode.window.registerWebviewViewProvider(
-    SessionsPanelProvider.viewType,
-    sessionsPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(sessionsViewRegistration);
+    outputChannel.appendLine("✓ Phase 4 panels registered");
+  } else {
+    outputChannel.appendLine("⚠ Command bridge not available - Phase 4 panels disabled");
+  }
 
   // ── Inline completion ──
   completionProvider = new DanteCodeCompletionProvider();
@@ -400,11 +440,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ── Version command ──
   context.subscriptions.push(registerVersionCommand(context));
-
-  // ── Output channel ──
-  const outputChannel = vscode.window.createOutputChannel("DanteCode");
-  context.subscriptions.push(outputChannel);
-  outputChannel.appendLine("DanteCode extension activated");
 
   // ── First-run onboarding ──
   if (!OnboardingProvider.hasOnboarded(context)) {

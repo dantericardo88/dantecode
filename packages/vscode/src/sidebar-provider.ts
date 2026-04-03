@@ -65,6 +65,7 @@ import {
   type AgentConfig,
 } from "./agent-config.js";
 import { getCommandCompletionEngine } from "./command-completion.js";
+import type { VSCodeCommandBridge } from "./command-bridge.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -296,6 +297,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     private readonly secrets: vscode.SecretStorage,
     private readonly globalState: vscode.Memento,
     private readonly hostCallbacks: SidebarHostCallbacks = {},
+    private readonly commandBridge?: VSCodeCommandBridge,
   ) {
     const config = vscode.workspace.getConfiguration("dantecode");
     this.currentModel = config.get<string>("defaultModel", DEFAULT_MODEL_ID);
@@ -364,6 +366,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+
+    // ── Attach to command bridge ──
+    if (this.commandBridge) {
+      this.commandBridge.attachWebview(webviewView.webview);
+    }
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewInboundMessage) => {
       await this.handleWebviewMessage(message);
@@ -4396,18 +4403,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       // ---- Slash Command Autocomplete ----
       const autocompleteDropdown = document.getElementById('autocomplete-dropdown');
-      let autocompleteData = [];
-      let selectedAutocompleteIndex = -1;
+      if (!autocompleteDropdown) {
+        console.error('Autocomplete dropdown element not found');
+      } else {
+        let autocompleteData = [];
+        let selectedAutocompleteIndex = -1;
 
-      function showAutocomplete(completions) {
-        autocompleteData = completions;
-        selectedAutocompleteIndex = -1;
+        function showAutocomplete(completions) {
+          if (!autocompleteDropdown) return;
 
-        if (completions.length === 0) {
-          autocompleteDropdown.innerHTML = '<div class="autocomplete-empty">No matching commands</div>';
-          autocompleteDropdown.classList.add('visible');
-          return;
-        }
+          autocompleteData = completions;
+          selectedAutocompleteIndex = -1;
+
+          if (completions.length === 0) {
+            autocompleteDropdown.innerHTML = '<div class="autocomplete-empty">No matching commands</div>';
+            autocompleteDropdown.classList.add('visible');
+            return;
+          }
 
         var html = '';
         completions.forEach(function(item, idx) {
@@ -4432,15 +4444,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         });
       }
 
-      function hideAutocomplete() {
-        autocompleteDropdown.classList.remove('visible');
-        autocompleteData = [];
-        selectedAutocompleteIndex = -1;
-      }
+        function hideAutocomplete() {
+          if (!autocompleteDropdown) return;
+          autocompleteDropdown.classList.remove('visible');
+          autocompleteData = [];
+          selectedAutocompleteIndex = -1;
+        }
 
-      function selectAutocompleteItem(index) {
-        if (index < 0 || index >= autocompleteData.length) return;
-        var item = autocompleteData[index];
+        function selectAutocompleteItem(index) {
+          if (!autocompleteDropdown) return;
+          if (index < 0 || index >= autocompleteData.length) return;
+          var item = autocompleteData[index];
 
         // Replace the current word/slash command with the selected command
         var text = inputEl.value;
@@ -4463,27 +4477,28 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         inputEl.focus();
       }
 
-      function updateAutocompleteSelection(delta) {
-        if (autocompleteData.length === 0) return;
+        function updateAutocompleteSelection(delta) {
+          if (!autocompleteDropdown) return;
+          if (autocompleteData.length === 0) return;
 
-        // Update index
-        selectedAutocompleteIndex += delta;
-        if (selectedAutocompleteIndex < 0) selectedAutocompleteIndex = autocompleteData.length - 1;
-        if (selectedAutocompleteIndex >= autocompleteData.length) selectedAutocompleteIndex = 0;
+          // Update index
+          selectedAutocompleteIndex += delta;
+          if (selectedAutocompleteIndex < 0) selectedAutocompleteIndex = autocompleteData.length - 1;
+          if (selectedAutocompleteIndex >= autocompleteData.length) selectedAutocompleteIndex = 0;
 
-        // Update UI
-        autocompleteDropdown.querySelectorAll('.autocomplete-item').forEach(function(el, idx) {
+          // Update UI
+          autocompleteDropdown.querySelectorAll('.autocomplete-item').forEach(function(el, idx) {
           if (idx === selectedAutocompleteIndex) {
             el.classList.add('selected');
             el.scrollIntoView({ block: 'nearest' });
           } else {
             el.classList.remove('selected');
           }
-        });
-      }
+          });
+        }
 
-      // Detect "/" and query for completions
-      inputEl.addEventListener('input', function(e) {
+        // Detect "/" and query for completions
+        inputEl.addEventListener('input', function(e) {
         var text = inputEl.value;
         var cursorPos = inputEl.selectionStart;
 
@@ -4507,52 +4522,53 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Extract the query (including the slash)
         var query = textAfterSlash;
 
-        // Send query to extension
-        vscode.postMessage({
-          type: 'slash_command_query',
-          payload: { query: query, limit: 10 }
+          // Send query to extension
+          vscode.postMessage({
+            type: 'slash_command_query',
+            payload: { query: query, limit: 10 }
+          });
         });
-      });
 
-      // Handle arrow keys and Enter in autocomplete
-      inputEl.addEventListener('keydown', function(e) {
-        var isAutocompleteVisible = autocompleteDropdown.classList.contains('visible');
+        // Handle arrow keys and Enter in autocomplete
+        inputEl.addEventListener('keydown', function(e) {
+          var isAutocompleteVisible = autocompleteDropdown.classList.contains('visible');
 
-        if (isAutocompleteVisible) {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            updateAutocompleteSelection(1);
-            return;
+          if (isAutocompleteVisible) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              updateAutocompleteSelection(1);
+              return;
+            }
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              updateAutocompleteSelection(-1);
+              return;
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              if (selectedAutocompleteIndex !== -1) {
+                selectAutocompleteItem(selectedAutocompleteIndex);
+              } else {
+                // Enter pressed with autocomplete visible but no selection - just send
+                hideAutocomplete();
+                sendMessage();
+              }
+              return;
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              hideAutocomplete();
+              return;
+            }
           }
-          if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            updateAutocompleteSelection(-1);
-            return;
-          }
+
+          // Original Enter handler (only if autocomplete not visible)
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (selectedAutocompleteIndex !== -1) {
-              selectAutocompleteItem(selectedAutocompleteIndex);
-            } else {
-              // Enter pressed with autocomplete visible but no selection - just send
-              hideAutocomplete();
-              sendMessage();
-            }
-            return;
+            sendMessage();
           }
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            hideAutocomplete();
-            return;
-          }
-        }
-
-        // Original Enter handler (only if autocomplete not visible)
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          sendMessage();
-        }
-      });
+        });
+      }
 
       // ---- Stop generation ----
       stopBtn.addEventListener('click', function() {
