@@ -108,7 +108,7 @@ class DiffContentCacheImpl {
   }
 }
 
-const DiffContentCache = new DiffContentCacheImpl();
+export const DiffContentCache = new DiffContentCacheImpl();
 
 /**
  * TextDocumentContentProvider for virtual diff URIs.

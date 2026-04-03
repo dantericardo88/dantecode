@@ -23,6 +23,11 @@ vi.mock("@dantecode/core", () => ({
   ModelRouterImpl: vi.fn(),
 }));
 
+// Mock diff-viewer (DiffContentCache)
+vi.mock("./ui-enhancements/diff-viewer.js", () => ({
+  DiffContentCache: { set: vi.fn(), get: vi.fn(), clear: vi.fn(), clearAll: vi.fn() },
+}));
+
 import {
   stripMarkdownFences,
   parseModelString,

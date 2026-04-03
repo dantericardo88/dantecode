@@ -7,6 +7,7 @@
 import * as vscode from "vscode";
 import { ModelRouterImpl } from "@dantecode/core";
 import type { ModelRouterConfig, ModelConfig } from "@dantecode/config-types";
+import { DiffContentCache } from "./ui-enhancements/diff-viewer.js";
 
 /** VSCode secret storage keys for provider API keys */
 const PROVIDER_SECRET_KEYS: Record<string, string> = {
@@ -189,8 +190,8 @@ export class InlineEditProvider {
     );
 
     // Store content for the content provider (reuse existing dantecode-diff scheme)
-    InlineEditContentCache.set(leftUri.toString(), originalText);
-    InlineEditContentCache.set(rightUri.toString(), editedText);
+    DiffContentCache.set(leftUri.toString(), originalText);
+    DiffContentCache.set(rightUri.toString(), editedText);
 
     // Open diff editor
     await vscode.commands.executeCommand(
@@ -210,8 +211,8 @@ export class InlineEditProvider {
     );
 
     // Clean up cache
-    InlineEditContentCache.delete(leftUri.toString());
-    InlineEditContentCache.delete(rightUri.toString());
+    DiffContentCache.clear(leftUri.toString());
+    DiffContentCache.clear(rightUri.toString());
 
     // Close the diff editor
     await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
@@ -314,15 +315,3 @@ export class InlineEditProvider {
   }
 }
 
-/**
- * In-memory cache for inline edit diff content.
- * Uses the existing dantecode-diff:// URI scheme registered by diff-viewer.ts.
- */
-class InlineEditContentCacheImpl {
-  private cache = new Map<string, string>();
-  set(key: string, value: string): void { this.cache.set(key, value); }
-  get(key: string): string | undefined { return this.cache.get(key); }
-  delete(key: string): void { this.cache.delete(key); }
-}
-
-export const InlineEditContentCache = new InlineEditContentCacheImpl();

@@ -118,7 +118,9 @@ interface WebviewInboundMessage {
     | "search_command"
     | "bg_command"
     | "party_command"
-    | "automate_command";
+    | "automate_command"
+    | "file_mention_query"
+    | "add_file_mention";
   payload: Record<string, unknown>;
 }
 
@@ -464,6 +466,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       case "slash_command_query":
         await this.handleSlashCommandQuery(message.payload);
         break;
+      case "file_mention_query":
+        await this.handleFileMentionQuery(message.payload);
+        break;
+      case "add_file_mention": {
+        const filePath = String(message.payload["filePath"] ?? "");
+        if (filePath) {
+          const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+          const fullPath = filePath.startsWith("/") || filePath.includes(":")
+            ? filePath
+            : `${projectRoot}/${filePath}`.replace(/\\/g, "/");
+          if (!this.contextFiles.includes(fullPath)) {
+            this.contextFiles.push(fullPath);
+            this.sendContextFilesUpdate();
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -2647,6 +2666,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Handle @file mention autocomplete queries.
+   * Searches workspace files matching the query and returns results for the dropdown.
+   */
+  private async handleFileMentionQuery(payload: Record<string, unknown>): Promise<void> {
+    const query = typeof payload.query === "string" ? payload.query : "";
+    const limit = typeof payload.limit === "number" ? payload.limit : 10;
+
+    try {
+      // Search for files matching the query
+      const pattern = `**/*${query}*`;
+      const excludePattern = "**/node_modules/**,**/.git/**,**/dist/**,**/build/**";
+      const files = await vscode.workspace.findFiles(pattern, excludePattern, limit);
+
+      const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+      const completions = files.map((uri) => {
+        const relativePath = uri.fsPath.startsWith(projectRoot)
+          ? uri.fsPath.substring(projectRoot.length + 1).replace(/\\/g, "/")
+          : uri.fsPath;
+        return {
+          command: `@${relativePath}`,
+          description: relativePath,
+          category: "file",
+        };
+      });
+
+      this.postMessage({
+        type: "slash_completions",
+        payload: { completions, query: `@${query}`, isLoading: false },
+      });
+    } catch {
+      this.postMessage({
+        type: "slash_completions",
+        payload: { completions: [], query: `@${query}`, isLoading: false },
+      });
+    }
+  }
+
   private reconcileClaimedFileWrites(
     fullResponse: string,
     touchedFiles: string[],
@@ -4480,20 +4537,35 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           if (index < 0 || index >= autocompleteData.length) return;
           var item = autocompleteData[index];
 
-        // Replace the current word/slash command with the selected command
         var text = inputEl.value;
         var cursorPos = inputEl.selectionStart;
 
-        // Find the start of the slash command
+        // Handle @file mentions — add file to context and remove @query from input
+        if (item.category === 'file' && item.command.startsWith('@')) {
+          var filePath = item.description; // relative path
+          vscode.postMessage({ type: 'add_file_mention', payload: { filePath: filePath } });
+
+          // Remove the @query from input
+          var atPos = text.lastIndexOf('@', cursorPos);
+          if (atPos === -1) atPos = 0;
+          var before = text.substring(0, atPos);
+          var after = text.substring(cursorPos);
+          inputEl.value = before + after;
+          inputEl.setSelectionRange(atPos, atPos);
+
+          hideAutocomplete();
+          inputEl.focus();
+          return;
+        }
+
+        // Handle /slash commands
         var slashPos = text.lastIndexOf('/', cursorPos);
         if (slashPos === -1) slashPos = 0;
 
-        // Replace from slash position to cursor with the selected command + space
         var before = text.substring(0, slashPos);
         var after = text.substring(cursorPos);
         inputEl.value = before + item.command + ' ' + after;
 
-        // Set cursor after the inserted command + space
         var newPos = slashPos + item.command.length + 1;
         inputEl.setSelectionRange(newPos, newPos);
 
@@ -4521,32 +4593,43 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           });
         }
 
-        // Detect "/" and query for completions
+        // Detect "/" for slash commands and "@" for file mentions
         inputEl.addEventListener('input', function(e) {
         var text = inputEl.value;
         var cursorPos = inputEl.selectionStart;
-
-        // Find the word at cursor position (look backwards for "/")
         var textBeforeCursor = text.substring(0, cursorPos);
+
+        // Check for @file mentions first
+        var lastAtPos = textBeforeCursor.lastIndexOf('@');
+        if (lastAtPos !== -1) {
+          var textAfterAt = textBeforeCursor.substring(lastAtPos);
+          // Only trigger if no whitespace between @ and cursor (except the @ itself)
+          if (!/\\s/.test(textAfterAt.substring(1)) && textAfterAt.length > 1) {
+            var fileQuery = textAfterAt.substring(1); // strip the @
+            vscode.postMessage({
+              type: 'file_mention_query',
+              payload: { query: fileQuery, limit: 10 }
+            });
+            return;
+          }
+        }
+
+        // Then check for /slash commands
         var lastSlashPos = textBeforeCursor.lastIndexOf('/');
 
-        // Check if we're in a slash command context
         if (lastSlashPos === -1) {
           hideAutocomplete();
           return;
         }
 
-        // Check if there's any whitespace between the slash and cursor
         var textAfterSlash = textBeforeCursor.substring(lastSlashPos);
         if (/\\s/.test(textAfterSlash)) {
           hideAutocomplete();
           return;
         }
 
-        // Extract the query (including the slash)
         var query = textAfterSlash;
 
-          // Send query to extension
           vscode.postMessage({
             type: 'slash_command_query',
             payload: { query: query, limit: 10 }

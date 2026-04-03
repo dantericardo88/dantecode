@@ -754,18 +754,23 @@
           "when": "editorFocus"
         },
         {
-          "command": "dantecode.verifySelection",
+          "command": "dantecode.inlineEdit",
           "group": "dantecode@3",
-          "when": "editorHasSelection"
+          "when": "editorFocus"
         },
         {
-          "command": "dantecode.searchSimilar",
+          "command": "dantecode.verifySelection",
           "group": "dantecode@4",
           "when": "editorHasSelection"
         },
         {
-          "command": "dantecode.commitFile",
+          "command": "dantecode.searchSimilar",
           "group": "dantecode@5",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "dantecode.commitFile",
+          "group": "dantecode@6",
           "when": "editorFocus"
         }
       ],
@@ -808,41 +813,50 @@
       {
         "id": "dantecode.welcome",
         "title": "Get Started with DanteCode",
-        "description": "Set up your AI coding assistant in minutes",
+        "description": "Set up your AI coding assistant with constitutional verification in minutes",
         "steps": [
           {
             "id": "setupApiKey",
             "title": "Configure API Keys",
-            "description": "Set up your preferred LLM provider (Grok, Claude, GPT, Ollama, etc.)",
+            "description": "Set up your preferred LLM provider (Grok, Claude, GPT, Google, Ollama)",
             "media": {
-              "markdown": "## Quick Setup\n\nRun the command **DanteCode: Setup API Keys** to configure your providers.\n\nDanteCode supports 7+ providers — use any model you prefer."
+              "markdown": "## Quick Setup\n\nRun **DanteCode: Setup API Keys** from the command palette (`Ctrl+Shift+P`).\n\nDanteCode supports 5 providers:\n- **Grok** (xAI) — fastest, recommended default\n- **Claude** (Anthropic) — strongest reasoning\n- **GPT** (OpenAI) — broad compatibility\n- **Gemini** (Google) — large context window\n- **Ollama** — free, runs locally\n\nYou only need one API key to get started."
             },
             "completionEvents": ["onCommand:dantecode.setupApiKeys"]
           },
           {
             "id": "openChat",
-            "title": "Start a Chat",
+            "title": "Open Chat & Ask Anything",
             "description": "Open the DanteCode sidebar and ask your first question",
             "media": {
-              "markdown": "## Chat with DanteCode\n\nClick the DanteCode icon in the activity bar, or press **Ctrl+Alt+D**.\n\nAsk anything: 'Fix the bug in auth.ts', 'Add unit tests', 'Refactor this function'."
+              "markdown": "## Chat with DanteCode\n\nPress **Ctrl+Alt+D** or click the DanteCode icon in the activity bar.\n\nThe chat has a full agent loop — it can:\n- Read, write, and edit files\n- Run terminal commands\n- Search your codebase\n- Create git commits\n\nTry: *\"Add error handling to the login function\"*"
             },
             "completionEvents": ["onCommand:dantecode.openChat"]
           },
           {
-            "id": "tryPDSE",
-            "title": "Run Quality Check",
-            "description": "Score your code with DanteForge's PDSE verification",
+            "id": "tryCmdK",
+            "title": "Try Cmd+K Inline Edit",
+            "description": "Select code and press Cmd+K to edit it with AI — with diff preview",
             "media": {
-              "markdown": "## Quality Gates\n\nDanteCode includes built-in quality verification:\n- **PDSE Score**: Production-Deployment Safety Evaluation\n- **Anti-Stub Detection**: Catches placeholder code\n- **Constitution Check**: Enforces coding standards"
+              "markdown": "## Inline Editing\n\n1. **Select** some code in the editor\n2. Press **Cmd+K** (Mac) or **Ctrl+K** (Windows/Linux)\n3. **Describe** what to change: *\"Add error handling\"*\n4. **Review** the diff preview (Before ↔ After)\n5. **Accept** or **Reject** the change\n\nWorks on any line — no selection needed (edits the current line)."
+            },
+            "completionEvents": ["onCommand:dantecode.inlineEdit"]
+          },
+          {
+            "id": "tryPDSE",
+            "title": "Check Code Quality",
+            "description": "See real-time PDSE scores in the status bar and file explorer",
+            "media": {
+              "markdown": "## Quality Verification\n\nDanteCode continuously monitors code quality:\n\n- **Status Bar**: Shows PDSE score for the current file (green ≥85, yellow ≥70, red <70)\n- **Explorer Badges**: ✓ / ~ / ! icons on each file\n- **Inline Annotations**: Squiggly underlines for constitution violations\n- **Code Actions**: Quick fixes for detected issues\n\nRun **DanteCode: Run PDSE Scorer** (`Ctrl+Alt+P`) for a full scan."
             },
             "completionEvents": ["onCommand:dantecode.runPDSE"]
           },
           {
-            "id": "learnMore",
-            "title": "Explore Features",
-            "description": "Discover background agents, semantic search, and more",
+            "id": "exploreFeatures",
+            "title": "Explore Advanced Features",
+            "description": "Discover panels, keyboard shortcuts, and power features",
             "media": {
-              "markdown": "## Power Features\n\n- **Background Agents**: `/bg` runs tasks in parallel\n- **Semantic Search**: `/search` finds code by meaning\n- **Event Gateway**: `/listen` receives webhooks\n- **Memory**: `/remember` saves project knowledge\n- **Model Switching**: `/model` changes LLM on the fly"
+              "markdown": "## Power Features\n\n### Panels (in sidebar)\n- **Git Operations**: Diff, commit, status — direct git-engine integration\n- **Sessions**: Browse 70+ chat sessions, resume any conversation\n- **Skills Library**: Browse learned skills from past sessions\n- **Memory Browser**: Search semantic memory across sessions\n\n### Keyboard Shortcuts\n| Key | Action |\n|-----|--------|\n| `Ctrl+Alt+D` | Open chat |\n| `Cmd+K` / `Ctrl+K` | Inline edit |\n| `Ctrl+Alt+P` | Run PDSE |\n| `Ctrl+Alt+V` | Run verification |\n| `Ctrl+Alt+C` | Smart commit |\n| `Ctrl+Alt+S` | Semantic search |\n| `Ctrl+Alt+G` | Launch party mode |\n\n### Right-Click Menu\n- **Add to Context** — include file in chat\n- **Run PDSE** — score selected file\n- **Verify Selection** — check selected code\n- **Find Similar** — search for similar patterns"
             }
           }
         ]
