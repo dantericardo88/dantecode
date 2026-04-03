@@ -585,7 +585,7 @@
         "command": "dantecode.inlineEdit",
         "key": "ctrl+k",
         "mac": "cmd+k",
-        "when": "editorTextFocus && editorHasSelection"
+        "when": "editorTextFocus"
       },
       {
         "command": "dantecode.openChat",

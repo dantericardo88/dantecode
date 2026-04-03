@@ -1,6 +1,7 @@
 // ============================================================================
 // DanteCode Cmd+K Inline Edit Provider
-// Cursor-style inline editing: select code → describe change → AI applies it
+// Cursor-style inline editing: select code → describe change → AI generates
+// diff preview → user accepts or rejects
 // ============================================================================
 
 import * as vscode from "vscode";
@@ -15,8 +16,59 @@ const PROVIDER_SECRET_KEYS: Record<string, string> = {
   google: "dantecode.googleApiKey",
 };
 
+/** Strip markdown code fences from AI response */
+export function stripMarkdownFences(text: string): string {
+  let result = text.replace(/^```[\w]*\n?/, "");
+  result = result.replace(/\n?```$/, "");
+  return result;
+}
+
+/** Parse "provider/modelId" string into components */
+export function parseModelString(model: string): { provider: string; modelId: string } {
+  const slashIdx = model.indexOf("/");
+  if (slashIdx >= 0) {
+    return { provider: model.substring(0, slashIdx), modelId: model.substring(slashIdx + 1) };
+  }
+  return { provider: "grok", modelId: model };
+}
+
+/** Build the system prompt for inline editing */
+export function buildEditSystemPrompt(language: string, filePath: string): string {
+  return [
+    "You are a precise code editor. The user has selected code and wants you to modify it.",
+    "Return ONLY the replacement code. No markdown fences, no explanations, no commentary.",
+    "Preserve the exact indentation style of the original code.",
+    "Do not add or remove lines outside the selected region unless the instruction requires it.",
+    `Language: ${language}`,
+    `File: ${filePath}`,
+  ].join("\n");
+}
+
+/** Build the user prompt with context for inline editing */
+export function buildEditUserPrompt(
+  instruction: string,
+  selectedText: string,
+  contextBefore: string,
+  contextAfter: string,
+): string {
+  return [
+    `## Instruction\n${instruction}`,
+    "",
+    "## Context Before Selection",
+    contextBefore.trim() || "(start of file)",
+    "",
+    "## Selected Code (replace this)",
+    selectedText,
+    "",
+    "## Context After Selection",
+    contextAfter.trim() || "(end of file)",
+    "",
+    "Return ONLY the replacement code for the selected section. No explanation.",
+  ].join("\n");
+}
+
 /**
- * Inline Edit Provider — handles Cmd+K edit flow
+ * Inline Edit Provider — handles Cmd+K edit flow with diff preview
  */
 export class InlineEditProvider {
   private currentModel: string;
@@ -35,57 +87,78 @@ export class InlineEditProvider {
 
   /**
    * Execute inline edit flow:
-   * 1. Get selection from active editor
+   * 1. Get selection (or current line if no selection)
    * 2. Prompt user for instruction
    * 3. Generate replacement via AI
-   * 4. Apply to editor
+   * 4. Show diff preview — user accepts or rejects
+   * 5. Apply if accepted
    */
   async execute(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.selection.isEmpty) {
-      void vscode.window.showWarningMessage("DanteCode: Select code first, then press Cmd+K");
+    if (!editor) {
+      void vscode.window.showWarningMessage("DanteCode: Open a file first");
       return;
     }
 
-    const selectedText = editor.document.getText(editor.selection);
+    // If no selection, expand to current line
+    let selection = editor.selection;
+    if (selection.isEmpty) {
+      const line = editor.document.lineAt(selection.active.line);
+      selection = new vscode.Selection(line.range.start, line.range.end);
+    }
+
+    const selectedText = editor.document.getText(selection);
+    if (selectedText.trim().length === 0) {
+      void vscode.window.showWarningMessage("DanteCode: Select non-empty code to edit");
+      return;
+    }
+
     const language = editor.document.languageId;
     const filePath = editor.document.uri.fsPath;
+    const lineCount = selectedText.split("\n").length;
 
-    // Step 1: Get edit instruction from user
+    // Step 1: Get edit instruction
     const instruction = await vscode.window.showInputBox({
       placeHolder: "Describe what to change...",
-      prompt: `Edit ${selectedText.split("\n").length} lines of ${language}`,
+      prompt: `Edit ${lineCount} line${lineCount > 1 ? "s" : ""} of ${language}`,
       validateInput: (v) => (v.trim().length < 3 ? "Describe the change (min 3 chars)" : null),
     });
 
     if (!instruction) return;
 
-    // Step 2: Build context (10 lines before/after selection)
+    // Step 2: Gather context (10 lines before/after)
     const doc = editor.document;
-    const selStart = editor.selection.start.line;
-    const selEnd = editor.selection.end.line;
+    const selStart = selection.start.line;
+    const selEnd = selection.end.line;
     const contextBefore = doc.getText(
       new vscode.Range(Math.max(0, selStart - 10), 0, selStart, 0),
     );
     const contextAfter = doc.getText(
-      new vscode.Range(selEnd + 1, 0, Math.min(doc.lineCount - 1, selEnd + 10), 999),
+      new vscode.Range(
+        Math.min(doc.lineCount - 1, selEnd + 1), 0,
+        Math.min(doc.lineCount - 1, selEnd + 10), 999,
+      ),
     );
 
-    // Step 3: Generate replacement via AI
+    // Step 3: Generate replacement
     const replacement = await this.generateEdit(
-      selectedText,
-      instruction,
-      language,
-      filePath,
-      contextBefore,
-      contextAfter,
+      selectedText, instruction, language, filePath, contextBefore, contextAfter,
     );
-
     if (!replacement) return;
 
-    // Step 4: Apply replacement
+    // Step 4: If replacement is identical, nothing to do
+    if (replacement === selectedText) {
+      void vscode.window.showInformationMessage("No changes needed — code already matches instruction");
+      return;
+    }
+
+    // Step 5: Show diff preview and ask for confirmation
+    const accepted = await this.showDiffPreview(selectedText, replacement, instruction, filePath);
+    if (!accepted) return;
+
+    // Step 6: Apply the edit
     const success = await editor.edit((editBuilder) => {
-      editBuilder.replace(editor.selection, replacement);
+      editBuilder.replace(selection, replacement);
     });
 
     if (success) {
@@ -93,6 +166,57 @@ export class InlineEditProvider {
     } else {
       void vscode.window.showErrorMessage("Failed to apply inline edit");
     }
+  }
+
+  /**
+   * Show a diff preview and ask the user to accept or reject.
+   * Returns true if accepted.
+   */
+  private async showDiffPreview(
+    originalText: string,
+    editedText: string,
+    instruction: string,
+    filePath: string,
+  ): Promise<boolean> {
+    // Create virtual URIs for the diff viewer
+    const fileName = filePath.split(/[\\/]/).pop() ?? "inline-edit";
+    const timestamp = Date.now();
+    const leftUri = vscode.Uri.parse(
+      `dantecode-diff:/${fileName}.original.${timestamp}?content=${encodeURIComponent(originalText)}`,
+    );
+    const rightUri = vscode.Uri.parse(
+      `dantecode-diff:/${fileName}.edited.${timestamp}?content=${encodeURIComponent(editedText)}`,
+    );
+
+    // Store content for the content provider (reuse existing dantecode-diff scheme)
+    InlineEditContentCache.set(leftUri.toString(), originalText);
+    InlineEditContentCache.set(rightUri.toString(), editedText);
+
+    // Open diff editor
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      leftUri,
+      rightUri,
+      `Cmd+K: ${instruction}`,
+      { preview: true },
+    );
+
+    // Ask user to accept or reject
+    const choice = await vscode.window.showInformationMessage(
+      `Apply this edit? "${instruction}"`,
+      { modal: false },
+      "Accept",
+      "Reject",
+    );
+
+    // Clean up cache
+    InlineEditContentCache.delete(leftUri.toString());
+    InlineEditContentCache.delete(rightUri.toString());
+
+    // Close the diff editor
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
+
+    return choice === "Accept";
   }
 
   /**
@@ -106,32 +230,11 @@ export class InlineEditProvider {
     contextBefore: string,
     contextAfter: string,
   ): Promise<string | undefined> {
-    // Build model config from current model + secrets
     const router = await this.buildRouter();
     if (!router) return undefined;
 
-    const systemPrompt = [
-      "You are a precise code editor. The user has selected code and wants you to modify it.",
-      "Return ONLY the replacement code. No markdown fences, no explanations, no commentary.",
-      "Preserve the exact indentation style of the original code.",
-      `Language: ${language}`,
-      `File: ${filePath}`,
-    ].join("\n");
-
-    const userPrompt = [
-      `## Instruction\n${instruction}`,
-      "",
-      `## Context Before Selection`,
-      contextBefore.trim() || "(start of file)",
-      "",
-      `## Selected Code (replace this)`,
-      selectedText,
-      "",
-      `## Context After Selection`,
-      contextAfter.trim() || "(end of file)",
-      "",
-      "Return ONLY the replacement code for the selected section.",
-    ].join("\n");
+    const systemPrompt = buildEditSystemPrompt(language, filePath);
+    const userPrompt = buildEditUserPrompt(instruction, selectedText, contextBefore, contextAfter);
 
     return await vscode.window.withProgress(
       {
@@ -144,9 +247,7 @@ export class InlineEditProvider {
         token.onCancellationRequested(() => abortController.abort());
 
         try {
-          const messages = [
-            { role: "user" as const, content: userPrompt },
-          ];
+          const messages = [{ role: "user" as const, content: userPrompt }];
 
           const streamResult = await router.stream(messages, {
             system: systemPrompt,
@@ -160,12 +261,9 @@ export class InlineEditProvider {
             progress.report({ message: `${fullText.split("\n").length} lines...` });
           }
 
-          // Strip markdown fences if model wraps response
-          return this.stripMarkdownFences(fullText.trim());
+          return stripMarkdownFences(fullText.trim());
         } catch (err: unknown) {
-          if (abortController.signal.aborted) {
-            return undefined; // User cancelled
-          }
+          if (abortController.signal.aborted) return undefined;
           const msg = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Inline edit failed: ${msg}`);
           return undefined;
@@ -178,11 +276,8 @@ export class InlineEditProvider {
    * Build ModelRouterImpl from current model + stored API key
    */
   private async buildRouter(): Promise<ModelRouterImpl | undefined> {
-    const slashIdx = this.currentModel.indexOf("/");
-    const provider = slashIdx >= 0 ? this.currentModel.substring(0, slashIdx) : "grok";
-    const modelId = slashIdx >= 0 ? this.currentModel.substring(slashIdx + 1) : this.currentModel;
+    const { provider, modelId } = parseModelString(this.currentModel);
 
-    // Get API key from secrets
     const secretKey = PROVIDER_SECRET_KEYS[provider];
     let apiKey: string | undefined;
     if (secretKey) {
@@ -217,15 +312,17 @@ export class InlineEditProvider {
 
     return new ModelRouterImpl(routerConfig, projectRoot, `inline-edit-${Date.now()}`);
   }
-
-  /**
-   * Strip markdown code fences from AI response
-   */
-  private stripMarkdownFences(text: string): string {
-    // Remove opening fence: ```language\n
-    let result = text.replace(/^```[\w]*\n?/, "");
-    // Remove closing fence: \n```
-    result = result.replace(/\n?```$/, "");
-    return result;
-  }
 }
+
+/**
+ * In-memory cache for inline edit diff content.
+ * Uses the existing dantecode-diff:// URI scheme registered by diff-viewer.ts.
+ */
+class InlineEditContentCacheImpl {
+  private cache = new Map<string, string>();
+  set(key: string, value: string): void { this.cache.set(key, value); }
+  get(key: string): string | undefined { return this.cache.get(key); }
+  delete(key: string): void { this.cache.delete(key); }
+}
+
+export const InlineEditContentCache = new InlineEditContentCacheImpl();
