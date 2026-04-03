@@ -34,6 +34,7 @@ import {
   updateStatusBarInfo,
   updateSandboxStatus,
   updateStatusBarWithCost,
+  registerPdseActiveEditorListener,
   type StatusBarState,
 } from "./status-bar.js";
 import { PDSEDiagnosticProvider } from "./diagnostics.js";
@@ -405,6 +406,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── Status bar ──
   statusBarState = createStatusBar(context);
   updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
+
+  // ── Real-time PDSE score in status bar ──
+  if (projectRoot) {
+    registerPdseActiveEditorListener(context, statusBarState, projectRoot);
+  }
 
   // ── Diagnostics ──
   diagnosticProvider = new PDSEDiagnosticProvider();

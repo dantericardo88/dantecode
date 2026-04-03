@@ -29,6 +29,8 @@ export interface StatusBarState {
   };
   /** Context pressure percentage (0-100) (Wave 3 Task 3.3). */
   contextPressure?: number;
+  /** Real-time PDSE score for the currently active file (0-100). */
+  currentFilePdseScore?: number;
 }
 
 /** Info payload for the updateStatusBarInfo() convenience method. */
@@ -161,10 +163,66 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
 }
 
 /**
+ * Update the current file's PDSE score in the status bar.
+ */
+export function updateStatusBarPdseScore(state: StatusBarState, score: number | undefined): void {
+  state.currentFilePdseScore = score;
+  renderStatusBar(state);
+}
+
+/**
+ * Register the active editor PDSE score listener.
+ * Scores the current file on editor change and updates the status bar.
+ */
+export function registerPdseActiveEditorListener(
+  context: vscode.ExtensionContext,
+  state: StatusBarState,
+  projectRoot: string,
+): void {
+  const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|h)$/;
+
+  async function scoreActiveFile(editor: vscode.TextEditor | undefined): Promise<void> {
+    if (!editor || !SOURCE_EXTENSIONS.test(editor.document.uri.fsPath)) {
+      updateStatusBarPdseScore(state, undefined);
+      return;
+    }
+
+    try {
+      const { runLocalPDSEScorer } = await import("@dantecode/danteforge");
+      const content = editor.document.getText();
+      const score = runLocalPDSEScorer(content, projectRoot);
+      const overall = typeof score === "number" ? score : (score as any)?.overall ?? 0;
+      updateStatusBarPdseScore(state, overall);
+    } catch {
+      updateStatusBarPdseScore(state, undefined);
+    }
+  }
+
+  // Score initial active editor
+  void scoreActiveFile(vscode.window.activeTextEditor);
+
+  // Re-score on editor change
+  const editorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    void scoreActiveFile(editor);
+  });
+  context.subscriptions.push(editorListener);
+
+  // Re-score on save
+  const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document === doc) {
+      void scoreActiveFile(editor);
+    }
+  });
+  context.subscriptions.push(saveListener);
+}
+
+/**
  * Build the status bar display text. Exported for testing.
  *
- * Format: "DanteCode | grok-3 | idx: ✓ | ctx: 72% | 2 tasks"
+ * Format: "DanteCode | grok-3 | PDSE: 92 | idx: ✓ | ctx: 72% | 2 tasks"
  *   - model segment is always shown
+ *   - PDSE score shown when available for current file
  *   - index readiness shown when available
  *   - context pressure shown when available
  *   - context segment shown when > 0%
@@ -173,6 +231,12 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
 export function formatStatusBarText(state: StatusBarState): string {
   const shortModel = formatModelName(state.currentModel);
   const parts: string[] = ["DanteCode", shortModel];
+
+  // PDSE score for current file
+  if (state.currentFilePdseScore !== undefined) {
+    const pdseIcon = state.currentFilePdseScore >= 85 ? "$(verified)" : state.currentFilePdseScore >= 70 ? "$(warning)" : "$(error)";
+    parts.push(`${pdseIcon} ${state.currentFilePdseScore}`);
+  }
 
   // Index readiness badge (Wave 3 Task 3.2)
   if (state.indexReadiness) {
@@ -255,6 +319,9 @@ function renderStatusBar(state: StatusBarState): void {
     GATE_TOOLTIPS[gateStatus],
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
+    state.currentFilePdseScore !== undefined
+      ? `Current file PDSE: ${state.currentFilePdseScore}/100`
+      : "Current file PDSE: N/A",
   ];
 
   // Add index readiness to tooltip (Wave 3 Task 3.2)
