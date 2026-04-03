@@ -15,10 +15,7 @@ let memoryOrchestrator: MemoryOrchestrator | undefined;
  */
 export async function getMemoryOrchestrator(projectRoot: string): Promise<MemoryOrchestrator> {
   if (!memoryOrchestrator) {
-    memoryOrchestrator = await createMemoryOrchestrator({
-      projectRoot,
-      embeddingProvider: "local", // Use local TF-IDF embeddings
-    });
+    memoryOrchestrator = createMemoryOrchestrator(projectRoot);
     await memoryOrchestrator.initialize();
   }
   return memoryOrchestrator;
