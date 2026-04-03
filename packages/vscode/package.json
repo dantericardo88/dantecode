@@ -724,6 +724,24 @@
           "type": "boolean",
           "default": true,
           "description": "Show PDSE quality warnings as ghost-text comments and Problems panel entries when inline completion scores below threshold."
+        },
+        "dantecode.budget.sessionMaxUsd": {
+          "type": "number",
+          "default": 5.0,
+          "minimum": 0,
+          "description": "Maximum spend per session (USD). Shows warning at 80%, blocks requests at 100%. Set to 0 for unlimited."
+        },
+        "dantecode.budget.monthlyMaxUsd": {
+          "type": "number",
+          "default": 50.0,
+          "minimum": 0,
+          "description": "Maximum monthly spend (USD). Resets on the 1st of each month. Set to 0 for unlimited."
+        },
+        "dantecode.approvalMode": {
+          "type": "string",
+          "enum": ["apply", "review", "plan", "yolo"],
+          "default": "apply",
+          "description": "Tool approval mode. 'apply' = ask before destructive ops, 'review' = ask for all writes, 'plan' = read-only, 'yolo' = auto-approve everything."
         }
       }
     },

@@ -702,7 +702,12 @@ async function commandReviewPR(): Promise<void> {
         out.appendLine(`  Error: ${msg}`);
         out.appendLine("  Ensure GitHub CLI (gh) is installed and authenticated");
         out.show();
-        void vscode.window.showErrorMessage(`PR review failed: ${msg}`);
+        const userMsg = msg.includes("ENOENT") || msg.includes("not found")
+          ? "GitHub CLI (gh) not found. Install it from https://cli.github.com"
+          : msg.includes("auth") || msg.includes("401")
+          ? "GitHub CLI not authenticated. Run `gh auth login` in terminal."
+          : `PR review failed: ${msg}`;
+        void vscode.window.showErrorMessage(userMsg);
       }
     },
   );
@@ -760,7 +765,12 @@ async function commandTriageIssue(): Promise<void> {
         out.appendLine(`  Error: ${msg}`);
         out.appendLine("  Ensure GitHub CLI (gh) is installed and authenticated");
         out.show();
-        void vscode.window.showErrorMessage(`Issue triage failed: ${msg}`);
+        const userMsg = msg.includes("ENOENT") || msg.includes("not found")
+          ? "GitHub CLI (gh) not found. Install it from https://cli.github.com"
+          : msg.includes("auth") || msg.includes("401")
+          ? "GitHub CLI not authenticated. Run `gh auth login` in terminal."
+          : `Issue triage failed: ${msg}`;
+        void vscode.window.showErrorMessage(userMsg);
       }
     },
   );

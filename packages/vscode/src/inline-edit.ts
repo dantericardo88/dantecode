@@ -286,9 +286,13 @@ export class InlineEditProvider {
     }
 
     if (provider !== "ollama" && !apiKey) {
-      void vscode.window.showWarningMessage(
-        `No API key for ${provider}. Open DanteCode settings to configure.`,
+      const action = await vscode.window.showWarningMessage(
+        `Cmd+K needs an API key for ${provider}. Set one up to start editing with AI.`,
+        "Setup API Keys",
       );
+      if (action === "Setup API Keys") {
+        void vscode.commands.executeCommand("dantecode.setupApiKeys");
+      }
       return undefined;
     }
 

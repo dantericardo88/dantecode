@@ -470,15 +470,32 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         await this.handleFileMentionQuery(message.payload);
         break;
       case "add_file_mention": {
-        const filePath = String(message.payload["filePath"] ?? "");
-        if (filePath) {
+        const mentionPath = String(message.payload["filePath"] ?? "");
+        const mentionCategory = String(message.payload["category"] ?? "file");
+        if (mentionPath) {
           const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-          const fullPath = filePath.startsWith("/") || filePath.includes(":")
-            ? filePath
-            : `${projectRoot}/${filePath}`.replace(/\\/g, "/");
-          if (!this.contextFiles.includes(fullPath)) {
-            this.contextFiles.push(fullPath);
+
+          if (mentionCategory === "folder") {
+            // Add all files in the folder to context
+            const folderPattern = `${mentionPath}**`;
+            const folderFiles = await vscode.workspace.findFiles(folderPattern, "**/node_modules/**", 20);
+            for (const uri of folderFiles) {
+              if (!this.contextFiles.includes(uri.fsPath)) {
+                this.contextFiles.push(uri.fsPath);
+              }
+            }
             this.sendContextFilesUpdate();
+            void vscode.window.showInformationMessage(
+              `Added ${folderFiles.length} files from ${mentionPath} to context`,
+            );
+          } else {
+            const fullPath = mentionPath.startsWith("/") || mentionPath.includes(":")
+              ? mentionPath
+              : `${projectRoot}/${mentionPath}`.replace(/\\/g, "/");
+            if (!this.contextFiles.includes(fullPath)) {
+              this.contextFiles.push(fullPath);
+              this.sendContextFilesUpdate();
+            }
           }
         }
         break;
@@ -1218,6 +1235,26 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           modelTier: costEstimate.modelTier,
           sessionTotalUsd: costEstimate.sessionTotalUsd,
         });
+
+        // Budget guardrail: check session spend against limit
+        const budgetConfig = vscode.workspace.getConfiguration("dantecode.budget");
+        const sessionMaxUsd = budgetConfig.get<number>("sessionMaxUsd", 5.0);
+        if (sessionMaxUsd > 0 && costEstimate.sessionTotalUsd > 0) {
+          const pct = costEstimate.sessionTotalUsd / sessionMaxUsd;
+          if (pct >= 1.0) {
+            this.postMessage({
+              type: "error",
+              payload: {
+                message: `Session budget reached ($${costEstimate.sessionTotalUsd.toFixed(2)} / $${sessionMaxUsd.toFixed(2)}). Start a new chat or increase dantecode.budget.sessionMaxUsd in settings.`,
+              },
+            });
+            break; // Stop the agent loop
+          } else if (pct >= 0.8) {
+            void vscode.window.showWarningMessage(
+              `DanteCode: Session spend at ${(pct * 100).toFixed(0)}% of $${sessionMaxUsd.toFixed(2)} budget`,
+            );
+          }
+        }
 
         // WS5 Context Guardian: send context utilization update to webview
         const ctxUtil = getContextUtilization(
@@ -2675,26 +2712,60 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const limit = typeof payload.limit === "number" ? payload.limit : 10;
 
     try {
-      // Search for files matching the query
-      const pattern = `**/*${query}*`;
-      const excludePattern = "**/node_modules/**,**/.git/**,**/dist/**,**/build/**";
-      const files = await vscode.workspace.findFiles(pattern, excludePattern, limit);
-
       const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-      const completions = files.map((uri) => {
+      const completions: Array<{ command: string; description: string; category: string }> = [];
+
+      // Search for files matching the query
+      const filePattern = `**/*${query}*`;
+      const excludePattern = "**/node_modules/**,**/.git/**,**/dist/**,**/build/**";
+      const files = await vscode.workspace.findFiles(filePattern, excludePattern, limit);
+
+      for (const uri of files) {
         const relativePath = uri.fsPath.startsWith(projectRoot)
           ? uri.fsPath.substring(projectRoot.length + 1).replace(/\\/g, "/")
           : uri.fsPath;
-        return {
+        completions.push({
           command: `@${relativePath}`,
           description: relativePath,
           category: "file",
-        };
+        });
+      }
+
+      // Also search for folders matching the query
+      const folderPattern = `**/${query}*/**`;
+      const folderFiles = await vscode.workspace.findFiles(folderPattern, excludePattern, 50);
+      const seenFolders = new Set<string>();
+      for (const uri of folderFiles) {
+        const relativePath = uri.fsPath.startsWith(projectRoot)
+          ? uri.fsPath.substring(projectRoot.length + 1).replace(/\\/g, "/")
+          : uri.fsPath;
+        // Extract the folder part that matches the query
+        const parts = relativePath.split("/");
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (parts[i]!.toLowerCase().includes(query.toLowerCase())) {
+            const folderPath = parts.slice(0, i + 1).join("/");
+            if (!seenFolders.has(folderPath)) {
+              seenFolders.add(folderPath);
+              completions.push({
+                command: `@${folderPath}/`,
+                description: `${folderPath}/ (folder)`,
+                category: "folder",
+              });
+            }
+          }
+        }
+      }
+
+      // Sort: folders first, then files; limit total
+      completions.sort((a, b) => {
+        if (a.category === "folder" && b.category !== "folder") return -1;
+        if (a.category !== "folder" && b.category === "folder") return 1;
+        return a.description.localeCompare(b.description);
       });
 
       this.postMessage({
         type: "slash_completions",
-        payload: { completions, query: `@${query}`, isLoading: false },
+        payload: { completions: completions.slice(0, limit), query: `@${query}`, isLoading: false },
       });
     } catch {
       this.postMessage({
@@ -4540,10 +4611,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         var text = inputEl.value;
         var cursorPos = inputEl.selectionStart;
 
-        // Handle @file mentions — add file to context and remove @query from input
-        if (item.category === 'file' && item.command.startsWith('@')) {
-          var filePath = item.description; // relative path
-          vscode.postMessage({ type: 'add_file_mention', payload: { filePath: filePath } });
+        // Handle @file and @folder mentions — add to context and remove @query from input
+        if ((item.category === 'file' || item.category === 'folder') && item.command.startsWith('@')) {
+          var filePath = item.description.replace(' (folder)', ''); // relative path
+          vscode.postMessage({ type: 'add_file_mention', payload: { filePath: filePath, category: item.category } });
 
           // Remove the @query from input
           var atPos = text.lastIndexOf('@', cursorPos);
