@@ -77,117 +77,140 @@
         {
           "type": "webview",
           "id": "dantecode.chatView",
-          "name": "Chat"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.auditView",
-          "name": "Audit Log"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.automationView",
-          "name": "Automation"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.verificationView",
-          "name": "Verification"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.planningView",
-          "name": "Planning"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.magicView",
-          "name": "Magic"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.pdseView",
-          "name": "PDSE Scorer"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.memoryView",
-          "name": "Memory"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.searchView",
-          "name": "Search"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.agentsView",
-          "name": "Agents"
-        },
-        {
-          "id": "dantecode.repoMap",
-          "name": "Repo Map",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.checkpointTree",
-          "name": "Checkpoints",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.skillsTree",
-          "name": "Skills",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.quickActions",
-          "name": "Quick Actions",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.commandHistory",
-          "name": "Command History",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.timeline",
-          "name": "Session Timeline",
-          "type": "tree"
-        },
-        {
-          "id": "dantecode.agentProgress",
-          "name": "Agent Progress",
-          "type": "tree"
+          "name": "Chat",
+          "visibility": "visible"
         },
         {
           "type": "webview",
           "id": "dantecode.gitView",
-          "name": "Git Operations"
-        },
-        {
-          "type": "webview",
-          "id": "dantecode.skillsLibraryView",
-          "name": "Skills Library"
+          "name": "Git",
+          "visibility": "visible"
         },
         {
           "type": "webview",
           "id": "dantecode.sessionsView",
-          "name": "Sessions"
+          "name": "Sessions",
+          "visibility": "visible"
+        },
+        {
+          "id": "dantecode.repoMap",
+          "name": "Repo Map",
+          "type": "tree",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "dantecode.quickActions",
+          "name": "Quick Actions",
+          "type": "tree",
+          "visibility": "collapsed"
         },
         {
           "type": "webview",
-          "id": "dantecode.partyProgressView",
-          "name": "Party Mode Progress"
+          "id": "dantecode.pdseView",
+          "name": "PDSE Scorer",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.skillsLibraryView",
+          "name": "Skills Library",
+          "visibility": "collapsed"
         },
         {
           "type": "webview",
           "id": "dantecode.memoryBrowserView",
-          "name": "Memory Browser"
+          "name": "Memory Browser",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "dantecode.checkpointTree",
+          "name": "Checkpoints",
+          "type": "tree",
+          "visibility": "hidden"
+        },
+        {
+          "id": "dantecode.skillsTree",
+          "name": "Skills",
+          "type": "tree",
+          "visibility": "hidden"
+        },
+        {
+          "id": "dantecode.commandHistory",
+          "name": "Command History",
+          "type": "tree",
+          "visibility": "hidden"
+        },
+        {
+          "id": "dantecode.timeline",
+          "name": "Session Timeline",
+          "type": "tree",
+          "visibility": "hidden"
+        },
+        {
+          "id": "dantecode.agentProgress",
+          "name": "Agent Progress",
+          "type": "tree",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.auditView",
+          "name": "Audit Log",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.automationView",
+          "name": "Automation",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.verificationView",
+          "name": "Verification",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.planningView",
+          "name": "Planning",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.magicView",
+          "name": "Magic",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.memoryView",
+          "name": "Memory",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.searchView",
+          "name": "Search",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.agentsView",
+          "name": "Agents",
+          "visibility": "hidden"
+        },
+        {
+          "type": "webview",
+          "id": "dantecode.partyProgressView",
+          "name": "Party Mode Progress",
+          "visibility": "hidden"
         },
         {
           "type": "webview",
           "id": "dantecode.automationDashboardView",
-          "name": "Automation Dashboard"
+          "name": "Automation Dashboard",
+          "visibility": "hidden"
         }
       ]
     },

@@ -8,7 +8,6 @@ import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext, readOrInitializeState } from "@dantecode/core";
 import type { Session, DanteCodeState } from "@dantecode/config-types";
-import { OnboardingWizard } from "@dantecode/ux-polish";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
@@ -470,55 +469,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     void onboardingProvider.show();
   }
 
-  // ── Bootstrap default lessons for new projects ──
+  // ── Bootstrap default lessons (deferred, non-blocking, 5s delay) ──
   if (projectRoot && !context.globalState.get<boolean>("dantecode.lessonsBootstrapped")) {
-    void (async () => {
-      try {
-        const { queryLessons, recordLesson } = await import("@dantecode/danteforge");
-        const existing = await queryLessons({ projectRoot, limit: 1 });
-        if (existing.length === 0) {
-          const defaults = [
-            { pattern: "Placeholder / stub code", correction: "Always implement real logic. Never leave TODO, FIXME, or empty function bodies in production code." },
-            { pattern: "Missing error handling", correction: "Wrap external calls (API, file I/O, DB) in try-catch. Show user-friendly messages, log technical details." },
-            { pattern: "Hardcoded secrets", correction: "Use environment variables or secure storage for API keys, passwords, and tokens. Never commit secrets." },
-            { pattern: "No type safety", correction: "Prefer explicit types over 'any'. Use strict TypeScript settings. Validate external data at boundaries." },
-            { pattern: "Large functions", correction: "Break functions over 50 lines into smaller, focused functions. Each function should do one thing well." },
-          ];
-          for (const d of defaults) {
-            await recordLesson({
-              pattern: d.pattern,
-              correction: d.correction,
-              projectRoot,
-              occurrences: 1,
-              lastSeen: new Date().toISOString(),
-              severity: "info" as any,
-              source: "bootstrap" as any,
-            }, projectRoot);
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const { queryLessons, recordLesson } = await import("@dantecode/danteforge");
+          const existing = await queryLessons({ projectRoot, limit: 1 });
+          if (existing.length === 0) {
+            const defaults = [
+              { pattern: "Placeholder / stub code", correction: "Always implement real logic." },
+              { pattern: "Missing error handling", correction: "Wrap external calls in try-catch." },
+              { pattern: "Hardcoded secrets", correction: "Use env vars or secure storage." },
+              { pattern: "No type safety", correction: "Prefer explicit types over any." },
+              { pattern: "Large functions", correction: "Break functions over 50 lines." },
+            ];
+            for (const d of defaults) {
+              await recordLesson({ pattern: d.pattern, correction: d.correction, projectRoot, occurrences: 1, lastSeen: new Date().toISOString(), severity: "info" as any, source: "bootstrap" as any }, projectRoot);
+            }
           }
-          outputChannel.appendLine("✓ Bootstrapped 5 default lessons");
-        }
-        void context.globalState.update("dantecode.lessonsBootstrapped", true);
-      } catch { /* danteforge not available — skip */ }
-    })();
+          void context.globalState.update("dantecode.lessonsBootstrapped", true);
+        } catch { /* danteforge not available */ }
+      })();
+    }, 5000); // Delay 5s to not compete with activation
   }
 
-  // ── UX Polish OnboardingWizard ──
-  // Runs the ux-polish OnboardingWizard on first activation to guide initial setup.
-  // Uses globalState to gate so it only runs once per install.
-  if (!context.globalState.get<boolean>("dantecode.uxOnboardingComplete")) {
-    const wizard = new OnboardingWizard({
-      stateOptions: { projectRoot },
-    });
-    if (!wizard.isComplete()) {
-      void wizard.run({ ci: process.env["CI"] === "true" }).then((result) => {
-        if (result.completed) {
-          void context.globalState.update("dantecode.uxOnboardingComplete", true);
-        }
-      });
-    } else {
-      void context.globalState.update("dantecode.uxOnboardingComplete", true);
-    }
-  }
+  // OnboardingWizard removed — it's a CLI tool that hangs in VSCode (no stdin).
+  // The extension uses OnboardingProvider (webview) + walkthrough for onboarding.
 }
 
 // ─── Deactivate ──────────────────────────────────────────────────────────────
