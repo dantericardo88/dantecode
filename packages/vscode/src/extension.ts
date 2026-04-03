@@ -98,12 +98,15 @@ let pendingDiffOldContent: string | undefined;
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const extensionUri = context.extensionUri;
 
-  // ── Output channel (created early for bridge initialization) ──
+  // ── Output channel (created early so errors are visible) ──
   const outputChannel = vscode.window.createOutputChannel("DanteCode");
   context.subscriptions.push(outputChannel);
-  outputChannel.appendLine("DanteCode extension activated");
+  outputChannel.appendLine("DanteCode extension activating...");
+  outputChannel.show(true); // Show output panel immediately so user can see logs
 
-  // Hide advanced panels by default — only show Chat, Git, Sessions, Repo Map, Quick Actions
+  try {
+
+  // Hide advanced panels by default
   void vscode.commands.executeCommand("setContext", "dantecode.showAdvancedPanels", false);
 
   // ── Repo map tree ──
@@ -509,8 +512,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }, 5000); // Delay 5s to not compete with activation
   }
 
-  // OnboardingWizard removed — it's a CLI tool that hangs in VSCode (no stdin).
-  // The extension uses OnboardingProvider (webview) + walkthrough for onboarding.
+  outputChannel.appendLine("DanteCode extension activated successfully");
+
+  } catch (activationError) {
+    outputChannel.appendLine(`ACTIVATION FAILED: ${activationError instanceof Error ? activationError.message : String(activationError)}`);
+    outputChannel.appendLine(`Stack: ${activationError instanceof Error ? activationError.stack : "N/A"}`);
+    outputChannel.show(true);
+  }
 }
 
 // ─── Deactivate ──────────────────────────────────────────────────────────────

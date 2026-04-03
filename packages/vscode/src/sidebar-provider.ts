@@ -365,7 +365,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+    try {
+      webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      webviewView.webview.html = `<!DOCTYPE html><html><body style="color:red;padding:20px;"><h3>Load Error</h3><pre>${msg}</pre></body></html>`;
+    }
 
     // ── Attach to command bridge ──
 
@@ -3076,7 +3081,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; img-src data: blob:;">
+    content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:;">
   <title>DanteCode Chat</title>
   <style nonce="${nonce}">
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -4309,6 +4314,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   <script nonce="${nonce}">
     (function() {
+      try {
       const vscode = acquireVsCodeApi();
 
       // DOM references
@@ -5504,6 +5510,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       // ---- Notify extension that webview is ready ----
       vscode.postMessage({ type: 'ready', payload: {} });
+      } catch(err) {
+        document.body.innerHTML = '<div style="color:red;padding:20px;font-family:monospace;">'
+          + '<h3>DanteCode Error</h3><pre>' + (err.message || err) + '\\n' + (err.stack || '') + '</pre></div>';
+      }
     })();
   </script>
 </body>
