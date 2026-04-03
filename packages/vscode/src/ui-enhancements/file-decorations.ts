@@ -95,12 +95,13 @@ export class PDSEFileDecorationProvider implements vscode.FileDecorationProvider
       const content = await readFile(path, "utf-8");
       const result = await runLocalPDSEScorer(content, path);
 
-      if (result.passed !== undefined && result.score !== undefined) {
+      if (result && typeof (result as any).overall === 'number') {
+        const score = (result as any).overall;
         this.scoreCache.set(path, {
-          score: result.score,
+          score,
           timestamp: Date.now(),
         });
-        return result.score;
+        return score;
       }
     } catch {
       // File read or scoring failed

@@ -58,6 +58,7 @@ import {
   type CommandHistoryProvider,
   type AgentProgressProvider,
 } from "./ui-enhancements/index.js";
+import { registerPhase4Commands } from "./commands-phase4.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 
@@ -85,14 +86,14 @@ let semanticIndex:
     }
   | undefined;
 
-// Phase 5: UX Enhancements
-let fileDecorationProvider: PDSEFileDecorationProvider | undefined;
-let verificationAnnotationProvider: VerificationAnnotationProvider | undefined;
-let quickActionsProvider: QuickActionsProvider | undefined;
-let timelineViewProvider: TimelineViewProvider | undefined;
-let notificationManager: NotificationManager | undefined;
-let commandHistoryProvider: CommandHistoryProvider | undefined;
-let agentProgressProvider: AgentProgressProvider | undefined;
+// Phase 5: UX Enhancements (prefixed with _ to suppress unused variable warnings)
+let _fileDecorationProvider: PDSEFileDecorationProvider | undefined;
+let _verificationAnnotationProvider: VerificationAnnotationProvider | undefined;
+let _quickActionsProvider: QuickActionsProvider | undefined;
+let _timelineViewProvider: TimelineViewProvider | undefined;
+let _notificationManager: NotificationManager | undefined;
+let _commandHistoryProvider: CommandHistoryProvider | undefined;
+let _agentProgressProvider: AgentProgressProvider | undefined;
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -130,7 +131,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         readOnlyFiles: [],
         todoList: [],
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         agentStack: [],
+        model: initialState.model.default,
       };
     } catch (error) {
       outputChannel.appendLine(`Warning: Failed to initialize session/state: ${error}`);
@@ -399,13 +402,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerDiffViewer(context);
 
     // 2. PDSE score badges in file explorer
-    fileDecorationProvider = registerFileDecorations(context, projectRoot);
+    _fileDecorationProvider = registerFileDecorations(context, projectRoot);
 
     // 3. Inline verification annotations
-    verificationAnnotationProvider = registerVerificationAnnotations(context, projectRoot);
+    _verificationAnnotationProvider = registerVerificationAnnotations(context, projectRoot);
 
     // 4. Command history with re-run buttons
-    commandHistoryProvider = registerCommandHistory(context, (command: string) => {
+    _commandHistoryProvider = registerCommandHistory(context, (command: string) => {
       // Execute command via sidebar provider
       if (chatSidebarProvider) {
         void chatSidebarProvider.sendCommandToChat(command);
@@ -413,7 +416,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 5. Quick actions sidebar
-    quickActionsProvider = registerQuickActions(context, (command: string) => {
+    _quickActionsProvider = registerQuickActions(context, (command: string) => {
       // Execute command via sidebar provider
       if (chatSidebarProvider) {
         void chatSidebarProvider.sendCommandToChat(command);
@@ -421,7 +424,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 6. Session snapshots timeline
-    timelineViewProvider = registerTimelineView(context, projectRoot, (id: string) => {
+    _timelineViewProvider = registerTimelineView(context, projectRoot, (id: string) => {
       // Restore checkpoint
       if (checkpointManager) {
         void checkpointManager.rewindCheckpoint(id);
@@ -429,14 +432,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 7. Agent progress visualization
-    agentProgressProvider = registerAgentProgress(context);
+    _agentProgressProvider = registerAgentProgress(context);
 
     // 10. Notification toasts
-    notificationManager = registerNotificationManager(context);
+    _notificationManager = registerNotificationManager(context);
   }
 
   // ── Commands ──
-  registerCommands(context);
+  registerCommands(context, chatSidebarProvider);
 
   // ── Version command ──
   context.subscriptions.push(registerVersionCommand(context));
@@ -490,7 +493,7 @@ export function deactivate(): void {
 
 // ─── Command Registration ────────────────────────────────────────────────────
 
-function registerCommands(context: vscode.ExtensionContext): void {
+function registerCommands(context: vscode.ExtensionContext, chatSidebarProvider?: ChatSidebarProvider): void {
   const commands: Array<[string, (...args: unknown[]) => unknown]> = [
     ["dantecode.selfUpdate", () => commandSelfUpdate(context)],
     ["dantecode.openChat", commandOpenChat],
@@ -533,31 +536,13 @@ function registerCommands(context: vscode.ExtensionContext): void {
       (chainName?: unknown) => commandExecuteSkillChain(chainName as string | undefined),
     ],
     ["dantecode.refreshSkills", commandRefreshSkills],
-    // Phase 4 commands
-    ["dantecode.showGitPanel", commandShowGitPanel],
-    ["dantecode.showSkillsLibrary", commandShowSkillsLibrary],
-    ["dantecode.showSessions", commandShowSessions],
-    ["dantecode.runVerification", commandRunVerification],
-    ["dantecode.searchSemantic", commandSearchSemantic],
-    ["dantecode.webResearch", commandWebResearch],
-    ["dantecode.launchParty", commandLaunchParty],
-    ["dantecode.backgroundTask", commandBackgroundTask],
-    ["dantecode.autoforge", commandAutoforge],
-    ["dantecode.planTask", commandPlanTask],
-    ["dantecode.showMemory", commandShowMemory],
-    ["dantecode.commitFile", commandCommitFile],
-    ["dantecode.verifySelection", commandVerifySelection],
-    ["dantecode.addRail", commandAddRail],
-    ["dantecode.searchSimilar", commandSearchSimilar],
-    ["dantecode.showGaslight", commandShowGaslight],
-    ["dantecode.showFearset", commandShowFearset],
-    ["dantecode.showMetrics", commandShowMetrics],
-    ["dantecode.showTraces", commandShowTraces],
-    ["dantecode.reviewPR", commandReviewPR],
-    ["dantecode.triageIssue", commandTriageIssue],
-    ["dantecode.showMacros", commandShowMacros],
-    ["dantecode.themeSwitch", commandThemeSwitch],
   ];
+
+  // ── Phase 4 commands (from commands-phase4.ts) ──
+  if (chatSidebarProvider) {
+    const phase4Commands = registerPhase4Commands(chatSidebarProvider);
+    commands.push(...phase4Commands);
+  }
 
   for (const [id, handler] of commands) {
     const disposable = vscode.commands.registerCommand(id, handler);

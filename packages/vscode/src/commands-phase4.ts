@@ -69,10 +69,16 @@ async function commandRunVerification(): Promise<void> {
     async () => {
       try {
         const { runGStack } = await import("@dantecode/danteforge");
-        const result = await runGStack(projectRoot);
-        const status = result.passed ? "PASSED" : "FAILED";
+        const results = await runGStack(projectRoot, []);
+
+        // Aggregate results (handle both array and single result)
+        const resultsArray = Array.isArray(results) ? results : [results];
+        const allPassed = resultsArray.every((r: any) => r.passed);
+        const summary = `${resultsArray.filter((r: any) => r.passed).length}/${resultsArray.length} checks passed`;
+
+        const status = allPassed ? "PASSED" : "FAILED";
         void vscode.window.showInformationMessage(
-          `DanteCode Verification: ${status} (${result.summary})`,
+          `DanteCode Verification: ${status} (${summary})`,
         );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

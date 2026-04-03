@@ -75,12 +75,13 @@ export class VerificationAnnotationProvider {
 
     // Run anti-stub scanner
     try {
-      const stubResult = await runAntiStubScanner(content);
-      if (stubResult.violations && stubResult.violations.length > 0) {
-        for (const violation of stubResult.violations) {
+      const stubResult = await runAntiStubScanner(content, filePath);
+      const violations = (stubResult as any).hardViolations || [];
+      if (Array.isArray(violations) && violations.length > 0) {
+        for (const violation of violations) {
           issues.push({
-            range: this.findPatternRange(content, violation.pattern),
-            message: `Stub detected: ${violation.pattern}`,
+            range: this.findPatternRange(content, violation.pattern || ''),
+            message: `Stub detected: ${violation.pattern || 'unknown'}`,
             severity: vscode.DiagnosticSeverity.Warning,
             code: "stub-violation",
           });
@@ -93,11 +94,13 @@ export class VerificationAnnotationProvider {
     // Run constitution check
     try {
       const constitutionResult = await runConstitutionCheck(content);
-      if (constitutionResult.violations && constitutionResult.violations.length > 0) {
+      if (constitutionResult && Array.isArray(constitutionResult.violations) && constitutionResult.violations.length > 0) {
         for (const violation of constitutionResult.violations) {
+          const rule = (violation as any).rule || (violation as any).pattern || "unknown";
+          const message = (violation as any).message || rule;
           issues.push({
-            range: this.findPatternRange(content, violation.rule || "unknown"),
-            message: `Constitution violation: ${violation.message || violation.rule}`,
+            range: this.findPatternRange(content, rule),
+            message: `Constitution violation: ${message}`,
             severity: vscode.DiagnosticSeverity.Error,
             code: "constitution-violation",
           });
@@ -119,6 +122,7 @@ export class VerificationAnnotationProvider {
     // Try to find pattern in content
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      if (!line) continue;
       const index = line.toLowerCase().indexOf(pattern.toLowerCase());
       if (index >= 0) {
         return new vscode.Range(
