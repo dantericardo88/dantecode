@@ -1,0 +1,42 @@
+name: "DanteForge Verification"
+description: "Run anti-stub, PDSE, and GStack verification for changed files with inline PR annotations and SARIF output."
+
+branding:
+  icon: "shield"
+  color: "blue"
+
+inputs:
+  gstack-commands:
+    description: "Newline-delimited commands to run after anti-stub and PDSE verification."
+    required: false
+    default: ""
+  pdse-threshold:
+    description: "Minimum average PDSE score required to pass."
+    required: false
+    default: "70"
+  fail-on-stub:
+    description: "Fail the action when the anti-stub checker reports violations."
+    required: false
+    default: "true"
+  annotations-mode:
+    description: "How to publish inline annotations: 'pr-comment', 'check-run', or 'both'."
+    required: false
+    default: "both"
+  github-token:
+    description: "GitHub token for API calls. Defaults to the built-in GITHUB_TOKEN."
+    required: false
+    default: "${{ github.token }}"
+
+outputs:
+  passed:
+    description: "Whether all verification gates passed ('true' or 'false')."
+  pdse-average:
+    description: "Average PDSE score across changed source files (empty if skipped)."
+  stub-count:
+    description: "Number of anti-stub violations detected."
+  summary:
+    description: "Full Markdown summary of the verification run."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

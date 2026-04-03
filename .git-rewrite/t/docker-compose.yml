@@ -1,0 +1,121 @@
+# ============================================================================
+# DanteCode Docker Compose Stack
+# Production deployment with monitoring and persistence
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ── DanteCode API Server ──────────────────────────────────────────────────
+  dantecode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dantecode-api
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      # API Keys (override via .env file)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      GROK_API_KEY: ${GROK_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+
+      # GitHub Integration
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GH_TOKEN: ${GH_TOKEN:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+
+      # DanteCode Configuration
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DANTECODE_API_TOKEN: ${DANTECODE_API_TOKEN:-}
+
+      # Model Adaptation
+      DANTE_MODEL_ADAPTATION_MODE: ${DANTE_MODEL_ADAPTATION_MODE:-observe-only}
+      DANTE_DISABLE_MODEL_ADAPTATION: ${DANTE_DISABLE_MODEL_ADAPTATION:-0}
+
+      # Debug & Telemetry
+      DANTECODE_DEBUG: ${DANTECODE_DEBUG:-0}
+      DANTECODE_EXPORT_TELEMETRY: ${DANTECODE_EXPORT_TELEMETRY:-0}
+
+      # Ollama (optional)
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+
+    volumes:
+      # Persistent state
+      - dantecode-data:/app/data
+      - dantecode-config:/app/.dantecode
+
+      # Project workspace (mount your repo here)
+      - ${PROJECT_ROOT:-./workspace}:/workspace
+
+      # Docker socket for sandbox (careful!)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    networks:
+      - dantecode-network
+
+    depends_on:
+      - ollama
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => r.ok ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    labels:
+      - "com.dantecode.service=api"
+      - "com.dantecode.version=0.9.2"
+
+  # ── Ollama (optional local LLM) ───────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dantecode-ollama
+    restart: unless-stopped
+
+    ports:
+      - "11434:11434"
+
+    volumes:
+      - ollama-models:/root/.ollama
+
+    networks:
+      - dantecode-network
+
+    # GPU support (uncomment if NVIDIA GPU available)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+volumes:
+  dantecode-data:
+    driver: local
+    name: dantecode-data
+
+  dantecode-config:
+    driver: local
+    name: dantecode-config
+
+  ollama-models:
+    driver: local
+    name: ollama-models
+
+# ── Networks ────────────────────────────────────────────────────────────────
+networks:
+  dantecode-network:
+    driver: bridge
+    name: dantecode-network

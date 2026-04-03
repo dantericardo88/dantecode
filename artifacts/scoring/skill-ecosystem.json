@@ -1,0 +1,6 @@
+{
+  "source": "third-party skill registry",
+  "thirdPartySkillCount": 0,
+  "targetForScore10": 100,
+  "notes": "Count only importable third-party skills that work on current HEAD."
+}

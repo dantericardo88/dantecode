@@ -1,0 +1,76 @@
+{
+  "_comment": "Golden fixture — verification FAIL due to stub detection (anti-stub hard violation).",
+  "schemaVersion": "1.0",
+  "runId": "sess_20260324_golden_fail_stub",
+  "sessionId": "sess_20260324_golden_fail_stub",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "commitShaBefore": "4b5ceaa3f21e9d7a8b6c5d4e3f2a1b0c9d8e7f6a",
+  "commitShaAfter": null,
+  "filesTouched": ["packages/core/src/utils/parse.ts"],
+  "stages": [
+    {
+      "stageName": "anti-stub",
+      "passed": false,
+      "reason": "STUB-001: Hard violation detected — function body is a stub. Line 14: 'throw new Error(\"not implemented\")'",
+      "score": null,
+      "violations": [
+        {
+          "type": "stub",
+          "severity": "hard",
+          "line": 14,
+          "message": "Function body is not implemented — contains 'throw new Error(\"not implemented\")'",
+          "failCode": "STUB-001"
+        }
+      ]
+    },
+    {
+      "stageName": "constitution",
+      "passed": true,
+      "reason": "No critical violations.",
+      "score": null
+    },
+    {
+      "stageName": "pdse",
+      "passed": false,
+      "reason": "Score 41/100 is below gate threshold of 70. Hard stub violation collapses completeness score.",
+      "score": 41,
+      "breakdown": {
+        "completeness": 10,
+        "correctness": 55,
+        "clarity": 58,
+        "consistency": 60
+      }
+    },
+    {
+      "stageName": "pr-quality",
+      "passed": false,
+      "reason": "Advisory score 35/100. Non-blocking.",
+      "score": 35
+    }
+  ],
+  "overallPassed": false,
+  "plainLanguageSummary": "⚠ Verification failed — caught 1 stub(s): Function body is not implemented. PDSE score 41/100 (below gate of 70). The generated code is incomplete and cannot be accepted.",
+  "nextStepRecommendation": "Ask DanteCode to complete the implementation of the flagged function. Be specific: describe what the function should do, its inputs, and expected outputs.",
+  "receipt": {
+    "receiptId": "rc_b2c3d4e5f6a7b8c9",
+    "correlationId": "sess_20260324_golden_fail_stub",
+    "actor": "danteforge",
+    "action": "pdse_score:packages/core/src/utils/parse.ts",
+    "beforeHash": "a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4",
+    "afterHash": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5",
+    "receiptHash": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3",
+    "issuedAt": "2026-03-24T12:01:00.000Z"
+  },
+  "seal": {
+    "sealId": "seal_20260324_golden_fail_stub",
+    "sessionId": "sess_20260324_golden_fail_stub",
+    "evidenceRootHash": "a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3",
+    "eventCount": 1,
+    "metrics": [
+      { "metric": "receipts",      "value": 1 },
+      { "metric": "filesModified", "value": 0 },
+      { "metric": "totalRounds",   "value": 1 }
+    ]
+  }
+}

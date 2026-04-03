@@ -1,0 +1,45 @@
+[
+  {
+    "id": "call_75116225",
+    "toolName": "AskUser",
+    "input": {
+      "question": "Could you confirm the exact file path or name for 'benchmark-test.ts'? I couldn't locate it in the repository map. If it's under a specific directory or has a different name, please provide that information."
+    },
+    "requestId": "round-1",
+    "dependsOn": [],
+    "status": "success",
+    "statusHistory": [
+      {
+        "status": "created",
+        "ts": 1775050260701
+      },
+      {
+        "status": "validating",
+        "ts": 1775050260701
+      },
+      {
+        "status": "scheduled",
+        "ts": 1775050260701
+      },
+      {
+        "status": "executing",
+        "ts": 1775050260701
+      },
+      {
+        "status": "verifying",
+        "ts": 1775050260702
+      },
+      {
+        "status": "success",
+        "ts": 1775050260702
+      }
+    ],
+    "createdAt": 1775050260701,
+    "startedAt": 1775050260701,
+    "result": {
+      "content": "User response: (non-interactive — no user input available)",
+      "isError": false
+    },
+    "completedAt": 1775050260702
+  }
+]

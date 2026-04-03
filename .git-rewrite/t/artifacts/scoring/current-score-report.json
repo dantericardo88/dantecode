@@ -1,0 +1,76 @@
+{
+  "generatedAt": "2026-03-27T17:26:26.982Z",
+  "summary": {
+    "passed": 9,
+    "failed": 0,
+    "total": 9,
+    "scoreA": 10,
+    "scoreC": 6.666666666666667,
+    "scoreD": 5
+  },
+  "measurements": [
+    {
+      "id": "A-1",
+      "name": "Test Suite",
+      "score": 10,
+      "evidence": "8199 passing tests, 0 failures",
+      "status": "pass"
+    },
+    {
+      "id": "A-2",
+      "name": "Type Safety",
+      "score": 10,
+      "evidence": "48/48 packages clean",
+      "status": "pass"
+    },
+    {
+      "id": "C-3",
+      "name": "Help Discoverability",
+      "score": 10,
+      "evidence": "15 commands shown by default in /help (107 total)",
+      "status": "pass"
+    },
+    {
+      "id": "C-6",
+      "name": "Command Surface Ratio",
+      "score": 10,
+      "evidence": "15/107 = 0.140",
+      "status": "pass"
+    },
+    {
+      "id": "C-1",
+      "name": "Docs Time To Value",
+      "score": 0,
+      "evidence": "no stopwatch evidence recorded in C:\\Projects\\DanteCode\\artifacts\\scoring\\docs-time-to-value.json",
+      "status": "pass"
+    },
+    {
+      "id": "D-1",
+      "name": "Install Success Rate",
+      "score": 10,
+      "evidence": "smoke:install passed",
+      "status": "pass"
+    },
+    {
+      "id": "D-2",
+      "name": "External Users",
+      "score": 0,
+      "evidence": "0 successful external sessions (external beta program)",
+      "status": "pass"
+    },
+    {
+      "id": "D-3",
+      "name": "Skill Ecosystem",
+      "score": 0,
+      "evidence": "0 importable third-party skills (third-party skill registry)",
+      "status": "pass"
+    },
+    {
+      "id": "D-4",
+      "name": "CI Integration",
+      "score": 10,
+      "evidence": "3/3 configured platforms: GitHub Actions, GitLab CI, CircleCI",
+      "status": "pass"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "checkpoint": {
+    "v": 1,
+    "id": "ace650db-cd6",
+    "ts": "2026-04-01T13:31:02.718Z",
+    "step": 1,
+    "channelValues": {
+      "id": "run-2e170b52-cd02-4c8d-910f-aab7f746b9bd-1775050255235",
+      "workflow": "agent-loop",
+      "status": "completed",
+      "touchedFiles": [],
+      "evidenceCount": 1,
+      "lastConfirmedStep": "Executed AskUser: User response: (non-interactive — no user input available)",
+      "lastSuccessfulTool": "AskUser",
+      "nextAction": "Run completed."
+    },
+    "channelVersions": {
+      "id": 1,
+      "workflow": 1,
+      "status": 1,
+      "touchedFiles": 1,
+      "evidenceCount": 1,
+      "lastConfirmedStep": 1,
+      "lastSuccessfulTool": 1,
+      "nextAction": 1
+    }
+  },
+  "metadata": {
+    "source": "update",
+    "step": 1,
+    "triggerCommand": "add a JSDoc comment to the calculateTotal function in benchmark-test.ts explaining what it does"
+  },
+  "replaySummary": {
+    "eventCount": 1,
+    "pendingWriteCount": 0,
+    "digest": "046956113ed16b93",
+    "lastEventIndex": 0
+  },
+  "workspaceContext": {
+    "projectRoot": "c:\\Projects\\DanteCode",
+    "workspaceRoot": "c:\\Projects\\DanteCode",
+    "repoRoot": "c:\\Projects\\DanteCode",
+    "workspaceIsRepoRoot": true,
+    "installContextKind": "repo_checkout"
+  }
+}

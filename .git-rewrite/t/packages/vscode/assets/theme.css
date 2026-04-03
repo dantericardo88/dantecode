@@ -1,0 +1,89 @@
+/* DanteCode Theme — Generated from .danteforge/design-tokens.yaml */
+
+:root {
+  /* Surfaces */
+  --surface-sidebar-bg: var(--vscode-sideBar-background);
+  --surface-editor-bg: var(--vscode-editor-background);
+  --surface-section-header-bg: var(--vscode-sideBarSectionHeader-background);
+  --surface-input-bg: var(--vscode-input-background);
+  --surface-dropdown-bg: var(--vscode-dropdown-background);
+  --surface-code-block-bg: var(--vscode-textCodeBlock-background);
+
+  /* Text */
+  --text-foreground: var(--vscode-foreground);
+  --text-section-header-fg: var(--vscode-sideBarSectionHeader-foreground);
+  --text-description: var(--vscode-descriptionForeground);
+
+  /* Accents */
+  --accent-user-message: var(--vscode-textLink-foreground);
+  --accent-assistant-message: var(--vscode-charts-green);
+
+  /* Borders */
+  --border-panel: var(--vscode-panel-border);
+  --border-input: var(--vscode-input-border);
+  --border-accent: 3px solid var(--vscode-textLink-foreground);
+
+  /* Status */
+  --status-gate-passed: var(--vscode-testing-iconPassed);
+  --status-gate-failed: var(--vscode-testing-iconFailed);
+
+  /* Typography */
+  --font-family: var(--vscode-font-family);
+  --font-size-base: var(--vscode-font-size);
+  --editor-font-family: var(--vscode-editor-font-family);
+  --editor-font-size: var(--vscode-editor-font-size);
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 6px;
+  --spacing-md: 8px;
+  --spacing-lg: 12px;
+
+  /* Dimensions */
+  --pill-height: 22px;
+  --header-height: 36px;
+}
+
+/* Message role accents */
+.user .message-body { border-left: var(--border-accent-user, var(--accent-user-message)); }
+.assistant .message-body { border-left: var(--border-accent-assistant, var(--accent-assistant-message)); }
+
+/* PDSE Badge */
+.pdse-badge.passed { 
+  background: var(--status-gate-passed); 
+  color: var(--status-gate-passed-overlay, #fff); 
+}
+.pdse-badge.failed {
+  background: var(--status-gate-failed);
+  color: var(--status-gate-failed-overlay, #fff);
+}
+
+/* Blade v1.2 — Visual Colored Diffs (D3) */
+.diff-hunk-container { margin: 8px 0; border-radius: 4px; overflow: hidden; }
+.diff-hunk-header { background: var(--surface-section-header-bg); padding: 6px 10px; font-family: var(--editor-font-family); font-size: 12px; }
+.diff-filename { color: var(--accent-user-message); font-weight: 600; }
+.diff-stats { margin-left: 12px; color: var(--text-description); }
+.diff-body { margin: 0; padding: 8px; font-size: 12px; overflow-x: auto; font-family: var(--editor-font-family); }
+.diff-line.diff-add { background: rgba(0,200,80,0.12); color: #4ade80; display: block; }
+.diff-line.diff-remove { background: rgba(255,60,60,0.12); color: #f87171; display: block; }
+.diff-line.diff-hunk_header { color: var(--text-description); display: block; }
+.diff-line.diff-context { display: block; }
+.diff-show-more { background: none; border: 1px solid var(--border-panel); color: var(--accent-user-message); padding: 4px 10px; cursor: pointer; font-size: 11px; border-radius: 3px; margin: 6px; }
+
+/* Blade v1.2 — Streaming cursor (D2) */
+.message-bubble.streaming::after {
+  content: "\25CC";
+  animation: blink 1s step-end infinite;
+  color: var(--accent-user-message);
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Blade v1.2 — Cost bar (D6) */
+.cost-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 11px; color: var(--text-description); }
+.cost-tier { font-weight: 600; }
+.escalate-btn { background: none; border: 1px solid var(--border-panel); color: var(--accent-user-message); padding: 2px 6px; cursor: pointer; font-size: 10px; border-radius: 3px; }
+
+/* Blade v1.2 — Self-modification modal (D5) */
+.self-mod-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.self-mod-dialog { background: var(--surface-sidebar-bg); border: 1px solid var(--border-panel); border-radius: 8px; padding: 20px; max-width: 400px; }
+.self-mod-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }

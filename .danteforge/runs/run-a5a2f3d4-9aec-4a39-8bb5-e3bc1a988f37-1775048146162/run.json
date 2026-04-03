@@ -1,0 +1,21 @@
+{
+  "id": "run-a5a2f3d4-9aec-4a39-8bb5-e3bc1a988f37-1775048146162",
+  "projectRoot": "C:\\Projects\\DanteCode",
+  "sessionId": "a5a2f3d4-9aec-4a39-8bb5-e3bc1a988f37",
+  "prompt": "test prompt",
+  "workflow": "agent-loop",
+  "status": "failed",
+  "createdAt": "2026-04-01T12:55:46.162Z",
+  "updatedAt": "2026-04-01T12:55:46.329Z",
+  "touchedFiles": [],
+  "evidenceCount": 0,
+  "lastConfirmedStep": "Started execution.",
+  "nextAction": "Resolve the model error before retrying.",
+  "resumeHint": {
+    "runId": "run-a5a2f3d4-9aec-4a39-8bb5-e3bc1a988f37-1775048146162",
+    "summary": "Grok API key not found.\nSet XAI_API_KEY or GROK_API_KEY, or configure it in .dantecode/STATE.yaml\nGet your key at: https://console.x.ai/",
+    "lastConfirmedStep": "Started execution.",
+    "nextAction": "Resolve the model error before retrying.",
+    "continueCommand": "continue"
+  }
+}

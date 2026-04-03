@@ -1,0 +1,61 @@
+# ============================================================================
+# DanteCode Kubernetes Service
+# Exposes the DanteCode API to internal and external clients
+# ============================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: dantecode
+  namespace: default
+  labels:
+    app: dantecode
+    component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: dantecode
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
+
+---
+# ============================================================================
+# Ingress (optional)
+# Expose DanteCode externally with TLS
+# ============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dantecode-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+    - hosts:
+        - dantecode.example.com
+      secretName: dantecode-tls
+  rules:
+    - host: dantecode.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dantecode
+                port:
+                  number: 80

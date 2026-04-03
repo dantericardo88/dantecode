@@ -1,0 +1,31 @@
+DanteForge Engine License
+Copyright (c) 2026 DanteCode Contributors
+
+TERMS OF USE
+
+1. BUNDLED USE (FREE): You may use this software as bundled within
+   DanteCode (the open-source product available at
+   https://github.com/dantericardo88/dantecode) at no cost. This
+   includes all DanteForge functionality accessed through DanteCode's
+   CLI, VS Code extension, JetBrains plugin, or MCP server.
+
+2. STANDALONE USE (PAID): Using this software outside of DanteCode
+   — for example, integrating it with Claude Code, Cursor, Aider,
+   Windsurf, or other development tools — requires a DanteForge Pro
+   license. Visit https://dantecode.dev/pro for licensing.
+
+3. NO REDISTRIBUTION: You may not redistribute, sublicense, sell,
+   or make available this software as a standalone product or
+   service. You may not extract, decompile, reverse-engineer, or
+   disassemble the compiled binary for the purpose of creating a
+   derivative work or competing product.
+
+4. SOURCE CODE: The source code for this software is proprietary
+   and not included in the open-source DanteCode distribution.
+   Only the compiled binary is distributed.
+
+5. NO WARRANTY: THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY
+   OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE AUTHORS
+   BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY.
+
+For questions about licensing, contact: licensing@dantecode.dev

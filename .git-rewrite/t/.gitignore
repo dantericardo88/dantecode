@@ -1,0 +1,33 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+.env.*
+.dantecode/
+*.vsix
+coverage/
+*.log
+.DS_Store
+Thumbs.db
+bun.lockb
+
+# Party mode worktrees
+.danteforge-worktrees/
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# Codex / Claire worktrees and scratch outputs
+.claire/worktrees/
+packages/temp-*/
+*_output.txt
+status.txt
+results.tsv
+vitest-error.txt
+.danteforge/oss-repos/
+
+# Playwright & Vitest reports
+playwright-report/
+test-results/

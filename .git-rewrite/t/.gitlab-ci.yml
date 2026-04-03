@@ -1,0 +1,21 @@
+stages:
+  - validate
+
+variables:
+  NODE_VERSION: "20"
+
+validate:
+  stage: validate
+  image: node:${NODE_VERSION}
+  script:
+    - npm ci
+    - npm run format:check
+    - npm run typecheck
+    - npm run lint
+    - npm test
+    - npm run build
+    - npm run smoke:cli
+    - npm run smoke:install
+    - npm run smoke:skill-import
+    - npm run smoke:external
+    - npm run publish:dry-run

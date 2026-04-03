@@ -1,0 +1,201 @@
+name: CI
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  catalog:
+    runs-on: ubuntu-24.04
+    outputs:
+      node_versions: ${{ steps.catalog.outputs.node_versions }}
+      primary_node: ${{ steps.catalog.outputs.primary_node }}
+      windows_node: ${{ steps.catalog.outputs.windows_node }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: catalog
+        shell: bash
+        run: |
+          echo "node_versions=$(node -e "const matrix = require('./release-matrix.json'); process.stdout.write(JSON.stringify(matrix.ci.nodeVersions));")" >> "$GITHUB_OUTPUT"
+          echo "primary_node=$(node -e "const matrix = require('./release-matrix.json'); process.stdout.write(String(matrix.ci.primaryNodeVersion));")" >> "$GITHUB_OUTPUT"
+          echo "windows_node=$(node -e "const matrix = require('./release-matrix.json'); process.stdout.write(String(matrix.ci.windowsNodeVersion));")" >> "$GITHUB_OUTPUT"
+
+  format:
+    needs: catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run format:check
+
+  typecheck:
+    needs: catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+
+  lint:
+    needs: catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+
+  build:
+    needs: catalog
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache turbo build
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm --prefix packages/vscode run package
+
+  test:
+    needs: catalog
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        node-version: ${{ fromJson(needs.catalog.outputs.node_versions) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache turbo build
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ matrix.node-version }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ matrix.node-version }}-
+            ${{ runner.os }}-turbo-
+
+      - name: Cache vitest
+        uses: actions/cache@v4
+        with:
+          path: |
+            **/node_modules/.vitest
+            **/.vitest
+          key: ${{ runner.os }}-vitest-${{ matrix.node-version }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-vitest-${{ matrix.node-version }}-
+            ${{ runner.os }}-vitest-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - run: npm ci
+      - name: Security audit
+        run: npm audit --audit-level=high || true
+      - name: Run workspace tests
+        run: npm test
+      - name: Run tests with coverage
+        if: matrix.node-version == needs.catalog.outputs.primary_node
+        run: npm run test:coverage
+      - name: Build workspace artifacts for smoke tests
+        run: npm run build
+      - name: Run CLI smoke check
+        run: npm run smoke:cli
+      - name: Run install smoke check
+        run: npm run smoke:install
+      - name: Run skill import smoke check
+        run: npm run smoke:skill-import
+      - name: Run external project smoke check
+        run: npm run smoke:external
+      - name: Upload coverage artifact
+        if: matrix.node-version == needs.catalog.outputs.primary_node
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  windows-smoke:
+    needs: catalog
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.windows_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run smoke:cli
+      - run: npm run smoke:install
+      - run: npm run smoke:skill-import
+      - run: npm run smoke:external
+
+  anti-stub-self-check:
+    runs-on: ubuntu-24.04
+    needs: [catalog, format, typecheck, lint, build, test, windows-smoke]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Run anti-stub scanner on own source
+        run: node scripts/anti-stub-check.cjs
+
+  update-readiness:
+    runs-on: ubuntu-24.04
+    needs: [catalog, format, typecheck, lint, build, test, windows-smoke, anti-stub-self-check]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - name: Sync readiness chain
+        env:
+          GATE_TYPECHECK: ${{ needs.typecheck.result == 'success' && 'pass' || 'fail' }}
+          GATE_LINT: ${{ needs.lint.result == 'success' && 'pass' || 'fail' }}
+          GATE_TEST: ${{ needs.test.result == 'success' && 'pass' || 'fail' }}
+          GATE_BUILD: ${{ needs.build.result == 'success' && 'pass' || 'fail' }}
+          GATE_WINDOWS_SMOKE: ${{ needs.windows-smoke.result == 'success' && 'pass' || 'fail' }}
+          GATE_ANTI_STUB: ${{ needs.anti-stub-self-check.result == 'success' && 'pass' || 'fail' }}
+          GATE_PUBLISH_DRY_RUN: ${{ needs.test.result == 'success' && 'pass' || 'fail' }}
+        run: npm run release:sync
+      - name: Upload readiness artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: readiness-report
+          path: artifacts/readiness/
+          retention-days: 30

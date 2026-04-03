@@ -1,0 +1,14 @@
+npm warn using --force Recommended protections disabled.
+npm warn audit Updating ai to 6.0.142, which is a SemVer major change.
+npm warn audit Updating ai to 6.0.142, which is a SemVer major change.
+npm warn audit Updating electron to 41.1.0, which is a SemVer major change.
+npm warn audit Updating vite to 8.0.3, which is a SemVer major change.
+npm warn audit Updating crawlee to 3.10.1, which is a SemVer major change.
+npm warn audit Updating crawlee to 3.10.1, which is a SemVer major change.
+
+added 88 packages, removed 73 packages, changed 19 packages, and audited 1299 packages in 2m
+
+271 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities

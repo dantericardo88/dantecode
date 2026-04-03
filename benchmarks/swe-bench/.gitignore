@@ -1,0 +1,6 @@
+# SWE-bench generated files
+.swe-bench-workspace/
+__pycache__/
+*.pyc
+results/
+*.rej

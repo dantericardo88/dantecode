@@ -1,0 +1,280 @@
+{
+  "repos": [
+    {
+      "name": "langgraph",
+      "url": "https://github.com/langchain-ai/langgraph",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "execution",
+          "name": "Versioned Checkpoints",
+          "description": "create_checkpoint() with versioned channel values and versions_seen for deterministic state recovery",
+          "priority": "P0",
+          "files": ["libs/langgraph/langgraph/pregel/_checkpoint.py"]
+        },
+        {
+          "category": "execution",
+          "name": "Durable Execution",
+          "description": "Graph-based stateful workflows that survive interruptions and resume from exact state",
+          "priority": "P0",
+          "files": []
+        },
+        {
+          "category": "architecture",
+          "name": "Graph-Based Workflow",
+          "description": "Nodes and edges define execution flow with conditional branching and cycles",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "agent-orchestrator",
+      "url": "https://github.com/ComposioHQ/agent-orchestrator",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "coordination",
+          "name": "Fleet Coordination with Worktrees",
+          "description": "Each agent gets its own git worktree, branch, and PR for parallel isolated work",
+          "priority": "P0",
+          "files": ["packages/core/src/orchestrator-session-strategy.ts"]
+        },
+        {
+          "category": "coordination",
+          "name": "Task Decomposition with Lineage",
+          "description": "Hierarchical TaskNode with lineage context for bounded subtask delegation",
+          "priority": "P0",
+          "files": ["packages/core/src/decomposer.ts"]
+        },
+        {
+          "category": "reliability",
+          "name": "Recovery Manager",
+          "description": "Scans sessions, validates state, executes recovery actions (recover/cleanup/escalate/skip)",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "voltagent",
+      "url": "https://github.com/VoltAgent/voltagent",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "execution",
+          "name": "Workflow Engine",
+          "description": "Declarative multi-step workflows with andThen/andWorkflow composition",
+          "priority": "P1",
+          "files": ["packages/core/src/workflow/steps/and-workflow.ts"]
+        },
+        {
+          "category": "execution",
+          "name": "Suspend/Resume Controller",
+          "description": "Workflow checkpoint data with suspend/resume capabilities",
+          "priority": "P1",
+          "files": ["packages/core/src/workflow/suspend-controller.ts"]
+        }
+      ]
+    },
+    {
+      "name": "crewai",
+      "url": "https://github.com/crewAIInc/crewAI",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "coordination",
+          "name": "Task-Based Orchestration",
+          "description": "Role-based agents with sequential/hierarchical process execution",
+          "priority": "P1",
+          "files": ["lib/crewai/src/crewai/task.py", "lib/crewai/src/crewai/process.py"]
+        },
+        {
+          "category": "execution",
+          "name": "Async Task Execution",
+          "description": "Support for async_execution flag with event-driven task completion",
+          "priority": "P2",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "qwen-code",
+      "url": "https://github.com/QwenLM/qwen-code",
+      "license": "Apache-2.0",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "permissions",
+          "name": "Approval Modes (allow/ask/deny)",
+          "description": "PermissionManager with allow/ask/deny decisions, rule parsing, shell-semantics-aware matching",
+          "priority": "P0",
+          "files": ["packages/core/src/permissions/permission-manager.ts", "packages/core/src/permissions/types.ts"]
+        },
+        {
+          "category": "coordination",
+          "name": "Subagent Delegation",
+          "description": "Explicit task delegation through subagents with separate context and tool access",
+          "priority": "P0",
+          "files": []
+        },
+        {
+          "category": "skills",
+          "name": "Skill System",
+          "description": "Visible skills with explicit invocation and slash-command distinction",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "opencode",
+      "url": "https://github.com/opencode-ai/opencode",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "execution",
+          "name": "Plan/Build Split",
+          "description": "Separate plan and build modes with clear mental model for primary agents vs subagents",
+          "priority": "P0",
+          "files": []
+        },
+        {
+          "category": "permissions",
+          "name": "Permission Engine",
+          "description": "Channel-based grant/deny with session auto-approve and config layering",
+          "priority": "P0",
+          "files": ["internal/permission/permission.go"]
+        },
+        {
+          "category": "architecture",
+          "name": "Session Management",
+          "description": "Session creation with parentSessionID tracking for task lineage",
+          "priority": "P1",
+          "files": ["internal/session/session.go"]
+        }
+      ]
+    },
+    {
+      "name": "openhands",
+      "url": "https://github.com/OpenHands/OpenHands",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "architecture",
+          "name": "Append-Only Event System",
+          "description": "Event base class with monotonically increasing IDs, source attribution, causal linking",
+          "priority": "P0",
+          "files": ["openhands/events/event.py"]
+        },
+        {
+          "category": "reliability",
+          "name": "Event Store",
+          "description": "EventStoreABC with search_events, filtering, and durable persistence",
+          "priority": "P0",
+          "files": ["openhands/events/event_store_abc.py"]
+        },
+        {
+          "category": "architecture",
+          "name": "Workspace Abstraction",
+          "description": "Local/remote execution symmetry with workspace isolation",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "aider",
+      "url": "https://github.com/Aider-AI/aider",
+      "license": "Apache-2.0",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "quality",
+          "name": "Repair Loop",
+          "description": "Lint edited files, auto-commit lint fixes, ask to fix lint errors, then run tests and ask to fix test errors",
+          "priority": "P0",
+          "files": ["aider/coders/base_coder.py"]
+        },
+        {
+          "category": "context",
+          "name": "Repo Map with PageRank",
+          "description": "Tree-sitter-based tag extraction with PageRank scoring for context relevance",
+          "priority": "P1",
+          "files": ["aider/repomap.py"]
+        },
+        {
+          "category": "quality",
+          "name": "Diff/Undo Culture",
+          "description": "Git stash create approach, every edit is a commit, every session is a branch",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    },
+    {
+      "name": "kilocode",
+      "url": "https://github.com/Kilo-Org/kilocode",
+      "license": "MIT",
+      "status": "allowed",
+      "clonedAt": "2026-03-28",
+      "patterns": [
+        {
+          "category": "reliability",
+          "name": "Worktree Manager",
+          "description": "WorktreeManager with session-per-worktree model, stats polling, managed sessions tracking",
+          "priority": "P0",
+          "files": ["packages/kilo-vscode/src/agent-manager/WorktreeManager.ts"]
+        },
+        {
+          "category": "reliability",
+          "name": "Checkpoints",
+          "description": "Resumable agent/session management with checkpoint/restore",
+          "priority": "P1",
+          "files": []
+        },
+        {
+          "category": "context",
+          "name": "Codebase Indexing",
+          "description": "Semantic code indexing plus context condensing for large repos",
+          "priority": "P1",
+          "files": []
+        },
+        {
+          "category": "ux",
+          "name": "Custom Modes",
+          "description": "Custom modes with sticky models, file/path restrictions, mode visibility",
+          "priority": "P1",
+          "files": []
+        }
+      ]
+    }
+  ],
+  "lastUpdated": "2026-03-28T08:30:00.000Z",
+  "totalRepos": 9,
+  "patternCategories": [
+    "execution",
+    "coordination",
+    "permissions",
+    "reliability",
+    "context",
+    "quality",
+    "ux",
+    "architecture",
+    "skills"
+  ]
+}

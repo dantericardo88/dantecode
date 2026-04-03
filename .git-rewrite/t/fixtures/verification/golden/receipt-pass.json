@@ -1,0 +1,67 @@
+{
+  "_comment": "Golden fixture — verification pass. All stages pass on a clean TypeScript utility file.",
+  "schemaVersion": "1.0",
+  "runId": "sess_20260324_golden_pass",
+  "sessionId": "sess_20260324_golden_pass",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-6",
+  "commitShaBefore": "4b5ceaa3f21e9d7a8b6c5d4e3f2a1b0c9d8e7f6a",
+  "commitShaAfter": "7f8e9d0c1b2a3c4d5e6f7a8b9c0d1e2f3a4b5c6d",
+  "filesTouched": ["packages/core/src/utils/format.ts"],
+  "stages": [
+    {
+      "stageName": "anti-stub",
+      "passed": true,
+      "reason": "No hard violations detected. 0 hard violations, 0 soft violations.",
+      "score": null
+    },
+    {
+      "stageName": "constitution",
+      "passed": true,
+      "reason": "No critical violations. 0 critical, 0 warnings.",
+      "score": null
+    },
+    {
+      "stageName": "pdse",
+      "passed": true,
+      "reason": "Score 84/100 exceeds gate threshold of 70.",
+      "score": 84,
+      "breakdown": {
+        "completeness": 85,
+        "correctness": 87,
+        "clarity": 82,
+        "consistency": 83
+      }
+    },
+    {
+      "stageName": "pr-quality",
+      "passed": true,
+      "reason": "Advisory score 79/100. Non-blocking.",
+      "score": 79
+    }
+  ],
+  "overallPassed": true,
+  "plainLanguageSummary": "✓ Verified — no issues found. Anti-stub scan passed. Constitution check passed. PDSE score 84/100 (Completeness 85, Correctness 87, Clarity 82, Consistency 83).",
+  "nextStepRecommendation": "Changes are ready to review and commit.",
+  "receipt": {
+    "receiptId": "rc_a1b2c3d4e5f6a7b8",
+    "correlationId": "sess_20260324_golden_pass",
+    "actor": "danteforge",
+    "action": "pdse_score:packages/core/src/utils/format.ts",
+    "beforeHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "afterHash": "c7be1ed902fb8dd8e35d36bde05c3a0d5c0b1c9a7f6d4e2b8a1f3c5e7d9b2a4",
+    "receiptHash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+    "issuedAt": "2026-03-24T12:00:00.000Z"
+  },
+  "seal": {
+    "sealId": "seal_20260324_golden_pass",
+    "sessionId": "sess_20260324_golden_pass",
+    "evidenceRootHash": "f1e2d3c4b5a6978869504132241516070819202122232425262728293031323334",
+    "eventCount": 1,
+    "metrics": [
+      { "metric": "receipts",      "value": 1 },
+      { "metric": "filesModified", "value": 1 },
+      { "metric": "totalRounds",   "value": 1 }
+    ]
+  }
+}

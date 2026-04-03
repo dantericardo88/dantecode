@@ -1,0 +1,8 @@
+{
+  "runId": "run-2e170b52-cd02-4c8d-910f-aab7f746b9bd-1775050255235",
+  "summary": "Execution paused before completion.",
+  "lastConfirmedStep": "Executed AskUser: User response: (non-interactive — no user input available)",
+  "lastSuccessfulTool": "AskUser",
+  "nextAction": "Run completed.",
+  "continueCommand": "continue"
+}

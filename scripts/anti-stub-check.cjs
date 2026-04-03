@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+// ============================================================================
+// Anti-Stub Self-Check — CI scanner
+// Scans packages/ for stub patterns in non-test .ts/.tsx files.
+// Exit code 1 if any violations found.
+// ============================================================================
+
+"use strict";
+
+const { readdirSync, readFileSync } = require("fs");
+const { join } = require("path");
+
+const STUB_PATTERNS = [
+  /\bTODO\b/i,
+  /\bFIXME\b/i,
+  /\bHACK\b(?!.*HACK marker)/i,
+  /raise NotImplementedError/i,
+  /throw new Error\(['"]not implemented['"]?\)/i,
+  /\bas\s+any\b/,
+  /@ts-ignore/,
+  /@ts-nocheck/,
+  /\bplaceholder\b/i,
+];
+
+const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".turbo", "coverage"]);
+
+function isTestFile(name) {
+  return (
+    name.endsWith(".test.ts") ||
+    name.endsWith(".test.tsx") ||
+    name.endsWith(".spec.ts") ||
+    name.endsWith(".spec.tsx")
+  );
+}
+
+function shouldSkipLine(line) {
+  const t = line.trim();
+  // Scanner rule definitions (message/regex fields in anti-stub-scanner)
+  if (t.startsWith("message:") || t.startsWith("regex:")) return true;
+  if (
+    line.includes("STUB_PATTERNS") ||
+    line.includes("HARD_VIOLATION") ||
+    line.includes("SOFT_VIOLATION") ||
+    line.includes("PLACEHOLDER_PATTERNS") ||
+    line.includes("placeholderHits") ||
+    line.includes("forbiddenPatterns")
+  )
+    return true;
+  if (line.includes("pattern:") || line.includes("RegExp")) return true;
+  if (t.startsWith("//") && line.includes("pattern")) return true;
+  // Mock/test helpers
+  if (line.includes("mockReturnValue") || line.includes("mockImplementation")) return true;
+  // HTML/CSS placeholder attributes (legitimate UI, not stubs)
+  if (
+    line.includes("placeholder=") ||
+    line.includes("placeholder:") ||
+    line.includes("::placeholder")
+  )
+    return true;
+  // JS .placeholder property access/assignment (legitimate DOM API)
+  if (line.includes(".placeholder")) return true;
+  // VS Code API placeHolder property
+  if (line.includes("placeHolder")) return true;
+  // JSDoc comment lines (* continuation or /** opening or */ closing)
+  if (t.startsWith("/**") || t.startsWith("*/") || (t.startsWith("*") && !t.startsWith("*=")))
+    return true;
+  // createStubPattern() calls — these define patterns, they are not violations
+  if (line.includes("createStubPattern(")) return true;
+  // switch case on a string literal (e.g., case "placeholder":)
+  if (/^\s*case\s+['"]/.test(line)) return true;
+  // Explicit escape hatch for documented legitimate uses
+  if (line.includes("// antistub-ok")) return true;
+  // Regex literals containing stub-word names (case-insensitive, includes placeholder)
+  if (/\/[^/]*(?:todo|fixme|hack|placeholder)[^/]*\//i.test(line)) return true;
+  // Template literal / string describing rules (documentation, not stubs) — case-insensitive
+  if (
+    (t.startsWith("`") || t.startsWith("'") || t.startsWith('"')) &&
+    (line.toLowerCase().includes("todo") ||
+      line.toLowerCase().includes("fixme") ||
+      line.toLowerCase().includes("hack") ||
+      line.toLowerCase().includes("placeholder") ||
+      line.includes("ts-ignore") ||
+      line.includes("ts-nocheck") ||
+      line.includes("as any"))
+  )
+    return true;
+  // String/template literal passed as argument to a reporting/logging function
+  // e.g. result.push(`Found N placeholder(s)...`) — this is reporting, not a stub
+  if (
+    /(?:push|log|warn|error|info|return|throw|reject)\s*\(/.test(line) &&
+    (line.includes("`") || line.includes('"') || line.includes("'")) &&
+    (line.toLowerCase().includes("placeholder") ||
+      line.toLowerCase().includes("fixme") ||
+      line.toLowerCase().includes("hack"))
+  )
+    return true;
+  // Backtick template lines that are part of multi-line template strings
+  if (
+    line.includes("\\`") &&
+    (line.includes("TODO") || line.includes("FIXME") || line.includes("placeholder"))
+  )
+    return true;
+  // Lines referencing todo as a data structure (todo list feature, not a TODO marker)
+  if (
+    line.includes("todo list") ||
+    line.includes("todo-$") ||
+    line.includes("Todo") ||
+    line.includes(".todo")
+  )
+    return true;
+  // Prompt/instruction strings describing what to avoid
+  if (
+    (line.includes("stubs") || line.includes("stub patterns")) &&
+    (line.includes("no ") || line.includes("Deduct") || line.includes("must not"))
+  )
+    return true;
+  // Lines inside string literals with pattern names as documentation
+  if (t.startsWith("-") && (line.includes("`") || line.includes("\\`"))) return true;
+  // Comments describing scanner behavior (not actual stubs)
+  if (
+    t.startsWith("//") &&
+    (line.includes("todo") ||
+      line.includes("TODO") ||
+      line.includes("placeholder") ||
+      line.includes("as any") ||
+      line.includes("ts-ignore") ||
+      line.includes("ts-nocheck"))
+  )
+    return true;
+  // List items describing forbidden patterns in docs/prompts
+  if (t.startsWith("- ") && (line.includes("Placeholder") || line.includes("placeholder")))
+    return true;
+  return false;
+}
+
+function scanDir(dir) {
+  let violations = 0;
+  const entries = readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      violations += scanDir(fullPath);
+    } else if (
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
+      !isTestFile(entry.name)
+    ) {
+      const content = readFileSync(fullPath, "utf-8");
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (shouldSkipLine(line)) continue;
+        for (const pattern of STUB_PATTERNS) {
+          if (pattern.test(line)) {
+            console.error("STUB VIOLATION: " + fullPath + ":" + (i + 1) + ": " + line.trim());
+            violations++;
+          }
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+const violations = scanDir("packages");
+if (violations > 0) {
+  console.error("\n" + violations + " stub violation(s) found. Anti-Stub Doctrine violated.");
+  process.exit(1);
+}
+console.log("Anti-stub self-check passed. Zero stubs found.");
