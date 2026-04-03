@@ -43,26 +43,6 @@ interface PlanGenerateMessage {
   goal: string;
 }
 
-interface PlanApproveMessage {
-  type: "plan_approve";
-  planId: string;
-}
-
-interface PlanRejectMessage {
-  type: "plan_reject";
-  planId: string;
-  reason?: string;
-}
-
-interface PlanListMessage {
-  type: "plan_list";
-}
-
-interface PlanStatusMessage {
-  type: "plan_status";
-  planId: string;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Test Suite
 // ──────────────────────────────────────────────────────────────────────────────
@@ -295,11 +275,6 @@ describe("Planning Mode", () => {
     });
 
     it("should handle rejection without reason", () => {
-      const message: PlanRejectMessage = {
-        type: "plan_reject",
-        planId: mockPlan.id,
-      };
-
       mockPlan.status = "rejected";
       mockPlan.rejectedAt = new Date().toISOString();
 

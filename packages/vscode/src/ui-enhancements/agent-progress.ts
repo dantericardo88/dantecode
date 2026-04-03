@@ -32,7 +32,8 @@ export interface AgentTask {
 class AgentTaskItem extends vscode.TreeItem {
   constructor(
     public readonly task: AgentTask,
-    private readonly allTasks: Map<string, AgentTask>
+    // @ts-expect-error - Unused for now, will be used for task hierarchy navigation
+    private readonly _allTasks: Map<string, AgentTask>
   ) {
     const hasChildren = task.children.length > 0;
     super(
@@ -183,8 +184,6 @@ export class AgentProgressProvider implements vscode.TreeDataProvider<AgentTaskI
    * Add or update a task.
    */
   updateTask(task: AgentTask): void {
-    const existing = this.tasks.get(task.id);
-
     // Update parent's children list
     if (task.parentId) {
       const parent = this.tasks.get(task.parentId);

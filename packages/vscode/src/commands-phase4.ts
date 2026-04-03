@@ -69,7 +69,7 @@ async function commandRunVerification(): Promise<void> {
     async () => {
       try {
         const { runGStack } = await import("@dantecode/danteforge");
-        const results = await runGStack(projectRoot, []);
+        const results = await runGStack("", [], projectRoot);
 
         // Aggregate results (handle both array and single result)
         const resultsArray = Array.isArray(results) ? results : [results];
@@ -211,17 +211,13 @@ async function commandShowMemory(chatProvider: any): Promise<void> {
 // ─── Git Commands ────────────────────────────────────────────────────────────
 
 async function commandCommitFile(chatProvider: any, uri?: unknown): Promise<void> {
-  let filePath: string;
-
-  if (uri instanceof vscode.Uri) {
-    filePath = uri.fsPath;
-  } else {
+  // Validate that we have a file to commit
+  if (!(uri instanceof vscode.Uri)) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       void vscode.window.showWarningMessage("DanteCode: No active file to commit");
       return;
     }
-    filePath = editor.document.uri.fsPath;
   }
 
   if (chatProvider) {

@@ -50,13 +50,6 @@ import {
   registerNotificationManager,
   registerCommandHistory,
   registerAgentProgress,
-  type PDSEFileDecorationProvider,
-  type VerificationAnnotationProvider,
-  type QuickActionsProvider,
-  type TimelineViewProvider,
-  type NotificationManager,
-  type CommandHistoryProvider,
-  type AgentProgressProvider,
 } from "./ui-enhancements/index.js";
 import { registerPhase4Commands } from "./commands-phase4.js";
 
@@ -86,14 +79,7 @@ let semanticIndex:
     }
   | undefined;
 
-// Phase 5: UX Enhancements (prefixed with _ to suppress unused variable warnings)
-let _fileDecorationProvider: PDSEFileDecorationProvider | undefined;
-let _verificationAnnotationProvider: VerificationAnnotationProvider | undefined;
-let _quickActionsProvider: QuickActionsProvider | undefined;
-let _timelineViewProvider: TimelineViewProvider | undefined;
-let _notificationManager: NotificationManager | undefined;
-let _commandHistoryProvider: CommandHistoryProvider | undefined;
-let _agentProgressProvider: AgentProgressProvider | undefined;
+// Phase 5: UX Enhancements registered directly (no need to store return values)
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -402,13 +388,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     registerDiffViewer(context);
 
     // 2. PDSE score badges in file explorer
-    _fileDecorationProvider = registerFileDecorations(context, projectRoot);
+    registerFileDecorations(context, projectRoot);
 
     // 3. Inline verification annotations
-    _verificationAnnotationProvider = registerVerificationAnnotations(context, projectRoot);
+    registerVerificationAnnotations(context, projectRoot);
 
     // 4. Command history with re-run buttons
-    _commandHistoryProvider = registerCommandHistory(context, (command: string) => {
+    registerCommandHistory(context, (command: string) => {
       // Execute command via sidebar provider
       if (chatSidebarProvider) {
         void chatSidebarProvider.sendCommandToChat(command);
@@ -416,7 +402,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 5. Quick actions sidebar
-    _quickActionsProvider = registerQuickActions(context, (command: string) => {
+    registerQuickActions(context, (command: string) => {
       // Execute command via sidebar provider
       if (chatSidebarProvider) {
         void chatSidebarProvider.sendCommandToChat(command);
@@ -424,7 +410,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 6. Session snapshots timeline
-    _timelineViewProvider = registerTimelineView(context, projectRoot, (id: string) => {
+    registerTimelineView(context, projectRoot, (id: string) => {
       // Restore checkpoint
       if (checkpointManager) {
         void checkpointManager.rewindCheckpoint(id);
@@ -432,10 +418,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
 
     // 7. Agent progress visualization
-    _agentProgressProvider = registerAgentProgress(context);
+    registerAgentProgress(context);
 
     // 10. Notification toasts
-    _notificationManager = registerNotificationManager(context);
+    registerNotificationManager(context);
   }
 
   // ── Commands ──

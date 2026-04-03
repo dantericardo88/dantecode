@@ -4,7 +4,6 @@
 // ============================================================================
 
 import * as vscode from "vscode";
-import { join } from "node:path";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 import { readFile } from "node:fs/promises";
 

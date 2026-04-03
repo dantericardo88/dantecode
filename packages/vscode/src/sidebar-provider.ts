@@ -2565,7 +2565,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     });
 
     // Execute the command
-    await this.handleChatRequest({ text: command });
+    await this.handleChatRequest(command);
   }
 
   // --------------------------------------------------------------------------

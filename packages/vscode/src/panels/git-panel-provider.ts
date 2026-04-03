@@ -12,7 +12,8 @@ export class GitPanelProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly commandBridge: VSCodeCommandBridge,
+    // @ts-expect-error - Unused for now, will be used for git operations
+    private readonly _commandBridge: VSCodeCommandBridge,
   ) {}
 
   resolveWebviewView(

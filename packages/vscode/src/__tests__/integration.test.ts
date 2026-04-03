@@ -484,7 +484,7 @@ describe("VSCode Extension Integration Tests", () => {
     });
 
     it("should handle panel creation failures", () => {
-      const createPanelWithError = vi.fn(() => {
+      const createPanelWithError = vi.fn((_id: string, _title: string, _column: number, _options: unknown) => {
         throw new Error("Panel creation failed");
       });
 
@@ -533,7 +533,7 @@ describe("VSCode Extension Integration Tests", () => {
   describe("Configuration", () => {
     it("should read configuration values", () => {
       const config = {
-        get: vi.fn(() => "test-value"),
+        get: vi.fn((_section: string) => "test-value"),
         has: vi.fn(),
         inspect: vi.fn(),
         update: vi.fn(),

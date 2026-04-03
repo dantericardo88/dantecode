@@ -24,10 +24,11 @@ export interface VerificationIssue {
 export class VerificationAnnotationProvider {
   private diagnostics: vscode.DiagnosticCollection;
   private codeActionProvider: VerificationCodeActionProvider;
-  private projectRoot: string;
+  // @ts-expect-error - Unused for now, will be used for project-wide verification
+  private _projectRoot: string;
 
   constructor(projectRoot: string) {
-    this.projectRoot = projectRoot;
+    this._projectRoot = projectRoot;
     this.diagnostics = vscode.languages.createDiagnosticCollection("dantecode-verification");
     this.codeActionProvider = new VerificationCodeActionProvider();
   }
@@ -201,7 +202,7 @@ class VerificationCodeActionProvider implements vscode.CodeActionProvider {
 
   provideCodeActions(
     document: vscode.TextDocument,
-    range: vscode.Range,
+    _range: vscode.Range,
     context: vscode.CodeActionContext
   ): vscode.CodeAction[] {
     const actions: vscode.CodeAction[] = [];
@@ -316,7 +317,7 @@ export function registerVerificationAnnotations(
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "dantecode.ignoreVerificationIssue",
-      (uri: vscode.Uri, range: vscode.Range) => {
+      (uri: vscode.Uri, _range: vscode.Range) => {
         provider.clearFile(uri);
         void vscode.window.showInformationMessage("Issue ignored");
       }

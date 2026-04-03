@@ -67,7 +67,7 @@ export class NotificationManager {
   /**
    * Show individual notification using VSCode's notification API.
    */
-  private async showNotification(id: string, notification: Notification): Promise<void> {
+  private async showNotification(_id: string, notification: Notification): Promise<void> {
     const { message, severity, actions, dismissible = true } = notification;
 
     // Build action labels
