@@ -201,24 +201,20 @@ export function registerPdseActiveEditorListener(
   // Score initial active editor
   void scoreActiveFile(vscode.window.activeTextEditor);
 
-  // Re-score on editor change (guard for test environments)
-  if (typeof vscode.window.onDidChangeActiveTextEditor === "function") {
-    const editorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
-      void scoreActiveFile(editor);
-    });
-    context.subscriptions.push(editorListener);
-  }
+  // Re-score on editor change
+  const editorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    void scoreActiveFile(editor);
+  });
+  context.subscriptions.push(editorListener);
 
-  // Re-score on save (guard for test environments)
-  if (typeof vscode.workspace.onDidSaveTextDocument === "function") {
-    const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor && editor.document === doc) {
-        void scoreActiveFile(editor);
-      }
-    });
-    context.subscriptions.push(saveListener);
-  }
+  // Re-score on save
+  const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document === doc) {
+      void scoreActiveFile(editor);
+    }
+  });
+  context.subscriptions.push(saveListener);
 }
 
 /**

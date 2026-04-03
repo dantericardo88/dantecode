@@ -181,6 +181,9 @@ vi.mock("vscode", () => {
   const StatusBarAlignment = { Left: 1, Right: 2 };
   const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
   const ProgressLocation = { Notification: 15 };
+  const CodeActionKind = { QuickFix: { value: "quickfix" }, RefactorExtract: { value: "refactor.extract" } };
+  const ViewColumn = { One: 1, Two: 2, Active: -1 };
+  const FileType = { File: 1, Directory: 2, SymbolicLink: 64 };
 
   const Uri = {
     parse: (s: string) => ({ toString: () => s, fsPath: s }),
@@ -204,6 +207,9 @@ vi.mock("vscode", () => {
     StatusBarAlignment,
     ConfigurationTarget,
     ProgressLocation,
+    CodeActionKind,
+    ViewColumn,
+    FileType,
     Uri,
     languages: {
       createDiagnosticCollection: vi.fn(() => ({
@@ -213,6 +219,7 @@ vi.mock("vscode", () => {
         dispose: mockCollectionDispose,
       })),
       registerInlineCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      registerCodeActionsProvider: vi.fn(() => ({ dispose: vi.fn() })),
     },
     window: {
       createStatusBarItem: vi.fn(() => mockStatusBarItem),
@@ -231,6 +238,12 @@ vi.mock("vscode", () => {
       activeTextEditor: undefined,
       tabGroups: { all: [] },
       createTerminal: vi.fn(() => ({ sendText: vi.fn(), show: vi.fn() })),
+      onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
+      registerFileDecorationProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      showTextDocument: vi.fn().mockResolvedValue(undefined),
+      showInputBox: vi.fn().mockResolvedValue(undefined),
+      showSaveDialog: vi.fn().mockResolvedValue(undefined),
+      withProgress: vi.fn((_opts: unknown, task: (p: unknown) => Promise<unknown>) => task({ report: vi.fn() })),
     },
     env: {
       appName: "VS Code",
@@ -245,6 +258,9 @@ vi.mock("vscode", () => {
       })),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
       onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       workspaceFolders: [{ uri: { fsPath: "/test/project" } }],
       onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
       createFileSystemWatcher: vi.fn(() => ({
@@ -253,8 +269,10 @@ vi.mock("vscode", () => {
         onDidDelete: vi.fn(),
         dispose: vi.fn(),
       })),
-      fs: { readFile: vi.fn() },
-      openTextDocument: vi.fn(),
+      fs: { readFile: vi.fn(), writeFile: vi.fn() },
+      openTextDocument: vi.fn().mockResolvedValue({ getText: vi.fn(() => ""), uri: { fsPath: "/test" } }),
+      findFiles: vi.fn().mockResolvedValue([]),
+      textDocuments: [],
     },
     commands: {
       registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
@@ -674,6 +692,52 @@ vi.mock("node:fs/promises", () => ({
 // Mock node:fs (sync) for resolveShell in toolBash
 vi.mock("node:fs", () => ({
   accessSync: vi.fn(),
+}));
+
+// Mock @dantecode/ux-polish (OnboardingWizard used in extension.ts)
+vi.mock("@dantecode/ux-polish", () => ({
+  OnboardingWizard: vi.fn().mockImplementation(() => ({
+    isComplete: vi.fn().mockReturnValue(true),
+    run: vi.fn().mockResolvedValue({ completed: true }),
+  })),
+}));
+
+// Mock @dantecode/dante-skillbook (used by skillbook-integration-new.ts)
+vi.mock("@dantecode/dante-skillbook", () => ({
+  DanteSkillbookIntegration: vi.fn().mockImplementation(() => ({
+    stats: vi.fn().mockReturnValue({ totalSkills: 0 }),
+    getRelevantSkills: vi.fn().mockReturnValue([]),
+  })),
+  DanteSkillbook: vi.fn().mockImplementation(() => ({
+    getSkills: vi.fn().mockReturnValue([]),
+    getData: vi.fn().mockReturnValue({}),
+    stats: vi.fn().mockReturnValue({ totalSkills: 0 }),
+  })),
+  GitSkillbookStore: vi.fn().mockImplementation(() => ({})),
+}));
+
+// Mock @dantecode/memory-engine (used by memory-integration.ts)
+vi.mock("@dantecode/memory-engine", () => ({
+  createMemoryOrchestrator: vi.fn().mockReturnValue({
+    initialize: vi.fn().mockResolvedValue(undefined),
+    memoryRecall: vi.fn().mockResolvedValue({ items: [] }),
+    memoryStore: vi.fn().mockResolvedValue({}),
+    memoryPrune: vi.fn().mockResolvedValue({ removed: 0 }),
+    memoryVisualize: vi.fn().mockReturnValue({ nodes: [], edges: [] }),
+    memorySummarize: vi.fn().mockResolvedValue({ summary: "" }),
+  }),
+  MemoryOrchestrator: vi.fn(),
+}));
+
+// Mock @dantecode/dante-gaslight (used by commands-phase4.ts dynamic imports)
+vi.mock("@dantecode/dante-gaslight", () => ({
+  DanteGaslightIntegration: vi.fn().mockImplementation(() => ({
+    stats: vi.fn().mockReturnValue({ totalSessions: 0, sessionsWithPass: 0, sessionsAborted: 0, averageIterations: 0, lessonEligibleCount: 0, distilledCount: 0 }),
+    cmdStats: vi.fn().mockReturnValue("No sessions"),
+  })),
+  FearSetResultStore: vi.fn().mockImplementation(() => ({
+    list: vi.fn().mockReturnValue([]),
+  })),
 }));
 
 // Mock node:child_process for toolBash
@@ -1726,6 +1790,8 @@ describe("VS Code Extension", () => {
         subscriptions: [] as { dispose: () => void }[],
         extensionUri: vscode.Uri.file("/test"),
         extensionPath: "/test",
+        storageUri: vscode.Uri.file("/test/.storage"),
+        globalStorageUri: vscode.Uri.file("/test/.global-storage"),
         secrets: {
           get: vi.fn().mockResolvedValue(undefined),
           store: vi.fn().mockResolvedValue(undefined),
@@ -1737,53 +1803,53 @@ describe("VS Code Extension", () => {
       } as unknown as vscode.ExtensionContext;
     }
 
-    it("activate registers all 26 commands", () => {
+    it("activate registers all 26 commands", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(26);
     });
 
-    it("activate registers webview view providers", () => {
+    it("activate registers webview view providers", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(4);
     });
 
-    it("activate registers inline completion provider", () => {
+    it("activate registers inline completion provider", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       expect(vscode.languages.registerInlineCompletionItemProvider).toHaveBeenCalledTimes(1);
     });
 
-    it("activate creates status bar", () => {
+    it("activate creates status bar", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       expect(vscode.window.createStatusBarItem).toHaveBeenCalled();
     });
 
-    it("activate creates output channel", () => {
+    it("activate creates output channel", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       expect(vscode.window.createOutputChannel).toHaveBeenCalledWith("DanteCode");
     });
 
-    it("activate pushes disposables to context.subscriptions", () => {
+    it("activate pushes disposables to context.subscriptions", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       // At minimum: 2 webview providers + inline completion + status bar item
       // + config watcher + diagnostics + 11 commands + output channel
       expect(context.subscriptions.length).toBeGreaterThanOrEqual(10);
     });
 
-    it("registers the verification view provider", () => {
+    it("registers the verification view provider", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
         .calls;
@@ -1791,9 +1857,9 @@ describe("VS Code Extension", () => {
       expect(viewTypes).toContain("dantecode.verificationView");
     });
 
-    it("registers the automation view provider", () => {
+    it("registers the automation view provider", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
         .calls;
@@ -1801,60 +1867,60 @@ describe("VS Code Extension", () => {
       expect(viewTypes).toContain("dantecode.automationView");
     });
 
-    it("deactivate does not throw", () => {
+    it("deactivate does not throw", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
       expect(() => deactivate()).not.toThrow();
     });
 
-    it("deactivate clears diagnostic provider", () => {
+    it("deactivate clears diagnostic provider", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
       deactivate();
 
       // clearAll should have been called during deactivation
       expect(mockCollectionClear).toHaveBeenCalled();
     });
 
-    it("registers dantecode.openChat command", () => {
+    it("registers dantecode.openChat command", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
       expect(commandIds).toContain("dantecode.openChat");
     });
 
-    it("registers dantecode.selfUpdate command", () => {
+    it("registers dantecode.selfUpdate command", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
       expect(commandIds).toContain("dantecode.selfUpdate");
     });
 
-    it("registers dantecode.switchModel command", () => {
+    it("registers dantecode.switchModel command", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
       expect(commandIds).toContain("dantecode.switchModel");
     });
 
-    it("registers dantecode.runPDSE command", () => {
+    it("registers dantecode.runPDSE command", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
       expect(commandIds).toContain("dantecode.runPDSE");
     });
 
-    it("registers checkpoint commands", () => {
+    it("registers checkpoint commands", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
@@ -1863,9 +1929,9 @@ describe("VS Code Extension", () => {
       expect(commandIds).toContain("dantecode.rewindCheckpoint");
     });
 
-    it("registers diff review commands", () => {
+    it("registers diff review commands", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const commandIds = callArgs.map((c: unknown[]) => c[0]);
@@ -1876,7 +1942,7 @@ describe("VS Code Extension", () => {
 
     it("runs repo self-update from the repo root terminal when the extension is in repo-dev mode", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
       mockDetectInstallContext.mockReturnValueOnce({
         kind: "vscode_extension_host",
         runtimePath: "/test/extension",
@@ -1912,7 +1978,7 @@ describe("VS Code Extension", () => {
 
     it("shows extension-host guidance instead of shelling into the workspace for published installs", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
       mockDetectInstallContext.mockReturnValueOnce({
         kind: "vscode_extension_host",
         runtimePath: "/extensions/dantecode",
@@ -1993,7 +2059,7 @@ describe("VS Code Extension", () => {
 
     it("manual create checkpoint command delegates to the checkpoint manager", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const handler = callArgs.find(
@@ -2013,7 +2079,7 @@ describe("VS Code Extension", () => {
       });
 
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
       const handler = callArgs.find(
@@ -2028,7 +2094,7 @@ describe("VS Code Extension", () => {
 
     it("setPendingDiff auto-creates a checkpoint before storing the diff", async () => {
       const context = createMockContext();
-      activate(context);
+      await activate(context);
 
       setPendingDiff("/test/project/src/app.ts", "old code", "new code");
       await Promise.resolve();
@@ -2046,7 +2112,7 @@ describe("VS Code Extension", () => {
       ]);
 
       const context = createMockContext();
-      activate(context);
+      await activate(context);
       setPendingDiff("/test/project/src/app.ts", "old code", "new code");
 
       const callArgs = (vscode.commands.registerCommand as ReturnType<typeof vi.fn>).mock.calls;
