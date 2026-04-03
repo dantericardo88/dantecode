@@ -126,91 +126,91 @@
           "id": "dantecode.checkpointTree",
           "name": "Checkpoints",
           "type": "tree",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "id": "dantecode.skillsTree",
           "name": "Skills",
           "type": "tree",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "id": "dantecode.commandHistory",
           "name": "Command History",
           "type": "tree",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "id": "dantecode.timeline",
           "name": "Session Timeline",
           "type": "tree",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "id": "dantecode.agentProgress",
           "name": "Agent Progress",
           "type": "tree",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.auditView",
           "name": "Audit Log",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.automationView",
           "name": "Automation",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.verificationView",
           "name": "Verification",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.planningView",
           "name": "Planning",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.magicView",
           "name": "Magic",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.memoryView",
           "name": "Memory",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.searchView",
           "name": "Search",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.agentsView",
           "name": "Agents",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.partyProgressView",
           "name": "Party Mode Progress",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         },
         {
           "type": "webview",
           "id": "dantecode.automationDashboardView",
           "name": "Automation Dashboard",
-          "visibility": "hidden"
+          "when": "dantecode.showAdvancedPanels"
         }
       ]
     },
@@ -609,6 +609,11 @@
         "title": "DanteCode: Inline Edit (Cmd+K)",
         "category": "DanteCode",
         "icon": "$(edit)"
+      },
+      {
+        "command": "dantecode.toggleAdvancedPanels",
+        "title": "DanteCode: Toggle Advanced Panels",
+        "category": "DanteCode"
       }
     ],
     "keybindings": [

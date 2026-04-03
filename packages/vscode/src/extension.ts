@@ -103,6 +103,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(outputChannel);
   outputChannel.appendLine("DanteCode extension activated");
 
+  // Hide advanced panels by default — only show Chat, Git, Sessions, Repo Map, Quick Actions
+  void vscode.commands.executeCommand("setContext", "dantecode.showAdvancedPanels", false);
+
   // ── Repo map tree ──
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
 
@@ -376,6 +379,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   inlineEditProvider = new InlineEditProvider(context.secrets, DEFAULT_MODEL_ID);
   context.subscriptions.push(
     vscode.commands.registerCommand("dantecode.inlineEdit", () => inlineEditProvider?.execute()),
+  );
+
+  // ── Toggle Advanced Panels command ──
+  let advancedPanelsVisible = false;
+  context.subscriptions.push(
+    vscode.commands.registerCommand("dantecode.toggleAdvancedPanels", () => {
+      advancedPanelsVisible = !advancedPanelsVisible;
+      void vscode.commands.executeCommand("setContext", "dantecode.showAdvancedPanels", advancedPanelsVisible);
+      void vscode.window.showInformationMessage(
+        advancedPanelsVisible ? "Advanced panels shown" : "Advanced panels hidden",
+      );
+    }),
   );
 
   // ── Inline completion: cache invalidation + accept detection ──
