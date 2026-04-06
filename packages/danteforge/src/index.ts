@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { LoopDetector, TaskCircuitBreaker } from "@dantecode/core";
 import type {
   AutoforgeConfig,
   AutoforgeIteration,
@@ -773,7 +774,7 @@ export interface AutoforgeResult {
   iterationHistory: AutoforgeIteration[];
   finalScore: PDSEScore | null;
   totalDurationMs: number;
-  terminationReason: "passed" | "max_iterations" | "constitution_violation" | "error";
+  terminationReason: "passed" | "max_iterations" | "constitution_violation" | "error" | "escalated";
 }
 
 export interface AutoforgeContext {
@@ -856,6 +857,20 @@ export async function runAutoforgeIAL(
   let finalScore: PDSEScore | null = null;
   const iterationHistory: AutoforgeIteration[] = [];
 
+  // Adaptive strategy tracking — detect stuck loops and reduce scope before escalating.
+  const loopDetector = new LoopDetector({ maxIterations, identicalThreshold: 3 });
+  const taskBreaker = new TaskCircuitBreaker({ identicalFailureThreshold: 3, maxRecoveryAttempts: 2 });
+  let strategyMode: "standard" | "reduced_scope" | "minimal" = "standard";
+
+  // Vercel AI SDK pattern: composable stop conditions.
+  // Evaluates all conditions in parallel; stops if any returns true.
+  const stopConditions = config.stopConditions ?? [];
+  async function isStopConditionMet(ctx: { steps: number; pdseScore: number | null; allGStackPassed: boolean }): Promise<boolean> {
+    if (stopConditions.length === 0) return false;
+    const results = await Promise.all(stopConditions.map((cond) => cond(ctx)));
+    return results.some(Boolean);
+  }
+
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
     onProgress?.({
       phase: iteration,
@@ -906,7 +921,8 @@ export async function runAutoforgeIAL(
     const gstackResults = await runGStack(currentCode, config.gstackCommands, projectRoot);
     const score = runLocalPDSEScorer(currentCode, projectRoot);
     finalScore = score;
-    const succeeded = score.passedGate && allGStackPassed(gstackResults);
+    const gstackAllPassed = allGStackPassed(gstackResults);
+    const succeeded = score.passedGate && gstackAllPassed;
 
     iterationHistory.push({
       iterationNumber: iteration,
@@ -931,6 +947,7 @@ export async function runAutoforgeIAL(
     });
 
     if (succeeded) {
+      taskBreaker.recordSuccess();
       await recordSuccessPattern(
         {
           pattern: `Autoforge success: ${context.taskDescription}`,
@@ -959,6 +976,45 @@ export async function runAutoforgeIAL(
       break;
     }
 
+    // Composable stop condition check (Vercel AI SDK pattern)
+    if (await isStopConditionMet({ steps: iteration, pdseScore: score.overall, allGStackPassed: gstackAllPassed })) {
+      return {
+        finalCode: currentCode,
+        iterations: iteration,
+        succeeded: gstackAllPassed,
+        iterationHistory,
+        finalScore,
+        totalDurationMs: Date.now() - startedAt,
+        terminationReason: gstackAllPassed ? "passed" : "max_iterations",
+      };
+    }
+
+    // ---- Adaptive strategy: record failure and check for stuck loops ----
+    const failureSummary = gstackResults
+      .filter((r) => !r.passed)
+      .map((r) => r.command)
+      .join(",");
+    const loopResult = loopDetector.recordAction("iteration", `${failureSummary}:${score.overall}`);
+    const breakerResult = taskBreaker.recordFailure(failureSummary || "score_fail", iteration);
+
+    if (breakerResult.action === "escalate" || loopResult.stuck) {
+      return {
+        finalCode: currentCode,
+        iterations: iterationHistory.length,
+        succeeded: false,
+        iterationHistory,
+        finalScore,
+        totalDurationMs: Date.now() - startedAt,
+        terminationReason: "escalated",
+      };
+    }
+
+    if (breakerResult.action === "pause_and_recover" && strategyMode === "standard") {
+      strategyMode = "reduced_scope";
+    } else if (breakerResult.action === "pause_and_recover" && strategyMode === "reduced_scope") {
+      strategyMode = "minimal";
+    }
+
     const lessons = bladeConfig.lessonInjectionEnabled
       ? await queryLessons({
           projectRoot,
@@ -968,15 +1024,44 @@ export async function runAutoforgeIAL(
         })
       : [];
 
-    const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
+    let prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
+
+    // Inject strategy preamble when not in standard mode.
+    if (strategyMode === "reduced_scope") {
+      prompt =
+        `[STRATEGY: REDUCED SCOPE] Previous attempts failed with identical errors. ` +
+        `Focus only on the single most critical failing check. ` +
+        `Do not attempt to fix everything at once.\n\n` +
+        prompt;
+    } else if (strategyMode === "minimal") {
+      prompt =
+        `[STRATEGY: MINIMAL REPRODUCTION] Multiple recovery attempts failed. ` +
+        `Produce the smallest possible change that could fix the top-priority error. ` +
+        `Ignore secondary failures for now.\n\n` +
+        prompt;
+    }
 
     try {
+      // Adaptive token budget: allocate more tokens early in the loop when there
+      // are many iterations remaining, taper down as we approach the ceiling to
+      // preserve context. Early: 8K, mid: 6K, late: 4K, final 10%: 2K.
+      const iterationsRemaining = maxIterations - iteration;
+      const iterationFraction = iteration / maxIterations;
+      const adaptiveMaxTokens =
+        iterationFraction < 0.3
+          ? 8192
+          : iterationFraction < 0.6
+            ? 6144
+            : iterationFraction < 0.9
+              ? 4096
+              : 2048;
       const regenerated = extractCodeFromResponse(
         await router.chat(prompt, {
           temperature: 0.3,
-          maxTokens: 4096,
+          maxTokens: adaptiveMaxTokens,
         }),
       );
+      void iterationsRemaining; // consumed by adaptiveMaxTokens calculation above
       if (regenerated.length > 0) {
         currentCode = regenerated;
       }
