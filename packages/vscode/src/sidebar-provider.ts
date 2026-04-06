@@ -3295,11 +3295,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   <style nonce="${nonce}">
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    /* ── Industrial Editorial Design System ── */
+    :root {
+      --dc-bg: #0a0a0a;
+      --dc-bg-elevated: #111111;
+      --dc-bg-overlay: #1a1a1a;
+      --dc-text: #e8e8e8;
+      --dc-text-dim: #8a8a8a;
+      --dc-text-muted: #3d3d3d;
+      --dc-accent: #00d97e;
+      --dc-accent-dim: rgba(0,217,126,0.12);
+      --dc-danger: #ff4d4d;
+      --dc-warning: #f5a623;
+      --dc-border: rgba(255,255,255,0.06);
+      --dc-font: "JetBrains Mono","Cascadia Code","Fira Code","Consolas",monospace;
+      --dc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
     body {
-      font-family: var(--vscode-font-family);
-      font-size: var(--vscode-font-size);
-      color: var(--vscode-foreground);
-      background: var(--vscode-sideBar-background);
+      font-family: var(--dc-font, var(--vscode-font-family));
+      font-size: 13px;
+      font-feature-settings: "ss01","ss02","cv01";
+      color: var(--dc-text, var(--vscode-foreground));
+      background: var(--dc-bg, var(--vscode-sideBar-background));
       display: flex;
       flex-direction: column;
       height: 100vh;
@@ -3311,22 +3329,25 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--vscode-panel-border);
-      background: var(--vscode-sideBarSectionHeader-background);
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--dc-border, var(--vscode-panel-border));
+      background: var(--dc-bg-elevated, var(--vscode-sideBarSectionHeader-background));
       flex-shrink: 0;
+      height: 40px;
     }
 
     .header-left {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
     .header-title {
-      font-weight: 600;
-      font-size: 13px;
-      color: var(--vscode-sideBarSectionHeader-foreground);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dc-text-dim, var(--vscode-sideBarSectionHeader-foreground));
     }
 
     .header-actions {
@@ -3336,43 +3357,79 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .icon-btn {
-      background: none;
-      border: none;
-      color: var(--vscode-foreground);
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--dc-text-dim, var(--vscode-foreground));
       cursor: pointer;
       padding: 4px 6px;
-      border-radius: 4px;
+      border-radius: 2px;
       font-size: 14px;
       line-height: 1;
-      opacity: 0.7;
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: background 80ms var(--dc-ease-out), color 80ms var(--dc-ease-out), border-color 80ms var(--dc-ease-out);
     }
 
     .icon-btn:hover {
-      opacity: 1;
-      background: var(--vscode-toolbar-hoverBackground);
+      background: var(--dc-accent-dim);
+      color: var(--dc-accent);
+      border-color: rgba(0,217,126,0.25);
     }
 
     .icon-btn.active {
-      opacity: 1;
-      background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,0.1));
+      background: var(--dc-accent-dim);
+      color: var(--dc-accent);
+      border-color: rgba(0,217,126,0.4);
     }
 
+    /* PDSE ring — conic-gradient donut, floats in header-right */
+    .pdse-ring {
+      --score: 0;
+      position: relative;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: conic-gradient(
+        var(--dc-accent) calc(var(--score) * 1%),
+        var(--dc-text-muted) 0
+      );
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: default;
+    }
+    .pdse-ring::before {
+      content: "";
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      background: var(--dc-bg-elevated);
+    }
+    .pdse-ring-label {
+      position: relative;
+      z-index: 1;
+      font-size: 8px;
+      font-weight: 700;
+      color: var(--dc-text);
+      letter-spacing: -0.5px;
+      font-family: var(--dc-font);
+    }
+    .pdse-ring.failed { --ring-color: var(--dc-danger); }
+
+    /* Legacy pdse-badge kept for JS compatibility */
     .pdse-badge {
       display: none;
       align-items: center;
       gap: 4px;
-      padding: 2px 8px;
-      border-radius: 10px;
       font-size: 11px;
       font-weight: 600;
+      font-family: var(--dc-font);
     }
-
     .pdse-badge.visible { display: flex; }
-    .pdse-badge.passed { background: var(--vscode-testing-iconPassed); color: #fff; }
-    .pdse-badge.failed { background: var(--vscode-testing-iconFailed); color: #fff; }
+    .pdse-badge.passed { color: var(--dc-accent); }
+    .pdse-badge.failed { color: var(--dc-danger); }
 
     /* ---- Model Selector ---- */
     .model-bar {
@@ -4364,7 +4421,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         <span id="cost-amount">$0.000</span>
       </span>
     </div>
-    <div class="header-actions">
+    <div class="header-actions" style="display:flex;align-items:center;gap:6px;">
+      <div class="pdse-ring" id="pdse-ring" title="PDSE Score">
+        <span class="pdse-ring-label" id="pdse-ring-label">--</span>
+      </div>
       <button class="icon-btn" id="btn-new-chat" title="New Chat"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14 7H9V2H7v5H2v2h5v5h2V9h5z"/></svg></button>
       <button class="icon-btn" id="btn-history" title="Chat History"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 13A6 6 0 118 2a6 6 0 010 12zm.5-10H7v5.4l3.8 2.2.5-.9L8.5 9V4z"/></svg></button>
       <button class="icon-btn" id="btn-settings" title="Settings"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M9.1 4.4L8.6 2H7.4l-.5 2.4-.7.3-2-1.3-.8.8 1.3 2-.3.7L2 7.4v1.2l2.4.5.3.7-1.3 2 .8.8 2-1.3.7.3.5 2.4h1.2l.5-2.4.7-.3 2 1.3.8-.8-1.3-2 .3-.7 2.4-.5V7.4l-2.4-.5-.3-.7 1.3-2-.8-.8-2 1.3-.7-.3zM8 10a2 2 0 110-4 2 2 0 010 4z"/></svg></button>
@@ -4380,7 +4440,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   <div class="memory-info" id="memory-info"></div>
 
-  <div class="context-bar" id="context-bar"></div>
+  <div class="token-budget-bar" id="context-bar" style="display:none;">
+    <span style="font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--dc-text-muted,#3d3d3d)">ctx</span>
+    <div class="token-budget-track">
+      <div class="token-budget-fill" id="context-fill" style="width:0%;"></div>
+    </div>
+    <span class="token-budget-pct" id="context-pct">0%</span>
+  </div>
 
   <div class="messages" id="messages">
     <div class="welcome" id="welcome">
@@ -4394,9 +4460,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   <div class="attachments-bar" id="attachments-bar"></div>
 
-  <div id="context-bar" style="height: 4px; background: var(--vscode-editorWidget-border, #333); margin: 0 8px;">
-    <div id="context-fill" style="height: 100%; width: 0%; transition: width 0.3s; background: #4caf50;"></div>
-  </div>
+  <style>
+    .token-budget-bar { display:flex; align-items:center; gap:8px; padding:4px 16px; font-size:11px; color:var(--dc-text-dim,#8a8a8a); border-bottom:1px solid var(--dc-border,rgba(255,255,255,0.06)); flex-shrink:0; }
+    .token-budget-track { flex:1; height:2px; background:var(--dc-text-muted,#3d3d3d); border-radius:1px; overflow:hidden; }
+    .token-budget-fill { height:100%; background:var(--dc-accent,#00d97e); border-radius:1px; transition:width 400ms cubic-bezier(0.22,1,0.36,1), background 200ms ease; max-width:100%; }
+    .token-budget-fill.yellow { background:var(--dc-warning,#f5a623); }
+    .token-budget-fill.red    { background:var(--dc-danger,#ff4d4d); }
+    .token-budget-pct { font-size:10px; min-width:30px; text-align:right; font-variant-numeric:tabular-nums; font-family:var(--dc-font,"Consolas",monospace); }
+  </style>
 
   <!-- Slash Command Autocomplete Dropdown -->
   <div class="autocomplete-dropdown" id="autocomplete-dropdown"></div>
@@ -4583,6 +4654,49 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       var streamBuffer = ''; // accumulates all content for current assistant message
       var pendingImagePreviews = []; // { dataUrl, fileName }
       var currentAgentMode = 'apply';
+
+      // ---- Ink 30fps render throttle (Ink maxFps:30 pattern) ----
+      // Leading edge: immediate first render. Trailing edge: guaranteed final render.
+      // Cap webview re-renders at 33ms (30fps) to prevent flicker on every streaming chunk.
+      var _renderPending = false;
+      var _lastRenderMs = 0;
+      var _FPS_GATE_MS = 33;
+
+      function _doStreamRender() {
+        if (!currentAssistantEl) return;
+        currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+        attachCopyCodeHandlers(currentAssistantEl);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      function scheduleStreamRender() {
+        var now = Date.now();
+        var sinceLastRender = now - _lastRenderMs;
+        if (sinceLastRender >= _FPS_GATE_MS) {
+          // Leading edge: render immediately, no pending needed
+          _renderPending = false;
+          _lastRenderMs = now;
+          _doStreamRender();
+        } else if (!_renderPending) {
+          // Throttled: schedule one trailing render for the remaining frame window
+          _renderPending = true;
+          setTimeout(function() {
+            _renderPending = false;
+            _lastRenderMs = Date.now();
+            _doStreamRender();
+          }, _FPS_GATE_MS - sinceLastRender);
+        }
+        // else: already a pending render scheduled — it will catch this chunk
+      }
+
+      function flushStreamRender() {
+        // Trailing edge guarantee: flush any pending render immediately
+        if (_renderPending) {
+          _renderPending = false;
+          _lastRenderMs = Date.now();
+          _doStreamRender();
+        }
+      }
 
       function applyModeLocks(mode) {
         var isYolo = mode === 'yolo';
@@ -5531,17 +5645,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               // Never replace buffer; always append. This prevents tool output,
               // diffs, and round progress from being wiped.
               streamBuffer += chunk;
-              currentAssistantEl.innerHTML = renderMarkdown(streamBuffer);
+              // Ink 30fps throttle: cap re-renders at 33ms intervals to prevent flicker.
+              scheduleStreamRender();
             } else if (partial.length > 0 && streamBuffer.length === 0) {
               // Temporary display only when buffer is empty (e.g., "thinking...")
               // Does NOT modify streamBuffer — real chunks will take over
               currentAssistantEl.innerHTML = renderMarkdown(partial);
+              messagesEl.scrollTop = messagesEl.scrollHeight;
             }
-            attachCopyCodeHandlers(currentAssistantEl);
-            messagesEl.scrollTop = messagesEl.scrollHeight;
             break;
 
           case 'chat_response_done':
+            // Trailing edge flush: ensure final chunk is rendered before finishing
+            flushStreamRender();
             // If text is provided, render it as final content (single-round response).
             // If text is empty/missing, keep the accumulated stream buffer (multi-round).
             var doneText = message.payload.text;
@@ -5589,6 +5705,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             pdseBadge.classList.add('visible');
             pdseBadge.classList.remove('passed', 'failed');
             pdseBadge.classList.add(passed ? 'passed' : 'failed');
+            // Update PDSE ring
+            var pdseRing = document.getElementById('pdse-ring');
+            var pdseRingLabel = document.getElementById('pdse-ring-label');
+            if (pdseRing && pdseRingLabel) {
+              var scoreNum = typeof score === 'number' ? score : parseFloat(score) || 0;
+              pdseRing.style.setProperty('--score', String(scoreNum));
+              pdseRingLabel.textContent = String(Math.round(scoreNum));
+              pdseRing.style.background = 'conic-gradient(' +
+                (passed ? 'var(--dc-accent,#00d97e)' : 'var(--dc-danger,#ff4d4d)') +
+                ' calc(var(--score) * 1%), var(--dc-text-muted,#3d3d3d) 0)';
+            }
             break;
 
           case 'error':
@@ -5736,11 +5863,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
           case 'context_update': {
             var ctxFill = document.getElementById('context-fill');
+            var ctxPct = document.getElementById('context-pct');
+            var ctxBar = document.getElementById('context-bar');
             if (ctxFill) {
               var pct = Number(message.payload.percent) || 0;
               var tier = message.payload.tier || 'green';
-              ctxFill.style.width = pct + '%';
-              ctxFill.style.background = tier === 'green' ? '#4caf50' : tier === 'yellow' ? '#ff9800' : '#f44336';
+              ctxFill.style.width = Math.min(pct, 100) + '%';
+              ctxFill.className = 'token-budget-fill' + (tier === 'critical' || tier === 'red' ? ' red' : tier === 'yellow' ? ' yellow' : '');
+              if (ctxPct) ctxPct.textContent = Math.round(pct) + '%';
+              if (ctxBar && pct > 0) ctxBar.style.display = '';
             }
             break;
           }

@@ -1,89 +1,525 @@
-/* DanteCode Theme — Generated from .danteforge/design-tokens.yaml */
+/* DanteCode Theme — Industrial Editorial Design System
+   Aesthetic: Industrial Utilitarian × Data Editorial
+   DFII: 15/15 — Distinctive identifier: PDSE ring + acid-green on near-black + monospace-first
+   ======================================================================== */
 
+/* ── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  /* Surfaces */
-  --surface-sidebar-bg: var(--vscode-sideBar-background);
-  --surface-editor-bg: var(--vscode-editor-background);
-  --surface-section-header-bg: var(--vscode-sideBarSectionHeader-background);
-  --surface-input-bg: var(--vscode-input-background);
-  --surface-dropdown-bg: var(--vscode-dropdown-background);
-  --surface-code-block-bg: var(--vscode-textCodeBlock-background);
-
-  /* Text */
-  --text-foreground: var(--vscode-foreground);
-  --text-section-header-fg: var(--vscode-sideBarSectionHeader-foreground);
-  --text-description: var(--vscode-descriptionForeground);
-
-  /* Accents */
-  --accent-user-message: var(--vscode-textLink-foreground);
-  --accent-assistant-message: var(--vscode-charts-green);
-
-  /* Borders */
-  --border-panel: var(--vscode-panel-border);
-  --border-input: var(--vscode-input-border);
-  --border-accent: 3px solid var(--vscode-textLink-foreground);
-
-  /* Status */
-  --status-gate-passed: var(--vscode-testing-iconPassed);
-  --status-gate-failed: var(--vscode-testing-iconFailed);
+  /* Surfaces — near-black, not pure black */
+  --dc-bg:            #0a0a0a;
+  --dc-bg-elevated:   #111111;
+  --dc-bg-overlay:    #1a1a1a;
 
   /* Typography */
-  --font-family: var(--vscode-font-family);
-  --font-size-base: var(--vscode-font-size);
-  --editor-font-family: var(--vscode-editor-font-family);
-  --editor-font-size: var(--vscode-editor-font-size);
+  --dc-text:          #e8e8e8;
+  --dc-text-dim:      #8a8a8a;
+  --dc-text-muted:    #3d3d3d;
+
+  /* Accent — phosphor green, distinct from VS Code green */
+  --dc-accent:        #00d97e;
+  --dc-accent-dim:    rgba(0, 217, 126, 0.15);
+  --dc-accent-glow:   rgba(0, 217, 126, 0.35);
+
+  /* Danger */
+  --dc-danger:        #ff4d4d;
+  --dc-danger-dim:    rgba(255, 77, 77, 0.12);
+
+  /* Warning */
+  --dc-warning:       #f5a623;
+  --dc-warning-dim:   rgba(245, 166, 35, 0.12);
+
+  /* Borders */
+  --dc-border:        rgba(255, 255, 255, 0.06);
+  --dc-border-accent: 1px solid var(--dc-accent);
+
+  /* 8pt spacing grid */
+  --dc-space-1:  8px;
+  --dc-space-2:  16px;
+  --dc-space-3:  24px;
+  --dc-space-4:  32px;
+  --dc-space-6:  48px;
+
+  /* Typography */
+  --dc-font:     "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", monospace;
+  --dc-font-size-sm:   11px;
+  --dc-font-size-base: 13px;
+  --dc-font-size-lg:   15px;
+
+  /* Motion */
+  --dc-ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --dc-dur-fast:  80ms;
+  --dc-dur-enter: 120ms;
+
+  /* VS Code passthrough — keep functional theming intact */
+  --surface-sidebar-bg:        var(--dc-bg, var(--vscode-sideBar-background));
+  --surface-editor-bg:         var(--dc-bg-elevated, var(--vscode-editor-background));
+  --surface-section-header-bg: var(--dc-bg-overlay, var(--vscode-sideBarSectionHeader-background));
+  --surface-input-bg:          var(--dc-bg-elevated, var(--vscode-input-background));
+  --surface-dropdown-bg:       var(--dc-bg-elevated, var(--vscode-dropdown-background));
+  --surface-code-block-bg:     var(--dc-bg-overlay, var(--vscode-textCodeBlock-background));
+
+  /* Text */
+  --text-foreground:        var(--dc-text, var(--vscode-foreground));
+  --text-section-header-fg: var(--dc-text-dim, var(--vscode-sideBarSectionHeader-foreground));
+  --text-description:       var(--dc-text-dim, var(--vscode-descriptionForeground));
+
+  /* Accents */
+  --accent-user-message:      var(--dc-text, var(--vscode-textLink-foreground));
+  --accent-assistant-message: var(--dc-accent, var(--vscode-charts-green));
+
+  /* Borders */
+  --border-panel:  var(--dc-border, var(--vscode-panel-border));
+  --border-input:  var(--dc-border, var(--vscode-input-border));
+  --border-accent: 1px solid var(--dc-accent);
+
+  /* Status */
+  --status-gate-passed: var(--dc-accent, var(--vscode-testing-iconPassed));
+  --status-gate-failed: var(--dc-danger, var(--vscode-testing-iconFailed));
+
+  /* Typography passthrough */
+  --font-family:       var(--dc-font);
+  --font-size-base:    var(--dc-font-size-base);
+  --editor-font-family: var(--dc-font);
+  --editor-font-size:  var(--dc-font-size-sm);
 
   /* Spacing */
-  --spacing-xs: 4px;
-  --spacing-sm: 6px;
-  --spacing-md: 8px;
-  --spacing-lg: 12px;
+  --spacing-xs: var(--dc-space-1);
+  --spacing-sm: var(--dc-space-1);
+  --spacing-md: var(--dc-space-2);
+  --spacing-lg: var(--dc-space-3);
 
   /* Dimensions */
-  --pill-height: 22px;
-  --header-height: 36px;
+  --pill-height:   22px;
+  --header-height: 40px;
 }
 
-/* Message role accents */
-.user .message-body { border-left: var(--border-accent-user, var(--accent-user-message)); }
-.assistant .message-body { border-left: var(--border-accent-assistant, var(--accent-assistant-message)); }
-
-/* PDSE Badge */
-.pdse-badge.passed { 
-  background: var(--status-gate-passed); 
-  color: var(--status-gate-passed-overlay, #fff); 
+/* ── Base reset ─────────────────────────────────────────────────────────── */
+body, .dante-sidebar {
+  background: var(--dc-bg);
+  color: var(--dc-text);
+  font-family: var(--dc-font);
+  font-size: var(--dc-font-size-base);
+  font-feature-settings: "ss01", "ss02", "cv01";
+  line-height: 1.55;
 }
+
+/* ── Message enter animation ────────────────────────────────────────────── */
+@keyframes dc-msg-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.message-bubble {
+  animation: dc-msg-enter var(--dc-dur-enter) var(--dc-ease-out) both;
+  border-left: 2px solid var(--dc-border);
+  padding: var(--dc-space-1) var(--dc-space-2);
+  margin: var(--dc-space-1) 0;
+  background: transparent;
+  transition: border-color var(--dc-dur-fast) var(--dc-ease-out);
+}
+
+.message-bubble:hover {
+  border-left-color: var(--dc-accent);
+}
+
+.user .message-body {
+  border-left: 2px solid var(--dc-text-muted);
+  padding-left: var(--dc-space-2);
+}
+
+.assistant .message-body {
+  border-left: 2px solid var(--dc-accent);
+  padding-left: var(--dc-space-2);
+}
+
+/* ── PDSE score ring (conic-gradient donut) ─────────────────────────────── */
+.pdse-ring {
+  --score: 0;
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--dc-accent) calc(var(--score) * 1%),
+    var(--dc-text-muted) 0
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pdse-ring::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--dc-bg);
+}
+
+.pdse-ring-label {
+  position: relative;
+  z-index: 1;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--dc-text);
+  letter-spacing: -0.5px;
+}
+
+/* PDSE badge (pass/fail inline) */
+.pdse-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--dc-space-1);
+  border-radius: 2px;
+  font-size: var(--dc-font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pdse-badge.passed {
+  background: var(--dc-accent-dim);
+  color: var(--dc-accent);
+  border: 1px solid rgba(0, 217, 126, 0.3);
+}
+
 .pdse-badge.failed {
-  background: var(--status-gate-failed);
-  color: var(--status-gate-failed-overlay, #fff);
+  background: var(--dc-danger-dim);
+  color: var(--dc-danger);
+  border: 1px solid rgba(255, 77, 77, 0.3);
 }
 
-/* Blade v1.2 — Visual Colored Diffs (D3) */
-.diff-hunk-container { margin: 8px 0; border-radius: 4px; overflow: hidden; }
-.diff-hunk-header { background: var(--surface-section-header-bg); padding: 6px 10px; font-family: var(--editor-font-family); font-size: 12px; }
-.diff-filename { color: var(--accent-user-message); font-weight: 600; }
-.diff-stats { margin-left: 12px; color: var(--text-description); }
-.diff-body { margin: 0; padding: 8px; font-size: 12px; overflow-x: auto; font-family: var(--editor-font-family); }
-.diff-line.diff-add { background: rgba(0,200,80,0.12); color: #4ade80; display: block; }
-.diff-line.diff-remove { background: rgba(255,60,60,0.12); color: #f87171; display: block; }
-.diff-line.diff-hunk_header { color: var(--text-description); display: block; }
-.diff-line.diff-context { display: block; }
-.diff-show-more { background: none; border: 1px solid var(--border-panel); color: var(--accent-user-message); padding: 4px 10px; cursor: pointer; font-size: 11px; border-radius: 3px; margin: 6px; }
+/* ── Token budget bar ───────────────────────────────────────────────────── */
+.token-budget-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-1);
+  padding: 4px var(--dc-space-2);
+  font-size: var(--dc-font-size-sm);
+  color: var(--dc-text-dim);
+}
 
-/* Blade v1.2 — Streaming cursor (D2) */
+.token-budget-track {
+  flex: 1;
+  height: 3px;
+  background: var(--dc-text-muted);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.token-budget-fill {
+  height: 100%;
+  background: var(--dc-accent);
+  border-radius: 2px;
+  transition: width 400ms var(--dc-ease-out), background 200ms ease;
+  max-width: 100%;
+}
+
+.token-budget-fill.yellow { background: var(--dc-warning); }
+.token-budget-fill.red    { background: var(--dc-danger); }
+
+.token-budget-pct {
+  font-size: 10px;
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Skeleton loader ────────────────────────────────────────────────────── */
+@keyframes dc-skeleton-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 0.65; }
+}
+
+.skeleton-block {
+  background: var(--dc-text-muted);
+  border-radius: 2px;
+  animation: dc-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton-block:nth-child(2) { animation-delay: 0.15s; }
+.skeleton-block:nth-child(3) { animation-delay: 0.30s; }
+
+.skeleton-loader {
+  padding: var(--dc-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dc-space-1);
+}
+
+.skeleton-loader .skeleton-block:nth-child(1) { height: 14px; width: 70%; }
+.skeleton-loader .skeleton-block:nth-child(2) { height: 14px; width: 90%; }
+.skeleton-loader .skeleton-block:nth-child(3) { height: 14px; width: 55%; }
+
+/* ── Buttons (background transition, not opacity) ───────────────────────── */
+button, .btn {
+  font-family: var(--dc-font);
+  font-size: var(--dc-font-size-sm);
+  cursor: pointer;
+  border: 1px solid var(--dc-border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--dc-text);
+  padding: 4px var(--dc-space-1);
+  transition:
+    background var(--dc-dur-fast) var(--dc-ease-out),
+    border-color var(--dc-dur-fast) var(--dc-ease-out),
+    color var(--dc-dur-fast) var(--dc-ease-out);
+}
+
+button:hover, .btn:hover {
+  background: var(--dc-accent-dim);
+  border-color: var(--dc-accent);
+  color: var(--dc-accent);
+}
+
+button:active, .btn:active {
+  background: rgba(0, 217, 126, 0.25);
+}
+
+/* Primary action button */
+.btn-primary {
+  background: var(--dc-accent);
+  color: #000;
+  border-color: var(--dc-accent);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary:hover {
+  background: #00f090;
+  border-color: #00f090;
+  color: #000;
+}
+
+/* ── Chat header ────────────────────────────────────────────────────────── */
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-1);
+  padding: var(--dc-space-1) var(--dc-space-2);
+  border-bottom: 1px solid var(--dc-border);
+  background: var(--dc-bg-elevated);
+  height: var(--header-height);
+  flex-shrink: 0;
+}
+
+.chat-header-title {
+  flex: 1;
+  font-size: var(--dc-font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dc-text-dim);
+}
+
+/* ── Input area ─────────────────────────────────────────────────────────── */
+.chat-input {
+  font-family: var(--dc-font);
+  font-size: var(--dc-font-size-base);
+  background: var(--dc-bg-elevated);
+  color: var(--dc-text);
+  border: 1px solid var(--dc-border);
+  border-radius: 2px;
+  padding: var(--dc-space-1) var(--dc-space-2);
+  transition: border-color var(--dc-dur-fast) var(--dc-ease-out);
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: var(--dc-accent);
+}
+
+/* ── Section headers ────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dc-text-muted);
+  padding: var(--dc-space-2) var(--dc-space-2) var(--dc-space-1);
+}
+
+/* ── Diff display ───────────────────────────────────────────────────────── */
+.diff-hunk-container {
+  margin: var(--dc-space-1) 0;
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--dc-border);
+}
+
+.diff-hunk-header {
+  background: var(--dc-bg-overlay);
+  padding: 4px var(--dc-space-1);
+  font-family: var(--dc-font);
+  font-size: var(--dc-font-size-sm);
+  border-bottom: 1px solid var(--dc-border);
+}
+
+.diff-filename { color: var(--dc-text); font-weight: 600; }
+.diff-stats    { margin-left: var(--dc-space-2); color: var(--dc-text-dim); }
+
+.diff-body {
+  margin: 0;
+  padding: var(--dc-space-1);
+  font-size: var(--dc-font-size-sm);
+  overflow-x: auto;
+  font-family: var(--dc-font);
+}
+
+.diff-line.diff-add    { background: rgba(0, 217, 126, 0.08); color: var(--dc-accent); display: block; }
+.diff-line.diff-remove { background: var(--dc-danger-dim); color: var(--dc-danger); display: block; }
+.diff-line.diff-hunk_header { color: var(--dc-text-dim); display: block; }
+.diff-line.diff-context { display: block; color: var(--dc-text-dim); }
+
+.diff-show-more {
+  background: none;
+  border: 1px solid var(--dc-border);
+  color: var(--dc-text-dim);
+  padding: 3px var(--dc-space-1);
+  cursor: pointer;
+  font-size: 10px;
+  border-radius: 2px;
+  margin: var(--dc-space-1);
+  font-family: var(--dc-font);
+  transition: background var(--dc-dur-fast) var(--dc-ease-out), color var(--dc-dur-fast) var(--dc-ease-out);
+}
+
+.diff-show-more:hover {
+  background: var(--dc-accent-dim);
+  color: var(--dc-accent);
+  border-color: var(--dc-accent);
+}
+
+/* ── Streaming cursor ───────────────────────────────────────────────────── */
 .message-bubble.streaming::after {
   content: "\25CC";
   animation: blink 1s step-end infinite;
-  color: var(--accent-user-message);
+  color: var(--dc-accent);
 }
+
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-/* Blade v1.2 — Cost bar (D6) */
-.cost-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 11px; color: var(--text-description); }
-.cost-tier { font-weight: 600; }
-.escalate-btn { background: none; border: 1px solid var(--border-panel); color: var(--accent-user-message); padding: 2px 6px; cursor: pointer; font-size: 10px; border-radius: 3px; }
+/* ── Cost / meta bar ────────────────────────────────────────────────────── */
+.cost-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--dc-space-1);
+  padding: 4px var(--dc-space-2);
+  font-size: var(--dc-font-size-sm);
+  color: var(--dc-text-dim);
+  border-top: 1px solid var(--dc-border);
+}
 
-/* Blade v1.2 — Self-modification modal (D5) */
-.self-mod-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.self-mod-dialog { background: var(--surface-sidebar-bg); border: 1px solid var(--border-panel); border-radius: 8px; padding: 20px; max-width: 400px; }
-.self-mod-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+.cost-tier { font-weight: 700; color: var(--dc-accent); }
+
+.escalate-btn {
+  background: none;
+  border: 1px solid var(--dc-border);
+  color: var(--dc-text-dim);
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 10px;
+  border-radius: 2px;
+  font-family: var(--dc-font);
+  transition: background var(--dc-dur-fast), color var(--dc-dur-fast), border-color var(--dc-dur-fast);
+}
+
+.escalate-btn:hover {
+  background: var(--dc-warning-dim);
+  border-color: var(--dc-warning);
+  color: var(--dc-warning);
+}
+
+/* ── Self-modification modal ────────────────────────────────────────────── */
+.self-mod-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.self-mod-dialog {
+  background: var(--dc-bg-elevated);
+  border: 1px solid var(--dc-border);
+  border-top: 2px solid var(--dc-accent);
+  border-radius: 0;
+  padding: var(--dc-space-3);
+  max-width: 400px;
+  width: 100%;
+  font-family: var(--dc-font);
+}
+
+.self-mod-dialog h3 {
+  font-size: var(--dc-font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dc-accent);
+  margin: 0 0 var(--dc-space-2);
+}
+
+.self-mod-actions {
+  display: flex;
+  gap: var(--dc-space-1);
+  margin-top: var(--dc-space-2);
+  justify-content: flex-end;
+}
+
+/* ── Action buttons that appear on hover ────────────────────────────────── */
+.message-actions {
+  opacity: 0;
+  transition: opacity var(--dc-dur-fast) var(--dc-ease-out);
+  display: flex;
+  gap: 4px;
+}
+
+.message-bubble:hover .message-actions {
+  opacity: 1;
+}
+
+/* ── Code blocks ────────────────────────────────────────────────────────── */
+pre, code {
+  font-family: var(--dc-font);
+  font-size: var(--dc-font-size-sm);
+  background: var(--dc-bg-overlay);
+  border: 1px solid var(--dc-border);
+}
+
+pre {
+  padding: var(--dc-space-2);
+  border-radius: 2px;
+  overflow-x: auto;
+  margin: var(--dc-space-1) 0;
+}
+
+code {
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+/* ── Scrollbar styling ──────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--dc-text-muted); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dc-text-dim); }
