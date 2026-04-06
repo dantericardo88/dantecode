@@ -16,12 +16,20 @@ import {
   formatErrorsForFixPrompt,
   computeErrorSignature,
   runStartupHealthCheck,
+  classifyError,
+  isRetryable,
+  isTerminal,
+  getRetryDelayMs,
+  DanteErrorType,
   getCurrentWave,
   advanceWave,
   globalArtifactStore,
   synthesizeConfidence,
   StreamRecovery,
   MemoryConsolidator,
+  checkBudget,
+  createContextBudget,
+  shouldTruncateToolOutput,
   observeAndAdapt,
   applyOverrides,
   TaskComplexityRouter,
@@ -40,8 +48,10 @@ import {
   runPostEditLint,
   buildLintFixPrompt,
   AgentStateMachine,
+  createAccumulatedUsage,
+  addLanguageModelUsage,
 } from "@dantecode/core";
-import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake } from "@dantecode/core";
+import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
 import { recordSuccessPattern, detectAndRecordPatterns } from "@dantecode/danteforge";
 import { runDanteForge } from "./danteforge-pipeline.js";
@@ -72,6 +82,7 @@ import {
   BOLD,
   RESET,
   PIVOT_INSTRUCTION,
+  DEEP_REFLECTION_INSTRUCTION,
   MAX_PIPELINE_CONTINUATION_NUDGES,
   MAX_CONSECUTIVE_EMPTY_ROUNDS,
   MAX_CONFABULATION_NUDGES,
@@ -500,6 +511,8 @@ async function _runAgentLoopCore(
           ? 75
           : estimatePromptComplexity(durablePrompt);
     let totalTokensUsed = 0;
+    // Vercel AI SDK LanguageModelUsage shape — tracks cache-read/reasoning tokens separately
+    let accumulatedUsage: AccumulatedUsage = createAccumulatedUsage();
     const touchedFiles: string[] = [];
     // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
     const recentToolSignatures: string[] = [];
@@ -924,6 +937,10 @@ async function _runAgentLoopCore(
       let toolCalls: ExtractedToolCall[] = [];
       let toolCallParseErrors: string[] = []; // malformed <tool_use> blocks from this round
       let cleanText = "";
+      // Cline pattern: track whether the first streaming chunk has been received.
+      // If an error occurs AFTER the first chunk, retrying is unsafe — partial tool
+      // executions may have already happened and a retry would duplicate them.
+      let streamingStarted = false;
       try {
         if (replayToolCalls.length > 0) {
           responseText = "Replaying pending durable tool calls after background task completion.";
@@ -964,6 +981,7 @@ async function _runAgentLoopCore(
               for await (const part of streamResult.fullStream) {
                 streamRecovery.updateActivity();
                 if (part.type === "text-delta") {
+                  streamingStarted = true;
                   renderer.write(part.textDelta);
                   config.onToken?.(part.textDelta);
                   config.eventEmitter?.emitToken(config.eventSessionId ?? "", part.textDelta);
@@ -976,6 +994,15 @@ async function _runAgentLoopCore(
                     id: part.toolCallId,
                     name: part.toolName,
                     input: part.args as Record<string, unknown>,
+                  });
+                } else if (part.type === "step-finish") {
+                  // Vercel AI SDK LanguageModelUsage — accumulate per-step token usage.
+                  // SDK uses promptTokens/completionTokens; our shape uses inputTokens/outputTokens.
+                  const sdkUsage = part.usage as { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+                  accumulatedUsage = addLanguageModelUsage(accumulatedUsage, {
+                    inputTokens: sdkUsage.promptTokens ?? 0,
+                    outputTokens: sdkUsage.completionTokens ?? 0,
+                    totalTokens: sdkUsage.totalTokens ?? 0,
                   });
                 }
               }
@@ -999,6 +1026,7 @@ async function _runAgentLoopCore(
                 ...(thinkingBudget ? { thinkingBudget } : {}),
               });
               for await (const chunk of streamResult.textStream) {
+                streamingStarted = true;
                 renderer.write(chunk);
                 config.onToken?.(chunk);
               }
@@ -1122,7 +1150,10 @@ async function _runAgentLoopCore(
             }
           }
 
-          totalTokensUsed += responseText.length; // Approximate token count
+          // Use accurate accumulated token count if available; fall back to char estimate
+          totalTokensUsed = accumulatedUsage.totalTokens > 0
+            ? accumulatedUsage.totalTokens
+            : totalTokensUsed + Math.ceil(responseText.length / 4);
 
           // Recompute effective self-improvement policy based on current fallback state
           effectiveSelfImprovement = router.isUsingFallback()
@@ -1277,7 +1308,86 @@ async function _runAgentLoopCore(
         transientTimeoutRetries = 0;
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorType = classifyError(err);
         process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+
+        // Terminal errors (bad key, empty wallet) — abort immediately, no retry
+        if (isTerminal(errorType)) {
+          const terminalHint =
+            errorType === DanteErrorType.Auth
+              ? "Check your API key in settings."
+              : "Add credits to your API account to continue.";
+          process.stdout.write(`${RED}[${errorType}] ${terminalHint}${RESET}\n`);
+          agentStateMachine.transition("error", "model_error");
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content: `Model error (${errorType}): ${errorMessage} — ${terminalHint}`,
+            timestamp: new Date().toISOString(),
+          });
+          await durableRunStore.failRun(durableRun.id, {
+            session,
+            touchedFiles,
+            lastConfirmedStep,
+            lastSuccessfulTool,
+            nextAction: terminalHint,
+            message: errorMessage,
+            evidence: evidenceLedger,
+            executionPolicyState: executionPolicy.snapshot(),
+          });
+          if (localSandboxBridge) await localSandboxBridge.shutdown();
+          return session;
+        }
+
+        // Retryable errors (rate-limit, network, unknown) — exponential backoff.
+        // Cline pattern: if streaming already started, partial tool executions may have
+        // already occurred — retrying would duplicate them. Pause for safe resume instead.
+        if (isRetryable(errorType) && !isTimeoutError(errorMessage)) {
+          if (streamingStarted) {
+            const pauseNotice =
+              `Execution paused for durable run ${durableRun.id} after mid-stream error (${errorType}). ` +
+              `Partial tool output was already emitted — retrying would risk duplicate tool calls. ` +
+              `Type /resume ${durableRun.id} to continue from the last confirmed step.`;
+            if (!config.silent) {
+              process.stdout.write(`${YELLOW}[${errorType}] Mid-stream error — pausing for safe resume.${RESET}\n`);
+            }
+            await durableRunStore.pauseRun(durableRun.id, {
+              reason: "recoverable_error",
+              session,
+              touchedFiles,
+              lastConfirmedStep,
+              lastSuccessfulTool,
+              nextAction: `Resume with /resume ${durableRun.id}`,
+              message: pauseNotice,
+              evidence: evidenceLedger,
+              executionPolicyState: executionPolicy.snapshot(),
+            });
+            session.messages.push({
+              id: randomUUID(),
+              role: "assistant",
+              content: pauseNotice,
+              timestamp: new Date().toISOString(),
+            });
+            if (localSandboxBridge) await localSandboxBridge.shutdown();
+            return session;
+          }
+
+          if (transientTimeoutRetries < maxTransientRetries) {
+            transientTimeoutRetries++;
+            const delayMs = getRetryDelayMs(errorType, transientTimeoutRetries);
+            if (!config.silent) {
+              process.stdout.write(
+                `${YELLOW}[${errorType}] Retrying in ${(delayMs / 1000).toFixed(1)}s (attempt ${transientTimeoutRetries}/${maxTransientRetries})${RESET}\n`,
+              );
+            }
+            if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+            messages.push({
+              role: "user" as const,
+              content: `SYSTEM: The last model call failed (${errorType}: ${errorMessage}). Please retry from the last confirmed step.`,
+            });
+            continue;
+          }
+        }
 
         if (isTimeoutError(errorMessage)) {
           if (transientTimeoutRetries < maxTransientRetries) {
@@ -1973,7 +2083,15 @@ async function _runAgentLoopCore(
                   lastPivotErrorSignature = verificationErrorSig;
                 }
 
-                if (consecutiveSameSignatureFailures >= 2) {
+                if (consecutiveSameSignatureFailures >= 4) {
+                  // Deep reflection: force full task re-assessment after prolonged stuck state
+                  retryMessage += `\n\n${DEEP_REFLECTION_INSTRUCTION}`;
+                  if (!config.silent) {
+                    process.stdout.write(
+                      `\n${RED}[deep-reflect: same error ${consecutiveSameSignatureFailures}x — forcing full re-assessment]${RESET}\n`,
+                    );
+                  }
+                } else if (consecutiveSameSignatureFailures >= 2) {
                   retryMessage += `\n\n${PIVOT_INSTRUCTION}`;
                   if (!config.silent) {
                     process.stdout.write(
@@ -2314,9 +2432,33 @@ async function _runAgentLoopCore(
       };
       messages.push(assistantToolMessage);
 
+      // Budget-aware tool output truncation: prevent large tool results from
+      // bloating context when we're already under pressure. Uses context-budget.ts
+      // dynamic limits: green=50KB, yellow=10KB, red=5KB, critical=2KB.
+      const _budgetState = checkBudget(
+        messages,
+        createContextBudget({ maxTokens: config.state.model.default.contextWindow ?? 200_000 }),
+      );
+      const truncatedResults = toolResults.map((result) => {
+        const advice = shouldTruncateToolOutput(result, _budgetState);
+        if (advice.truncate) {
+          return (
+            result.slice(0, advice.maxChars) +
+            `\n[truncated: output exceeded ${advice.maxChars} char budget limit (context ${_budgetState.tier} — ${Math.round(_budgetState.percent)}% used)]`
+          );
+        }
+        return result;
+      });
+
+      if (!config.silent && _budgetState.tier !== "green") {
+        emitOrWrite(
+          `${DIM}[budget: ${_budgetState.tier} ${Math.round(_budgetState.percent)}% — ${Math.round(_budgetState.remainingBudget() / 1000)}K tokens remaining]${RESET}\n`,
+        );
+      }
+
       const toolResultsMessage = {
         role: "user" as const,
-        content: `Tool execution results:\n\n${toolResults.join("\n\n---\n\n")}`,
+        content: `Tool execution results:\n\n${truncatedResults.join("\n\n---\n\n")}`,
       };
       messages.push(toolResultsMessage);
 

@@ -347,6 +347,18 @@ export {
 } from "./error-parser.js";
 export type { ParsedError } from "./error-parser.js";
 
+// ─── Error Classifier ────────────────────────────────────────────────────────
+
+export {
+  classifyError,
+  isRetryable,
+  isTerminal,
+  getRetryDelayMs,
+  DanteErrorType,
+  RETRYABLE_ERROR_TYPES,
+  TERMINAL_ERROR_TYPES,
+} from "./error-classifier.js";
+
 // ─── Health Check ───────────────────────────────────────────────────────────
 
 export { runStartupHealthCheck } from "./health-check.js";
@@ -935,12 +947,16 @@ export {
   checkBudget,
   shouldTruncateToolOutput,
   getBudgetTier,
+  createAccumulatedUsage,
+  addLanguageModelUsage,
 } from "./context-budget.js";
 export type {
   ContextBudget,
   ContextBudgetState,
   BudgetTier,
   TruncationAdvice,
+  LanguageModelUsage,
+  AccumulatedUsage,
 } from "./context-budget.js";
 
 // ─── Model Adaptation (D-12 / D-12A) ────────────────────────────────────────

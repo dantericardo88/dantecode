@@ -2,9 +2,88 @@
 // @dantecode/core — Context Window Budget Tracker
 // Proactive context window management. Tracks token usage and provides
 // dynamic output truncation limits based on remaining budget.
+// Vercel AI SDK pattern: LanguageModelUsage shape with cache-read token breakdown.
 // ============================================================================
 
 import { estimateMessageTokens } from "./token-counter.js";
+
+// ---------------------------------------------------------------------------
+// Token usage shape (Vercel AI SDK LanguageModelUsage pattern)
+// ---------------------------------------------------------------------------
+
+/**
+ * Full token usage breakdown per API response.
+ * Mirrors Vercel AI SDK's `LanguageModelUsage` shape.
+ * Cache-read tokens are priced ~10x cheaper than uncached — separate tracking
+ * is required for accurate cost estimation.
+ */
+export interface LanguageModelUsage {
+  /** Tokens in the input (prompt) that were NOT served from cache. */
+  inputTokens: number;
+  /** Tokens generated in the output (completion). */
+  outputTokens: number;
+  /** Detailed input token breakdown. */
+  inputTokenDetails?: {
+    /** Tokens served from the prompt cache (cheaper — typically ~10% of uncached price). */
+    cacheReadTokens?: number;
+    /** Tokens from extended thinking / chain-of-thought (model-internal). */
+    reasoningTokens?: number;
+  };
+  /** Convenience sum: inputTokens + outputTokens (+ reasoning if included). */
+  totalTokens: number;
+}
+
+/**
+ * Accumulated token usage across multiple rounds of generation.
+ * Use `addLanguageModelUsage()` to safely accumulate undefined-safe fields.
+ */
+export interface AccumulatedUsage {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalReasoningTokens: number;
+  totalTokens: number;
+  /** Number of rounds accumulated. */
+  rounds: number;
+}
+
+/**
+ * Accumulated usage state, zero-initialized.
+ */
+export function createAccumulatedUsage(): AccumulatedUsage {
+  return {
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalReasoningTokens: 0,
+    totalTokens: 0,
+    rounds: 0,
+  };
+}
+
+/**
+ * Accumulate one round's usage into the running total.
+ * All fields are undefined-safe — missing values are treated as 0.
+ */
+export function addLanguageModelUsage(
+  acc: AccumulatedUsage,
+  usage: Partial<LanguageModelUsage>,
+): AccumulatedUsage {
+  const inputTokens = usage.inputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? 0;
+  const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  const reasoningTokens = usage.inputTokenDetails?.reasoningTokens ?? 0;
+  const totalTokens = usage.totalTokens ?? inputTokens + outputTokens;
+
+  return {
+    totalInputTokens: acc.totalInputTokens + inputTokens,
+    totalOutputTokens: acc.totalOutputTokens + outputTokens,
+    totalCacheReadTokens: acc.totalCacheReadTokens + cacheReadTokens,
+    totalReasoningTokens: acc.totalReasoningTokens + reasoningTokens,
+    totalTokens: acc.totalTokens + totalTokens,
+    rounds: acc.rounds + 1,
+  };
+}
 
 export interface ContextBudget {
   /** Maximum tokens the model's context window supports. */

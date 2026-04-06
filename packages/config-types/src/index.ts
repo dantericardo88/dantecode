@@ -304,6 +304,27 @@ export interface AutoforgeIteration {
 }
 
 /** Top-level autoforge configuration. */
+/**
+ * Vercel AI SDK pattern: composable stop condition.
+ * A function that receives the current autoforge step count and returns true to halt.
+ * Multiple conditions are evaluated with Promise.all — first truthy result stops the loop.
+ */
+export type AutoforgeStopCondition = (ctx: {
+  steps: number;
+  pdseScore: number | null;
+  allGStackPassed: boolean;
+}) => boolean | Promise<boolean>;
+
+/** Built-in stop conditions (Vercel AI SDK pattern). */
+export const stopWhenStepCountReached = (n: number): AutoforgeStopCondition =>
+  ({ steps }) => steps >= n;
+
+export const stopWhenPdseScoreReached = (threshold: number): AutoforgeStopCondition =>
+  ({ pdseScore }) => (pdseScore ?? 0) >= threshold;
+
+export const stopWhenAllGStackPassed = (): AutoforgeStopCondition =>
+  ({ allGStackPassed }) => allGStackPassed;
+
 export interface AutoforgeConfig {
   enabled: boolean;
   maxIterations: number;
@@ -311,6 +332,8 @@ export interface AutoforgeConfig {
   lessonInjectionEnabled: boolean;
   abortOnSecurityViolation: boolean;
   autoRunOnWrite: boolean; // Controls whether DanteForge runs automatically after Write/Edit
+  /** Optional composable stop conditions (Vercel AI SDK pattern). Any returning true halts the loop. */
+  stopConditions?: AutoforgeStopCondition[];
 }
 
 /** Extended autoforge config for Blade v1.2. */

@@ -101,6 +101,20 @@ export const PIVOT_INSTRUCTION =
   "- Is there an alternative tool or method?\n" +
   "- Should we read more context first?";
 
+/**
+ * Deep-reflection instruction injected after 4+ consecutive same-signature failures.
+ * More aggressive than PIVOT_INSTRUCTION: forces a full task re-assessment.
+ */
+export const DEEP_REFLECTION_INSTRUCTION =
+  "DEEP REFLECTION REQUIRED — the same error has persisted across 4+ attempts.\n" +
+  "Before writing any more code, you MUST:\n" +
+  "1. Re-read the original task description (first user message)\n" +
+  "2. Read the current state of ALL files you've modified\n" +
+  "3. Run the failing test/check to confirm the exact error message\n" +
+  "4. Identify the ROOT CAUSE (not symptoms) — what specific line/condition is wrong?\n" +
+  "5. Propose a completely different approach — not a variation of what you've tried\n\n" +
+  "Do NOT attempt another fix until you have completed these 5 steps.";
+
 export const EXECUTION_CONTINUATION_PATTERN = /^(?:please\s+)?(?:continue|resume|run|verify)\b/i;
 
 export const EXECUTION_WORKFLOW_PATTERN =

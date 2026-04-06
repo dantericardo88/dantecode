@@ -560,6 +560,15 @@ vi.mock("@dantecode/core", async () => {
       store() {
         return Promise.resolve();
       }
+      size() {
+        return 0;
+      }
+      distill() {
+        return Promise.resolve();
+      }
+      save() {
+        return Promise.resolve();
+      }
     },
     // SecurityEngine — Lane 2 wiring
     SecurityEngine: class MockSecurityEngine {
