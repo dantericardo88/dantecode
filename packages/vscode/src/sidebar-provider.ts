@@ -4790,87 +4790,81 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
       });
 
-      // ---- Voice Input (Web Speech API) ----
-      (function() {
-        var micBtn = document.getElementById('mic-btn');
-        if (!micBtn) return;
+      // ---- Voice Input (Web Speech API / MediaRecorder fallback) ----
+      var micBtn = document.getElementById('mic-btn');
+      if (micBtn) {
         var SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) {
-          micBtn.style.display = 'none';
-          return;
-        }
-        var recognition = new SpeechRec();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        var recording = false;
+        if (SpeechRec) {
+          var recognition = new SpeechRec();
+          recognition.continuous = false;
+          recognition.interimResults = false;
+          var recording = false;
 
-        recognition.onresult = function(event) {
-          var transcript = event.results[0][0].transcript;
-          if (inputEl) {
-            inputEl.value = (inputEl.value ? inputEl.value + ' ' : '') + transcript;
-            // Trigger height recalc
-            inputEl.style.height = 'auto';
-            inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
-            inputEl.focus();
-          }
-        };
+          recognition.onresult = function(event) {
+            var transcript = event.results[0][0].transcript;
+            if (inputEl) {
+              inputEl.value = (inputEl.value ? inputEl.value + ' ' : '') + transcript;
+              inputEl.style.height = 'auto';
+              inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+              inputEl.focus();
+            }
+          };
 
-        recognition.onstart = function() {
-          recording = true;
-          micBtn.classList.add('recording');
-          micBtn.title = 'Recording… click to stop';
-        };
-
-        recognition.onend = function() {
-          recording = false;
-          micBtn.classList.remove('recording');
-          micBtn.title = 'Voice input (Web Speech API)';
-        };
-
-        recognition.onerror = function(event) {
-          recording = false;
-          micBtn.classList.remove('recording');
-          console.warn('Voice recognition error:', event.error);
-        };
-
-        micBtn.addEventListener('click', function() {
-          if (recording) {
-            recognition.stop();
-          } else {
-            try { recognition.start(); } catch(e) { console.warn('Could not start recognition:', e); }
-          }
-        });
-      })();
-
-      // Fallback: record via MediaRecorder and send to Whisper backend
-      if (micBtn && !('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        var mediaRecorder = null;
-        var audioChunks = [];
-        micBtn.addEventListener('click', async function() {
-          if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
-            micBtn.classList.remove('recording');
-            return;
-          }
-          try {
-            var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioChunks = [];
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-            mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) audioChunks.push(e.data); };
-            mediaRecorder.onstop = function() {
-              var blob = new Blob(audioChunks, { type: 'audio/webm' });
-              var reader = new FileReader();
-              reader.onload = function() {
-                var base64 = reader.result.split(',')[1];
-                vscode.postMessage({ type: 'voice_audio_blob', payload: { data: base64, mimeType: 'audio/webm' } });
-              };
-              reader.readAsDataURL(blob);
-              stream.getTracks().forEach(function(t) { t.stop(); });
-            };
-            mediaRecorder.start();
+          recognition.onstart = function() {
+            recording = true;
             micBtn.classList.add('recording');
-          } catch(err) { console.error('Voice capture failed:', err); }
-        });
+            micBtn.title = 'Recording… click to stop';
+          };
+
+          recognition.onend = function() {
+            recording = false;
+            micBtn.classList.remove('recording');
+            micBtn.title = 'Voice input (Web Speech API)';
+          };
+
+          recognition.onerror = function(event) {
+            recording = false;
+            micBtn.classList.remove('recording');
+            console.warn('Voice recognition error:', event.error);
+          };
+
+          micBtn.addEventListener('click', function() {
+            if (recording) {
+              recognition.stop();
+            } else {
+              try { recognition.start(); } catch(e) { console.warn('Could not start recognition:', e); }
+            }
+          });
+        } else {
+          // Fallback: record via MediaRecorder and send to Whisper backend
+          var mediaRecorder = null;
+          var audioChunks = [];
+          micBtn.addEventListener('click', async function() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+              mediaRecorder.stop();
+              micBtn.classList.remove('recording');
+              return;
+            }
+            try {
+              var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              audioChunks = [];
+              mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+              mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) audioChunks.push(e.data); };
+              mediaRecorder.onstop = function() {
+                var blob = new Blob(audioChunks, { type: 'audio/webm' });
+                var reader = new FileReader();
+                reader.onload = function() {
+                  var base64 = reader.result.split(',')[1];
+                  vscode.postMessage({ type: 'voice_audio_blob', payload: { data: base64, mimeType: 'audio/webm' } });
+                };
+                reader.readAsDataURL(blob);
+                stream.getTracks().forEach(function(t) { t.stop(); });
+              };
+              mediaRecorder.start();
+              micBtn.classList.add('recording');
+            } catch(err) { console.error('Voice capture failed:', err); }
+          });
+        }
       }
 
       // ---- Slash Command Autocomplete ----
