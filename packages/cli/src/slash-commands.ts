@@ -4117,14 +4117,40 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         `retry=${retryCount} step=${startStep + retryCount} file=${displayTargetFile}`,
       );
       if (loopCheck.stuck) {
-        checkpointMgr.stopPeriodicCheckpoints();
         await eventCheckpointer.putWrite({
-          taskId: `loop-break-${retryCount}`,
+          taskId: `loop-detected-${retryCount}`,
           channel: "loopDetection",
           value: { stuck: true, reason: loopCheck.reason, details: loopCheck.details },
           timestamp: new Date().toISOString(),
         });
-        return `${RED}${BOLD}Autoforge LOOP DETECTED${RESET}: ${loopCheck.reason} — ${loopCheck.details}\n  Iterations: ${loopCheck.iterationCount}, consecutive repeats: ${loopCheck.consecutiveRepeats}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+
+        // Adaptive strategy: don't give up immediately — pivot approach
+        // Strategy ladder: STANDARD → REDUCED_SCOPE → MINIMAL_REPRODUCTION → abort
+        const isFirstLoop = loopCheck.iterationCount <= (hardCeiling * 0.5);
+        if (isFirstLoop && retryCount < maxRetries) {
+          process.stdout.write(
+            `\n${YELLOW}[loop-detect] Stuck pattern detected — pivoting to reduced-scope strategy${RESET}\n` +
+            `  Reason: ${loopCheck.reason}\n` +
+            `  Clearing context and re-anchoring on minimal failing case...\n`,
+          );
+          // Re-anchor: reset to current code state, use minimal task description
+          currentCode = await readFile(resolvedTargetFile, "utf-8").catch(() => currentCode);
+          retryCount++;
+          continue;
+        }
+
+        // All adaptive strategies exhausted — run RecoveryEngine before aborting
+        process.stdout.write(`\n${YELLOW}Adaptive strategies exhausted — running diagnostics...${RESET}\n`);
+        const loopDiag = recovery.runRepoRootVerification(state.projectRoot);
+        const loopDiagLines = loopDiag.stepResults.map(
+          (s) => `  ${s.passed ? GREEN + "✓" : RED + "✗"} ${s.name}${RESET}`,
+        );
+        process.stdout.write(loopDiagLines.join("\n") + "\n");
+        checkpointMgr.stopPeriodicCheckpoints();
+        const loopFailedChecks = loopDiag.failedSteps.length > 0
+          ? `\n  Failing checks: ${loopDiag.failedSteps.join(", ")}`
+          : "";
+        return `${RED}${BOLD}Autoforge LOOP DETECTED${RESET}: ${loopCheck.reason} — ${loopCheck.details}\n  Iterations: ${loopCheck.iterationCount}, consecutive repeats: ${loopCheck.consecutiveRepeats}${loopFailedChecks}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
       }
 
       try {
