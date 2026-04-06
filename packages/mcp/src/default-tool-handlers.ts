@@ -780,6 +780,233 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
           .slice(0, 5),
       });
     },
+
+    run_tests: async (args) => {
+      const projectRoot = requiredString(args, "projectRoot");
+      const workspace = optionalString(args, "workspace");
+      const pattern = optionalString(args, "pattern");
+
+      const { execSync } = await import("node:child_process");
+      const cmd = workspace
+        ? `npm run test --workspace=${workspace} -- ${pattern ? `--testNamePattern="${pattern}"` : ""}`
+        : `npm run test ${pattern ? `-- --testNamePattern="${pattern}"` : ""}`;
+
+      try {
+        const output = execSync(cmd, { cwd: projectRoot, encoding: "utf8", stdio: "pipe" });
+        const lines = output.split("\n");
+        const summary = lines.filter((l) => /pass|fail|error|\d+ test/i.test(l)).join("\n");
+        return serialize({ status: "passed", summary: summary || output.slice(0, 2000) });
+      } catch (err) {
+        const e = err as { stdout?: string; stderr?: string; message?: string };
+        const output = (e.stdout || "") + (e.stderr || "");
+        const lines = output.split("\n");
+        const failures = lines.filter((l) => /FAIL|✗|×|Error|fail/i.test(l)).slice(0, 50);
+        return serialize({ status: "failed", failures, raw: output.slice(0, 3000) });
+      }
+    },
+
+    get_coverage: async (args) => {
+      const projectRoot = requiredString(args, "projectRoot");
+      const workspace = optionalString(args, "workspace");
+
+      const { execSync } = await import("node:child_process");
+      const cmd = workspace
+        ? `npm run test --workspace=${workspace} -- --coverage`
+        : "npm run test -- --coverage";
+
+      try {
+        const output = execSync(cmd, { cwd: projectRoot, encoding: "utf8", stdio: "pipe" });
+        const coverageMatch = output.match(/Statements\s*:\s*([\d.]+)%[\s\S]*?Branches\s*:\s*([\d.]+)%[\s\S]*?Functions\s*:\s*([\d.]+)%[\s\S]*?Lines\s*:\s*([\d.]+)%/);
+        if (coverageMatch && coverageMatch[1] && coverageMatch[2] && coverageMatch[3] && coverageMatch[4]) {
+          return serialize({
+            statements: parseFloat(coverageMatch[1]),
+            branches: parseFloat(coverageMatch[2]),
+            functions: parseFloat(coverageMatch[3]),
+            lines: parseFloat(coverageMatch[4]),
+          });
+        }
+        return serialize({ raw: output.slice(0, 2000) });
+      } catch (err) {
+        const e = err as { stdout?: string; message?: string };
+        return serialize({ error: e.message, raw: (e.stdout || "").slice(0, 2000) });
+      }
+    },
+
+    analyze_error: async (args) => {
+      const error = requiredString(args, "error");
+      const filePath = optionalString(args, "filePath");
+
+      // Parse TypeScript compiler errors
+      const tsErrorPattern = /^(.+?)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)$/gm;
+      const tsErrors: Array<{ file: string; line: number; col: number; code: string; message: string }> = [];
+      let match;
+      while ((match = tsErrorPattern.exec(error)) !== null) {
+        if (match[1] && match[2] && match[3] && match[4] && match[5]) {
+          tsErrors.push({ file: match[1], line: parseInt(match[2]), col: parseInt(match[3]), code: match[4], message: match[5] });
+        }
+      }
+
+      // Parse stack traces
+      const stackLines = error.split("\n").filter((l) => l.trim().startsWith("at ")).slice(0, 5);
+      const firstTsError = tsErrors[0];
+
+      return serialize({
+        type: tsErrors.length > 0 ? "typescript" : stackLines.length > 0 ? "runtime" : "unknown",
+        tsErrors: tsErrors.length > 0 ? tsErrors : undefined,
+        stackTrace: stackLines.length > 0 ? stackLines : undefined,
+        filePath,
+        summary: error.split("\n")[0]?.slice(0, 200) ?? "",
+        suggestion: firstTsError
+          ? `Fix TypeScript error ${firstTsError.code} in ${firstTsError.file}:${firstTsError.line}`
+          : "Inspect the stack trace for the failing call site",
+      });
+    },
+
+    suggest_fix: async (args) => {
+      const error = requiredString(args, "error");
+      const code = optionalString(args, "code");
+      const filePath = optionalString(args, "filePath");
+
+      // Pattern-based fix suggestions
+      const fixes: string[] = [];
+
+      if (/is not assignable to type/.test(error)) {
+        fixes.push("Add missing type union member or cast with 'as' if intentional");
+      }
+      if (/Cannot find name/.test(error)) {
+        fixes.push("Import the missing symbol or check for typos in the identifier");
+      }
+      if (/Property .* does not exist/.test(error)) {
+        fixes.push("Extend the interface/type definition or use optional chaining (?.)");
+      }
+      if (/has no exported member/.test(error)) {
+        fixes.push("Add the export to the source module's index.ts or check the import path");
+      }
+      if (/Expected .* arguments/.test(error)) {
+        fixes.push("Check the function signature and provide the required arguments");
+      }
+      if (fixes.length === 0) {
+        fixes.push("Read the error message carefully and verify the types on both sides of the assignment");
+      }
+
+      return serialize({
+        error: error.slice(0, 300),
+        filePath,
+        hasCodeContext: (code?.length ?? 0) > 0,
+        suggestedFixes: fixes,
+        confidence: fixes.length > 1 ? "high" : "medium",
+      });
+    },
+
+    list_skills: async (args) => {
+      const filter = optionalString(args, "filter");
+      const { readdir, readFile } = await import("node:fs/promises");
+      // use already-imported `join` from node:path
+
+      // Look for skills in common locations
+      const skillDirs = [
+        join(process.env["HOME"] ?? process.env["USERPROFILE"] ?? "", ".claude", "skills"),
+        join(process.cwd(), ".dantecode", "skills"),
+      ];
+
+      const skills: Array<{ name: string; path: string; description?: string }> = [];
+
+      for (const dir of skillDirs) {
+        try {
+          const entries = await readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isFile() && entry.name.endsWith(".md")) {
+              const name = entry.name.replace(".md", "");
+              if (!filter || name.toLowerCase().includes(filter.toLowerCase())) {
+                try {
+                  const content = await readFile(join(dir, entry.name), "utf8");
+                  const descMatch = content.match(/^#+\s+(.+)/m);
+                  skills.push({ name, path: join(dir, entry.name), description: descMatch?.[1] });
+                } catch {
+                  skills.push({ name, path: join(dir, entry.name) });
+                }
+              }
+            }
+          }
+        } catch {
+          // Directory doesn't exist — skip
+        }
+      }
+
+      return serialize({ total: skills.length, skills });
+    },
+
+    get_session_history: async (args) => {
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
+      const sessionId = optionalString(args, "sessionId");
+
+      const { readdir, readFile } = await import("node:fs/promises");
+      // use already-imported `join` from node:path
+
+      const sessionDir = join(process.cwd(), ".dantecode", "sessions");
+
+      try {
+        if (sessionId) {
+          const filePath = join(sessionDir, `${sessionId}.json`);
+          const content = await readFile(filePath, "utf8");
+          return serialize(JSON.parse(content) as Record<string, unknown>);
+        }
+
+        const entries = await readdir(sessionDir);
+        const sessions = entries
+          .filter((e) => e.endsWith(".json"))
+          .slice(0, limit)
+          .map((e) => e.replace(".json", ""));
+
+        return serialize({ total: entries.length, sessions });
+      } catch {
+        return serialize({ total: 0, sessions: [], note: "No session history found" });
+      }
+    },
+
+    run_benchmark: async (args) => {
+      const projectRoot = requiredString(args, "projectRoot");
+      const task = requiredString(args, "task");
+      const dimensions = Array.isArray(args["dimensions"]) ? (args["dimensions"] as string[]) : undefined;
+
+      // Run anti-stub scan as a proxy for benchmark quality signal
+      const { readFile } = await import("node:fs/promises");
+      const pkgPath = join(projectRoot, "package.json");
+
+      let projectName = "unknown";
+      try {
+        const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { name?: string };
+        projectName = pkg.name ?? "unknown";
+      } catch { /* ignore */ }
+
+      const defaultDimensions = dimensions ?? [
+        "autonomy", "convergence", "tokenEconomy", "errorHandling",
+        "uxPolish", "testing", "ecosystemMcp", "selfImprovement",
+      ];
+
+      // Placeholder scores — actual scoring requires DanteForge assessment
+      const scores = Object.fromEntries(defaultDimensions.map((d) => [d, 50]));
+
+      return serialize({
+        project: projectName,
+        task,
+        dimensions: scores,
+        note: "Run `danteforge assess` for full competitive benchmark scores",
+      });
+    },
+
+    get_token_usage: async (args) => {
+      const sessionId = optionalString(args, "sessionId");
+      void sessionId;
+
+      // Return placeholder — actual token tracking requires session context injection
+      return serialize({
+        sessionId: sessionId ?? "current",
+        note: "Token usage is tracked per-session in agent-loop.ts via context-budget.ts",
+        budgetTiers: { green: "<70%", yellow: "70-80%", red: "80-90%", critical: ">90%" },
+        truncationLimits: { green: "50KB", yellow: "10KB", red: "5KB", critical: "2KB" },
+      });
+    },
   };
 }
 

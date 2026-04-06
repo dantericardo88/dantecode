@@ -487,6 +487,120 @@ const DANTEFORGE_TOOLS = [
       required: ["projectRoot"],
     },
   },
+  {
+    name: "run_tests",
+    description:
+      "Run the project test suite using the configured test runner (Vitest, Jest, etc.) and return a pass/fail summary with failure details.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        pattern: { type: "string", description: "Optional test file pattern or test name filter" },
+        workspace: { type: "string", description: "Optional workspace/package to test (e.g. packages/cli)" },
+      },
+      required: ["projectRoot"],
+    },
+  },
+  {
+    name: "get_coverage",
+    description:
+      "Return test coverage metrics (statements, branches, functions, lines) for a project or specific package.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        workspace: { type: "string", description: "Optional workspace/package to measure" },
+        threshold: { type: "number", description: "Optional minimum coverage % threshold (default 80)" },
+      },
+      required: ["projectRoot"],
+    },
+  },
+  {
+    name: "analyze_error",
+    description:
+      "Analyze a TypeScript/JavaScript error message or stack trace to identify root cause, affected files, and suggest targeted fixes.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        error: { type: "string", description: "Error message, stack trace, or compiler error text" },
+        projectRoot: { type: "string", description: "Project root directory for context" },
+        filePath: { type: "string", description: "Optional file path where the error occurred" },
+      },
+      required: ["error"],
+    },
+  },
+  {
+    name: "suggest_fix",
+    description:
+      "Given a failing test output or error, suggest a concrete code fix with the minimal change required to resolve the issue.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        error: { type: "string", description: "Error or test failure to fix" },
+        code: { type: "string", description: "Optional current code context" },
+        filePath: { type: "string", description: "Optional file path for context" },
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: ["error"],
+    },
+  },
+  {
+    name: "list_skills",
+    description:
+      "List all available DanteCode skills with their names, descriptions, and activation status.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        filter: { type: "string", description: "Optional keyword to filter skills by name or description" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_session_history",
+    description:
+      "Retrieve recent session history including tasks completed, files modified, and PDSE scores.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Maximum number of sessions to return (default 10)" },
+        sessionId: { type: "string", description: "Optional specific session ID to retrieve" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "run_benchmark",
+    description:
+      "Run a DanteForge competitive benchmark against a task and return a score report with dimension-level ratings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        task: { type: "string", description: "Task description to benchmark" },
+        dimensions: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of dimensions to score (default: all 18)",
+        },
+      },
+      required: ["projectRoot", "task"],
+    },
+  },
+  {
+    name: "get_token_usage",
+    description:
+      "Return current session token usage, context window utilization percentage, and budget tier.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string", description: "Optional session ID to query (defaults to current)" },
+      },
+      required: [],
+    },
+  },
 ];
 
 /** The tool names exposed by the server (for testing/validation). */

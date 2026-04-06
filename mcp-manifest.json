@@ -1,0 +1,205 @@
+{
+  "name": "dantecode",
+  "version": "0.9.2",
+  "description": "DanteCode MCP server — DanteForge quality gates, verification pipeline, memory, automation, and developer tools exposed as MCP tools.",
+  "license": "MIT",
+  "transport": ["stdio", "http-sse"],
+  "toolCount": 35,
+  "tools": [
+    {
+      "name": "pdse_score",
+      "description": "Run PDSE quality scoring on a code string. Returns completeness, correctness, clarity, consistency scores and violations.",
+      "category": "verification"
+    },
+    {
+      "name": "anti_stub_scan",
+      "description": "Scan code for stubs, placeholders, TODOs, FIXMEs, empty functions, and type:any violations.",
+      "category": "verification"
+    },
+    {
+      "name": "constitution_check",
+      "description": "Check code for constitutional violations: credential exposure, background processes, dangerous operations.",
+      "category": "verification"
+    },
+    {
+      "name": "lessons_query",
+      "description": "Query the lessons database for recorded patterns and corrections relevant to a file or language.",
+      "category": "learning"
+    },
+    {
+      "name": "semantic_search",
+      "description": "Search the project code index using TF-IDF or hybrid semantic search when embeddings are available.",
+      "category": "search"
+    },
+    {
+      "name": "record_lesson",
+      "description": "Record a success, failure, or preference lesson so future runs can learn from the pattern.",
+      "category": "learning"
+    },
+    {
+      "name": "autoforge_verify",
+      "description": "Run the DanteForge verification pipeline across a task or project and return a compact result summary.",
+      "category": "verification"
+    },
+    {
+      "name": "verify_output",
+      "description": "Run the multi-stage QA harness against a task output and return PDSE-style metrics, critique trace, and rail findings.",
+      "category": "verification"
+    },
+    {
+      "name": "run_qa_suite",
+      "description": "Run the QA harness across multiple outputs for a plan or batch and return an aggregate pass/fail report.",
+      "category": "verification"
+    },
+    {
+      "name": "critic_debate",
+      "description": "Aggregate critic or sub-agent verdicts into a consensus decision with blocking findings.",
+      "category": "verification"
+    },
+    {
+      "name": "add_verification_rail",
+      "description": "Register a runtime output verification rail so subsequent verification calls apply the guard automatically.",
+      "category": "verification"
+    },
+    {
+      "name": "web_search",
+      "description": "Search the web using DanteCode's intelligent multi-provider orchestrator with persistent caching.",
+      "category": "research"
+    },
+    {
+      "name": "web_fetch",
+      "description": "Fetch a URL and extract clean markdown or structured JSON using the DanteCode Smart Extractor pipeline.",
+      "category": "research"
+    },
+    {
+      "name": "smart_extract",
+      "description": "Intelligently extract specific information from a webpage based on a goal.",
+      "category": "research"
+    },
+    {
+      "name": "batch_fetch",
+      "description": "Fetch multiple URLs concurrently with common extraction instructions.",
+      "category": "research"
+    },
+    {
+      "name": "spawn_subagent",
+      "description": "Spawn a dynamic, role-specialized sub-agent for parallel or isolated task execution with worktree support.",
+      "category": "orchestration"
+    },
+    {
+      "name": "git_watch",
+      "description": "Start, list, or stop durable Git event watchers for post-commit, pre-push, branch-update, and file-change events.",
+      "category": "automation"
+    },
+    {
+      "name": "run_github_workflow",
+      "description": "Executes a local GitHub-style workflow file with event payload injection, matrix expansion, and persisted run metadata.",
+      "category": "automation"
+    },
+    {
+      "name": "auto_pr_create",
+      "description": "Automatically create a pull request from current branch changes with AI-generated description.",
+      "category": "git"
+    },
+    {
+      "name": "webhook_listen",
+      "description": "Start a local webhook listener for external event integration.",
+      "category": "automation"
+    },
+    {
+      "name": "schedule_git_task",
+      "description": "Schedule a recurring git-based task with cron syntax.",
+      "category": "automation"
+    },
+    {
+      "name": "memory_store",
+      "description": "Store a persistent memory entry associated with the current session.",
+      "category": "memory"
+    },
+    {
+      "name": "memory_recall",
+      "description": "Recall relevant memories using semantic similarity search.",
+      "category": "memory"
+    },
+    {
+      "name": "memory_summarize",
+      "description": "Summarize and compact older memory entries to free context window budget.",
+      "category": "memory"
+    },
+    {
+      "name": "memory_prune",
+      "description": "Prune stale or irrelevant memory entries based on age and access frequency.",
+      "category": "memory"
+    },
+    {
+      "name": "cross_session_recall",
+      "description": "Recall memories from prior sessions to provide continuity across conversations.",
+      "category": "memory"
+    },
+    {
+      "name": "memory_visualize",
+      "description": "Visualize the trace and entity map of the persistent memory.",
+      "category": "memory"
+    },
+    {
+      "name": "run_tests",
+      "description": "Run the project test suite using the configured test runner and return a pass/fail summary with failure details.",
+      "category": "testing"
+    },
+    {
+      "name": "get_coverage",
+      "description": "Return test coverage metrics (statements, branches, functions, lines) for a project or specific package.",
+      "category": "testing"
+    },
+    {
+      "name": "analyze_error",
+      "description": "Analyze a TypeScript/JavaScript error or stack trace to identify root cause and suggest targeted fixes.",
+      "category": "debugging"
+    },
+    {
+      "name": "suggest_fix",
+      "description": "Given a failing test output or error, suggest a concrete code fix with the minimal change required.",
+      "category": "debugging"
+    },
+    {
+      "name": "list_skills",
+      "description": "List all available DanteCode skills with their names, descriptions, and activation status.",
+      "category": "skills"
+    },
+    {
+      "name": "get_session_history",
+      "description": "Retrieve recent session history including tasks completed, files modified, and PDSE scores.",
+      "category": "session"
+    },
+    {
+      "name": "run_benchmark",
+      "description": "Run a DanteForge competitive benchmark against a task and return a score report with dimension-level ratings.",
+      "category": "assessment"
+    },
+    {
+      "name": "get_token_usage",
+      "description": "Return current session token usage, context window utilization percentage, and budget tier.",
+      "category": "session"
+    }
+  ],
+  "categories": {
+    "verification": 11,
+    "learning": 2,
+    "search": 1,
+    "research": 3,
+    "orchestration": 1,
+    "automation": 4,
+    "git": 1,
+    "memory": 6,
+    "testing": 2,
+    "debugging": 2,
+    "skills": 1,
+    "session": 2,
+    "assessment": 1
+  },
+  "quickstart": {
+    "install": "npm install -g @dantecode/mcp",
+    "connect": "dantecode mcp serve --transport stdio",
+    "docs": "https://github.com/dantecode/dantecode/blob/main/packages/mcp/README.md"
+  }
+}
