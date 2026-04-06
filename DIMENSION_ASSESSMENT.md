@@ -25,7 +25,7 @@ Changes from Inferno Sprint marked with ↑
 | 8 | Performance | 70 | 80 | Codex CLI (OpenAI) | -10 | **Major** |
 | 9 | Self-Improvement | 55 | 72 | CodiumAI/Qodo | -17 | **Major** |
 | 10 | Testing | 56 | 92 | Qodo 2.0 | -36 | **CRITICAL** |
-| 11 | Error Handling | **60** ↑+10 | 80 | CodeRabbit | -20 | **CRITICAL** |
+| 11 | Error Handling | **62** ↑+12 | 80 | CodeRabbit | -18 | **CRITICAL** |
 | 12 | UX Polish | **58** ↑+8 | 92 | Cursor | -34 | **CRITICAL** |
 | 13 | Ecosystem / MCP | **68** ↑+8 | 90 | Claude Code | -22 | **CRITICAL** |
 | 14 | Token Economy | **58** ↑+18 | 75 | Claude Code | -17 | **CRITICAL** |
@@ -35,7 +35,7 @@ Changes from Inferno Sprint marked with ↑
 | 18 | Community Adoption | 15 | 95 | Cursor / GH Copilot CLI | -80 | **CRITICAL** |
 
 **Competitive Average Score (pre-sprint):** 59.8 / 100
-**Competitive Average Score (post-sprint estimate):** ~64.5 / 100
+**Competitive Average Score (post-sprint estimate):** ~65 / 100
 **Leaderboard Rank:** 27 out of 28 (unchanged — need community adoption to move)
 **Fake-Completion Risk:** REDUCED — sprint wired existing code rather than building new abstractions
 
@@ -45,7 +45,7 @@ Changes from Inferno Sprint marked with ↑
 |-----------|-------|--------|----------|
 | Token Economy | 58 | +18 | `shouldTruncateToolOutput` wired with dynamic limits (green=50KB, yellow=10KB, red=5KB, critical=2KB); adaptive `maxTokens`; `LanguageModelUsage` accumulator; budget tier printed to stdout |
 | Convergence | 52 | +14 | `LoopDetector` + `TaskCircuitBreaker` → STANDARD→REDUCED_SCOPE→MINIMAL; RecoveryEngine auto-triggers; **10 council worktree race conditions fixed** — sequential lane merges now reliable |
-| Error Handling | 60 | +10 | `DanteErrorType` classifier; `classifyError/isRetryable/isTerminal` wired into agent-loop; terminal errors (Auth/Billing) abort immediately; `streamingStarted` mid-stream safe-resume (Cline pattern); `process.on` fix |
+| Error Handling | **62** | **+12** | `DanteErrorType` classifier; `classifyError/isRetryable/isTerminal` wired; terminal errors abort immediately; `streamingStarted` mid-stream safe-resume; `ErrorHelper` PDSE hints injected into tool results (TypeScript/ESLint/test/git patterns); `process.on` fix |
 | UX Polish | 58 | +8 | Industrial Editorial design (VSCode + Desktop); Ink incremental line-diffing in `stream-renderer.ts`; 30fps webview throttle; context gauge in stream header |
 | Ecosystem/MCP | 68 | +8 | 15 → 35 tools, `mcp-manifest.json` published for third-party discovery |
 | Autonomy | 42 | +5 | `DEEP_REFLECTION_INSTRUCTION` (4+ consecutive failures → full re-assessment); `streamingStarted` safe resume prevents loop on mid-stream errors; `PIVOT_INSTRUCTION` unchanged for 2–3 failures |
