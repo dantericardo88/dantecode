@@ -151,12 +151,27 @@ export class DanteCodeAdapter extends BaseCouncilAdapter {
     if (!session) return null;
 
     try {
-      const diff = execSync("git diff HEAD", {
-        cwd: session.packet.worktreePath,
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-        timeout: GIT_TIMEOUT_MS,
-      }).trim();
+      // Diff against the base branch to capture all commits in this worktree.
+      // "git diff HEAD" only shows uncommitted changes (empty after commits).
+      // "git diff <baseBranch>...HEAD" shows all commits since branching from base.
+      const baseBranch = session.packet.baseBranch || "main";
+      let diff = "";
+      try {
+        diff = execSync(`git diff ${baseBranch}...HEAD`, {
+          cwd: session.packet.worktreePath,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          timeout: GIT_TIMEOUT_MS,
+        }).trim();
+      } catch {
+        // Fallback: base branch may not exist in this worktree — try uncommitted changes
+        diff = execSync("git diff HEAD", {
+          cwd: session.packet.worktreePath,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+          timeout: GIT_TIMEOUT_MS,
+        }).trim();
+      }
 
       const changedFiles = diff
         .split("\n")

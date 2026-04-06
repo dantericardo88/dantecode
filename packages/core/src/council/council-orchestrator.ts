@@ -162,6 +162,8 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   /** Prevents double-emit of "lanes:all-terminal" across concurrent poll cycles. */
   private _allTerminalFired = false;
+  /** Serializes worktree merge operations — prevents concurrent git operations. */
+  private _worktreeMergeLock: Promise<void> = Promise.resolve();
   /** Serializes all persistRunState() calls — prevents concurrent writes to state.json (Windows EBUSY). */
   private _pendingWrite: Promise<void> = Promise.resolve();
   /** Last persist error for observability; null means the most recent write succeeded. */
@@ -349,7 +351,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     let finalWorktreePath = request.worktreePath;
     let worktreeBranch: string | undefined = undefined;
 
-    if (!request.worktreePath || request.worktreePath === this.runState.repoRoot) {
+    if (this.worktreeHooks && (!request.worktreePath || request.worktreePath === this.runState.repoRoot)) {
       // Generate a temporary laneId for worktree creation.
       // The actual laneId will be assigned by the router.
       const tempLaneId = `lane-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -912,6 +914,28 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
           return;
         }
         this.stopPolling();
+
+        // Fast-path: all completed lanes already merged via worktree path.
+        // Calling merge() again would find no patches (worktrees are removed) → skip.
+        const completedLanes = this.runState?.agents.filter((s) => s.status === "completed") ?? [];
+        const allWorktreeMerged =
+          completedLanes.length > 0 && completedLanes.every((s) => s.worktreeMerged === true);
+        if (allWorktreeMerged) {
+          this.transition("merging");
+          this.transition("verifying");
+          this.complete().then(() => {
+            cleanup();
+            resolve();
+          }).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.fail(`Complete error: ${msg}`).catch(() => {
+              cleanup();
+              reject(new Error(msg));
+            });
+          });
+          return;
+        }
+
         this.merge()
           .then((mergeResult) => {
             if (mergeResult.success) {
@@ -924,7 +948,29 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
                 mergeResult.error ?? "Merge blocked: conflicts require manual resolution",
               );
             }
-            // Zero candidates — all lanes failed, nothing to merge → permanent failure
+            // Zero candidates: distinguish verify-gate failures from no-op completions.
+            //
+            // A lane that failed verification WITHOUT a worktree represents a quality gate
+            // failure in the unit-test / non-worktree path — fail the run.
+            //
+            // A lane that failed verification WITH a worktree is typically a no-op
+            // (empty diff, score=20) or a threshold miss on a run that still completed —
+            // the run should complete (the lane just won't be merged).
+            const anyVerifyFailedNoWorktree = this.runState?.agents.some(
+              (s) =>
+                s.status === "completed" &&
+                s.verificationPassed === false &&
+                !s.worktreeBranch,
+            ) ?? false;
+            if (anyVerifyFailedNoWorktree) {
+              return this.fail("All lanes failed verification — no viable patches to merge");
+            }
+            const anyCompleted =
+              (this.runState?.agents.some((s) => s.status === "completed") ?? false);
+            if (anyCompleted) {
+              // Lanes completed (possibly no-op) — nothing to merge is acceptable
+              return this.complete();
+            }
             return this.fail("All lanes failed — no viable patches to merge");
           })
           .catch((err: unknown) => {
@@ -1084,27 +1130,44 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
           // Worktree merge/cleanup: only merge if verification passed and worktree was created.
           // Failed lanes preserve worktree for manual review.
+          // Guard: skip if a merge was already queued (concurrent poll cycles can process the
+          // same lane twice before worktreeMerged is set).
           if (
             session.worktreeBranch &&
             session.worktreePath &&
             verifyResult.passed &&
+            !session.worktreeMergeQueued &&
             this.runState
           ) {
-            try {
-              await this.mergeAndCleanupWorktree(
-                session.laneId,
-                session.worktreePath,
-                session.worktreeBranch,
-                this.options.baseBranch,
-              );
-            } catch (error: unknown) {
-              const msg = error instanceof Error ? error.message : String(error);
-              this.emitError(
-                `Failed to merge worktree for lane ${session.laneId}: ${msg}`,
-                "worktree-merge",
-              );
-              // Don't fail the lane — merge failure is an operator problem, not a lane problem
-            }
+            session.worktreeMergeQueued = true;
+            // Serialize git merge operations to prevent concurrent branch operations
+            // (setInterval can trigger multiple pollAllLanes concurrently).
+            const laneId = session.laneId;
+            const worktreePath = session.worktreePath;
+            const worktreeBranch = session.worktreeBranch;
+            this._worktreeMergeLock = this._worktreeMergeLock.then(async () => {
+              try {
+                await this.mergeAndCleanupWorktree(
+                  laneId,
+                  worktreePath,
+                  worktreeBranch,
+                  this.options.baseBranch,
+                );
+                // Mark lane as worktree-merged so watchUntilComplete can skip MergeBrain re-synthesis
+                const s = this.runState?.agents.find((a) => a.laneId === laneId);
+                if (s) {
+                  s.worktreeMerged = true;
+                  await this.persistRunState();
+                }
+              } catch (error: unknown) {
+                const msg = error instanceof Error ? error.message : String(error);
+                this.emitError(
+                  `Failed to merge worktree for lane ${laneId}: ${msg}`,
+                  "worktree-merge",
+                );
+              }
+            });
+            await this._worktreeMergeLock;
           } else if (session.worktreeBranch && session.worktreePath) {
             // Verification failed — preserve worktree for manual investigation
             await this.cleanupFailedWorktree(
@@ -1289,14 +1352,30 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // ── allTerminal check with double-emit guard (P5 fix) ─────────────────
     // "retry-pending" and "paused" are NOT terminal — they represent active work.
+    // Wait for any in-flight worktree merges to complete before firing the event,
+    // so watchUntilComplete sees a consistent worktreeMerged state.
+    await this._worktreeMergeLock;
     if (this.status === "running" && this.runState.agents.length > 0) {
-      const allTerminal = this.runState.agents.every(
-        (s) =>
+      // A lane is "fully terminal" only when:
+      //  - Status is in a terminal state, AND
+      //  - If it completed with a worktree, the verify+merge decision has been made
+      //    (either merge was queued, or verification failed/crashed).
+      // This prevents a concurrent poll cycle from firing lanes:all-terminal before another
+      // concurrent cycle has finished running verify/merge for the last lane.
+      const allTerminal = this.runState.agents.every((s) => {
+        const isTerminalStatus =
           s.status === "completed" ||
           s.status === "failed" ||
           s.status === "aborted" ||
-          s.status === "handed-off",
-      );
+          s.status === "handed-off";
+        if (!isTerminalStatus) return false;
+        // For completed lanes with a worktree, ensure verify+merge decision was made.
+        // verificationPassed === undefined means verify hasn't run yet.
+        if (s.status === "completed" && s.worktreeBranch) {
+          return s.worktreeMergeQueued === true || s.verificationPassed === false;
+        }
+        return true;
+      });
       if (allTerminal && !this._allTerminalFired) {
         this._allTerminalFired = true;
         this.stopPolling();

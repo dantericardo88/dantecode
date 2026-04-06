@@ -209,6 +209,17 @@ export interface AgentSessionState {
    */
   worktreeBranch?: string;
   /**
+   * Set to true after mergeAndCleanupWorktree completes successfully.
+   * Used by watchUntilComplete to detect when all lanes are already merged
+   * via the worktree path, bypassing the MergeBrain synthesis step.
+   */
+  worktreeMerged?: boolean;
+  /**
+   * Set to true when a merge has been queued for this lane.
+   * Prevents duplicate merge attempts from concurrent poll cycles.
+   */
+  worktreeMergeQueued?: boolean;
+  /**
    * Git checkpoint reference for recovery (e.g. commit SHA or stash ref).
    * Populated during checkpoint operations for durable recovery.
    */

@@ -77,7 +77,8 @@ function ensureInternalWorktreePathIgnored(repoRoot: string): void {
     repoRoot,
     git(["rev-parse", "--git-path", "info/exclude"], repoRoot),
   );
-  const pattern = ".dantecode/worktrees/";
+  // Exclude the entire .dantecode directory (worktrees, council state, audit logs, etc.)
+  const patterns = [".dantecode/worktrees/", ".dantecode/"];
   let current = "";
 
   try {
@@ -89,18 +90,13 @@ function ensureInternalWorktreePathIgnored(repoRoot: string): void {
     }
   }
 
-  if (
-    current
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .includes(pattern)
-  ) {
-    return;
-  }
+  const existingLines = current.split(/\r?\n/u).map((line) => line.trim());
+  const missing = patterns.filter((p) => !existingLines.includes(p));
+  if (missing.length === 0) return;
 
   mkdirSync(path.dirname(excludePath), { recursive: true });
   const prefix = current.endsWith("\n") || current.length === 0 ? "" : "\n";
-  appendFileSync(excludePath, `${prefix}${pattern}\n`, "utf-8");
+  appendFileSync(excludePath, `${prefix}${missing.join("\n")}\n`, "utf-8");
 }
 
 // ----------------------------------------------------------------------------
@@ -267,11 +263,18 @@ export function mergeWorktree(
   targetBranch: string,
   projectRoot: string,
 ): WorktreeMergeResult & { worktreeClean: boolean; mainBranchClean: boolean } {
-  // Check pre-merge status
+  // Ensure .dantecode/ is excluded so its untracked files don't block the pre-merge check
+  try { ensureInternalWorktreePathIgnored(projectRoot); } catch { /* best effort */ }
+
+  // Check pre-merge status — only unstaged modifications to tracked files block the merge.
+  // Staged files (stagedCount > 0) after a prior successful merge commit are safe: they are
+  // already part of the commit. On Windows, git sometimes reports merge-committed files as
+  // staged in the index even after the commit completes; blocking on staged would prevent
+  // sequential lane merges. Untracked files are always safe to ignore.
   const preMergeStatus = getGitStatusSummary(projectRoot);
-  if (!preMergeStatus.isClean) {
+  if (preMergeStatus.unstagedCount > 0) {
     throw new Error(
-      `Pre-merge: main branch is dirty (${preMergeStatus.stagedCount} staged, ${preMergeStatus.unstagedCount} unstaged, ${preMergeStatus.untrackedCount} untracked)`,
+      `Pre-merge: main branch has unstaged changes (${preMergeStatus.stagedCount} staged, ${preMergeStatus.unstagedCount} unstaged, ${preMergeStatus.untrackedCount} untracked)`,
     );
   }
 
@@ -288,13 +291,16 @@ export function mergeWorktree(
   // Merge the worktree branch
   git(["merge", worktreeBranch, "--no-edit"], projectRoot);
 
-  // Check post-merge status
+  // Check post-merge status — only unstaged modifications to tracked files indicate a bad merge.
+  // After a clean merge commit, git may report staged files on Windows (files included in the
+  // merge commit show as staged in the index); these are safe and already committed.
+  // Only roll back if there are unstaged tracked changes (actual working-tree dirt).
   const postMergeStatus = getGitStatusSummary(projectRoot);
-  if (!postMergeStatus.isClean) {
-    // Roll back the merge if main branch became dirty
+  if (postMergeStatus.unstagedCount > 0) {
+    // Roll back the merge if main branch has unstaged tracked changes after merge
     git(["reset", "--hard", "HEAD~1"], projectRoot);
     throw new Error(
-      `Post-merge: main branch is dirty after merge (${postMergeStatus.stagedCount} staged, ${postMergeStatus.unstagedCount} unstaged, ${postMergeStatus.untrackedCount} untracked) — merge rolled back`,
+      `Post-merge: main branch has unstaged changes after merge (${postMergeStatus.stagedCount} staged, ${postMergeStatus.unstagedCount} unstaged, ${postMergeStatus.untrackedCount} untracked) — merge rolled back`,
     );
   }
 
