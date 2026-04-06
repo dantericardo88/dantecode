@@ -6,6 +6,7 @@
 import { access, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { getSafeModulePath } from "./runtime-path.js";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -139,7 +140,7 @@ function checkDanteForge(): HealthCheck {
     // Use createRequire so esbuild doesn't statically follow the package
     // and bundle its contents into the core dist chunk. We only need to
     // verify the package resolves at runtime — not import it.
-    const req = createRequire(import.meta.url);
+    const req = createRequire(getSafeModulePath());
     req.resolve("@dantecode/danteforge");
     return {
       name: "DanteForge binary",

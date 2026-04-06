@@ -10,6 +10,8 @@ export type {
   AutoPullRequestRequest,
   QueuedAutomationRun,
   GitAutomationOrchestratorOptions,
+  GateEvaluator,
+  GateEvaluationResult,
 } from "./automation-orchestrator.js";
 
 export {

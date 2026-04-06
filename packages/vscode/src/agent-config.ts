@@ -5,7 +5,7 @@ import {
   type CanonicalApprovalMode,
 } from "@dantecode/core";
 
-export type AgentMode = CanonicalApprovalMode;
+export type AgentMode = CanonicalApprovalMode | "architect";
 export type PersistedAgentMode = AgentMode | "build" | "default" | "auto-edit";
 export type PermissionLevel = "allow" | "ask" | "deny";
 
@@ -60,7 +60,8 @@ export function normalizeAgentMode(mode: string | null | undefined): AgentMode {
     raw === "autoforge" ||
     raw === "plan" ||
     raw === "yolo" ||
-    raw === "chat"
+    raw === "chat" ||
+    raw === "architect"
   ) {
     return raw;
   }
@@ -109,14 +110,22 @@ export function normalizeAgentConfig(
     merged.runUntilComplete = true;
   }
 
+  if (merged.agentMode === "architect") {
+    merged.maxToolRounds = Math.max(merged.maxToolRounds, 40);
+  }
+
   return merged;
 }
 
 export function createAgentApprovalGateway(mode: AgentMode): ApprovalGateway {
-  return new ApprovalGateway(buildApprovalGatewayProfile(mode));
+  // "architect" is a DanteCode-specific mode not in CanonicalApprovalMode; map to "apply"
+  const resolvedMode: import("@dantecode/core").ApprovalModeInput =
+    mode === "architect" ? "apply" : mode;
+  return new ApprovalGateway(buildApprovalGatewayProfile(resolvedMode));
 }
 
 export function isExecutionAgentMode(mode: AgentMode): boolean {
+  if (mode === "architect") return true;
   return isExecutionApprovalMode(mode);
 }
 

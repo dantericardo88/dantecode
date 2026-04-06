@@ -1,6 +1,134 @@
 import { app, BrowserWindow, ipcMain, shell, Menu } from "electron";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+
+// ---------------------------------------------------------------------------
+// Agent subprocess management
+// ---------------------------------------------------------------------------
+
+let agentProcess: ChildProcess | null = null;
+let agentRunning = false;
+let agentModel = "default";
+/** Buffered output from the agent subprocess, delivered to renderer via IPC. */
+let outputListeners: Array<(data: string) => void> = [];
+
+function findCliBinary(): string | null {
+  // Try common locations
+  const candidates = [
+    join(process.cwd(), "node_modules", ".bin", "dantecode"),
+    join(process.cwd(), "packages", "cli", "dist", "index.js"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  // Try global: check if dantecode is on PATH
+  try {
+    execFileSync("dantecode", ["--version"], { stdio: "pipe", timeout: 5000 });
+    return "dantecode";
+  } catch {
+    // not found
+  }
+  return null;
+}
+
+function emitOutput(data: string): void {
+  for (const listener of outputListeners) {
+    try {
+      listener(data);
+    } catch {
+      // Listener may be stale if window closed
+    }
+  }
+}
+
+function runAgentPrompt(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const cliBin = findCliBinary();
+    if (!cliBin) {
+      reject(
+        new Error(
+          "DanteCode CLI not found. Install with: npm install -g @dantecode/cli",
+        ),
+      );
+      return;
+    }
+
+    // Kill any existing agent process
+    abortAgent();
+
+    const isJsFile = cliBin.endsWith(".js");
+    const cmd = isJsFile ? "node" : cliBin;
+    const args = isJsFile
+      ? [cliBin, "--prompt", prompt]
+      : ["--prompt", prompt];
+
+    try {
+      agentProcess = spawn(cmd, args, {
+        cwd: process.cwd(),
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env },
+      });
+    } catch (err) {
+      reject(
+        new Error(
+          `Failed to start DanteCode CLI: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+      return;
+    }
+
+    agentRunning = true;
+    let output = "";
+
+    agentProcess.stdout?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf-8");
+      output += text;
+      emitOutput(text);
+    });
+
+    agentProcess.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf-8");
+      emitOutput(`[stderr] ${text}`);
+    });
+
+    agentProcess.on("close", (code) => {
+      agentRunning = false;
+      agentProcess = null;
+      if (code === 0 || code === null) {
+        resolve(output);
+      } else {
+        reject(new Error(`DanteCode CLI exited with code ${code}`));
+      }
+    });
+
+    agentProcess.on("error", (err) => {
+      agentRunning = false;
+      agentProcess = null;
+      reject(
+        new Error(`DanteCode CLI process error: ${err.message}`),
+      );
+    });
+  });
+}
+
+function abortAgent(): void {
+  if (agentProcess && !agentProcess.killed) {
+    agentProcess.kill("SIGTERM");
+    // Give it a moment, then force kill
+    setTimeout(() => {
+      if (agentProcess && !agentProcess.killed) {
+        agentProcess.kill("SIGKILL");
+      }
+    }, 3000);
+  }
+  agentRunning = false;
+  agentProcess = null;
+}
+
+// ---------------------------------------------------------------------------
+// Window
+// ---------------------------------------------------------------------------
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -32,13 +160,19 @@ function createWindow(): void {
   if (existsSync(indexPath)) {
     mainWindow.loadFile(indexPath);
   } else {
-    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getDefaultHTML())}`);
+    mainWindow.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(getDefaultHTML())}`,
+    );
   }
 
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Menu
+// ---------------------------------------------------------------------------
 
 function createMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -47,7 +181,11 @@ function createMenu(): void {
       submenu: [
         { label: "About DanteCode", role: "about" },
         { type: "separator" },
-        { label: "Settings", accelerator: "CmdOrCtrl+,", click: openSettings },
+        {
+          label: "Settings",
+          accelerator: "CmdOrCtrl+,",
+          click: openSettings,
+        },
         { type: "separator" },
         { label: "Quit", accelerator: "CmdOrCtrl+Q", role: "quit" },
       ],
@@ -56,25 +194,53 @@ function createMenu(): void {
       label: "Edit",
       submenu: [
         { label: "Undo", accelerator: "CmdOrCtrl+Z", role: "undo" },
-        { label: "Redo", accelerator: "Shift+CmdOrCtrl+Z", role: "redo" },
+        {
+          label: "Redo",
+          accelerator: "Shift+CmdOrCtrl+Z",
+          role: "redo",
+        },
         { type: "separator" },
         { label: "Cut", accelerator: "CmdOrCtrl+X", role: "cut" },
         { label: "Copy", accelerator: "CmdOrCtrl+C", role: "copy" },
         { label: "Paste", accelerator: "CmdOrCtrl+V", role: "paste" },
-        { label: "Select All", accelerator: "CmdOrCtrl+A", role: "selectAll" },
+        {
+          label: "Select All",
+          accelerator: "CmdOrCtrl+A",
+          role: "selectAll",
+        },
       ],
     },
     {
       label: "View",
       submenu: [
         { label: "Reload", accelerator: "CmdOrCtrl+R", role: "reload" },
-        { label: "Toggle Developer Tools", accelerator: "F12", role: "toggleDevTools" },
+        {
+          label: "Toggle Developer Tools",
+          accelerator: "F12",
+          role: "toggleDevTools",
+        },
         { type: "separator" },
-        { label: "Actual Size", accelerator: "CmdOrCtrl+0", role: "resetZoom" },
-        { label: "Zoom In", accelerator: "CmdOrCtrl+=", role: "zoomIn" },
-        { label: "Zoom Out", accelerator: "CmdOrCtrl+-", role: "zoomOut" },
+        {
+          label: "Actual Size",
+          accelerator: "CmdOrCtrl+0",
+          role: "resetZoom",
+        },
+        {
+          label: "Zoom In",
+          accelerator: "CmdOrCtrl+=",
+          role: "zoomIn",
+        },
+        {
+          label: "Zoom Out",
+          accelerator: "CmdOrCtrl+-",
+          role: "zoomOut",
+        },
         { type: "separator" },
-        { label: "Toggle Full Screen", accelerator: "F11", role: "togglefullscreen" },
+        {
+          label: "Toggle Full Screen",
+          accelerator: "F11",
+          role: "togglefullscreen",
+        },
       ],
     },
     {
@@ -86,7 +252,10 @@ function createMenu(): void {
         },
         {
           label: "Report Issue",
-          click: () => shell.openExternal("https://github.com/dantecode/dantecode/issues"),
+          click: () =>
+            shell.openExternal(
+              "https://github.com/dantecode/dantecode/issues",
+            ),
         },
         { type: "separator" },
         {
@@ -107,6 +276,10 @@ function openSettings(): void {
   mainWindow?.webContents.send("open-settings");
 }
 
+// ---------------------------------------------------------------------------
+// IPC handlers
+// ---------------------------------------------------------------------------
+
 function setupIPC(): void {
   ipcMain.handle("get-version", () => app.getVersion());
 
@@ -117,7 +290,53 @@ function setupIPC(): void {
   });
 
   ipcMain.handle("get-cwd", () => process.cwd());
+
+  // Agent operations
+  ipcMain.handle("agent:run-prompt", async (_event, prompt: string) => {
+    try {
+      const result = await runAgentPrompt(prompt);
+      return { success: true, output: result };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle("agent:get-status", () => {
+    return { running: agentRunning, model: agentModel };
+  });
+
+  ipcMain.handle("agent:abort", () => {
+    abortAgent();
+    return { success: true };
+  });
+
+  // Output streaming: renderer registers once, we push data via webContents.send
+  ipcMain.on("agent:subscribe-output", (event) => {
+    const webContents = event.sender;
+    const listener = (data: string) => {
+      try {
+        if (!webContents.isDestroyed()) {
+          webContents.send("agent:output", data);
+        }
+      } catch {
+        // Window may have closed
+      }
+    };
+    outputListeners.push(listener);
+
+    // Clean up when the window is destroyed
+    webContents.on("destroyed", () => {
+      outputListeners = outputListeners.filter((l) => l !== listener);
+    });
+  });
 }
+
+// ---------------------------------------------------------------------------
+// Default HTML
+// ---------------------------------------------------------------------------
 
 function getDefaultHTML(): string {
   return `<!DOCTYPE html>
@@ -216,6 +435,10 @@ function getDefaultHTML(): string {
 </html>`;
 }
 
+// ---------------------------------------------------------------------------
+// App lifecycle
+// ---------------------------------------------------------------------------
+
 app.whenReady().then(() => {
   createMenu();
   setupIPC();
@@ -229,6 +452,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  abortAgent(); // Clean up agent subprocess
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -1,9 +1,35 @@
 # DanteCode Architecture
 ## Comprehensive System Design Documentation
 
-**Last Updated:** 2026-03-28
-**Version:** 0.9.2
+**Last Updated:** 2026-04-04
+**Version:** 0.9.3
 **Status:** 8.2/10 quality, 1 dimension at 9+
+
+## What's Actually Wired (Evidence-Based)
+
+### Agent Loop Pipeline
+1. **Context Pruning** — `agent-loop.ts:807` — ContextPruner fires when messages > 20
+2. **Context Selection** — `agent-loop.ts:858` — selectContextFiles() on round 1
+3. **Model Call** — StreamRenderer with adaptive thinking budget
+4. **SEARCH/REPLACE Extraction** — `agent-loop.ts:924` — extractEditBlocks() after extractToolCalls()
+5. **XML Artifact Parsing** — `agent-loop.ts:1013` — parseArtifacts() converts <danteArtifact> to tool calls
+6. **Tool Execution** — executeToolBatch() with analyzeBashCommand() + buildSandboxedCommand()
+7. **Post-Edit Linting** — `agent-loop.ts:1618` — runPostEditLint() + LspClient augmentation
+8. **Auto-Commit** — `agent-loop.ts:1726` — autoCommitIfEnabled() (opt-in)
+9. **Hook System** — 4 call sites: SessionStart, PreToolUse, PostToolUse, SessionEnd
+
+### VS Code Extension
+- Workflow loading: `sidebar-provider.ts:573` — loads DanteForge contract on slash commands
+- Follow-up suggestions: `sidebar-provider.ts:5742` — rendered as clickable pills
+- Stage progress: `sidebar-provider.ts:5769` — animated progress bar
+- Cost tracking: `sidebar-provider.ts:1569` — updates status bar after each round
+- Voice input: Web Speech API (primary) + Whisper fallback (`sidebar-provider.ts:546`)
+- PR review trigger: `extension.ts:386` — detects GitHub PR URLs
+
+### What's NOT Yet Wired (Honest)
+- Tab completion cold-start: pre-warm added but first request still slow
+- Party mode end-to-end: adapters wired but untested in production
+- Inference scaling: behind `config.inferenceScaling.enabled` flag, no default
 
 ---
 

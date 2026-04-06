@@ -3,21 +3,51 @@
 // Extracts function, class, interface, type, const, and enum definitions
 // ============================================================================
 
-import Parser from "tree-sitter";
-import TypeScript from "tree-sitter-typescript";
+import type Parser from "tree-sitter";
 import type { SymbolDefinition } from "../repo-map-ast.js";
+import { OptionalNativeModuleError, loadOptionalModule } from "./native-loader.js";
+
+type TreeSitterParserConstructor = new () => Parser;
+type TreeSitterLanguageModule = Record<string, unknown> & {
+  default?: Record<string, unknown>;
+};
 
 export class TypeScriptParser {
-  private parser: Parser;
+  private parser: Parser | null = null;
 
-  constructor(isTSX = false) {
-    this.parser = new Parser();
-    // tree-sitter-typescript exports both typescript and tsx
-    this.parser.setLanguage(isTSX ? TypeScript.tsx : TypeScript.typescript);
+  constructor(private readonly isTSX = false) {}
+
+  private getParser(): Parser {
+    if (this.parser) {
+      return this.parser;
+    }
+
+    const ParserConstructor = loadOptionalModule<TreeSitterParserConstructor>("tree-sitter");
+    const typeScriptModule = loadOptionalModule<TreeSitterLanguageModule>(
+      "tree-sitter-typescript",
+      { preferDefault: false },
+    );
+    const languages =
+      typeScriptModule.default && typeof typeScriptModule.default === "object"
+        ? typeScriptModule.default
+        : typeScriptModule;
+    const language = this.isTSX ? languages["tsx"] : languages["typescript"];
+
+    if (!language) {
+      throw new OptionalNativeModuleError(
+        "tree-sitter-typescript",
+        new Error(`Missing ${this.isTSX ? "tsx" : "typescript"} language export`),
+      );
+    }
+
+    const parser = new ParserConstructor();
+    parser.setLanguage(language as never);
+    this.parser = parser;
+    return parser;
   }
 
   parse(source: string, filePath: string): SymbolDefinition[] {
-    const tree = this.parser.parse(source);
+    const tree = this.getParser().parse(source);
     const symbols: SymbolDefinition[] = [];
     const lines = source.split("\n");
 

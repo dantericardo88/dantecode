@@ -2,6 +2,7 @@
   "name": "@dantecode/desktop",
   "version": "0.9.2",
   "description": "DanteCode desktop application — Electron wrapper for the AI coding agent",
+  "alpha": true,
   "license": "MIT",
   "repository": {
     "type": "git",

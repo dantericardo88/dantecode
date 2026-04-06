@@ -828,10 +828,11 @@ async function skillsInstall(args: string[], projectRoot: string): Promise<void>
 
   const force = args.includes("--force");
   const symlink = args.includes("--symlink");
+  const noVerify = args.includes("--no-verify");
 
   process.stdout.write(`\n${DIM}Installing skill from: ${source}...${RESET}\n`);
 
-  const result = await installSkill({ source, verify: true, tier, force, symlink }, projectRoot);
+  const result = await installSkill({ source, verify: !noVerify, tier, force, symlink }, projectRoot);
 
   if (result.success) {
     process.stdout.write(`\n${GREEN}Skill installed:${RESET} ${BOLD}${result.name}${RESET}\n`);

@@ -56,7 +56,7 @@ describe("formatStatusBarText", () => {
 
   it("includes context percent when > 0", () => {
     const text = formatStatusBarText(makeState({ contextPercent: 23 }));
-    expect(text).toBe("DanteCode | grok-3 | 23% ctx");
+    expect(text).toBe("DanteCode | grok-3 | █░░░░ 23%");
   });
 
   it("includes active tasks when > 0", () => {
@@ -77,7 +77,7 @@ describe("formatStatusBarText", () => {
         activeTasks: 3,
       }),
     );
-    expect(text).toBe("DanteCode | claude-sonnet-4-20250514 | 55% ctx | 3 tasks");
+    expect(text).toBe("DanteCode | claude-sonnet-4-20250514 | ███░░ 55% | 3 tasks");
   });
 
   it("omits context and task segments when both are zero", () => {

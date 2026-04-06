@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BrowserAgent } from "./browser-agent.js";
-import type { BrowserAction, BrowserActionResult } from "./browser-agent.js";
+import type { BrowserAction, BrowserActionResult, VisionRouter } from "./browser-agent.js";
 
 // ─── Mock Factories ──────────────────────────────────────────────────────────
 
@@ -35,6 +35,9 @@ function createMockPage() {
           },
         ],
       }),
+    },
+    mouse: {
+      click: vi.fn().mockResolvedValue(undefined),
     },
     close: vi.fn().mockResolvedValue(undefined),
     url: vi.fn().mockReturnValue("https://example.com"),
@@ -446,6 +449,141 @@ describe("BrowserAgent", () => {
       expect(lines[2]).toBe('    list "Menu"');
       // listitem: 6 spaces
       expect(lines[3]).toBe('      listitem "Item 1"');
+    });
+  });
+
+  // ─── Vision Fallback ────────────────────────────────────────────────
+
+  describe("vision fallback", () => {
+    it("should use vision when selector click fails and router is available", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn().mockResolvedValue('{"x": 150, "y": 200}'),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      // Selector click fails
+      visionPage.click.mockRejectedValue(new Error("Element not found"));
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.click("#missing-btn");
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBe("#missing-btn");
+      // Selector was tried first
+      expect(visionPage.click).toHaveBeenCalledWith("#missing-btn", { timeout: 5000 });
+      // Screenshot was taken
+      expect(visionPage.screenshot).toHaveBeenCalledWith({ type: "png" });
+      // Vision router was called with base64 image
+      expect(mockRouter.call).toHaveBeenCalledTimes(1);
+      expect(mockRouter.call).toHaveBeenCalledWith(expect.stringContaining("#missing-btn"), expect.any(String));
+      // Mouse click at the coordinates
+      expect(visionPage.mouse.click).toHaveBeenCalledWith(150, 200);
+    });
+
+    it("should throw when selector fails and no vision router", async () => {
+      // Default agent has no vision router
+      mockPage.click.mockRejectedValue(new Error("Element not found"));
+      const result = await agent.click("#nonexistent");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Click failed");
+    });
+
+    it("should use selector when click succeeds (no vision needed)", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn(),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.click("#exists");
+
+      expect(result.success).toBe(true);
+      expect(mockRouter.call).not.toHaveBeenCalled();
+      expect(visionPage.mouse.click).not.toHaveBeenCalled();
+    });
+
+    it("should handle unparseable LLM response gracefully", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn().mockResolvedValue("I cannot find that element"),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      visionPage.click.mockRejectedValue(new Error("Element not found"));
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.click("#ghost");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("could not parse LLM response");
+    });
+
+    it("should handle LLM returning negative coordinates (element not found)", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn().mockResolvedValue('{"x": -1, "y": -1}'),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      visionPage.click.mockRejectedValue(new Error("Element not found"));
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.click("#invisible");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not found in screenshot");
+    });
+
+    it("should fall back to vision for type action when selector fails", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn().mockResolvedValue('{"x": 300, "y": 100}'),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      // First fill call fails (selector), second succeeds (:focus)
+      visionPage.fill
+        .mockRejectedValueOnce(new Error("Element not found"))
+        .mockResolvedValueOnce(undefined);
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.type("#missing-input", "hello");
+
+      expect(result.success).toBe(true);
+      expect(result.data).toBe("hello");
+      // Vision router called
+      expect(mockRouter.call).toHaveBeenCalledTimes(1);
+      // Mouse click to focus the element
+      expect(visionPage.mouse.click).toHaveBeenCalledWith(300, 100);
+      // Fill called on :focus
+      expect(visionPage.fill).toHaveBeenCalledWith(":focus", "hello", { timeout: 5000 });
+    });
+
+    it("should use selector for type when fill succeeds (no vision needed)", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn(),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.type("#exists", "text");
+
+      expect(result.success).toBe(true);
+      expect(mockRouter.call).not.toHaveBeenCalled();
+    });
+
+    it("should handle vision router throwing an error", async () => {
+      const mockRouter: VisionRouter = {
+        call: vi.fn().mockRejectedValue(new Error("LLM service unavailable")),
+      };
+      const visionAgent = new BrowserAgent({ visionRouter: mockRouter });
+      const visionPage = createMockPage();
+      visionPage.click.mockRejectedValue(new Error("Element not found"));
+      visionAgent._injectPage(visionPage as Parameters<typeof visionAgent._injectPage>[0]);
+
+      const result = await visionAgent.click("#broken");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Click failed");
     });
   });
 });

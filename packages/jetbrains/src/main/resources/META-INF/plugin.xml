@@ -1,17 +1,52 @@
 <idea-plugin>
     <id>dev.dantecode.plugin</id>
     <name>DanteCode</name>
+    <version>1.0.0-beta.1</version>
     <vendor email="support@dantecode.dev" url="https://dantecode.dev">DanteCode</vendor>
 
     <description><![CDATA[
-    AI-powered coding assistant with runtime-verified code quality.
-    Features DanteForge verification pipeline, multi-model support, and
-    intelligent code completions.
+    <h2>DanteCode — AI Coding Agent for JetBrains</h2>
+    <p>
+      Open-source, model-agnostic AI coding assistant with runtime-verified code quality
+      powered by the DanteForge verification pipeline.
+    </p>
+    <h3>Features</h3>
+    <ul>
+      <li><b>Chat Panel</b> — Interactive AI chat right inside your IDE (JCEF rich UI with Swing fallback)</li>
+      <li><b>Inline Completions</b> — Context-aware code completions with debounced, non-blocking requests</li>
+      <li><b>DanteForge Verification</b> — One-click quality gate checks on any file</li>
+      <li><b>Multi-Model Support</b> — Works with Claude, GPT, Grok, Gemini, and local models</li>
+      <li><b>Stdio Bridge</b> — Reliable connection to the DanteCode CLI with auto-reconnect</li>
+    </ul>
+    <h3>Getting Started</h3>
+    <ol>
+      <li>Install the DanteCode CLI: <code>npm install -g @dantecode/cli</code></li>
+      <li>Open the DanteCode panel from the right sidebar or Tools menu</li>
+      <li>Start chatting or let inline completions assist your coding</li>
+    </ol>
     ]]></description>
+
+    <change-notes><![CDATA[
+    <h3>1.0.0-beta.1</h3>
+    <ul>
+      <li>Stdio bridge: lazy init, auto-reconnect with exponential backoff (3 retries), 30s request timeout</li>
+      <li>Chat panel: JCEF (Chromium) rich UI with Swing fallback for older IDEs</li>
+      <li>Loading indicator while connecting to CLI</li>
+      <li>Error state with install instructions when CLI is not found</li>
+      <li>Inline completions: 300ms debounce, cancel-on-type, non-blocking with timeout</li>
+      <li>Process death notification via IDE balloon</li>
+      <li>Stderr from CLI process routed to IntelliJ log</li>
+      <li>Compatibility: IntelliJ 2024.1 through 2025.1</li>
+    </ul>
+    ]]></change-notes>
+
+    <idea-version since-build="241" until-build="251.*"/>
 
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <projectService
+                serviceImplementation="dev.dantecode.plugin.DanteCodeService"/>
         <toolWindow id="DanteCode"
                     secondary="true"
                     icon="/icons/dantecode.svg"

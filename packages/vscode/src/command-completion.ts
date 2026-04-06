@@ -262,6 +262,98 @@ const CORE_COMMANDS: PaletteCommand[] = [
     keywords: ["mcp", "server", "tools", "extension"],
     category: "system",
   },
+  // DanteForge workflow presets
+  {
+    name: "nova",
+    description: "Very-high-power preset — planning + autoforge + party + verify (no OSS)",
+    keywords: ["nova", "high", "power", "plan", "party"],
+    category: "workflow",
+  },
+  {
+    name: "blaze",
+    description: "High-power preset — full party + strong autoforge + self-improvement",
+    keywords: ["blaze", "high", "party", "autoforge"],
+    category: "workflow",
+  },
+  {
+    name: "ember",
+    description: "Very low-token preset — budget autoforge with light checkpoints",
+    keywords: ["ember", "budget", "low", "token", "light"],
+    category: "workflow",
+  },
+  {
+    name: "spark",
+    description: "Zero-token planning preset — review through tasks for new ideas",
+    keywords: ["spark", "planning", "review", "tasks", "ideas"],
+    category: "workflow",
+  },
+  // DanteForge core pipeline commands
+  {
+    name: "specify",
+    description: "Transform a high-level idea into a full spec artifact",
+    keywords: ["specify", "spec", "requirements", "idea"],
+    category: "workflow",
+  },
+  {
+    name: "tasks",
+    description: "Break plan into executable task list for wave execution",
+    keywords: ["tasks", "breakdown", "list", "wave", "execute"],
+    category: "workflow",
+  },
+  {
+    name: "verify",
+    description: "Run verification checks — typecheck, lint, test, PDSE",
+    keywords: ["verify", "check", "typecheck", "lint", "test"],
+    category: "workflow",
+  },
+  {
+    name: "debug",
+    description: "Systematic 4-phase root-cause debugging",
+    keywords: ["debug", "bug", "fix", "root", "cause"],
+    category: "workflow",
+  },
+  {
+    name: "oss",
+    description: "Auto-detect project, search OSS, clone, scan, and extract patterns",
+    keywords: ["oss", "open", "source", "scan", "patterns"],
+    category: "workflow",
+  },
+  {
+    name: "harvest",
+    description: "Run a Titan Harvest V2 track — 5-step constitutional harvest of OSS patterns",
+    keywords: ["harvest", "titan", "patterns", "constitutional"],
+    category: "workflow",
+  },
+  {
+    name: "ship",
+    description: "Paranoid release guidance — review, version bump, changelog",
+    keywords: ["ship", "release", "deploy", "version", "changelog"],
+    category: "workflow",
+  },
+  {
+    name: "synthesize",
+    description: "Generate Ultimate Planning Resource — consolidate all artifacts",
+    keywords: ["synthesize", "upr", "consolidate", "planning", "resource"],
+    category: "workflow",
+  },
+  {
+    name: "canvas",
+    description: "Design-first frontend sprint — generate design, implement, verify",
+    keywords: ["canvas", "design", "frontend", "ui", "sprint"],
+    category: "workflow",
+  },
+  {
+    name: "maturity",
+    description: "Analyze current code maturity level with founder-friendly report",
+    keywords: ["maturity", "quality", "report", "analysis"],
+    category: "workflow",
+  },
+  {
+    name: "browse",
+    description: "Browser automation — navigate, screenshot, inspect live apps",
+    keywords: ["browse", "browser", "screenshot", "inspect"],
+    category: "workflow",
+  },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────

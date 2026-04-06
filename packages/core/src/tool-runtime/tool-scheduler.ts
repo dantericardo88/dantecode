@@ -778,3 +778,124 @@ export class ToolScheduler extends EventEmitter {
 
 /** Module-level singleton — shared within a CLI or VSCode session */
 export const globalToolScheduler = new ToolScheduler();
+
+// ============================================================================
+// Hybrid Parallel Tool Scheduling (QwenCode coreToolScheduler pattern)
+// Read-only tools run in parallel; mutation tools stay sequential.
+// ============================================================================
+
+/**
+ * Read-only tools: safe to execute concurrently because they have no shared state.
+ */
+export const READ_ONLY_TOOLS = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "ListDir",
+  "WebFetch",
+  "WebSearch",
+]);
+
+/**
+ * Mutation tools: must execute sequentially to preserve filesystem/git consistency.
+ */
+export const MUTATION_TOOLS = new Set(["Write", "Edit", "Bash", "GitCommit", "GitPush"]);
+
+export interface ParallelBatch {
+  toolCalls: ToolSchedulerExecutionRequest[];
+  type: "parallel" | "sequential";
+}
+
+/**
+ * Groups consecutive read-only tool calls into parallel batches.
+ * Mutation tools (and unknown tools) become single-item sequential batches.
+ *
+ * Example:
+ *   [Read, Read, Read, Write, Read, Edit]
+ *   → [{parallel: [Read, Read, Read]}, {sequential: [Write]}, {parallel: [Read]}, {sequential: [Edit]}]
+ */
+export function groupToolCallsForExecution(
+  toolCalls: ToolSchedulerExecutionRequest[],
+): ParallelBatch[] {
+  if (toolCalls.length === 0) return [];
+
+  const batches: ParallelBatch[] = [];
+  let currentParallelBatch: ToolSchedulerExecutionRequest[] = [];
+
+  for (const toolCall of toolCalls) {
+    const isReadOnly = READ_ONLY_TOOLS.has(toolCall.toolName);
+
+    if (isReadOnly) {
+      // Accumulate into the current parallel batch
+      currentParallelBatch.push(toolCall);
+    } else {
+      // Flush any accumulated read-only batch first
+      if (currentParallelBatch.length > 0) {
+        batches.push({ type: "parallel", toolCalls: currentParallelBatch });
+        currentParallelBatch = [];
+      }
+      // Mutation tool — always sequential, single-item batch
+      batches.push({ type: "sequential", toolCalls: [toolCall] });
+    }
+  }
+
+  // Flush remaining read-only batch
+  if (currentParallelBatch.length > 0) {
+    batches.push({ type: "parallel", toolCalls: currentParallelBatch });
+  }
+
+  return batches;
+}
+
+/**
+ * Executes batches in order.
+ * Parallel batches run concurrently (bounded by concurrencyLimit, default 3).
+ * Sequential batches run one at a time.
+ * Returns map of request.id → result.
+ *
+ * Note: Requests without an id are assigned one before execution so the
+ * result map is always fully populated.
+ */
+export async function executeBatchedTools(
+  batches: ParallelBatch[],
+  execute: (req: ToolSchedulerExecutionRequest) => Promise<ToolExecutionResult>,
+  concurrencyLimit = 3,
+): Promise<Map<string, ToolExecutionResult>> {
+  const results = new Map<string, ToolExecutionResult>();
+
+  for (const batch of batches) {
+    if (batch.type === "sequential") {
+      // Always exactly one call in a sequential batch
+      for (const toolCall of batch.toolCalls) {
+        const id = toolCall.id ?? `seq-${Math.random().toString(36).slice(2)}`;
+        const callWithId = { ...toolCall, id };
+        const result = await execute(callWithId);
+        results.set(id, result);
+      }
+    } else {
+      // Parallel batch — respect concurrency limit
+      const calls = batch.toolCalls.map((tc) => ({
+        ...tc,
+        id: tc.id ?? `par-${Math.random().toString(36).slice(2)}`,
+      }));
+
+      // Run in chunks of concurrencyLimit
+      for (let i = 0; i < calls.length; i += concurrencyLimit) {
+        const chunk = calls.slice(i, i + concurrencyLimit);
+        const chunkResults = await Promise.all(
+          chunk.map((callWithId) =>
+            execute(callWithId).then((result) => ({
+              id: callWithId.id!,
+              result,
+            })),
+          ),
+        );
+        for (const { id, result } of chunkResults) {
+          results.set(id, result);
+        }
+      }
+    }
+  }
+
+  return results;
+}

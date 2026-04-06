@@ -32,10 +32,15 @@ export interface BrowserActionResult {
   error?: string;
 }
 
+export interface VisionRouter {
+  call(prompt: string, imageBase64?: string): Promise<string>;
+}
+
 export interface BrowserAgentOptions {
   headless?: boolean;
   timeout?: number;
   viewport?: { width: number; height: number };
+  visionRouter?: VisionRouter;
 }
 
 // ─── Typed Internal Interfaces (avoid eslint `Function` type) ────────────────
@@ -59,6 +64,10 @@ interface PlaywrightAccessibility {
   snapshot(): Promise<PlaywrightAccessibilityNode | null>;
 }
 
+interface PlaywrightMouse {
+  click(x: number, y: number): Promise<void>;
+}
+
 interface PlaywrightPage {
   goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
   click(selector: string, options?: { timeout?: number }): Promise<void>;
@@ -66,6 +75,7 @@ interface PlaywrightPage {
   screenshot(options?: { fullPage?: boolean; type?: string }): Promise<Buffer>;
   evaluate(fn: string | ((...args: unknown[]) => unknown), ...args: unknown[]): Promise<unknown>;
   accessibility: PlaywrightAccessibility;
+  mouse: PlaywrightMouse;
   close(): Promise<void>;
   url(): string;
 }
@@ -95,7 +105,7 @@ interface PlaywrightModule {
 const PLAYWRIGHT_NOT_INSTALLED =
   "Playwright is not installed. Run `npm install playwright` to enable browser automation.";
 
-const DEFAULT_OPTIONS: Required<BrowserAgentOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<BrowserAgentOptions, "visionRouter">> = {
   headless: true,
   timeout: 30_000,
   viewport: { width: 1280, height: 720 },
@@ -186,7 +196,8 @@ export class BrowserAgent {
   private context: PlaywrightBrowserContext | null = null;
   private browser: PlaywrightBrowser | null = null;
   private playwrightAvailable: boolean | null = null;
-  readonly options: Required<BrowserAgentOptions>;
+  private visionRouter: VisionRouter | null = null;
+  readonly options: Required<Omit<BrowserAgentOptions, "visionRouter">>;
 
   constructor(options?: BrowserAgentOptions) {
     this.options = {
@@ -196,6 +207,7 @@ export class BrowserAgent {
         ? { width: options.viewport.width, height: options.viewport.height }
         : { ...DEFAULT_OPTIONS.viewport },
     };
+    this.visionRouter = options?.visionRouter ?? null;
   }
 
   // ─── Execute Dispatcher ──────────────────────────────────────────────
@@ -258,7 +270,9 @@ export class BrowserAgent {
   }
 
   /**
-   * Click an element identified by a CSS selector.
+   * Click an element identified by a CSS selector. When a `visionRouter` is
+   * configured, a failed selector click automatically falls back to a
+   * screenshot-based LLM vision lookup that returns coordinates.
    */
   async click(selector: string): Promise<BrowserActionResult> {
     if (!selector || !selector.trim()) {
@@ -268,6 +282,15 @@ export class BrowserAgent {
     const page = await this.ensurePage();
     if (!page) {
       return { success: false, error: PLAYWRIGHT_NOT_INSTALLED };
+    }
+
+    if (this.visionRouter) {
+      try {
+        const result = await this.clickWithVisionFallback(page, selector);
+        return { success: true, data: selector, ...result };
+      } catch (err: unknown) {
+        return { success: false, error: `Click failed on "${selector}": ${errorMessage(err)}` };
+      }
     }
 
     try {
@@ -280,7 +303,9 @@ export class BrowserAgent {
 
   /**
    * Type text into an element identified by a CSS selector.
-   * Uses Playwright's `fill()` which clears the field first.
+   * Uses Playwright's `fill()` which clears the field first. When a
+   * `visionRouter` is configured and the selector fails, falls back to
+   * vision-based coordinate click followed by fill on `:focus`.
    */
   async type(selector: string, text: string): Promise<BrowserActionResult> {
     if (!selector || !selector.trim()) {
@@ -293,6 +318,18 @@ export class BrowserAgent {
     const page = await this.ensurePage();
     if (!page) {
       return { success: false, error: PLAYWRIGHT_NOT_INSTALLED };
+    }
+
+    if (this.visionRouter) {
+      try {
+        const result = await this.typeWithVisionFallback(page, selector, text);
+        return { success: true, data: text, ...result };
+      } catch (err: unknown) {
+        return {
+          success: false,
+          error: `Type failed on "${selector}": ${errorMessage(err)}`,
+        };
+      }
     }
 
     try {
@@ -408,6 +445,107 @@ export class BrowserAgent {
     } catch (err: unknown) {
       return { success: false, error: `Script evaluation failed: ${errorMessage(err)}` };
     }
+  }
+
+  // ─── Vision Fallback ─────────────────────────────────────────────────
+
+  /**
+   * Attempt a selector-based click, falling back to screenshot + LLM vision
+   * when the selector fails. Requires `this.visionRouter` to be set.
+   */
+  private async clickWithVisionFallback(
+    page: PlaywrightPage,
+    selector: string,
+  ): Promise<{ method: string }> {
+    // Step 1: Try normal selector click
+    try {
+      await page.click(selector, { timeout: 5000 });
+      return { method: "selector" };
+    } catch {
+      // Selector click failed — fall through to vision
+    }
+
+    // Step 2: No vision router means we cannot recover
+    if (!this.visionRouter) {
+      throw new Error(`Element not found: ${selector} (no vision fallback available)`);
+    }
+
+    // Step 3: Take screenshot and ask LLM for coordinates
+    const coords = await this.locateElementViaVision(page, selector);
+
+    // Step 4: Click at the coordinates
+    await page.mouse.click(coords.x, coords.y);
+    return { method: "vision" };
+  }
+
+  /**
+   * Attempt a selector-based fill, falling back to vision-located click +
+   * fill on the focused element when the selector fails.
+   */
+  private async typeWithVisionFallback(
+    page: PlaywrightPage,
+    selector: string,
+    text: string,
+  ): Promise<{ method: string }> {
+    // Step 1: Try normal selector fill
+    try {
+      await page.fill(selector, text, { timeout: 5000 });
+      return { method: "selector" };
+    } catch {
+      // Selector fill failed — fall through to vision
+    }
+
+    // Step 2: No vision router means we cannot recover
+    if (!this.visionRouter) {
+      throw new Error(`Element not found: ${selector} (no vision fallback available)`);
+    }
+
+    // Step 3: Locate via vision and click to focus
+    const coords = await this.locateElementViaVision(page, selector);
+    await page.mouse.click(coords.x, coords.y);
+
+    // Step 4: Fill the now-focused element
+    try {
+      await page.fill(":focus", text, { timeout: 5000 });
+    } catch {
+      // If :focus fill fails, fall back to the original selector as a last resort
+      await page.fill(selector, text, { timeout: 5000 });
+    }
+    return { method: "vision" };
+  }
+
+  /**
+   * Take a screenshot and ask the vision router to locate an element.
+   * Returns the {x, y} coordinates of the element's center.
+   */
+  private async locateElementViaVision(
+    page: PlaywrightPage,
+    selector: string,
+  ): Promise<{ x: number; y: number }> {
+    const screenshotBuffer = await page.screenshot({ type: "png" });
+    const base64 = Buffer.from(screenshotBuffer).toString("base64");
+
+    const prompt =
+      `You are looking at a screenshot of a web page. Find the element that matches ` +
+      `this description or selector: "${selector}". Return ONLY a JSON object with the ` +
+      `x,y coordinates of the center of the element: {"x": number, "y": number}. ` +
+      `If you cannot find it, return {"x": -1, "y": -1}.`;
+
+    const response = await this.visionRouter!.call(prompt, base64);
+
+    const match = response.match(/\{[^}]*"x"\s*:\s*(-?\d+)[^}]*"y"\s*:\s*(-?\d+)[^}]*/);
+    if (!match) {
+      throw new Error(`Vision fallback: could not parse LLM response for "${selector}"`);
+    }
+
+    const x = parseInt(match[1]!, 10);
+    const y = parseInt(match[2]!, 10);
+
+    if (x < 0 || y < 0) {
+      throw new Error(`Vision fallback: element "${selector}" not found in screenshot`);
+    }
+
+    return { x, y };
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────

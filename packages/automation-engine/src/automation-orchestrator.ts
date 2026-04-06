@@ -73,6 +73,8 @@ export interface GitAutomationOrchestratorOptions {
     config: AgentBridgeConfig,
     triggerContext: Record<string, unknown>,
   ) => Promise<AgentBridgeResult>;
+  /** Override the default PDSE + repo-verification gate. Useful for tests and custom policies. */
+  gateEvaluator?: GateEvaluator;
 }
 
 interface WorkflowWorkItem {
@@ -89,12 +91,26 @@ interface AutoPRWorkItem {
 
 type AutomationWorkItem = WorkflowWorkItem | AutoPRWorkItem;
 
-interface GateEvaluationResult {
+export interface GateEvaluationResult {
   gateStatus: StoredAutomationExecutionRecord["gateStatus"];
   modifiedFiles: string[];
   pdseScore?: number;
   repoVerificationPassed?: boolean;
   error?: string;
+}
+
+/**
+ * Injectable gate evaluator interface.
+ *
+ * Implement this to replace the default PDSE + repo-verification gate logic.
+ * Useful for tests (instant deterministic responses) and for custom gate policies.
+ */
+export interface GateEvaluator {
+  evaluate(
+    executionId: string,
+    modifiedFiles: string[],
+    trigger: AutomationTrigger | undefined,
+  ): Promise<GateEvaluationResult>;
 }
 
 const TERMINAL_EXECUTION_STATUSES = new Set<StoredAutomationExecutionRecord["status"]>([
@@ -126,6 +142,7 @@ export class GitAutomationOrchestrator {
     triggerContext: Record<string, unknown>,
   ) => Promise<AgentBridgeResult>;
   private readonly taskToExecutionId = new Map<string, string>();
+  private readonly gateEvaluatorOverride: GateEvaluator | undefined;
 
   constructor(options: GitAutomationOrchestratorOptions) {
     this.projectRoot = path.resolve(options.projectRoot);
@@ -158,6 +175,7 @@ export class GitAutomationOrchestrator {
       ((projectRoot) => new RecoveryEngine().runRepoRootVerification(projectRoot));
     this.auditLoggerImpl = options.auditLogger ?? appendAuditEvent;
     this.runAgentImpl = options.runAgent ?? runAutomationAgent;
+    this.gateEvaluatorOverride = options.gateEvaluator;
     this.runner.setWorkFn(
       async (
         prompt: string,
@@ -292,9 +310,9 @@ export class GitAutomationOrchestrator {
 
     try {
       if (workItem.kind === "workflow") {
-        return this.executeWorkflowRun(workItem, checkpointer, onProgress);
+        return await this.executeWorkflowRun(workItem, checkpointer, onProgress);
       }
-      return this.executeAutoPRRun(workItem, checkpointer, onProgress);
+      return await this.executeAutoPRRun(workItem, checkpointer, onProgress);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       const completedAt = new Date().toISOString();
@@ -599,7 +617,7 @@ export class GitAutomationOrchestrator {
     trigger: AutomationTrigger | undefined,
   ): Promise<GateEvaluationResult> {
     const modifiedFiles = diffStatusFiles(beforeStatus, afterStatus);
-    return this.evaluateGateForFiles(executionId, modifiedFiles, trigger);
+    return await this.evaluateGateForFiles(executionId, modifiedFiles, trigger);
   }
 
   private async evaluateGateForFiles(
@@ -607,6 +625,9 @@ export class GitAutomationOrchestrator {
     modifiedFiles: string[],
     trigger: AutomationTrigger | undefined,
   ): Promise<GateEvaluationResult> {
+    if (this.gateEvaluatorOverride) {
+      return this.gateEvaluatorOverride.evaluate(executionId, modifiedFiles, trigger);
+    }
     if (modifiedFiles.length === 0) {
       return {
         gateStatus: "skipped",

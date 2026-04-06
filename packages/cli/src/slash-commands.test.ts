@@ -15,6 +15,7 @@ import type { ReplState } from "./slash-commands.js";
 
 const {
   mockExecSync,
+  mockExecFileSync,
   mockCreateWorktree,
   mockMergeWorktree,
   mockRemoveWorktree,
@@ -29,6 +30,7 @@ const {
   mockDebugRestore,
 } = vi.hoisted(() => ({
   mockExecSync: vi.fn(),
+  mockExecFileSync: vi.fn(),
   mockCreateWorktree: vi.fn(),
   mockMergeWorktree: vi.fn(),
   mockRemoveWorktree: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock("node:child_process", async () => {
   return {
     ...actual,
     execSync: (...args: unknown[]) => mockExecSync(...args),
+    execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
   };
 });
 
@@ -98,15 +101,21 @@ vi.mock("@dantecode/debug-trail", () => ({
   debugRestore: (...args: unknown[]) => mockDebugRestore(...args),
 }));
 
-vi.mock("@dantecode/danteforge", async () => {
-  const actual = await vi.importActual<object>("@dantecode/danteforge");
-  return {
-    ...actual,
-    runLocalPDSEScorer: (...args: unknown[]) => mockRunLocalPDSEScorer(...args),
-  };
-});
+// @dantecode/danteforge is an obfuscated binary — see __test-helpers__/danteforge-mock.ts
+// NEVER use vi.importActual("@dantecode/danteforge") — it crashes the Vitest worker.
+import { createDanteforgeMock } from "./__test-helpers__/danteforge-mock.js";
+vi.mock("@dantecode/danteforge", () => ({
+  ...createDanteforgeMock(),
+  // Override scorer so individual tests can control the PDSE result via mockRunLocalPDSEScorer
+  runLocalPDSEScorer: (...args: unknown[]) => mockRunLocalPDSEScorer(...args),
+}));
 
 import { routeSlashCommand } from "./slash-commands.js";
+
+/** Strip ANSI escape codes for clean assertions. Use when output contains colored/dim values. */
+function strip(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*[mGKHFJABCDEFa]/g, "");
+}
 
 function makeRuntimeSession(projectRoot: string): Session {
   return {
@@ -222,6 +231,13 @@ describe("/party --autoforge", () => {
         return "";
       }
 
+      return "";
+    });
+
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") {
+        return "main\n";
+      }
       return "";
     });
 
@@ -633,7 +649,7 @@ describe("verification slash commands", () => {
             {
               id: "incident",
               task: "Explain the incident flow",
-              output: "TODO",
+              output: "pending",
               criteria: {
                 requiredKeywords: ["incident"],
                 minLength: 30,
@@ -714,6 +730,8 @@ describe("git automation slash commands", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     projectRoot = await mkdtemp(join(tmpdir(), "dantecode-git-automation-cli-"));
+    // Provide a valid empty git status so the automation orchestrator doesn't crash
+    mockGetStatus.mockReturnValue({ staged: [], unstaged: [], untracked: [], conflicted: [] });
     mockRunLocalPDSEScorer.mockReturnValue({
       overall: 96,
       passedGate: true,
@@ -1346,6 +1364,18 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
     const eventsDir = join(projectRoot, ".dantecode", "events");
     await mkdir(checkpointsDir, { recursive: true });
     await mkdir(eventsDir, { recursive: true });
+
+    // Mock execFileSync for git worktree list (used by RecoveryManager.checkWorktreeExists)
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "worktree") {
+        // Return porcelain output that marks any refs/heads/feature-branch as present
+        return (
+          "worktree /some/worktree\nhead 0000000000000000000000000000000000000000\n" +
+          "branch refs/heads/feature-branch\n\n"
+        );
+      }
+      return "";
+    });
   });
 
   // Helper to create a mock checkpoint
@@ -1408,7 +1438,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
             : i % 3 === 1
               ? "run.tool.started"
               : "run.checkpoint.saved",
-        timestamp: new Date(Date.now() + i * 1000).toISOString(),
+        at: new Date(Date.now() + i * 1000).toISOString(),
         payload: { test: `event-${i}` },
       };
       events.push(JSON.stringify(event));
@@ -1491,7 +1521,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
 
       const output = await routeSlashCommand(`/resume-checkpoint ${sessionId}`, state);
 
-      expect(output).toContain("Events to replay: 15");
+      expect(strip(output)).toContain("Events to replay: 15");
     });
 
     it("lists multiple resumable sessions sorted by time", async () => {
@@ -1580,10 +1610,14 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
 
   describe("/fork", () => {
     beforeEach(() => {
-      // Mock git branch command
-      mockExecSync.mockImplementation((_command: string, args?: string[]) => {
+      // Mock git branch command via execFileSync (production code uses execFileSync)
+      mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
         if (Array.isArray(args) && args[0] === "branch") {
           return ""; // Successful branch creation
+        }
+        if (Array.isArray(args) && args[0] === "worktree") {
+          // Keep worktree mock working for RecoveryManager
+          return "worktree /some/worktree\nhead 0000000000000000000000000000000000000000\nbranch refs/heads/original-branch\n\n";
         }
         return "";
       });
@@ -1612,7 +1646,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
 
       const output = await routeSlashCommand(`/fork ${sessionId}`, state);
 
-      expect(output).toContain("Base ref: refs/heads/feature-x");
+      expect(strip(output)).toContain("Base ref: refs/heads/feature-x");
     });
 
     it("falls back to HEAD when no worktreeRef", async () => {
@@ -1621,7 +1655,7 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
 
       const output = await routeSlashCommand(`/fork ${sessionId}`, state);
 
-      expect(output).toContain("Base ref: HEAD");
+      expect(strip(output)).toContain("Base ref: HEAD");
     });
 
     it("preserves original session as read-only", async () => {
@@ -1656,5 +1690,134 @@ describe("Wave 2: /resume-checkpoint, /replay, /fork", () => {
       expect(output).toContain("Session not found");
       expect(output).toContain("nonexistent");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wave 4: execFileSync coverage — /worktree, /troubleshoot
+// ---------------------------------------------------------------------------
+
+describe("/worktree — git rev-parse branch detection (line 3481)", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-worktree-"));
+    state = makeState(projectRoot);
+
+    mockCreateWorktree.mockImplementation(
+      ({ branch }: { branch: string; baseBranch: string; sessionId: string; directory: string }) => ({
+        directory: join(projectRoot, ".dantecode", "worktrees", "wt1"),
+        branch,
+      }),
+    );
+  });
+
+  it("uses rev-parse result as baseBranch for worktree creation", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") return "feature-branch\n";
+      return "";
+    });
+
+    const output = await routeSlashCommand("/worktree", state);
+
+    expect(output).toContain("Created worktree");
+    // createWorktree should have been called with the detected base branch
+    expect(mockCreateWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ baseBranch: "feature-branch" }),
+    );
+  });
+
+  it("falls back to 'main' when rev-parse throws", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") throw new Error("not a git repo");
+      return "";
+    });
+
+    const output = await routeSlashCommand("/worktree", state);
+
+    expect(output).toContain("Created worktree");
+    expect(mockCreateWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ baseBranch: "main" }),
+    );
+  });
+});
+
+describe("/troubleshoot — execFileSync + execSync capability detection", () => {
+  let projectRoot: string;
+  let state: ReplState;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    projectRoot = await mkdtemp(join(tmpdir(), "dantecode-troubleshoot-"));
+    state = makeState(projectRoot);
+
+    // Default: git status succeeds (git repo present)
+    mockGetStatus.mockReturnValue({
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+    });
+  });
+
+  it("shows branch name in git OK line when rev-parse succeeds (line 8358)", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") return "main\n";
+      return "";
+    });
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (String(cmd).includes("dantecode-forge")) return "v1.0.0\n";
+      return "";
+    });
+
+    const output = await routeSlashCommand("/troubleshoot", state);
+
+    expect(strip(output)).toContain("Git repository: OK (branch: main)");
+  });
+
+  it("shows 'detached HEAD' when rev-parse throws (line 8358)", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") throw new Error("detached");
+      return "";
+    });
+    mockExecSync.mockImplementation(() => "v1.0.0\n");
+
+    const output = await routeSlashCommand("/troubleshoot", state);
+
+    expect(strip(output)).toContain("Git repository: OK (detached HEAD)");
+  });
+
+  it("shows DanteForge warning when dantecode-forge not found (graceful degradation)", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") return "main\n";
+      return "";
+    });
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (String(cmd).includes("dantecode-forge")) throw new Error("command not found");
+      return "";
+    });
+
+    // Should not throw — graceful degradation
+    const output = await routeSlashCommand("/troubleshoot", state);
+
+    expect(strip(output)).toContain("DanteForge binary not found in PATH");
+  });
+
+  it("shows DanteForge version when binary is found", async () => {
+    mockExecFileSync.mockImplementation((_cmd: string, args?: string[]) => {
+      if (Array.isArray(args) && args[0] === "rev-parse") return "main\n";
+      return "";
+    });
+    mockExecSync.mockImplementation((cmd: string) => {
+      if (String(cmd).includes("dantecode-forge")) return "dantecode-forge v2.3.1\n";
+      return "";
+    });
+
+    const output = await routeSlashCommand("/troubleshoot", state);
+
+    expect(strip(output)).toContain("DanteForge binary: OK");
+    expect(output).toContain("dantecode-forge v2.3.1");
   });
 });

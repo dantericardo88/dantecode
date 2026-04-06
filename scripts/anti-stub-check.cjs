@@ -7,8 +7,50 @@
 
 "use strict";
 
-const { readdirSync, readFileSync } = require("fs");
-const { join } = require("path");
+const fs = require("fs");
+const path = require("path");
+const { readdirSync, readFileSync } = fs;
+const { join } = path;
+
+const FEATURE_WIRING_MAP = {
+  "autoCommitIfEnabled": "auto-commit",
+  "runArchitectPhase": "architect-mode",
+  "extractEditBlocks": "SEARCH/REPLACE",
+  "getGlobalHookRunner": "hook-system",
+  "ContextPruner": "context-pruning",
+  "selectContextFiles": "context-selection",
+  "parseArtifacts": "xml-artifacts",
+  "runPostEditLint": "post-edit-linting",
+};
+
+const HOT_PATH_SCAN_FILES = [
+  "packages/cli/src/agent-loop.ts",
+  "packages/cli/src/tool-executor.ts",
+  "packages/vscode/src/sidebar-provider.ts",
+];
+
+function checkFeatureWiring(projectRoot) {
+  const warnings = [];
+  for (const [fnName, featureName] of Object.entries(FEATURE_WIRING_MAP)) {
+    let foundAndCalled = false;
+    for (const relPath of HOT_PATH_SCAN_FILES) {
+      const fullPath = path.join(projectRoot, relPath);
+      if (!fs.existsSync(fullPath)) continue;
+      const content = fs.readFileSync(fullPath, "utf-8");
+      const lines = content.split("\n");
+      const importLine = lines.findIndex(l => l.includes("import") && l.includes(fnName));
+      if (importLine === -1) continue;
+      const called = lines.some(
+        (l, i) => i > importLine && new RegExp(`\\b${fnName}\\b`).test(l) && !l.trim().startsWith("//")
+      );
+      if (called) { foundAndCalled = true; break; }
+    }
+    if (!foundAndCalled) {
+      warnings.push(`[WARN] UNWIRED_FEATURE: '${featureName}' — '${fnName}' not called from hot-path files`);
+    }
+  }
+  return warnings;
+}
 
 const STUB_PATTERNS = [
   /\bTODO\b/i,
@@ -167,4 +209,11 @@ if (violations > 0) {
   console.error("\n" + violations + " stub violation(s) found. Anti-Stub Doctrine violated.");
   process.exit(1);
 }
+
+const wiringWarnings = checkFeatureWiring(process.cwd());
+if (wiringWarnings.length > 0) {
+  console.log("\nFeature Wiring Warnings:");
+  wiringWarnings.forEach(w => console.log(w));
+}
+
 console.log("Anti-stub self-check passed. Zero stubs found.");

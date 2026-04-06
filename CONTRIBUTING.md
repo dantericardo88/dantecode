@@ -112,6 +112,44 @@ Some acceptance steps cannot be completed in a normal contribution without maint
 
 Call those out clearly if your work depends on them.
 
+## How to Add a Slash Command
+
+1. Add to `SLASH_COMMANDS` array in `packages/cli/src/slash-commands.ts`
+2. Add a handler case in `routeSlashCommand()`
+3. Add to `FEATURE_WIRING_MAP` in `packages/core/src/wiring-auditor.ts`
+4. Run `dantecode /verify --feature=<your-feature>` — must show GREEN before PR
+
+## How to Write a Feature Test
+
+In `packages/core/src/feature-tests/index.ts`:
+```typescript
+const myFeatureScenario: FeatureTestScenario = {
+  name: "my-feature",
+  description: "Verify my feature does X",
+  run: async (projectRoot) => {
+    // Do something observable
+    // Throw if it doesn't work
+    return { score: 9, evidence: "Feature worked: [specific evidence]" };
+  },
+};
+// Add to ALL_SCENARIOS array
+```
+
+## PR Requirements
+
+Every PR must include the output of:
+```bash
+node -e "const {runWiringAudit}=require('./packages/core/dist/index.js');const r=runWiringAudit(process.cwd());console.log(r.overallScore+'/10 | '+r.greenCount+' GREEN | '+r.redCount+' RED')"
+```
+
+The score must not decrease from main.
+
+## Honest Scoring Policy
+
+- No feature may be claimed as "done" without `dantecode verify --feature=X` showing GREEN
+- No score may be self-assessed — only the wiring auditor output counts
+- If you claim 8/10 for a feature, show the `dantecode verify` evidence
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

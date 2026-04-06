@@ -11,7 +11,11 @@ import {
   adaptToolResult,
   formatEvidenceSummary,
   globalApprovalGateway,
+  analyzeBashCommand,
+  detectPlatformSandbox,
+  buildSandboxedCommand,
 } from "@dantecode/core";
+import type { PlatformSandboxResult } from "@dantecode/core";
 import type { ExecutionPolicyEngine, SecurityEngine, SecretsScanner } from "@dantecode/core";
 import type { DurableRunStore } from "@dantecode/core";
 import type {
@@ -54,6 +58,19 @@ import {
   REFLECTION_PROMPT,
   WRITE_SIZE_WARNING_THRESHOLD,
 } from "./agent-loop-constants.js";
+
+// ----------------------------------------------------------------------------
+// Platform Sandbox — lazy singleton
+// ----------------------------------------------------------------------------
+
+let _platformSandbox: PlatformSandboxResult | null = null;
+
+function getPlatformSandbox(): PlatformSandboxResult {
+  if (!_platformSandbox) {
+    _platformSandbox = detectPlatformSandbox();
+  }
+  return _platformSandbox;
+}
 
 // ----------------------------------------------------------------------------
 // Constants
@@ -323,6 +340,49 @@ export async function executeToolBatch(
           continue;
         }
 
+        // Bash analysis (OpenCode pattern): pattern-based static analysis before execution.
+        // Runs before SecurityEngine so critical commands are blocked before any external check.
+        const bashAnalysis = analyzeBashCommand(bashCmd, session.projectRoot);
+        if (bashAnalysis.estimatedRiskLevel === "critical") {
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${RED}${BOLD}[bash-analysis] BLOCKED (critical):${RESET} ${RED}${bashAnalysis.reason ?? "critical risk pattern"}${RESET}\n` +
+                `${DIM}Command: ${bashCmd.slice(0, 100)}${RESET}\n`,
+            );
+          }
+          toolResults.push(
+            `BASH ANALYSIS: Command BLOCKED — critical risk detected. ${bashAnalysis.reason ?? ""}. ` +
+              `This command could cause irreversible damage. Use a safer approach.`,
+          );
+          // Log to audit trail
+          evidenceLedger.push({
+            id: randomUUID(),
+            kind: "blocked_action",
+            success: false,
+            label: `Bash blocked (critical): ${bashCmd.slice(0, 80)}`,
+            timestamp: new Date().toISOString(),
+            command: bashCmd,
+            details: { reason: bashAnalysis.reason, riskLevel: "critical" },
+          });
+          continue;
+        }
+
+        if (bashAnalysis.requiresApproval && !config.silent) {
+          process.stdout.write(
+            `\n${YELLOW}[bash-analysis] high-risk command (${bashAnalysis.estimatedRiskLevel}):${RESET} ${DIM}${bashCmd.slice(0, 100)}${RESET}\n` +
+              (bashAnalysis.reason ? `${DIM}  Reason: ${bashAnalysis.reason}${RESET}\n` : "") +
+              (bashAnalysis.externalPaths.length > 0
+                ? `${DIM}  External paths: ${bashAnalysis.externalPaths.join(", ")}${RESET}\n`
+                : ""),
+          );
+        }
+
+        if (bashAnalysis.estimatedRiskLevel === "medium" && !config.silent) {
+          process.stdout.write(
+            `${DIM}[bash-analysis] medium-risk: ${bashCmd.slice(0, 60)}${RESET}\n`,
+          );
+        }
+
         // SecurityEngine: zero-trust multi-layer check for Bash commands.
         // Evaluates command against built-in rules (critical: curl|sh, dd, mkfs, fork bomb, etc.)
         // and anomaly detection. Runs AFTER existing destructive guards to avoid double-blocking.
@@ -583,13 +643,42 @@ export async function executeToolBatch(
       activeSandboxBridge &&
       typeof toolCall.input["command"] === "string";
 
+    // Platform-native sandbox: wrap Bash commands with OS-level restrictions when
+    // no DanteSandbox bridge is active (avoids double-wrapping).
+    // Only applied in workspace-write mode (default) — does not override bridges.
+    // On Windows the Job Object is applied at spawn time, not as a command wrapper,
+    // so we skip command wrapping there.
+    let effectiveToolCallInput = toolCall.input;
+    if (
+      toolCall.name === "Bash" &&
+      !useSandbox &&
+      typeof toolCall.input["command"] === "string"
+    ) {
+      const platformSandbox = getPlatformSandbox();
+      if (platformSandbox.available && platformSandbox.platform !== "windows-job") {
+        const rawCmd = toolCall.input["command"] as string;
+        // Wrap via sh -c so the original shell command string is preserved intact
+        const wrapped = buildSandboxedCommand(
+          "sh",
+          ["-c", rawCmd],
+          { mode: "workspace-write", projectRoot: session.projectRoot },
+          platformSandbox,
+        );
+        // Reconstruct as a single command string for tools.ts
+        const wrappedCmd = [wrapped.command, ...wrapped.args]
+          .map((a) => (a.includes(" ") ? `"${a.replace(/"/g, '\\"')}"` : a))
+          .join(" ");
+        effectiveToolCallInput = { ...toolCall.input, command: wrappedCmd };
+      }
+    }
+
     const _toolStartMs = Date.now();
     const [schedulerResult] = await globalToolScheduler.executeBatch(
       [
         {
           id: toolCall.id,
           toolName: toolCall.name,
-          input: toolCall.input,
+          input: effectiveToolCallInput,
           dependsOn: toolCall.dependsOn,
         },
       ],
@@ -1033,3 +1122,6 @@ export async function executeToolBatch(
     roundWrittenFiles,
   };
 }
+
+// Re-export for callers that import analyzeBashCommand from this module
+export type { BashAnalysisResult } from "@dantecode/core";

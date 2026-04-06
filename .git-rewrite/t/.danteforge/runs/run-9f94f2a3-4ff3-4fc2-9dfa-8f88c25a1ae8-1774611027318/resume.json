@@ -1,7 +1,0 @@
-{
-  "runId": "run-9f94f2a3-4ff3-4fc2-9dfa-8f88c25a1ae8-1774611027318",
-  "summary": "Grok API key not found.\nSet XAI_API_KEY or GROK_API_KEY, or configure it in .dantecode/STATE.yaml\nGet your key at: https://console.x.ai/",
-  "lastConfirmedStep": "Started execution.",
-  "nextAction": "Resolve the model error before retrying.",
-  "continueCommand": "continue"
-}

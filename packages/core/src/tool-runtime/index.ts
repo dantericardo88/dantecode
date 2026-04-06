@@ -5,7 +5,22 @@
 export * from "./tool-call-types.js";
 export * from "./verification-checks.js";
 export * from "./artifact-store.js";
-export * from "./tool-scheduler.js";
+export {
+  ToolScheduler,
+  globalToolScheduler,
+  READ_ONLY_TOOLS,
+  MUTATION_TOOLS,
+  groupToolCallsForExecution,
+  executeBatchedTools,
+} from "./tool-scheduler.js";
+export type {
+  SchedulerEvents,
+  ToolSchedulerExecutionRequest,
+  ToolSchedulerExecutionContext,
+  ToolSchedulerExecutionResult,
+  ToolSchedulerRuntimeConfig,
+  ParallelBatch,
+} from "./tool-scheduler.js";
 export * from "./approval-gateway.js";
 export * from "./verification-rules.js";
 export * from "./tool-adapters.js";

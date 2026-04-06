@@ -252,6 +252,17 @@ export async function persistSessionEnd(ctx: PersistSessionEndContext): Promise<
     }
   }
 
+  // ---- MemoryConsolidation: distill when entries exceed threshold ----
+  // Prevents unbounded growth without adding latency to every session end.
+  if (ctx.sessionPersistentMemory.size() > 100) {
+    try {
+      await ctx.sessionPersistentMemory.distill();
+      await ctx.sessionPersistentMemory.save();
+    } catch {
+      // Non-fatal
+    }
+  }
+
   // ---- AutonomyEngine: persist goal state for next session ----
   try {
     await ctx.autonomyEngine.save();

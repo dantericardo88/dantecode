@@ -170,16 +170,19 @@ describe("cli tools hardening", () => {
     );
   });
 
-  it("rejects repo-internal cd chains for Bash", async () => {
+  it("rejects external cd chains for Bash (escapes repo root)", async () => {
+    // Relative sub-directory cd chains (cd packages/cli && ...) are now allowed.
+    // Only chains that escape the repo root (/etc, /tmp, ../../ etc.) are blocked.
     const result = await executeTool(
       "Bash",
-      { command: "cd packages/cli && npm test" },
+      { command: "cd /etc && cat passwd" },
       "/proj",
       makeContext(),
     );
 
     expect(result.isError).toBe(true);
-    expect(result.content).toContain("Run this from the repository root");
+    expect(result.content).toContain("blocked");
+    expect(result.content).toContain("repo root");
     expect(mockExecSync).not.toHaveBeenCalled();
   });
 

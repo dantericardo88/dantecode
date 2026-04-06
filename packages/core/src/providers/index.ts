@@ -11,6 +11,11 @@ export { buildOpenAIProvider } from "./openai.js";
 export { buildOllamaProvider } from "./ollama.js";
 export { buildGoogleProvider } from "./google.js";
 export { buildGroqProvider } from "./groq.js";
+export { buildMistralProvider } from "./mistral.js";
+export { buildDeepSeekProvider } from "./deepseek.js";
+export { buildTogetherProvider } from "./together.js";
+export { buildPerplexityProvider } from "./perplexity.js";
+export { buildOpenRouterProvider, OPENROUTER_MODELS, type OpenRouterModelId } from "./openrouter.js";
 
 import { buildGrokProvider } from "./grok.js";
 import { buildAnthropicProvider } from "./anthropic.js";
@@ -18,6 +23,11 @@ import { buildOpenAIProvider } from "./openai.js";
 import { buildOllamaProvider } from "./ollama.js";
 import { buildGoogleProvider } from "./google.js";
 import { buildGroqProvider } from "./groq.js";
+import { buildMistralProvider } from "./mistral.js";
+import { buildDeepSeekProvider } from "./deepseek.js";
+import { buildTogetherProvider } from "./together.js";
+import { buildPerplexityProvider } from "./perplexity.js";
+import { buildOpenRouterProvider } from "./openrouter.js";
 
 /**
  * Function signature for a provider builder: takes a ModelConfig
@@ -52,5 +62,10 @@ export const PROVIDER_BUILDERS: Record<string, ProviderBuilder> = {
   ollama: buildOllamaProvider,
   google: buildGoogleProvider,
   groq: buildGroqProvider,
+  mistral: buildMistralProvider,
+  deepseek: buildDeepSeekProvider,
+  together: buildTogetherProvider,
+  perplexity: buildPerplexityProvider,
+  openrouter: buildOpenRouterProvider,
   custom: buildCustomProvider,
 };

@@ -19,6 +19,7 @@ import {
   resolvePreferredShell,
   getModeToolExclusions,
   normalizeApprovalMode,
+  analyzeBashCommand,
   type CanonicalApprovalMode,
 } from "@dantecode/core";
 
@@ -59,6 +60,8 @@ export interface ToolExecutionContext {
   onSelfModificationAttempt?: (filePath: string) => void;
   awaitSelfModConfirmation?: () => Promise<boolean>;
   runReleaseCheck?: () => Promise<boolean>;
+  /** When true, this session uses the two-stage Architect/Editor workflow. */
+  architectEditorMode?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -694,6 +697,20 @@ export async function executeTool(
           "Error: Run this from the repository root instead of chaining `cd ... &&`. Re-issue the command from the root worktree so verification and audit paths stay consistent.",
         isError: true,
       };
+    }
+
+    // Pre-execution bash analysis (OpenCode pattern): block critical-risk commands
+    // before any shell execution. Runs after cd-chain guard.
+    if (command) {
+      const bashAnalysis = analyzeBashCommand(command, projectRoot);
+      if (bashAnalysis.estimatedRiskLevel === "critical") {
+        return {
+          content:
+            `Bash BLOCKED — critical risk detected: ${bashAnalysis.reason ?? "matches a critical-risk pattern"}. ` +
+            `This command could cause irreversible damage. Use a safer approach.`,
+          isError: true,
+        };
+      }
     }
   }
 

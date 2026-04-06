@@ -22,6 +22,7 @@ import { appendAuditEvent } from "./audit.js";
 import { CredentialVault } from "./credential-vault.js";
 import { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
 import { MetricCounter, TraceRecorder } from "@dantecode/observability";
+import { globalTokenCache } from "./token-cache.js";
 
 // ─── Observability ──────────────────────────────────────────────────────────
 
@@ -475,14 +476,24 @@ export class ModelRouterImpl {
 
       this.logEntry(config, "attempt", 0);
 
+      // Apply transparent token caching for Anthropic provider
+      let cachedMessages = messages as CoreMessage[];
+      let cachedSystem: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> | undefined;
+      if (config.provider === "anthropic" && options.system) {
+        const typedMessages = messages.map((m) => ({ role: m.role as string, content: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }));
+        const wrapped = globalTokenCache.wrapAnthropicMessages(typedMessages, options.system);
+        cachedMessages = wrapped.messages as CoreMessage[];
+        cachedSystem = wrapped.system;
+      }
+
       const result = await retryWithBackoff(
         async () =>
           generateText({
             model,
-            messages,
+            messages: cachedMessages,
             maxTokens: options.maxTokens ?? config.maxTokens,
             temperature: config.temperature,
-            ...(options.system ? { system: options.system } : {}),
+            ...(cachedSystem ? { system: cachedSystem as unknown as string } : options.system ? { system: options.system } : {}),
             ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
             ...(providerOptions ? { providerOptions } : {}),
           }),

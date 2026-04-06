@@ -76,6 +76,10 @@ vi.mock("vscode", () => ({
       dispose: vi.fn(),
     })),
   },
+  commands: {
+    registerCommand: vi.fn(),
+    executeCommand: vi.fn(),
+  },
 }));
 
 // ─── Async Stream Helper ──────────────────────────────────────────────────────
@@ -134,6 +138,14 @@ vi.mock("@dantecode/core", () => ({
     buildPrompt(_ctx: unknown, _model: string) {
       return "<PRE> <SUF> <MID>";
     }
+  },
+  // StreamRecovery — added by Wave 4, used in streamCompletion
+  StreamRecovery: class MockStreamRecovery {
+    updateActivity() {}
+    isStalled() { return false; }
+    shouldRetry() { return false; }
+    recordRetry() { return 1; }
+    resetForRetry() {}
   },
 }));
 
@@ -196,10 +208,11 @@ describe("inline completion helpers", () => {
     );
   });
 
-  it("falls back to default model when fim is empty", () => {
-    expect(resolveInlineCompletionModel("grok/grok-3", "")).toBe("grok/grok-3");
-    expect(resolveInlineCompletionModel("grok/grok-3", "  ")).toBe("grok/grok-3");
-    expect(resolveInlineCompletionModel("grok/grok-3", undefined)).toBe("grok/grok-3");
+  it("falls back to fast variant of default model when fim is empty", () => {
+    // Wave 7A: auto-selects grok-3-mini for faster completions when no FIM model configured
+    expect(resolveInlineCompletionModel("grok/grok-3", "")).toBe("grok/grok-3-mini");
+    expect(resolveInlineCompletionModel("grok/grok-3", "  ")).toBe("grok/grok-3-mini");
+    expect(resolveInlineCompletionModel("grok/grok-3", undefined)).toBe("grok/grok-3-mini");
   });
 
   it("uses provider-aware debounce delays", () => {

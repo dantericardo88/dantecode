@@ -3,20 +3,38 @@
 // Extracts function, struct, enum, trait, type, and const definitions
 // ============================================================================
 
-import Parser from "tree-sitter";
-import Rust from "tree-sitter-rust";
+import type Parser from "tree-sitter";
 import type { SymbolDefinition } from "../repo-map-ast.js";
+import { OptionalNativeModuleError, loadOptionalModule } from "./native-loader.js";
+
+type TreeSitterParserConstructor = new () => Parser;
 
 export class RustParser {
-  private parser: Parser;
+  private parser: Parser | null = null;
 
-  constructor() {
-    this.parser = new Parser();
-    this.parser.setLanguage(Rust);
+  private getParser(): Parser {
+    if (this.parser) {
+      return this.parser;
+    }
+
+    const ParserConstructor = loadOptionalModule<TreeSitterParserConstructor>("tree-sitter");
+    const rustLanguage = loadOptionalModule<unknown>("tree-sitter-rust");
+
+    if (!rustLanguage) {
+      throw new OptionalNativeModuleError(
+        "tree-sitter-rust",
+        new Error("Missing Rust language export"),
+      );
+    }
+
+    const parser = new ParserConstructor();
+    parser.setLanguage(rustLanguage as never);
+    this.parser = parser;
+    return parser;
   }
 
   parse(source: string, filePath: string): SymbolDefinition[] {
-    const tree = this.parser.parse(source);
+    const tree = this.getParser().parse(source);
     const symbols: SymbolDefinition[] = [];
     const lines = source.split("\n");
 

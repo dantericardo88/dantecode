@@ -3,20 +3,38 @@
 // Extracts function, class, and const definitions from JavaScript/JSX source
 // ============================================================================
 
-import Parser from "tree-sitter";
-import JavaScript from "tree-sitter-javascript";
+import type Parser from "tree-sitter";
 import type { SymbolDefinition } from "../repo-map-ast.js";
+import { OptionalNativeModuleError, loadOptionalModule } from "./native-loader.js";
+
+type TreeSitterParserConstructor = new () => Parser;
 
 export class JavaScriptParser {
-  private parser: Parser;
+  private parser: Parser | null = null;
 
-  constructor() {
-    this.parser = new Parser();
-    this.parser.setLanguage(JavaScript);
+  private getParser(): Parser {
+    if (this.parser) {
+      return this.parser;
+    }
+
+    const ParserConstructor = loadOptionalModule<TreeSitterParserConstructor>("tree-sitter");
+    const javaScriptLanguage = loadOptionalModule<unknown>("tree-sitter-javascript");
+
+    if (!javaScriptLanguage) {
+      throw new OptionalNativeModuleError(
+        "tree-sitter-javascript",
+        new Error("Missing JavaScript language export"),
+      );
+    }
+
+    const parser = new ParserConstructor();
+    parser.setLanguage(javaScriptLanguage as never);
+    this.parser = parser;
+    return parser;
   }
 
   parse(source: string, filePath: string): SymbolDefinition[] {
-    const tree = this.parser.parse(source);
+    const tree = this.getParser().parse(source);
     const symbols: SymbolDefinition[] = [];
     const lines = source.split("\n");
 

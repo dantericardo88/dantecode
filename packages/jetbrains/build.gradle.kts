@@ -33,6 +33,14 @@ tasks {
     patchPluginXml {
         sinceBuild.set("241")
         untilBuild.set("251.*")
+        changeNotes.set("""
+            <ul>
+              <li>Stdio bridge: lazy init, auto-reconnect with exponential backoff</li>
+              <li>Chat panel: JCEF rich UI with Swing fallback</li>
+              <li>Inline completions: debounce + cancel-on-type</li>
+              <li>Process death notification</li>
+            </ul>
+        """.trimIndent())
     }
 
     signPlugin {

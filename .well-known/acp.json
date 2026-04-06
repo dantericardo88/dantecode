@@ -1,0 +1,9 @@
+{
+  "name": "DanteCode",
+  "version": "0.9.3",
+  "description": "AI coding agent with runtime-verified code quality",
+  "command": "dantecode",
+  "args": ["--acp"],
+  "capabilities": ["run_agent", "get_status", "cancel"],
+  "homepage": "https://github.com/dantecode/dantecode"
+}

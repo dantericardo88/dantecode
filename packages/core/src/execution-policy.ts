@@ -288,7 +288,14 @@ export class ExecutionPolicyEngine {
 
     const isGrokConfab = GROK_CONFAB_PATTERN.test(context.responseText);
     const isClassicConfab = responseLooksComplete(context.responseText);
-    const isReadsOnlyConfab = context.executedToolsThisTurn > 0 && (isGrokConfab || context.roundNumber >= 3);
+    // Reads-only confab: require BOTH a confab pattern match AND enough rounds.
+    // Workflow commands (/inferno, /blaze, etc.) naturally spend 5-8 rounds reading
+    // before writing, so the round threshold must be high enough to avoid false positives.
+    const readsOnlyRoundThreshold = context.isWorkflow ? 8 : 3;
+    const isReadsOnlyConfab =
+      context.executedToolsThisTurn > 0 &&
+      isGrokConfab &&
+      context.roundNumber >= readsOnlyRoundThreshold;
     if (
       context.isWorkflow &&
       context.filesModified === 0 &&
@@ -412,7 +419,10 @@ export class ExecutionPolicyEngine {
       intentDescription: context.intentDescription ?? context.phaseName ?? "Workflow deliverables",
     });
 
-    if (verification.verdict !== "complete" && this.failClosedWorkflows && context.isWorkflow) {
+    // Only block if we had concrete expectations to verify.
+    // When nothing was written (no touched/claimed/expected files), low-confidence
+    // is not a deliverable failure — it just means there's nothing to measure.
+    if (verification.verdict !== "complete" && this.failClosedWorkflows && context.isWorkflow && expectedFiles.length > 0) {
       if (context.phaseName) {
         this.statusTracker.markPhaseFailed(context.phaseName, verification.summary);
       }

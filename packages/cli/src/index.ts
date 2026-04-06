@@ -353,6 +353,13 @@ function parseArgs(argv: string[]): ParsedArgs {
 // ----------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  // ACP mode: run as JSON-RPC stdio server for Zed/Neovim/ACP-compatible editors
+  if (process.argv.includes("--acp")) {
+    const { startACPServer } = await import("./acp-server.js");
+    await startACPServer(process.cwd());
+    process.exit(0);
+  }
+
   const parsed = parseArgs(process.argv);
 
   // --version

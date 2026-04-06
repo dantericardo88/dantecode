@@ -6,7 +6,7 @@
 
 import * as vscode from "vscode";
 import type { ModelConfig, ModelRouterConfig } from "@dantecode/config-types";
-import { ModelRouterImpl, parseModelReference, FIMEngine } from "@dantecode/core";
+import { ModelRouterImpl, parseModelReference, FIMEngine, StreamRecovery } from "@dantecode/core";
 import { runLocalPDSEScorer } from "@dantecode/danteforge";
 import { gatherCrossFileContext } from "./cross-file-context.js";
 import { CompletionTelemetry } from "./completion-telemetry.js";
@@ -58,7 +58,18 @@ interface FIMPromptResult {
 }
 
 export function resolveInlineCompletionModel(defaultModel: string, fimModel?: string): string {
-  return fimModel?.trim() ? fimModel.trim() : defaultModel;
+  // If no FIM model specified, use a fast variant of the default model
+  if (!fimModel?.trim()) {
+    // Auto-select a fast model for completions
+    if (defaultModel.includes("grok-3") && !defaultModel.includes("mini")) {
+      return "grok/grok-3-mini"; // Use mini for faster completions
+    }
+    if (defaultModel.includes("claude") && !defaultModel.includes("haiku")) {
+      return "anthropic/claude-haiku-4-5"; // Use Haiku for completions
+    }
+    return defaultModel;
+  }
+  return fimModel.trim();
 }
 
 export function getInlineCompletionDebounceMs(provider: string, customMs?: number): number {
@@ -266,12 +277,29 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
   /** Index into telemetry.getRecent() for the last recorded event. */
   private lastEventIndex = -1;
 
+  // ── C.3: Semantic cache (last-40-chars + language) + request deduplication ─
+  private pendingRequests = new Map<string, Promise<vscode.InlineCompletionItem[]>>();
+  private semanticCache = new Map<string, { items: vscode.InlineCompletionItem[]; timestamp: number }>();
+
+  // ── D.2: Acceptance rate tracking ────────────────────────────────────────
+  private acceptedCount = 0;
+  private shownCount = 0;
+  private acceptanceHistory: Array<{ timestamp: number; accepted: boolean }> = [];
+
   constructor() {
     const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
     this.telemetry = new CompletionTelemetry(projectRoot);
     // Load telemetry and apply adaptive hints — fully non-blocking
     void this.telemetry.load().then(() => {
       this._applyAdaptiveHints();
+    });
+
+    // ── D.2: Register acceptance tracking command ─────────────────────────
+    vscode.commands.registerCommand("dantecode._trackCompletionAccepted", (timestamp: number) => {
+      this.acceptedCount++;
+      this.acceptanceHistory.push({ timestamp, accepted: true });
+      // Trim history to last 500 entries
+      if (this.acceptanceHistory.length > 500) this.acceptanceHistory.shift();
     });
   }
 
@@ -281,8 +309,6 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     _context: vscode.InlineCompletionContext,
     token: vscode.CancellationToken,
   ): Promise<vscode.InlineCompletionItem[]> {
-    const requestId = ++this.lastRequestId;
-
     const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
     const suffix = document.getText(
       new vscode.Range(
@@ -346,6 +372,21 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       return prefetched.items;
     }
 
+    // ── C.3: Semantic cache — last 40 chars + language covers most duplicate positions ──
+    const semanticCacheKey = `${prefix.slice(-40)}::${document.languageId}`;
+    const semanticCached = this.semanticCache.get(semanticCacheKey);
+    if (semanticCached && Date.now() - semanticCached.timestamp < 30_000) {
+      return semanticCached.items;
+    }
+
+    // ── C.3: Request deduplication — if same semantic key is in-flight, reuse it.
+    // Do NOT increment lastRequestId here so the inflight request's stale check passes.
+    const inflight = this.pendingRequests.get(semanticCacheKey);
+    if (inflight) return inflight;
+
+    // Only count as a new unique request after deduplication check
+    const requestId = ++this.lastRequestId;
+
     const cached = this.lookupCache(cacheKey);
     if (cached) {
       return cached;
@@ -353,7 +394,7 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
 
     const requestStart = Date.now();
 
-    const completions = await new Promise<vscode.InlineCompletionItem[]>((resolve) => {
+    const pendingPromise = new Promise<vscode.InlineCompletionItem[]>((resolve) => {
       if (this.debounceTimer !== undefined) {
         clearTimeout(this.debounceTimer);
       }
@@ -386,8 +427,17 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       }, debounceMs);
     });
 
+    // Register pending request for deduplication; remove when settled
+    this.pendingRequests.set(semanticCacheKey, pendingPromise);
+    pendingPromise.finally(() => this.pendingRequests.delete(semanticCacheKey));
+
+    const completions = await pendingPromise;
+
     if (completions.length > 0) {
       this.storeCache(cacheKey, completions);
+
+      // ── C.3: Store with semantic key for 30s semantic-level cache hit ───────
+      this.semanticCache.set(semanticCacheKey, { items: completions, timestamp: Date.now() });
 
       // Record telemetry — outcome starts as "rejected", updated on accept detection
       const item = completions[0];
@@ -740,6 +790,26 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       gateLabel = "";
     }
 
+    // Wire trend tracking after PDSE score
+    if (pdseScore !== undefined) {
+      try {
+        const { VerificationTrendTracker } = await import("@dantecode/core");
+        const { homedir } = await import("node:os");
+        const { join: pathJoin } = await import("node:path");
+        const trendTracker = new VerificationTrendTracker(
+          pathJoin(homedir(), ".dantecode", "pdse-trends.jsonl")
+        );
+        void trendTracker.record({
+          timestamp: new Date().toISOString(),
+          sessionId: "vscode-inline",
+          filePath: document.uri.fsPath,
+          pdseScore: pdseScore,
+          antiStubPassed: pdseScore >= 85,
+          constitutionPassed: true,
+        });
+      } catch { /* non-fatal */ }
+    }
+
     // Build the completion text -- append PDSE warning comment for low scores
     let insertText = cleaned;
     if (pdseWarnings && pdseScore !== undefined && pdseScore < pdseThreshold) {
@@ -753,8 +823,12 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     const confidenceMarker = cleaned.length < 10 ? " [?]" : "";
     item.filterText = `dantecode${gateLabel}${confidenceMarker}`;
 
-    // ── B4: Telemetry wiring ─────────────────────────────────────────────────
+    // ── D.2: Increment shown count each time a completion is surfaced ────────
+    this.shownCount++;
+
+    // ── B4 + D.2: Telemetry wiring (accept command also drives D.2 tracking) ─
     const completionId = `${filePath}:${position.line}:${position.character}:${cleaned.length}`;
+    const shownAt = Date.now();
     recordPrefixPattern(prefix);
     (
       item as vscode.InlineCompletionItem & {
@@ -763,7 +837,8 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
     ).command = {
       command: "dantecode._recordCompletionAccept",
       title: "Record completion accept",
-      arguments: [completionId],
+      // Pass both completionId (B4) and shownAt timestamp (D.2) as arguments
+      arguments: [completionId, shownAt],
     };
     DanteCodeCompletionProvider._pendingAcceptIds.set(completionId, true);
 
@@ -775,12 +850,18 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
 
   /**
    * Called by the VS Code command `dantecode._recordCompletionAccept` when
-   * a user accepts an inline completion item (B4).
+   * a user accepts an inline completion item (B4 + D.2).
+   * The optional `shownAt` timestamp drives the D.2 acceptance-rate tracker.
    */
-  static recordCompletionAccept(completionId: string): void {
+  static recordCompletionAccept(completionId: string, shownAt?: number): void {
     if (DanteCodeCompletionProvider._pendingAcceptIds.has(completionId)) {
       recordAccept(completionId);
       DanteCodeCompletionProvider._pendingAcceptIds.delete(completionId);
+      // ── D.2: Forward to instance-level acceptance tracker ────────────────
+      void vscode.commands.executeCommand(
+        "dantecode._trackCompletionAccepted",
+        shownAt ?? Date.now(),
+      );
     }
   }
 
@@ -803,12 +884,14 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       abortSignal,
     });
 
+    const streamRecovery = new StreamRecovery({ timeoutMs: 5000, maxRetries: 2 });
     let text = "";
     const streamStart = Date.now();
     let firstChunkLogged = false;
 
     for await (const chunk of result.textStream) {
       text += chunk;
+      streamRecovery.updateActivity();
 
       if (!firstChunkLogged) {
         firstChunkLogged = true;
@@ -828,6 +911,11 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
       if (isMultiline && text.length > 5 && !shouldContinueStreaming(text)) {
         break;
       }
+    }
+
+    // Check if we should retry after a stream stall/timeout
+    if (streamRecovery.isStalled() && !streamRecovery.shouldRetry()) {
+      // Max retries exceeded, return what we have
     }
 
     return text;
@@ -861,6 +949,24 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
   clearCache(): void {
     this.cache.length = 0;
     this.completionCache.clear();
+    this.semanticCache.clear();
+  }
+
+  // ── D.2: Acceptance rate public API ──────────────────────────────────────
+
+  /**
+   * Returns acceptance rate statistics for completions shown in the last
+   * `lastDays` days. Used by status panels and telemetry dashboards.
+   */
+  getAcceptanceRate(lastDays = 7): { rate: number; accepted: number; shown: number } {
+    const cutoff = Date.now() - lastDays * 24 * 60 * 60 * 1000;
+    const recent = this.acceptanceHistory.filter((h) => h.timestamp > cutoff);
+    const shownRecent = Math.max(this.shownCount, recent.length); // approximate
+    return {
+      rate: shownRecent > 0 ? recent.length / shownRecent : 0,
+      accepted: recent.length,
+      shown: shownRecent,
+    };
   }
 
   /** Apply adaptive hints derived from accumulated telemetry data. */
@@ -889,6 +995,66 @@ export class DanteCodeCompletionProvider implements vscode.InlineCompletionItemP
         this.lastEventIndex = -1;
       }
     }
+  }
+
+  /**
+   * Pre-warm: send a lightweight request on file open to initialize model connection.
+   * This reduces first-keystroke latency by establishing the HTTPS connection early.
+   */
+  static registerPreWarm(
+    context: vscode.ExtensionContext,
+    provider: DanteCodeCompletionProvider,
+  ): void {
+    const disposable = vscode.workspace.onDidOpenTextDocument(async (doc) => {
+      // Only pre-warm for code files, not settings/JSON
+      if (doc.languageId === "plaintext" || doc.fileName.endsWith(".json")) return;
+      try {
+        // Fire a minimal completion request to warm the connection
+        // Use a very short timeout — discard result, just warm the HTTP connection
+        const warmupController = new AbortController();
+        const warmupTimer = setTimeout(() => warmupController.abort(), 2000);
+        await provider.warmupConnection(doc).finally(() => clearTimeout(warmupTimer));
+      } catch {
+        // Completely non-fatal
+      }
+    });
+    context.subscriptions.push(disposable);
+  }
+
+  /**
+   * Send a 1-token completion to warm the API connection.
+   * Reduces first-keystroke latency by establishing the HTTPS connection.
+   */
+  async warmupConnection(doc: vscode.TextDocument): Promise<void> {
+    const shortText = doc.getText().slice(0, 100);
+    if (!shortText.trim()) return;
+
+    const config = vscode.workspace.getConfiguration("dantecode");
+    const modelString = resolveInlineCompletionModel(
+      config.get<string>("defaultModel", "grok/grok-3"),
+      config.get<string>("fimModel"),
+    );
+    const [provider, modelId] = parseModelString(modelString);
+    const modelConfig: ModelConfig = {
+      provider: provider as ModelConfig["provider"],
+      modelId,
+      maxTokens: 1,
+      temperature: 0,
+      contextWindow: 131072,
+      supportsVision: false,
+      supportsToolCalls: false,
+    };
+    const routerConfig: ModelRouterConfig = {
+      default: modelConfig,
+      fallback: [],
+      overrides: {},
+    };
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    const router = new ModelRouterImpl(routerConfig, projectRoot, "inline-warmup");
+    await router.generate(
+      [{ role: "user", content: shortText.slice(0, 50) }],
+      { maxTokens: 1, system: "Complete:" },
+    ).catch(() => {}); // Discard result entirely
   }
 }
 

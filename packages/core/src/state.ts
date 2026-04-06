@@ -56,7 +56,7 @@ const AutoforgeConfigSchema = z.object({
   gstackCommands: z.array(GStackCommandSchema),
   lessonInjectionEnabled: z.boolean(),
   abortOnSecurityViolation: z.boolean(),
-  autoRunOnWrite: z.boolean(),
+  autoRunOnWrite: z.boolean().default(false),
 });
 
 const GitConfigSchema = z.object({
@@ -65,7 +65,7 @@ const GitConfigSchema = z.object({
   worktreeEnabled: z.boolean(),
   worktreeBase: z.string(),
   signCommits: z.boolean(),
-  dirtyCommitBeforeEdit: z.boolean(),
+  dirtyCommitBeforeEdit: z.boolean().default(false),
 });
 
 const SandboxConfigSchema = z.object({
@@ -108,8 +108,8 @@ const LessonsConfigSchema = z.object({
 });
 
 const AutonomyConfigSchema = z.object({
-  metaReasoningEnabled: z.boolean(),
-  metaReasoningInterval: z.number().int().positive(),
+  metaReasoningEnabled: z.boolean().default(false),
+  metaReasoningInterval: z.number().int().positive().default(15),
 });
 
 const ProjectConfigSchema = z.object({
@@ -153,7 +153,10 @@ export const DanteCodeStateSchema = z.object({
   audit: AuditConfigSchema,
   sessionHistory: z.array(SessionHistoryEntrySchema),
   lessons: LessonsConfigSchema,
-  autonomy: AutonomyConfigSchema,
+  autonomy: AutonomyConfigSchema.default({
+    metaReasoningEnabled: false,
+    metaReasoningInterval: 15,
+  }),
   project: ProjectConfigSchema,
 });
 
@@ -282,7 +285,7 @@ export async function initializeState(
   const provider = options?.provider ?? "grok";
   const modelId = options?.modelId ?? "grok-3";
   const contextWindow = options?.contextWindow ?? 131072;
-  const maxTokens = options?.maxTokens ?? 8192;
+  const maxTokens = options?.maxTokens ?? 16384;
   const temperature = options?.temperature ?? 0.1;
   const supportsVision = options?.supportsVision ?? false;
   const supportsToolCalls = options?.supportsToolCalls ?? true;

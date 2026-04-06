@@ -10,6 +10,7 @@ import { SessionStore } from "./session-store.js";
 import { EntityExtractor } from "./entity-extractor.js";
 import { PruningEngine } from "./pruning-engine.js";
 import { SemanticRecall } from "./semantic-recall.js";
+import { ContextPruner } from "./context-pruner.js";
 import type { AutonomyEngine } from "./autonomy-engine.js";
 import type { EventSourcedCheckpointer } from "./checkpointer.js";
 import type { ModelRouterImpl } from "./model-router.js";
@@ -25,6 +26,12 @@ export class MemoryOrchestrator {
   public extractor: EntityExtractor;
   public pruner: PruningEngine;
   public recallEngine: SemanticRecall;
+
+  /** Bedrock inception messages — survive all compaction cycles. */
+  private inceptionMessages: string[] = [];
+
+  /** Internal context pruner instance. */
+  private contextPruner = new ContextPruner();
 
   constructor(
     private readonly config: MemoryConfig,
@@ -65,6 +72,55 @@ export class MemoryOrchestrator {
     }
 
     return entry;
+  }
+
+  // ─── Inception / Bedrock API ──────────────────────────────────────────────
+
+  /**
+   * Adds a permanent bedrock system message that survives ALL compaction
+   * cycles.  Call this for top-level instructions that must never be dropped.
+   */
+  addInceptionMessage(content: string): void {
+    if (!this.inceptionMessages.includes(content)) {
+      this.inceptionMessages.push(content);
+    }
+  }
+
+  /** Returns all registered bedrock inception messages. */
+  getInceptionMessages(): string[] {
+    return this.inceptionMessages.slice();
+  }
+
+  // ─── Dynamic Context Pruning ──────────────────────────────────────────────
+
+  /**
+   * Returns true when the context should be compacted:
+   *   - estimatedTokens > 0.75 × contextWindowSize, AND
+   *   - messageCount > 10
+   */
+  shouldCompact(
+    messageCount: number,
+    estimatedTokens: number,
+    contextWindowSize: number,
+  ): boolean {
+    if (messageCount <= 10) return false;
+    return estimatedTokens > 0.75 * contextWindowSize;
+  }
+
+  /**
+   * Compresses a message array for context-window pressure relief.
+   *
+   * Result always:
+   *   1. Re-injects all inception (bedrock) messages at the start.
+   *   2. Keeps the last `keepLast` messages verbatim (default 6).
+   *   3. Inserts a compaction summary notice for stripped middle messages.
+   */
+  compactMessages(
+    messages: Array<{ role: string; content: string }>,
+    keepLast = 6,
+  ): Array<{ role: string; content: string }> {
+    const { pruned } = this.contextPruner.prune(messages, this.inceptionMessages, keepLast);
+    return pruned;
   }
 
   /**

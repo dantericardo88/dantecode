@@ -1,6 +1,0 @@
-{
-  "source": "packaged install smoke",
-  "successfulRuns": 0,
-  "failedRuns": 0,
-  "notes": "The automated install smoke updates current readiness, but external install cohorts can also be tracked here."
-}

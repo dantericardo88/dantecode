@@ -3,9 +3,25 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import os from "node:os";
 import { readAuditEvents } from "@dantecode/core";
+
+// @dantecode/danteforge is an obfuscated binary — must mock explicitly, never vi.importActual
+vi.mock("@dantecode/danteforge", () => ({
+  runLocalPDSEScorer: vi.fn().mockReturnValue({
+    overall: 92,
+    completeness: 92,
+    correctness: 92,
+    clarity: 92,
+    consistency: 92,
+    passedGate: true,
+    violations: [],
+    scoredAt: "2026-01-01T00:00:00.000Z",
+    scoredBy: "mock",
+  }),
+}));
 import { GitAutomationStore } from "./automation-store.js";
 import { GitAutomationOrchestrator } from "./automation-orchestrator.js";
 import type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
+import type { GateEvaluator } from "./automation-orchestrator.js";
 
 describe("GitAutomationOrchestrator", () => {
   let tmpDir: string | undefined;
@@ -98,7 +114,7 @@ describe("GitAutomationOrchestrator", () => {
 
     const checkpointPath = path.join(
       tmpDir,
-      ".danteforge",
+      ".dantecode",
       "checkpoints",
       execution.checkpointSessionId!,
       "base_state.json",
@@ -321,5 +337,184 @@ describe("GitAutomationOrchestrator", () => {
 
     expect(record.status).toBe("completed");
     expect(record.gateStatus).toBe("failed");
+  });
+
+  it("reaches 'failed' terminal status quickly when readStatus throws (return-await regression)", async () => {
+    // Regression test: before the fix, executeWorkflowRun rejection bypassed the catch
+    // block in executeWorkItem because of `return` (no await), leaving executions in
+    // "running" status indefinitely and causing waitForExecution to timeout.
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-return-await-"));
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-return-await",
+      modelId: "test-model",
+      waitTimeoutMs: 3_000,
+      pollIntervalMs: 20,
+      runWorkflow: async () => ({
+        id: "wf-1",
+        success: true,
+        workflowName: "CI",
+        jobName: "build",
+        jobs: [],
+        steps: [],
+        totalDurationMs: 5,
+      }),
+      // readStatus throws — simulates broken git status in tmpdir
+      readStatus: vi.fn().mockImplementation(() => {
+        throw new Error("git status failed: not a git repository");
+      }),
+    });
+
+    const start = Date.now();
+    const queued = await orchestrator.runWorkflowInBackground({
+      workflowPath: "workflow.yml",
+      trigger: { kind: "manual", label: "test" },
+    });
+
+    // Must reach a terminal status (failed) well within the timeout — not spin for 3s
+    const execution = await orchestrator.waitForExecution(queued.executionId);
+    const elapsed = Date.now() - start;
+
+    expect(execution.status).toBe("failed");
+    expect(elapsed).toBeLessThan(2_000); // Would be ~3s before the fix
+  });
+});
+
+describe("GitAutomationOrchestrator — injectable GateEvaluator (Wave 6)", () => {
+  let tmpDir: string | undefined;
+
+  afterEach(() => {
+    if (tmpDir) {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  it("uses injected GateEvaluator returning 'passed' instead of default PDSE scoring", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-gate-inject-pass-"));
+
+    const mockGateEvaluator: GateEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        gateStatus: "passed",
+        modifiedFiles: ["src/injected.ts"],
+        pdseScore: 0.95,
+        repoVerificationPassed: true,
+      }),
+    };
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-gate-inject",
+      modelId: "test-model",
+      maxConcurrent: 1,
+      runWorkflow: async () => ({
+        id: "wf-gate-inject",
+        success: true,
+        workflowName: "CI",
+        jobName: "build",
+        jobs: [],
+        steps: [],
+        totalDurationMs: 5,
+      }),
+      readStatus: vi.fn().mockReturnValue({
+        staged: [],
+        unstaged: [{ index: " ", workTree: "M", path: "src/injected.ts" }],
+        untracked: [],
+        conflicted: [],
+      }),
+      gateEvaluator: mockGateEvaluator,
+    });
+
+    const record = await orchestrator.runWorkflow({
+      workflowPath: "ci.yml",
+      trigger: { kind: "manual", label: "test" },
+    });
+
+    expect(record.status).toBe("completed");
+    expect(record.gateStatus).toBe("passed");
+    expect(mockGateEvaluator.evaluate).toHaveBeenCalledOnce();
+  });
+
+  it("uses injected GateEvaluator returning 'failed' to block the workflow", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-gate-inject-fail-"));
+
+    const mockGateEvaluator: GateEvaluator = {
+      evaluate: vi.fn().mockResolvedValue({
+        gateStatus: "failed",
+        modifiedFiles: ["src/broken.ts"],
+        pdseScore: 0.45,
+        repoVerificationPassed: false,
+        error: "PDSE gate failed for one or more modified files.",
+      }),
+    };
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-gate-fail",
+      modelId: "test-model",
+      maxConcurrent: 1,
+      runWorkflow: async () => ({
+        id: "wf-gate-fail",
+        success: true,
+        workflowName: "CI",
+        jobName: "build",
+        jobs: [],
+        steps: [],
+        totalDurationMs: 5,
+      }),
+      readStatus: vi.fn().mockReturnValue({
+        staged: [],
+        unstaged: [{ index: " ", workTree: "M", path: "src/broken.ts" }],
+        untracked: [],
+        conflicted: [],
+      }),
+      gateEvaluator: mockGateEvaluator,
+    });
+
+    const record = await orchestrator.runWorkflow({
+      workflowPath: "ci.yml",
+      trigger: { kind: "manual", label: "test" },
+    });
+
+    expect(record.gateStatus).toBe("failed");
+    expect(mockGateEvaluator.evaluate).toHaveBeenCalledOnce();
+  });
+
+  it("uses default gate when no gateEvaluator is provided", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "git-automation-gate-default-"));
+
+    const orchestrator = new GitAutomationOrchestrator({
+      projectRoot: tmpDir,
+      sessionId: "session-gate-default",
+      modelId: "test-model",
+      maxConcurrent: 1,
+      runWorkflow: async () => ({
+        id: "wf-default",
+        success: true,
+        workflowName: "CI",
+        jobName: "build",
+        jobs: [],
+        steps: [],
+        totalDurationMs: 5,
+      }),
+      // No modified files → gate skipped
+      readStatus: vi.fn().mockReturnValue({
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+      }),
+      verifyRepo: () => ({ passed: true, failedSteps: [], stepResults: [] }),
+    });
+
+    const record = await orchestrator.runWorkflow({ workflowPath: "ci.yml" });
+
+    // No files modified → gate is skipped
+    expect(record.gateStatus).toBe("skipped");
+    expect(record.status).toBe("completed");
   });
 });

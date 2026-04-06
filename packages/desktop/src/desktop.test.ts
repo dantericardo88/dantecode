@@ -39,6 +39,7 @@ const mockApp = {
 
 const mockIpcMain = {
   handle: vi.fn(),
+  on: vi.fn(),
 };
 
 const mockShell = {
@@ -113,7 +114,7 @@ describe("Desktop App", () => {
   });
 
   describe("IPC handlers", () => {
-    it("sets up all 4 IPC handlers after ready", async () => {
+    it("sets up all 7 IPC handlers after ready", async () => {
       vi.resetModules();
       vi.doMock("electron", () => ({
         app: mockApp,
@@ -130,7 +131,7 @@ describe("Desktop App", () => {
       // Wait for the whenReady promise to resolve and .then() to run
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(mockIpcMain.handle).toHaveBeenCalledTimes(4);
+      expect(mockIpcMain.handle).toHaveBeenCalledTimes(7);
     });
 
     it("registers get-version handler", async () => {

@@ -172,6 +172,7 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.replState = replState;
   agentConfig.planModeActive = replState.planMode && !replState.planApproved;
   agentConfig.taskMode = replState.taskMode ?? undefined;
+  agentConfig.autoCommit = replState.state?.git?.autoCommit ?? false;
 }
 
 // ----------------------------------------------------------------------------
@@ -365,6 +366,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     silent: options.silent,
     fearSetBlockOnNoGo: options.fearSetBlockOnNoGo === true,
     replState: replState,
+    autoCommit: state.git?.autoCommit ?? false,
   };
 
   // DanteGaslight: deferred to first use via getOrInitGaslight() in lazy-init.ts.
@@ -380,6 +382,19 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
   // DanteMemory: deferred to first use via getOrInitMemory() in lazy-init.ts.
   // /memory and /compact call it lazily; null until then.
+
+  // Inject relevant cross-session memories into first context
+  try {
+    const { PersistentMemory } = await import("@dantecode/core");
+    const memory = new PersistentMemory(options.projectRoot);
+    await memory.load();
+    const topMemories = memory.formatForPrompt(5);
+    if (topMemories.length > 0) {
+      (agentConfig as unknown as Record<string, unknown>)["additionalSystemContext"] =
+        ((agentConfig as unknown as Record<string, unknown>)["additionalSystemContext"] as string ?? "") +
+        `\n## Relevant past context:\n${topMemories}\n`;
+    }
+  } catch { /* non-fatal */ }
 
   // Background Semantic Index: Start indexing in background (non-blocking)
   try {
@@ -894,6 +909,7 @@ export async function runOneShotPrompt(prompt: string, options: ReplOptions): Pr
     confidenceGating:
       options.executionProfile === "benchmark" ? { mode: "log-only", threshold: 0.5 } : undefined,
     executionProfile: options.executionProfile ?? "default",
+    autoCommit: state.git?.autoCommit ?? false,
   };
 
   if (options.maxRounds !== undefined) {

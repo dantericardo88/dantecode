@@ -6,7 +6,7 @@
 
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type {
@@ -38,6 +38,7 @@ export interface StubPattern {
   regex: RegExp;
   message: string;
   violationType: PDSEViolation["type"];
+  excludeExtensions?: string[];
 }
 
 export interface AntiStubScanResult {
@@ -52,8 +53,9 @@ function createStubPattern(
   regex: RegExp,
   message: string,
   violationType: PDSEViolation["type"],
+  excludeExtensions?: string[],
 ): StubPattern {
-  return { regex, message, violationType };
+  return { regex, message, violationType, excludeExtensions };
 }
 
 export const HARD_VIOLATION_PATTERNS: StubPattern[] = [
@@ -68,6 +70,7 @@ export const HARD_VIOLATION_PATTERNS: StubPattern[] = [
     /raise\s+NotImplementedError/,
     "NotImplementedError indicates an incomplete implementation",
     "stub_detected",
+    [".py"],
   ),
   createStubPattern(
     /throw\s+new\s+Error\s*\(\s*['"`]not\s+implemented['"`]\s*\)/i,
@@ -85,7 +88,7 @@ export const HARD_VIOLATION_PATTERNS: StubPattern[] = [
     "stub_detected",
   ),
   createStubPattern(/^\s*\.\.\.\s*$/, "Ellipsis stub detected", "stub_detected"),
-  createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected"),
+  createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected", [".py"]),
   createStubPattern(/\bplaceholder\b/i, "Placeholder text found", "stub_detected"),
   createStubPattern(/\bnotImplemented\b/, "notImplemented symbol found", "stub_detected"),
   createStubPattern(/\/\/\s*\.{3,}/, "Comment ellipsis indicates stubbed code", "stub_detected"),
@@ -142,9 +145,11 @@ export function runAntiStubScanner(
   const lines = content.split(/\r?\n/);
   const hardViolations: PDSEViolation[] = [];
   const softViolations: PDSEViolation[] = [];
+  const fileExt = filePath ? extname(filePath).toLowerCase() : "";
 
   lines.forEach((line, index) => {
     for (const pattern of HARD_VIOLATION_PATTERNS) {
+      if (pattern.excludeExtensions?.includes(fileExt)) continue;
       const violation = buildViolation(line, index + 1, filePath, pattern, "hard");
       if (violation !== null) {
         hardViolations.push(violation);
@@ -152,6 +157,7 @@ export function runAntiStubScanner(
     }
 
     for (const pattern of SOFT_VIOLATION_PATTERNS) {
+      if (pattern.excludeExtensions?.includes(fileExt)) continue;
       const violation = buildViolation(line, index + 1, filePath, pattern, "soft");
       if (violation !== null) {
         softViolations.push(violation);

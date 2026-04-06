@@ -3,20 +3,38 @@
 // Extracts function and class definitions from Python source
 // ============================================================================
 
-import Parser from "tree-sitter";
-import Python from "tree-sitter-python";
+import type Parser from "tree-sitter";
 import type { SymbolDefinition } from "../repo-map-ast.js";
+import { OptionalNativeModuleError, loadOptionalModule } from "./native-loader.js";
+
+type TreeSitterParserConstructor = new () => Parser;
 
 export class PythonParser {
-  private parser: Parser;
+  private parser: Parser | null = null;
 
-  constructor() {
-    this.parser = new Parser();
-    this.parser.setLanguage(Python);
+  private getParser(): Parser {
+    if (this.parser) {
+      return this.parser;
+    }
+
+    const ParserConstructor = loadOptionalModule<TreeSitterParserConstructor>("tree-sitter");
+    const pythonLanguage = loadOptionalModule<unknown>("tree-sitter-python");
+
+    if (!pythonLanguage) {
+      throw new OptionalNativeModuleError(
+        "tree-sitter-python",
+        new Error("Missing Python language export"),
+      );
+    }
+
+    const parser = new ParserConstructor();
+    parser.setLanguage(pythonLanguage as never);
+    this.parser = parser;
+    return parser;
   }
 
   parse(source: string, filePath: string): SymbolDefinition[] {
-    const tree = this.parser.parse(source);
+    const tree = this.getParser().parse(source);
     const symbols: SymbolDefinition[] = [];
     const lines = source.split("\n");
 

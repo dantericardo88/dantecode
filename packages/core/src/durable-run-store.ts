@@ -1,6 +1,5 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type {
   BackgroundAgentTask,
   DurableRun,
@@ -14,6 +13,7 @@ import type { CheckpointWorkspaceContext } from "@dantecode/runtime-spine";
 import type { AutoforgeCheckpointFile } from "./autoforge-checkpoint.js";
 import { BackgroundTaskStore } from "./background-task-store.js";
 import { EventSourcedCheckpointer } from "./checkpointer.js";
+import { getSafeModulePath } from "./runtime-path.js";
 import { detectInstallContext } from "./runtime-update.js";
 import { SessionStore } from "./session-store.js";
 import type { ArtifactRecord, ToolCallRecord } from "./tool-runtime/tool-call-types.js";
@@ -75,7 +75,13 @@ const EVIDENCE_FILENAME = "evidence.json";
 const ARTIFACTS_FILENAME = "artifacts.json";
 const PENDING_TOOL_CALLS_FILENAME = "pending-tool-calls.json";
 const TOOL_CALLS_FILENAME = "tool-calls.json";
-const RUNTIME_FILE_PATH = fileURLToPath(import.meta.url);
+let _runtimeFilePath: string | undefined;
+function getRuntimeFilePath(): string {
+  if (!_runtimeFilePath) {
+    _runtimeFilePath = getSafeModulePath();
+  }
+  return _runtimeFilePath;
+}
 
 export interface DurablePendingToolCall {
   id: string;
@@ -390,7 +396,7 @@ export class DurableRunStore {
     });
     const workspaceRoot = session?.projectRoot ?? run.projectRoot;
     const installContext = detectInstallContext({
-      runtimePath: RUNTIME_FILE_PATH,
+      runtimePath: getRuntimeFilePath(),
       cwd: workspaceRoot,
       workspaceRoot,
     });

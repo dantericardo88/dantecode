@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
+import { MCPMemoryBridge } from "@dantecode/core";
 import {
   ModelRouterImpl,
   detectSelfImprovementContext,
@@ -19,6 +20,8 @@ import {
   advanceWave,
   globalArtifactStore,
   synthesizeConfidence,
+  StreamRecovery,
+  MemoryConsolidator,
   observeAndAdapt,
   applyOverrides,
   TaskComplexityRouter,
@@ -34,6 +37,9 @@ import {
   ExecutionPolicyEngine,
   isWorkflowExecutionPrompt,
   responseLooksComplete,
+  runPostEditLint,
+  buildLintFixPrompt,
+  AgentStateMachine,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -73,7 +79,9 @@ import {
   displayThinking,
   estimatePromptComplexity,
 } from "./agent-loop-constants.js";
-import { type ExtractedToolCall, extractToolCalls } from "./tool-call-parser.js";
+import { type ExtractedToolCall, extractToolCalls, extractEditBlocks, applyEditBlock } from "./tool-call-parser.js";
+import { autoCommitIfEnabled, runArchitectPhase, getGlobalHookRunner, ContextPruner } from "@dantecode/core";
+import { generateRepoMap, formatRepoMapForContext } from "@dantecode/git-engine";
 import {
   getVerifyCommands,
   extractClaimedFiles,
@@ -222,6 +230,38 @@ export interface AgentLoopConfig {
   taskMode?: string;
   /** Explicit runtime profile for deterministic automation and benchmark runs. */
   executionProfile?: "default" | "benchmark";
+  /**
+   * When true, enables Aider-style two-stage architect/editor execution for
+   * complex tasks. The architect phase produces guidance; the editor phase
+   * applies targeted SEARCH/REPLACE edits.
+   * Default: false.
+   */
+  architectEditorMode?: boolean;
+  /**
+   * When true, auto-commits modified files after each write batch using an
+   * LLM-generated conventional commit message (Aider pattern).
+   * Default: false (opt-in). Requires git.autoCommit in project state.
+   */
+  autoCommit?: boolean;
+  /**
+   * When false, disables the automatic post-edit lint loop.
+   * When true (default), the agent loop runs lint after each write batch and
+   * injects a targeted fix prompt if errors are found (up to 3 retries).
+   * Default: true.
+   */
+  postEditLint?: boolean;
+  /**
+   * Inference-time scaling: run N variants of the prompt in parallel isolated
+   * worktrees and auto-select the best result by PDSE score.
+   * Based on OpenHands' multi-attempt scaling pattern.
+   * Default: disabled.
+   */
+  inferenceScaling?: {
+    /** Whether inference-time scaling is active. */
+    enabled: boolean;
+    /** Number of parallel variants to run (default 3, clamped 2-8). */
+    n: number;
+  };
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -371,6 +411,18 @@ async function _runAgentLoopCore(
     // ---- Evidence Chain: session-scoped cryptographic audit trail ----
     const evidenceTracker: SessionEvidenceTracker = createSessionEvidenceTracker(session.id);
 
+    // ---- Agent State Machine: lifecycle tracking (OpenHands agent_controller pattern) ----
+    const agentStateMachine = new AgentStateMachine({
+      onStateChange: config.verbose
+        ? (from, to, trigger) => {
+            process.stdout.write(
+              `${DIM}[state-machine] ${from} → ${to} (${trigger})${RESET}\n`,
+            );
+          }
+        : undefined,
+    });
+    agentStateMachine.transition("loading", "session_start");
+
     // Append user message
     const userMessage: SessionMessage = {
       id: randomUUID(),
@@ -437,12 +489,16 @@ async function _runAgentLoopCore(
     // Tool call loop: keep sending to the model until no more tool calls
     // Dynamic round budget: pipeline orchestrators can request more rounds via requiredRounds.
     // When a skill is active (skillActive), default to 50 rounds to ensure completion.
+    // Workflow commands (/inferno, /blaze, /forge, etc.) get 75 rounds to prevent premature exit.
     // Otherwise, estimate complexity from prompt characteristics (5/10/20 rounds).
+    const isWorkflowPrompt = isWorkflowExecutionPrompt(durablePrompt, config.skillActive);
     let maxToolRounds = config.requiredRounds
       ? Math.max(config.requiredRounds, 15)
       : config.skillActive
         ? 50
-        : estimatePromptComplexity(durablePrompt);
+        : isWorkflowPrompt
+          ? 75
+          : estimatePromptComplexity(durablePrompt);
     let totalTokensUsed = 0;
     const touchedFiles: string[] = [];
     // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
@@ -468,7 +524,7 @@ async function _runAgentLoopCore(
     let pipelineContinuationNudges = 0;
     // CLI auto-continuation: refill round budget when exhausted mid-pipeline
     let autoContinuations = 0;
-    const MAX_AUTO_CONTINUATIONS = 3;
+    const MAX_AUTO_CONTINUATIONS = isWorkflowPrompt ? 5 : 3;
     // Effective self-improvement policy: may be restricted when on a fallback model
     let effectiveSelfImprovement: SelfImprovementContext | null | undefined =
       config.selfImprovement;
@@ -486,7 +542,7 @@ async function _runAgentLoopCore(
       const isPipelineWorkflow =
         config.executionProfile === "benchmark" ||
         config.requiredRounds !== undefined ||
-        isWorkflowExecutionPrompt(durablePrompt, config.skillActive) ||
+        isWorkflowPrompt ||
         isExecutionContinuationPrompt(durablePrompt, session);
 
     // ---- Feature: Planning phase (for complex tasks) ----
@@ -591,6 +647,8 @@ async function _runAgentLoopCore(
     let testsRun = 0;
     let bashSucceeded = 0;
     let roundCounter = 0;
+    // Post-edit lint retries counter (max 3 per session)
+    let lintRetries = 0;
     let lastMajorEditGatePassed = true;
     const readTracker = new Map<string, string>();
     const editAttempts = new Map<string, number>();
@@ -628,7 +686,87 @@ async function _runAgentLoopCore(
     // ---- Boundary Tracker: detect scope drift across tool rounds ----
     const boundaryTracker = new BoundaryTracker(runIntake);
 
+    // Hook: SessionStart
+    void getGlobalHookRunner().run("SessionStart", { eventType: "SessionStart", metadata: { sessionId: session.id, projectRoot: session.projectRoot } });
+
+    // Pieces MCP: inject cross-tool memories if configured
+    const piecesMemory = MCPMemoryBridge.fromEnv();
+    if (piecesMemory && await piecesMemory.isAvailable().catch(() => false)) {
+      const memories = await piecesMemory.recallContext(durablePrompt.slice(0, 200)).catch(() => []);
+      if (memories.length > 0 && !config.silent) {
+        emitOrWrite(`${DIM}[pieces-memory] ${memories.length} relevant memories injected${RESET}\n`);
+        // Prepend to messages
+        messages.unshift({
+          role: "user" as const,
+          content: `## Long-term memory (from Pieces):\n${memories.map((m: string) => `• ${m}`).join("\n")}`,
+        });
+      }
+    }
+
+    // Architect phase (Aider pattern): if enabled, run a planning phase FIRST
+    // then let the editor phase handle targeted SEARCH/REPLACE edits
+    let architectGuidance = "";
+    if (config.architectEditorMode && roundCounter === 0) {
+      try {
+        if (!config.silent) {
+          emitOrWrite(`${DIM}[architect] running planning phase...${RESET}\n`);
+        }
+        // Collect repo map as code context for architect phase (was empty string before)
+        let architectCodeContext = "";
+        try {
+          const repoEntries = generateRepoMap(session.projectRoot, { maxFiles: 30 });
+          architectCodeContext = formatRepoMapForContext(repoEntries).slice(0, 8000);
+        } catch {
+          // Non-fatal — fall back to empty context if repo map fails
+        }
+        architectGuidance = await runArchitectPhase(durablePrompt, architectCodeContext, router, messages);
+        if (architectGuidance) {
+          messages.push({ role: "user" as const, content: `Architectural guidance:\n${architectGuidance}\n\nNow implement using SEARCH/REPLACE blocks only.` });
+        }
+      } catch {
+        // Non-fatal — fall back to normal execution
+      }
+    }
+
+    agentStateMachine.transition("running", "loop_start");
+
+    // Inference-time scaling (OpenHands pattern): run N variants in parallel, pick best PDSE
+    // Only runs on first prompt, opt-in via config.inferenceScaling.enabled
+    let inferenceScalingDone = false;
+    if (config.inferenceScaling?.enabled) {
+      try {
+        const { runInferenceScaling } = await import("@dantecode/core");
+        if (!config.silent) {
+          emitOrWrite(`${DIM}[inference-scaling] running ${config.inferenceScaling.n ?? 3} variants...${RESET}\n`);
+        }
+        const scalingResult = await runInferenceScaling(
+          {
+            n: config.inferenceScaling.n ?? 3,
+            prompt: durablePrompt,
+            projectRoot: session.projectRoot,
+            sessionId: session.id,
+          },
+          router,
+        );
+        if (scalingResult.appliedToMain) {
+          if (!config.silent) {
+            emitOrWrite(
+              `${GREEN}[inference-scaling] best variant applied (PDSE: ${scalingResult.bestVariant.pdseScore?.toFixed(1) ?? "N/A"})${RESET}\n`,
+            );
+          }
+          filesModified = scalingResult.bestVariant.modifiedFiles.length;
+          touchedFiles.push(...scalingResult.bestVariant.modifiedFiles);
+          inferenceScalingDone = true;
+        }
+      } catch (err) {
+        if (!config.silent) {
+          emitOrWrite(`${YELLOW}[inference-scaling] failed, continuing normally: ${String(err)}${RESET}\n`);
+        }
+      }
+    }
+
     while (maxToolRounds > 0) {
+      if (inferenceScalingDone) break;
       // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
       if (
         maxToolRounds <= 1 &&
@@ -726,6 +864,61 @@ async function _runAgentLoopCore(
         }
       }
 
+      // Context pruning (OpenCode DCP pattern) — prune messages when context grows large
+      if (messages.length > 20) {
+        const pruner = new ContextPruner();
+        if (pruner.shouldPrune(messages, config.state.model.default.contextWindow)) {
+          const pruned = pruner.prune(messages, []);
+          if (pruned.droppedCount > 0) {
+            messages = pruned.pruned as typeof messages;
+            if (!config.silent) {
+              emitOrWrite(`${DIM}[context-prune] dropped ${pruned.droppedCount} messages, kept last ${messages.length - 2}${RESET}\n`);
+            }
+          }
+        }
+      }
+
+      // AI-driven context selection (Bolt.DIY pattern) — round 1 only, reduces irrelevant context
+      if (roundCounter === 1 && session.projectRoot) {
+        try {
+          const { selectContextFiles } = await import("@dantecode/core");
+          // Only run if we have enough context to be worth selecting from
+          if (messages.length >= 3) {
+            const recentContent = messages.slice(-3).map(m => m.content).join(" ").slice(0, 500);
+            const request = {
+              availableFiles: (() => {
+                try {
+                  const repoMap = generateRepoMap(session.projectRoot, { maxFiles: 100 });
+                  return repoMap.map((e) => e.path).slice(0, 80);
+                } catch {
+                  return touchedFiles.slice(0, 50);
+                }
+              })(),
+              currentContext: touchedFiles.slice(0, 10),
+              conversationSummary: recentContent,
+              userQuery: durablePrompt.slice(0, 300),
+              maxContextFiles: 8,
+              projectRoot: session.projectRoot,
+            };
+            if (request.availableFiles.length > 0) {
+              const candidates = request.availableFiles.map((p) => ({
+                path: p,
+                relevanceScore: 0.5,
+                reason: "candidate",
+              }));
+              const selected = selectContextFiles(candidates, request.projectRoot, {
+                maxFiles: request.maxContextFiles,
+              });
+              if (selected.length > 0 && !config.silent) {
+                emitOrWrite(`${DIM}[context-select] narrowed to ${selected.length} files${RESET}\n`);
+              }
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
       // Generate response from model (streaming with tool calling support)
       let responseText = "";
       let toolCalls: ExtractedToolCall[] = [];
@@ -760,6 +953,7 @@ async function _runAgentLoopCore(
                 "Starting model inference with native tools",
                 { round: roundCounter, messageCount: messages.length },
               );
+              const streamRecovery = new StreamRecovery({ timeoutMs: 5000, maxRetries: 2 });
               const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
               const streamResult = await router.streamWithTools(messages, aiSdkTools, {
                 system: systemPrompt,
@@ -768,6 +962,7 @@ async function _runAgentLoopCore(
                 ...(thinkingBudget ? { thinkingBudget } : {}),
               });
               for await (const part of streamResult.fullStream) {
+                streamRecovery.updateActivity();
                 if (part.type === "text-delta") {
                   renderer.write(part.textDelta);
                   config.onToken?.(part.textDelta);
@@ -807,6 +1002,7 @@ async function _runAgentLoopCore(
                 renderer.write(chunk);
                 config.onToken?.(chunk);
               }
+              // StreamRecovery: XML fallback streaming tracked via native path
               responseText = renderer.getFullText();
               renderer.finish();
             } catch (err: unknown) {
@@ -829,6 +1025,56 @@ async function _runAgentLoopCore(
             cleanText = extracted.cleanText;
             toolCalls = extracted.toolCalls;
             toolCallParseErrors = extracted.parseErrors.map((e) => e.rawPayload); // Backward compat
+
+            // Wire SEARCH/REPLACE blocks (Aider pattern) — parse blocks model emitted as text
+            const editBlocks = extractEditBlocks(responseText);
+            if (editBlocks.length > 0 && !config.silent) {
+              emitOrWrite(`${DIM}[edit-blocks] ${editBlocks.length} SEARCH/REPLACE block(s) detected${RESET}\n`);
+            }
+            for (const block of editBlocks) {
+              try {
+                const editResult = await applyEditBlock(
+                  block.filePath,
+                  block.searchContent,
+                  block.replaceContent,
+                  session.projectRoot,
+                );
+                if (editResult.success) {
+                  touchedFiles.push(block.filePath);
+                  filesModified++;
+                  if (!config.silent) {
+                    emitOrWrite(`${GREEN}[edit-block] applied ${editResult.strategy} edit → ${block.filePath}${RESET}\n`);
+                  }
+                } else if (!config.silent) {
+                  emitOrWrite(`${YELLOW}[edit-block] failed: ${editResult.error ?? "unknown"}${RESET}\n`);
+                }
+              } catch {
+                // Non-fatal — edit block errors never crash the loop
+              }
+            }
+
+            // XML artifact parsing (Bolt.DIY <danteArtifact> protocol)
+            // Convert <danteArtifact>/<danteAction> blocks to tool calls
+            try {
+              const { parseArtifacts, XmlArtifactParser } = await import("@dantecode/core");
+              const artifacts = parseArtifacts(responseText);
+              if (artifacts.length > 0) {
+                const additionalToolCalls = XmlArtifactParser.toToolCalls(artifacts);
+                if (additionalToolCalls.length > 0 && !config.silent) {
+                  emitOrWrite(`${DIM}[xml-artifact] ${additionalToolCalls.length} action(s) from ${artifacts.length} artifact(s)${RESET}\n`);
+                }
+                // Prepend artifact tool calls to existing toolCalls (they run first)
+                for (const atc of additionalToolCalls) {
+                  toolCalls.unshift({
+                    id: randomUUID(),
+                    name: atc.name,
+                    input: atc.input,
+                  });
+                }
+              }
+            } catch {
+              // Non-fatal
+            }
 
             // Enhanced: Immediate feedback with diagnostic details
             if (extracted.parseErrors.length > 0) {
@@ -1074,6 +1320,7 @@ async function _runAgentLoopCore(
           return session;
         }
 
+        agentStateMachine.transition("error", "model_error");
         const errorMsg: SessionMessage = {
           id: randomUUID(),
           role: "assistant",
@@ -1436,6 +1683,10 @@ async function _runAgentLoopCore(
         parentSpanId: rootSpan.spanId,
         input: { toolCount: toolCalls.length, round: roundCounter },
       });
+      // Hook: PreToolUse — fire for each tool call
+      for (const tc of toolCalls) {
+        void getGlobalHookRunner().run("PreToolUse", { eventType: "PreToolUse", toolName: tc.name, toolInput: tc.input as Record<string, unknown> });
+      }
       const execResult = await executeToolBatch(
         toolCalls,
         toolCallParseErrors,
@@ -1501,6 +1752,9 @@ async function _runAgentLoopCore(
       bashSucceeded = execResult.bashSucceeded;
       const toolResults = execResult.toolResults;
 
+      // Hook: PostToolUse — fire for completed tools
+      void getGlobalHookRunner().run("PostToolUse", { eventType: "PostToolUse", metadata: { toolCount: toolCalls.length, filesModified: execResult.filesModified } });
+
       traceLogger.endSpan(toolBatchSpan.spanId, {
         status: execResult.action === "return" ? "success" : "success",
         output: { toolResults: toolResults.length, filesModified, action: execResult.action },
@@ -1558,6 +1812,81 @@ async function _runAgentLoopCore(
               return session;
             }
           }
+        }
+      }
+
+      // ---- Post-edit lint loop (Wave 2: Aider pattern) ----
+      // After each file-write batch, run the project's linters and inject a
+      // targeted fix prompt when errors are found (max 3 retries).
+      // Disabled by passing `postEditLint: false` in AgentLoopConfig.
+      if (wroteCode && filesModified > 0 && config.postEditLint !== false && lintRetries < 3) {
+        try {
+          const lintResult = await runPostEditLint(session.projectRoot, touchedFiles);
+          // Augment with LSP diagnostics when available (more precise than CLI linting)
+          try {
+            const { readLspConfig, LspClient } = await import("@dantecode/core");
+            const lspConfig = await readLspConfig(session.projectRoot);
+            if (lspConfig.enabled && lspConfig.servers.length > 0 && touchedFiles.length > 0) {
+              const server = lspConfig.servers[0]!;
+              const lspClient = new LspClient(server);
+              await lspClient.connect();
+              for (const file of touchedFiles.slice(0, 3)) { // Max 3 files
+                try {
+                  const { readFileSync } = await import("node:fs");
+                  const content = readFileSync(file, "utf-8");
+                  const lspDiags = await lspClient.getDiagnostics(file, content);
+                  const errors = lspDiags.filter(d => d.severity === "error");
+                  if (errors.length > 0) {
+                    lintResult.errors.push(...errors.map(d => ({
+                      file: d.file,
+                      line: d.line,
+                      message: `[LSP] ${d.message}`,
+                      code: d.code,
+                    })));
+                    lintResult.passed = false;
+                  }
+                } catch { /* file-level non-fatal */ }
+              }
+              await lspClient.disconnect();
+            }
+          } catch { /* LSP augmentation non-fatal */ }
+          if (!lintResult.passed && lintResult.errors.length > 0) {
+            lintRetries++;
+            const fixPrompt = await buildLintFixPrompt(lintResult);
+            if (fixPrompt) {
+              messages.push({ role: "user" as const, content: fixPrompt });
+              session.messages.push({
+                id: randomUUID(),
+                role: "user",
+                content: fixPrompt,
+                timestamp: new Date().toISOString(),
+              });
+              if (config.verbose && !config.silent) {
+                emitOrWrite(
+                  `${YELLOW}[post-edit-lint] ${lintResult.errors.length} error(s) — injecting fix prompt (retry ${lintRetries}/3)${RESET}\n`,
+                );
+              }
+              // Skip the normal reflection loop this round — lint loop drives recovery
+              maxToolRounds = Math.max(maxToolRounds, 3);
+            }
+          }
+        } catch {
+          // Non-fatal — post-edit linting never blocks execution
+        }
+      }
+
+      // Auto-commit after writes (Aider pattern) — opt-in via STATE.yaml git.autoCommit
+      if (config.autoCommit && filesModified > 0 && touchedFiles.length > 0) {
+        try {
+          await autoCommitIfEnabled(
+            session.projectRoot,
+            [...new Set(touchedFiles)],
+            { enabled: true, includeCoAuthoredBy: true },
+            router,
+            config.state.model.default.modelId,
+          );
+        } catch {
+          // Non-fatal — auto-commit never blocks execution
         }
       }
 
@@ -1815,6 +2144,22 @@ async function _runAgentLoopCore(
           }
         } else if (verificationPassed && config.verbose) {
           // Verification passed — emit a synthesizer "pass" signal in verbose mode
+  // Consolidate session memories if accumulated entry count is high
+  try {
+    const consolidator = new MemoryConsolidator({ consolidationThreshold: 50, maxAgeDays: 90 });
+    const memoryEntries = session.messages
+      .filter((m) => m.role === "assistant")
+      .map((m) => ({
+        key: m.id,
+        value: typeof m.content === "string" ? m.content.slice(0, 200) : "",
+        timestamp: m.timestamp,
+      }));
+    consolidator.addEntries(memoryEntries);
+    consolidator.consolidateIfNeeded();
+  } catch {
+    // Memory consolidation is non-critical — never block session end
+  }
+
           try {
             const synthesis = synthesizeConfidence({
               pdseScore: 1.0,
@@ -2306,6 +2651,12 @@ async function _runAgentLoopCore(
     } catch {
       // Non-fatal
     }
+
+    // Hook: SessionEnd
+    void getGlobalHookRunner().run("SessionEnd", { eventType: "SessionEnd", metadata: { sessionId: session.id, filesModified, roundsUsed: roundCounter } });
+
+    // State machine: mark session as finished on normal completion
+    agentStateMachine.transition("finished", "loop_complete");
 
     // Emit session-complete event for SSE clients in serve mode
     if (config.eventEmitter && config.eventSessionId) {

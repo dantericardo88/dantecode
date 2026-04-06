@@ -22,15 +22,8 @@ export interface StatusBarState {
   activeTasks: number;
   /** Whether the status bar is in an error state. */
   hasError: boolean;
-  /** Index readiness for semantic search (Wave 3 Task 3.2). */
-  indexReadiness?: {
-    status: "indexing" | "ready" | "error";
-    progress: number; // 0-100
-  };
-  /** Context pressure percentage (0-100) (Wave 3 Task 3.3). */
-  contextPressure?: number;
-  /** Real-time PDSE score for the currently active file (0-100). */
-  currentFilePdseScore?: number;
+  /** Last known PDSE score (0-100). -1 means not scored yet. */
+  pdseScore?: number;
 }
 
 /** Info payload for the updateStatusBarInfo() convenience method. */
@@ -39,11 +32,7 @@ export interface StatusBarInfo {
   contextPercent?: number;
   activeTasks?: number;
   hasError?: boolean;
-  indexReadiness?: {
-    status: "indexing" | "ready" | "error";
-    progress: number;
-  };
-  contextPressure?: number;
+  pdseScore?: number;
 }
 
 const GATE_ICONS: Record<GateStatus, string> = {
@@ -84,11 +73,16 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     contextPercent: 0,
     activeTasks: 0,
     hasError: false,
-    indexReadiness: undefined,
-    contextPressure: undefined,
+    pdseScore: -1,
   };
 
-  item.command = "dantecode.openChat";
+  // Register the quick-pick command for status bar clicks
+  const quickPickCmd = vscode.commands.registerCommand("dantecode.statusBarQuickPick", () => {
+    void showStatusBarQuickPick(state);
+  });
+  context.subscriptions.push(quickPickCmd);
+
+  item.command = "dantecode.statusBarQuickPick";
   renderStatusBar(state);
 
   item.show();
@@ -105,6 +99,58 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
   context.subscriptions.push(configWatcher);
 
   return state;
+}
+
+/**
+ * Shows a quick-pick menu when the status bar item is clicked.
+ * Provides fast access to common actions.
+ */
+async function showStatusBarQuickPick(state: StatusBarState): Promise<void> {
+  const items: Array<{ label: string; description?: string; action: string }> = [
+    {
+      label: "$(comment-discussion) Open Chat",
+      description: "Open the DanteCode sidebar",
+      action: "dantecode.openChat",
+    },
+    {
+      label: "$(symbol-enum) Switch Model",
+      description: state.currentModel,
+      action: "dantecode.switchModel",
+    },
+    {
+      label: "$(beaker) Run PDSE Score",
+      description: "Score the active file",
+      action: "dantecode.runPDSE",
+    },
+    {
+      label: "$(terminal) Run GStack QA",
+      description: "Typecheck + lint + test",
+      action: "dantecode.runGStack",
+    },
+    {
+      label: state.sandboxEnabled ? "$(vm) Disable Sandbox" : "$(vm-outline) Enable Sandbox",
+      description: state.sandboxEnabled ? "Currently enabled" : "Currently disabled",
+      action: "dantecode.toggleSandbox",
+    },
+    {
+      label: "$(key) Setup API Keys",
+      description: "Configure LLM providers",
+      action: "dantecode.setupApiKeys",
+    },
+    {
+      label: "$(history) List Checkpoints",
+      description: "View saved checkpoints",
+      action: "dantecode.listCheckpoints",
+    },
+  ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: `DanteCode | ${formatModelName(state.currentModel)} | ${state.contextPercent}% ctx`,
+  });
+
+  if (picked) {
+    await vscode.commands.executeCommand(picked.action);
+  }
 }
 
 export function updateStatusBar(
@@ -136,6 +182,15 @@ export function updateStatusBarWithCost(
 }
 
 /**
+ * Update the PDSE score displayed in the status bar.
+ * Color coding: green (>=80), yellow (60-79), red (<60).
+ */
+export function updatePdseScore(state: StatusBarState, score: number): void {
+  state.pdseScore = score;
+  renderStatusBar(state);
+}
+
+/**
  * Convenience method to update context percent, active tasks, model, and error
  * state in a single call. Called after each model response and when background
  * tasks change.
@@ -153,111 +208,39 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
   if (info.hasError !== undefined) {
     state.hasError = info.hasError;
   }
-  if (info.indexReadiness !== undefined) {
-    state.indexReadiness = info.indexReadiness;
-  }
-  if (info.contextPressure !== undefined) {
-    state.contextPressure = info.contextPressure;
+  if (info.pdseScore !== undefined) {
+    state.pdseScore = info.pdseScore;
   }
   renderStatusBar(state);
 }
 
 /**
- * Update the current file's PDSE score in the status bar.
+ * Build a visual gauge bar for context utilization.
+ * Uses Unicode block characters for a compact visual in the status bar.
+ * Exported for testing.
  */
-export function updateStatusBarPdseScore(state: StatusBarState, score: number | undefined): void {
-  state.currentFilePdseScore = score;
-  renderStatusBar(state);
-}
-
-/**
- * Register the active editor PDSE score listener.
- * Scores the current file on editor change and updates the status bar.
- */
-export function registerPdseActiveEditorListener(
-  context: vscode.ExtensionContext,
-  state: StatusBarState,
-  projectRoot: string,
-): void {
-  const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|py|rs|go|java|cpp|c|h)$/;
-
-  async function scoreActiveFile(editor: vscode.TextEditor | undefined): Promise<void> {
-    if (!editor || !SOURCE_EXTENSIONS.test(editor.document.uri.fsPath)) {
-      updateStatusBarPdseScore(state, undefined);
-      return;
-    }
-
-    try {
-      const { runLocalPDSEScorer } = await import("@dantecode/danteforge");
-      const content = editor.document.getText();
-      const score = runLocalPDSEScorer(content, projectRoot);
-      const overall = typeof score === "number" ? score : (score as any)?.overall ?? 0;
-      updateStatusBarPdseScore(state, overall);
-    } catch {
-      updateStatusBarPdseScore(state, undefined);
-    }
-  }
-
-  // Score initial active editor
-  void scoreActiveFile(vscode.window.activeTextEditor);
-
-  // Re-score on editor change
-  const editorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
-    void scoreActiveFile(editor);
-  });
-  context.subscriptions.push(editorListener);
-
-  // Re-score on save
-  const saveListener = vscode.workspace.onDidSaveTextDocument((doc) => {
-    const editor = vscode.window.activeTextEditor;
-    if (editor && editor.document === doc) {
-      void scoreActiveFile(editor);
-    }
-  });
-  context.subscriptions.push(saveListener);
+export function formatContextGauge(percent: number): string {
+  if (percent <= 0) return "";
+  const filled = Math.round((percent / 100) * 5);
+  const empty = 5 - filled;
+  return "\u2588".repeat(filled) + "\u2591".repeat(empty);
 }
 
 /**
  * Build the status bar display text. Exported for testing.
  *
- * Format: "DanteCode | grok-3 | PDSE: 92 | idx: ✓ | ctx: 72% | 2 tasks"
+ * Format: "DanteCode | grok-3 | [gauge] 23% | 2 tasks"
  *   - model segment is always shown
- *   - PDSE score shown when available for current file
- *   - index readiness shown when available
- *   - context pressure shown when available
- *   - context segment shown when > 0%
+ *   - context gauge shown when > 0%
  *   - tasks segment shown when > 0
  */
 export function formatStatusBarText(state: StatusBarState): string {
   const shortModel = formatModelName(state.currentModel);
   const parts: string[] = ["DanteCode", shortModel];
 
-  // PDSE score for current file
-  if (state.currentFilePdseScore !== undefined) {
-    const pdseIcon = state.currentFilePdseScore >= 85 ? "$(verified)" : state.currentFilePdseScore >= 70 ? "$(warning)" : "$(error)";
-    parts.push(`${pdseIcon} ${state.currentFilePdseScore}`);
-  }
-
-  // Index readiness badge (Wave 3 Task 3.2)
-  if (state.indexReadiness) {
-    const { status, progress } = state.indexReadiness;
-    if (status === "ready") {
-      parts.push("idx: ✓");
-    } else if (status === "error") {
-      parts.push("idx: ✗");
-    } else {
-      // indexing
-      parts.push(`idx: ${progress}%`);
-    }
-  }
-
-  // Context pressure badge (Wave 3 Task 3.3)
-  if (state.contextPressure !== undefined) {
-    parts.push(`ctx: ${state.contextPressure}%`);
-  }
-
   if (state.contextPercent > 0) {
-    parts.push(`${state.contextPercent}% ctx`);
+    const gauge = formatContextGauge(state.contextPercent);
+    parts.push(`${gauge} ${state.contextPercent}%`);
   }
 
   if (state.activeTasks > 0) {
@@ -271,32 +254,24 @@ export function formatStatusBarText(state: StatusBarState): string {
  * Determine the status bar color based on current state.
  * Exported for testing.
  *
- *  - "red"    → error state, PDSE gate failed, or context pressure >80%
- *  - "yellow" → context usage >75%, gate pending, or context pressure 50-80%
- *  - "green"  → healthy (everything normal)
+ *  - "red"    → error state, PDSE gate failed, or PDSE score < 60
+ *  - "yellow" → context usage >75%, gate pending, or PDSE score 60-79
+ *  - "green"  → healthy (PDSE >= 80 or not scored, everything normal)
  */
 export function getStatusBarColor(state: StatusBarState): "green" | "yellow" | "red" {
   if (state.hasError || state.gateStatus === "failed") {
     return "red";
   }
-
-  // Context pressure takes priority over contextPercent (Wave 3 Task 3.3)
-  if (state.contextPressure !== undefined && state.contextPressure >= 80) {
+  const pdse = state.pdseScore ?? -1;
+  if (pdse >= 0 && pdse < 60) {
     return "red";
   }
-
-  if (state.indexReadiness?.status === "error") {
-    return "red";
-  }
-
-  if (
-    state.contextPercent > 75 ||
-    state.gateStatus === "pending" ||
-    (state.contextPressure !== undefined && state.contextPressure >= 50)
-  ) {
+  if (pdse >= 60 && pdse < 80) {
     return "yellow";
   }
-
+  if (state.contextPercent > 75 || state.gateStatus === "pending") {
+    return "yellow";
+  }
   return "green";
 }
 
@@ -310,43 +285,19 @@ function renderStatusBar(state: StatusBarState): void {
   const tierLabel = state.modelTier === "capable" ? " [capable]" : "";
 
   item.text = `${gateIcon} ${formatStatusBarText(state)}${tierLabel}${sandboxLabel}${costLabel}`;
-
-  const tooltipLines = [
+  const pdseLabel = (state.pdseScore ?? -1) >= 0 ? `PDSE score: ${state.pdseScore}/100` : "PDSE score: not scored";
+  item.tooltip = [
     `Model: ${state.currentModel}`,
     `Tier: ${state.modelTier}`,
     `Context: ${state.contextPercent}%`,
     `Active tasks: ${state.activeTasks}`,
+    pdseLabel,
     GATE_TOOLTIPS[gateStatus],
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
-    state.currentFilePdseScore !== undefined
-      ? `Current file PDSE: ${state.currentFilePdseScore}/100`
-      : "Current file PDSE: N/A",
-  ];
-
-  // Add index readiness to tooltip (Wave 3 Task 3.2)
-  if (state.indexReadiness) {
-    const { status, progress } = state.indexReadiness;
-    if (status === "ready") {
-      tooltipLines.push("Index: Ready");
-    } else if (status === "error") {
-      tooltipLines.push("Index: Error");
-    } else {
-      tooltipLines.push(`Index: Indexing (${progress}%)`);
-    }
-  }
-
-  // Add context pressure to tooltip (Wave 3 Task 3.3)
-  if (state.contextPressure !== undefined) {
-    const pressureStatus =
-      state.contextPressure >= 80 ? "Critical" : state.contextPressure >= 50 ? "High" : "Normal";
-    tooltipLines.push(`Context Pressure: ${state.contextPressure}% (${pressureStatus})`);
-  }
-
-  tooltipLines.push("");
-  tooltipLines.push("Click to open DanteCode sidebar");
-
-  item.tooltip = tooltipLines.join("\n");
+    "",
+    "Click for quick actions",
+  ].join("\n");
 
   // Theme-aware colors based on health state
   item.backgroundColor = undefined;

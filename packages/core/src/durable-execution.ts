@@ -6,7 +6,6 @@
 
 import { mkdir, readFile, unlink, writeFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   DurableExecutionCheckpointSchema,
   type DurableExecutionCheckpoint as RuntimeDurableExecutionCheckpoint,
@@ -14,6 +13,7 @@ import {
   type CheckpointWorkspaceContext,
   type ApplyReceipt,
 } from "@dantecode/runtime-spine";
+import { getSafeModulePath } from "./runtime-path.js";
 import { detectInstallContext } from "./runtime-update.js";
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -31,7 +31,13 @@ export interface DurableExecutionOptions {
   maxRetries?: number;
 }
 
-const RUNTIME_FILE_PATH = fileURLToPath(import.meta.url);
+let _runtimeFilePath: string | undefined;
+function getRuntimeFilePath(): string {
+  if (!_runtimeFilePath) {
+    _runtimeFilePath = getSafeModulePath();
+  }
+  return _runtimeFilePath;
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // DurableExecutionEngine
@@ -307,7 +313,7 @@ export async function clearAllCheckpoints(projectRoot: string): Promise<void> {
 
 function buildWorkspaceContext(projectRoot: string): CheckpointWorkspaceContext {
   const installContext = detectInstallContext({
-    runtimePath: RUNTIME_FILE_PATH,
+    runtimePath: getRuntimeFilePath(),
     cwd: projectRoot,
     workspaceRoot: projectRoot,
   });

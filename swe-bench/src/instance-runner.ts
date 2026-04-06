@@ -20,7 +20,7 @@ export interface RunResult {
 }
 
 const DEFAULT_DOCKER_IMAGE = "python:3.11-slim";
-const DEFAULT_TIMEOUT = 300_000; // 5 minutes
+const DEFAULT_TIMEOUT = 600_000; // 10 minutes
 
 /**
  * Run a single SWE-bench instance inside a Docker container.

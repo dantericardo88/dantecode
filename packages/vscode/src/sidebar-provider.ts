@@ -39,6 +39,12 @@ import {
   responseLooksComplete,
   shouldContinueLoop,
   globalToolScheduler,
+  loadWorkflowCommand,
+  createWorkflowExecutionContext,
+  buildWorkflowInvocationPrompt,
+  generateFollowupSuggestions,
+  getRouterMetrics,
+  getGlobalHookRunner,
 } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -120,7 +126,8 @@ interface WebviewInboundMessage {
     | "party_command"
     | "automate_command"
     | "file_mention_query"
-    | "add_file_mention";
+    | "add_file_mention"
+    | "voice_audio_blob";
   payload: Record<string, unknown>;
 }
 
@@ -169,7 +176,10 @@ interface WebviewOutboundMessage {
     | "plan_list_data"
     | "plan_status_data"
     | "plan_approved"
-    | "plan_rejected";
+    | "plan_rejected"
+    | "followup_suggestions"
+    | "workflow_stage_update"
+    | "voice_transcript";
   payload: Record<string, unknown>;
 }
 
@@ -293,6 +303,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private activeSkill: string | null = null;
   /** Current approval mode (plan, review, apply, autoforge, yolo). Defaults to apply. */
   private approvalMode: string = "apply";
+  /** Workflow stage tracking for progress bar display. */
+  private currentWorkflowStage = 0;
+  private workflowStageCount = 0;
+  private workflowStageName = "";
+  /** Failure policy for the active workflow — "hard_stop" aborts the agent loop on stage error. */
+  private activeWorkflowFailurePolicy: "hard_stop" | "continue" = "continue";
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly secrets: vscode.SecretStorage,
@@ -375,7 +391,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // ── Attach to command bridge ──
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewInboundMessage) => {
-      await this.handleWebviewMessage(message);
+      try {
+        await this.handleWebviewMessage(message);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        console.error(`[DanteCode] Webview handler failed: ${errorMsg}`);
+        this.postMessage({
+          type: "error",
+          payload: { message: `Agent loop error: ${errorMsg}` },
+        });
+        this.postMessage({
+          type: "chat_response_done",
+          payload: { error: true },
+        });
+      }
     });
 
     webviewView.onDidChangeVisibility(() => {
@@ -392,9 +421,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   private async handleWebviewMessage(message: WebviewInboundMessage): Promise<void> {
     switch (message.type) {
-      case "chat_request":
-        await this.handleChatRequest(String(message.payload["text"] ?? ""));
+      case "chat_request": {
+        let chatText = String(message.payload["text"] ?? "");
+        // Detect GitHub PR URL in chat and auto-trigger review
+        const prMatch = chatText.match(/https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/);
+        if (prMatch) {
+          this.pendingRequiredRounds = 30;
+          // Prepend context to the message
+          chatText = `Review this GitHub PR: ${prMatch[0]}\n\nOriginal message: ${chatText}`;
+        }
+        await this.handleChatRequest(chatText);
         break;
+      }
       case "file_add":
         this.handleFileAdd(String(message.payload["filePath"] ?? ""));
         break;
@@ -505,6 +543,28 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "voice_audio_blob": {
+        // Transcribe audio via Whisper API backend
+        try {
+          const { transcribeAudioBuffer } = await import("@dantecode/core");
+          const apiKey = await this.secrets.get("OPENAI_API_KEY") ?? await this.secrets.get("ANTHROPIC_API_KEY") ?? "";
+          if (!apiKey) break;
+          const audioData = message.payload["data"] as string; // base64
+          if (!audioData) break;
+          const buffer = Buffer.from(audioData, "base64");
+          const mimeType = (message.payload["mimeType"] ?? "audio/webm") as "audio/webm" | "audio/wav";
+          const result = await transcribeAudioBuffer(buffer, mimeType, {
+            apiKey,
+            language: "en",
+          });
+          if (result.text) {
+            this.postMessage({ type: "voice_transcript", payload: { text: result.text } });
+          }
+        } catch (err) {
+          console.error("[DanteCode] Whisper transcription failed:", err instanceof Error ? err.message : String(err));
+        }
+        break;
+      }
     }
   }
 
@@ -535,10 +595,62 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Detect pipeline workflows and set dynamic round budget.
     // Any active skill gets 80 rounds; heavy DanteForge pipelines get 150.
-    if (/\/(?:magic|inferno|blaze)\b/i.test(text)) {
+    if (this.agentConfig.agentMode === "architect") {
+      this.pendingRequiredRounds = 40;
+    }
+    if (/\/(?:magic|inferno|blaze|nova)\b/i.test(text)) {
       this.pendingRequiredRounds = 150;
-    } else if (this.activeSkill || /\/(?:autoforge|party|ember)\b/i.test(text)) {
+    } else if (this.activeSkill || /\/(?:autoforge|party|ember|forge|spark)\b/i.test(text)) {
       this.pendingRequiredRounds = 80;
+    }
+
+    // ── Load DanteForge workflow context for slash commands ──
+    // When the user types a slash command like /inferno, /nova, /forge, etc.,
+    // load the workflow markdown file and build an execution context that tells
+    // the agent about stages, failure policies, and contract metadata.
+    let workflowContextPrompt = "";
+    const slashMatch = text.match(/^\/([a-z][\w-]*)/i);
+    if (slashMatch) {
+      const cmdName = slashMatch[1]!.toLowerCase();
+      try {
+        const loaded = await loadWorkflowCommand(projectRoot, cmdName);
+        if (loaded.command) {
+          const wfContext = createWorkflowExecutionContext(loaded.command, text);
+          workflowContextPrompt = buildWorkflowInvocationPrompt(wfContext);
+          // Activate skill-like behavior for workflow commands
+          if (!this.activeSkill) {
+            this.activeSkill = cmdName;
+          }
+          // Store failure policy for the loop to enforce
+          const rawPolicy = (loaded.command.contract as { failurePolicy?: string } | undefined)?.failurePolicy;
+          this.activeWorkflowFailurePolicy = rawPolicy === "hard_stop" ? "hard_stop" : "continue";
+          // Stage 3 — Stage progress bar: announce workflow stages to the webview
+          const stages = loaded.command.contract?.stages ?? [];
+          if (stages.length > 0) {
+            this.currentWorkflowStage = 0;
+            this.workflowStageCount = stages.length;
+            this.workflowStageName = stages[0] ?? "";
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> **/${cmdName}** activated — Stage 0/${stages.length}: Loading workflow...\n> stages: ${stages.join(" \u2192 ")}\n\n`,
+                partial: "",
+              },
+            });
+            this.postMessage({
+              type: "workflow_stage_update",
+              payload: {
+                current: 0,
+                total: stages.length,
+                stageName: stages[0] ?? "",
+                stages,
+              },
+            });
+          }
+        }
+      } catch {
+        // Command not found as workflow — fall through to normal handling
+      }
     }
     const { signal } = this.abortController;
 
@@ -572,11 +684,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const projectState = await readOrInitializeState(projectRoot).catch(() => null);
+    const stateMaxTokens = projectState?.model?.default?.maxTokens ?? 16384;
     const modelConfig: ModelConfig = {
       provider: provider as ModelConfig["provider"],
       modelId,
       apiKey,
-      maxTokens: 8192,
+      maxTokens: stateMaxTokens,
       temperature: 0.1,
       contextWindow: 131072,
       supportsVision: false,
@@ -634,7 +748,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       projectRoot,
       failClosedWorkflows: true,
     });
-    const projectState = await readOrInitializeState(projectRoot).catch(() => null);
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -753,6 +866,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         "Focus on providing helpful explanations, analysis, and guidance rather than making changes.",
       );
       systemParts.push("");
+    } else if (agentMode === "architect") {
+      systemParts.push("## Mode: ARCHITECT (Two-Stage)");
+      systemParts.push(
+        "You are in ARCHITECT mode. First output an architectural plan: what to change and why. " +
+        "Do NOT write full code yet. Describe file paths, function signatures, and change rationale. " +
+        "Keep the plan concise (under 300 words). After planning, the editor phase will implement using SEARCH/REPLACE blocks.",
+      );
+      systemParts.push("After your plan is reviewed, switch to EDITOR mode to write SEARCH/REPLACE blocks.");
+      systemParts.push("");
     } else {
       systemParts.push("## Mode: APPLY");
       systemParts.push(
@@ -857,6 +979,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     );
     systemParts.push(`Co-Authored-By: DanteCode (${modelLabel}) <noreply@dantecode.dev>`);
     systemParts.push("");
+
+    // ── DanteForge workflow contract injection ──
+    // When a slash command loaded a workflow, inject its contract (stages, failure
+    // policy, execution mode, etc.) so the model knows how to execute the pipeline.
+    if (workflowContextPrompt) {
+      systemParts.push("");
+      systemParts.push(workflowContextPrompt);
+      systemParts.push("");
+    }
 
     systemParts.push(getToolDefinitionsPrompt(this.approvalMode));
 
@@ -1135,6 +1266,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               this.postMessage({
                 type: "chat_response_chunk",
                 payload: { chunk, partial: "" },
+              });
+            }
+            // Stage 3 — Detect stage/wave completions and advance progress bar
+            if (
+              this.workflowStageCount > 0 &&
+              /\[(?:STAGE|WAVE)\s+COMPLETE\]/i.test(chunk)
+            ) {
+              this.currentWorkflowStage = Math.min(
+                this.currentWorkflowStage + 1,
+                this.workflowStageCount,
+              );
+              const nextStageName =
+                this.workflowStageName; // will be updated below
+              // Update stage name from contract if possible
+              this.postMessage({
+                type: "workflow_stage_update",
+                payload: {
+                  current: this.currentWorkflowStage,
+                  total: this.workflowStageCount,
+                  stageName: nextStageName,
+                },
               });
             }
           }
@@ -1457,6 +1609,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           );
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
+          // Update cost tracking in status bar using router metrics
+          try {
+            const routerMetrics = getRouterMetrics();
+            const tokenMetric = routerMetrics.find((m) => m.name === "tokens_total");
+            const totalTokens = tokenMetric ? tokenMetric.value : 0;
+            const costPerMToken = 0.003; // Conservative estimate: $3 per million tokens
+            const estimatedCost = (totalTokens / 1_000_000) * costPerMToken;
+            if (estimatedCost > 0) {
+              this.hostCallbacks.onCostUpdate?.({
+                model: this.currentModel,
+                modelTier: "fast",
+                sessionTotalUsd: estimatedCost,
+              });
+            }
+          } catch {
+            // Non-fatal
+          }
+          void getGlobalHookRunner().run("Stop", {
+            eventType: "Stop",
+            metadata: { sessionId: this.sessionId, roundsUsed: roundNumber },
+          });
           if (roundNumber <= 1) {
             // Single-round response (no tool execution) — send final text
             this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
@@ -1465,6 +1638,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             this.postMessage({ type: "chat_response_done", payload: {} });
           }
           finalResponse = fullResponse;
+
+          // Feature 5 — Follow-up suggestions (QwenCode fast-model pattern).
+          // Generate only after 2+ turns so the context is meaningful.
+          if (roundNumber >= 2 && fullResponse.trim().length > 0) {
+            void generateFollowupSuggestions(fullResponse, roundNumber, router).then(
+              (suggestions: string[]) => {
+                if (suggestions.length > 0) {
+                  this.postMessage({
+                    type: "followup_suggestions",
+                    payload: { suggestions },
+                  });
+                }
+              },
+            );
+          }
           break;
         }
 
@@ -1710,6 +1898,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const toolContext: ToolExecutionContext = {
             projectRoot,
             silentMode: this.agentConfig.agentMode === "yolo",
+            architectEditorMode: agentMode === "architect",
             currentModelId: this.currentModel,
             roundId: `round-${roundNumber}`,
             sessionId: this.sessionId,
@@ -1739,6 +1928,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               return selection === "Allow once";
             },
           };
+          void getGlobalHookRunner().run("PreToolUse", {
+            eventType: "PreToolUse",
+            toolName: toolCall.name,
+            toolInput: toolCall.input,
+          });
           let result: ToolResult;
           try {
             result = await executeTool(
@@ -1751,6 +1945,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           } finally {
             clearInterval(heartbeat);
           }
+          void getGlobalHookRunner().run("PostToolUse", {
+            eventType: "PostToolUse",
+            toolName: toolCall.name,
+            metadata: { success: !result.isError },
+          });
 
           // Track files written for DanteForge verification
           const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
@@ -2076,6 +2275,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.postMessage({ type: "chat_response_done", payload: { error: true } });
         // Signal error state to status bar
         this.updateStatusBar({ hasError: true });
+        // Workflow failure_policy enforcement: hard_stop halts on any stage error
+        if (this.activeWorkflowFailurePolicy === "hard_stop") {
+          this.activeWorkflowFailurePolicy = "continue"; // reset for next run
+          this.activeSkill = null;
+          return; // Exit handleChatMessage — loop stops
+        }
       }
     } finally {
       this.abortController = null;
@@ -2659,7 +2864,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   private postMessage(message: WebviewOutboundMessage): void {
     if (this.view) {
-      void this.view.webview.postMessage(message);
+      this.view.webview.postMessage(message).then(undefined, (err: unknown) => {
+        console.error(
+          `[DanteCode] postMessage failed (${message.type}): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
   }
 
@@ -3638,6 +3847,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     .input-area textarea:focus { border-color: var(--vscode-focusBorder); }
     .input-area textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
 
+    .mic-btn {
+      background: none;
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      padding: 4px 7px;
+      font-size: 15px;
+      line-height: 1;
+      align-self: flex-end;
+      opacity: 0.7;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    .mic-btn:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground); }
+    .mic-btn.recording { opacity: 1; color: #e05252; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+
     .send-btn, .stop-btn {
       padding: 6px 14px;
       font-size: 13px;
@@ -4179,6 +4405,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     <button class="icon-btn attach-btn" id="btn-attach" title="Attach file"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2a3 3 0 00-3 3v6.5a1.5 1.5 0 003 0V5a.5.5 0 00-1 0v6.5a.5.5 0 01-1 0V5a2 2 0 014 0v6.5a2.5 2.5 0 01-5 0V5a3 3 0 016 0v6.5a3.5 3.5 0 01-7 0V5h1v6.5a2.5 2.5 0 005 0V5a2 2 0 00-2-2z"/></svg></button>
     <button class="icon-btn attach-btn" id="btn-attach-image" title="Attach image"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14.5 2h-13a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h13a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5zM2 3h12v7.1l-2.6-2.6a.5.5 0 00-.7 0L7.5 10.7 5.8 9a.5.5 0 00-.7 0L2 12.1V3zm0 10.1l3.5-3.5L7.1 11.2l.7-.7 3.5-3.5L14 9.7V13H2v-.9zM5 7.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/></svg></button>
     <textarea id="input" placeholder="Ask DanteCode anything..." rows="1"></textarea>
+    <button class="mic-btn" id="mic-btn" title="Voice input (Web Speech API)">&#127908;</button>
     <button class="send-btn" id="send-btn">Send</button>
     <button class="stop-btn" id="stop-btn">Stop</button>
   </div>
@@ -4218,6 +4445,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           <button class="mode-btn" data-mode="chat">
             <span class="mode-icon">&#128172;</span>Chat
             <span class="mode-desc">Conversational only</span>
+          </button>
+          <button class="mode-btn" data-mode="architect">
+            <span class="mode-icon">&#128161;</span>Architect
+            <span class="mode-desc">Plan then implement</span>
           </button>
         </div>
       </div>
@@ -4558,6 +4789,89 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.style.height = 'auto';
         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
       });
+
+      // ---- Voice Input (Web Speech API) ----
+      (function() {
+        var micBtn = document.getElementById('mic-btn');
+        if (!micBtn) return;
+        var SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRec) {
+          micBtn.style.display = 'none';
+          return;
+        }
+        var recognition = new SpeechRec();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        var recording = false;
+
+        recognition.onresult = function(event) {
+          var transcript = event.results[0][0].transcript;
+          if (inputEl) {
+            inputEl.value = (inputEl.value ? inputEl.value + ' ' : '') + transcript;
+            // Trigger height recalc
+            inputEl.style.height = 'auto';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+            inputEl.focus();
+          }
+        };
+
+        recognition.onstart = function() {
+          recording = true;
+          micBtn.classList.add('recording');
+          micBtn.title = 'Recording… click to stop';
+        };
+
+        recognition.onend = function() {
+          recording = false;
+          micBtn.classList.remove('recording');
+          micBtn.title = 'Voice input (Web Speech API)';
+        };
+
+        recognition.onerror = function(event) {
+          recording = false;
+          micBtn.classList.remove('recording');
+          console.warn('Voice recognition error:', event.error);
+        };
+
+        micBtn.addEventListener('click', function() {
+          if (recording) {
+            recognition.stop();
+          } else {
+            try { recognition.start(); } catch(e) { console.warn('Could not start recognition:', e); }
+          }
+        });
+      })();
+
+      // Fallback: record via MediaRecorder and send to Whisper backend
+      if (micBtn && !('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        var mediaRecorder = null;
+        var audioChunks = [];
+        micBtn.addEventListener('click', async function() {
+          if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            micBtn.classList.remove('recording');
+            return;
+          }
+          try {
+            var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioChunks = [];
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            mediaRecorder.ondataavailable = function(e) { if (e.data.size > 0) audioChunks.push(e.data); };
+            mediaRecorder.onstop = function() {
+              var blob = new Blob(audioChunks, { type: 'audio/webm' });
+              var reader = new FileReader();
+              reader.onload = function() {
+                var base64 = reader.result.split(',')[1];
+                vscode.postMessage({ type: 'voice_audio_blob', payload: { data: base64, mimeType: 'audio/webm' } });
+              };
+              reader.readAsDataURL(blob);
+              stream.getTracks().forEach(function(t) { t.stop(); });
+            };
+            mediaRecorder.start();
+            micBtn.classList.add('recording');
+          } catch(err) { console.error('Voice capture failed:', err); }
+        });
+      }
 
       // ---- Slash Command Autocomplete ----
       const autocompleteDropdown = document.getElementById('autocomplete-dropdown');
@@ -5499,12 +5813,70 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           case 'audit_event':
             break;
 
+          case 'voice_transcript': {
+            var inp = document.getElementById('chat-input') || document.querySelector('textarea');
+            if (inp && message.payload && message.payload.text) {
+              inp.value = (inp.value ? inp.value + ' ' : '') + message.payload.text;
+              inp.focus();
+            }
+            break;
+          }
+
           case 'slash_completions':
             var completions = message.payload.completions || [];
             if (completions.length > 0 || message.payload.query) {
               showAutocomplete(completions);
             }
             break;
+
+          case 'followup_suggestions': {
+            var suggestions = message.payload && message.payload.suggestions;
+            if (!suggestions || !suggestions.length) break;
+            // Remove any existing suggestions
+            var existingSugg = document.getElementById('followup-suggestions');
+            if (existingSugg) existingSugg.remove();
+            // Create suggestion pills container
+            var suggContainer = document.createElement('div');
+            suggContainer.id = 'followup-suggestions';
+            suggContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;';
+            suggestions.forEach(function(text) {
+              var pill = document.createElement('button');
+              pill.textContent = text;
+              pill.style.cssText = 'background:var(--vscode-button-secondaryBackground,#3a3a3a);color:var(--vscode-button-secondaryForeground,#ccc);border:1px solid var(--vscode-button-border,#555);border-radius:12px;padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;';
+              pill.onclick = function() {
+                var inp = document.getElementById('chat-input') || document.querySelector('textarea');
+                if (inp) { inp.value = text; inp.focus(); }
+                suggContainer.remove();
+              };
+              suggContainer.appendChild(pill);
+            });
+            // Insert before the input area
+            var inputArea = document.querySelector('.input-area') || document.querySelector('#input-container');
+            if (inputArea) inputArea.insertAdjacentElement('beforebegin', suggContainer);
+            break;
+          }
+
+          case 'workflow_stage_update': {
+            var wfPayload = message.payload || {};
+            var wfCurrent = wfPayload.current || 0;
+            var wfTotal = wfPayload.total || 0;
+            var wfStageName = wfPayload.stageName || '';
+            // Find or create progress bar
+            var progressEl = document.getElementById('workflow-progress');
+            if (!progressEl) {
+              progressEl = document.createElement('div');
+              progressEl.id = 'workflow-progress';
+              progressEl.style.cssText = 'padding:4px 12px;font-size:11px;color:var(--vscode-descriptionForeground,#888);border-bottom:1px solid var(--vscode-panel-border,#333);';
+              var wfChatContainer = document.getElementById('chat-container') || document.querySelector('.messages-container');
+              if (wfChatContainer) wfChatContainer.insertAdjacentElement('beforebegin', progressEl);
+            }
+            if (wfTotal > 0) {
+              var wfPct = Math.round((wfCurrent / wfTotal) * 100);
+              progressEl.innerHTML = '<span>Stage ' + wfCurrent + '/' + wfTotal + ': ' + wfStageName + '</span>' +
+                '<div style="background:var(--vscode-progressBar-background,#007acc);height:2px;width:' + wfPct + '%;margin-top:2px;border-radius:1px;transition:width 0.3s;"></div>';
+            }
+            break;
+          }
         }
       });
 

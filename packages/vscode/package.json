@@ -614,6 +614,37 @@
         "command": "dantecode.toggleAdvancedPanels",
         "title": "DanteCode: Toggle Advanced Panels",
         "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.openPreview",
+        "title": "Open Preview",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.previewUrl",
+        "title": "Preview URL...",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.openArena",
+        "title": "Open Arena Mode",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.newSession",
+        "title": "New Session",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.showHistory",
+        "title": "Show Session History",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.deployProject",
+        "title": "Deploy Project",
+        "category": "DanteCode",
+        "icon": "$(rocket)"
       }
     ],
     "keybindings": [
@@ -700,6 +731,49 @@
         "command": "dantecode.showSkillsLibrary",
         "key": "ctrl+alt+k",
         "mac": "cmd+alt+k"
+      },
+      {
+        "key": "ctrl+x ctrl+n",
+        "mac": "cmd+x cmd+n",
+        "command": "dantecode.newSession",
+        "when": "dantecode.chatViewOpen"
+      },
+      {
+        "key": "ctrl+x ctrl+v",
+        "mac": "cmd+x cmd+v",
+        "command": "dantecode.runVerification",
+        "when": "editorFocus"
+      },
+      {
+        "key": "ctrl+x ctrl+p",
+        "mac": "cmd+x cmd+p",
+        "command": "dantecode.runPDSE",
+        "when": "editorFocus"
+      },
+      {
+        "key": "ctrl+x ctrl+m",
+        "mac": "cmd+x cmd+m",
+        "command": "dantecode.switchModel"
+      },
+      {
+        "key": "ctrl+x ctrl+h",
+        "mac": "cmd+x cmd+h",
+        "command": "dantecode.showHistory"
+      },
+      {
+        "key": "ctrl+x ctrl+a",
+        "mac": "cmd+x cmd+a",
+        "command": "dantecode.openArena"
+      },
+      {
+        "key": "ctrl+x ctrl+r",
+        "mac": "cmd+x cmd+r",
+        "command": "dantecode.openPreview"
+      },
+      {
+        "key": "f2",
+        "command": "dantecode.switchModel",
+        "when": "dantecode.chatViewOpen"
       }
     ],
     "configuration": {
@@ -712,7 +786,7 @@
         },
         "dantecode.fimModel": {
           "type": "string",
-          "default": "",
+          "default": "grok/grok-3-mini",
           "description": "Optional dedicated inline-completion model. Format: provider/model-id"
         },
         "dantecode.pdseThreshold": {

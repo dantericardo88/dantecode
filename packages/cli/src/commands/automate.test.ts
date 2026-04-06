@@ -83,13 +83,44 @@ import {
   // FilePatternWatcher,
 } from "@dantecode/git-engine";
 
-// Import from correct packages
-import { GitAutomationOrchestrator } from "@dantecode/automation-engine";
+vi.mock("@dantecode/automation-engine", () => ({
+  GitAutomationOrchestrator: vi.fn().mockImplementation(() => ({
+    listExecutions: vi.fn().mockResolvedValue([]),
+    runWorkflowInBackground: vi
+      .fn()
+      .mockResolvedValue({ executionId: "exec-1", backgroundTaskId: "bg-1" }),
+  })),
+  FilePatternWatcher: vi.fn().mockImplementation(() => {
+    _mockWatcherStart = vi.fn();
+    _mockWatcherSnapshot = vi.fn().mockReturnValue({ watcherId: "fpw-mock-id" });
+    _mockWatcherOn = vi.fn();
+    return {
+      start: _mockWatcherStart,
+      stop: vi.fn(),
+      snapshot: _mockWatcherSnapshot,
+      on: _mockWatcherOn,
+    };
+  }),
+  getTemplate: vi.fn(),
+  listTemplates: vi.fn(),
+  runAutomationAgent: vi.fn().mockResolvedValue({
+    sessionId: "agent-1",
+    success: true,
+    output: "",
+    tokensUsed: 0,
+    durationMs: 0,
+    filesChanged: [],
+  }),
+  substitutePromptVars: vi.fn().mockImplementation((template: string) => template),
+}));
 
-// Mock-only exports (not in real packages yet)
-const getTemplate = vi.fn();
-const listTemplates = vi.fn();
-const FilePatternWatcher = vi.fn();
+// Import from correct packages
+import {
+  GitAutomationOrchestrator,
+  FilePatternWatcher,
+  getTemplate,
+  listTemplates,
+} from "@dantecode/automation-engine";
 
 import { automateCommand, _resetForTesting } from "./automate.js";
 

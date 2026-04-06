@@ -6,25 +6,10 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext, readOrInitializeState } from "@dantecode/core";
-import type { Session, DanteCodeState } from "@dantecode/config-types";
+import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
-import { AutomationPanelProvider } from "./automation-panel-provider.js";
-import { VerificationPanelProvider } from "./verification-panel-provider.js";
-import { PlanningPanelProvider } from "./planning-panel.js";
-import { GitPanelProvider } from "./panels/git-panel-provider.js";
-import { SkillsPanelProvider } from "./panels/skills-panel-provider.js";
-import { SessionsPanelProvider } from "./panels/sessions-panel-provider.js";
-import { PartyProgressPanel } from "./panels/party-progress-panel.js";
-import { MemoryBrowserPanel } from "./panels/memory-browser-panel.js";
-import { AutomationDashboardPanel } from "./panels/automation-dashboard-panel.js";
-import { MagicPanelProvider } from "./panels/magic-panel.js";
-import { PDSEPanelProvider } from "./panels/pdse-panel.js";
-import { MemoryPanelProvider } from "./panels/memory-panel.js";
-import { SearchPanelProvider } from "./panels/search-panel.js";
-import { AgentsPanelProvider } from "./panels/agents-panel.js";
 import { DanteCodeCompletionProvider, disposeInlinePDSEDiagnostics } from "./inline-completion.js";
 import {
   createStatusBar,
@@ -32,7 +17,7 @@ import {
   updateStatusBarInfo,
   updateSandboxStatus,
   updateStatusBarWithCost,
-  registerPdseActiveEditorListener,
+  updatePdseScore,
   type StatusBarState,
 } from "./status-bar.js";
 import { PDSEDiagnosticProvider } from "./diagnostics.js";
@@ -40,53 +25,17 @@ import { OnboardingProvider } from "./onboarding-provider.js";
 import { RepoMapTreeDataProvider } from "./repo-map-tree-provider.js";
 import { CheckpointManager } from "./checkpoint-manager.js";
 import { DiffReviewProvider, type PendingDiffReview } from "./diff-review-provider.js";
-import { CheckpointTreeDataProvider } from "./checkpoint-tree-provider.js";
-import { SkillsTreeDataProvider } from "./skills-tree-provider.js";
-import { registerVersionCommand } from "./version-command.js";
-import {
-  registerDiffViewer,
-  registerFileDecorations,
-  registerVerificationAnnotations,
-  registerQuickActions,
-  registerTimelineView,
-  registerNotificationManager,
-  registerCommandHistory,
-  registerAgentProgress,
-} from "./ui-enhancements/index.js";
-import { registerPhase4Commands } from "./commands-phase4.js";
-import { InlineEditProvider } from "./inline-edit.js";
 
 // ─── Module-Level State ──────────────────────────────────────────────────────
 
 let statusBarState: StatusBarState | undefined;
 let chatSidebarProvider: ChatSidebarProvider | undefined;
 let auditPanelProvider: AuditPanelProvider | undefined;
-let automationPanelProvider: AutomationPanelProvider | undefined;
-let verificationPanelProvider: VerificationPanelProvider | undefined;
-let planningPanelProvider: PlanningPanelProvider | undefined;
-let gitPanelProvider: GitPanelProvider | undefined;
-let skillsPanelProvider: SkillsPanelProvider | undefined;
-let sessionsPanelProvider: SessionsPanelProvider | undefined;
-let partyProgressPanel: PartyProgressPanel | undefined;
-let memoryBrowserPanel: MemoryBrowserPanel | undefined;
-let automationDashboardPanel: AutomationDashboardPanel | undefined;
 let completionProvider: DanteCodeCompletionProvider | undefined;
 let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
 let checkpointManager: CheckpointManager | undefined;
 let diffReviewProvider: DiffReviewProvider | undefined;
-let checkpointTreeProvider: CheckpointTreeDataProvider | undefined;
-let skillsTreeProvider: SkillsTreeDataProvider | undefined;
-let semanticIndex:
-  | {
-      start: () => Promise<void>;
-      getReadiness: () => { status: "indexing" | "ready" | "error"; progress: number };
-    }
-  | undefined;
-
-let inlineEditProvider: InlineEditProvider | undefined;
-
-// Phase 5: UX Enhancements registered directly (no need to store return values)
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -95,429 +44,136 @@ let pendingDiffOldContent: string | undefined;
 
 // ─── Activate ────────────────────────────────────────────────────────────────
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export function activate(context: vscode.ExtensionContext): void {
   const extensionUri = context.extensionUri;
 
-  // ── Output channel (created early so errors are visible) ──
+  // ── Output channel (register first for logging) ──
   const outputChannel = vscode.window.createOutputChannel("DanteCode");
   context.subscriptions.push(outputChannel);
-  outputChannel.appendLine("DanteCode extension activating...");
-  outputChannel.show(true); // Show output panel immediately so user can see logs
 
-  try {
-
-  // Hide advanced panels by default
-  void vscode.commands.executeCommand("setContext", "dantecode.showAdvancedPanels", false);
+  const log = (msg: string) => outputChannel.appendLine(`[${new Date().toISOString()}] ${msg}`);
+  log("DanteCode extension activating...");
 
   // ── Repo map tree ──
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
-
-  // ── Initialize session and state for command bridge ──
-  let initialSession: Session | undefined;
-  let initialState: DanteCodeState | undefined;
-
   if (projectRoot) {
     try {
-      // Load existing state or initialize default
-      initialState = await readOrInitializeState(projectRoot);
-
-      // Create initial session
-      initialSession = {
-        id: `vscode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        projectRoot,
-        messages: [],
-        activeFiles: [],
-        readOnlyFiles: [],
-        todoList: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        agentStack: [],
-        model: initialState.model.default,
-      };
-    } catch (error) {
-      outputChannel.appendLine(`Warning: Failed to initialize session/state: ${error}`);
+      checkpointManager = new CheckpointManager(projectRoot);
+      diffReviewProvider = new DiffReviewProvider(projectRoot);
+      const treeProvider = new RepoMapTreeDataProvider(projectRoot);
+      const repoTree = vscode.window.createTreeView("dantecode.repoMap", {
+        treeDataProvider: treeProvider,
+      });
+      context.subscriptions.push(repoTree);
+    } catch (err) {
+      log(`Repo map/checkpoint init failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-
-  // Session/state loaded above — used for panel initialization check
-  const sessionReady = Boolean(initialSession && initialState);
-
-  if (projectRoot) {
-    checkpointManager = new CheckpointManager(projectRoot);
-    diffReviewProvider = new DiffReviewProvider(projectRoot);
-    const treeProvider = new RepoMapTreeDataProvider(projectRoot);
-    const repoTree = vscode.window.createTreeView("dantecode.repoMap", {
-      treeDataProvider: treeProvider,
-    });
-    context.subscriptions.push(repoTree);
-
-    // ── Checkpoint tree ──
-    checkpointTreeProvider = new CheckpointTreeDataProvider(projectRoot);
-    const checkpointTree = vscode.window.createTreeView("dantecode.checkpointTree", {
-      treeDataProvider: checkpointTreeProvider,
-      showCollapseAll: false,
-    });
-    context.subscriptions.push(checkpointTree);
-
-    // ── Skills tree (Wave 3 Task 3.6) ──
-    skillsTreeProvider = new SkillsTreeDataProvider(projectRoot);
-    const skillsTree = vscode.window.createTreeView("dantecode.skillsTree", {
-      treeDataProvider: skillsTreeProvider,
-      showCollapseAll: false,
-    });
-    context.subscriptions.push(skillsTree);
-
-    // ── Background Semantic Index (Wave 3 Task 3.6) ──
-    // Start indexing in background (non-blocking)
-    void (async () => {
-      try {
-        const { BackgroundSemanticIndex } = await import("@dantecode/core");
-        semanticIndex = new BackgroundSemanticIndex({
-          projectRoot,
-          sessionId: "vscode-session",
-        });
-        await semanticIndex.start();
-
-        // Update status bar periodically with index readiness
-        const currentIndex = semanticIndex; // Capture in closure
-        const indexInterval = setInterval(() => {
-          if (currentIndex && statusBarState) {
-            const readiness = currentIndex.getReadiness();
-            if (readiness) {
-              updateStatusBarInfo(statusBarState, { indexReadiness: readiness });
-            }
-          }
-        }, 2000);
-
-        context.subscriptions.push({
-          dispose: () => {
-            clearInterval(indexInterval);
-          },
-        });
-      } catch (error) {
-        console.error("Failed to start semantic index:", error);
-      }
-    })();
   }
 
   // ── Sidebar providers ──
-  chatSidebarProvider = new ChatSidebarProvider(
-    extensionUri,
-    context.secrets,
-    context.globalState,
-    {
-      onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
-        if (!statusBarState) {
-          return;
-        }
+  try {
+    chatSidebarProvider = new ChatSidebarProvider(
+      extensionUri,
+      context.secrets,
+      context.globalState,
+      {
+        onCostUpdate: ({ model, modelTier, sessionTotalUsd }) => {
+          if (!statusBarState) {
+            return;
+          }
 
-        updateStatusBar(statusBarState, model, statusBarState.gateStatus);
-        updateStatusBarWithCost(statusBarState, modelTier, sessionTotalUsd);
-      },
-      onDiffReview: ({ filePath, oldContent, newContent }) => {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const resolvedPath =
-          workspaceRoot && !path.isAbsolute(filePath)
-            ? path.resolve(workspaceRoot, filePath)
-            : filePath;
-        setPendingDiff(resolvedPath, oldContent, newContent);
-      },
-      onModelChange: (model) => {
-        if (statusBarState) {
           updateStatusBar(statusBarState, model, statusBarState.gateStatus);
-        }
+          updateStatusBarWithCost(statusBarState, modelTier, sessionTotalUsd);
+        },
+        onDiffReview: ({ filePath, oldContent, newContent }) => {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          const resolvedPath =
+            workspaceRoot && !path.isAbsolute(filePath)
+              ? path.resolve(workspaceRoot, filePath)
+              : filePath;
+          setPendingDiff(resolvedPath, oldContent, newContent);
+        },
+        onModelChange: (model) => {
+          if (statusBarState) {
+            updateStatusBar(statusBarState, model, statusBarState.gateStatus);
+          }
+        },
+        onStatusBarUpdate: (info) => {
+          if (statusBarState) {
+            updateStatusBarInfo(statusBarState, info);
+          }
+        },
       },
-      onStatusBarUpdate: (info) => {
-        if (statusBarState) {
-          updateStatusBarInfo(statusBarState, info);
-        }
-      },
-    },
-  );
-  const chatViewRegistration = vscode.window.registerWebviewViewProvider(
-    ChatSidebarProvider.viewType,
-    chatSidebarProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(chatViewRegistration);
-
-  auditPanelProvider = new AuditPanelProvider(extensionUri);
-  const auditViewRegistration = vscode.window.registerWebviewViewProvider(
-    AuditPanelProvider.viewType,
-    auditPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(auditViewRegistration);
-
-  automationPanelProvider = new AutomationPanelProvider(extensionUri);
-  const automationViewRegistration = vscode.window.registerWebviewViewProvider(
-    AutomationPanelProvider.viewType,
-    automationPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(automationViewRegistration);
-
-  verificationPanelProvider = new VerificationPanelProvider(extensionUri);
-  const verificationViewRegistration = vscode.window.registerWebviewViewProvider(
-    VerificationPanelProvider.viewType,
-    verificationPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(verificationViewRegistration);
-
-  planningPanelProvider = new PlanningPanelProvider(extensionUri);
-  const planningViewRegistration = vscode.window.registerWebviewViewProvider(
-    PlanningPanelProvider.viewType,
-    planningPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(planningViewRegistration);
-
-  // ── Phase 3: High-priority command panels ──
-  const magicPanelProvider = new MagicPanelProvider(extensionUri);
-  const magicViewRegistration = vscode.window.registerWebviewViewProvider(
-    MagicPanelProvider.viewType,
-    magicPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(magicViewRegistration);
-
-  const pdsePanelProvider = new PDSEPanelProvider(extensionUri);
-  const pdseViewRegistration = vscode.window.registerWebviewViewProvider(
-    PDSEPanelProvider.viewType,
-    pdsePanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(pdseViewRegistration);
-
-  const memoryPanelProvider = new MemoryPanelProvider(extensionUri);
-  const memoryViewRegistration = vscode.window.registerWebviewViewProvider(
-    MemoryPanelProvider.viewType,
-    memoryPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(memoryViewRegistration);
-
-  const searchPanelProvider = new SearchPanelProvider(extensionUri);
-  const searchViewRegistration = vscode.window.registerWebviewViewProvider(
-    SearchPanelProvider.viewType,
-    searchPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(searchViewRegistration);
-
-  const agentsPanelProvider = new AgentsPanelProvider(extensionUri);
-  const agentsViewRegistration = vscode.window.registerWebviewViewProvider(
-    AgentsPanelProvider.viewType,
-    agentsPanelProvider,
-    { webviewOptions: { retainContextWhenHidden: true } },
-  );
-  context.subscriptions.push(agentsViewRegistration);
-
-  // ── Phase 4 panel providers ──
-  if (sessionReady) {
-    gitPanelProvider = new GitPanelProvider(extensionUri);
-    const gitViewRegistration = vscode.window.registerWebviewViewProvider(
-      GitPanelProvider.viewType,
-      gitPanelProvider,
+    );
+    const chatViewRegistration = vscode.window.registerWebviewViewProvider(
+      ChatSidebarProvider.viewType,
+      chatSidebarProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     );
-    context.subscriptions.push(gitViewRegistration);
+    context.subscriptions.push(chatViewRegistration);
+  } catch (err) {
+    log(`Chat sidebar registration failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
-    skillsPanelProvider = new SkillsPanelProvider(extensionUri);
-    const skillsViewRegistration = vscode.window.registerWebviewViewProvider(
-      SkillsPanelProvider.viewType,
-      skillsPanelProvider,
+  try {
+    auditPanelProvider = new AuditPanelProvider(extensionUri);
+    const auditViewRegistration = vscode.window.registerWebviewViewProvider(
+      AuditPanelProvider.viewType,
+      auditPanelProvider,
       { webviewOptions: { retainContextWhenHidden: true } },
     );
-    context.subscriptions.push(skillsViewRegistration);
-
-    sessionsPanelProvider = new SessionsPanelProvider(extensionUri);
-    const sessionsViewRegistration = vscode.window.registerWebviewViewProvider(
-      SessionsPanelProvider.viewType,
-      sessionsPanelProvider,
-      { webviewOptions: { retainContextWhenHidden: true } },
-    );
-    context.subscriptions.push(sessionsViewRegistration);
-
-    // ── Phase 3 New Panels: Party Progress, Memory Browser, Automation ──
-    partyProgressPanel = new PartyProgressPanel(extensionUri, context);
-    const partyProgressViewRegistration = vscode.window.registerWebviewViewProvider(
-      PartyProgressPanel.viewType,
-      partyProgressPanel,
-      { webviewOptions: { retainContextWhenHidden: true } },
-    );
-    context.subscriptions.push(partyProgressViewRegistration);
-
-    memoryBrowserPanel = new MemoryBrowserPanel(extensionUri, context);
-    const memoryBrowserViewRegistration = vscode.window.registerWebviewViewProvider(
-      MemoryBrowserPanel.viewType,
-      memoryBrowserPanel,
-      { webviewOptions: { retainContextWhenHidden: true } },
-    );
-    context.subscriptions.push(memoryBrowserViewRegistration);
-
-    automationDashboardPanel = new AutomationDashboardPanel(extensionUri, context);
-    const automationDashboardViewRegistration = vscode.window.registerWebviewViewProvider(
-      AutomationDashboardPanel.viewType,
-      automationDashboardPanel,
-      { webviewOptions: { retainContextWhenHidden: true } },
-    );
-    context.subscriptions.push(automationDashboardViewRegistration);
-
-    outputChannel.appendLine("✓ Phase 4 panels registered");
-  } else {
-    outputChannel.appendLine("⚠ Session/state not available - Phase 4 panels disabled");
+    context.subscriptions.push(auditViewRegistration);
+  } catch (err) {
+    log(`Audit panel registration failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ── Inline completion ──
-  completionProvider = new DanteCodeCompletionProvider();
-  const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
-    { pattern: "**" },
-    completionProvider,
-  );
-  context.subscriptions.push(completionRegistration);
-
-  // ── Cmd+K Inline Edit Provider ──
-  inlineEditProvider = new InlineEditProvider(context.secrets, DEFAULT_MODEL_ID);
-  context.subscriptions.push(
-    vscode.commands.registerCommand("dantecode.inlineEdit", () => inlineEditProvider?.execute()),
-  );
-
-  // ── Toggle Advanced Panels command ──
-  let advancedPanelsVisible = false;
-  context.subscriptions.push(
-    vscode.commands.registerCommand("dantecode.toggleAdvancedPanels", () => {
-      advancedPanelsVisible = !advancedPanelsVisible;
-      void vscode.commands.executeCommand("setContext", "dantecode.showAdvancedPanels", advancedPanelsVisible);
-      void vscode.window.showInformationMessage(
-        advancedPanelsVisible ? "Advanced panels shown" : "Advanced panels hidden",
-      );
-    }),
-  );
-
-  // ── Inline completion: cache invalidation + accept detection ──
-  const docChangeDisposable = vscode.workspace.onDidChangeTextDocument((event) => {
-    if (completionProvider === undefined) return;
-    // Update cursor position tracking so cache invalidation knows the current cursor line
-    const cursorLine = vscode.window.activeTextEditor?.selection.active.line ?? 0;
-    completionProvider.completionCache.updateCursorPosition(
-      event.document.uri.toString(),
-      cursorLine,
+  try {
+    completionProvider = new DanteCodeCompletionProvider();
+    const completionRegistration = vscode.languages.registerInlineCompletionItemProvider(
+      { pattern: "**" },
+      completionProvider,
     );
-    // Cache invalidation: clear trie entries when edit is above cursor line
-    for (const change of event.contentChanges) {
-      completionProvider.completionCache.onDocumentChange(
-        event.document.uri.toString(),
-        change.range.start.line,
-        event.document.version,
-      );
-    }
-    // Accept detection for telemetry outcome update + prefetch trigger
-    completionProvider.handleDocumentChange(event);
-  });
-  context.subscriptions.push(docChangeDisposable);
+    context.subscriptions.push(completionRegistration);
+  } catch (err) {
+    log(`Inline completion registration failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // ── Status bar ──
-  statusBarState = createStatusBar(context);
-  updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
-
-  // ── Real-time PDSE score in status bar ──
-  if (projectRoot) {
-    registerPdseActiveEditorListener(context, statusBarState, projectRoot);
+  try {
+    statusBarState = createStatusBar(context);
+    updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
+  } catch (err) {
+    log(`Status bar creation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ── Diagnostics ──
-  diagnosticProvider = new PDSEDiagnosticProvider();
-  context.subscriptions.push(diagnosticProvider);
+  try {
+    diagnosticProvider = new PDSEDiagnosticProvider();
+    context.subscriptions.push(diagnosticProvider);
+  } catch (err) {
+    log(`Diagnostics provider failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // ── Onboarding ──
-  onboardingProvider = new OnboardingProvider(extensionUri, context.secrets, context);
-
-  // ── Phase 5: UX Enhancements ──
-  if (projectRoot) {
-    // 1. Visual diff viewer
-    registerDiffViewer(context);
-
-    // 2. PDSE score badges in file explorer
-    registerFileDecorations(context, projectRoot);
-
-    // 3. Inline verification annotations
-    registerVerificationAnnotations(context, projectRoot);
-
-    // 4. Command history with re-run buttons
-    registerCommandHistory(context, (command: string) => {
-      // Execute command via sidebar provider
-      if (chatSidebarProvider) {
-        void chatSidebarProvider.sendCommandToChat(command);
-      }
-    });
-
-    // 5. Quick actions sidebar
-    registerQuickActions(context, (command: string) => {
-      // Execute command via sidebar provider
-      if (chatSidebarProvider) {
-        void chatSidebarProvider.sendCommandToChat(command);
-      }
-    });
-
-    // 6. Session snapshots timeline
-    registerTimelineView(context, projectRoot, (id: string) => {
-      // Restore checkpoint
-      if (checkpointManager) {
-        void checkpointManager.rewindCheckpoint(id);
-      }
-    });
-
-    // 7. Agent progress visualization
-    registerAgentProgress(context);
-
-    // 10. Notification toasts
-    registerNotificationManager(context);
+  try {
+    onboardingProvider = new OnboardingProvider(extensionUri, context.secrets, context);
+  } catch (err) {
+    log(`Onboarding provider failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // ── Commands ──
-  registerCommands(context, chatSidebarProvider);
+  registerCommands(context);
 
-  // ── Version command ──
-  context.subscriptions.push(registerVersionCommand(context));
+  log("DanteCode extension activated");
 
   // ── First-run onboarding ──
-  if (!OnboardingProvider.hasOnboarded(context)) {
-    void onboardingProvider.show();
-  }
-
-  // ── Bootstrap default lessons (deferred, non-blocking, 5s delay) ──
-  if (projectRoot && !context.globalState.get<boolean>("dantecode.lessonsBootstrapped")) {
-    setTimeout(() => {
-      void (async () => {
-        try {
-          const { queryLessons, recordLesson } = await import("@dantecode/danteforge");
-          const existing = await queryLessons({ projectRoot, limit: 1 });
-          if (existing.length === 0) {
-            const defaults = [
-              { pattern: "Placeholder / stub code", correction: "Always implement real logic." },
-              { pattern: "Missing error handling", correction: "Wrap external calls in try-catch." },
-              { pattern: "Hardcoded secrets", correction: "Use env vars or secure storage." },
-              { pattern: "No type safety", correction: "Prefer explicit types over any." },
-              { pattern: "Large functions", correction: "Break functions over 50 lines." },
-            ];
-            for (const d of defaults) {
-              await recordLesson({ pattern: d.pattern, correction: d.correction, projectRoot, occurrences: 1, lastSeen: new Date().toISOString(), severity: "info" as any, source: "bootstrap" as any }, projectRoot);
-            }
-          }
-          void context.globalState.update("dantecode.lessonsBootstrapped", true);
-        } catch { /* danteforge not available */ }
-      })();
-    }, 5000); // Delay 5s to not compete with activation
-  }
-
-  outputChannel.appendLine("DanteCode extension activated successfully");
-
-  } catch (activationError) {
-    outputChannel.appendLine(`ACTIVATION FAILED: ${activationError instanceof Error ? activationError.message : String(activationError)}`);
-    outputChannel.appendLine(`Stack: ${activationError instanceof Error ? activationError.stack : "N/A"}`);
-    outputChannel.show(true);
+  try {
+    if (onboardingProvider && !OnboardingProvider.hasOnboarded(context)) {
+      void onboardingProvider.show();
+    }
+  } catch {
+    // Onboarding is non-critical
   }
 }
 
@@ -527,14 +183,9 @@ export function deactivate(): void {
   statusBarState?.item.dispose();
   chatSidebarProvider = undefined;
   auditPanelProvider = undefined;
-  automationPanelProvider = undefined;
-  verificationPanelProvider = undefined;
   completionProvider = undefined;
   checkpointManager = undefined;
   diffReviewProvider = undefined;
-  checkpointTreeProvider = undefined;
-  skillsTreeProvider = undefined;
-  semanticIndex = undefined;
 
   if (diagnosticProvider) {
     diagnosticProvider.clearAll();
@@ -546,7 +197,7 @@ export function deactivate(): void {
 
 // ─── Command Registration ────────────────────────────────────────────────────
 
-function registerCommands(context: vscode.ExtensionContext, chatSidebarProvider?: ChatSidebarProvider): void {
+function registerCommands(context: vscode.ExtensionContext): void {
   const commands: Array<[string, (...args: unknown[]) => unknown]> = [
     ["dantecode.selfUpdate", () => commandSelfUpdate(context)],
     ["dantecode.openChat", commandOpenChat],
@@ -567,35 +218,7 @@ function registerCommands(context: vscode.ExtensionContext, chatSidebarProvider?
     ["dantecode.listCheckpoints", commandListCheckpoints],
     ["dantecode.rewindCheckpoint", commandRewindCheckpoint],
     ["dantecode.setupApiKeys", commandSetupApiKeys],
-    [
-      "dantecode.resumeSession",
-      (sessionId?: unknown) => commandResumeSession(sessionId as string | undefined),
-    ],
-    [
-      "dantecode.forkSession",
-      (sessionId?: unknown) => commandForkSession(sessionId as string | undefined),
-    ],
-    [
-      "dantecode.deleteCheckpoint",
-      (sessionId?: unknown) => commandDeleteCheckpoint(sessionId as string | undefined),
-    ],
-    ["dantecode.refreshCheckpoints", commandRefreshCheckpoints],
-    [
-      "dantecode.executeSkill",
-      (skillName?: unknown) => commandExecuteSkill(skillName as string | undefined),
-    ],
-    [
-      "dantecode.executeSkillChain",
-      (chainName?: unknown) => commandExecuteSkillChain(chainName as string | undefined),
-    ],
-    ["dantecode.refreshSkills", commandRefreshSkills],
   ];
-
-  // ── Phase 4 commands (from commands-phase4.ts) ──
-  if (chatSidebarProvider) {
-    const phase4Commands = registerPhase4Commands(chatSidebarProvider, context);
-    commands.push(...phase4Commands);
-  }
 
   for (const [id, handler] of commands) {
     const disposable = vscode.commands.registerCommand(id, handler);
@@ -699,6 +322,16 @@ async function commandRunPDSE(): Promise<void> {
             `completeness: ${score.completeness}, correctness: ${score.correctness}, ` +
             `clarity: ${score.clarity}, consistency: ${score.consistency}`,
         );
+
+        // Update status bar with PDSE score
+        if (statusBarState) {
+          updatePdseScore(statusBarState, score.overall);
+          updateStatusBar(
+            statusBarState,
+            statusBarState.currentModel,
+            score.passedGate ? "passed" : "failed",
+          );
+        }
 
         // Push violations to diagnostics panel
         if (diagnosticProvider) {
@@ -1077,26 +710,9 @@ async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void
       name: "DanteCode Self-Update",
       cwd: installContext.repoRoot,
     });
-    // Auto-commit any local changes before self-update (self-update refuses on dirty repo).
-    // Stage tracked modifications, commit if anything changed, push, then update.
-    const autoCommitAndUpdate = [
-      `git add -u`,
-      `git diff --cached --quiet || git commit -m "chore: auto-snapshot before self-update"`,
-      `git push origin HEAD`,
-      `node packages/cli/dist/index.js self-update --verbose`,
-    ].join(" && ");
-    terminal.sendText(autoCommitAndUpdate);
+    terminal.sendText("node packages/cli/dist/index.js self-update --verbose");
     terminal.show();
-    void vscode.window
-      .showInformationMessage(
-        "DanteCode: Committing, pushing, and self-updating… Reload window when the terminal finishes.",
-        "Reload Now",
-      )
-      .then((action) => {
-        if (action === "Reload Now") {
-          void vscode.commands.executeCommand("workbench.action.reloadWindow");
-        }
-      });
+    void vscode.window.showInformationMessage("DanteCode: Repo self-update started in terminal");
     return;
   }
 
@@ -1146,534 +762,4 @@ function clearPendingDiff(): void {
   pendingDiffFilePath = undefined;
   pendingDiffNewContent = undefined;
   pendingDiffOldContent = undefined;
-}
-
-// ─── Checkpoint/Resume Commands ──────────────────────────────────────────────
-
-async function commandResumeSession(sessionId?: string): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!projectRoot) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  try {
-    const { RecoveryManager, resumeFromCheckpoint, JsonlEventStore } =
-      await import("@dantecode/core");
-    const recoveryManager = new RecoveryManager({ projectRoot });
-    const staleSessions = await recoveryManager.scanStaleSessions();
-    const resumableSessions = staleSessions.filter((s) => s.status === "resumable");
-
-    // If sessionId provided, try to find it
-    let targetSession;
-    if (sessionId) {
-      targetSession = resumableSessions.find(
-        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
-      );
-      if (!targetSession) {
-        void vscode.window.showWarningMessage(`DanteCode: Session ${sessionId} is not resumable`);
-        return;
-      }
-    } else {
-      // Show quick pick if no sessionId provided
-      if (resumableSessions.length === 0) {
-        void vscode.window.showInformationMessage("DanteCode: No resumable sessions found");
-        return;
-      }
-
-      const selection = await vscode.window.showQuickPick(
-        resumableSessions.map((s) => {
-          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
-          const eventInfo = s.lastEventId !== undefined ? ` • ${s.lastEventId} events` : "";
-          return {
-            label: s.sessionId.slice(0, 12),
-            description: timestamp,
-            detail: `Step ${s.step ?? 0}${eventInfo}`,
-            sessionId: s.sessionId,
-          };
-        }),
-        { placeHolder: "Select a session to resume" },
-      );
-
-      if (!selection) {
-        return;
-      }
-
-      targetSession = resumableSessions.find((s) => s.sessionId === selection.sessionId);
-    }
-
-    if (!targetSession) {
-      void vscode.window.showWarningMessage("DanteCode: Session not found");
-      return;
-    }
-
-    // Load checkpoint and event store
-    const eventStore = new JsonlEventStore(projectRoot, targetSession.sessionId);
-    const resumeContext = await resumeFromCheckpoint(
-      projectRoot,
-      targetSession.sessionId,
-      eventStore,
-    );
-
-    if (!resumeContext) {
-      void vscode.window.showErrorMessage(
-        `DanteCode: Failed to load checkpoint for session ${targetSession.sessionId}`,
-      );
-      return;
-    }
-
-    void vscode.window.showInformationMessage(
-      `DanteCode: Resumed session ${targetSession.sessionId.slice(0, 12)} from step ${resumeContext.checkpoint.step} with ${resumeContext.replayEventCount} replay events`,
-    );
-
-    // Refresh checkpoint tree
-    await checkpointTreeProvider?.refresh();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`DanteCode: Resume failed — ${msg}`);
-  }
-}
-
-async function commandForkSession(sessionId?: string): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!projectRoot) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  try {
-    const { RecoveryManager, EventSourcedCheckpointer } = await import("@dantecode/core");
-    const recoveryManager = new RecoveryManager({ projectRoot });
-    const staleSessions = await recoveryManager.scanStaleSessions();
-
-    // Find session (allow any status for forking)
-    let targetSession;
-    if (sessionId) {
-      targetSession = staleSessions.find(
-        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
-      );
-      if (!targetSession) {
-        void vscode.window.showWarningMessage(`DanteCode: Session ${sessionId} not found`);
-        return;
-      }
-    } else {
-      // Show quick pick
-      if (staleSessions.length === 0) {
-        void vscode.window.showInformationMessage("DanteCode: No sessions available to fork");
-        return;
-      }
-
-      const selection = await vscode.window.showQuickPick(
-        staleSessions.map((s) => {
-          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
-          const statusIcon = s.status === "resumable" ? "✓" : s.status === "stale" ? "⚠" : "✗";
-          return {
-            label: `${statusIcon} ${s.sessionId.slice(0, 12)}`,
-            description: `${s.status} • ${timestamp}`,
-            detail: `Step ${s.step ?? 0}`,
-            sessionId: s.sessionId,
-          };
-        }),
-        { placeHolder: "Select a session to fork" },
-      );
-
-      if (!selection) {
-        return;
-      }
-
-      targetSession = staleSessions.find((s) => s.sessionId === selection.sessionId);
-    }
-
-    if (!targetSession) {
-      void vscode.window.showWarningMessage("DanteCode: Session not found");
-      return;
-    }
-
-    // Load checkpoint
-    const checkpointer = new EventSourcedCheckpointer(projectRoot, targetSession.sessionId);
-    const tuple = await checkpointer.getTuple();
-
-    if (!tuple) {
-      void vscode.window.showErrorMessage(
-        `DanteCode: Failed to load checkpoint for session ${targetSession.sessionId}`,
-      );
-      return;
-    }
-
-    const { checkpoint } = tuple;
-
-    // Create new branch from checkpoint's worktree ref (or current HEAD)
-    const baseRef = checkpoint.worktreeRef || "HEAD";
-    const timestamp = Date.now();
-    const newBranchName = `fork-${targetSession.sessionId.slice(0, 8)}-${timestamp}`;
-
-    const { execFileSync } = await import("node:child_process");
-    execFileSync("git", ["branch", newBranchName, baseRef], {
-      cwd: projectRoot,
-      encoding: "utf8",
-    });
-
-    const switchToNew = await vscode.window.showInformationMessage(
-      `DanteCode: Forked session to branch ${newBranchName}`,
-      "Switch to Branch",
-      "Stay Here",
-    );
-
-    if (switchToNew === "Switch to Branch") {
-      execFileSync("git", ["checkout", newBranchName], {
-        cwd: projectRoot,
-        encoding: "utf8",
-      });
-      void vscode.window.showInformationMessage(`DanteCode: Switched to ${newBranchName}`);
-    }
-
-    // Refresh checkpoint tree
-    await checkpointTreeProvider?.refresh();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`DanteCode: Fork failed — ${msg}`);
-  }
-}
-
-async function commandDeleteCheckpoint(sessionId?: string): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!projectRoot || !checkpointTreeProvider) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  try {
-    const { RecoveryManager } = await import("@dantecode/core");
-    const recoveryManager = new RecoveryManager({ projectRoot });
-    const staleSessions = await recoveryManager.scanStaleSessions();
-
-    let targetSession;
-    if (sessionId) {
-      targetSession = staleSessions.find(
-        (s) => s.sessionId === sessionId || s.sessionId.startsWith(sessionId),
-      );
-    } else {
-      // Show quick pick
-      if (staleSessions.length === 0) {
-        void vscode.window.showInformationMessage("DanteCode: No checkpoints to delete");
-        return;
-      }
-
-      const selection = await vscode.window.showQuickPick(
-        staleSessions.map((s) => {
-          const timestamp = s.timestamp ? new Date(s.timestamp).toLocaleString() : "unknown";
-          return {
-            label: s.sessionId.slice(0, 12),
-            description: `${s.status} • ${timestamp}`,
-            sessionId: s.sessionId,
-          };
-        }),
-        { placeHolder: "Select a checkpoint to delete" },
-      );
-
-      if (!selection) {
-        return;
-      }
-
-      targetSession = staleSessions.find((s) => s.sessionId === selection.sessionId);
-    }
-
-    if (!targetSession) {
-      void vscode.window.showWarningMessage("DanteCode: Checkpoint not found");
-      return;
-    }
-
-    // Confirm deletion
-    const confirm = await vscode.window.showWarningMessage(
-      `Delete checkpoint ${targetSession.sessionId.slice(0, 12)}?`,
-      { modal: true },
-      "Delete",
-      "Cancel",
-    );
-
-    if (confirm !== "Delete") {
-      return;
-    }
-
-    // Delete checkpoint directory
-    const { rm } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    const checkpointDir = join(projectRoot, ".dantecode", "checkpoints", targetSession.sessionId);
-    await rm(checkpointDir, { recursive: true, force: true });
-
-    // Delete event log
-    const eventLog = join(projectRoot, ".dantecode", "events", `${targetSession.sessionId}.jsonl`);
-    await rm(eventLog, { force: true });
-
-    void vscode.window.showInformationMessage(
-      `DanteCode: Deleted checkpoint ${targetSession.sessionId.slice(0, 12)}`,
-    );
-
-    // Refresh checkpoint tree
-    await checkpointTreeProvider.refresh();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    void vscode.window.showErrorMessage(`DanteCode: Delete failed — ${msg}`);
-  }
-}
-
-async function commandRefreshCheckpoints(): Promise<void> {
-  if (!checkpointTreeProvider) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  await checkpointTreeProvider.refresh();
-  const count = checkpointTreeProvider.getCheckpointCount();
-  const resumableCount = checkpointTreeProvider.getResumableCount();
-  void vscode.window.showInformationMessage(
-    `DanteCode: Found ${count} checkpoint(s), ${resumableCount} resumable`,
-  );
-}
-
-// ─── Skill Commands (Wave 3 Task 3.6) ────────────────────────────────────────
-
-async function commandExecuteSkill(skillName?: string): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!projectRoot) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  try {
-    const { listSkills, getSkill } = await import("@dantecode/skill-adapter");
-    const { runSkill, makeRunContext, makeProvenance } = await import("@dantecode/skills-runtime");
-
-    // If no skill name provided, show picker
-    if (!skillName) {
-      const skills = await listSkills(projectRoot);
-      if (skills.length === 0) {
-        void vscode.window.showInformationMessage("DanteCode: No skills found");
-        return;
-      }
-
-      const selected = await vscode.window.showQuickPick(
-        skills.map((s) => ({
-          label: s.name,
-          description: s.importSource || "",
-          detail: s.description,
-          skillName: s.name,
-        })),
-        {
-          placeHolder: "Select a skill to execute",
-          matchOnDescription: true,
-          matchOnDetail: true,
-        },
-      );
-
-      if (!selected) {
-        return;
-      }
-
-      skillName = selected.skillName;
-    }
-
-    // Execute skill
-    void vscode.window.showInformationMessage(`DanteCode: Executing skill "${skillName}"...`);
-
-    // Load skill definition
-    const skillDef = await getSkill(skillName as string, projectRoot as string);
-    if (!skillDef) {
-      void vscode.window.showErrorMessage(`DanteCode: Skill "${skillName}" not found`);
-      return;
-    }
-
-    // Convert to DanteSkill format
-    const skill = {
-      name: skillDef.frontmatter.name,
-      description: skillDef.frontmatter.description ?? "",
-      sourceType: "native" as const,
-      sourceRef: skillDef.sourcePath ?? skillName,
-      license: "MIT",
-      instructions: skillDef.instructions,
-      commandOverrides: [],
-      provenance: makeProvenance({
-        sourceType: "native",
-        sourceRef: skillDef.sourcePath ?? skillName,
-        originalName: skillDef.frontmatter.name,
-        license: "MIT",
-      }),
-    };
-
-    const context = makeRunContext({
-      skillName: skillName as string,
-      projectRoot: projectRoot as string,
-    });
-    const result = await runSkill({ skill, context });
-
-    // Show result
-    if (result.state === "applied" || result.state === "verified") {
-      void vscode.window.showInformationMessage(
-        `DanteCode: Skill "${skillName}" completed successfully`,
-      );
-    } else {
-      void vscode.window.showWarningMessage(
-        `DanteCode: Skill "${skillName}" completed with state: ${result.state}`,
-      );
-    }
-
-    // Show output in channel
-    const outputChannel = vscode.window.createOutputChannel(`DanteCode: ${skillName}`);
-    outputChannel.appendLine(`Skill: ${skillName}`);
-    outputChannel.appendLine(`State: ${result.state}`);
-    outputChannel.appendLine(`Summary: ${result.plainLanguageSummary}`);
-    if (result.commandsRun.length > 0) {
-      outputChannel.appendLine(`\nCommands:\n${result.commandsRun.join("\n")}`);
-    }
-    if (result.filesTouched.length > 0) {
-      outputChannel.appendLine(`\nFiles:\n${result.filesTouched.join("\n")}`);
-    }
-    outputChannel.show();
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    void vscode.window.showErrorMessage(`DanteCode: Skill execution failed — ${msg}`);
-  }
-}
-
-async function commandExecuteSkillChain(chainName?: string): Promise<void> {
-  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!projectRoot) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    const { executeChain, makeRunContext, makeProvenance } =
-      await import("@dantecode/skills-runtime");
-    const { getSkill } = await import("@dantecode/skill-adapter");
-
-    // If no chain name provided, show picker
-    if (!chainName) {
-      const { readdir } = await import("node:fs/promises");
-      const chainsDir = join(projectRoot, ".dantecode", "skills", "chains");
-
-      let chainFiles: string[] = [];
-      try {
-        chainFiles = await readdir(chainsDir);
-        chainFiles = chainFiles.filter((f) => f.endsWith(".json"));
-      } catch {
-        void vscode.window.showInformationMessage("DanteCode: No skill chains found");
-        return;
-      }
-
-      if (chainFiles.length === 0) {
-        void vscode.window.showInformationMessage("DanteCode: No skill chains found");
-        return;
-      }
-
-      const selected = await vscode.window.showQuickPick(
-        chainFiles.map((f) => ({
-          label: f.replace(".json", ""),
-          description: "Skill chain",
-          chainName: f.replace(".json", ""),
-        })),
-        {
-          placeHolder: "Select a skill chain to execute",
-        },
-      );
-
-      if (!selected) {
-        return;
-      }
-
-      chainName = selected.chainName;
-    }
-
-    // Load chain definition
-    const chainPath = join(projectRoot, ".dantecode", "skills", "chains", `${chainName}.json`);
-    const chainContent = await readFile(chainPath, "utf-8");
-    const chain = JSON.parse(chainContent);
-
-    // Get initial input from user
-    const initialInput = await vscode.window.showInputBox({
-      prompt: `Enter initial input for chain "${chainName}"`,
-      placeHolder: "Chain input (optional)",
-    });
-
-    if (initialInput === undefined) {
-      return;
-    }
-
-    // Execute chain
-    void vscode.window.showInformationMessage(`DanteCode: Executing chain "${chainName}"...`);
-
-    // Create a context for chain execution - use a placeholder skill name
-    const context = makeRunContext({ skillName: `chain:${chainName}`, projectRoot });
-
-    const result = await executeChain({
-      chain,
-      initialInput: initialInput || "",
-      context,
-      skillLoader: async (name: string) => {
-        const skillDef = await getSkill(name, projectRoot);
-        if (!skillDef) {
-          return null;
-        }
-
-        return {
-          name: skillDef.frontmatter.name,
-          description: skillDef.frontmatter.description ?? "",
-          sourceType: "native" as const,
-          sourceRef: skillDef.sourcePath ?? name,
-          license: "MIT",
-          instructions: skillDef.instructions,
-          commandOverrides: [],
-          provenance: makeProvenance({
-            sourceType: "native",
-            sourceRef: skillDef.sourcePath ?? name,
-            originalName: skillDef.frontmatter.name,
-            license: "MIT",
-          }),
-        };
-      },
-    });
-
-    // Show result
-    if (result.success) {
-      void vscode.window.showInformationMessage(
-        `DanteCode: Chain "${chainName}" completed successfully (${result.stepResults.length} steps)`,
-      );
-    } else {
-      void vscode.window.showWarningMessage(
-        `DanteCode: Chain "${chainName}" failed at step ${result.failedAtStep !== undefined ? result.failedAtStep + 1 : "unknown"}`,
-      );
-    }
-
-    // Show output in channel
-    const outputChannel = vscode.window.createOutputChannel(`DanteCode: ${chainName}`);
-    outputChannel.appendLine(`Chain: ${chainName}`);
-    outputChannel.appendLine(`Success: ${result.success}`);
-    outputChannel.appendLine(`Steps completed: ${result.stepResults.length}`);
-    outputChannel.appendLine("");
-
-    for (const stepResult of result.stepResults) {
-      outputChannel.appendLine(`Step ${stepResult.stepIndex + 1}: ${stepResult.skillName}`);
-      outputChannel.appendLine(`  State: ${stepResult.result.state}`);
-      outputChannel.appendLine(
-        `  Summary: ${stepResult.result.plainLanguageSummary.substring(0, 200)}${stepResult.result.plainLanguageSummary.length > 200 ? "..." : ""}`,
-      );
-    }
-
-    outputChannel.show();
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    void vscode.window.showErrorMessage(`DanteCode: Chain execution failed — ${msg}`);
-  }
-}
-
-async function commandRefreshSkills(): Promise<void> {
-  if (!skillsTreeProvider) {
-    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
-    return;
-  }
-
-  skillsTreeProvider.refresh();
-  void vscode.window.showInformationMessage("DanteCode: Skills refreshed");
 }

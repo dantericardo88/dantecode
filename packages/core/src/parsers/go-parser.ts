@@ -3,20 +3,38 @@
 // Extracts function, type, interface, and struct definitions from Go source
 // ============================================================================
 
-import Parser from "tree-sitter";
-import Go from "tree-sitter-go";
+import type Parser from "tree-sitter";
 import type { SymbolDefinition } from "../repo-map-ast.js";
+import { OptionalNativeModuleError, loadOptionalModule } from "./native-loader.js";
+
+type TreeSitterParserConstructor = new () => Parser;
 
 export class GoParser {
-  private parser: Parser;
+  private parser: Parser | null = null;
 
-  constructor() {
-    this.parser = new Parser();
-    this.parser.setLanguage(Go);
+  private getParser(): Parser {
+    if (this.parser) {
+      return this.parser;
+    }
+
+    const ParserConstructor = loadOptionalModule<TreeSitterParserConstructor>("tree-sitter");
+    const goLanguage = loadOptionalModule<unknown>("tree-sitter-go");
+
+    if (!goLanguage) {
+      throw new OptionalNativeModuleError(
+        "tree-sitter-go",
+        new Error("Missing Go language export"),
+      );
+    }
+
+    const parser = new ParserConstructor();
+    parser.setLanguage(goLanguage as never);
+    this.parser = parser;
+    return parser;
   }
 
   parse(source: string, filePath: string): SymbolDefinition[] {
-    const tree = this.parser.parse(source);
+    const tree = this.getParser().parse(source);
     const symbols: SymbolDefinition[] = [];
     const lines = source.split("\n");
 

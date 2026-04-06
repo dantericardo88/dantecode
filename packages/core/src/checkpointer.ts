@@ -127,7 +127,7 @@ export interface CheckpointListOptions {
 
 /** Options for the EventSourcedCheckpointer constructor. */
 export interface EventSourcedCheckpointerOptions {
-  /** Base directory for checkpoints. Defaults to `.danteforge/checkpoints`. */
+  /** Base directory for checkpoints. Defaults to `.dantecode/checkpoints`. */
   baseDir?: string;
   /** Maximum events before compaction into new base state. Default: 100. */
   maxEventsBeforeCompaction?: number;
@@ -202,7 +202,7 @@ export class EventSourcedCheckpointer {
     options: EventSourcedCheckpointerOptions = {},
   ) {
     this.sessionId = sessionId;
-    this.baseDir = options.baseDir ?? join(projectRoot, ".danteforge", "checkpoints");
+    this.baseDir = options.baseDir ?? join(projectRoot, ".dantecode", "checkpoints");
     this.maxEvents = options.maxEventsBeforeCompaction ?? DEFAULT_MAX_EVENTS;
     this.writeFileFn = options.writeFileFn ?? ((p, d) => writeFile(p, d, "utf-8"));
     this.readFileFn = options.readFileFn ?? ((p) => readFile(p, "utf-8"));

@@ -12,6 +12,20 @@ export {
 } from "./model-router.js";
 export type { GenerateOptions, LoopExitReason } from "./model-router.js";
 
+// ─── Stream Recovery ──────────────────────────────────────────────────────────
+
+export { StreamRecovery } from "./stream-recovery.js";
+export type { StreamRecoveryOptions } from "./stream-recovery.js";
+
+// ─── Auto Commit ─────────────────────────────────────────────────────────────
+
+export { generateCommitMessage, autoCommitIfEnabled } from "./auto-commit.js";
+export type { AutoCommitConfig, AutoCommitResult } from "./auto-commit.js";
+
+// ─── Follow-up Suggestions ───────────────────────────────────────────────────
+
+export { generateFollowupSuggestions } from "./followup-suggestions.js";
+
 // ─── Providers ────────────────────────────────────────────────────────────────
 
 export {
@@ -20,6 +34,10 @@ export {
   buildOpenAIProvider,
   buildOllamaProvider,
   PROVIDER_BUILDERS,
+  buildMistralProvider,
+  buildDeepSeekProvider,
+  buildTogetherProvider,
+  buildPerplexityProvider,
 } from "./providers/index.js";
 export type { ProviderBuilder } from "./providers/index.js";
 
@@ -210,7 +228,12 @@ export type { CommandPaletteOptions, PaletteCommand, CommandMatch } from "./comm
 // ─── Browser Agent ──────────────────────────────────────────────────────────
 
 export { BrowserAgent } from "./browser-agent.js";
-export type { BrowserAction, BrowserActionResult, BrowserAgentOptions } from "./browser-agent.js";
+export type {
+  BrowserAction,
+  BrowserActionResult,
+  BrowserAgentOptions,
+  VisionRouter,
+} from "./browser-agent.js";
 
 // ─── Vision Router ──────────────────────────────────────────────────────────
 
@@ -430,6 +453,7 @@ export {
   formatPipelineProgress,
   getMagicStatePath,
 } from "./magic-pipeline-state.js";
+
 export type { MagicPipelineState, MagicStepResult } from "./magic-pipeline-state.js";
 
 export { detectInstallContext, resolvePreferredShell } from "./runtime-update.js";
@@ -822,6 +846,13 @@ export type { ApprovalModeInput, CanonicalApprovalMode } from "./approval-modes.
 export { assessMutationScope, summarizeMutationScope } from "./mutation-scope.js";
 export type { MutationScopeAssessment, MutationScopeInput } from "./mutation-scope.js";
 export { globalToolScheduler } from "./tool-runtime/tool-scheduler.js";
+export {
+  READ_ONLY_TOOLS,
+  MUTATION_TOOLS,
+  groupToolCallsForExecution,
+  executeBatchedTools,
+} from "./tool-runtime/tool-scheduler.js";
+export type { ParallelBatch } from "./tool-runtime/tool-scheduler.js";
 
 // ─── Verification Stores ──────────────────────────────────────────────────────
 
@@ -997,8 +1028,9 @@ export type { DimensionScore, DimensionScorerOptions } from "./dimension-scorer.
 export { MemoryQualityScorer } from "./memory-quality-scorer.js";
 export type { ScoredMemory, QualityScore } from "./memory-quality-scorer.js";
 
+// ─── Memory Consolidator ──────────────────────────────────────────────────
 export { MemoryConsolidator } from "./memory-consolidator.js";
-export type { MemoryItem, MemoryConsolidatorOptions } from "./memory-consolidator.js";
+export type { MemoryConsolidatorOptions, MemoryEntry, ConsolidationResult } from "./memory-consolidator.js";
 
 // ─── Search Quality ─────────────────────────────────────────────────────────
 
@@ -1293,3 +1325,185 @@ export type {
   CompletionVerificationContext,
   ExecutionPolicySnapshot,
 } from "./execution-policy.js";
+
+// ─── Hook System ─────────────────────────────────────────────────────────────
+
+export {
+  HookRunner,
+  getGlobalHookRunner,
+  setGlobalHookRunner,
+  type HookEvent,
+  type HookDefinition,
+  type HookResult,
+  type HookRunSummary,
+} from "./hooks/hook-runner.js";
+export type { HookEventType } from "./hooks/hook-types.js";
+
+// ─── Context Pruner ──────────────────────────────────────────────────────────
+
+export { ContextPruner } from "./context-pruner.js";
+export type { PruneResult } from "./context-pruner.js";
+
+// ─── Architect / Editor Mode ─────────────────────────────────────────────────
+
+export {
+  runArchitectPhase,
+  runEditorPhase,
+  ARCHITECT_SYSTEM_PROMPT,
+  EDITOR_SYSTEM_PROMPT,
+} from "./architect-editor-mode.js";
+export type { ArchitectEditorConfig } from "./architect-editor-mode.js";
+
+// ─── Post-Edit Linter ────────────────────────────────────────────────────────
+
+export { runPostEditLint, buildLintFixPrompt } from "./post-edit-linter.js";
+export type { LintResult as PostEditLintResult, LintError as PostEditLintError } from "./post-edit-linter.js";
+
+// ─── Voice Input ─────────────────────────────────────────────────────────────
+
+export { transcribeAudio, transcribeAudioBuffer } from "./voice-input.js";
+export type { VoiceInputConfig, VoiceTranscription } from "./voice-input.js";
+
+// ─── Session Cron ─────────────────────────────────────────────────────────────
+
+export { SessionCronScheduler } from "./session-cron.js";
+export type { CronTask } from "./session-cron.js";
+
+// ─── Arena Mode ───────────────────────────────────────────────────────────────
+
+export { ArenaRunner, applyVariantToMain as arenaApplyVariantToMain } from "./arena-mode.js";
+export type {
+  ArenaModel,
+  ArenaRunConfig,
+  ArenaResult,
+  ArenaSession,
+} from "./arena-mode.js";
+
+// ─── Inference-Time Scaling ───────────────────────────────────────────────────
+
+export { runInferenceScaling, applyVariantToMain } from "./inference-scaling.js";
+export type { ScalingConfig, ScaledResult } from "./inference-scaling.js";
+
+// ─── LSP Integration ──────────────────────────────────────────────────────────
+
+export { readLspConfig, writeLspConfig, detectLspServers } from "./lsp-config.js";
+export type { LspConfig, LspServerConfig } from "./lsp-config.js";
+
+export { LspClient } from "./lsp-client.js";
+export type { LspDiagnostic, LspLocation } from "./lsp-client.js";
+
+// ─── Bash Analyser ────────────────────────────────────────────────────────────
+
+export { analyzeBashCommand } from "./bash-analyzer.js";
+export type { BashAnalysisResult } from "./bash-analyzer.js";
+
+// ─── Context Selector ────────────────────────────────────────────────────────
+
+export {
+  selectContextFiles,
+  getGitFrequencyScores,
+  computeFrequencyMultiplier,
+  findAdjacentTestFile,
+  findReferencedTypeFiles,
+  detectPrimaryLanguage,
+} from "./context-selector.js";
+export type {
+  ContextCandidate,
+  ContextSelectorOptions,
+} from "./context-selector.js";
+
+// ─── Token Cache ──────────────────────────────────────────────────────────────
+
+export { TokenCache, globalTokenCache } from "./token-cache.js";
+export type { CacheableContent } from "./token-cache.js";
+
+// ─── Agent Schema ─────────────────────────────────────────────────────────────
+
+export {
+  createAction,
+  createObservation,
+  createEvent,
+  serializeEvent,
+  deserializeEvent,
+  isTerminalObservation,
+  isDestructiveAction,
+} from "./agent-schema.js";
+export type {
+  ActionType,
+  ObservationType,
+  AgentAction,
+  AgentObservation,
+  AgentEvent,
+} from "./agent-schema.js";
+
+// ─── Agent State Machine ──────────────────────────────────────────────────────
+
+export { AgentStateMachine } from "./agent-state-machine.js";
+export type {
+  AgentState,
+  StateTransition,
+  AgentStateMachineConfig,
+} from "./agent-state-machine.js";
+
+// ─── Agent Delegation ─────────────────────────────────────────────────────────
+
+export { AgentDelegationManager, globalDelegationManager } from "./agent-delegation.js";
+export type {
+  DelegationRequest,
+  DelegationResult,
+  ActiveDelegation,
+} from "./agent-delegation.js";
+
+// ─── Platform Sandbox ─────────────────────────────────────────────────────────
+
+export {
+  detectPlatformSandbox,
+  buildSandboxedCommand,
+  getSandboxProfile,
+} from "./platform-sandbox.js";
+export type {
+  SandboxMode,
+  PlatformSandboxConfig,
+  PlatformSandboxResult,
+} from "./platform-sandbox.js";
+
+// ─── Deployer ─────────────────────────────────────────────────────────────────
+
+export { deploy, detectDeploymentPlatform } from "./deployer.js";
+export type {
+  DeploymentConfig,
+  DeploymentResult,
+  DeploymentPlatform,
+} from "./deployer.js";
+
+// ─── XML Artifact Parser ──────────────────────────────────────────────────────
+
+export { XmlArtifactParser, parseArtifacts } from "./xml-artifact-parser.js";
+export type {
+  ParsedArtifact,
+  ArtifactAction,
+  ArtifactActionType,
+  ArtifactParseCallbacks,
+} from "./xml-artifact-parser.js";
+
+// ─── Wiring Auditor ───────────────────────────────────────────────────────────
+export {
+  FEATURE_WIRING_MAP,
+  HOT_PATH_FILES,
+  getRegisteredFeatures,
+  isFeatureRegistered,
+  getFeatureWiring,
+} from "./wiring-auditor.js";
+export type { FeatureWiringEntry } from "./wiring-auditor.js";
+
+// ─── Feature Tests ────────────────────────────────────────────────────────────
+export {
+  ALL_SCENARIOS,
+  runFeatureTest,
+  type FeatureTestScenario,
+  type FeatureTestResult,
+} from "./feature-tests/index.js";
+
+// ─── MCP Memory Bridge ────────────────────────────────────────────────────────
+export { MCPMemoryBridge } from "./mcp-memory-bridge.js";
+export type { MCPMemoryBridgeOptions } from "./mcp-memory-bridge.js";
