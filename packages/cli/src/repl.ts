@@ -573,14 +573,14 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       }).catch(() => {});
     }
   };
-  process.once("uncaughtException", async (err) => {
+  process.on("uncaughtException", async (err) => {
     process.stderr.write(
       `\n[DanteCode] Uncaught exception: ${err.message ?? err}\nWriting crash report...\n`,
     );
     await _writeCrashReport();
     process.exit(1);
   });
-  process.once("unhandledRejection", async (reason) => {
+  process.on("unhandledRejection", async (reason) => {
     const msg = reason instanceof Error ? reason.message : String(reason);
     process.stderr.write(`\n[DanteCode] Unhandled rejection: ${msg}\nWriting crash report...\n`);
     await _writeCrashReport();

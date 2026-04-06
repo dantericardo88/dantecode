@@ -4170,6 +4170,15 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         });
 
         if (failureAction.action === "escalate") {
+          // Auto-trigger RecoveryEngine on escalation to provide actionable diagnostics
+          // before giving up. Runs typecheck/lint/test to surface which checks are broken.
+          process.stdout.write(`\n${YELLOW}Escalation — running repo verification to diagnose...${RESET}\n`);
+          const diagResult = recovery.runRepoRootVerification(state.projectRoot);
+          const diagLines = diagResult.stepResults.map(
+            (s) => `  ${s.passed ? GREEN + "✓" : RED + "✗"} ${s.name}${RESET}`,
+          );
+          process.stdout.write(diagLines.join("\n") + "\n");
+
           // Save final checkpoint before aborting
           await checkpointMgr.createCheckpoint({
             label: "escalation",
@@ -4178,10 +4187,17 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
             elapsedMs: Date.now() - sessionStart,
             targetFilePath: resolvedTargetFile,
             targetFileContent: currentCode,
-            metadata: { escalated: true, error: errMsg },
+            metadata: {
+              escalated: true,
+              error: errMsg,
+              diagFailed: diagResult.failedSteps,
+            },
           });
           checkpointMgr.stopPeriodicCheckpoints();
-          return `${RED}${BOLD}Autoforge ESCALATED${RESET}: ${taskBreaker.getTotalFailures()} failures, recovery exhausted.\n  Last error: ${errMsg}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
+          const failedChecks = diagResult.failedSteps.length > 0
+            ? `\n  Failing checks: ${diagResult.failedSteps.join(", ")}`
+            : "";
+          return `${RED}${BOLD}Autoforge ESCALATED${RESET}: ${taskBreaker.getTotalFailures()} failures, recovery exhausted.\n  Last error: ${errMsg}${failedChecks}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
         }
 
         if (failureAction.action === "pause_and_recover") {

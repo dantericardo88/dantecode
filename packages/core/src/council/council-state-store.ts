@@ -41,9 +41,15 @@ export async function saveCouncilRun(state: CouncilRunState): Promise<void> {
     ...state,
     updatedAt: new Date().toISOString(),
   };
-  // Write to .tmp first, then rename — atomic on POSIX, best-effort on Windows
+  // Write to .tmp first, then rename — atomic on POSIX, best-effort on Windows.
+  // Windows rename can fail with ENOENT on flush-timing races; fall back to direct write.
   await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
-  await rename(tmpPath, path);
+  try {
+    await rename(tmpPath, path);
+  } catch {
+    // Fallback: direct write (non-atomic, safe for Windows dev environments)
+    await writeFile(path, JSON.stringify(updated, null, 2), "utf-8");
+  }
 }
 
 /**

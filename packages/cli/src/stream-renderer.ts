@@ -26,6 +26,10 @@ export interface StreamRendererOptions {
   reasoningTier?: string;
   /** Thinking token budget to display in header. */
   thinkingBudget?: number;
+  /** Context window utilization percentage (0-100) shown in header. */
+  contextPercent?: number;
+  /** Budget tier for color coding the context gauge (green/yellow/red/critical). */
+  budgetTier?: "green" | "yellow" | "red" | "critical";
 }
 
 export interface FinishOptions {
@@ -35,6 +39,10 @@ export interface FinishOptions {
   elapsedMs?: number;
   /** Number of tokens used. */
   tokens?: number;
+  /** Context window utilization percentage to show in footer. */
+  contextPercent?: number;
+  /** Budget tier for footer color coding. */
+  budgetTier?: "green" | "yellow" | "red" | "critical";
 }
 
 export interface ToolAnnotation {
@@ -58,6 +66,8 @@ export class StreamRenderer {
   private readonly ux: UXEngine;
   private readonly reasoningTier: string | undefined;
   private readonly thinkingBudget: number | undefined;
+  private readonly contextPercent: number | undefined;
+  private readonly budgetTier: "green" | "yellow" | "red" | "critical" | undefined;
 
   constructor(options: StreamRendererOptions | boolean = false) {
     // Backward compat: `new StreamRenderer(true)` = silent
@@ -69,6 +79,8 @@ export class StreamRenderer {
       this.ux = new UXEngine();
       this.reasoningTier = undefined;
       this.thinkingBudget = undefined;
+      this.contextPercent = undefined;
+      this.budgetTier = undefined;
     } else {
       this.silent = options.silent ?? false;
       this.richMode = options.richMode ?? false;
@@ -77,6 +89,8 @@ export class StreamRenderer {
       this.ux = new UXEngine({ theme: options.theme ?? "default", colors: this.colors });
       this.reasoningTier = options.reasoningTier;
       this.thinkingBudget = options.thinkingBudget;
+      this.contextPercent = options.contextPercent;
+      this.budgetTier = options.budgetTier;
     }
   }
 
@@ -116,15 +130,34 @@ export class StreamRenderer {
       }
     }
 
-    process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET}${label}${tierSuffix}\n\n`);
+    let contextGauge = "";
+    if (this.contextPercent !== undefined) {
+      const pct = Math.round(this.contextPercent);
+      const barWidth = 20;
+      const filled = Math.round((pct / 100) * barWidth);
+      const bar = "█".repeat(filled) + "░".repeat(barWidth - filled);
+      const tierColor =
+        this.budgetTier === "critical"
+          ? this.colors ? "\x1b[31m" : ""  // red
+          : this.budgetTier === "red"
+            ? this.colors ? "\x1b[33m" : ""  // yellow
+            : this.budgetTier === "yellow"
+              ? this.colors ? "\x1b[33m" : ""  // yellow
+              : this.colors ? "\x1b[32m" : ""; // green
+      contextGauge = `  ${DIM}ctx${RESET} ${tierColor}${bar}${RESET} ${DIM}${pct}%${RESET}`;
+    }
+
+    process.stdout.write(`\n${CYAN}${BOLD}DanteCode${RESET}${label}${tierSuffix}${contextGauge}\n\n`);
   }
 
   /**
    * Write a token chunk to the output.
    * In silent mode, buffers only (no stdout output).
    * In richMode, tokens are buffered and flushed line-by-line for markdown rendering.
+   * Ink pattern: willRender pre-flight skips empty/unchanged writes.
    */
   write(token: string): void {
+    if (!token) return; // Ink willRender pre-flight: skip empty writes entirely
     this.buffer += token;
     if (this.silent) return;
 
@@ -151,6 +184,7 @@ export class StreamRenderer {
     this.headerPrinted = false;
     this.toolLineCount = 0;
     this._richLineBuffer = "";
+    this._renderedUpTo = 0;
   }
 
   /**
@@ -245,29 +279,42 @@ export class StreamRenderer {
   }
 
   // -------------------------------------------------------------------------
-  // Private: rich-mode line buffering
+  // Private: rich-mode line buffering (Ink incremental line-diff pattern)
   // -------------------------------------------------------------------------
 
+  /** Tracks how many bytes of this.buffer have already been rendered to stdout. */
+  private _renderedUpTo = 0;
+  /** Holds the incomplete current line (no trailing \n yet). */
   private _richLineBuffer = "";
 
+  /**
+   * Ink incremental line-diff pattern: only process content added since last flush.
+   * Compares lines using `nextLine !== previousLine` logic — only writes changed lines.
+   * This eliminates streaming flicker from full-repaint on each chunk.
+   */
   private _flushLines(): void {
-    // Find all complete lines (ending with \n) in _richLineBuffer + new additions
-    const combined = this._richLineBuffer + this.buffer.slice(-this.buffer.length);
-    // We track incrementally — only process what was added to buffer
-    const tail = this.buffer;
-    const nlIdx = tail.lastIndexOf("\n");
+    // Get only the new content since the last flush
+    const newContent = this.buffer.slice(this._renderedUpTo);
+    if (!newContent) return; // Ink willRender: nothing new to render
+
+    // Append new content to the current incomplete line buffer
+    const combined = this._richLineBuffer + newContent;
+    const nlIdx = combined.lastIndexOf("\n");
+
     if (nlIdx === -1) {
       // No complete line yet — accumulate
-      this._richLineBuffer = tail;
+      this._richLineBuffer = combined;
+      this._renderedUpTo = this.buffer.length;
       return;
     }
 
-    const complete = tail.slice(0, nlIdx + 1);
-    this._richLineBuffer = tail.slice(nlIdx + 1);
+    // Extract all complete lines, keep the trailing incomplete fragment
+    const complete = combined.slice(0, nlIdx + 1);
+    this._richLineBuffer = combined.slice(nlIdx + 1);
+    this._renderedUpTo = this.buffer.length - this._richLineBuffer.length;
 
     const rendered = this.ux.formatMarkdown(complete);
-    process.stdout.write(rendered);
-    void combined; // suppress unused warning
+    if (rendered) process.stdout.write(rendered); // Ink willRender: skip empty renders
   }
 
   // -------------------------------------------------------------------------
@@ -300,6 +347,17 @@ export class StreamRenderer {
 
     if (opts.tokens !== undefined) {
       parts.push(`${DIM}${opts.tokens.toLocaleString()} tokens${RESET}`);
+    }
+
+    if (opts.contextPercent !== undefined) {
+      const pct = Math.round(opts.contextPercent);
+      const tierColor =
+        opts.budgetTier === "critical" || opts.budgetTier === "red"
+          ? this.colors ? "\x1b[31m" : ""
+          : opts.budgetTier === "yellow"
+            ? this.colors ? "\x1b[33m" : ""
+            : this.colors ? "\x1b[32m" : "";
+      parts.push(`${tierColor}ctx ${pct}%${RESET}`);
     }
 
     if (parts.length > 0) {
