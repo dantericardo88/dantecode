@@ -3,14 +3,31 @@
 **Project:** DanteCode
 **Branch:** feat/all-nines
 **Generated:** 2026-03-30
+**Updated (score correction):** 2026-04-06
 **Sprint:** Nova (high-value OSS patterns + critical path to 9.7+)
 **Status:** ✅ PHASE 1-4 COMPLETE (3/4 phases executable, 1 pending API key)
 
 ---
 
-## Executive Summary
+## ⚠️ SCORE CORRECTION (2026-04-06)
 
-**Score Progression:** 9.3/10 → 9.5/10 (target: 9.7+)
+**The "9.3/10 → 9.5/10" score progression below was based on a self-referential internal framework, NOT competitive benchmarking.**
+
+**True competitive scores (DanteForge assess, 27 competitors):**
+- Competitive rank: **27/28**
+- Competitive avg: **59.8/100**
+- Harsh score: **3/10**
+- 9 critical dimensions scoring 15–60/100
+
+The internal 11-dimension framework measured code existence and test counts. It did not measure competitive capability, user adoption, autonomous task completion, or enterprise readiness.
+
+**Do not use the "9.3/10 → 9.5/10" progression in planning. See DIMENSION_ASSESSMENT.md for accurate scores.**
+
+---
+
+## Executive Summary (Internal Engineering — NOT Competitive)
+
+**Internal score progression (not competitive):** 9.3/10 → 9.5/10 (these scores mean "code exists and tests pass", not "we are winning")
 
 **Deliverables:**
 - ✅ **Phase 1 (Observability System):** 670 LOC production code, 799 LOC tests, 84/84 tests passing

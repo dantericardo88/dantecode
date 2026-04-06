@@ -11,10 +11,13 @@
 
 **Question:** Is everything truly 100% complete? Do we score 9+ on all dimensions?
 
-**Honest Answer:** **No.** We score **8.0/10 overall** (not 9.1 as previously claimed).
-- 0 dimensions at 9+ (previously claimed "mission complete")
-- 5 dimensions within 0.5 of target (very close)
-- ~20 hours of critical path work remaining to reach 9+ on 8 of 11 dimensions
+**Honest Answer (2026-04-06 UPDATE):** **No.** The "8.0/10" figure in this document was also based on a self-referential internal framework.
+
+**True competitive score: 59.8/100 avg, ranked 27/28 competitors (DanteForge assess, 2026-04-06)**
+
+The 8.0/10 was an improvement over the prior false 9.1/10 — but it still used an 11-dimension internal framework that did not benchmark against competitors. The actual competitive position is far weaker than 8.0/10.
+
+See DIMENSION_ASSESSMENT.md for the corrected 18-dimension competitive scores.
 
 ---
 

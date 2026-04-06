@@ -35,3 +35,4 @@ test-results/
 # Local Claude Code settings (not for source control)
 .claude/settings.local.json
 .danteforge/lessons.md
+.git-rewrite/

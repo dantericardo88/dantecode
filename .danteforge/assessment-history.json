@@ -1,0 +1,54 @@
+[
+  {
+    "timestamp": "2026-04-06T15:57:52.697Z",
+    "harshScore": 30,
+    "displayScore": 3,
+    "dimensions": {
+      "functionality": 85,
+      "testing": 56,
+      "errorHandling": 50,
+      "security": 70,
+      "uxPolish": 50,
+      "documentation": 85,
+      "performance": 70,
+      "maintainability": 77,
+      "planningQuality": 82,
+      "selfImprovement": 55,
+      "developerExperience": 91,
+      "autonomy": 37,
+      "specDrivenPipeline": 80,
+      "convergenceSelfHealing": 38,
+      "tokenEconomy": 40,
+      "ecosystemMcp": 60,
+      "enterpriseReadiness": 35,
+      "communityAdoption": 15
+    },
+    "penaltyTotal": 35
+  },
+  {
+    "timestamp": "2026-04-06T15:59:53.203Z",
+    "harshScore": 30,
+    "displayScore": 3,
+    "dimensions": {
+      "functionality": 85,
+      "testing": 56,
+      "errorHandling": 50,
+      "security": 70,
+      "uxPolish": 50,
+      "documentation": 85,
+      "performance": 70,
+      "maintainability": 77,
+      "planningQuality": 82,
+      "selfImprovement": 55,
+      "developerExperience": 91,
+      "autonomy": 37,
+      "specDrivenPipeline": 80,
+      "convergenceSelfHealing": 38,
+      "tokenEconomy": 40,
+      "ecosystemMcp": 60,
+      "enterpriseReadiness": 35,
+      "communityAdoption": 15
+    },
+    "penaltyTotal": 35
+  }
+]
