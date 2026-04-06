@@ -8,8 +8,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
 import { CouncilOrchestrator, tryLoadCouncilRun, DanteCodeAdapter } from "@dantecode/core";
 import type {
   CouncilAgentAdapter,
@@ -114,6 +115,14 @@ describe("CouncilOrchestrator integration", () => {
   beforeEach(async () => {
     testDir = join(tmpdir(), `council-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     await mkdir(testDir, { recursive: true });
+    // Initialize a git repo so worktreeHooks can operate
+    const execOpts = { cwd: testDir, stdio: "pipe" as const };
+    execSync("git init -b main", execOpts);
+    execSync('git config user.email "test@test.com"', execOpts);
+    execSync('git config user.name "Test"', execOpts);
+    await writeFile(join(testDir, "README.md"), "test\n");
+    execSync("git add .", execOpts);
+    execSync('git commit -m "init"', execOpts);
   });
 
   afterEach(async () => {

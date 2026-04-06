@@ -12,6 +12,11 @@ vi.mock("node:child_process", async () => {
   return {
     ...actual,
     execSync: (...args: unknown[]) => mockExecSync(...args),
+    // self-update uses execFileSync for git commands — route through same mock
+    execFileSync: (cmd: string, args: string[], opts?: unknown) => {
+      const fullCmd = `${cmd} ${(args ?? []).join(" ")}`.trim();
+      return mockExecSync(fullCmd, opts);
+    },
   };
 });
 
