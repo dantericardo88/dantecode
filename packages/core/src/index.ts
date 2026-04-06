@@ -359,6 +359,11 @@ export {
   TERMINAL_ERROR_TYPES,
 } from "./error-classifier.js";
 
+// ─── Error Helper ────────────────────────────────────────────────────────────
+
+export { ErrorHelper, errorHelper } from "./error-helper.js";
+export type { ErrorKind, ErrorAnalysis, FormatOptions } from "./error-helper.js";
+
 // ─── Health Check ───────────────────────────────────────────────────────────
 
 export { runStartupHealthCheck } from "./health-check.js";

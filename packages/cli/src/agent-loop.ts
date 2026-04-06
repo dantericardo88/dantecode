@@ -21,6 +21,7 @@ import {
   isTerminal,
   getRetryDelayMs,
   DanteErrorType,
+  errorHelper,
   getCurrentWave,
   advanceWave,
   globalArtifactStore,
@@ -2439,7 +2440,20 @@ async function _runAgentLoopCore(
         messages,
         createContextBudget({ maxTokens: config.state.model.default.contextWindow ?? 200_000 }),
       );
-      const truncatedResults = toolResults.map((result) => {
+      // Inject PDSE hints for tool results that contain actionable errors
+      // (TypeScript errors, test failures, lint errors, git conflicts).
+      // ErrorHelper surfaces next-step suggestions to guide the model toward a fix.
+      const annotatedResults = toolResults.map((result) => {
+        if (result.length < 20) return result;
+        const analysis = errorHelper.classify(result);
+        if (analysis.kind !== "unknown" && analysis.suggestions.length > 0) {
+          const hint = `\n[ErrorHelper: ${analysis.kind} — ${analysis.suggestions.slice(0, 2).join("; ")}]`;
+          return result + hint;
+        }
+        return result;
+      });
+
+      const truncatedResults = annotatedResults.map((result) => {
         const advice = shouldTruncateToolOutput(result, _budgetState);
         if (advice.truncate) {
           return (
