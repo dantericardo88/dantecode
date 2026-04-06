@@ -210,7 +210,7 @@ jobs:
       - name: Update results summary
         run: python benchmarks/swe-bench/scripts/update_summary.py || echo "Summary update skipped"
       - name: Commit updated results
-        uses: EndBug/add-and-commit@v9
+        uses: EndBug/add-and-commit@v10
         with:
           message: "chore: update SWE-bench results [skip ci]"
           add: "benchmarks/swe-bench/RESULTS_SUMMARY.md benchmarks/swe-bench/results/"
