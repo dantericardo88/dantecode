@@ -48,7 +48,7 @@
     "@dantecode/web-extractor": "0.9.2",
     "@dantecode/web-research": "0.9.2",
     "@dantecode/agent-orchestrator": "0.9.2",
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.24.0"
   },
   "publishConfig": {
