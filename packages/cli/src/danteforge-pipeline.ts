@@ -42,10 +42,16 @@ export interface VerificationDetails {
 }
 
 export function formatVerificationVerdict(details: VerificationDetails, verbose: boolean): string {
-  const allPassed = details.antiStubPassed && details.constitutionPassed && details.pdsePassedGate;
+  // allPassed = anti-stub and constitution pass. PDSE gate is informational only.
+  const allPassed = details.antiStubPassed && details.constitutionPassed;
   const lines: string[] = [];
 
-  if (allPassed && details.constitutionWarningCount === 0) {
+  if (allPassed && details.pdsePassedGate === false) {
+    // PDSE gate failed but anti-stub and constitution passed — soft advisory.
+    lines.push(
+      `${YELLOW}\u2713 Verified \u2014 additional review needed (PDSE: ${details.pdseScore}/100)${RESET}`,
+    );
+  } else if (allPassed && details.constitutionWarningCount === 0) {
     lines.push(`${GREEN}\u2713 Verified \u2014 no issues found${RESET}`);
   } else if (allPassed && details.constitutionWarningCount > 0) {
     lines.push(
@@ -65,7 +71,7 @@ export function formatVerificationVerdict(details: VerificationDetails, verbose:
     lines.push(`${RED}\u26A0 Could not fully verify \u2014 additional review needed${RESET}`);
   }
 
-  if (verbose || !allPassed) {
+  if (verbose || !allPassed || details.pdsePassedGate === false) {
     lines.push(
       `  ${DIM}Anti-stub scan: ${details.antiStubPassed ? "PASSED" : "FAILED"} (${details.hardViolationCount} hard violations)${RESET}`,
     );
@@ -110,9 +116,10 @@ export async function runDanteForge(
   if (criticalViolations.length > 0) passed = false;
   const warnings = constitution.violations.filter((v) => v.severity === "warning");
 
-  // Step 3: PDSE local score
+  // Step 3: PDSE local score (informational only — does not block passed)
+  // Only anti-stub hard violations and constitution critical violations are blocking.
+  // Soft PDSE failures (score < 85, console.log, etc.) must not trigger false positives.
   const pdse = runLocalPDSEScorer(code, projectRoot);
-  if (!pdse.passedGate) passed = false;
 
   const details: VerificationDetails = {
     antiStubPassed: antiStub.passed,

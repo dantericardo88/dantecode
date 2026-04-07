@@ -167,6 +167,8 @@ describe("getOrInitGaslight", () => {
   it("respects DANTECODE_GASLIGHT env var", () => {
     const root = makeTempRoot("lazy-gl-env-");
     const state = makeMinimalState(root);
+    // Simulate interactive session so gaslight can be enabled by default.
+    state.silent = false;
 
     // Without env var — enabled by default (opt-out model)
     delete process.env["DANTECODE_GASLIGHT"];

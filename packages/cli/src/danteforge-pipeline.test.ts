@@ -1,13 +1,184 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 
-// Mock the compiled @dantecode/danteforge binary before importing the pipeline module
-vi.mock("@dantecode/danteforge", () => ({
-  runAntiStubScanner: vi.fn(),
-  runLocalPDSEScorer: vi.fn(),
-  runConstitutionCheck: vi.fn(),
-}));
+// Use the real compiled danteforge binary — NO mocking.
+// These tests verify the actual pipeline behavior end-to-end.
+import {
+  runDanteForge,
+  formatVerificationVerdict,
+  getWrittenFilePath,
+  getAllWrittenFilePath,
+  type VerificationDetails,
+} from "./danteforge-pipeline.js";
 
-import { getAllWrittenFilePath, getWrittenFilePath } from "./danteforge-pipeline.js";
+const PROJECT_ROOT = process.cwd();
+
+// ---------------------------------------------------------------------------
+// runDanteForge — real end-to-end pipeline tests
+// ---------------------------------------------------------------------------
+
+describe("runDanteForge — real validators", () => {
+  it("passes clean code", async () => {
+    const code = `
+export function add(a: number, b: number): number {
+  return a + b;
+}
+`;
+    const result = await runDanteForge(code, "src/add.ts", PROJECT_ROOT, false);
+    expect(result.passed).toBe(true);
+    expect(result.pdseScore).toBeGreaterThan(0);
+    expect(result.summary).toContain("Verified");
+  });
+
+  it("fails on TODO marker (hard anti-stub violation)", async () => {
+    const code = `
+export function processPayment(amount: number): void {
+  // TODO: implement payment processing
+}
+`;
+    const result = await runDanteForge(code, "src/payment.ts", PROJECT_ROOT, false);
+    expect(result.passed).toBe(false);
+    expect(result.summary).toMatch(/Verification failed|stub/i);
+  });
+
+  it("fails on hardcoded API credential (constitution critical)", async () => {
+    const code = `
+const API_KEY = "sk-abc123supersecretkey";
+export function callApi() {
+  return fetch("https://api.example.com", { headers: { Authorization: API_KEY } });
+}
+`;
+    const result = await runDanteForge(code, "src/api.ts", PROJECT_ROOT, false);
+    expect(result.passed).toBe(false);
+    expect(result.summary).toMatch(/Verification failed|policy violation/i);
+  });
+
+  it("passes code with console.log (soft violation — non-blocking)", async () => {
+    const code = `
+export function debug(msg: string): void {
+  console.log(msg);
+}
+`;
+    const result = await runDanteForge(code, "src/debug.ts", PROJECT_ROOT, false);
+    // console.log is a soft violation — must NOT block
+    expect(result.passed).toBe(true);
+  });
+
+  it("passes code with low PDSE score (PDSE non-blocking after fix)", async () => {
+    // Code with console.log + long lines — PDSE may score below 85 but must not block
+    const longLine = "x".repeat(150);
+    const code = `
+export function example(): void {
+  console.log("${longLine}");
+  console.warn("debug output here");
+}
+`;
+    const result = await runDanteForge(code, "src/example.ts", PROJECT_ROOT, false);
+    expect(result.passed).toBe(true);  // PDSE is informational only
+  });
+
+  it("includes PDSE score in result regardless of pass/fail", async () => {
+    const code = `export const x = 1;`;
+    const result = await runDanteForge(code, "src/x.ts", PROJECT_ROOT, false);
+    expect(result.pdseScore).toBeGreaterThanOrEqual(0);
+    expect(result.pdseScore).toBeLessThanOrEqual(100);
+  });
+
+  it("fails on FIXME stub", async () => {
+    const code = `
+export function parseConfig(raw: string) {
+  // FIXME: this is incomplete
+  return {};
+}
+`;
+    const result = await runDanteForge(code, "src/config.ts", PROJECT_ROOT, false);
+    expect(result.passed).toBe(false);
+  });
+
+  it("fails on empty function body (binary treats it as an incomplete-implementation hard violation)", async () => {
+    const code = `
+export function doWork() {}
+`;
+    const result = await runDanteForge(code, "src/work.ts", PROJECT_ROOT, false);
+    // The compiled danteforge binary flags empty function bodies (`{\s*}\s*$`) as a hard violation
+    // with type "incomplete_function". This is stricter than source-level PDSE scoring.
+    expect(result.passed).toBe(false);
+    expect(result.pdseScore).toBeLessThan(100);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatVerificationVerdict — all output cases
+// ---------------------------------------------------------------------------
+
+describe("formatVerificationVerdict", () => {
+  const baseDetails: VerificationDetails = {
+    antiStubPassed: true,
+    hardViolationCount: 0,
+    hardViolationMessages: [],
+    constitutionPassed: true,
+    constitutionCriticalCount: 0,
+    constitutionWarningCount: 0,
+    constitutionMessages: [],
+    pdseScore: 90,
+    pdsePassedGate: true,
+  };
+
+  it("GREEN — all passed, no warnings", () => {
+    const result = formatVerificationVerdict(baseDetails, false);
+    expect(result).toContain("Verified");
+    expect(result).toContain("no issues");
+  });
+
+  it("YELLOW — all passed but constitution has warnings", () => {
+    const details: VerificationDetails = {
+      ...baseDetails,
+      constitutionWarningCount: 2,
+    };
+    const result = formatVerificationVerdict(details, false);
+    expect(result).toContain("Verified");
+    expect(result).toContain("warning");
+  });
+
+  it("RED — anti-stub failed (stubs detected)", () => {
+    const details: VerificationDetails = {
+      ...baseDetails,
+      antiStubPassed: false,
+      hardViolationCount: 1,
+      hardViolationMessages: ["TODO: implement this"],
+    };
+    const result = formatVerificationVerdict(details, false);
+    expect(result).toMatch(/Verification failed/i);
+    expect(result).toMatch(/stub/i);
+  });
+
+  it("RED — constitution failed (critical violation)", () => {
+    const details: VerificationDetails = {
+      ...baseDetails,
+      constitutionPassed: false,
+      constitutionCriticalCount: 1,
+      constitutionMessages: ["Possible hardcoded credential detected"],
+    };
+    const result = formatVerificationVerdict(details, false);
+    expect(result).toMatch(/Verification failed/i);
+    expect(result).toMatch(/policy violation/i);
+  });
+
+  it("PDSE gate failure does NOT produce RED verdict (informational only)", () => {
+    const details: VerificationDetails = {
+      ...baseDetails,
+      pdsePassedGate: false,
+      pdseScore: 70,
+    };
+    // With PDSE non-blocking, anti-stub and constitution both pass → GREEN
+    const result = formatVerificationVerdict(details, false);
+    expect(result).toContain("Verified");
+    expect(result).not.toMatch(/Verification failed/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getWrittenFilePath / getAllWrittenFilePath — existing tests preserved
+// ---------------------------------------------------------------------------
 
 describe("getAllWrittenFilePath", () => {
   it("returns path for Write tool with any extension", () => {
@@ -46,9 +217,7 @@ describe("getWrittenFilePath vs getAllWrittenFilePath", () => {
       ".prettierrc",
     ];
     for (const file of configFiles) {
-      // getWrittenFilePath filters out non-code files
       expect(getWrittenFilePath("Write", { file_path: file })).toBeNull();
-      // getAllWrittenFilePath accepts all file extensions
       expect(getAllWrittenFilePath("Write", { file_path: file })).toBe(file);
     }
   });
