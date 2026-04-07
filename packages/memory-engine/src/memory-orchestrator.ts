@@ -193,6 +193,14 @@ export class MemoryOrchestrator {
       summary?: string;
       verified?: boolean;
       layer?: "short-term" | "checkpoint" | "semantic";
+      /** PDSE quality score attached by the agent loop after DanteForge verification. */
+      pdseScore?: number;
+      /** List of file paths modified in the round that produced this memory entry. */
+      filesModified?: string[];
+      /** Agent-loop round number when this entry was written. */
+      round?: number;
+      /** Session ID for early-checkpoint entries (session::id::first-write pattern). */
+      sessionId?: string;
     },
   ): Promise<MemoryStoreResult> {
     // Build base item

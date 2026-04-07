@@ -144,8 +144,10 @@ export async function buildPreLoopContext(
   try {
     await memoryOrchestrator.initialize();
     memoryInitialized = true;
-  } catch {
+  } catch (err) {
     // Non-fatal: memory init failure must not block the agent
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[DanteMemory] initialization failed — cross-session recall disabled: ${msg}`);
   }
   // getGlobalLogger creates-if-absent: first call with sessionId initializes the singleton.
   // tools.ts dynamic import of debug-trail will pick up the same session-scoped instance.
@@ -168,7 +170,23 @@ export async function buildPreLoopContext(
             (typeof m.value === "string"
               ? m.value.slice(0, 200)
               : JSON.stringify(m.value).slice(0, 200));
-          return `- [${m.scope}] ${m.key}: ${summary}${staleFlag}`;
+          // Render structured metadata inline so the model can use it for context
+          const metaParts: string[] = [];
+          if (typeof m.meta?.pdseScore === "number") {
+            metaParts.push(`pdse: ${m.meta.pdseScore.toFixed(1)}`);
+          }
+          if (Array.isArray(m.meta?.filesModified) && m.meta.filesModified.length > 0) {
+            const files = (m.meta.filesModified as string[])
+              .slice(0, 3)
+              .map((f: string) => f.split("/").pop())
+              .join(", ");
+            metaParts.push(`files: ${files}`);
+          }
+          if (typeof m.meta?.round === "number") {
+            metaParts.push(`round: ${m.meta.round}`);
+          }
+          const metaSuffix = metaParts.length > 0 ? ` (${metaParts.join(", ")})` : "";
+          return `- [${m.scope}] ${m.key}: ${summary}${metaSuffix}${staleFlag}`;
         });
         messages.push({
           role: "system" as const,
@@ -320,6 +338,11 @@ export async function injectRoundContext(
         `${RED}[context: ${utilization.percent}% — ${Math.round(utilization.tokens / 1000)}K/${Math.round(utilization.maxTokens / 1000)}K tokens — use /compact or /new for fresh session]${RESET}\n`,
       );
     }
+  }
+
+  // ---- DanteMemory: warn once on first round if memory init failed ----
+  if (!ctx.memoryInitialized && ctx.roundCounter === 1) {
+    console.error("[DanteMemory] memory unavailable — operating without cross-session recall");
   }
 
   // ---- DanteMemory: auto-compaction at 80% context utilization ----

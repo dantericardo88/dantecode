@@ -6,11 +6,12 @@
 
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import { readFile as fsReadFile } from "node:fs/promises";
+import { readFile as fsReadFile, appendFile, mkdir } from "node:fs/promises";
 import { join as pathJoin } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { parseModelReference, readOrInitializeState, appendAuditEvent } from "@dantecode/core";
+import { parseModelReference, readOrInitializeState, appendAuditEvent, swallowError } from "@dantecode/core";
+import { computeCost } from "./cost-calculator.js";
 import type { Session, DanteCodeState, ModelConfig } from "@dantecode/config-types";
 import { isFirstRun, getFirstRunBanner, getCompactBanner } from "./banner.js";
 import { checkForUpdate } from "./lib/auto-update.js";
@@ -191,6 +192,9 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
  * 7. Handles Ctrl+C gracefully
  */
 export async function startRepl(options: ReplOptions): Promise<void> {
+  // Wave 5a: Startup phase timing
+  const startMs = Date.now();
+
   // Load or initialize state
   let state: DanteCodeState;
   try {
@@ -213,6 +217,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       );
       process.exit(1);
     }
+  }
+
+  // Wave 5a: config-loaded phase mark
+  if (process.env.DANTECODE_PROFILE) {
+    process.stderr.write(`[profile] config-loaded: ${Date.now() - startMs}ms\n`);
   }
 
   // Apply model override if specified
@@ -367,7 +376,19 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     fearSetBlockOnNoGo: options.fearSetBlockOnNoGo === true,
     replState: replState,
     autoCommit: state.git?.autoCommit ?? false,
+    // Stream tokens to stdout in real-time so users see output as the model generates,
+    // not buffered until completion. Suppress in silent/task modes to avoid noise.
+    onToken: options.silent
+      ? undefined
+      : (token: string) => {
+          process.stdout.write(token);
+        },
   };
+
+  // Wave 5a: llm-ready phase mark (agent config + model wired)
+  if (process.env.DANTECODE_PROFILE) {
+    process.stderr.write(`[profile] llm-ready: ${Date.now() - startMs}ms\n`);
+  }
 
   // DanteGaslight: deferred to first use via getOrInitGaslight() in lazy-init.ts.
   // Constructed lazily in syncAgentLoopConfig (first prompt) or /gaslight command.
@@ -379,6 +400,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     projectRoot: options.projectRoot,
     config: { mode: "auto", allowHostEscape: false },
   });
+  // Wave 5a: git-ready phase mark (git engine + sandbox ready)
+  if (process.env.DANTECODE_PROFILE) {
+    process.stderr.write(`[profile] git-ready: ${Date.now() - startMs}ms\n`);
+  }
 
   // DanteMemory: deferred to first use via getOrInitMemory() in lazy-init.ts.
   // /memory and /compact call it lazily; null until then.
@@ -501,7 +526,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           payload: { source: "git-event-watcher", event: evt },
           modelId: "system",
           projectRoot: options.projectRoot,
-        }).catch(() => {});
+        }).catch((err) => swallowError(err, "audit-event-git-commit"));
       });
       if (!options.silent) {
         process.stdout.write(`${DIM}[git-event-watcher: monitoring post-commit events]${RESET}\n`);
@@ -542,6 +567,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   let currentRoundCount = 0;
   let currentPdseScore: number | undefined;
 
+  // Wave 5a: repl-ready phase mark
+  if (process.env.DANTECODE_PROFILE) {
+    process.stderr.write(`[profile] repl-ready: ${Date.now() - startMs}ms\n`);
+  }
+
   // Create readline interface
   const rl = readline.createInterface({
     input: process.stdin,
@@ -570,7 +600,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           replState.lastSessionPdseResults.length > 0
             ? replState.lastSessionPdseResults
             : undefined,
-      }).catch(() => {});
+      }).catch((err) => swallowError(err, "session-report"));
     }
   };
   process.on("uncaughtException", async (err) => {
@@ -688,10 +718,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   rl.on("close", async () => {
     // Stop GitEventWatcher if running
     if (gitEventWatcher) {
-      await gitEventWatcher.stop().catch(() => {});
+      await gitEventWatcher.stop().catch((err) => swallowError(err, "git-event-watcher-stop"));
     }
     // Tear down DanteSandbox isolation layers (containers, worktrees)
-    await DanteSandbox.teardown().catch(() => {});
+    await DanteSandbox.teardown().catch((err: unknown) => swallowError(err, "sandbox-teardown"));
     // Shut down sandbox container if running
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
@@ -703,10 +733,14 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       const sessionMessages = replState.session.messages;
       const totalTokens = sessionMessages.reduce((sum, m) => sum + (m.tokensUsed ?? 0), 0);
       if (totalTokens > 0) {
+        // Use real promptTokens/completionTokens tracked by the agent loop via Vercel AI SDK.
+        // Stored on session._sessionCost by agent-loop.ts after each run.
+        const sessionCost = (replState.session as unknown as Record<string, unknown>)
+          ._sessionCost as { inputTokens: number; outputTokens: number } | undefined;
         const tokenData: TokenUsageData = {
           totalTokens,
-          inputTokens: Math.round(totalTokens * 0.66),
-          outputTokens: Math.round(totalTokens * 0.34),
+          inputTokens: sessionCost?.inputTokens ?? Math.round(totalTokens * 0.66),
+          outputTokens: sessionCost?.outputTokens ?? Math.round(totalTokens * 0.34),
           byTool: {},
           modelId: state.model.default.modelId,
           contextWindow: 131072,
@@ -714,6 +748,44 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           sessionDurationMs: Date.now() - sessionStartMs,
         };
         process.stdout.write(renderTokenDashboard(tokenData, themeEngine));
+
+        // Wave 8b: Append session cost to .dantecode/cost-history.jsonl
+        try {
+          const dantecodeDir = pathJoin(options.projectRoot, ".dantecode");
+          await mkdir(dantecodeDir, { recursive: true });
+          const historyPath = pathJoin(dantecodeDir, "cost-history.jsonl");
+          const firstMsg = replState.session.messages.find((m) => m.role === "user");
+          const rawSummary =
+            typeof firstMsg?.content === "string"
+              ? firstMsg.content
+              : Array.isArray(firstMsg?.content) &&
+                  firstMsg.content[0] &&
+                  typeof (firstMsg.content[0] as { text?: string }).text === "string"
+                ? ((firstMsg.content[0] as { text?: string }).text ?? "")
+                : "";
+          const taskSummary = rawSummary.slice(0, 80).replace(/\n/g, " ");
+          const modelId = state.model.default.modelId.toLowerCase();
+          const tier = modelId.includes("haiku")
+            ? "low"
+            : modelId.includes("sonnet")
+              ? "medium"
+              : modelId.includes("opus")
+                ? "high"
+                : "medium";
+          const historyEntry = {
+            date: new Date().toISOString().slice(0, 10),
+            sessionId: replState.session.id,
+            inputTokens: tokenData.inputTokens,
+            outputTokens: tokenData.outputTokens,
+            cost: computeCost(state.model.default.modelId, tokenData.inputTokens, tokenData.outputTokens),
+            model: state.model.default.modelId,
+            tier,
+            taskSummary,
+          };
+          await appendFile(historyPath, JSON.stringify(historyEntry) + "\n", "utf-8");
+        } catch {
+          // Non-fatal — cost history is informational only
+        }
       }
     }
 
@@ -739,6 +811,21 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       });
       if (reportPath && !options.silent) {
         process.stdout.write(`${DIM}Report saved: ${reportPath}${RESET}\n`);
+      }
+    }
+
+    // Wave 1b: Log TokenCache hit rate at session end
+    if (!options.silent) {
+      try {
+        const { globalTokenCache } = await import("@dantecode/core");
+        const cacheStats = globalTokenCache.getStats();
+        if (cacheStats.cachedEntries > 0) {
+          process.stdout.write(
+            `${DIM}Cache: ${Math.round(cacheStats.hitRate * 100)}% hit rate (${cacheStats.estimatedSavedTokens ?? 0} tokens saved)${RESET}\n`,
+          );
+        }
+      } catch {
+        // Non-fatal — token cache stats are informational only
       }
     }
 

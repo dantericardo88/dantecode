@@ -81,6 +81,13 @@ export interface GenerateOptions {
   taskMode?: string;
   abortSignal?: AbortSignal;
   thinkingBudget?: number;
+  /**
+   * When true and provider is Anthropic, applies cache_control: { type: "ephemeral" }
+   * to the system prompt. This caches the system prompt prefix for ~5 minutes,
+   * cutting token costs 70-90% on the cached portion across all rounds of a long session.
+   * Safe no-op for non-Anthropic providers.
+   */
+  cacheSystemPrompt?: boolean;
 }
 
 /**
@@ -365,32 +372,35 @@ export class ModelRouterImpl {
     config: ModelConfig,
     options: GenerateOptions,
   ): ProviderOptions | undefined {
-    if (
-      !config.supportsExtendedThinking ||
-      !options.thinkingBudget ||
-      options.thinkingBudget <= 0
-    ) {
+    const hasThinking =
+      config.supportsExtendedThinking && options.thinkingBudget && options.thinkingBudget > 0;
+    const hasCacheControl = options.cacheSystemPrompt && config.provider === "anthropic";
+
+    if (!hasThinking && !hasCacheControl) {
       return undefined;
     }
 
     const reasoningEffort = config.reasoningEffort ?? "medium";
 
     switch (config.provider) {
-      case "anthropic":
-        return {
-          anthropic: {
-            thinking: {
-              type: "enabled",
-              budgetTokens: options.thinkingBudget,
-            },
-            reasoningEffort,
-          },
-        };
+      case "anthropic": {
+        const anthropicOpts: { [key: string]: ProviderOptionValue } = {};
+        if (hasThinking) {
+          anthropicOpts["thinking"] = { type: "enabled", budgetTokens: options.thinkingBudget ?? 0 };
+          anthropicOpts["reasoningEffort"] = reasoningEffort;
+        }
+        // cache_control on the system prompt: caches the prefix for ~5 min, cutting
+        // repeated-round token costs by 70-90% on the cached portion.
+        if (hasCacheControl) {
+          anthropicOpts["cacheControl"] = { type: "ephemeral" };
+        }
+        return { anthropic: anthropicOpts };
+      }
       case "openai":
         return {
           openai: {
             reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
+            thinkingBudget: options.thinkingBudget ?? 0,
           },
         };
       case "google":
@@ -398,7 +408,7 @@ export class ModelRouterImpl {
           google: {
             reasoningEffort,
             thinkingConfig: {
-              thinkingBudget: options.thinkingBudget,
+              thinkingBudget: options.thinkingBudget ?? 0,
             },
           },
         };
@@ -406,7 +416,7 @@ export class ModelRouterImpl {
         return {
           [config.provider]: {
             reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
+            thinkingBudget: options.thinkingBudget ?? 0,
           },
         };
     }

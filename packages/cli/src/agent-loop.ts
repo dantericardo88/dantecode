@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 
 import { MCPMemoryBridge } from "@dantecode/core";
@@ -51,13 +52,33 @@ import {
   AgentStateMachine,
   createAccumulatedUsage,
   addLanguageModelUsage,
+  swallowError,
+  runFinalGate,
+  runLintRepair,
+  runTestRepair,
+  LoopDetector,
+  RecoveryEngine,
+  TaskCircuitBreaker,
+  sanitizeUserPrompt,
+  completionGate,
+  ConvergenceMetrics,
+  globalTokenCache,
 } from "@dantecode/core";
-import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage } from "@dantecode/core";
+import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage, TestFailure } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
-import { recordSuccessPattern, detectAndRecordPatterns } from "@dantecode/danteforge";
+import { recordSuccessPattern } from "@dantecode/danteforge";
+// detectAndRecordPatterns is optional — not present in all danteforge binary versions
+let detectAndRecordPatterns: ((messages: unknown[], projectRoot: string) => Promise<void>) | undefined;
+import("@dantecode/danteforge").then((m) => {
+  if (typeof (m as Record<string, unknown>)["detectAndRecordPatterns"] === "function") {
+    detectAndRecordPatterns = (m as Record<string, unknown>)["detectAndRecordPatterns"] as typeof detectAndRecordPatterns;
+  }
+}).catch(() => {});
+
 import { runDanteForge } from "./danteforge-pipeline.js";
 import { executeToolBatch } from "./tool-executor.js";
 import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import type {
   ExecutionEvidence,
   Session,
@@ -85,6 +106,7 @@ import {
   PIVOT_INSTRUCTION,
   DEEP_REFLECTION_INSTRUCTION,
   MAX_PIPELINE_CONTINUATION_NUDGES,
+  NUDGE_MIN_REMAINING_BUDGET_PCT,
   MAX_CONSECUTIVE_EMPTY_ROUNDS,
   MAX_CONFABULATION_NUDGES,
   EMPTY_RESPONSE_WARNING,
@@ -435,6 +457,12 @@ async function _runAgentLoopCore(
     });
     agentStateMachine.transition("loading", "session_start");
 
+    // Audit user message for suspicious patterns (detection-only, no modification)
+    const sanitizeAudit = sanitizeUserPrompt(durablePrompt);
+    if (sanitizeAudit.warnings.length > 0) {
+      process.stderr.write(`[PromptSanitizer] ${sanitizeAudit.warnings.join("; ")}\n`);
+    }
+
     // Append user message
     const userMessage: SessionMessage = {
       id: randomUUID(),
@@ -531,6 +559,10 @@ async function _runAgentLoopCore(
     let sessionFailureCount = 0;
     let executionNudges = 0;
     const MAX_EXECUTION_NUDGES = 2;
+    // Test-repair loop: tracks how many times we've injected failing test messages.
+    // Capped at MAX_TEST_REPAIR_RETRIES to avoid runaway loops on unfixable failures.
+    let testRetries = 0;
+    const MAX_TEST_REPAIR_RETRIES = 3;
     let executedToolsThisTurn = 0;
     // ExecutionPolicy (DTR Phase 6): track completed tool names for dependency gating
     const completedToolsThisTurn = new Set<string>();
@@ -585,6 +617,33 @@ async function _runAgentLoopCore(
       metricsCollector,
     } = await buildPreLoopContext(durablePrompt, session, config, messages);
     let currentRoundTier: import("@dantecode/core").ReasoningTier = "quick";
+    // Tracks whether the early-checkpoint project-scope memory write has fired this session.
+    // Set to true after the first file modification so we only fire it once.
+    let memoryEarlyCheckpointFired = false;
+
+    // ---- Autonomy: capture baseline test failures before any mutations ----
+    // runTestRepair can distinguish OLD failures from NEW ones introduced by the agent,
+    // but only if baselineFailures is provided. Without this snapshot, every pre-existing
+    // failure would look like a regression the agent caused.
+    let baselineTestFailures: TestFailure[] = [];
+    let testCommandAvailable = false;
+    try {
+      const baselineResult = await runTestRepair({
+        config: { command: "npm test", maxRetries: 1, runBeforeMutations: false },
+        projectRoot: session.projectRoot,
+        baselineFailures: [],
+      });
+      baselineTestFailures = baselineResult.failures;
+      testCommandAvailable = true;
+      if (config.verbose && !config.silent && baselineTestFailures.length > 0) {
+        emitOrWrite(
+          `${DIM}[autonomy] baseline: ${baselineTestFailures.length} pre-existing test failure(s) noted (will be excluded from repair loop)${RESET}\n`,
+        );
+      }
+    } catch {
+      // No test infrastructure in this project — test-repair will be skipped entirely.
+      testCommandAvailable = false;
+    }
 
     // ---- Feature: Task complexity classification (informational) ----
     const taskComplexityRouter = new TaskComplexityRouter();
@@ -602,6 +661,61 @@ async function _runAgentLoopCore(
       emitOrWrite(
         `${DIM}[complexity] tier=${complexityTier} confidence=${complexityDecision.confidence.toFixed(2)}${RESET}\n`,
       );
+    }
+
+    // ---- Wave 1a: Wire TaskComplexityRouter to actual model selection ----
+    // Only downgrade to haiku for simple tasks — never upgrade to opus (cost-safety).
+    // We inject a haiku override into routerConfig.overrides under key "haiku-simple"
+    // and pass that taskType to the generation calls when complexity === "simple".
+    const HAIKU_MODEL_ID = "claude-haiku-4-5-20251001";
+    let effectiveTaskType: string | undefined;
+    if (
+      complexityDecision.complexity === "simple" &&
+      complexityDecision.recommendedModel === HAIKU_MODEL_ID &&
+      config.state.model.default.modelId !== HAIKU_MODEL_ID
+    ) {
+      routerConfig.overrides["haiku-simple"] = {
+        ...config.state.model.default,
+        modelId: HAIKU_MODEL_ID,
+        // Haiku does not support extended thinking — disable to avoid provider errors
+        supportsExtendedThinking: false,
+        reasoningEffort: undefined,
+      };
+      effectiveTaskType = "haiku-simple";
+      emitOrWrite(`${DIM}[routing: haiku (simple task)]${RESET}\n`);
+    }
+
+    // ---- Wave 5a: Prior Lessons injection from Skillbook ----
+    // Hoist ref + injected IDs so recordSessionOutcome can be called at session end.
+    let _skillbookRef: DanteSkillbookIntegration | null = null;
+    const _injectedSkillIds: string[] = [];
+    try {
+      const skillbookIntegration = new DanteSkillbookIntegration({ cwd: session.projectRoot });
+      _skillbookRef = skillbookIntegration;
+      const taskKeywords = durablePrompt.toLowerCase().split(/\W+/).filter((t) => t.length >= 3).slice(0, 20);
+      const candidateLessons = skillbookIntegration.getRelevantSkills(
+        { keywords: taskKeywords, taskType: "general" },
+        5,
+      );
+      // Wave 4b: Filter to skills with >=50% effectiveness and cap at ~300 tokens (~1200 chars)
+      const priorLessons = candidateLessons.filter((s) => (s.winRate ?? 0) >= 0.5);
+      if (priorLessons.length > 0) {
+        const lessonLines = priorLessons.map((s, i) => `${i + 1}. **${s.title}** (${s.section})\n   ${s.content.slice(0, 200)}`);
+        const lessonBlock = lessonLines.join("\n\n").slice(0, 1200);
+        messages.push({
+          role: "system" as const,
+          content: `## Prior Lessons (from Skillbook)\n\nThe following lessons from past sessions are relevant to this task:\n\n${lessonBlock}`,
+        });
+        // Track IDs for effectiveness reporting at session end
+        for (const s of priorLessons) {
+          if (s.id) _injectedSkillIds.push(s.id as string);
+        }
+        if (config.verbose) {
+          emitOrWrite(`${DIM}[Skillbook] Injecting ${priorLessons.length} lessons (effectiveness threshold: 50%)${RESET}\n`);
+        }
+      }
+    } catch (err) {
+      swallowError(err, "skillbook-prior-lessons");
     }
 
     // ---- Feature: Skill Discovery ----
@@ -643,6 +757,17 @@ async function _runAgentLoopCore(
     } catch {
       // Non-fatal — skill discovery never blocks a session
     }
+
+    // ---- Wave 2b: LoopDetector — stuck-loop detection ----
+    const loopDetector = new LoopDetector({ maxIterations: 25, identicalThreshold: 3 });
+    let stuckRoundCount = 0;
+
+    // ---- Wave 2 (new): ConvergenceMetrics — session-level convergence telemetry ----
+    const convergenceMetrics = new ConvergenceMetrics();
+
+    // ---- Wave 2c: RecoveryEngine + TaskCircuitBreaker ----
+    const recoveryEngine = new RecoveryEngine();
+    const taskCircuitBreaker = new TaskCircuitBreaker({ identicalFailureThreshold: 5, maxRecoveryAttempts: 2 });
 
     // ---- Feature: Pivot logic ----
     // Track consecutive failures with similar error signatures for strategy change.
@@ -801,8 +926,28 @@ async function _runAgentLoopCore(
         }
       }
 
+      // Autonomy Wave 4: extend rounds when test-repair is actively cycling.
+      // The agent may need more rounds than estimated to fix test failures it introduced.
+      // Cap at 2 extensions (20 extra rounds) to prevent infinite loops on unfixable failures.
+      if (
+        maxToolRounds <= 3 &&
+        testCommandAvailable &&
+        testRetries > 0 &&
+        testRetries < MAX_TEST_REPAIR_RETRIES &&
+        autoContinuations < MAX_AUTO_CONTINUATIONS
+      ) {
+        autoContinuations++;
+        maxToolRounds += 10;
+        if (!config.silent) {
+          emitOrWrite(
+            `${CYAN}[adaptive] +10 rounds: test-repair in progress (${testRetries}/${MAX_TEST_REPAIR_RETRIES} iterations)${RESET}\n`,
+          );
+        }
+      }
+
       maxToolRounds--;
       roundCounter++;
+      convergenceMetrics.increment("iterations");
       const _roundStartMs = Date.now();
 
       // ─── Observability: Start round span ───
@@ -956,9 +1101,52 @@ async function _runAgentLoopCore(
             thinkingBudget: thinkingBudget,
           });
           renderer.printHeader();
+          renderer.startThinkingSpinner();
           if (!config.silent && config.state.thinkingDisplayMode !== "disabled") {
             displayThinking(config.state.thinkingDisplayMode, thinkingBudget);
           }
+          // ---- Wave 6b: Complexity-tiered token routing ----
+          let effectiveMaxTokens = config.state.model.default.maxTokens;
+          try {
+            const complexityRouter = new TaskComplexityRouter();
+            const roundSignals = complexityRouter.extractSignals(durablePrompt, {
+              files: session.activeFiles,
+            });
+            const roundDecision = complexityRouter.classify(roundSignals);
+            if (roundDecision.complexity === "simple" && typeof effectiveMaxTokens === "number" && effectiveMaxTokens > 4096) {
+              effectiveMaxTokens = 4096;
+              if (config.verbose) {
+                emitOrWrite(`${DIM}[complexity-router] simple task — capping maxTokens to 4096${RESET}\n`);
+              }
+            } else if (roundDecision.complexity === "complex") {
+              // Keep full budget for complex tasks (no cap)
+              if (config.verbose) {
+                emitOrWrite(`${DIM}[complexity-router] complex task — using full token budget${RESET}\n`);
+              }
+            }
+            // "medium"/"standard": keep current behavior
+          } catch {
+            // Routing failures must not block generation
+          }
+
+          // ---- Wave 5b: Cache hit rate tracking — mark each round's messages ----
+          try {
+            for (const msg of messages) {
+              const messageContent = typeof msg.content === "string"
+                ? msg.content
+                : Array.isArray(msg.content)
+                  ? (msg.content as Array<{text?: string}>).map((b) => b.text ?? "").join("")
+                  : String(msg.content);
+              if (messageContent.length > 0) {
+                const hash = Buffer.from(messageContent.slice(0, 200)).toString("base64").slice(0, 32);
+                const tokenEstimate = Math.ceil(messageContent.length / 4);
+                globalTokenCache.markSeen(hash, messageContent.slice(0, tokenEstimate));
+              }
+            }
+          } catch {
+            // Non-fatal — cache tracking must never block generation
+          }
+
           const useNativeTools = config.state.model.default.supportsToolCalls;
           let nativeSuccess = false;
 
@@ -975,9 +1163,13 @@ async function _runAgentLoopCore(
               const aiSdkTools = getAISDKTools(config.mcpTools, config.replState?.approvalMode);
               const streamResult = await router.streamWithTools(messages, aiSdkTools, {
                 system: systemPrompt,
-                maxTokens: config.state.model.default.maxTokens,
+                maxTokens: effectiveMaxTokens,
                 abortSignal: config.abortSignal,
+                // cache_control: ephemeral caches the system prompt prefix for ~5 min,
+                // cutting token costs 70-90% on the cached portion across all rounds.
+                cacheSystemPrompt: true,
                 ...(thinkingBudget ? { thinkingBudget } : {}),
+                ...(effectiveTaskType ? { taskType: effectiveTaskType } : {}),
               });
               for await (const part of streamResult.fullStream) {
                 streamRecovery.updateActivity();
@@ -1022,9 +1214,10 @@ async function _runAgentLoopCore(
             try {
               const streamResult = await router.stream(messages, {
                 system: systemPrompt,
-                maxTokens: config.state.model.default.maxTokens,
+                maxTokens: effectiveMaxTokens,
                 abortSignal: config.abortSignal,
                 ...(thinkingBudget ? { thinkingBudget } : {}),
+                ...(effectiveTaskType ? { taskType: effectiveTaskType } : {}),
               });
               for await (const chunk of streamResult.textStream) {
                 streamingStarted = true;
@@ -1048,6 +1241,7 @@ async function _runAgentLoopCore(
                 system: systemPrompt,
                 maxTokens: config.state.model.default.maxTokens,
                 ...(thinkingBudget ? { thinkingBudget } : {}),
+                ...(effectiveTaskType ? { taskType: effectiveTaskType } : {}),
               });
             }
             const extracted = extractToolCalls(responseText);
@@ -1311,6 +1505,45 @@ async function _runAgentLoopCore(
         const errorMessage = err instanceof Error ? err.message : String(err);
         const errorType = classifyError(err);
         process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+
+        // ---- Wave 2c: TaskCircuitBreaker + RecoveryEngine ----
+        // Don't record auth/balance errors — those are terminal and need no recovery plan
+        if (errorType !== DanteErrorType.Auth && errorType !== DanteErrorType.Balance) {
+          try {
+            const breakerAction = taskCircuitBreaker.recordFailure(errorMessage, roundCounter);
+            if (breakerAction.action === "pause_and_recover" || breakerAction.action === "escalate") {
+              if (errorType === DanteErrorType.RateLimit) {
+                const backoff = taskCircuitBreaker.getBackoffDelay(errorMessage);
+                process.stdout.write(
+                  `${YELLOW}[RecoveryEngine] Rate-limit detected — backoff plan: wait ${(backoff.delayMs / 1000).toFixed(1)}s before retry (attempt ${backoff.attempt}, cumulative ${(backoff.cumulativeDelayMs / 1000).toFixed(1)}s)${RESET}\n`,
+                );
+              } else if (errorType === DanteErrorType.ContextWindow) {
+                process.stdout.write(
+                  `${YELLOW}[RecoveryEngine] Context window error — strategy: condense context or summarize conversation${RESET}\n`,
+                );
+              } else {
+                // Generic recovery: run repo-root diagnostics
+                try {
+                  const repoVerify = recoveryEngine.runRepoRootVerification(session.projectRoot);
+                  const failedSteps = repoVerify.failedSteps;
+                  if (failedSteps.length > 0) {
+                    process.stdout.write(
+                      `${YELLOW}[RecoveryEngine] Repo diagnostics — failed steps: ${failedSteps.join(", ")}${RESET}\n`,
+                    );
+                  } else {
+                    process.stdout.write(
+                      `${DIM}[RecoveryEngine] Repo diagnostics — all checks passed${RESET}\n`,
+                    );
+                  }
+                } catch {
+                  // Non-fatal
+                }
+              }
+            }
+          } catch {
+            // Circuit breaker errors must never block execution
+          }
+        }
 
         // Terminal errors (bad key, empty wallet) — abort immediately, no retry
         if (isTerminal(errorType)) {
@@ -1720,8 +1953,24 @@ async function _runAgentLoopCore(
           roundNumber: roundCounter,
           maxToolRounds,
         });
+        // Budget-aware nudge gate: suppress pipeline continuation nudges when
+        // the remaining round budget is critically low (< 15%) to avoid
+        // burning the last rounds on nudges instead of actual work.
+        const initialMaxToolRounds = config.requiredRounds
+          ? Math.max(config.requiredRounds, 15)
+          : config.skillActive
+            ? 50
+            : isWorkflowPrompt
+              ? 75
+              : estimatePromptComplexity(durablePrompt);
+        const budgetRemaining = maxToolRounds / initialMaxToolRounds;
+        const budgetExhausted =
+          lateNoToolDecision?.type === "pipeline_continuation" &&
+          budgetRemaining < NUDGE_MIN_REMAINING_BUDGET_PCT;
+
         if (
           lateNoToolDecision &&
+          !budgetExhausted &&
           (lateNoToolDecision.type === "pipeline_continuation" ||
             lateNoToolDecision.type === "confab_block")
         ) {
@@ -1773,6 +2022,69 @@ async function _runAgentLoopCore(
               process.stdout.write(`\n${RED}${completionDecision.displayText}${RESET}\n`);
             }
             continue;
+          }
+        }
+
+        // ---- CompletionGate: prevent premature exits and stub responses ----
+        // Only apply when there are remaining rounds (don't block on last round)
+        // and not in observe/diagnose-only mode (already handled above).
+        if (
+          maxToolRounds > 0 &&
+          !config.taskMode &&
+          !config.silent // skip in silent/serve mode to avoid injecting noise
+        ) {
+          const cgVerdict = completionGate.evaluate(responseText, executedToolsThisTurn + filesModified);
+          if (!cgVerdict.shouldExit) {
+            convergenceMetrics.increment("completionGateRejections");
+            const gateMsg = `\n[CompletionGate] Response incomplete (confidence: ${cgVerdict.confidence.toFixed(2)}) — ${cgVerdict.reason}. Please provide actual verification output.`;
+            messages.push({ role: "assistant" as const, content: responseText });
+            messages.push({ role: "user" as const, content: gateMsg });
+            if (!config.silent) {
+              process.stdout.write(`${YELLOW}${gateMsg}${RESET}\n`);
+            }
+            continue;
+          }
+        }
+
+        // ---- Autonomy Wave 2: Tests-as-exit-criterion ----
+        // Before accepting the CompletionGate exit, run a final test verification.
+        // If the agent introduced new test failures, block the exit and inject them.
+        // This changes "done" from "model stops producing tool calls" to "tests confirm done."
+        if (
+          testCommandAvailable &&
+          touchedFiles.length > 0 &&
+          testRetries < MAX_TEST_REPAIR_RETRIES
+        ) {
+          try {
+            const exitVerification = await runTestRepair({
+              config: { command: "npm test", maxRetries: 1, runBeforeMutations: false },
+              projectRoot: session.projectRoot,
+              baselineFailures: baselineTestFailures,
+            });
+            if (!exitVerification.success && exitVerification.newFailures.length > 0) {
+              // Do NOT exit — inject failures and continue the loop
+              testRetries++;
+              convergenceMetrics.increment("completionGateRejections");
+              const failureSummary = exitVerification.newFailures
+                .slice(0, 3)
+                .map(
+                  (f) =>
+                    `  ${f.testFile ?? "unknown"}::${f.testName ?? "?"} — ${(f.error ?? "").slice(0, 120)}`,
+                )
+                .join("\n");
+              messages.push({
+                role: "user" as const,
+                content: `[exit-verification] Cannot complete — ${exitVerification.newFailures.length} test(s) still failing:\n${failureSummary}\nFix these before finishing.`,
+              });
+              if (!config.silent) {
+                emitOrWrite(
+                  `${YELLOW}[exit-verification] Blocking exit — ${exitVerification.newFailures.length} test failure(s) remain${RESET}\n`,
+                );
+              }
+              continue; // Stay in the loop
+            }
+          } catch {
+            // Non-fatal — exit proceeds normally if verification throws
           }
         }
 
@@ -1862,6 +2174,162 @@ async function _runAgentLoopCore(
       testsRun = execResult.testsRun;
       bashSucceeded = execResult.bashSucceeded;
       const toolResults = execResult.toolResults;
+
+      // ---- Wave 2b: LoopDetector — record tool results and check for stuck loops ----
+      if (toolResults.length > 0) {
+        const toolResultHash = toolResults.join("|").slice(0, 1000);
+        const loopResult = loopDetector.recordAction("tool_results", toolResultHash);
+        if (loopResult.stuck) {
+          stuckRoundCount++;
+          convergenceMetrics.increment("loopDetectorHits");
+          try {
+            const repoVerify = recoveryEngine.runRepoRootVerification(session.projectRoot);
+            const findings = repoVerify.stepResults
+              .map((s) => `  ${s.name}: ${s.passed ? "OK" : `FAILED — ${(s.output ?? "").slice(0, 200)}`}`)
+              .join("\n");
+            const loopMsg = `\n[LoopDetector] Stuck pattern detected (reason: ${loopResult.reason}). Recovery diagnostics:\n${findings}\n`;
+            toolResults.push(loopMsg);
+            if (!config.silent) {
+              emitOrWrite(`${YELLOW}${loopMsg}${RESET}\n`);
+            }
+          } catch {
+            // Recovery diagnostics are non-fatal
+          }
+          // After 3 stuck rounds: prepend gaslight trigger to surface novel-task handling
+          if (stuckRoundCount >= 3) {
+            const nextUserMsg = messages.findIndex((m, i) => i === messages.length - 1 && m.role === "user");
+            if (nextUserMsg >= 0) {
+              messages[nextUserMsg]!.content = `[verification-gaslight-trigger] ${messages[nextUserMsg]!.content}`;
+            } else {
+              toolResults.push("[verification-gaslight-trigger] Stuck loop detected — try a fundamentally different approach.");
+            }
+            stuckRoundCount = 0; // reset so it can re-trigger
+          }
+        }
+      }
+
+      // ---- Repair loop: post-execution final gate + lint repair (Wave 1) ----
+      // After Write/Edit/Bash tool results, run FinalGate verification and
+      // optionally trigger LintRepair for auto-fixable issues. Non-blocking —
+      // errors are injected as messages rather than thrown.
+      const hasMutatingTools = toolCalls.some(
+        (tc) => tc.name === "Write" || tc.name === "Edit" || tc.name === "Bash",
+      );
+      if (hasMutatingTools && touchedFiles.length > 0) {
+        try {
+          const fgResult = await runFinalGate({
+            mutatedFiles: [...new Set(touchedFiles)],
+            config: {
+              enabled: true,
+              pdseThreshold: 70,
+              requireAntiStub: true,
+              requireEvidence: false,
+            },
+            projectRoot: session.projectRoot,
+          });
+
+          if (!fgResult.passed && fgResult.failureReasons.length > 0) {
+            // Check if lint repair can help (anti-stub violations not lint-fixable)
+            const hasLintableErrors = fgResult.failureReasons.some(
+              (r) => r.includes("PDSE") || r.includes("lint"),
+            );
+            if (hasLintableErrors && lintRetries < 3) {
+              lintRetries++;
+              convergenceMetrics.increment("repairTriggers");
+              const lintRepairResult = await runLintRepair({
+                changedFiles: [...new Set(touchedFiles)],
+                config: {
+                  command: "npm run lint",
+                  maxRetries: 3,
+                  autoCommitFixes: false,
+                },
+                projectRoot: session.projectRoot,
+              });
+              if (!lintRepairResult.success && lintRepairResult.errors.length > 0) {
+                const errorSummary = lintRepairResult.errors
+                  .slice(0, 5)
+                  .map((e) => `  ${e.file}:${e.line} — ${e.message}`)
+                  .join("\n");
+                const repairMsg = `[repair-loop] Lint errors remain after auto-fix (iteration ${lintRepairResult.iteration}):\n${errorSummary}\nPlease fix these lint errors.`;
+                messages.push({ role: "user" as const, content: repairMsg });
+                if (config.verbose && !config.silent) {
+                  emitOrWrite(`${YELLOW}[repair-loop] ${lintRepairResult.errors.length} lint error(s) remain — injecting fix prompt${RESET}\n`);
+                }
+              }
+            } else if (!hasLintableErrors) {
+              // Permanent gate failure (anti-stub etc.): inject structured error message
+              const failSummary = fgResult.failureReasons.slice(0, 3).join("; ");
+              const permanentFailMsg = `[repair-loop] Final gate failed permanently: ${failSummary}. Please address these issues in your next edit.`;
+              messages.push({ role: "user" as const, content: permanentFailMsg });
+              if (!config.silent) {
+                emitOrWrite(`${RED}[repair-loop] Gate failed: ${failSummary}${RESET}\n`);
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — repair loop never blocks execution
+        }
+
+        // ---- Repair loop: test verification (Autonomy Wave 1) ----
+        // Runs only when file mutations occurred AND test infrastructure detected.
+        // Compares against baselineTestFailures to surface ONLY new failures introduced
+        // by this agent session — pre-existing failures are not the agent's responsibility.
+        if (testCommandAvailable && testRetries < MAX_TEST_REPAIR_RETRIES) {
+          try {
+            const testRepairResult = await runTestRepair({
+              config: { command: "npm test", maxRetries: 1, runBeforeMutations: false },
+              projectRoot: session.projectRoot,
+              baselineFailures: baselineTestFailures,
+            });
+            if (!testRepairResult.success && testRepairResult.newFailures.length > 0) {
+              testRetries++;
+              convergenceMetrics.increment("repairTriggers");
+              const failureSummary = testRepairResult.newFailures
+                .slice(0, 5)
+                .map(
+                  (f) =>
+                    `  ${f.testFile ?? "unknown"}::${f.testName ?? "?"} — ${(f.error ?? "unknown error").slice(0, 120)}`,
+                )
+                .join("\n");
+              const testFailMsg = `[repair-loop] ${testRepairResult.newFailures.length} NEW test failure(s) introduced by your changes (iteration ${testRetries}/${MAX_TEST_REPAIR_RETRIES}):\n${failureSummary}\nPlease fix these failing tests before continuing.`;
+              messages.push({ role: "user" as const, content: testFailMsg });
+              if (!config.silent) {
+                emitOrWrite(
+                  `${YELLOW}[repair-loop] ${testRepairResult.newFailures.length} new test failure(s) — injecting fix prompt (attempt ${testRetries}/${MAX_TEST_REPAIR_RETRIES})${RESET}\n`,
+                );
+              }
+            } else if (testRepairResult.success && testRetries > 0 && !config.silent) {
+              emitOrWrite(
+                `${GREEN}[repair-loop] All tests pass after ${testRetries} repair iteration(s)${RESET}\n`,
+              );
+            }
+          } catch {
+            // Non-fatal — test repair never blocks execution
+          }
+        }
+
+        // TestRulesEngine: check if written file is a test
+        if (touchedFiles.some((f) => f.endsWith(".test.ts"))) {
+          const { testRulesEngine } = await import("@dantecode/core");
+          const { basename } = await import("node:path");
+          for (const file of touchedFiles.filter((f) => f.endsWith(".test.ts"))) {
+            try {
+              const content = await readFile(file, "utf-8").catch(() => "");
+              const violations = testRulesEngine.checkFile(file, content);
+              if (violations.length > 0) {
+                const hints = violations
+                  .map((v) => `  [${v.severity.toUpperCase()}] ${v.message}`)
+                  .join("\n");
+                toolResults.push(
+                  `[TestRules] ${violations.length} rule violation(s) in ${basename(file)}:\n${hints}`,
+                );
+              }
+            } catch {
+              /* non-blocking */
+            }
+          }
+        }
+      }
 
       // Hook: PostToolUse — fire for completed tools
       void getGlobalHookRunner().run("PostToolUse", { eventType: "PostToolUse", metadata: { toolCount: toolCalls.length, filesModified: execResult.filesModified } });
@@ -2202,7 +2670,7 @@ async function _runAgentLoopCore(
                 toolCalls: currentApproachToolCalls,
                 sessionId: session.id,
               })
-              .catch(() => {});
+              .catch((err) => swallowError(err, "memory-record-success"));
             // Reset pivot tracking on success
             consecutiveSameSignatureFailures = 0;
             lastPivotErrorSignature = "";
@@ -2221,7 +2689,7 @@ async function _runAgentLoopCore(
                 toolCalls: currentApproachToolCalls,
                 sessionId: session.id,
               })
-              .catch(() => {});
+              .catch((err) => swallowError(err, "memory-record-failure"));
 
             // Inject approach memory into the retry prompt so the model knows what was tried
             if (approachLog.length > 1) {
@@ -2409,6 +2877,7 @@ async function _runAgentLoopCore(
       }
 
       // ---- DanteMemory: retain tool round outcome for cross-session recall ----
+      // Scope: "project" + layer: "semantic" so facts persist across session restarts.
       if (memoryInitialized && toolCalls.length > 0) {
         const touchedFilesList = touchedFiles
           .slice(0, 3)
@@ -2416,14 +2885,40 @@ async function _runAgentLoopCore(
           .join(", ");
         const roundSummary = `Round ${roundCounter}: ${toolCalls.length} tool(s)${touchedFilesList ? ` | files: ${touchedFilesList}` : ""}`;
         if (secretsScanner.scan(roundSummary).clean) {
+          // Use last PDSE score if available (set by DanteForge on prior round)
+          const lastPdse = config.replState?.lastSessionPdseResults?.slice(-1)[0]?.pdseScore;
           memoryOrchestrator
-            .memoryStore(`round-${roundCounter}-${session.id}`, roundSummary, "session", {
+            .memoryStore(`round-${roundCounter}-${session.id}`, roundSummary, "project", {
+              layer: "semantic",
               source: session.id,
               summary: roundSummary,
               tags: ["round"],
+              round: roundCounter,
+              filesModified: touchedFiles.slice(0, 10),
+              ...(lastPdse !== undefined ? { pdseScore: lastPdse } : {}),
             })
-            .catch(() => {}); // fire-and-forget, non-fatal
+            .catch((err) => swallowError(err, "memory-store")); // fire-and-forget, non-fatal
         }
+      }
+
+      // ---- DanteMemory: early-checkpoint write after first file modification ----
+      // Fires once per session the first time a file is actually written/edited.
+      // Ensures SOME project-scope fact survives even if the process is killed mid-session.
+      if (
+        memoryInitialized &&
+        !memoryEarlyCheckpointFired &&
+        touchedFiles.length > 0
+      ) {
+        memoryEarlyCheckpointFired = true;
+        const firstFile = touchedFiles[0] ?? "unknown";
+        memoryOrchestrator
+          .memoryStore(
+            `session::${session.id}::first-write`,
+            `Modified ${firstFile} in session ${session.id}`,
+            "project",
+            { layer: "semantic", tags: ["early-checkpoint"], sessionId: session.id },
+          )
+          .catch((err) => swallowError(err, "memory-early-checkpoint")); // fire-and-forget
       }
 
       // Add tool results to messages for the next model call
@@ -2676,7 +3171,7 @@ async function _runAgentLoopCore(
               ? m.content
               : m.content.map((b) => b.text || "").join("\n"),
         }));
-      await detectAndRecordPatterns(conversationMessages, session.projectRoot);
+      await detectAndRecordPatterns?.(conversationMessages, session.projectRoot);
     } catch {
       // Non-fatal: pattern detection failure should not break the session
     }
@@ -2793,6 +3288,99 @@ async function _runAgentLoopCore(
       }
     } catch {
       // Non-fatal - telemetry export failure should not block session completion
+    }
+
+    // ---- Wave 6a: Session cost tracking ----
+    try {
+      // Sonnet pricing: input $3/MTok, output $15/MTok
+      const SONNET_INPUT_COST_PER_MTOK = 3.0;
+      const SONNET_OUTPUT_COST_PER_MTOK = 15.0;
+      if (accumulatedUsage.totalInputTokens > 0 || accumulatedUsage.totalOutputTokens > 0) {
+        const inputCost = (accumulatedUsage.totalInputTokens / 1_000_000) * SONNET_INPUT_COST_PER_MTOK;
+        const outputCost = (accumulatedUsage.totalOutputTokens / 1_000_000) * SONNET_OUTPUT_COST_PER_MTOK;
+        const totalCost = inputCost + outputCost;
+        const costMsg = `Session cost: ~$${totalCost.toFixed(4)} (input: ${accumulatedUsage.totalInputTokens}t, output: ${accumulatedUsage.totalOutputTokens}t)`;
+        if (!config.silent) {
+          process.stdout.write(`${DIM}${costMsg}${RESET}\n`);
+        }
+        // Store on session for downstream consumers
+        (session as unknown as Record<string, unknown>)._sessionCost = {
+          inputTokens: accumulatedUsage.totalInputTokens,
+          outputTokens: accumulatedUsage.totalOutputTokens,
+          totalCostUsd: totalCost,
+          rounds: accumulatedUsage.rounds,
+        };
+      }
+    } catch {
+      // Non-fatal — cost tracking must never block session end
+    }
+
+    // ---- Wave 2c: Post-exec typecheck verification ----
+    // Runs tsc --noEmit on modified packages to catch regressions before returning.
+    // Non-blocking — errors are logged but do not throw.
+    if (touchedFiles.length > 0 && !config.silent) {
+      try {
+        // Derive unique package roots from touched files (look for packages/<name>/ pattern)
+        const modifiedPackageRoots = new Set<string>();
+        for (const f of touchedFiles) {
+          const normalized = f.replace(/\\/g, "/");
+          const match = normalized.match(/^(.+\/packages\/[^/]+)\//);
+          if (match?.[1]) {
+            modifiedPackageRoots.add(match[1]);
+          }
+        }
+        for (const pkgRoot of modifiedPackageRoots) {
+          try {
+            execFileSync("npx", ["tsc", "--noEmit"], { cwd: pkgRoot, stdio: "pipe" });
+            convergenceMetrics.setVerificationPassed(true);
+            if (config.verbose) {
+              process.stdout.write(`${DIM}[PostVerify] ✓ typecheck passed (${pkgRoot})${RESET}\n`);
+            }
+          } catch {
+            convergenceMetrics.setVerificationPassed(false);
+            process.stdout.write(`${YELLOW}[PostVerify] typecheck FAILED — 1 repair attempt remaining (${pkgRoot})${RESET}\n`);
+          }
+        }
+      } catch {
+        // Non-fatal — typecheck verification must never block session end
+      }
+    }
+
+    // ---- Wave 2 (new): ConvergenceMetrics — session-end summary ----
+    if (!config.silent) {
+      try {
+        const convergenceSummary = convergenceMetrics.formatSummary();
+        if (convergenceSummary) {
+          process.stdout.write(`${DIM}[convergence] ${convergenceSummary}${RESET}\n`);
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    // ---- Skillbook: record session outcome for effectiveness tracking ----
+    // This closes the Gaslight→Skillbook→agent-loop feedback loop.
+    // A session is "succeeded" when ALL of:
+    //   1. Verification explicitly passed (not undefined — we need positive signal)
+    //   2. CompletionGate was never rejected
+    //   3. At least 1 file was modified (zero-work sessions must not teach lessons)
+    // This prevents permissive undefined-passes-as-success poisoning the skillbook.
+    if (_skillbookRef !== null && _injectedSkillIds.length > 0) {
+      try {
+        const snap = convergenceMetrics.snapshot();
+        const sessionSucceeded =
+          snap.verificationPassed === true &&
+          snap.completionGateRejections === 0 &&
+          filesModified > 0;
+        _skillbookRef.recordSessionOutcome(_injectedSkillIds, sessionSucceeded);
+        if (config.verbose) {
+          emitOrWrite(
+            `${DIM}[Skillbook] Recorded outcome for ${_injectedSkillIds.length} lessons — succeeded=${sessionSucceeded}${RESET}\n`,
+          );
+        }
+      } catch (err) {
+        swallowError(err, "skillbook-record-outcome");
+      }
     }
 
     // ---- Evidence Chain: seal session and surface sealHash ----
