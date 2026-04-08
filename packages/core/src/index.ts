@@ -478,6 +478,52 @@ export type {
   ScoreTrend,
 } from "./convergence-controller.js";
 
+// ─── Verification Engine ─────────────────────────────────────────────────────
+
+export { VerificationEngine } from "./verification-engine.js";
+export type {
+  VerificationStage,
+  VerificationStageResult,
+  VerificationReport,
+  VerificationEngineOptions,
+  TestRunnerInfo,
+} from "./verification-engine.js";
+
+// ─── Repair Strategy Engine ─────────────────────────────────────────────────
+
+export { RepairStrategyEngine } from "./repair-strategy-engine.js";
+export type {
+  ErrorCategory,
+  ClassifiedError,
+  RepairPlan,
+} from "./repair-strategy-engine.js";
+
+// ─── Self-Healing Loop ───────────────────────────────────────────────────────
+
+export { SelfHealingLoop, createSelfHealingLoop } from "./self-healing-loop.js";
+export type {
+  AsyncFixFn,
+  SelfHealingLoopOptions,
+  StageHealResult,
+  SelfHealingResult,
+} from "./self-healing-loop.js";
+
+// ─── Crash Recovery ──────────────────────────────────────────────────────────
+
+export {
+  CrashRecovery,
+  scanAutoforgeResumableSessions,
+  runStartupCrashRecovery,
+} from "./crash-recovery.js";
+export type {
+  AutoResumePolicy,
+  CrashRecoveryOptions,
+  CrashRecoveryScanResult,
+  CrashRecoveryResult,
+  AutoforgeResumableSession,
+  StartupRecoveryState,
+} from "./crash-recovery.js";
+
 // ─── Magic Pipeline State ────────────────────────────────────────────────────
 
 export {

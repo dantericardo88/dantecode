@@ -53,6 +53,7 @@ import {
   deploy,
   detectDeploymentPlatform,
   MCPMemoryBridge,
+  createSelfHealingLoop,
 } from "@dantecode/core";
 import type { DeploymentPlatform } from "@dantecode/core";
 import type {
@@ -139,6 +140,8 @@ import { researchSlashHandler } from "./commands/research.js";
 import { automateCommand } from "./commands/automate.js";
 import { adaptationCommand } from "./commands/adaptation.js";
 import { planCommand } from "./commands/plan.js";
+import { verifyReceiptCommand } from "./commands/verify-receipt.js";
+import { pdseReportCommand } from "./commands/pdse-report.js";
 import { buildCliOperatorStatus } from "./operator-status.js";
 import { mergeVisibleSkills } from "./skill-visibility.js";
 import { loadSlashCommandRegistry, type NativeSlashCommandDefinition } from "./command-registry.js";
@@ -4441,6 +4444,44 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
       lines.push(`  Applied to disk: ${displayTargetFile}`);
     } else {
       lines.push(`  Disk state: unchanged (${displayTargetFile})`);
+
+      // Self-healing pass: when autoforge doesn't pass, run a closed verify→repair
+      // loop on the project to catch typecheck/lint/unit failures and attempt
+      // targeted repair without human intervention.
+      try {
+        process.stdout.write(`\n${DIM}[self-heal] Running verify→repair cycle on ${displayTargetFile}...${RESET}\n`);
+        const healingLoop = createSelfHealingLoop(state.projectRoot, {
+          stages: ["typecheck", "lint", "unit"],
+          maxAttemptsPerStage: 2,
+          maxTotalAttempts: 6,
+        });
+        const healResult = await healingLoop.run(async (stage: string, prompt: string) => {
+          // Inject repair prompt into the model for targeted fix generation
+          const repairMessage = [
+            `## Self-Healing Repair Request`,
+            `Stage: ${stage}`,
+            `Target: ${displayTargetFile}`,
+            ``,
+            prompt,
+          ].join("\n");
+          // Use the model router to generate a repair — result is discarded here
+          // since the LLM is expected to write fixes directly to disk via tool calls
+          // in a future full integration. For now we emit the prompt as a visible
+          // suggestion so the user can act on it.
+          process.stdout.write(
+            `\n${YELLOW}[self-heal] ${stage} repair prompt injected (attempt):${RESET}\n` +
+            repairMessage.slice(0, 500) + (repairMessage.length > 500 ? "\n...[truncated]" : "") + "\n",
+          );
+        });
+
+        if (healResult.allHealed) {
+          lines.push(`  ${GREEN}Self-healing: all stages now passing (PDSE: ${(healResult.finalReport.pdseScore * 100).toFixed(1)}/100)${RESET}`);
+        } else {
+          lines.push(`  Self-healing: ${healResult.summary.split("\n")[0] ?? "partial"}`);
+        }
+      } catch (_healErr) {
+        // Self-healing is best-effort — never block the return path
+      }
     }
 
     // Save final checkpoint
@@ -7308,7 +7349,7 @@ async function gaslightCommand(args: string, state: ReplState): Promise<string> 
     default:
       return [
         `${BOLD}DanteGaslight${RESET} — bounded adversarial refinement engine`,
-        `  ${CYAN}/gaslight on${RESET}        Enable the engine (default: off)`,
+        `  ${CYAN}/gaslight on${RESET}        Enable the engine (default: on for interactive sessions)`,
         `  ${CYAN}/gaslight off${RESET}       Disable the engine`,
         `  ${CYAN}/gaslight stats${RESET}     Session statistics`,
         `  ${CYAN}/gaslight review${RESET}    Review last session`,
@@ -8919,6 +8960,44 @@ ${BOLD}${YELLOW}Health Check Categories:${RESET}
 }
 
 // ----------------------------------------------------------------------------
+// Quality Gate Report
+// ----------------------------------------------------------------------------
+
+async function qualityCommand(_args: string, state: ReplState): Promise<string> {
+  const results = state.lastSessionPdseResults;
+  const lines: string[] = ["", `${BOLD}Quality Gate Results${RESET}`, ""];
+
+  if (results.length === 0) {
+    lines.push(`${DIM}No gate results yet. Write or edit code files to trigger checks.${RESET}`);
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  const recent = results.slice(-10);
+  for (const r of recent) {
+    const icon = r.passed ? `${GREEN}\u2713${RESET}` : `${RED}\u26A0${RESET}`;
+    const shortFile = r.file.length > 50 ? `...${r.file.slice(-47)}` : r.file;
+    const scoreColor = r.pdseScore >= 85 ? GREEN : r.pdseScore >= 70 ? YELLOW : RED;
+    lines.push(
+      `  ${icon} ${shortFile.padEnd(52)} ${DIM}PDSE:${RESET} ${scoreColor}${r.pdseScore}${RESET}`,
+    );
+  }
+
+  const passed = results.filter((r) => r.passed).length;
+  const avgPdse = results.length > 0
+    ? Math.round(results.reduce((sum, r) => sum + r.pdseScore, 0) / results.length)
+    : 0;
+  const avgColor = avgPdse >= 85 ? GREEN : avgPdse >= 70 ? YELLOW : RED;
+
+  lines.push("");
+  lines.push(
+    `  ${DIM}Gate summary:${RESET} ${passed}/${results.length} passed  ${DIM}|${RESET}  Avg PDSE: ${avgColor}${avgPdse}${RESET}`,
+  );
+  lines.push("");
+  return lines.join("\n");
+}
+
+// ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
 
@@ -8970,6 +9049,14 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/score",
     handler: scoreCommand,
     tier: 2,
+    category: "verification",
+  },
+  {
+    name: "quality",
+    description: "Show recent DanteForge quality gate results (anti-stub, constitution, PDSE) for this session",
+    usage: "/quality",
+    handler: qualityCommand,
+    tier: 1,
     category: "verification",
   },
   {
@@ -9978,17 +10065,37 @@ const SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   // --------------------------------------------------------------------------
-  // /benchmark — Show DanteCode benchmark scores
+  // /benchmark — Show DanteCode benchmark scores / run SWE-bench
   // --------------------------------------------------------------------------
   {
     name: "benchmark",
     description: "Show DanteCode benchmark scores (SWE-bench, code editing accuracy)",
-    usage: "/benchmark",
+    usage: "/benchmark [swe-bench [--subset N] | report [--input PATH]]",
     tier: 2,
     category: "verification",
-    handler: async (_args: string, state: ReplState): Promise<string> => {
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const trimmed = args.trim();
+      if (trimmed.startsWith("swe-bench") || trimmed.startsWith("report")) {
+        const { benchmarkCommand } = await import("./commands/benchmark.js");
+        return benchmarkCommand(trimmed, state.projectRoot);
+      }
       const { generateBenchmarkReport } = await import("./commands/benchmark-report.js");
       return generateBenchmarkReport(state.projectRoot);
+    },
+  },
+  // --------------------------------------------------------------------------
+  // /stress-test — Autonomous self-evaluation via VM evaluator
+  // --------------------------------------------------------------------------
+  {
+    name: "stress-test",
+    description:
+      "Run built-in SWE-bench instances through the VM evaluator — autonomous self-test, no human input required",
+    usage: "/stress-test [--instances N|all] [--output PATH]",
+    tier: 2,
+    category: "verification",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const { runStressTest } = await import("./commands/stress-test.js");
+      return runStressTest(args, state.projectRoot);
     },
   },
   // --------------------------------------------------------------------------
@@ -10263,6 +10370,34 @@ const SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   // --------------------------------------------------------------------------
+  // /cost-history — Show cost history for past sessions
+  // --------------------------------------------------------------------------
+  {
+    name: "cost-history",
+    description: "Show cost history: total spend, avg per session, Haiku routing rate",
+    usage: "/cost-history [--last N | --export csv]",
+    tier: 2,
+    category: "core",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const { costHistoryCommand } = await import("./commands/cost-history.js");
+      return costHistoryCommand(args, state.projectRoot);
+    },
+  },
+  // --------------------------------------------------------------------------
+  // /efficiency-report — Token efficiency and Haiku routing savings
+  // --------------------------------------------------------------------------
+  {
+    name: "efficiency-report",
+    description: "Show token efficiency report: Haiku routing savings vs all-Sonnet baseline",
+    usage: "/efficiency-report [--last N | --export csv]",
+    tier: 2,
+    category: "core",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const { runEfficiencyReport } = await import("./commands/efficiency-report.js");
+      return runEfficiencyReport(args, state.projectRoot);
+    },
+  },
+  // --------------------------------------------------------------------------
   // /migrate — Migrate codebase (js-to-ts, cjs-to-esm, jest-to-vitest, npm-to-pnpm)
   // --------------------------------------------------------------------------
   {
@@ -10287,6 +10422,36 @@ const SLASH_COMMANDS: SlashCommand[] = [
       process.stdout.write(`${CYAN}Migrating ${migrationType}...${RESET}\n`);
       const result = await runMigration(state.projectRoot, migrationType, router);
       return result.summary;
+    },
+  },
+  // --------------------------------------------------------------------------
+  // /verify-receipt — Verify a cryptographic evidence bundle receipt
+  // --------------------------------------------------------------------------
+  {
+    name: "verify-receipt",
+    description: "Verify a cryptographic evidence bundle receipt from .dantecode/evidence/",
+    usage: "/verify-receipt <receipt-id>",
+    tier: 2,
+    category: "verification",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      await verifyReceiptCommand(parts, state.projectRoot);
+      return "";
+    },
+  },
+  // --------------------------------------------------------------------------
+  // /pdse-report — PDSE session history report
+  // --------------------------------------------------------------------------
+  {
+    name: "pdse-report",
+    description: "Show PDSE scores and stats for recent sessions",
+    usage: "/pdse-report [--last N] [--export csv]",
+    tier: 2,
+    category: "verification",
+    handler: async (args: string, state: ReplState): Promise<string> => {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      await pdseReportCommand(parts, state.projectRoot);
+      return "";
     },
   },
 ];

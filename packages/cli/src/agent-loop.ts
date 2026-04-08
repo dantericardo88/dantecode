@@ -65,6 +65,7 @@ import {
   globalTokenCache,
   AutonomyOrchestrator,
   ConvergenceController,
+  runStartupCrashRecovery,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage, TestFailure } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -368,6 +369,19 @@ async function _runAgentLoopCore(
       }
     } catch (err: unknown) {
       swallowError(err, "health-check");
+    }
+
+    // Crash recovery: scan for interrupted sessions and surface them to the user.
+    // Uses policy="none" so we surface but never auto-resume mid-conversation.
+    try {
+      const recoveryState = await runStartupCrashRecovery(session.projectRoot, {
+        autoResumePolicy: "none",
+      });
+      for (const line of recoveryState.bannerLines) {
+        process.stdout.write(`${YELLOW}${line}${RESET}\n`);
+      }
+    } catch (_recErr) {
+      // Best-effort: never block startup for recovery scan failures
     }
   }
 
