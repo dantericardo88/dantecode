@@ -508,6 +508,17 @@ export type {
   SelfHealingResult,
 } from "./self-healing-loop.js";
 
+// ─── Healing Agent ───────────────────────────────────────────────────────────
+
+export { HealingAgent, getHealingTools, HEALING_TOOL_NAMES } from "./healing-agent.js";
+export type {
+  HealingToolCall,
+  HealingToolExecutor,
+  HealingExecutionResult,
+  HealingAgentOptions,
+  HealingRunResult,
+} from "./healing-agent.js";
+
 // ─── Crash Recovery ──────────────────────────────────────────────────────────
 
 export {

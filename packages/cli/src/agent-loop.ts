@@ -66,7 +66,10 @@ import {
   AutonomyOrchestrator,
   ConvergenceController,
   runStartupCrashRecovery,
+  createSelfHealingLoop,
+  HealingAgent,
 } from "@dantecode/core";
+import type { HealingToolCall, VerificationStage } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage, TestFailure } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
 import { recordSuccessPattern } from "@dantecode/danteforge";
@@ -3492,6 +3495,47 @@ async function _runAgentLoopCore(
       (session as unknown as Record<string, unknown>)._sealHash = seal.sealHash;
     } catch (err: unknown) {
       swallowError(err, "evidence-seal");
+    }
+
+    // ---- Post-completion self-healing pass ----
+    // If autoforge ran (roundCounter > 0) and the session modified files,
+    // attempt a quick verify→repair cycle to catch any leftover failures
+    // before returning to the user.
+    if (config.state.autoforge.autoRunOnWrite && roundCounter > 0 && filesModified > 0) {
+      try {
+        const healLoop = createSelfHealingLoop(session.projectRoot, {
+          stages: ["typecheck", "lint", "unit"],
+          maxAttemptsPerStage: 2,
+          maxTotalAttempts: 4,
+        });
+
+        const agentHealingExecutor = async (calls: HealingToolCall[]) => {
+          let modified = 0;
+          const outputs: string[] = [];
+          for (const call of calls) {
+            try {
+              const r = await executeTool(call.name, call.input, session.projectRoot, session.id);
+              outputs.push(r.content);
+              if (["Edit", "Write"].includes(call.name) && !r.isError) modified++;
+            } catch (err) {
+              outputs.push(String(err));
+            }
+          }
+          return { filesModified: modified, outputs, summary: `${calls.length} call(s)` };
+        };
+
+        const healingAgent = new HealingAgent(router, agentHealingExecutor, {
+          maxTokens: 4096,
+          maxLlmRounds: 2,
+          streamOutput: false,
+        });
+
+        await healLoop.run(async (stage: string, prompt: string, attempt: number) => {
+          await healingAgent.run(stage as VerificationStage, prompt, attempt, "");
+        });
+      } catch (err) {
+        swallowError(err, "post-loop-self-heal");
+      }
     }
 
     // Hook: SessionEnd

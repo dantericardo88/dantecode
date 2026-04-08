@@ -54,7 +54,9 @@ import {
   detectDeploymentPlatform,
   MCPMemoryBridge,
   createSelfHealingLoop,
+  HealingAgent,
 } from "@dantecode/core";
+import type { HealingToolCall, VerificationStage } from "@dantecode/core";
 import type { DeploymentPlatform } from "@dantecode/core";
 import type {
   CriticOpinion,
@@ -130,6 +132,7 @@ import type { ThemeName } from "@dantecode/ux-polish";
 import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
+import { executeTool } from "./tools.js";
 import { runSkillsCommand } from "./commands/skills.js";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
 import { discoverSkillsWithScopes } from "@dantecode/skills-registry";
@@ -4455,23 +4458,50 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
           maxAttemptsPerStage: 2,
           maxTotalAttempts: 6,
         });
-        const healResult = await healingLoop.run(async (stage: string, prompt: string) => {
-          // Inject repair prompt into the model for targeted fix generation
-          const repairMessage = [
-            `## Self-Healing Repair Request`,
-            `Stage: ${stage}`,
-            `Target: ${displayTargetFile}`,
-            ``,
+
+        // Build a real tool executor that calls executeTool() for each LLM tool call
+        const healingToolExecutor = async (calls: HealingToolCall[]) => {
+          let filesModified = 0;
+          const outputs: string[] = [];
+          for (const call of calls) {
+            try {
+              const toolResult = await executeTool(
+                call.name,
+                call.input,
+                state.projectRoot,
+                state.session.id,
+              );
+              outputs.push(toolResult.content);
+              // Count write-type tools as file modifications
+              if (["Edit", "Write"].includes(call.name) && !toolResult.isError) {
+                filesModified++;
+              }
+            } catch (err) {
+              outputs.push(String(err));
+            }
+          }
+          return { filesModified, outputs, summary: `${calls.length} call(s)` };
+        };
+
+        const healingAgent = new HealingAgent(modelRouter, healingToolExecutor, {
+          maxTokens: 4096,
+          maxLlmRounds: 2,
+          streamOutput: true,
+        });
+
+        const healResult = await healingLoop.run(async (stage: string, prompt: string, attempt: number) => {
+          process.stdout.write(`\n${DIM}[self-heal] ${stage} repair — attempt ${attempt}...${RESET}\n`);
+          const agentResult = await healingAgent.run(
+            stage as VerificationStage,
             prompt,
-          ].join("\n");
-          // Use the model router to generate a repair — result is discarded here
-          // since the LLM is expected to write fixes directly to disk via tool calls
-          // in a future full integration. For now we emit the prompt as a visible
-          // suggestion so the user can act on it.
-          process.stdout.write(
-            `\n${YELLOW}[self-heal] ${stage} repair prompt injected (attempt):${RESET}\n` +
-            repairMessage.slice(0, 500) + (repairMessage.length > 500 ? "\n...[truncated]" : "") + "\n",
+            attempt,
+            displayTargetFile,
           );
+          if (agentResult.filesModified > 0) {
+            process.stdout.write(`\n${GREEN}[self-heal] ${agentResult.summary}${RESET}\n`);
+          } else if (!agentResult.aborted) {
+            process.stdout.write(`\n${YELLOW}[self-heal] ${agentResult.summary}${RESET}\n`);
+          }
         });
 
         if (healResult.allHealed) {
