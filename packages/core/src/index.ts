@@ -353,6 +353,7 @@ export {
   classifyError,
   isRetryable,
   isTerminal,
+  isCircuitOpen,
   getRetryDelayMs,
   DanteErrorType,
   RETRYABLE_ERROR_TYPES,
@@ -361,7 +362,7 @@ export {
 
 // ─── Error Helper ────────────────────────────────────────────────────────────
 
-export { ErrorHelper, errorHelper } from "./error-helper.js";
+export { ErrorHelper, errorHelper, swallowError } from "./error-helper.js";
 export type { ErrorKind, ErrorAnalysis, FormatOptions } from "./error-helper.js";
 
 // ─── Health Check ───────────────────────────────────────────────────────────
@@ -455,6 +456,27 @@ export type {
 
 export { LoopDetector, fingerprintAction } from "./loop-detector.js";
 export type { ActionRecord, LoopDetectionResult, LoopDetectorOptions } from "./loop-detector.js";
+
+// ─── Autonomy Orchestrator ──────────────────────────────────────────────────
+
+export { AutonomyOrchestrator } from "./autonomy-orchestrator.js";
+export type {
+  AutonomyActionType,
+  AutonomyDecision,
+  AutonomyInput,
+  AutonomyOrchestratorOptions,
+  ScopeConstraint,
+} from "./autonomy-orchestrator.js";
+
+// ─── Convergence Controller ─────────────────────────────────────────────────
+
+export { ConvergenceController, computeSlope } from "./convergence-controller.js";
+export type {
+  ConvergenceDecision,
+  ConvergenceControllerOptions,
+  ScoreObservation,
+  ScoreTrend,
+} from "./convergence-controller.js";
 
 // ─── Magic Pipeline State ────────────────────────────────────────────────────
 
@@ -1528,3 +1550,19 @@ export {
 // ─── MCP Memory Bridge ────────────────────────────────────────────────────────
 export { MCPMemoryBridge } from "./mcp-memory-bridge.js";
 export type { MCPMemoryBridgeOptions } from "./mcp-memory-bridge.js";
+
+// ─── Completion Gate ──────────────────────────────────────────────────────────
+export { CompletionGate, completionGate } from "./completion-gate.js";
+export type { GateVerdict } from "./completion-gate.js";
+
+// ─── Convergence Metrics ──────────────────────────────────────────────────────
+export { ConvergenceMetrics } from "./convergence-metrics.js";
+export type { ConvergenceSnapshot } from "./convergence-metrics.js";
+
+// ─── Prompt Sanitizer ─────────────────────────────────────────────────────────
+export { sanitizeUserPrompt } from "./prompt-sanitizer.js";
+export type { SanitizeResult } from "./prompt-sanitizer.js";
+
+// ─── Test Rules Engine ────────────────────────────────────────────────────────
+export { TestRulesEngine, testRulesEngine } from "./test-rules-engine.js";
+export type { TestRule, RuleViolation } from "./test-rules-engine.js";

@@ -63,6 +63,8 @@ import {
   completionGate,
   ConvergenceMetrics,
   globalTokenCache,
+  AutonomyOrchestrator,
+  ConvergenceController,
 } from "@dantecode/core";
 import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage, TestFailure } from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
@@ -364,8 +366,8 @@ async function _runAgentLoopCore(
           `${YELLOW}[health] Some checks failed — see warnings above. Proceeding anyway.${RESET}\n`,
         );
       }
-    } catch {
-      // Health check failure is non-fatal — never block the agent loop
+    } catch (err: unknown) {
+      swallowError(err, "health-check");
     }
   }
 
@@ -640,7 +642,8 @@ async function _runAgentLoopCore(
           `${DIM}[autonomy] baseline: ${baselineTestFailures.length} pre-existing test failure(s) noted (will be excluded from repair loop)${RESET}\n`,
         );
       }
-    } catch {
+    } catch (err: unknown) {
+      swallowError(err, "baseline-test-detection");
       // No test infrastructure in this project — test-repair will be skipped entirely.
       testCommandAvailable = false;
     }
@@ -754,8 +757,8 @@ async function _runAgentLoopCore(
           });
         }
       }
-    } catch {
-      // Non-fatal — skill discovery never blocks a session
+    } catch (err: unknown) {
+      swallowError(err, "skill-discovery");
     }
 
     // ---- Wave 2b: LoopDetector — stuck-loop detection ----
@@ -768,6 +771,12 @@ async function _runAgentLoopCore(
     // ---- Wave 2c: RecoveryEngine + TaskCircuitBreaker ----
     const recoveryEngine = new RecoveryEngine();
     const taskCircuitBreaker = new TaskCircuitBreaker({ identicalFailureThreshold: 5, maxRecoveryAttempts: 2 });
+
+    // ---- Autonomy Sprint: AutonomyOrchestrator + ConvergenceController ----
+    // AutonomyOrchestrator: wires circuit-breaker → RecoveryEngine → context injection
+    // ConvergenceController: tracks PDSE score trend → decides continue/scope-reduce/escalate
+    const autonomyOrchestrator = new AutonomyOrchestrator({ recoveryEngine, maxRecoveryAttempts: 4, maxScopeReductions: 2 });
+    const convergenceController = new ConvergenceController({ windowSize: 5, flatRoundsBeforeScopeReduce: 3, decliningRoundsBeforeEscalate: 2 });
 
     // ---- Feature: Pivot logic ----
     // Track consecutive failures with similar error signatures for strategy change.
@@ -855,15 +864,15 @@ async function _runAgentLoopCore(
         try {
           const repoEntries = generateRepoMap(session.projectRoot, { maxFiles: 30 });
           architectCodeContext = formatRepoMapForContext(repoEntries).slice(0, 8000);
-        } catch {
-          // Non-fatal — fall back to empty context if repo map fails
+        } catch (err: unknown) {
+          swallowError(err, "repo-map");
         }
         architectGuidance = await runArchitectPhase(durablePrompt, architectCodeContext, router, messages);
         if (architectGuidance) {
           messages.push({ role: "user" as const, content: `Architectural guidance:\n${architectGuidance}\n\nNow implement using SEARCH/REPLACE blocks only.` });
         }
-      } catch {
-        // Non-fatal — fall back to normal execution
+      } catch (err: unknown) {
+        swallowError(err, "architect-guidance");
       }
     }
 
@@ -1049,7 +1058,7 @@ async function _runAgentLoopCore(
                 try {
                   const repoMap = generateRepoMap(session.projectRoot, { maxFiles: 100 });
                   return repoMap.map((e) => e.path).slice(0, 80);
-                } catch {
+                } catch (_err: unknown) {
                   return touchedFiles.slice(0, 50);
                 }
               })(),
@@ -1073,8 +1082,8 @@ async function _runAgentLoopCore(
               }
             }
           }
-        } catch {
-          // Non-fatal
+        } catch (err: unknown) {
+          swallowError(err, "ai-context-selection");
         }
       }
 
@@ -1125,8 +1134,8 @@ async function _runAgentLoopCore(
               }
             }
             // "medium"/"standard": keep current behavior
-          } catch {
-            // Routing failures must not block generation
+          } catch (err: unknown) {
+            swallowError(err, "complexity-router");
           }
 
           // ---- Wave 5b: Cache hit rate tracking — mark each round's messages ----
@@ -1143,8 +1152,8 @@ async function _runAgentLoopCore(
                 globalTokenCache.markSeen(hash, messageContent.slice(0, tokenEstimate));
               }
             }
-          } catch {
-            // Non-fatal — cache tracking must never block generation
+          } catch (err: unknown) {
+            swallowError(err, "token-cache-tracking");
           }
 
           const useNativeTools = config.state.model.default.supportsToolCalls;
@@ -1203,7 +1212,8 @@ async function _runAgentLoopCore(
               renderer.finish();
               cleanText = responseText;
               nativeSuccess = true;
-            } catch {
+            } catch (err: unknown) {
+              swallowError(err, "native-tool-calling");
               // Native tool calling failed — fall through to XML fallback
               renderer.reset();
             }
@@ -1271,8 +1281,8 @@ async function _runAgentLoopCore(
                 } else if (!config.silent) {
                   emitOrWrite(`${YELLOW}[edit-block] failed: ${editResult.error ?? "unknown"}${RESET}\n`);
                 }
-              } catch {
-                // Non-fatal — edit block errors never crash the loop
+              } catch (err: unknown) {
+                swallowError(err, "edit-block-parsing");
               }
             }
 
@@ -1295,8 +1305,8 @@ async function _runAgentLoopCore(
                   });
                 }
               }
-            } catch {
-              // Non-fatal
+            } catch (err: unknown) {
+              swallowError(err, "artifact-parsing");
             }
 
             // Enhanced: Immediate feedback with diagnostic details
@@ -1506,42 +1516,70 @@ async function _runAgentLoopCore(
         const errorType = classifyError(err);
         process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
 
-        // ---- Wave 2c: TaskCircuitBreaker + RecoveryEngine ----
+        // ---- Autonomy Sprint: TaskCircuitBreaker → AutonomyOrchestrator → real recovery ----
         // Don't record auth/balance errors — those are terminal and need no recovery plan
         if (errorType !== DanteErrorType.Auth && errorType !== DanteErrorType.Balance) {
           try {
             const breakerAction = taskCircuitBreaker.recordFailure(errorMessage, roundCounter);
             if (breakerAction.action === "pause_and_recover" || breakerAction.action === "escalate") {
-              if (errorType === DanteErrorType.RateLimit) {
-                const backoff = taskCircuitBreaker.getBackoffDelay(errorMessage);
-                process.stdout.write(
-                  `${YELLOW}[RecoveryEngine] Rate-limit detected — backoff plan: wait ${(backoff.delayMs / 1000).toFixed(1)}s before retry (attempt ${backoff.attempt}, cumulative ${(backoff.cumulativeDelayMs / 1000).toFixed(1)}s)${RESET}\n`,
-                );
-              } else if (errorType === DanteErrorType.ContextWindow) {
-                process.stdout.write(
-                  `${YELLOW}[RecoveryEngine] Context window error — strategy: condense context or summarize conversation${RESET}\n`,
-                );
-              } else {
-                // Generic recovery: run repo-root diagnostics
+              try {
+                const primaryTarget = touchedFiles[touchedFiles.length - 1];
+                const decision = await autonomyOrchestrator.decide({
+                  breakerAction,
+                  errorMessage,
+                  touchedFiles: [...touchedFiles],
+                  projectRoot: session.projectRoot,
+                  primaryTargetFile: primaryTarget,
+                  round: roundCounter,
+                });
+
+                if (!config.silent) {
+                  process.stdout.write(
+                    `${YELLOW}[AutonomyOrchestrator] ${decision.type.toUpperCase()}: ${decision.reason}${RESET}\n`,
+                  );
+                }
+
+                // Inject recovery messages into the conversation
+                for (const msg of decision.injectedMessages) {
+                  messages.push({ role: "user" as const, content: msg });
+                }
+
+                // If we got fresh file context, inject it as a system hint
+                if (decision.freshContext?.recovered && decision.freshContext.targetContent && primaryTarget) {
+                  const freshMsg = `[AutonomyOrchestrator] Fresh file content for ${primaryTarget} (re-read from disk):\n\`\`\`\n${decision.freshContext.targetContent.slice(0, 3000)}\n\`\`\`\n${decision.freshContext.contextFiles.length} context files also re-loaded.`;
+                  messages.push({ role: "user" as const, content: freshMsg });
+                }
+
+                // Apply backoff if recommended
+                if (decision.backoffMs > 0) {
+                  await new Promise<void>((resolve) => setTimeout(resolve, decision.backoffMs));
+                }
+
+                if (decision.type === "escalate") {
+                  // Escalation is a terminal state — log diagnostics but let the outer
+                  // error handler decide whether to abort or continue
+                  process.stdout.write(
+                    `${RED}[AutonomyOrchestrator] Escalating — all recovery attempts exhausted after ${roundCounter} rounds${RESET}\n`,
+                  );
+                }
+              } catch (orchErr: unknown) {
+                swallowError(orchErr, "autonomy-orchestrator");
+                // Fallback: at minimum run repo diagnostics (previous behavior)
                 try {
                   const repoVerify = recoveryEngine.runRepoRootVerification(session.projectRoot);
                   const failedSteps = repoVerify.failedSteps;
-                  if (failedSteps.length > 0) {
+                  if (failedSteps.length > 0 && !config.silent) {
                     process.stdout.write(
                       `${YELLOW}[RecoveryEngine] Repo diagnostics — failed steps: ${failedSteps.join(", ")}${RESET}\n`,
                     );
-                  } else {
-                    process.stdout.write(
-                      `${DIM}[RecoveryEngine] Repo diagnostics — all checks passed${RESET}\n`,
-                    );
                   }
-                } catch {
-                  // Non-fatal
+                } catch (diagErr: unknown) {
+                  swallowError(diagErr, "recovery-engine-diagnostics");
                 }
               }
             }
-          } catch {
-            // Circuit breaker errors must never block execution
+          } catch (err: unknown) {
+            swallowError(err, "circuit-breaker-record");
           }
         }
 
@@ -1783,8 +1821,8 @@ async function _runAgentLoopCore(
               }
             }
           }
-        } catch {
-          // Non-fatal: confidence-gate failure must never block the agent response
+        } catch (err: unknown) {
+          swallowError(err, "confidence-gate");
         }
       }
 
@@ -1899,8 +1937,8 @@ async function _runAgentLoopCore(
                   }
                 }
               }
-            } catch {
-              // Non-fatal — proceed with wave advancement
+            } catch (err: unknown) {
+              swallowError(err, "wave-advancement");
             }
           }
 
@@ -2083,8 +2121,8 @@ async function _runAgentLoopCore(
               }
               continue; // Stay in the loop
             }
-          } catch {
-            // Non-fatal — exit proceeds normally if verification throws
+          } catch (err: unknown) {
+            swallowError(err, "exit-verification");
           }
         }
 
@@ -2175,7 +2213,7 @@ async function _runAgentLoopCore(
       bashSucceeded = execResult.bashSucceeded;
       const toolResults = execResult.toolResults;
 
-      // ---- Wave 2b: LoopDetector — record tool results and check for stuck loops ----
+      // ---- Autonomy Sprint: LoopDetector → AutonomyOrchestrator scope reduction ----
       if (toolResults.length > 0) {
         const toolResultHash = toolResults.join("|").slice(0, 1000);
         const loopResult = loopDetector.recordAction("tool_results", toolResultHash);
@@ -2183,27 +2221,38 @@ async function _runAgentLoopCore(
           stuckRoundCount++;
           convergenceMetrics.increment("loopDetectorHits");
           try {
-            const repoVerify = recoveryEngine.runRepoRootVerification(session.projectRoot);
-            const findings = repoVerify.stepResults
-              .map((s) => `  ${s.name}: ${s.passed ? "OK" : `FAILED — ${(s.output ?? "").slice(0, 200)}`}`)
-              .join("\n");
-            const loopMsg = `\n[LoopDetector] Stuck pattern detected (reason: ${loopResult.reason}). Recovery diagnostics:\n${findings}\n`;
-            toolResults.push(loopMsg);
+            // Ask AutonomyOrchestrator for scope reduction decision
+            const decision = await autonomyOrchestrator.decide({
+              loopResult,
+              touchedFiles: [...touchedFiles],
+              projectRoot: session.projectRoot,
+              primaryTargetFile: touchedFiles[touchedFiles.length - 1],
+              round: roundCounter,
+            });
+
             if (!config.silent) {
-              emitOrWrite(`${YELLOW}${loopMsg}${RESET}\n`);
+              emitOrWrite(`${YELLOW}[AutonomyOrchestrator] Loop detected (${loopResult.reason}) → ${decision.type}: ${decision.reason}${RESET}\n`);
             }
-          } catch {
-            // Recovery diagnostics are non-fatal
-          }
-          // After 3 stuck rounds: prepend gaslight trigger to surface novel-task handling
-          if (stuckRoundCount >= 3) {
-            const nextUserMsg = messages.findIndex((m, i) => i === messages.length - 1 && m.role === "user");
-            if (nextUserMsg >= 0) {
-              messages[nextUserMsg]!.content = `[verification-gaslight-trigger] ${messages[nextUserMsg]!.content}`;
-            } else {
-              toolResults.push("[verification-gaslight-trigger] Stuck loop detected — try a fundamentally different approach.");
+
+            // Inject scope-reduction or recovery messages
+            for (const msg of decision.injectedMessages) {
+              toolResults.push(msg);
             }
-            stuckRoundCount = 0; // reset so it can re-trigger
+
+            // After 3 stuck rounds with no scope reduction: trigger gaslight
+            if (stuckRoundCount >= 3 && decision.type === "continue") {
+              const nextUserMsg = messages.findIndex((m, i) => i === messages.length - 1 && m.role === "user");
+              if (nextUserMsg >= 0) {
+                messages[nextUserMsg]!.content = `[verification-gaslight-trigger] ${messages[nextUserMsg]!.content}`;
+              } else {
+                toolResults.push("[verification-gaslight-trigger] Stuck loop detected — try a fundamentally different approach.");
+              }
+              stuckRoundCount = 0;
+            }
+          } catch (err: unknown) {
+            swallowError(err, "loop-detector-recovery-diagnostics");
+            // Fallback: inject basic stuck message
+            toolResults.push(`[LoopDetector] Stuck pattern detected (${loopResult.reason}). Please try a different approach.`);
           }
         }
       }
@@ -2266,8 +2315,8 @@ async function _runAgentLoopCore(
               }
             }
           }
-        } catch {
-          // Non-fatal — repair loop never blocks execution
+        } catch (err: unknown) {
+          swallowError(err, "lint-repair-hot-path");
         }
 
         // ---- Repair loop: test verification (Autonomy Wave 1) ----
@@ -2303,8 +2352,8 @@ async function _runAgentLoopCore(
                 `${GREEN}[repair-loop] All tests pass after ${testRetries} repair iteration(s)${RESET}\n`,
               );
             }
-          } catch {
-            // Non-fatal — test repair never blocks execution
+          } catch (err: unknown) {
+            swallowError(err, "test-repair-hot-path");
           }
         }
 
@@ -2324,8 +2373,8 @@ async function _runAgentLoopCore(
                   `[TestRules] ${violations.length} rule violation(s) in ${basename(file)}:\n${hints}`,
                 );
               }
-            } catch {
-              /* non-blocking */
+            } catch (err: unknown) {
+              swallowError(err, "test-rules-engine");
             }
           }
         }
@@ -2424,11 +2473,11 @@ async function _runAgentLoopCore(
                     })));
                     lintResult.passed = false;
                   }
-                } catch { /* file-level non-fatal */ }
+                } catch (err: unknown) { swallowError(err, "lsp-file-diagnostic"); }
               }
               await lspClient.disconnect();
             }
-          } catch { /* LSP augmentation non-fatal */ }
+          } catch (err: unknown) { swallowError(err, "lsp-augmentation"); }
           if (!lintResult.passed && lintResult.errors.length > 0) {
             lintRetries++;
             const fixPrompt = await buildLintFixPrompt(lintResult);
@@ -2449,8 +2498,8 @@ async function _runAgentLoopCore(
               maxToolRounds = Math.max(maxToolRounds, 3);
             }
           }
-        } catch {
-          // Non-fatal — post-edit linting never blocks execution
+        } catch (err: unknown) {
+          swallowError(err, "post-edit-linting");
         }
       }
 
@@ -2464,8 +2513,8 @@ async function _runAgentLoopCore(
             router,
             config.state.model.default.modelId,
           );
-        } catch {
-          // Non-fatal — auto-commit never blocks execution
+        } catch (err: unknown) {
+          swallowError(err, "auto-commit");
         }
       }
 
@@ -2502,8 +2551,8 @@ async function _runAgentLoopCore(
                   verifyRetries,
                   MAX_VERIFY_RETRIES,
                 );
-              } catch {
-                // Evidence recording is non-fatal
+              } catch (err: unknown) {
+                swallowError(err, "evidence-record-failure");
               }
 
               // Self-healing: parse errors into structured format for targeted fixes
@@ -2602,14 +2651,14 @@ async function _runAgentLoopCore(
               // Evidence Chain: record verification pass receipt
               try {
                 evidenceTracker.recordVerificationPass(vc.name, vc.command);
-              } catch {
-                // Evidence recording is non-fatal
+              } catch (err: unknown) {
+                swallowError(err, "evidence-record-pass");
               }
 
               process.stdout.write(`\n${GREEN}[verify: ${vc.name} OK]${RESET}\n`);
             }
-          } catch {
-            // Verification command failed to execute, skip
+          } catch (err: unknown) {
+            swallowError(err, "verify-command-execution");
           }
         }
 
@@ -2726,8 +2775,8 @@ async function _runAgentLoopCore(
               toolResults.push(blockMsg);
               verificationRetriesExhausted = true;
             }
-          } catch {
-            // Synthesizer errors must not break the recovery loop
+          } catch (err: unknown) {
+            swallowError(err, "confidence-synthesizer");
           }
         } else if (verificationPassed && config.verbose) {
           // Verification passed — emit a synthesizer "pass" signal in verbose mode
@@ -2743,8 +2792,8 @@ async function _runAgentLoopCore(
       }));
     consolidator.addEntries(memoryEntries);
     consolidator.consolidateIfNeeded();
-  } catch {
-    // Memory consolidation is non-critical — never block session end
+  } catch (err: unknown) {
+    swallowError(err, "memory-consolidation");
   }
 
           try {
@@ -2757,8 +2806,8 @@ async function _runAgentLoopCore(
             process.stdout.write(
               `${DIM}[ConfidenceSynthesizer] Decision: ${synthesis.decision} — continuing normally${RESET}\n`,
             );
-          } catch {
-            // Ignore
+          } catch (err: unknown) {
+            swallowError(err, "confidence-synthesizer-pass");
           }
         }
 
@@ -2843,8 +2892,8 @@ async function _runAgentLoopCore(
                 }
               }
             }
-          } catch {
-            // Non-fatal — proceed with wave advancement
+          } catch (err: unknown) {
+            swallowError(err, "wave-verify-advancement");
           }
         }
 
@@ -3093,8 +3142,8 @@ async function _runAgentLoopCore(
             process.stdout.write(`\n${vIcon}[deliverables] ${finalVerification.summary}${RESET}\n`);
           }
         }
-      } catch {
-        // Non-fatal
+      } catch (err: unknown) {
+        swallowError(err, "deliverables-verification");
       }
     }
 
@@ -3117,13 +3166,31 @@ async function _runAgentLoopCore(
           // Evidence Chain: record PDSE score receipt for each DanteForge verification
           try {
             evidenceTracker.recordPdseScore(filePath, passed, summary);
-          } catch {
-            // Evidence recording is non-fatal
+          } catch (err: unknown) {
+            swallowError(err, "evidence-record-pdse");
           }
 
           // Trend tracker: record PDSE score for regression detection
           if (config.replState?.verificationTrendTracker) {
             config.replState.verificationTrendTracker.record("pdse", pdseScore);
+          }
+
+          // ---- Autonomy Sprint: ConvergenceController — feed PDSE score for trend analysis ----
+          try {
+            convergenceController.record(pdseScore, roundCounter, passed);
+            const convergenceDecision = convergenceController.evaluate();
+            if (convergenceDecision.action !== "continue" && !config.silent) {
+              process.stdout.write(
+                `${YELLOW}[ConvergenceController] ${convergenceDecision.action.toUpperCase()}: ${convergenceDecision.reason}${RESET}\n`,
+              );
+            }
+            // If convergence says scope-reduce or escalate, surface to orchestrator
+            if (convergenceDecision.action === "reduce_scope" || convergenceDecision.action === "escalate") {
+              const convergenceMsg = `[ConvergenceController] Score trend: ${convergenceDecision.trend} (slope=${convergenceDecision.slope.toFixed(1)}/round, current=${convergenceDecision.currentScore}, best=${convergenceDecision.bestScore}). ${convergenceDecision.reason}. Recommended: ${convergenceDecision.recommendedStrategy} strategy.`;
+              messages.push({ role: "user" as const, content: convergenceMsg });
+            }
+          } catch (err: unknown) {
+            swallowError(err, "convergence-controller-record");
           }
 
           // Session run report: accumulate per-file PDSE results so the REPL
@@ -3152,7 +3219,8 @@ async function _runAgentLoopCore(
           if (!session.activeFiles.includes(filePath)) {
             session.activeFiles.push(filePath);
           }
-        } catch {
+        } catch (err: unknown) {
+          swallowError(err, "danteforge-file-analysis");
           process.stdout.write(
             `${DIM}Could not read ${filePath} for DanteForge analysis${RESET}\n`,
           );
@@ -3172,8 +3240,8 @@ async function _runAgentLoopCore(
               : m.content.map((b) => b.text || "").join("\n"),
         }));
       await detectAndRecordPatterns?.(conversationMessages, session.projectRoot);
-    } catch {
-      // Non-fatal: pattern detection failure should not break the session
+    } catch (err: unknown) {
+      swallowError(err, "pattern-detection");
     }
 
     // Update session timestamp
@@ -3186,8 +3254,8 @@ async function _runAgentLoopCore(
     if (acquiredArtifacts.length > 0) {
       try {
         await durableRunStore.persistArtifacts(durableRun.id, acquiredArtifacts);
-      } catch {
-        /* Non-fatal — artifact log is informational */
+      } catch (err: unknown) {
+        swallowError(err, "artifact-persist");
       }
     }
 
@@ -3241,15 +3309,15 @@ async function _runAgentLoopCore(
           );
         }
         await memoryOrchestrator.memoryPrune();
-      } catch {
-        // Non-fatal
+      } catch (err: unknown) {
+        swallowError(err, "memory-session-store");
       }
     }
     // ---- debug-trail: flush session audit log ----
     try {
       await auditLogger.flush({ endSession: true });
-    } catch {
-      // Non-fatal
+    } catch (err: unknown) {
+      swallowError(err, "audit-log-flush");
     }
 
     // ---- Observability: Session-end telemetry ----
@@ -3286,8 +3354,8 @@ async function _runAgentLoopCore(
           "utf-8",
         );
       }
-    } catch {
-      // Non-fatal - telemetry export failure should not block session completion
+    } catch (err: unknown) {
+      swallowError(err, "session-telemetry-export");
     }
 
     // ---- Wave 6a: Session cost tracking ----
@@ -3311,8 +3379,8 @@ async function _runAgentLoopCore(
           rounds: accumulatedUsage.rounds,
         };
       }
-    } catch {
-      // Non-fatal — cost tracking must never block session end
+    } catch (err: unknown) {
+      swallowError(err, "session-cost-tracking");
     }
 
     // ---- Wave 2c: Post-exec typecheck verification ----
@@ -3336,25 +3404,41 @@ async function _runAgentLoopCore(
             if (config.verbose) {
               process.stdout.write(`${DIM}[PostVerify] ✓ typecheck passed (${pkgRoot})${RESET}\n`);
             }
-          } catch {
+          } catch (err: unknown) {
+            swallowError(err, "post-verify-typecheck");
             convergenceMetrics.setVerificationPassed(false);
             process.stdout.write(`${YELLOW}[PostVerify] typecheck FAILED — 1 repair attempt remaining (${pkgRoot})${RESET}\n`);
           }
         }
-      } catch {
-        // Non-fatal — typecheck verification must never block session end
+      } catch (err: unknown) {
+        swallowError(err, "post-verify-package-loop");
       }
     }
 
-    // ---- Wave 2 (new): ConvergenceMetrics — session-end summary ----
+    // ---- Autonomy Sprint: ConvergenceMetrics + ConvergenceController — session-end summary ----
     if (!config.silent) {
       try {
         const convergenceSummary = convergenceMetrics.formatSummary();
         if (convergenceSummary) {
           process.stdout.write(`${DIM}[convergence] ${convergenceSummary}${RESET}\n`);
         }
-      } catch {
-        // Non-fatal
+        const observations = convergenceController.getObservations();
+        if (observations.length > 0) {
+          const best = convergenceController.getBestScore();
+          const current = convergenceController.getCurrentScore();
+          const decision = convergenceController.evaluate();
+          process.stdout.write(
+            `${DIM}[convergence] PDSE trend: ${decision.trend} — best=${best}, final=${current}, ${observations.length} observation(s), strategy=${autonomyOrchestrator.getStrategy()}${RESET}\n`,
+          );
+        }
+        const recoveryAttempts = autonomyOrchestrator.getRecoveryAttempts();
+        if (recoveryAttempts > 0) {
+          process.stdout.write(
+            `${DIM}[convergence] ${recoveryAttempts} recovery attempt(s) this session${RESET}\n`,
+          );
+        }
+      } catch (err: unknown) {
+        swallowError(err, "convergence-summary");
       }
     }
 
@@ -3392,8 +3476,8 @@ async function _runAgentLoopCore(
       };
       const seal = evidenceTracker.seal(sealConfig, filesModified, roundCounter);
       (session as unknown as Record<string, unknown>)._sealHash = seal.sealHash;
-    } catch {
-      // Non-fatal
+    } catch (err: unknown) {
+      swallowError(err, "evidence-seal");
     }
 
     // Hook: SessionEnd
