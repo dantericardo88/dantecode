@@ -19,7 +19,18 @@ contextBridge.exposeInMainWorld("dantecode", {
   // --- Agent operations ---
   runPrompt: (prompt: string): Promise<{ success: boolean; output?: string; error?: string }> =>
     ipcRenderer.invoke("agent:run-prompt", prompt),
-  getStatus: (): Promise<{ running: boolean; model: string }> =>
+  getStatus: (): Promise<{
+    running: boolean;
+    model: string;
+    provider: string | null;
+    mode: string | null;
+    changedFiles: string[];
+    mutationCount: number;
+    validationCount: number;
+    gateStatus: "passed" | "failed" | "pending" | "none";
+    reasonCode: string | null;
+    lastVerifiedAt: string | null;
+  }> =>
     ipcRenderer.invoke("agent:get-status"),
   abort: (): Promise<{ success: boolean }> =>
     ipcRenderer.invoke("agent:abort"),

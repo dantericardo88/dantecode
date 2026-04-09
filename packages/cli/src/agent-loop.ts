@@ -6,9 +6,13 @@
 
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import { MCPMemoryBridge } from "@dantecode/core";
+import { makeVerifiedClaim, validateClaim, formatValidationResult } from "@dantecode/core";
+import { executionIntegrity, ToolClass } from "@dantecode/core";
+import { persistExecutionEvidenceBundle, EXECUTION_TRUTH_RELATIVE_PATH, type ExecutionTruthPayload } from "@dantecode/core";
 import {
   ModelRouterImpl,
   detectSelfImprovementContext,
@@ -60,7 +64,6 @@ import {
   RecoveryEngine,
   TaskCircuitBreaker,
   sanitizeUserPrompt,
-  completionGate,
   ConvergenceMetrics,
   globalTokenCache,
   AutonomyOrchestrator,
@@ -68,18 +71,31 @@ import {
   runStartupCrashRecovery,
   createSelfHealingLoop,
   HealingAgent,
+  getHealingTools,
 } from "@dantecode/core";
 import type { HealingToolCall, VerificationStage } from "@dantecode/core";
-import type { WorkflowExecutionContext, WaveOrchestratorState, RunIntake, AccumulatedUsage, TestFailure } from "@dantecode/core";
+import type {
+  WorkflowExecutionContext,
+  WaveOrchestratorState,
+  RunIntake,
+  AccumulatedUsage,
+  TestFailure,
+} from "@dantecode/core";
 import { buildWavePrompt } from "@dantecode/core";
 import { recordSuccessPattern } from "@dantecode/danteforge";
 // detectAndRecordPatterns is optional — not present in all danteforge binary versions
-let detectAndRecordPatterns: ((messages: unknown[], projectRoot: string) => Promise<void>) | undefined;
-import("@dantecode/danteforge").then((m) => {
-  if (typeof (m as Record<string, unknown>)["detectAndRecordPatterns"] === "function") {
-    detectAndRecordPatterns = (m as Record<string, unknown>)["detectAndRecordPatterns"] as typeof detectAndRecordPatterns;
-  }
-}).catch(() => {});
+let detectAndRecordPatterns:
+  | ((messages: unknown[], projectRoot: string) => Promise<void>)
+  | undefined;
+import("@dantecode/danteforge")
+  .then((m) => {
+    if (typeof (m as Record<string, unknown>)["detectAndRecordPatterns"] === "function") {
+      detectAndRecordPatterns = (m as Record<string, unknown>)[
+        "detectAndRecordPatterns"
+      ] as typeof detectAndRecordPatterns;
+    }
+  })
+  .catch(() => {});
 
 import { runDanteForge } from "./danteforge-pipeline.js";
 import { executeToolBatch } from "./tool-executor.js";
@@ -119,8 +135,19 @@ import {
   displayThinking,
   estimatePromptComplexity,
 } from "./agent-loop-constants.js";
-import { type ExtractedToolCall, extractToolCalls, extractEditBlocks, applyEditBlock } from "./tool-call-parser.js";
-import { autoCommitIfEnabled, runArchitectPhase, getGlobalHookRunner, ContextPruner } from "@dantecode/core";
+import {
+  type ExtractedToolCall,
+  extractToolCalls,
+  extractEditBlocks,
+  applyEditBlock,
+  parseToolCallInputPayload,
+} from "./tool-call-parser.js";
+import {
+  autoCommitIfEnabled,
+  runArchitectPhase,
+  getGlobalHookRunner,
+  ContextPruner,
+} from "@dantecode/core";
 import { generateRepoMap, formatRepoMapForContext } from "@dantecode/git-engine";
 import {
   getVerifyCommands,
@@ -335,6 +362,246 @@ let _healthCheckCompleted = false;
  * cannot corrupt the parent lane's backgroundTaskRegistries key. The try/finally covers
  * ALL exit paths of `_runAgentLoopCore` (including early returns) with a single cleanup.
  */
+
+// ============================================================================
+// Anti-Overclaiming Enforcement Functions
+// ============================================================================
+
+/**
+ * Classify tool by its execution integrity requirements
+ */
+function getToolClass(toolName: string): ToolClass {
+  const name = toolName.toLowerCase();
+
+  // Read-only tools
+  if (name.includes('read') || name.includes('grep') || name.includes('search') ||
+      name.includes('list') || name.includes('find') || name.includes('analyze')) {
+    return ToolClass.READ_ONLY;
+  }
+
+  // Mutating tools
+  if (name.includes('edit') || name.includes('write') || name.includes('apply_patch') ||
+      name.includes('multiedit') || name.includes('create') || name.includes('delete')) {
+    return ToolClass.MUTATING;
+  }
+
+  // Validating tools
+  if (name.includes('test') || name.includes('lint') || name.includes('typecheck') ||
+      name.includes('validate') || name.includes('check')) {
+    return ToolClass.VALIDATING;
+  }
+
+  // Coordinating tools
+  if (name.includes('delegate') || name.includes('plan') || name.includes('orchestrate')) {
+    return ToolClass.COORDINATING;
+  }
+
+  return ToolClass.READ_ONLY; // Default to read-only for safety
+}
+
+/**
+ * Extract structured metadata from tool execution results
+ */
+function extractToolMetadata(toolName: string, result: string): Record<string, any> {
+  const metadata: Record<string, any> = {};
+
+  // Extract file paths
+  const filePathMatch = result.match(/file[:\s]+([^\s\n]+)/i);
+  if (filePathMatch) {
+    metadata.filePath = filePathMatch[1] ?? "";
+  }
+
+  // Extract diff statistics
+  const additionsMatch = result.match(/(\d+)\s*additions?/i);
+  const deletionsMatch = result.match(/(\d+)\s*deletions?/i);
+
+  if (additionsMatch) {
+    metadata.additions = Number.parseInt(additionsMatch[1] ?? "0", 10);
+  }
+  if (deletionsMatch) {
+    metadata.deletions = Number.parseInt(deletionsMatch[1] ?? "0", 10);
+  }
+
+  // Extract diff summary
+  const diffMatch = result.match(/(diff\s*--git[^`]*)/s);
+  if (diffMatch) {
+    metadata.diffSummary = (diffMatch[1] ?? "").slice(0, 500); // Truncate long diffs
+  }
+
+  // For validation tools, extract error counts
+  if (toolName.toLowerCase().includes('test') || toolName.toLowerCase().includes('lint')) {
+    const errorMatch = result.match(/(\d+)\s*(?:errors?|failures?)/i);
+    const warningMatch = result.match(/(\d+)\s*warnings?/i);
+
+    if (errorMatch) metadata.errorCount = Number.parseInt(errorMatch[1] ?? "0", 10);
+    if (warningMatch) metadata.warningCount = Number.parseInt(warningMatch[1] ?? "0", 10);
+  }
+
+  return metadata;
+}
+
+function messageContentToText(content: string | { text?: string }[]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  return content
+    .map((block) => block.text ?? "")
+    .join("\n")
+    .trim();
+}
+
+async function writeExecutionTruthPayload(
+  projectRoot: string,
+  payload: ExecutionTruthPayload,
+  sessionId: string,
+  gateResult?: CompletionGateResult,
+): Promise<void> {
+  try {
+    const ledgers = executionIntegrity.getSessionLedgers(sessionId);
+    const aggregateLedger: any = {
+      sessionId,
+      messageId: "aggregate",
+      mode: "code",
+      toolCalls: ledgers.flatMap((l: any) => l.toolCalls),
+      mutations: ledgers.flatMap((l: any) => l.mutations),
+      validations: ledgers.flatMap((l: any) => l.validations),
+      claimedArtifacts: [...new Set(ledgers.flatMap((l: any) => l.claimedArtifacts))],
+      readFiles: [...new Set(ledgers.flatMap((l: any) => l.readFiles))],
+      fileLocks: Object.assign({}, ...ledgers.map((l: any) => l.fileLocks)),
+      completionStatus: ledgers[ledgers.length - 1]?.completionStatus || { canComplete: true, missingEvidence: [], summary: "" }
+    };
+    await persistExecutionEvidenceBundle(projectRoot, aggregateLedger, payload, {
+      gateResult,
+      fileState: executionIntegrity.getFileState(),
+    });
+  } catch (error) {
+    swallowError(error, "execution-truth-persist");
+  }
+}
+
+/**
+ * Universal Completion Gate (M1 — Completion Gate Universalization).
+ * Wraps executionIntegrity.runCompletionGate() so EVERY exit path uses the same logic.
+ * Returns the gate result. The caller decides whether to block or tag the session.
+ */
+function runUniversalCompletionGate(
+  sessionId: string,
+  messageId: string,
+  durablePrompt: string,
+  responseText: string,
+): import("@dantecode/core").CompletionGateResult {
+  return executionIntegrity.runCompletionGate(sessionId, messageId, durablePrompt, responseText);
+}
+
+/** Session completion status for tracking gate outcomes across all exit paths. */
+type SessionCompletionStatus = "success" | "gate_failed" | "interrupted" | "error";
+
+function getExecutionIntegrityMode(
+  taskMode?: string,
+  approvalMode?: string,
+): "ask" | "plan" | "code" | "debug" | "review" | "orchestrator" {
+  if (approvalMode === "plan" || taskMode === "plan") {
+    return "plan";
+  }
+
+  if (approvalMode === "review" || taskMode === "review") {
+    return "review";
+  }
+
+  if (approvalMode === "chat") {
+    return "ask";
+  }
+
+  if (taskMode === "observe-only" || taskMode === "diagnose-only") {
+    return "review";
+  }
+
+  if (taskMode === "debug") {
+    return "debug";
+  }
+
+  if (taskMode === "orchestrator") {
+    return "orchestrator";
+  }
+
+  return "code";
+}
+
+/**
+ * Validates claims made in the final assistant response to prevent overclaiming.
+ * This enforces Kilo Code's "soul" - technical verification of completion claims.
+ */
+async function validateFinalClaims(responseContent: string, sessionId: string, projectRoot: string): Promise<void> {
+  // Extract potential claims from the response
+  const claims = extractClaimsFromResponse(responseContent);
+
+  if (claims.length === 0) {
+    return; // No claims to validate
+  }
+
+  console.log(`🔍 Validating ${claims.length} claims from final response...`);
+
+  for (const claim of claims) {
+    try {
+      // Create verified claim with evidence
+      const verifiedClaim = await makeVerifiedClaim(
+        claim,
+        sessionId,
+        "dante-agent", // Could be made dynamic
+        projectRoot
+      );
+
+      // Validate the claim
+      const validation = validateClaim(claim, verifiedClaim);
+
+      if (!validation.valid) {
+        console.log(`⚠️  Claim validation failed:`);
+        console.log(formatValidationResult(validation));
+
+        // For critical claims, we could block completion
+        // For now, just warn but allow completion
+        console.log(`💡 Consider revising claim: "${claim}"`);
+        console.log(`   Evidence shows ${validation.confidence}% confidence`);
+        console.log('');
+      } else {
+        console.log(`✅ Claim validated: "${claim}" (${validation.confidence}% confidence)`);
+      }
+    } catch (error) {
+      console.warn(`⚠️  Could not validate claim "${claim}":`, error);
+    }
+  }
+}
+
+/**
+ * Extracts potential claims from assistant response that should be verified.
+ * Looks for phrases indicating completion or implementation.
+ */
+function extractClaimsFromResponse(content: string): string[] {
+  const claims: string[] = [];
+
+  // Look for completion indicators
+  const completionPatterns = [
+    /I have (?:successfully\s+)?(?:implemented?|created?|built?|completed?|finished?)\s+(.+?)(?:\s+for you|\s+as requested|\.|\n|$)/gi,
+    /The (.+?) has been (?:successfully\s+)?(?:implemented?|created?|built?|completed?|finished?)/gi,
+    /I've (.+?)(?:\s+and|\.|\n|$)/gi,
+    /(?:successfully\s+)?(?:implemented?|created?|built?|completed?|finished?)\s+(.+?)(?:\s+that|\.|\n|$)/gi,
+  ];
+
+  for (const pattern of completionPatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const claim = match[1] || match[0];
+      if (claim.length > 10 && claim.length < 200) { // Reasonable claim length
+        claims.push(claim.trim());
+      }
+    }
+  }
+
+  // Remove duplicates
+  return [...new Set(claims)];
+}
+
 export async function runAgentLoop(
   prompt: string,
   session: Session,
@@ -468,9 +735,7 @@ async function _runAgentLoopCore(
     const agentStateMachine = new AgentStateMachine({
       onStateChange: config.verbose
         ? (from, to, trigger) => {
-            process.stdout.write(
-              `${DIM}[state-machine] ${from} → ${to} (${trigger})${RESET}\n`,
-            );
+            process.stdout.write(`${DIM}[state-machine] ${from} → ${to} (${trigger})${RESET}\n`);
           }
         : undefined,
     });
@@ -545,6 +810,15 @@ async function _runAgentLoopCore(
           : msg.content.map((b) => b.text || "").join("\n"),
     }));
 
+    // Seed execution-integrity tracking for the session even before any tools run.
+    // The final completion gate should always evaluate a real session ledger, not
+    // fall back to a missing-ledger branch when the run stayed read-only or failed early.
+    const executionMode = getExecutionIntegrityMode(
+      config.taskMode,
+      config.replState?.approvalMode,
+    );
+    executionIntegrity.startSession(session.id, `msg-${messages.length}`, executionMode);
+
     // Tool call loop: keep sending to the model until no more tool calls
     // Dynamic round budget: pipeline orchestrators can request more rounds via requiredRounds.
     // When a skill is active (skillActive), default to 50 rounds to ensure completion.
@@ -604,11 +878,11 @@ async function _runAgentLoopCore(
     // Wave deliverables verification: max retries per wave before force-advancing
     const MAX_WAVE_VERIFY_RETRIES = 2;
     let waveVerifyRetries = 0;
-      const isPipelineWorkflow =
-        config.executionProfile === "benchmark" ||
-        config.requiredRounds !== undefined ||
-        isWorkflowPrompt ||
-        isExecutionContinuationPrompt(durablePrompt, session);
+    const isPipelineWorkflow =
+      config.executionProfile === "benchmark" ||
+      config.requiredRounds !== undefined ||
+      isWorkflowPrompt ||
+      isExecutionContinuationPrompt(durablePrompt, session);
 
     // ---- Feature: Planning phase (for complex tasks) ----
     // Inject planning instruction before first model call when complexity >= 0.7
@@ -712,7 +986,11 @@ async function _runAgentLoopCore(
     try {
       const skillbookIntegration = new DanteSkillbookIntegration({ cwd: session.projectRoot });
       _skillbookRef = skillbookIntegration;
-      const taskKeywords = durablePrompt.toLowerCase().split(/\W+/).filter((t) => t.length >= 3).slice(0, 20);
+      const taskKeywords = durablePrompt
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((t) => t.length >= 3)
+        .slice(0, 20);
       const candidateLessons = skillbookIntegration.getRelevantSkills(
         { keywords: taskKeywords, taskType: "general" },
         5,
@@ -720,7 +998,9 @@ async function _runAgentLoopCore(
       // Wave 4b: Filter to skills with >=50% effectiveness and cap at ~300 tokens (~1200 chars)
       const priorLessons = candidateLessons.filter((s) => (s.winRate ?? 0) >= 0.5);
       if (priorLessons.length > 0) {
-        const lessonLines = priorLessons.map((s, i) => `${i + 1}. **${s.title}** (${s.section})\n   ${s.content.slice(0, 200)}`);
+        const lessonLines = priorLessons.map(
+          (s, i) => `${i + 1}. **${s.title}** (${s.section})\n   ${s.content.slice(0, 200)}`,
+        );
         const lessonBlock = lessonLines.join("\n\n").slice(0, 1200);
         messages.push({
           role: "system" as const,
@@ -731,7 +1011,9 @@ async function _runAgentLoopCore(
           if (s.id) _injectedSkillIds.push(s.id as string);
         }
         if (config.verbose) {
-          emitOrWrite(`${DIM}[Skillbook] Injecting ${priorLessons.length} lessons (effectiveness threshold: 50%)${RESET}\n`);
+          emitOrWrite(
+            `${DIM}[Skillbook] Injecting ${priorLessons.length} lessons (effectiveness threshold: 50%)${RESET}\n`,
+          );
         }
       }
     } catch (err) {
@@ -787,13 +1069,24 @@ async function _runAgentLoopCore(
 
     // ---- Wave 2c: RecoveryEngine + TaskCircuitBreaker ----
     const recoveryEngine = new RecoveryEngine();
-    const taskCircuitBreaker = new TaskCircuitBreaker({ identicalFailureThreshold: 5, maxRecoveryAttempts: 2 });
+    const taskCircuitBreaker = new TaskCircuitBreaker({
+      identicalFailureThreshold: 5,
+      maxRecoveryAttempts: 2,
+    });
 
     // ---- Autonomy Sprint: AutonomyOrchestrator + ConvergenceController ----
     // AutonomyOrchestrator: wires circuit-breaker → RecoveryEngine → context injection
     // ConvergenceController: tracks PDSE score trend → decides continue/scope-reduce/escalate
-    const autonomyOrchestrator = new AutonomyOrchestrator({ recoveryEngine, maxRecoveryAttempts: 4, maxScopeReductions: 2 });
-    const convergenceController = new ConvergenceController({ windowSize: 5, flatRoundsBeforeScopeReduce: 3, decliningRoundsBeforeEscalate: 2 });
+    const autonomyOrchestrator = new AutonomyOrchestrator({
+      recoveryEngine,
+      maxRecoveryAttempts: 4,
+      maxScopeReductions: 2,
+    });
+    const convergenceController = new ConvergenceController({
+      windowSize: 5,
+      flatRoundsBeforeScopeReduce: 3,
+      decliningRoundsBeforeEscalate: 2,
+    });
 
     // ---- Feature: Pivot logic ----
     // Track consecutive failures with similar error signatures for strategy change.
@@ -852,14 +1145,21 @@ async function _runAgentLoopCore(
     const boundaryTracker = new BoundaryTracker(runIntake);
 
     // Hook: SessionStart
-    void getGlobalHookRunner().run("SessionStart", { eventType: "SessionStart", metadata: { sessionId: session.id, projectRoot: session.projectRoot } });
+    void getGlobalHookRunner().run("SessionStart", {
+      eventType: "SessionStart",
+      metadata: { sessionId: session.id, projectRoot: session.projectRoot },
+    });
 
     // Pieces MCP: inject cross-tool memories if configured
     const piecesMemory = MCPMemoryBridge.fromEnv();
-    if (piecesMemory && await piecesMemory.isAvailable().catch(() => false)) {
-      const memories = await piecesMemory.recallContext(durablePrompt.slice(0, 200)).catch(() => []);
+    if (piecesMemory && (await piecesMemory.isAvailable().catch(() => false))) {
+      const memories = await piecesMemory
+        .recallContext(durablePrompt.slice(0, 200))
+        .catch(() => []);
       if (memories.length > 0 && !config.silent) {
-        emitOrWrite(`${DIM}[pieces-memory] ${memories.length} relevant memories injected${RESET}\n`);
+        emitOrWrite(
+          `${DIM}[pieces-memory] ${memories.length} relevant memories injected${RESET}\n`,
+        );
         // Prepend to messages
         messages.unshift({
           role: "user" as const,
@@ -884,9 +1184,17 @@ async function _runAgentLoopCore(
         } catch (err: unknown) {
           swallowError(err, "repo-map");
         }
-        architectGuidance = await runArchitectPhase(durablePrompt, architectCodeContext, router, messages);
+        architectGuidance = await runArchitectPhase(
+          durablePrompt,
+          architectCodeContext,
+          router,
+          messages,
+        );
         if (architectGuidance) {
-          messages.push({ role: "user" as const, content: `Architectural guidance:\n${architectGuidance}\n\nNow implement using SEARCH/REPLACE blocks only.` });
+          messages.push({
+            role: "user" as const,
+            content: `Architectural guidance:\n${architectGuidance}\n\nNow implement using SEARCH/REPLACE blocks only.`,
+          });
         }
       } catch (err: unknown) {
         swallowError(err, "architect-guidance");
@@ -902,7 +1210,9 @@ async function _runAgentLoopCore(
       try {
         const { runInferenceScaling } = await import("@dantecode/core");
         if (!config.silent) {
-          emitOrWrite(`${DIM}[inference-scaling] running ${config.inferenceScaling.n ?? 3} variants...${RESET}\n`);
+          emitOrWrite(
+            `${DIM}[inference-scaling] running ${config.inferenceScaling.n ?? 3} variants...${RESET}\n`,
+          );
         }
         const scalingResult = await runInferenceScaling(
           {
@@ -925,13 +1235,29 @@ async function _runAgentLoopCore(
         }
       } catch (err) {
         if (!config.silent) {
-          emitOrWrite(`${YELLOW}[inference-scaling] failed, continuing normally: ${String(err)}${RESET}\n`);
+          emitOrWrite(
+            `${YELLOW}[inference-scaling] failed, continuing normally: ${String(err)}${RESET}\n`,
+          );
         }
       }
     }
 
+    let sessionCompletionStatus: SessionCompletionStatus = "success";
+
     while (maxToolRounds > 0) {
-      if (inferenceScalingDone) break;
+      // G3a: inferenceScalingDone — gate before break
+      if (inferenceScalingDone) {
+        const gateResult = runUniversalCompletionGate(
+          session.id,
+          `msg-${messages.length}`,
+          durablePrompt,
+          messages[messages.length - 1]?.content?.toString() ?? "",
+        );
+        if (!gateResult.gatePassed) {
+          sessionCompletionStatus = "gate_failed";
+        }
+        break;
+      }
       // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
       if (
         maxToolRounds <= 1 &&
@@ -1057,7 +1383,9 @@ async function _runAgentLoopCore(
           if (pruned.droppedCount > 0) {
             messages = pruned.pruned as typeof messages;
             if (!config.silent) {
-              emitOrWrite(`${DIM}[context-prune] dropped ${pruned.droppedCount} messages, kept last ${messages.length - 2}${RESET}\n`);
+              emitOrWrite(
+                `${DIM}[context-prune] dropped ${pruned.droppedCount} messages, kept last ${messages.length - 2}${RESET}\n`,
+              );
             }
           }
         }
@@ -1069,7 +1397,11 @@ async function _runAgentLoopCore(
           const { selectContextFiles } = await import("@dantecode/core");
           // Only run if we have enough context to be worth selecting from
           if (messages.length >= 3) {
-            const recentContent = messages.slice(-3).map(m => m.content).join(" ").slice(0, 500);
+            const recentContent = messages
+              .slice(-3)
+              .map((m) => m.content)
+              .join(" ")
+              .slice(0, 500);
             const request = {
               availableFiles: (() => {
                 try {
@@ -1095,7 +1427,9 @@ async function _runAgentLoopCore(
                 maxFiles: request.maxContextFiles,
               });
               if (selected.length > 0 && !config.silent) {
-                emitOrWrite(`${DIM}[context-select] narrowed to ${selected.length} files${RESET}\n`);
+                emitOrWrite(
+                  `${DIM}[context-select] narrowed to ${selected.length} files${RESET}\n`,
+                );
               }
             }
           }
@@ -1139,15 +1473,23 @@ async function _runAgentLoopCore(
               files: session.activeFiles,
             });
             const roundDecision = complexityRouter.classify(roundSignals);
-            if (roundDecision.complexity === "simple" && typeof effectiveMaxTokens === "number" && effectiveMaxTokens > 4096) {
+            if (
+              roundDecision.complexity === "simple" &&
+              typeof effectiveMaxTokens === "number" &&
+              effectiveMaxTokens > 4096
+            ) {
               effectiveMaxTokens = 4096;
               if (config.verbose) {
-                emitOrWrite(`${DIM}[complexity-router] simple task — capping maxTokens to 4096${RESET}\n`);
+                emitOrWrite(
+                  `${DIM}[complexity-router] simple task — capping maxTokens to 4096${RESET}\n`,
+                );
               }
             } else if (roundDecision.complexity === "complex") {
               // Keep full budget for complex tasks (no cap)
               if (config.verbose) {
-                emitOrWrite(`${DIM}[complexity-router] complex task — using full token budget${RESET}\n`);
+                emitOrWrite(
+                  `${DIM}[complexity-router] complex task — using full token budget${RESET}\n`,
+                );
               }
             }
             // "medium"/"standard": keep current behavior
@@ -1158,13 +1500,16 @@ async function _runAgentLoopCore(
           // ---- Wave 5b: Cache hit rate tracking — mark each round's messages ----
           try {
             for (const msg of messages) {
-              const messageContent = typeof msg.content === "string"
-                ? msg.content
-                : Array.isArray(msg.content)
-                  ? (msg.content as Array<{text?: string}>).map((b) => b.text ?? "").join("")
-                  : String(msg.content);
+              const messageContent =
+                typeof msg.content === "string"
+                  ? msg.content
+                  : Array.isArray(msg.content)
+                    ? (msg.content as Array<{ text?: string }>).map((b) => b.text ?? "").join("")
+                    : String(msg.content);
               if (messageContent.length > 0) {
-                const hash = Buffer.from(messageContent.slice(0, 200)).toString("base64").slice(0, 32);
+                const hash = Buffer.from(messageContent.slice(0, 200))
+                  .toString("base64")
+                  .slice(0, 32);
                 const tokenEstimate = Math.ceil(messageContent.length / 4);
                 globalTokenCache.markSeen(hash, messageContent.slice(0, tokenEstimate));
               }
@@ -1197,6 +1542,25 @@ async function _runAgentLoopCore(
                 ...(thinkingBudget ? { thinkingBudget } : {}),
                 ...(effectiveTaskType ? { taskType: effectiveTaskType } : {}),
               });
+              const streamedToolArgs = new Map<string, { toolName: string; argsText: string }>();
+              const flushStreamedToolCall = (toolCallId: string) => {
+                const streamedTool = streamedToolArgs.get(toolCallId);
+                if (!streamedTool) return;
+
+                const parsedInput = parseToolCallInputPayload(streamedTool.argsText);
+                if (parsedInput.success) {
+                  toolCalls.push({
+                    id: toolCallId,
+                    name: streamedTool.toolName,
+                    input: parsedInput.data,
+                  });
+                } else {
+                  toolCallParseErrors.push(streamedTool.argsText.slice(0, 300).trim());
+                }
+
+                streamedToolArgs.delete(toolCallId);
+              };
+
               for await (const part of streamResult.fullStream) {
                 streamRecovery.updateActivity();
                 if (part.type === "text-delta") {
@@ -1208,22 +1572,58 @@ async function _runAgentLoopCore(
                   if (config.verbose) {
                     process.stdout.write(`${DIM}[reasoning] ${part.textDelta}${RESET}\n`);
                   }
+                } else if (part.type === "tool-call-streaming-start") {
+                  streamedToolArgs.set(part.toolCallId, {
+                    toolName: part.toolName,
+                    argsText: "",
+                  });
+                } else if (part.type === "tool-call-delta") {
+                  const current = streamedToolArgs.get(part.toolCallId) ?? {
+                    toolName: part.toolName,
+                    argsText: "",
+                  };
+                  current.argsText += part.argsTextDelta;
+                  streamedToolArgs.set(part.toolCallId, current);
                 } else if (part.type === "tool-call") {
+                  streamedToolArgs.delete(part.toolCallId);
+                  const parsedArgs =
+                    typeof part.args === "string"
+                      ? parseToolCallInputPayload(part.args)
+                      : {
+                          success: true as const,
+                          data: part.args as Record<string, unknown>,
+                        };
+
+                  if (!parsedArgs.success) {
+                    toolCallParseErrors.push(String(part.args).slice(0, 300));
+                    continue;
+                  }
+
                   toolCalls.push({
                     id: part.toolCallId,
                     name: part.toolName,
-                    input: part.args as Record<string, unknown>,
+                    input: parsedArgs.data,
                   });
                 } else if (part.type === "step-finish") {
+                  for (const pendingToolCallId of [...streamedToolArgs.keys()]) {
+                    flushStreamedToolCall(pendingToolCallId);
+                  }
                   // Vercel AI SDK LanguageModelUsage — accumulate per-step token usage.
                   // SDK uses promptTokens/completionTokens; our shape uses inputTokens/outputTokens.
-                  const sdkUsage = part.usage as { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+                  const sdkUsage = part.usage as {
+                    promptTokens?: number;
+                    completionTokens?: number;
+                    totalTokens?: number;
+                  };
                   accumulatedUsage = addLanguageModelUsage(accumulatedUsage, {
                     inputTokens: sdkUsage.promptTokens ?? 0,
                     outputTokens: sdkUsage.completionTokens ?? 0,
                     totalTokens: sdkUsage.totalTokens ?? 0,
                   });
                 }
+              }
+              for (const pendingToolCallId of [...streamedToolArgs.keys()]) {
+                flushStreamedToolCall(pendingToolCallId);
               }
               responseText = renderer.getFullText();
               renderer.finish();
@@ -1279,7 +1679,9 @@ async function _runAgentLoopCore(
             // Wire SEARCH/REPLACE blocks (Aider pattern) — parse blocks model emitted as text
             const editBlocks = extractEditBlocks(responseText);
             if (editBlocks.length > 0 && !config.silent) {
-              emitOrWrite(`${DIM}[edit-blocks] ${editBlocks.length} SEARCH/REPLACE block(s) detected${RESET}\n`);
+              emitOrWrite(
+                `${DIM}[edit-blocks] ${editBlocks.length} SEARCH/REPLACE block(s) detected${RESET}\n`,
+              );
             }
             for (const block of editBlocks) {
               try {
@@ -1293,10 +1695,14 @@ async function _runAgentLoopCore(
                   touchedFiles.push(block.filePath);
                   filesModified++;
                   if (!config.silent) {
-                    emitOrWrite(`${GREEN}[edit-block] applied ${editResult.strategy} edit → ${block.filePath}${RESET}\n`);
+                    emitOrWrite(
+                      `${GREEN}[edit-block] applied ${editResult.strategy} edit → ${block.filePath}${RESET}\n`,
+                    );
                   }
                 } else if (!config.silent) {
-                  emitOrWrite(`${YELLOW}[edit-block] failed: ${editResult.error ?? "unknown"}${RESET}\n`);
+                  emitOrWrite(
+                    `${YELLOW}[edit-block] failed: ${editResult.error ?? "unknown"}${RESET}\n`,
+                  );
                 }
               } catch (err: unknown) {
                 swallowError(err, "edit-block-parsing");
@@ -1311,7 +1717,9 @@ async function _runAgentLoopCore(
               if (artifacts.length > 0) {
                 const additionalToolCalls = XmlArtifactParser.toToolCalls(artifacts);
                 if (additionalToolCalls.length > 0 && !config.silent) {
-                  emitOrWrite(`${DIM}[xml-artifact] ${additionalToolCalls.length} action(s) from ${artifacts.length} artifact(s)${RESET}\n`);
+                  emitOrWrite(
+                    `${DIM}[xml-artifact] ${additionalToolCalls.length} action(s) from ${artifacts.length} artifact(s)${RESET}\n`,
+                  );
                 }
                 // Prepend artifact tool calls to existing toolCalls (they run first)
                 for (const atc of additionalToolCalls) {
@@ -1373,9 +1781,10 @@ async function _runAgentLoopCore(
           }
 
           // Use accurate accumulated token count if available; fall back to char estimate
-          totalTokensUsed = accumulatedUsage.totalTokens > 0
-            ? accumulatedUsage.totalTokens
-            : totalTokensUsed + Math.ceil(responseText.length / 4);
+          totalTokensUsed =
+            accumulatedUsage.totalTokens > 0
+              ? accumulatedUsage.totalTokens
+              : totalTokensUsed + Math.ceil(responseText.length / 4);
 
           // Recompute effective self-improvement policy based on current fallback state
           effectiveSelfImprovement = router.isUsingFallback()
@@ -1401,6 +1810,9 @@ async function _runAgentLoopCore(
                     `Please retry when the primary model recovers.\n${RESET}`,
                 );
               }
+              // G3e: interrupted fallback abort — call gate but mark interrupted
+              runUniversalCompletionGate(session.id, `msg-${messages.length}`, durablePrompt, "");
+              sessionCompletionStatus = "interrupted";
               break;
             }
           } else if (!router.isUsingFallback()) {
@@ -1538,7 +1950,10 @@ async function _runAgentLoopCore(
         if (errorType !== DanteErrorType.Auth && errorType !== DanteErrorType.Balance) {
           try {
             const breakerAction = taskCircuitBreaker.recordFailure(errorMessage, roundCounter);
-            if (breakerAction.action === "pause_and_recover" || breakerAction.action === "escalate") {
+            if (
+              breakerAction.action === "pause_and_recover" ||
+              breakerAction.action === "escalate"
+            ) {
               try {
                 const primaryTarget = touchedFiles[touchedFiles.length - 1];
                 const decision = await autonomyOrchestrator.decide({
@@ -1562,7 +1977,11 @@ async function _runAgentLoopCore(
                 }
 
                 // If we got fresh file context, inject it as a system hint
-                if (decision.freshContext?.recovered && decision.freshContext.targetContent && primaryTarget) {
+                if (
+                  decision.freshContext?.recovered &&
+                  decision.freshContext.targetContent &&
+                  primaryTarget
+                ) {
                   const freshMsg = `[AutonomyOrchestrator] Fresh file content for ${primaryTarget} (re-read from disk):\n\`\`\`\n${decision.freshContext.targetContent.slice(0, 3000)}\n\`\`\`\n${decision.freshContext.contextFiles.length} context files also re-loaded.`;
                   messages.push({ role: "user" as const, content: freshMsg });
                 }
@@ -1638,7 +2057,9 @@ async function _runAgentLoopCore(
               `Partial tool output was already emitted — retrying would risk duplicate tool calls. ` +
               `Type /resume ${durableRun.id} to continue from the last confirmed step.`;
             if (!config.silent) {
-              process.stdout.write(`${YELLOW}[${errorType}] Mid-stream error — pausing for safe resume.${RESET}\n`);
+              process.stdout.write(
+                `${YELLOW}[${errorType}] Mid-stream error — pausing for safe resume.${RESET}\n`,
+              );
             }
             await durableRunStore.pauseRun(durableRun.id, {
               reason: "recoverable_error",
@@ -1763,6 +2184,14 @@ async function _runAgentLoopCore(
             content: `The model returned ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses. This typically indicates a model compatibility issue. Try a different model or simplify your request.`,
             timestamp: new Date().toISOString(),
           });
+          // G3b: confab breaker — gate before break; mark interrupted if gate fails
+          const confabGate = runUniversalCompletionGate(
+            session.id,
+            `msg-${messages.length}`,
+            durablePrompt,
+            "",
+          );
+          sessionCompletionStatus = confabGate.gatePassed ? "success" : "interrupted";
           break;
         }
         messages.push({ role: "assistant" as const, content: "(empty response)" });
@@ -1866,6 +2295,14 @@ async function _runAgentLoopCore(
             tokensUsed: totalTokensUsed,
           };
           session.messages.push(assistantMessage);
+          // M1: GATED - report-only completion
+          const reportGate = runUniversalCompletionGate(
+            session.id,
+            `msg-${messages.length}`,
+            durablePrompt,
+            responseText,
+          );
+          sessionCompletionStatus = reportGate.gatePassed ? "success" : "interrupted";
           break;
         }
         const promptRequestsExecution =
@@ -2081,15 +2518,22 @@ async function _runAgentLoopCore(
         }
 
         // ---- CompletionGate: prevent premature exits and stub responses ----
-        // Only apply when there are remaining rounds (don't block on last round)
-        // and not in observe/diagnose-only mode (already handled above).
-        if (
-          maxToolRounds > 0 &&
-          !config.taskMode &&
-          !config.silent // skip in silent/serve mode to avoid injecting noise
-        ) {
-          const cgVerdict = completionGate.evaluate(responseText, executedToolsThisTurn + filesModified);
-          if (!cgVerdict.shouldExit) {
+        // M1 (G3c/G3d): Gate runs for ALL modes except truly read-only observe/diagnose.
+        // Silent/serve mode is NOT exempt — it's a production path that needs the gate most.
+        const isReadOnlyTaskMode =
+          config.taskMode === "observe-only" || config.taskMode === "diagnose-only";
+        if (maxToolRounds > 0 && !isReadOnlyTaskMode) {
+          const preExitGateResult = runUniversalCompletionGate(
+            session.id,
+            `msg-${messages.length}`,
+            durablePrompt,
+            responseText,
+          );
+          if (!preExitGateResult.gatePassed) {
+            const cgVerdict = {
+              confidence: preExitGateResult.confidence,
+              reason: preExitGateResult.reasonCode,
+            };
             convergenceMetrics.increment("completionGateRejections");
             const gateMsg = `\n[CompletionGate] Response incomplete (confidence: ${cgVerdict.confidence.toFixed(2)}) — ${cgVerdict.reason}. Please provide actual verification output.`;
             messages.push({ role: "assistant" as const, content: responseText });
@@ -2152,6 +2596,7 @@ async function _runAgentLoopCore(
           tokensUsed: totalTokensUsed,
         };
         session.messages.push(assistantMessage);
+        sessionCompletionStatus = "success"; // Gate already passed above
         break;
       }
 
@@ -2163,7 +2608,11 @@ async function _runAgentLoopCore(
       });
       // Hook: PreToolUse — fire for each tool call
       for (const tc of toolCalls) {
-        void getGlobalHookRunner().run("PreToolUse", { eventType: "PreToolUse", toolName: tc.name, toolInput: tc.input as Record<string, unknown> });
+        void getGlobalHookRunner().run("PreToolUse", {
+          eventType: "PreToolUse",
+          toolName: tc.name,
+          toolInput: tc.input as Record<string, unknown>,
+        });
       }
       const execResult = await executeToolBatch(
         toolCalls,
@@ -2199,6 +2648,8 @@ async function _runAgentLoopCore(
           bashSucceeded,
           currentApproachToolCalls,
           toolErrorCounts,
+          executionIntegrity,
+          messageId: assistantMessage.id,
         },
         runAgentLoop,
       );
@@ -2228,7 +2679,55 @@ async function _runAgentLoopCore(
       localSandboxBridge = execResult.localSandboxBridge;
       testsRun = execResult.testsRun;
       bashSucceeded = execResult.bashSucceeded;
-      const toolResults = execResult.toolResults;
+      const toolOutcomes = execResult.toolResults;
+      const toolResults = toolOutcomes.map((outcome) => outcome.content);
+
+      // ---- Execution Integrity: Record tool executions for completion gate ----
+      executionIntegrity.startSession(session.id, `msg-${messages.length}`, executionMode);
+
+      for (const outcome of toolOutcomes) {
+        if (
+          outcome.kind !== "tool" ||
+          !outcome.toolName ||
+          !outcome.toolInput ||
+          !outcome.executionResult
+        ) {
+          continue;
+        }
+
+        const runtimeResult = outcome.executionResult;
+        const mutationMetadata = runtimeResult.evidence?.mutations?.[0];
+        const validationMetadata = runtimeResult.evidence?.validations?.[0];
+        const metadata =
+          mutationMetadata || validationMetadata
+            ? {
+                filePath: mutationMetadata?.filePath,
+                beforeHash: mutationMetadata?.beforeHash,
+                afterHash: mutationMetadata?.afterHash,
+                additions: mutationMetadata?.additions,
+                deletions: mutationMetadata?.deletions,
+                diffSummary: mutationMetadata?.diffSummary,
+                observableMutation: mutationMetadata?.observableMutation,
+                diagnostics: undefined,
+                target: validationMetadata?.target,
+                errorCount: validationMetadata?.errorCount,
+                warningCount: validationMetadata?.warningCount,
+                output: validationMetadata?.output,
+              }
+            : extractToolMetadata(outcome.toolName, runtimeResult.content);
+
+        executionIntegrity.recordToolCall(session.id, `msg-${messages.length}`, {
+          toolName: outcome.toolName,
+          toolClass: getToolClass(outcome.toolName),
+          calledAt: new Date().toISOString(),
+          arguments: outcome.toolInput,
+          result: {
+            success: !runtimeResult.isError,
+            metadata,
+          },
+          executionDuration: runtimeResult.evidence?.durationMs ?? 0,
+        });
+      }
 
       // ---- Autonomy Sprint: LoopDetector → AutonomyOrchestrator scope reduction ----
       if (toolResults.length > 0) {
@@ -2248,7 +2747,9 @@ async function _runAgentLoopCore(
             });
 
             if (!config.silent) {
-              emitOrWrite(`${YELLOW}[AutonomyOrchestrator] Loop detected (${loopResult.reason}) → ${decision.type}: ${decision.reason}${RESET}\n`);
+              emitOrWrite(
+                `${YELLOW}[AutonomyOrchestrator] Loop detected (${loopResult.reason}) → ${decision.type}: ${decision.reason}${RESET}\n`,
+              );
             }
 
             // Inject scope-reduction or recovery messages
@@ -2258,18 +2759,25 @@ async function _runAgentLoopCore(
 
             // After 3 stuck rounds with no scope reduction: trigger gaslight
             if (stuckRoundCount >= 3 && decision.type === "continue") {
-              const nextUserMsg = messages.findIndex((m, i) => i === messages.length - 1 && m.role === "user");
+              const nextUserMsg = messages.findIndex(
+                (m, i) => i === messages.length - 1 && m.role === "user",
+              );
               if (nextUserMsg >= 0) {
-                messages[nextUserMsg]!.content = `[verification-gaslight-trigger] ${messages[nextUserMsg]!.content}`;
+                messages[nextUserMsg]!.content =
+                  `[verification-gaslight-trigger] ${messages[nextUserMsg]!.content}`;
               } else {
-                toolResults.push("[verification-gaslight-trigger] Stuck loop detected — try a fundamentally different approach.");
+                toolResults.push(
+                  "[verification-gaslight-trigger] Stuck loop detected — try a fundamentally different approach.",
+                );
               }
               stuckRoundCount = 0;
             }
           } catch (err: unknown) {
             swallowError(err, "loop-detector-recovery-diagnostics");
             // Fallback: inject basic stuck message
-            toolResults.push(`[LoopDetector] Stuck pattern detected (${loopResult.reason}). Please try a different approach.`);
+            toolResults.push(
+              `[LoopDetector] Stuck pattern detected (${loopResult.reason}). Please try a different approach.`,
+            );
           }
         }
       }
@@ -2319,7 +2827,9 @@ async function _runAgentLoopCore(
                 const repairMsg = `[repair-loop] Lint errors remain after auto-fix (iteration ${lintRepairResult.iteration}):\n${errorSummary}\nPlease fix these lint errors.`;
                 messages.push({ role: "user" as const, content: repairMsg });
                 if (config.verbose && !config.silent) {
-                  emitOrWrite(`${YELLOW}[repair-loop] ${lintRepairResult.errors.length} lint error(s) remain — injecting fix prompt${RESET}\n`);
+                  emitOrWrite(
+                    `${YELLOW}[repair-loop] ${lintRepairResult.errors.length} lint error(s) remain — injecting fix prompt${RESET}\n`,
+                  );
                 }
               }
             } else if (!hasLintableErrors) {
@@ -2398,7 +2908,10 @@ async function _runAgentLoopCore(
       }
 
       // Hook: PostToolUse — fire for completed tools
-      void getGlobalHookRunner().run("PostToolUse", { eventType: "PostToolUse", metadata: { toolCount: toolCalls.length, filesModified: execResult.filesModified } });
+      void getGlobalHookRunner().run("PostToolUse", {
+        eventType: "PostToolUse",
+        metadata: { toolCount: toolCalls.length, filesModified: execResult.filesModified },
+      });
 
       traceLogger.endSpan(toolBatchSpan.spanId, {
         status: execResult.action === "return" ? "success" : "success",
@@ -2416,6 +2929,9 @@ async function _runAgentLoopCore(
       agentMetrics.gauge("agent.context_tokens.remaining", contextWindowSize - totalTokensUsed);
 
       if (execResult.action === "return") {
+        // G3e: classify as interrupted (approval-required / hard-stop), not success.
+        // The tool batch executor signaled an immediate return — this is not normal completion.
+        sessionCompletionStatus = "interrupted";
         agentMetrics.increment("agent.rounds.success");
         agentTracer.endSpan(roundSpan.id);
         return session;
@@ -2475,26 +2991,33 @@ async function _runAgentLoopCore(
               const server = lspConfig.servers[0]!;
               const lspClient = new LspClient(server);
               await lspClient.connect();
-              for (const file of touchedFiles.slice(0, 3)) { // Max 3 files
+              for (const file of touchedFiles.slice(0, 3)) {
+                // Max 3 files
                 try {
                   const { readFileSync } = await import("node:fs");
                   const content = readFileSync(file, "utf-8");
                   const lspDiags = await lspClient.getDiagnostics(file, content);
-                  const errors = lspDiags.filter(d => d.severity === "error");
+                  const errors = lspDiags.filter((d) => d.severity === "error");
                   if (errors.length > 0) {
-                    lintResult.errors.push(...errors.map(d => ({
-                      file: d.file,
-                      line: d.line,
-                      message: `[LSP] ${d.message}`,
-                      code: d.code,
-                    })));
+                    lintResult.errors.push(
+                      ...errors.map((d) => ({
+                        file: d.file,
+                        line: d.line,
+                        message: `[LSP] ${d.message}`,
+                        code: d.code,
+                      })),
+                    );
                     lintResult.passed = false;
                   }
-                } catch (err: unknown) { swallowError(err, "lsp-file-diagnostic"); }
+                } catch (err: unknown) {
+                  swallowError(err, "lsp-file-diagnostic");
+                }
               }
               await lspClient.disconnect();
             }
-          } catch (err: unknown) { swallowError(err, "lsp-augmentation"); }
+          } catch (err: unknown) {
+            swallowError(err, "lsp-augmentation");
+          }
           if (!lintResult.passed && lintResult.errors.length > 0) {
             lintRetries++;
             const fixPrompt = await buildLintFixPrompt(lintResult);
@@ -2797,21 +3320,24 @@ async function _runAgentLoopCore(
           }
         } else if (verificationPassed && config.verbose) {
           // Verification passed — emit a synthesizer "pass" signal in verbose mode
-  // Consolidate session memories if accumulated entry count is high
-  try {
-    const consolidator = new MemoryConsolidator({ consolidationThreshold: 50, maxAgeDays: 90 });
-    const memoryEntries = session.messages
-      .filter((m) => m.role === "assistant")
-      .map((m) => ({
-        key: m.id,
-        value: typeof m.content === "string" ? m.content.slice(0, 200) : "",
-        timestamp: m.timestamp,
-      }));
-    consolidator.addEntries(memoryEntries);
-    consolidator.consolidateIfNeeded();
-  } catch (err: unknown) {
-    swallowError(err, "memory-consolidation");
-  }
+          // Consolidate session memories if accumulated entry count is high
+          try {
+            const consolidator = new MemoryConsolidator({
+              consolidationThreshold: 50,
+              maxAgeDays: 90,
+            });
+            const memoryEntries = session.messages
+              .filter((m) => m.role === "assistant")
+              .map((m) => ({
+                key: m.id,
+                value: typeof m.content === "string" ? m.content.slice(0, 200) : "",
+                timestamp: m.timestamp,
+              }));
+            consolidator.addEntries(memoryEntries);
+            consolidator.consolidateIfNeeded();
+          } catch (err: unknown) {
+            swallowError(err, "memory-consolidation");
+          }
 
           try {
             const synthesis = synthesizeConfidence({
@@ -2970,11 +3496,7 @@ async function _runAgentLoopCore(
       // ---- DanteMemory: early-checkpoint write after first file modification ----
       // Fires once per session the first time a file is actually written/edited.
       // Ensures SOME project-scope fact survives even if the process is killed mid-session.
-      if (
-        memoryInitialized &&
-        !memoryEarlyCheckpointFired &&
-        touchedFiles.length > 0
-      ) {
+      if (memoryInitialized && !memoryEarlyCheckpointFired && touchedFiles.length > 0) {
         memoryEarlyCheckpointFired = true;
         const firstFile = touchedFiles[0] ?? "unknown";
         memoryOrchestrator
@@ -3202,7 +3724,10 @@ async function _runAgentLoopCore(
               );
             }
             // If convergence says scope-reduce or escalate, surface to orchestrator
-            if (convergenceDecision.action === "reduce_scope" || convergenceDecision.action === "escalate") {
+            if (
+              convergenceDecision.action === "reduce_scope" ||
+              convergenceDecision.action === "escalate"
+            ) {
               const convergenceMsg = `[ConvergenceController] Score trend: ${convergenceDecision.trend} (slope=${convergenceDecision.slope.toFixed(1)}/round, current=${convergenceDecision.currentScore}, best=${convergenceDecision.bestScore}). ${convergenceDecision.reason}. Recommended: ${convergenceDecision.recommendedStrategy} strategy.`;
               messages.push({ role: "user" as const, content: convergenceMsg });
             }
@@ -3381,8 +3906,10 @@ async function _runAgentLoopCore(
       const SONNET_INPUT_COST_PER_MTOK = 3.0;
       const SONNET_OUTPUT_COST_PER_MTOK = 15.0;
       if (accumulatedUsage.totalInputTokens > 0 || accumulatedUsage.totalOutputTokens > 0) {
-        const inputCost = (accumulatedUsage.totalInputTokens / 1_000_000) * SONNET_INPUT_COST_PER_MTOK;
-        const outputCost = (accumulatedUsage.totalOutputTokens / 1_000_000) * SONNET_OUTPUT_COST_PER_MTOK;
+        const inputCost =
+          (accumulatedUsage.totalInputTokens / 1_000_000) * SONNET_INPUT_COST_PER_MTOK;
+        const outputCost =
+          (accumulatedUsage.totalOutputTokens / 1_000_000) * SONNET_OUTPUT_COST_PER_MTOK;
         const totalCost = inputCost + outputCost;
         const costMsg = `Session cost: ~$${totalCost.toFixed(4)} (input: ${accumulatedUsage.totalInputTokens}t, output: ${accumulatedUsage.totalOutputTokens}t)`;
         if (!config.silent) {
@@ -3424,7 +3951,9 @@ async function _runAgentLoopCore(
           } catch (err: unknown) {
             swallowError(err, "post-verify-typecheck");
             convergenceMetrics.setVerificationPassed(false);
-            process.stdout.write(`${YELLOW}[PostVerify] typecheck FAILED — 1 repair attempt remaining (${pkgRoot})${RESET}\n`);
+            process.stdout.write(
+              `${YELLOW}[PostVerify] typecheck FAILED — 1 repair attempt remaining (${pkgRoot})${RESET}\n`,
+            );
           }
         }
       } catch (err: unknown) {
@@ -3524,10 +4053,14 @@ async function _runAgentLoopCore(
           return { filesModified: modified, outputs, summary: `${calls.length} call(s)` };
         };
 
+        const healingTools = getHealingTools(
+          getAISDKTools(config.mcpTools, config.replState?.approvalMode),
+        );
         const healingAgent = new HealingAgent(router, agentHealingExecutor, {
           maxTokens: 4096,
           maxLlmRounds: 2,
           streamOutput: false,
+          tools: healingTools,
         });
 
         await healLoop.run(async (stage: string, prompt: string, attempt: number) => {
@@ -3539,7 +4072,78 @@ async function _runAgentLoopCore(
     }
 
     // Hook: SessionEnd
-    void getGlobalHookRunner().run("SessionEnd", { eventType: "SessionEnd", metadata: { sessionId: session.id, filesModified, roundsUsed: roundCounter } });
+    void getGlobalHookRunner().run("SessionEnd", {
+      eventType: "SessionEnd",
+      metadata: { sessionId: session.id, filesModified, roundsUsed: roundCounter },
+    });
+
+    // Anti-Overclaiming Enforcement: Run completion gate before allowing success
+    const finalResponse = session.messages[session.messages.length - 1];
+    if (finalResponse && finalResponse.role === 'assistant') {
+      const lastUserMessage = session.messages.filter(m => m.role === 'user').pop();
+      const userRequest = lastUserMessage ? messageContentToText(lastUserMessage.content) : "";
+      const finalResponseText = messageContentToText(finalResponse.content);
+
+      const gateResult = executionIntegrity.runCompletionGate(
+        session.id,
+        `msg-${session.messages.length - 1}`,
+        userRequest,
+        finalResponseText
+      );
+      const truthPayload: ExecutionTruthPayload = {
+        mode: executionMode,
+        provider: session.model.provider,
+        model: session.model.modelId,
+        changedFiles: [...new Set(touchedFiles)],
+        mutationCount: gateResult.evidenceSummary.mutationsFound,
+        validationCount: gateResult.evidenceSummary.validationsRun,
+        gateStatus: gateResult.gatePassed ? "passed" : "failed",
+        reasonCode: gateResult.reasonCode,
+        lastVerifiedAt: gateResult.evaluatedAt,
+        // M8: Extended fields for full reconstruction
+        roundCount: roundCounter,
+        totalToolCalls: gateResult.evidenceSummary.mutatingToolCalls + gateResult.evidenceSummary.validationsRun,
+        requestType: gateResult.requestType,
+        promptPreview: userRequest.slice(0, 500),
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (!gateResult.gatePassed) {
+        await writeExecutionTruthPayload(session.projectRoot, truthPayload, session.id, gateResult);
+        console.log(`\n${RED}=========================================${RESET}`);
+        console.log(`${RED}🚫 COMPLETION BLOCKED - FALSE CLAIMS DETECTED${RESET}`);
+        console.log(`${RED}=========================================${RESET}`);
+        console.log(`Reason:      ${gateResult.reasonCode}`);
+        console.log(`Confidence:  ${gateResult.confidence}%`);
+        console.log('Missing:');
+        gateResult.missingEvidence.forEach(evidence => {
+          console.log(`  • ${evidence}`);
+        });
+        console.log('Next Steps:');
+        gateResult.recommendedActions.forEach(action => {
+          console.log(`  • ${action}`);
+        });
+        console.log(`${RED}=========================================${RESET}\n`);
+
+        // Force another iteration instead of allowing completion
+        throw new Error(`Completion gate failed: ${gateResult.reasonCode}`);
+      } else {
+        await writeExecutionTruthPayload(session.projectRoot, truthPayload, session.id, gateResult);
+        console.log(`\n${GREEN}=========================================${RESET}`);
+        console.log(`${GREEN}✅ COMPLETION APPROVED - VERIFIED TRUTH${RESET}`);
+        console.log(`${GREEN}=========================================${RESET}`);
+        console.log(`Confidence:  ${gateResult.confidence}%`);
+        console.log(`Summary:     ${gateResult.evidenceSummary.mutationsFound} mutations, ${gateResult.evidenceSummary.validationsRun} validations`);
+        
+        if (truthPayload.changedFiles.length > 0) {
+          console.log(`Changed Files:`);
+          truthPayload.changedFiles.forEach(f => console.log(`  • ${f}`));
+        }
+        console.log(`${GREEN}=========================================${RESET}\n`);
+        await validateFinalClaims(finalResponseText, session.id, session.projectRoot);
+      }
+    }
 
     // State machine: mark session as finished on normal completion
     agentStateMachine.transition("finished", "loop_complete");

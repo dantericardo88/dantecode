@@ -360,7 +360,23 @@ export class ArenaRunner {
       };
     });
 
-    const results = await Promise.all(runPromises);
+    const settled = await Promise.allSettled(runPromises);
+    const results: ArenaResult[] = settled.map((r, i) => {
+      if (r.status === "fulfilled") return r.value;
+      const model = clampedModels[i]!;
+      return {
+        modelId: model.modelId,
+        provider: model.provider,
+        label: model.label ?? model.modelId,
+        filesModified: [],
+        pdseScore: 0,
+        durationMs: 0,
+        toolCallCount: 0,
+        status: "error" as const,
+        errorMessage: (r.reason as Error)?.message ?? "unknown error",
+        worktreePath: "",
+      };
+    });
 
     // Sort by PDSE score descending; errors last
     results.sort((a, b) => {

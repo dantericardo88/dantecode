@@ -57,6 +57,22 @@ export class DanteSkillbookIntegration {
   }
 
   /**
+   * Get the top N skills ranked by win-rate weighted by usage frequency.
+   * Score = winRate * log1p(useCount). Skills with no usage data rank last.
+   */
+  getTopSkills(n: number): Skill[] {
+    return this.book.getTopSkills(n);
+  }
+
+  /**
+   * Record that a skill was used (increments useCount without a pass).
+   * Call before grading; pass outcomes are recorded via applyProposals.
+   */
+  recordSkillUse(skillId: string): boolean {
+    return this.book.recordSkillUse(skillId);
+  }
+
+  /**
    * Trigger reflection after a task.
    * Only runs for meaningful tasks. Does NOT write to skillbook (call applyProposals after gate).
    */

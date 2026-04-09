@@ -3,6 +3,7 @@ import {
   classifyError,
   isRetryable,
   isTerminal,
+  isCircuitOpen,
   getRetryDelayMs,
   DanteErrorType,
 } from "./error-classifier.js";
@@ -140,5 +141,82 @@ describe("getRetryDelayMs", () => {
   });
   it("caps at 30 seconds", () => {
     expect(getRetryDelayMs(DanteErrorType.RateLimit, 10)).toBe(30_000);
+  });
+  it("returns 0 for CircuitOpen (has own reset semantics)", () => {
+    expect(getRetryDelayMs(DanteErrorType.CircuitOpen, 1)).toBe(0);
+  });
+});
+
+// ─── CircuitOpenError classification ────────────────────────────────────────
+
+describe("CircuitOpenError classification", () => {
+  function makeCircuitOpenError(provider = "anthropic"): Error {
+    const err = new Error(`Circuit breaker is open for provider "${provider}". Retry after 30s.`);
+    err.name = "CircuitOpenError";
+    Object.defineProperty(err, "provider", { value: provider, enumerable: true });
+    return err;
+  }
+
+  it("classifies a CircuitOpenError by duck-typing (name + provider field)", () => {
+    const err = makeCircuitOpenError("anthropic");
+    expect(classifyError(err)).toBe(DanteErrorType.CircuitOpen);
+  });
+
+  it("classifies CircuitOpenError for any provider name", () => {
+    expect(classifyError(makeCircuitOpenError("openai"))).toBe(DanteErrorType.CircuitOpen);
+    expect(classifyError(makeCircuitOpenError("grok"))).toBe(DanteErrorType.CircuitOpen);
+  });
+
+  it("does NOT classify a plain Error named CircuitOpenError without provider field", () => {
+    const err = new Error("Circuit breaker is open");
+    err.name = "CircuitOpenError";
+    // No 'provider' field — should fall through to Unknown
+    expect(classifyError(err)).toBe(DanteErrorType.Unknown);
+  });
+
+  it("does NOT classify a non-Error object with provider field as CircuitOpen", () => {
+    // Must be an actual Error instance, not a plain object
+    expect(classifyError({ name: "CircuitOpenError", provider: "anthropic", message: "open" })).toBe(DanteErrorType.Unknown);
+  });
+
+  it("classifies CircuitOpen BEFORE pattern matching (highest priority)", () => {
+    // Even if message contains '429', CircuitOpenError is detected first
+    const err = makeCircuitOpenError("anthropic");
+    err.message = "Circuit open — too many requests (429)";
+    expect(classifyError(err)).toBe(DanteErrorType.CircuitOpen);
+  });
+});
+
+// ─── isCircuitOpen helper ────────────────────────────────────────────────────
+
+describe("isCircuitOpen", () => {
+  it("returns true for CircuitOpen", () => {
+    expect(isCircuitOpen(DanteErrorType.CircuitOpen)).toBe(true);
+  });
+
+  it("returns false for all other types", () => {
+    expect(isCircuitOpen(DanteErrorType.Auth)).toBe(false);
+    expect(isCircuitOpen(DanteErrorType.Balance)).toBe(false);
+    expect(isCircuitOpen(DanteErrorType.RateLimit)).toBe(false);
+    expect(isCircuitOpen(DanteErrorType.ContextWindow)).toBe(false);
+    expect(isCircuitOpen(DanteErrorType.Network)).toBe(false);
+    expect(isCircuitOpen(DanteErrorType.Unknown)).toBe(false);
+  });
+});
+
+// ─── CircuitOpen in isRetryable / isTerminal ─────────────────────────────────
+
+describe("CircuitOpen retry/terminal semantics", () => {
+  it("CircuitOpen is NOT in RETRYABLE_ERROR_TYPES (has own reset window)", () => {
+    expect(isRetryable(DanteErrorType.CircuitOpen)).toBe(false);
+  });
+
+  it("CircuitOpen is NOT terminal (it will eventually reset)", () => {
+    expect(isTerminal(DanteErrorType.CircuitOpen)).toBe(false);
+  });
+
+  it("CircuitOpen getRetryDelayMs returns 0 (don't use standard backoff)", () => {
+    expect(getRetryDelayMs(DanteErrorType.CircuitOpen, 1)).toBe(0);
+    expect(getRetryDelayMs(DanteErrorType.CircuitOpen, 3)).toBe(0);
   });
 });

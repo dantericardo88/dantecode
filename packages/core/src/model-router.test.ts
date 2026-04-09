@@ -33,6 +33,7 @@ vi.mock("./providers/index.js", () => ({
 import { ModelRouterImpl, shouldContinueLoop } from "./model-router.js";
 import { generateText, streamText } from "ai";
 import { appendAuditEvent } from "./audit.js";
+import { PROVIDER_BUILDERS } from "./providers/index.js";
 
 // ---------------------------------------------------------------------------
 // Test configs
@@ -545,6 +546,33 @@ describe("model-router", () => {
       const logs = router.getLogs();
       expect(logs[0]!.provider).toBe("anthropic");
     });
+
+    it("uses the openai provider namespace for grok reasoning options", async () => {
+      (streamText as Mock).mockReturnValueOnce({ type: "mock-stream" });
+
+      const router = new ModelRouterImpl(
+        makeRouterConfig({
+          default: {
+            ...grokConfig,
+            supportsExtendedThinking: true,
+            reasoningEffort: "high",
+          },
+          fallback: [],
+        }),
+        "/tmp",
+        "s1",
+      );
+
+      await router.stream(testMessages, { thinkingBudget: 1024 });
+
+      const callArgs = (streamText as Mock).mock.calls[0]![0];
+      expect(callArgs.providerOptions).toEqual({
+        openai: {
+          reasoningEffort: "high",
+          thinkingBudget: 1024,
+        },
+      });
+    });
   });
 });
 
@@ -1014,5 +1042,229 @@ describe("D6 cost tracking integration", () => {
     const afterReset = router.getCostEstimate();
     expect(afterReset.sessionTotalUsd).toBe(0);
     expect(afterReset.tokensUsedSession).toBe(0);
+  });
+});
+
+// ─── Wave 2: Error type propagation through model-router ─────────────────────
+
+import { DanteErrorType } from "./error-classifier.js";
+
+describe("model-router error type propagation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Helper: make CircuitOpenError by duck-typing (same pattern as error-classifier.test.ts)
+  function makeCircuitOpenError(provider = "anthropic"): Error {
+    const err = new Error(`Circuit breaker open for ${provider}`);
+    err.name = "CircuitOpenError";
+    Object.defineProperty(err, "provider", { value: provider, enumerable: true });
+    return err;
+  }
+
+  // ── tryGenerate errorType ──────────────────────────────────────────────────
+
+  describe("tryGenerate — errorType in failure result", () => {
+    it("returns errorType=RateLimit when 429 error thrown", async () => {
+      const err = Object.assign(new Error("Too many requests"), { status: 429 });
+      (generateText as Mock).mockRejectedValue(err);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-1");
+      // tryGenerate is private but surfaced through generate() throwing
+      // We spy on generate to capture the tryGenerate result indirectly
+      // via checking that all fallbacks exhaust — then throw
+      await expect(router.generate(testMessages)).rejects.toThrow();
+    });
+
+    it("tryGenerate result has errorType=RateLimit for 429", async () => {
+      const err429 = Object.assign(new Error("Request failed with status code 429"), { status: 429 });
+      (generateText as Mock).mockRejectedValue(err429);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-2");
+      // Access tryGenerate via the public generate path — single provider, all fail
+      // Logs contain the error; use tryGenerate directly by casting
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.RateLimit);
+    });
+
+    it("tryGenerate result has errorType=Auth for 401", async () => {
+      const err401 = Object.assign(new Error("Unauthorized"), { status: 401 });
+      (generateText as Mock).mockRejectedValue(err401);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-3");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Auth);
+    });
+
+    it("tryGenerate result has errorType=Auth for 403", async () => {
+      const err403 = Object.assign(new Error("Forbidden"), { status: 403 });
+      (generateText as Mock).mockRejectedValue(err403);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-4");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Auth);
+    });
+
+    it("tryGenerate result has errorType=Network for ECONNREFUSED", async () => {
+      const errNet = new Error("connect ECONNREFUSED 127.0.0.1:443");
+      (generateText as Mock).mockRejectedValue(errNet);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-5");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Network);
+    });
+
+    it("tryGenerate result has errorType=CircuitOpen for CircuitOpenError", async () => {
+      (generateText as Mock).mockRejectedValue(makeCircuitOpenError("anthropic"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-6");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.CircuitOpen);
+    });
+
+    it("tryGenerate result has errorType=Balance for insufficient_credits", async () => {
+      const errBalance = new Error("insufficient_credits — account out of credits");
+      (generateText as Mock).mockRejectedValue(errBalance);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-7");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Balance);
+    });
+
+    it("tryGenerate result has errorType=Unknown for unrecognized errors", async () => {
+      (generateText as Mock).mockRejectedValue(new Error("Something exploded internally"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-et-8");
+      const result = await (router as unknown as {
+        tryGenerate: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryGenerate(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Unknown);
+    });
+  });
+
+  // ── tryStream errorType ───────────────────────────────────────────────────
+
+  describe("tryStream — errorType in failure result", () => {
+    it("tryStream result has errorType=RateLimit for quota exceeded", async () => {
+      (streamText as Mock).mockRejectedValue(new Error("Quota exceeded for this project"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-st-1");
+      const result = await (router as unknown as {
+        tryStream: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStream(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.RateLimit);
+    });
+
+    it("tryStream result has errorType=Auth for invalid API key", async () => {
+      (streamText as Mock).mockRejectedValue(new Error("Invalid API key provided"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-st-2");
+      const result = await (router as unknown as {
+        tryStream: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStream(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Auth);
+    });
+
+    it("tryStream result has errorType=CircuitOpen for CircuitOpenError", async () => {
+      (streamText as Mock).mockRejectedValue(makeCircuitOpenError("openai"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-st-3");
+      const result = await (router as unknown as {
+        tryStream: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStream(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.CircuitOpen);
+    });
+
+    it("tryStream result has errorType=Network for ETIMEDOUT", async () => {
+      (streamText as Mock).mockRejectedValue(new Error("request failed: ETIMEDOUT"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-st-4");
+      const result = await (router as unknown as {
+        tryStream: (config: ModelConfig, messages: unknown[], opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStream(grokConfig, testMessages, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Network);
+    });
+  });
+
+  // ── tryStreamWithTools errorType ──────────────────────────────────────────
+
+describe("tryStreamWithTools — errorType in failure result", () => {
+    it("tryStreamWithTools result has errorType=RateLimit for 429", async () => {
+      const err429 = Object.assign(new Error("Too many requests"), { status: 429 });
+      (streamText as Mock).mockRejectedValue(err429);
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-swt-1");
+      const result = await (router as unknown as {
+        tryStreamWithTools: (config: ModelConfig, messages: unknown[], tools: object, opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStreamWithTools(grokConfig, testMessages, {}, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.RateLimit);
+    });
+
+    it("tryStreamWithTools result has errorType=CircuitOpen for CircuitOpenError", async () => {
+      (streamText as Mock).mockRejectedValue(makeCircuitOpenError("grok"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-swt-2");
+      const result = await (router as unknown as {
+        tryStreamWithTools: (config: ModelConfig, messages: unknown[], tools: object, opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStreamWithTools(grokConfig, testMessages, {}, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.CircuitOpen);
+    });
+
+    it("tryStreamWithTools result has errorType=Balance for billing error", async () => {
+      (streamText as Mock).mockRejectedValue(new Error("Billing error: payment required"));
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-swt-3");
+      const result = await (router as unknown as {
+        tryStreamWithTools: (config: ModelConfig, messages: unknown[], tools: object, opts: object) => Promise<{ success: boolean; errorType?: DanteErrorType }>;
+      }).tryStreamWithTools(grokConfig, testMessages, {}, {});
+      expect(result.success).toBe(false);
+      expect(result.errorType).toBe(DanteErrorType.Balance);
+    });
+
+    it("enriches grok streamWithTools calls with the resolved xAI API key", async () => {
+      process.env["XAI_API_KEY"] = "stream-tools-xai-key";
+      (streamText as Mock).mockReturnValueOnce({ type: "mock-stream" });
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-swt-4");
+      await (router as unknown as {
+        tryStreamWithTools: (
+          config: ModelConfig,
+          messages: unknown[],
+          tools: object,
+          opts: object,
+        ) => Promise<{ success: boolean }>;
+      }).tryStreamWithTools(grokConfig, testMessages, {}, {});
+
+      expect((PROVIDER_BUILDERS["grok"] as Mock).mock.calls[0]![0]).toEqual(
+        expect.objectContaining({
+          apiKey: "stream-tools-xai-key",
+        }),
+      );
+    });
   });
 });

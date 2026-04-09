@@ -11,3 +11,10 @@ _Source: user correction_
 
 **Mistake:** Treating an Antigravity toast mentioning `OpenCode` as if the target product were OpenCode, even though the workspace and installed extension under investigation were DanteCode.
 **Rule:** When debugging DanteCode IDE/plugin issues, separate DanteCode failures from other installed extensions and treat `OpenCode` labels or toasts as possible conflicts or stale neighbors until the DanteCode activation logs are checked directly.
+
+## [Verification] Do not certify the retrofit before root typecheck and provider suites pass
+_Added: 2026-04-09T20:45:00Z_
+_Source: verify failure_
+
+**Mistake:** Describing the execution-integrity retrofit as fully implemented before rerunning the root `typecheck` pipeline and the Grok normalization test suite, which left compile errors and red provider tests undiscovered.
+**Rule:** Never claim the V+E execution-integrity retrofit is complete until `npm run typecheck`, package-level CLI/core typechecks, and the Grok normalization regression suite all pass in the current workspace state.

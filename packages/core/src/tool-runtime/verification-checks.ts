@@ -181,6 +181,33 @@ async function runSingleCheck(
         };
       }
 
+      case "edit_applied": {
+        // Verify the edit was applied: check if after is in the file and before is not (if unique)
+        let content = "";
+        try {
+          content = fs.readFileSync(absPath, "utf8");
+        } catch {
+          return {
+            check,
+            passed: false,
+            errorMessage: `File not readable: ${absPath}`
+          };
+        }
+        const hasAfter = check.after ? content.includes(check.after) : true;
+        const hasBefore = check.before ? content.includes(check.before) : false;
+        const passed = hasAfter && !hasBefore;
+        let errorMessage: string | undefined;
+        if (!passed) {
+          if (!hasAfter && check.after) { const truncated = check.after.length > 50 ? check.after.slice(0, 50) + "..." : check.after; errorMessage = `Expected text "${truncated}" not found in file`; }
+          if (hasBefore && check.before) { const truncated = check.before.length > 50 ? check.before.slice(0, 50) + "..." : check.before; errorMessage = `Old text "${truncated}" still present in file`; }
+        }
+        return {
+          check,
+          passed,
+          actualValue: { hasAfter, hasBefore },
+          errorMessage,
+        };
+      }
       default: {
         const _exhaustive: never = check.kind;
         return {
@@ -241,6 +268,16 @@ export function buildDownloadChecks(filePath: string): VerificationCheck[] {
  */
 export function buildMkdirChecks(dirPath: string): VerificationCheck[] {
   return [{ kind: "directory_exists", path: dirPath }];
+}
+/**
+ * Build verification checks for an Edit command.
+ * Returns checks for: file_exists + edit_applied (custom check to verify the edit was actually applied)
+ */
+export function buildEditChecks(filePath: string, before: string, after: string): VerificationCheck[] {
+  return [
+    { kind: "file_exists", path: filePath },
+    { kind: "edit_applied", path: filePath, before, after },
+  ];
 }
 
 // ─── Auto-Detect + Build ──────────────────────────────────────────────────────
@@ -312,3 +349,6 @@ export function formatVerificationMessage(result: VerificationResult, command: s
     `Do NOT proceed to the next step. Re-run the command or use Read/Glob to diagnose what went wrong.`
   );
 }
+
+
+

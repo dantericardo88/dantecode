@@ -1,10 +1,10 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/slash-commands.ts"],
+  entry: ["src/index.ts", "src/slash-commands.ts", "src/commands/benchmark-cli.ts"],
   format: ["esm"],
   dts: false, // CLI binary doesn't need .d.ts for end users
-  splitting: true, // Enable code splitting for faster incremental builds
+  splitting: true, // Enable code splitting for faster startup - commands loaded on demand
   treeshake: true, // Remove unused code
   minify: false, // Keep readable for debugging (minify in production build)
   banner: {

@@ -12,6 +12,7 @@ export type {
   GitAutomationOrchestratorOptions,
   GateEvaluator,
   GateEvaluationResult,
+  AutomationMemoryRecord,
 } from "./automation-orchestrator.js";
 
 export {
@@ -36,6 +37,9 @@ export {
 
 export { FilePatternWatcher, matchGlob } from "./file-pattern-watcher.js";
 export type { FileChangeEvent } from "./file-pattern-watcher.js";
+
+export { SlackWebhookProvider, LinearWebhookProvider } from "./webhook-providers.js";
+export type { AutomationTriggerEvent } from "./webhook-providers.js";
 
 // ============================================================================
 // Workflow Graph Execution (LangGraph-inspired)

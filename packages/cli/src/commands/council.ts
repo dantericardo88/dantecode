@@ -342,10 +342,13 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
   console.log(``);
 
   // Auto-assign one lane per agent kind with isolated worktrees.
+  // Worktree creation is synchronous — do it sequentially, then launch all lanes CONCURRENTLY.
   const createdWorktrees: string[] = [];
+  const laneRequests: LaneAssignmentRequest[] = [];
+  const wtTimestampBase = Date.now();
 
   for (const agentKind of agentKinds) {
-    const wtTimestamp = Date.now();
+    const wtTimestamp = wtTimestampBase + agentKinds.indexOf(agentKind);
     const sessionId = `${runId.slice(-8)}-${agentKind}-${wtTimestamp}`;
     const branch = `council-${runId.slice(-8)}-${agentKind}-${wtTimestamp}`;
     let worktreePath: string;
@@ -382,20 +385,15 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
           `${RED}[council] Worktree creation failed for ${agentKind}: ${wtMsg}${RESET}\n` +
             `  NOMA isolation requires an isolated worktree. Re-run with --no-worktree to explicitly disable it (conflict risk).`,
         );
-        // Clean up any worktrees already created during earlier loop iterations.
         for (const wt of createdWorktrees) {
-          try {
-            removeWorktree(wt);
-          } catch {
-            /* non-fatal */
-          }
+          try { removeWorktree(wt); } catch { /* non-fatal */ }
         }
         await orchestrator.fail("worktree creation failed");
         return;
       }
     }
 
-    const req: LaneAssignmentRequest = {
+    laneRequests.push({
       preferredAgent: agentKind,
       objective,
       worktreePath,
@@ -403,15 +401,25 @@ async function cmdStart(args: string[], projectRoot: string): Promise<void> {
       baseBranch: "main",
       taskCategory: "coding",
       ownedFiles: [],
-    };
-    const laneResult = await orchestrator.assignLane(req);
+    });
+  }
 
-    if (laneResult.accepted) {
-      console.log(`${GREEN}  Lane: ${laneResult.laneId} (${agentKind})${RESET}`);
-    } else {
-      console.warn(
-        `${YELLOW}  Lane rejected for ${agentKind}: ${laneResult.reason ?? "unknown"}${RESET}`,
-      );
+  // Launch all lanes concurrently — agents start working simultaneously, not sequentially.
+  console.log(`${DIM}  Launching ${laneRequests.length} lane(s) concurrently...${RESET}`);
+  const launchResults = await orchestrator.launchLanesConcurrently(laneRequests);
+  for (let i = 0; i < launchResults.length; i++) {
+    const r = launchResults[i];
+    const agentKind = agentKinds[i] ?? "unknown";
+    if (r?.status === "fulfilled") {
+      const lane = r.value;
+      if (lane.accepted) {
+        console.log(`${GREEN}  Lane: ${lane.laneId} (${agentKind}) — started${RESET}`);
+      } else {
+        console.warn(`${YELLOW}  Lane rejected for ${agentKind}: ${lane.reason ?? "unknown"}${RESET}`);
+      }
+    } else if (r?.status === "rejected") {
+      const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      console.error(`${RED}  Lane launch error for ${agentKind}: ${reason}${RESET}`);
     }
   }
 

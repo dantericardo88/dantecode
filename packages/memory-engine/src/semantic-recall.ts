@@ -106,7 +106,7 @@ export class SemanticRecall {
 
     // Layer 3: Semantic (vector store)
     if (includeSemantic) {
-      const vecResults = this.vectorStore.search(query, limit * 2, scope);
+      const vecResults = await this.vectorStore.searchAsync(query, limit * 2, scope);
       for (const r of vecResults) {
         candidates.push({
           item: r.item,
@@ -145,7 +145,7 @@ export class SemanticRecall {
 
     // Search project + global scopes in semantic layer
     for (const scope of ["project", "global"] as MemoryScope[]) {
-      const vecResults = this.vectorStore.search(userGoal, limit * 2, scope);
+      const vecResults = await this.vectorStore.searchAsync(userGoal, limit * 2, scope);
       for (const r of vecResults) {
         candidates.push({
           item: r.item,

@@ -57,6 +57,10 @@
                 implementationClass="dev.dantecode.plugin.InlineCompletionProvider"/>
         <notificationGroup id="DanteCode Notifications"
                           displayType="BALLOON"/>
+        <statusBarWidgetFactory
+                id="DanteCode.PdseStatusBar"
+                implementation="dev.dantecode.plugin.PdseStatusBarWidgetFactory"
+                order="after git"/>
     </extensions>
 
     <actions>

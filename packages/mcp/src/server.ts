@@ -601,6 +601,520 @@ const DANTEFORGE_TOOLS = [
       required: [],
     },
   },
+
+  // ── Knowledge graph ────────────────────────────────────────────────────────
+  {
+    name: "get_workspace_map",
+    description:
+      "Return the top-level directory structure and npm workspace package list for the current project.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "find_symbol",
+    description:
+      "Search for a symbol name across TypeScript/JavaScript files and return file locations with matching lines.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        symbol: { type: "string", description: "Symbol name to search for" },
+        projectRoot: { type: "string", description: "Project root directory (defaults to cwd)" },
+      },
+      required: ["symbol"],
+    },
+  },
+  {
+    name: "get_dependencies",
+    description:
+      "Return the package.json dependencies, devDependencies, and peerDependencies for a named workspace package.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        packageName: { type: "string", description: "Package or workspace folder name" },
+        projectRoot: { type: "string", description: "Project root directory (defaults to cwd)" },
+      },
+      required: ["packageName"],
+    },
+  },
+
+  // ── Multi-repo ─────────────────────────────────────────────────────────────
+  {
+    name: "list_workspaces",
+    description:
+      "List all npm workspaces from the root package.json with their names, paths, and versions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "cross_repo_search",
+    description:
+      "Search for a pattern across all workspace packages and return results grouped by package.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        pattern: { type: "string", description: "Search pattern (grep syntax)" },
+        projectRoot: { type: "string", description: "Project root directory (defaults to cwd)" },
+        fileGlob: { type: "string", description: "File glob to restrict search (default: *.ts)" },
+      },
+      required: ["pattern"],
+    },
+  },
+
+  // ── Compliance / audit ─────────────────────────────────────────────────────
+  {
+    name: "get_audit_log",
+    description: "Read the last N lines from the .dantecode/audit.log file if it exists.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Number of recent log entries to return (default 50)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "export_audit_trail",
+    description: "Export audit log entries as a structured JSON array for compliance reporting.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Maximum entries to export (default 200)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_compliance_report",
+    description:
+      "Return a structured summary of security and sandbox settings including presence of key config artifacts.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+
+  // ── Productivity ───────────────────────────────────────────────────────────
+  {
+    name: "get_recent_errors",
+    description:
+      "Read recent error entries from the debug-trail or audit log to aid troubleshooting.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Maximum error lines to return (default 20)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_repair_history",
+    description:
+      "Read the repair attempt history from debug-trail or audit log to understand past recovery actions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Maximum repair entries to return (default 20)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_skill_recommendations",
+    description:
+      "Return the top skills by win-rate from the skillbook.json for the current project.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        limit: { type: "number", description: "Number of top skills to return (default 10)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_convergence_stats",
+    description:
+      "Return circuit breaker state and loop detector statistics from the current session.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+
+  // ── Meta ───────────────────────────────────────────────────────────────────
+  {
+    name: "get_competitive_score",
+    description:
+      "Read DIMENSION_ASSESSMENT.md and return current competitive scores as structured JSON.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_sprint_progress",
+    description:
+      "Read COMPETITIVE_MATRIX.md and return the current rank, overall score, and progress summary.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "get_agent_health",
+    description:
+      "Return process uptime, heap memory usage, Node.js version, and current session count.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "reset_circuit_breaker",
+    description:
+      "Write a circuit-breaker reset signal to .dantecode/circuit-breaker-reset.json so the running agent loop resets on next check.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory (defaults to cwd)" },
+      },
+      required: [],
+    },
+  },
+  // ── New tools added in Wave 9 (Session 8) — reach 59 total ──────────────────
+  {
+    name: "tool_stress_test_run",
+    description:
+      "Run the built-in SWE-bench stress test against the VM evaluator. Returns pass@1 score from 20 representative TypeScript coding tasks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        instances: {
+          type: "number",
+          description: "Number of instances to evaluate (1-20, default 5)",
+        },
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_benchmark_report",
+    description:
+      "Retrieve the most recent SWE-bench benchmark report from .dantecode/benchmark-results/. Returns run_id, pass_rate, and per-repo breakdown.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_council_status",
+    description:
+      "Get the current Council orchestrator status: active lanes, completion %, PDSE scores per lane, fleet budget usage.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_gaslight_status",
+    description:
+      "Get DanteGaslight status: enabled/disabled, session count, average confidence delta, last session outcome.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_skillbook_effectiveness",
+    description:
+      "Get Skillbook skill effectiveness report: per-skill win rates, number of sessions improved, top performing skills.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        topN: { type: "number", description: "Return top N skills by effectiveness (default 10)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_coverage_report",
+    description:
+      "Read the most recent coverage/coverage-summary.json and return per-package coverage percentages and threshold pass/fail status.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_efficiency_report",
+    description:
+      "Return token efficiency stats: Haiku routing rate, projected all-Sonnet cost, actual savings in USD and percent.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        lastN: { type: "number", description: "Analyze only last N sessions (default: all)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "tool_linear_webhook_status",
+    description:
+      "Check if the Linear webhook listener is configured and active. Returns endpoint URL, last received event, and HMAC verification status.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  // ── Wave 10: DanteForge Bridge Tools ─────────────────────────────────────
+  {
+    name: "danteforge_assess",
+    description:
+      "Run a full 18-dimension project assessment using DanteForge's harsh scorer. Returns competitive score vs 27+ industry tools.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory to assess" },
+        json: { type: "boolean", description: "Return structured JSON output" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_autoforge",
+    description:
+      "Run DanteForge autonomous improvement loop: assess → plan → forge → verify in a single command.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        goal: { type: "string", description: "Improvement goal or dimension to target" },
+        maxRounds: { type: "number", description: "Maximum autoforge rounds (default: 3)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_verify",
+    description:
+      "Run the DanteForge GStack verification suite: typecheck, lint, test, build, anti-stub, constitution, PDSE.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        quick: { type: "boolean", description: "Run quick subset (skip slow tests)" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_plan",
+    description:
+      "Generate a DanteForge implementation plan from the current project state and spec.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        goal: { type: "string", description: "Goal or feature to plan" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_specify",
+    description:
+      "Transform a rough idea into a structured spec using DanteForge's specify pipeline.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        idea: { type: "string", description: "The idea or requirement to specify" },
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: ["idea"],
+    },
+  },
+  {
+    name: "danteforge_forge",
+    description:
+      "Execute a DanteForge forge wave: implement a specific feature or fix from the current spec.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        wave: { type: "string", description: "Wave name or number to execute" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_constitution",
+    description:
+      "Show or update the project constitution — the principles and rules that govern all code changes.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        show: { type: "boolean", description: "Show the current constitution" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_lessons",
+    description:
+      "Query, add, or list lessons learned from past sessions. Used for self-improvement.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        query: { type: "string", description: "Search query for lessons" },
+        add: { type: "string", description: "New lesson to add" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_masterplan",
+    description:
+      "Generate or show the DanteForge masterplan — the prioritized backlog of improvements.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        refresh: { type: "boolean", description: "Force regenerate the masterplan" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_retro",
+    description:
+      "Run a DanteForge retrospective: what worked, what failed, what to do next.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_synthesize",
+    description:
+      "Synthesize session outcomes and update the STATE.yaml with latest progress.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        summary: { type: "string", description: "Optional summary of what was accomplished" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_state_read",
+    description:
+      "Read the current DanteForge STATE.yaml — phase, score, tasks, and dimension progress.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_tasks",
+    description:
+      "List current DanteForge tasks from STATE.yaml with status and priority.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        status: { type: "string", description: "Filter by status: pending, in_progress, done" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_maturity",
+    description:
+      "Assess project maturity against the DanteForge maturity model (0-5 levels per dimension).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_competitors",
+    description:
+      "Run a competitor scan: benchmark DanteCode against industry tools (Cursor, Devin, Copilot Workspace, etc.).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        json: { type: "boolean", description: "Return structured JSON output" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "danteforge_workflow",
+    description:
+      "Execute a DanteForge workflow: a named sequence of commands defined in the project spec.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectRoot: { type: "string", description: "Project root directory" },
+        name: { type: "string", description: "Workflow name to execute" },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
 /** The tool names exposed by the server (for testing/validation). */

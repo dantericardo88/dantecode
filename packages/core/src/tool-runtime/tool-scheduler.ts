@@ -742,7 +742,7 @@ export class ToolScheduler extends EventEmitter {
 
   private async _runPostExecutionVerification(
     record: ToolCallRecord,
-    options: { bashCommand?: string; writtenFile?: string; projectRoot?: string },
+    options: { bashCommand?: string; writtenFile?: string; editFile?: { path: string; before: string; after: string }; projectRoot?: string },
   ): Promise<string | undefined> {
     const projectRoot = options.projectRoot ?? process.cwd();
 
@@ -759,18 +759,7 @@ export class ToolScheduler extends EventEmitter {
       }
     }
 
-    if (options.writtenFile) {
-      const msg = await this.verifyWriteArtifact(options.writtenFile, projectRoot);
-      if (msg) {
-        const vResult: VerificationResult = {
-          passed: false,
-          checks: [],
-          failedChecks: [],
-        };
-        this.emit("verificationFailed", record, vResult, msg);
-        return msg;
-      }
-    }
+    if (options.writtenFile) { const msg = await this.verifyWriteArtifact(options.writtenFile, projectRoot); if (msg) { const vResult: VerificationResult = { passed: false, checks: [], failedChecks: [] }; this.emit("verificationFailed", record, vResult, msg); return msg; } } if (options.editFile) { const editPath = typeof options.editFile === "string" ? options.editFile : options.editFile.path; const msg = await this.verifyWriteArtifact(editPath, projectRoot); if (msg) { const vResult: VerificationResult = { passed: false, checks: [], failedChecks: [] }; this.emit("verificationFailed", record, vResult, msg); return msg; } }
 
     return undefined;
   }
@@ -899,3 +888,8 @@ export async function executeBatchedTools(
 
   return results;
 }
+
+
+
+
+

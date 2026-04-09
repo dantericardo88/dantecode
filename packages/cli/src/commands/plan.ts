@@ -20,6 +20,7 @@ import {
   renderPlan,
   renderPlanSummary,
   analyzeComplexity,
+  swallowError,
 } from "@dantecode/core";
 import type {
   StoredPlan,
@@ -470,7 +471,7 @@ async function approvePlan(state: ReplState): Promise<string> {
         if (state.currentPlanId) {
           const finalStore = new PlanStore(state.projectRoot);
           const finalStatus = result.allPassed ? "completed" : "failed";
-          finalStore.updateStatus(state.currentPlanId, finalStatus).catch(() => {});
+          finalStore.updateStatus(state.currentPlanId, finalStatus).catch((err) => swallowError(err, "plan-status-update"));
         }
       })
       .catch(() => {

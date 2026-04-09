@@ -96,20 +96,64 @@ export class AgentsPanelProvider implements vscode.WebviewViewProvider {
   }
 
   async cancelTask(taskId: string): Promise<void> {
-    // TODO: Wire to actual cancel operation
-    void vscode.window.showInformationMessage(`Cancelling task: ${taskId}`);
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    if (!projectRoot) return;
+
+    try {
+      const store = new BackgroundTaskStore(projectRoot);
+      const task = await store.loadTask(taskId);
+      if (task) {
+        task.status = "cancelled";
+        task.completedAt = new Date().toISOString();
+        await store.saveTask(task);
+      }
+    } catch {
+      // non-fatal
+    }
     await this.refreshTasks();
   }
 
   async startTask(task: string): Promise<void> {
-    // TODO: Wire to actual /bg command
-    void vscode.window.showInformationMessage(`Starting background task: ${task}`);
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    if (!projectRoot) return;
+
+    try {
+      const store = new BackgroundTaskStore(projectRoot);
+      const id = `bg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await store.saveTask({
+        id,
+        prompt: task,
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        progress: "0",
+        touchedFiles: [],
+      });
+      void vscode.window.showInformationMessage(`Background task queued: ${task.slice(0, 60)}`);
+    } catch {
+      void vscode.window.showErrorMessage("Failed to queue background task");
+    }
     await this.refreshTasks();
   }
 
   async startParty(task: string): Promise<void> {
-    // TODO: Wire to actual /party command
-    void vscode.window.showInformationMessage(`Starting party mode: ${task}`);
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    if (!projectRoot) return;
+
+    try {
+      const store = new BackgroundTaskStore(projectRoot);
+      const id = `party-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await store.saveTask({
+        id,
+        prompt: `/party ${task}`,
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        progress: "0",
+        touchedFiles: [],
+      });
+      void vscode.window.showInformationMessage(`Party mode queued: ${task.slice(0, 60)}`);
+    } catch {
+      void vscode.window.showErrorMessage("Failed to queue party task");
+    }
     await this.refreshTasks();
   }
 

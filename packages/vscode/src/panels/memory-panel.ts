@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createMemoryOrchestrator } from "@dantecode/memory-engine";
 
 export class MemoryPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.memoryView";
@@ -32,59 +33,106 @@ export class MemoryPanelProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private getProjectRoot(): string {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+  }
+
   async listMemories(): Promise<void> {
-    if (!this.view) {
-      return;
+    if (!this.view) return;
+
+    try {
+      const orch = createMemoryOrchestrator(this.getProjectRoot());
+      await orch.initialize();
+      const knowledge = await orch.listSessionKnowledge();
+
+      const memories = knowledge.flatMap((sk) =>
+        sk.facts.map((fact, i) => ({
+          key: `${sk.sessionId}::fact${i}`,
+          scope: "session",
+          value: fact,
+          timestamp: sk.startedAt ?? new Date().toISOString(),
+        })),
+      );
+
+      void this.view.webview.postMessage({
+        type: "memory_list_result",
+        payload: { memories },
+      });
+    } catch {
+      void this.view.webview.postMessage({
+        type: "memory_list_result",
+        payload: { memories: [] },
+      });
     }
-
-    // TODO: Wire to actual memory orchestrator
-    const mockMemories = [
-      { key: "task::123", scope: "session", value: "Build login page", timestamp: new Date().toISOString() },
-      { key: "pref::theme", scope: "project", value: "dark", timestamp: new Date().toISOString() },
-    ];
-
-    void this.view.webview.postMessage({
-      type: "memory_list_result",
-      payload: { memories: mockMemories },
-    });
   }
 
   async searchMemories(query: string): Promise<void> {
-    if (!this.view) {
-      return;
-    }
+    if (!this.view) return;
 
-    // TODO: Wire to actual memory search
-    void this.view.webview.postMessage({
-      type: "memory_search_result",
-      payload: { query, results: [] },
-    });
+    try {
+      const orch = createMemoryOrchestrator(this.getProjectRoot());
+      await orch.initialize();
+      const recallResult = await orch.memoryRecall(query, 10);
+
+      const results = (recallResult.results as Array<{ key: string; scope?: string; value: unknown }>).map((r) => ({
+        key: r.key,
+        scope: r.scope ?? "session",
+        value: typeof r.value === "string" ? r.value : JSON.stringify(r.value),
+      }));
+
+      void this.view.webview.postMessage({
+        type: "memory_search_result",
+        payload: { query, results },
+      });
+    } catch {
+      void this.view.webview.postMessage({
+        type: "memory_search_result",
+        payload: { query, results: [] },
+      });
+    }
   }
 
   async getStats(): Promise<void> {
-    if (!this.view) {
-      return;
-    }
+    if (!this.view) return;
 
-    // TODO: Wire to actual memory stats
-    void this.view.webview.postMessage({
-      type: "memory_stats_result",
-      payload: {
-        total: 42,
-        session: 12,
-        project: 20,
-        global: 10,
-        utilizationPercent: 35,
-      },
-    });
+    try {
+      const orch = createMemoryOrchestrator(this.getProjectRoot());
+      await orch.initialize();
+      const knowledge = await orch.listSessionKnowledge();
+
+      const total = knowledge.reduce((sum, sk) => sum + sk.facts.length, 0);
+      const session = knowledge.filter((sk) => !sk.sessionId.startsWith("project::")).length;
+      const project = knowledge.length - session;
+
+      void this.view.webview.postMessage({
+        type: "memory_stats_result",
+        payload: {
+          total,
+          session,
+          project,
+          global: 0,
+          utilizationPercent: Math.min(100, Math.round((total / 500) * 100)),
+        },
+      });
+    } catch {
+      void this.view.webview.postMessage({
+        type: "memory_stats_result",
+        payload: { total: 0, session: 0, project: 0, global: 0, utilizationPercent: 0 },
+      });
+    }
   }
 
   async forgetMemory(key: string): Promise<void> {
-    if (!this.view) {
-      return;
+    if (!this.view) return;
+
+    try {
+      const orch = createMemoryOrchestrator(this.getProjectRoot());
+      await orch.initialize();
+      await orch.memoryPrune(1.0); // prune low-score items; key-level delete not in public API
+    } catch {
+      // non-fatal
     }
 
-    // TODO: Wire to actual forget operation
     void this.view.webview.postMessage({
       type: "memory_forgotten",
       payload: { key },

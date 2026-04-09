@@ -115,6 +115,8 @@ export interface ToolExecutionContext {
   bashSucceeded: number;
   currentApproachToolCalls: number;
   toolErrorCounts: Map<string, number>;
+  executionIntegrity: import("@dantecode/core").ExecutionIntegrityManager;
+  messageId: string;
 }
 
 /** Maximum times a single tool type can fail before the model is told to stop using it. */
@@ -730,6 +732,8 @@ export async function executeToolBatch(
               // Pass sandboxBridge into context so toolBash() can route through it
               // even when the tool scheduler doesn't take the useSandbox fast path.
               sandboxBridge: activeSandboxBridge,
+              executionIntegrity: ctx.executionIntegrity,
+              messageId: ctx.messageId,
             },
           );
         },

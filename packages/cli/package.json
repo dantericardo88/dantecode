@@ -37,7 +37,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+    "bench": "vitest bench",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "benchmark": "node dist/commands/benchmark-cli.js"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
@@ -57,6 +59,7 @@
   },
   "devDependencies": {
     "@dantecode/automation-engine": "0.9.2",
+    "@dantecode/swe-bench": "0.1.0",
     "@dantecode/config-types": "0.9.2",
     "@dantecode/core": "0.9.2",
     "@dantecode/dante-gaslight": "0.9.2",

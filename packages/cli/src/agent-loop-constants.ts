@@ -146,7 +146,10 @@ export const GROK_CONFAB_PATTERN =
   /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
 
 /** Max pipeline continuation nudges before allowing the model to stop. */
-export const MAX_PIPELINE_CONTINUATION_NUDGES = 3;
+export const MAX_PIPELINE_CONTINUATION_NUDGES = 6;
+
+/** Minimum remaining round budget fraction before pipeline nudges are suppressed. */
+export const NUDGE_MIN_REMAINING_BUDGET_PCT = 0.15;
 
 /** Pipeline continuation instruction injected when the model stops mid-pipeline. */
 export const PIPELINE_CONTINUATION_INSTRUCTION =

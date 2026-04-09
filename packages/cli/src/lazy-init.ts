@@ -8,7 +8,7 @@ import { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
 import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import { createMemoryOrchestrator } from "@dantecode/memory-engine";
 import type { MemoryOrchestrator } from "@dantecode/memory-engine";
-import { initializeState } from "@dantecode/core";
+import { initializeState, swallowError } from "@dantecode/core";
 import type { DanteCodeState } from "@dantecode/config-types";
 import { scanForApiKeys, isOllamaAvailable, PROVIDER_DEFAULTS } from "./commands/init.js";
 import type { ReplState } from "./slash-commands.js";
@@ -20,8 +20,14 @@ import type { ReplState } from "./slash-commands.js";
 export function getOrInitGaslight(state: ReplState): DanteGaslightIntegration {
   if (state.gaslight) return state.gaslight;
 
+  // Gaslight is ON by default for interactive sessions.
+  // Disabled in silent/taskMode/CI to avoid unexpected cost.
+  const isInteractive = !state.silent && !state.taskMode;
+  const envEnabled = process.env["DANTECODE_GASLIGHT"] !== "0";
+  const enabled = isInteractive && envEnabled;
+
   state.gaslight = new DanteGaslightIntegration(
-    { enabled: process.env["DANTECODE_GASLIGHT"] !== "0" },
+    { enabled },
     { cwd: state.projectRoot },
     {
       priorLessonProvider: (draft: string) => {
@@ -58,6 +64,10 @@ export async function getOrInitMemory(state: ReplState): Promise<MemoryOrchestra
       const mo = createMemoryOrchestrator(state.projectRoot);
       await mo.initialize();
       state.memoryOrchestrator = mo;
+      // Upgrade to real embeddings if an API key is available (non-fatal)
+      if (!state.silent) {
+        await tryUpgradeEmbeddings(mo);
+      }
       return mo;
     } catch {
       return null;
@@ -66,6 +76,23 @@ export async function getOrInitMemory(state: ReplState): Promise<MemoryOrchestra
     }
   })();
   return _memoryInitPromise;
+}
+
+/**
+ * Silently upgrades the memory orchestrator to use a real embedding provider
+ * (OpenAI → Google → Ollama) if one is available. Falls back to TF-IDF on
+ * any error — this must never break the REPL startup.
+ */
+async function tryUpgradeEmbeddings(mo: MemoryOrchestrator): Promise<void> {
+  try {
+    const { detectBestEmbeddingProvider } = await import("@dantecode/memory-engine");
+    const fn = await detectBestEmbeddingProvider();
+    if (fn) {
+      mo.setEmbeddingProvider(fn);
+    }
+  } catch (err: unknown) {
+    swallowError(err, "memory-embedding-upgrade");
+  }
 }
 
 /**

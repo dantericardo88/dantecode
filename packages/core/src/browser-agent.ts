@@ -595,6 +595,16 @@ export class BrowserAgent {
     this.playwrightAvailable = true;
   }
 
+  /**
+   * Force the playwright-unavailable state for testing environments where
+   * Playwright is installed but we need to simulate it being absent.
+   *
+   * @internal — intended for tests only.
+   */
+  _forceUnavailable(): void {
+    this.playwrightAvailable = false;
+  }
+
   // ─── Private ─────────────────────────────────────────────────────────
 
   /**

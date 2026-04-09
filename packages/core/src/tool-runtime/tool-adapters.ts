@@ -8,13 +8,36 @@
  * The adapter layer does NOT replace executeTool(); it only post-processes results.
  */
 
-import type { ToolExecutionEvidence, ToolExecutionResult } from "./tool-call-types.js";
+import type {
+  ToolExecutionEvidence,
+  ToolExecutionResult,
+  ToolMutationEvidence,
+  ToolValidationEvidence,
+} from "./tool-call-types.js";
 
 // ─── Raw tool result (matches existing executeTool return type) ───────────────
 
 export interface RawToolResult {
   content: string;
   isError: boolean;
+  evidence?: ToolExecutionEvidence;
+  executionMetadata?: {
+    filePath?: string;
+    beforeHash?: string;
+    afterHash?: string;
+    additions?: number;
+    deletions?: number;
+    diffSummary?: string;
+    validationResults?: {
+      passed: boolean;
+      errorCount: number;
+      warningCount: number;
+      target: string;
+    };
+    observableMutation?: boolean;
+    beforeMtimeMs?: number;
+    afterMtimeMs?: number;
+  };
 }
 
 // ─── Generic Wrapper ──────────────────────────────────────────────────────────
@@ -30,7 +53,7 @@ export function wrapToolResult(
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: evidence ? buildEvidence(evidence) : undefined,
+    evidence: mergeEvidence(raw, evidence),
   };
 }
 
@@ -44,27 +67,23 @@ export function adaptReadResult(
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: {
+    evidence: mergeEvidence(raw, {
       filesRead: raw.isError ? [] : [filePath],
       durationMs: Date.now() - startMs,
-    },
+    }),
   };
 }
 
 // ─── Write / Edit Adapter ─────────────────────────────────────────────────────
 
-export function adaptWriteResult(
-  raw: RawToolResult,
-  filePath: string,
-  startMs: number,
-): ToolExecutionResult {
+export function adaptWriteResult( raw: RawToolResult, input: { file_path?: string }, startMs: number, ): ToolExecutionResult {
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: {
-      filesWritten: raw.isError ? [] : [filePath],
+    evidence: mergeEvidence(raw, {
+      filesWritten: raw.isError ? [] : [input.file_path ?? "unknown"],
       durationMs: Date.now() - startMs,
-    },
+    }),
   };
 }
 
@@ -86,12 +105,13 @@ export function adaptBashResult(
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: {
+    evidence: mergeEvidence(raw, {
       exitCode,
       filesWritten,
       bytesTransferred,
       durationMs: Date.now() - startMs,
-    },
+      validations: inferValidationEvidence(command, raw),
+    }),
   };
 }
 
@@ -142,10 +162,10 @@ export function adaptWebResult(raw: RawToolResult, startMs: number): ToolExecuti
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: {
+    evidence: mergeEvidence(raw, {
       bytesTransferred: raw.isError ? 0 : raw.content.length,
       durationMs: Date.now() - startMs,
-    },
+    }),
   };
 }
 
@@ -155,9 +175,9 @@ export function adaptSubAgentResult(raw: RawToolResult, startMs: number): ToolEx
   return {
     content: raw.content,
     isError: raw.isError,
-    evidence: {
+    evidence: mergeEvidence(raw, {
       durationMs: Date.now() - startMs,
-    },
+    }),
   };
 }
 
@@ -181,7 +201,7 @@ export function adaptToolResult(
 
     case "Write":
     case "Edit":
-      return adaptWriteResult(raw, String(input["file_path"] ?? ""), startMs);
+      return adaptWriteResult(raw, { file_path: String(input["file_path"] ?? "") }, startMs);
 
     case "Bash":
       return adaptBashResult(raw, String(input["command"] ?? ""), startMs);
@@ -207,7 +227,130 @@ function buildEvidence(partial: Partial<ToolExecutionEvidence>): ToolExecutionEv
     filesRead: partial.filesRead,
     bytesTransferred: partial.bytesTransferred,
     durationMs: partial.durationMs,
+    mutations: partial.mutations,
+    validations: partial.validations,
   };
+}
+
+function mergeEvidence(
+  raw: RawToolResult,
+  evidence?: Partial<ToolExecutionEvidence>,
+): ToolExecutionEvidence | undefined {
+  const mutationEvidence = normalizeMutationEvidence(raw.executionMetadata);
+  const validationEvidence = normalizeValidationEvidence(raw.executionMetadata);
+  const mergedMutations = mergeArrays(raw.evidence?.mutations, evidence?.mutations, mutationEvidence);
+  const mergedValidations = mergeArrays(
+    raw.evidence?.validations,
+    evidence?.validations,
+    validationEvidence,
+  );
+  const merged = buildEvidence({
+    ...raw.evidence,
+    ...evidence,
+    mutations: mergedMutations,
+    validations: mergedValidations,
+  });
+
+  return Object.values(merged).some((value) =>
+    Array.isArray(value) ? value.length > 0 : value !== undefined,
+  )
+    ? merged
+    : undefined;
+}
+
+function normalizeMutationEvidence(
+  metadata: RawToolResult["executionMetadata"],
+): ToolMutationEvidence[] | undefined {
+  if (!metadata?.filePath || metadata.observableMutation === undefined) {
+    return undefined;
+  }
+
+  return [
+    {
+      filePath: metadata.filePath,
+      beforeHash: metadata.beforeHash,
+      afterHash: metadata.afterHash,
+      additions: metadata.additions,
+      deletions: metadata.deletions,
+      diffSummary: metadata.diffSummary,
+      observableMutation: metadata.observableMutation,
+      beforeMtimeMs: metadata.beforeMtimeMs,
+      afterMtimeMs: metadata.afterMtimeMs,
+    },
+  ];
+}
+
+function normalizeValidationEvidence(
+  metadata: RawToolResult["executionMetadata"],
+): ToolValidationEvidence[] | undefined {
+  if (!metadata?.validationResults) {
+    return undefined;
+  }
+
+  const validationType = inferValidationType(metadata.validationResults.target);
+  if (!validationType) {
+    return undefined;
+  }
+
+  return [
+    {
+      validationType,
+      target: metadata.validationResults.target,
+      passed: metadata.validationResults.passed,
+      errorCount: metadata.validationResults.errorCount,
+      warningCount: metadata.validationResults.warningCount,
+      output: undefined,
+    },
+  ];
+}
+
+function inferValidationEvidence(
+  command: string,
+  raw: RawToolResult,
+): ToolValidationEvidence[] | undefined {
+  const validationType = inferValidationType(command);
+  if (!validationType) {
+    return undefined;
+  }
+
+  const errorCountMatch = raw.content.match(/(\d+)\s*(?:errors?|failures?)/i);
+  const warningCountMatch = raw.content.match(/(\d+)\s*warnings?/i);
+  return [
+    {
+      validationType,
+      target: command,
+      passed: !raw.isError,
+      errorCount: errorCountMatch ? Number.parseInt(errorCountMatch[1] ?? "0", 10) : raw.isError ? 1 : 0,
+      warningCount: warningCountMatch ? Number.parseInt(warningCountMatch[1] ?? "0", 10) : 0,
+      output: raw.content,
+    },
+  ];
+}
+
+function inferValidationType(
+  text: string,
+): ToolValidationEvidence["validationType"] | undefined {
+  const lower = text.toLowerCase();
+  if (/\b(vitest|jest|mocha|pytest|cargo\s+test|npm\s+test|pnpm\s+test|bun\s+test)\b/i.test(lower)) {
+    return "test";
+  }
+  if (/\b(eslint|lint)\b/i.test(lower)) {
+    return "lint";
+  }
+  if (/\b(tsc|typecheck)\b/i.test(lower)) {
+    return "typecheck";
+  }
+  if (/\b(check|validate)\b/i.test(lower)) {
+    return "custom";
+  }
+  return undefined;
+}
+
+function mergeArrays<T>(
+  ...parts: Array<T[] | undefined>
+): T[] | undefined {
+  const merged = parts.flatMap((part) => part ?? []);
+  return merged.length > 0 ? merged : undefined;
 }
 
 // ─── Evidence Summary ─────────────────────────────────────────────────────────
@@ -229,3 +372,5 @@ export function formatEvidenceSummary(result: ToolExecutionResult): string {
 
   return parts.length ? `[${parts.join(" ")}]` : "";
 }
+
+

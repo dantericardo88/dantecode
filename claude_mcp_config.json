@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "dantecode": {
+      "command": "node",
+      "args": ["packages/mcp/dist/cli.js"],
+      "cwd": "c:/Projects/DanteCode",
+      "description": "DanteCode unified MCP server — DanteForge quality gates + 75 tools including danteforge_assess, anti_stub_scan, PDSE scoring, lessons, semantic search, and full DanteForge CLI bridge"
+    }
+  }
+}

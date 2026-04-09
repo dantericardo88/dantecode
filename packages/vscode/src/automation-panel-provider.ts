@@ -118,14 +118,45 @@ export class AutomationPanelProvider implements vscode.WebviewViewProvider {
   }
 
   async stopAutomation(id: string): Promise<void> {
-    // TODO: Wire to actual stop operation
-    void vscode.window.showInformationMessage(`Stopping automation: ${id}`);
+    const projectRoot = this.getProjectRoot();
+    if (!projectRoot) {
+      await this.refreshEntries();
+      return;
+    }
+    const store = new GitAutomationStore(projectRoot);
+    const executions = await store.listAutomationExecutions();
+    const exec = executions.find((e) => e.id === id);
+    if (exec && (exec.status === "running" || exec.status === "queued")) {
+      await store.upsertAutomationExecution({
+        ...exec,
+        status: "failed",
+        summary: (exec.summary ?? "") + " [cancelled by user]",
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await this.refreshEntries();
   }
 
   async viewLogs(id: string): Promise<void> {
-    // TODO: Wire to actual logs view
-    void vscode.window.showInformationMessage(`Viewing logs for: ${id}`);
+    const projectRoot = this.getProjectRoot();
+    const store = projectRoot ? new GitAutomationStore(projectRoot) : null;
+    const executions = store ? await store.listAutomationExecutions() : [];
+    const exec = executions.find((e) => e.id === id);
+    if (!exec) {
+      void vscode.window.showWarningMessage(`DanteCode: No logs found for automation ${id}`);
+      return;
+    }
+    const channel = vscode.window.createOutputChannel(`DanteCode Automation: ${id.slice(0, 8)}`);
+    channel.appendLine(`=== Automation Execution: ${id} ===`);
+    channel.appendLine(`Status:   ${exec.status}`);
+    channel.appendLine(`Updated:  ${exec.updatedAt ?? "unknown"}`);
+    if (exec.summary) channel.appendLine(`\nSummary:\n${exec.summary}`);
+    if (exec.pdseScore != null) channel.appendLine(`\nPDSE Score: ${exec.pdseScore}`);
+    if (exec.modifiedFiles?.length) {
+      channel.appendLine(`\nModified Files (${exec.modifiedFiles.length}):`);
+      for (const f of exec.modifiedFiles) channel.appendLine(`  ${f}`);
+    }
+    channel.show(true);
   }
 
   private startFileWatchers(): void {

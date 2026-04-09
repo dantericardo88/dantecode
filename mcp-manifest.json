@@ -4,7 +4,7 @@
   "description": "DanteCode MCP server — DanteForge quality gates, verification pipeline, memory, automation, and developer tools exposed as MCP tools.",
   "license": "MIT",
   "transport": ["stdio", "http-sse"],
-  "toolCount": 35,
+  "toolCount": 51,
   "tools": [
     {
       "name": "pdse_score",
@@ -180,6 +180,86 @@
       "name": "get_token_usage",
       "description": "Return current session token usage, context window utilization percentage, and budget tier.",
       "category": "session"
+    },
+    {
+      "name": "get_workspace_map",
+      "description": "Return the top-level directory structure and npm workspace package list for the current project.",
+      "category": "knowledge-graph"
+    },
+    {
+      "name": "find_symbol",
+      "description": "Search for a symbol name across TypeScript/JavaScript files and return file locations with matching lines.",
+      "category": "knowledge-graph"
+    },
+    {
+      "name": "get_dependencies",
+      "description": "Return the package.json dependencies for a named workspace package.",
+      "category": "knowledge-graph"
+    },
+    {
+      "name": "list_workspaces",
+      "description": "List all npm workspaces from the root package.json with their names, paths, and versions.",
+      "category": "multi-repo"
+    },
+    {
+      "name": "cross_repo_search",
+      "description": "Search for a pattern across all workspace packages and return results grouped by package.",
+      "category": "multi-repo"
+    },
+    {
+      "name": "get_audit_log",
+      "description": "Read the last N lines from the .dantecode/audit.log file if it exists.",
+      "category": "compliance"
+    },
+    {
+      "name": "export_audit_trail",
+      "description": "Export audit log entries as a structured JSON array for compliance reporting.",
+      "category": "compliance"
+    },
+    {
+      "name": "get_compliance_report",
+      "description": "Return a structured summary of security and sandbox settings including presence of key config artifacts.",
+      "category": "compliance"
+    },
+    {
+      "name": "get_recent_errors",
+      "description": "Read recent error entries from the debug-trail or audit log to aid troubleshooting.",
+      "category": "productivity"
+    },
+    {
+      "name": "get_repair_history",
+      "description": "Read the repair attempt history from debug-trail or audit log.",
+      "category": "productivity"
+    },
+    {
+      "name": "get_skill_recommendations",
+      "description": "Return the top skills by win-rate from the skillbook.json for the current project.",
+      "category": "productivity"
+    },
+    {
+      "name": "get_convergence_stats",
+      "description": "Return circuit breaker state and loop detector statistics from the current session.",
+      "category": "productivity"
+    },
+    {
+      "name": "get_competitive_score",
+      "description": "Read DIMENSION_ASSESSMENT.md and return current competitive scores as structured JSON.",
+      "category": "meta"
+    },
+    {
+      "name": "get_sprint_progress",
+      "description": "Read COMPETITIVE_MATRIX.md and return the current rank, overall score, and progress summary.",
+      "category": "meta"
+    },
+    {
+      "name": "get_agent_health",
+      "description": "Return process uptime, heap memory usage, Node.js version, and current session count.",
+      "category": "meta"
+    },
+    {
+      "name": "reset_circuit_breaker",
+      "description": "Write a circuit-breaker reset signal so the running agent loop resets on next check.",
+      "category": "meta"
     }
   ],
   "categories": {
@@ -195,7 +275,12 @@
     "debugging": 2,
     "skills": 1,
     "session": 2,
-    "assessment": 1
+    "assessment": 1,
+    "knowledge-graph": 3,
+    "multi-repo": 2,
+    "compliance": 3,
+    "productivity": 4,
+    "meta": 4
   },
   "quickstart": {
     "install": "npm install -g @dantecode/mcp",

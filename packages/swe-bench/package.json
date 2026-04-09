@@ -1,0 +1,25 @@
+{
+  "name": "@dantecode/swe-bench",
+  "version": "0.1.0",
+  "description": "Docker/local SWE-bench harness — used by /benchmark command. Loads dataset, runs agent patches, scores results.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config ../../vitest.package.config.ts"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

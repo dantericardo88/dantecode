@@ -4353,3 +4353,229 @@ describe("Lane I — Multi-Lane Integration", () => {
     expect(synthesis!.mergedPatch).toContain("lane-b");
   });
 });
+
+// ----------------------------------------------------------------------------
+// Lane J — Concurrent Launch (launchLanesConcurrently)
+// ----------------------------------------------------------------------------
+
+describe("Lane J — launchLanesConcurrently", () => {
+  let testDirJ: string;
+  const activeOrchestratorsJ: CouncilOrchestrator[] = [];
+
+  beforeEach(async () => {
+    testDirJ = join(
+      tmpdir(),
+      `council-concurrent-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await mkdir(testDirJ, { recursive: true });
+    // Init git repo for the test dir
+    execSync("git init -b main", { cwd: testDirJ, stdio: "pipe" });
+    execSync("git config user.email test@test.com", { cwd: testDirJ, stdio: "pipe" });
+    execSync("git config user.name Test", { cwd: testDirJ, stdio: "pipe" });
+    execSync("git commit --allow-empty -m init", { cwd: testDirJ, stdio: "pipe" });
+  });
+
+  afterEach(async () => {
+    for (const o of activeOrchestratorsJ) {
+      o.on("error", () => {});
+      const oc = o as unknown as { pollTimer: unknown };
+      if (oc.pollTimer) clearInterval(oc.pollTimer as ReturnType<typeof setInterval>);
+    }
+    activeOrchestratorsJ.length = 0;
+    await rm(testDirJ, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("J1: launchLanesConcurrently resolves all lane assignments via Promise.allSettled", async () => {
+    const startTimes: number[] = [];
+
+    const makeMockAdapter = (kind: AgentKind): CouncilAgentAdapter => ({
+      id: kind,
+      displayName: kind,
+      kind: "file-bridge",
+      probeAvailability: async () => ({ available: true, health: "ready" as const, reason: "ok" }),
+      estimateCapacity: async () => ({ remainingCapacity: 80, capSuspicion: "none" as const }),
+      submitTask: vi.fn(async () => {
+        startTimes.push(Date.now());
+        return { sessionId: randomUUID(), accepted: true };
+      }),
+      pollStatus: vi.fn(async (sid: string) => ({ sessionId: sid, status: "running" as const })),
+      collectArtifacts: async (sid: string) => ({ sessionId: sid, files: [], logs: [] }),
+      collectPatch: vi.fn(async () => null),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: vi.fn(async () => {}),
+    });
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([
+      ["dantecode", makeMockAdapter("dantecode")],
+      ["claude-code", makeMockAdapter("claude-code")],
+      ["codex", makeMockAdapter("codex")],
+    ]);
+
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 60_000 });
+    activeOrchestratorsJ.push(orchestrator);
+
+    await orchestrator.start({
+      objective: "concurrent launch test",
+      agents: ["dantecode", "claude-code", "codex"],
+      repoRoot: testDirJ,
+    });
+
+    const requests = (["dantecode", "claude-code", "codex"] as AgentKind[]).map((kind) => ({
+      preferredAgent: kind,
+      objective: "concurrent test",
+      worktreePath: testDirJ,
+      branch: "feat/concurrent-test",
+      baseBranch: "main",
+      taskCategory: "coding" as const,
+      ownedFiles: [],
+    }));
+
+    const launchStart = Date.now();
+    const results = await orchestrator.launchLanesConcurrently(requests);
+    const launchDuration = Date.now() - launchStart;
+
+    // All 3 lanes should have settled results
+    expect(results).toHaveLength(3);
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+
+    // All lanes should have been accepted
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        expect(r.value.accepted).toBe(true);
+      }
+    }
+
+    // Launch should complete quickly (mocked adapters are instant)
+    expect(launchDuration).toBeLessThan(500);
+  });
+
+  it("J2: launchLanesConcurrently does not abort on partial failure — fulfilled lanes still succeed", async () => {
+    let callCount = 0;
+
+    const flakyAdapter: CouncilAgentAdapter = {
+      id: "dantecode",
+      displayName: "dantecode",
+      kind: "file-bridge",
+      probeAvailability: async () => ({ available: true, health: "ready" as const, reason: "ok" }),
+      estimateCapacity: async () => ({ remainingCapacity: 80, capSuspicion: "none" as const }),
+      submitTask: vi.fn(async () => {
+        callCount++;
+        if (callCount === 2) throw new Error("adapter error on lane 2");
+        return { sessionId: randomUUID(), accepted: true };
+      }),
+      pollStatus: vi.fn(async (sid: string) => ({ sessionId: sid, status: "running" as const })),
+      collectArtifacts: async (sid: string) => ({ sessionId: sid, files: [], logs: [] }),
+      collectPatch: vi.fn(async () => null),
+      detectRateLimit: async () => ({ detected: false, confidence: "none" as const }),
+      abortTask: vi.fn(async () => {}),
+    };
+
+    const adapters = new Map<AgentKind, CouncilAgentAdapter>([
+      ["dantecode", flakyAdapter],
+    ]);
+
+    const orchestrator = new CouncilOrchestrator(adapters, { pollIntervalMs: 60_000 });
+    activeOrchestratorsJ.push(orchestrator);
+
+    await orchestrator.start({
+      objective: "partial failure test",
+      agents: ["dantecode"],
+      repoRoot: testDirJ,
+    });
+
+    const requests = [1, 2, 3].map((n) => ({
+      preferredAgent: "dantecode" as AgentKind,
+      objective: `task ${n}`,
+      worktreePath: testDirJ,
+      branch: `feat/partial-fail-${n}`,
+      baseBranch: "main",
+      taskCategory: "coding" as const,
+      ownedFiles: [],
+    }));
+
+    const results = await orchestrator.launchLanesConcurrently(requests);
+
+    // All results present — allSettled means no early abort
+    expect(results).toHaveLength(3);
+
+    // At least some succeed (those that didn't throw)
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Lane K — Parallel Poll Dispatch
+// Verifies that pollAllLanes() fires all pollStatus calls concurrently, not sequentially.
+describe("Lane K — parallel poll dispatch", () => {
+  it("K1: pollAllLanes fires all pollStatus calls within a single event-loop batch (concurrent)", async () => {
+    const runId = `council-parallel-poll-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    // Track when each pollStatus call starts
+    const callTimestamps: number[] = [];
+    const POLL_DELAY_MS = 80; // artificial delay per poll to amplify sequential vs parallel gap
+
+    function makeMockAdapterWithDelay(kindId: string) {
+      return {
+        id: kindId,
+        displayName: kindId,
+        kind: kindId as AgentKind,
+        probeAvailability: async () => ({ available: true, agentKind: kindId as AgentKind }),
+        estimateCapacity: async () => ({ slots: 1 }),
+        submitTask: async () => ({ sessionId: `sess-${kindId}`, accepted: true }),
+        pollStatus: async (sessionId: string) => {
+          callTimestamps.push(Date.now());
+          await new Promise<void>(r => setTimeout(r, POLL_DELAY_MS));
+          return { sessionId, status: "completed" as const };
+        },
+        collectArtifacts: async () => ({ artifacts: [] }),
+        collectPatch: async () => null,
+        detectRateLimit: async () => false,
+        abortTask: async () => {},
+      };
+    }
+
+    const adapter1 = makeMockAdapterWithDelay("mockK1");
+    const adapter2 = makeMockAdapterWithDelay("mockK2");
+    const adapter3 = makeMockAdapterWithDelay("mockK3");
+
+    const adapterMap = new Map<AgentKind, CouncilAgentAdapter>([
+      ["mockK1" as AgentKind, adapter1 as unknown as CouncilAgentAdapter],
+      ["mockK2" as AgentKind, adapter2 as unknown as CouncilAgentAdapter],
+      ["mockK3" as AgentKind, adapter3 as unknown as CouncilAgentAdapter],
+    ]);
+
+    const orchestrator = new CouncilOrchestrator(adapterMap, { baseBranch: "main", maxLaneRetries: 0 });
+
+    // Manually set up 3 running sessions in the run state
+    const runState = {
+      runId,
+      projectRoot: process.cwd(),
+      baseBranch: "main",
+      status: "running" as const,
+      agents: [
+        { laneId: "k1", agentKind: "mockK1" as AgentKind, sessionId: "sess-k1", status: "running" as const, assignedFiles: [], retryCount: 0, objective: "test", branch: "feat/k1", nestingDepth: 0 },
+        { laneId: "k2", agentKind: "mockK2" as AgentKind, sessionId: "sess-k2", status: "running" as const, assignedFiles: [], retryCount: 0, objective: "test", branch: "feat/k2", nestingDepth: 0 },
+        { laneId: "k3", agentKind: "mockK3" as AgentKind, sessionId: "sess-k3", status: "running" as const, assignedFiles: [], retryCount: 0, objective: "test", branch: "feat/k3", nestingDepth: 0 },
+      ],
+      mergeStrategy: "sequential" as const,
+      createdAt: new Date().toISOString(),
+    };
+    (orchestrator as unknown as { runState: typeof runState }).runState = runState;
+
+    const start = Date.now();
+    // Call pollAllLanes directly via reflection
+    await (orchestrator as unknown as { pollAllLanes: () => Promise<void> }).pollAllLanes();
+    const elapsed = Date.now() - start;
+
+    // Sequential would take 3 × POLL_DELAY_MS = 240ms+
+    // Parallel should take ~1 × POLL_DELAY_MS = ~80ms
+    // Allow generous budget for CI variance: must be under 2× single delay
+    expect(elapsed).toBeLessThan(POLL_DELAY_MS * 2 + 50);
+
+    // All 3 polls were dispatched
+    expect(callTimestamps).toHaveLength(3);
+
+    // All calls started within a tight window (concurrent start, not staggered)
+    const spread = Math.max(...callTimestamps) - Math.min(...callTimestamps);
+    expect(spread).toBeLessThan(40); // all fire within 40ms of each other
+  });
+});

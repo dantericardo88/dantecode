@@ -116,4 +116,45 @@ describe("DanteSkillbook", () => {
     expect(book.stats().totalSkills).toBe(2);
     expect(book.stats().sections["research"]).toBe(1);
   });
+
+  it("recordSessionOutcome increments appliedInSessions and sessionsSucceeded on success", () => {
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" },
+      "pass",
+    );
+    book.recordSessionOutcome(["s1"], true);
+    book.recordSessionOutcome(["s1"], true);
+    book.recordSessionOutcome(["s1"], false);
+    const skill = book.findById("s1");
+    expect(skill?.appliedInSessions).toBe(3);
+    expect(skill?.sessionsSucceeded).toBe(2);
+  });
+
+  it("getEffectivenessReport returns skills with session data", () => {
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s1" }), rationale: "init" },
+      "pass",
+    );
+    book.applyUpdate(
+      { action: "add", candidateSkill: makeSkill({ id: "s2", section: "debugging" }), rationale: "init" },
+      "pass",
+    );
+    // s1: applied 4x, succeeded 3x → effectivenessScore = 0.75
+    book.recordSessionOutcome(["s1"], true);
+    book.recordSessionOutcome(["s1"], true);
+    book.recordSessionOutcome(["s1"], true);
+    book.recordSessionOutcome(["s1"], false);
+    // s2: no sessions recorded → excluded from report
+    const report = book.getEffectivenessReport();
+    expect(report).toHaveLength(1);
+    expect(report[0]!.skillId).toBe("s1");
+    expect(report[0]!.effectivenessScore).toBeCloseTo(0.75);
+    expect(report[0]!.appliedInSessions).toBe(4);
+  });
+
+  it("recordSessionOutcome ignores unknown skill IDs gracefully", () => {
+    // Should not throw for non-existent IDs
+    expect(() => book.recordSessionOutcome(["unknown-id"], true)).not.toThrow();
+    expect(book.getEffectivenessReport()).toHaveLength(0);
+  });
 });

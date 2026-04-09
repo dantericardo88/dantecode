@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell, Menu } from "electron";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { EXECUTION_TRUTH_RELATIVE_PATH, type ExecutionTruthPayload } from "@dantecode/core";
 
 // ---------------------------------------------------------------------------
 // Agent subprocess management
@@ -9,9 +10,21 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 
 let agentProcess: ChildProcess | null = null;
 let agentRunning = false;
-let agentModel = "default";
+const agentModel = "default";
 /** Buffered output from the agent subprocess, delivered to renderer via IPC. */
 let outputListeners: Array<(data: string) => void> = [];
+
+function readExecutionTruthPayload(): ExecutionTruthPayload | null {
+  try {
+    const truthPath = join(process.cwd(), EXECUTION_TRUTH_RELATIVE_PATH);
+    if (!existsSync(truthPath)) {
+      return null;
+    }
+    return JSON.parse(readFileSync(truthPath, "utf8")) as ExecutionTruthPayload;
+  } catch {
+    return null;
+  }
+}
 
 function findCliBinary(): string | null {
   // Try common locations
@@ -46,11 +59,7 @@ function runAgentPrompt(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const cliBin = findCliBinary();
     if (!cliBin) {
-      reject(
-        new Error(
-          "DanteCode CLI not found. Install with: npm install -g @dantecode/cli",
-        ),
-      );
+      reject(new Error("DanteCode CLI not found. Install with: npm install -g @dantecode/cli"));
       return;
     }
 
@@ -59,9 +68,7 @@ function runAgentPrompt(prompt: string): Promise<string> {
 
     const isJsFile = cliBin.endsWith(".js");
     const cmd = isJsFile ? "node" : cliBin;
-    const args = isJsFile
-      ? [cliBin, "--prompt", prompt]
-      : ["--prompt", prompt];
+    const args = isJsFile ? [cliBin, "--prompt", prompt] : ["--prompt", prompt];
 
     try {
       agentProcess = spawn(cmd, args, {
@@ -105,9 +112,7 @@ function runAgentPrompt(prompt: string): Promise<string> {
     agentProcess.on("error", (err) => {
       agentRunning = false;
       agentProcess = null;
-      reject(
-        new Error(`DanteCode CLI process error: ${err.message}`),
-      );
+      reject(new Error(`DanteCode CLI process error: ${err.message}`));
     });
   });
 }
@@ -160,9 +165,7 @@ function createWindow(): void {
   if (existsSync(indexPath)) {
     mainWindow.loadFile(indexPath);
   } else {
-    mainWindow.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent(getDefaultHTML())}`,
-    );
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getDefaultHTML())}`);
   }
 
   mainWindow.on("closed", () => {
@@ -252,10 +255,7 @@ function createMenu(): void {
         },
         {
           label: "Report Issue",
-          click: () =>
-            shell.openExternal(
-              "https://github.com/dantecode/dantecode/issues",
-            ),
+          click: () => shell.openExternal("https://github.com/dantecode/dantecode/issues"),
         },
         { type: "separator" },
         {
@@ -305,7 +305,19 @@ function setupIPC(): void {
   });
 
   ipcMain.handle("agent:get-status", () => {
-    return { running: agentRunning, model: agentModel };
+    const truth = readExecutionTruthPayload();
+    return {
+      running: agentRunning,
+      model: truth?.model ?? agentModel,
+      provider: truth?.provider ?? null,
+      mode: truth?.mode ?? null,
+      changedFiles: truth?.changedFiles ?? [],
+      mutationCount: truth?.mutationCount ?? 0,
+      validationCount: truth?.validationCount ?? 0,
+      gateStatus: truth?.gateStatus ?? "none",
+      reasonCode: truth?.reasonCode ?? null,
+      lastVerifiedAt: truth?.lastVerifiedAt ?? null,
+    };
   });
 
   ipcMain.handle("agent:abort", () => {
@@ -533,6 +545,52 @@ function getDefaultHTML(): string {
 
     .meta-item strong { color: var(--dc-dim); }
 
+    .meta-secondary {
+      margin-top: 10px;
+      color: var(--dc-dim);
+      flex-wrap: wrap;
+    }
+
+    .status-reason {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--dc-dim);
+      min-height: 16px;
+    }
+
+    .output-panel {
+      margin-top: 24px;
+      background: var(--dc-elevated);
+      border: 1px solid var(--dc-border);
+      border-radius: 2px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .output-panel.visible {
+      display: block;
+    }
+
+    .output-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--dc-border);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dc-accent);
+    }
+
+    .output-log {
+      margin: 0;
+      padding: 14px;
+      max-height: 240px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.6;
+      color: var(--dc-text);
+    }
+
     /* PDSE badge in topbar */
     .pdse-chip {
       display: flex;
@@ -571,7 +629,7 @@ function getDefaultHTML(): string {
     <span class="topbar-brand">DanteCode</span>
     <div class="topbar-meta">
       <span class="status-dot"></span>
-      <span>Ready</span>
+      <span id="status-label">Ready</span>
       <div class="pdse-chip">
         <div class="pdse-ring-sm"></div>
         PDSE
@@ -595,11 +653,123 @@ function getDefaultHTML(): string {
     </div>
 
     <div class="meta-row">
-      <span class="meta-item"><strong>Model</strong> Grok-3</span>
-      <span class="meta-item"><strong>Gate</strong> DanteForge v2</span>
-      <span class="meta-item"><strong>Mode</strong> Apply</span>
+      <span class="meta-item"><strong>Model</strong> <span id="model-value">Loading...</span></span>
+      <span class="meta-item"><strong>Gate</strong> <span id="gate-value">Loading...</span></span>
+      <span class="meta-item"><strong>Mode</strong> <span id="mode-value">Loading...</span></span>
+    </div>
+
+    <div class="meta-row meta-secondary">
+      <span class="meta-item"><strong>Provider</strong> <span id="provider-value">-</span></span>
+      <span class="meta-item"><strong>Mutations</strong> <span id="mutation-count">0</span></span>
+      <span class="meta-item"><strong>Validations</strong> <span id="validation-count">0</span></span>
+      <span class="meta-item"><strong>Files</strong> <span id="changed-files">None</span></span>
+    </div>
+
+    <div class="status-reason" id="reason-value"></div>
+
+    <div class="output-panel" id="output-panel">
+      <div class="output-header">Live Output</div>
+      <pre class="output-log" id="output-log"></pre>
     </div>
   </div>
+
+  <script>
+    const promptInput = document.querySelector('.prompt-input');
+    const sendButton = document.querySelector('.send-btn');
+    const statusLabel = document.getElementById('status-label');
+    const modelValue = document.getElementById('model-value');
+    const providerValue = document.getElementById('provider-value');
+    const modeValue = document.getElementById('mode-value');
+    const gateValue = document.getElementById('gate-value');
+    const mutationCount = document.getElementById('mutation-count');
+    const validationCount = document.getElementById('validation-count');
+    const changedFiles = document.getElementById('changed-files');
+    const reasonValue = document.getElementById('reason-value');
+    const outputPanel = document.getElementById('output-panel');
+    const outputLog = document.getElementById('output-log');
+
+    function formatGate(status) {
+      if (status === 'passed') return 'Passed';
+      if (status === 'failed') return 'Failed';
+      if (status === 'pending') return 'Pending';
+      return 'None';
+    }
+
+    function formatMode(mode) {
+      return mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : 'Unknown';
+    }
+
+    function updateStatus(status) {
+      statusLabel.textContent = status.running ? 'Working' : 'Ready';
+      modelValue.textContent = status.model || 'Unknown';
+      providerValue.textContent = status.provider || '-';
+      modeValue.textContent = formatMode(status.mode);
+      gateValue.textContent = formatGate(status.gateStatus);
+      mutationCount.textContent = String(status.mutationCount || 0);
+      validationCount.textContent = String(status.validationCount || 0);
+      changedFiles.textContent = status.changedFiles && status.changedFiles.length > 0
+        ? status.changedFiles.slice(0, 3).join(', ')
+        : 'None';
+
+      if (status.reasonCode || status.lastVerifiedAt) {
+        const parts = [];
+        if (status.reasonCode) parts.push('Reason: ' + status.reasonCode);
+        if (status.lastVerifiedAt) parts.push('Verified: ' + status.lastVerifiedAt);
+        reasonValue.textContent = parts.join(' | ');
+      } else {
+        reasonValue.textContent = '';
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const status = await window.dantecode.getStatus();
+        updateStatus(status);
+      } catch (error) {
+        reasonValue.textContent = 'Unable to load runtime status.';
+      }
+    }
+
+    async function runPrompt() {
+      const prompt = promptInput.value.trim();
+      if (!prompt) return;
+
+      sendButton.disabled = true;
+      promptInput.disabled = true;
+      outputPanel.classList.add('visible');
+      outputLog.textContent = '';
+
+      try {
+        const result = await window.dantecode.runPrompt(prompt);
+        if (!result.success && result.error) {
+          outputLog.textContent += '[error] ' + result.error + '\\n';
+        }
+      } finally {
+        sendButton.disabled = false;
+        promptInput.disabled = false;
+        promptInput.focus();
+        await refreshStatus();
+      }
+    }
+
+    sendButton.addEventListener('click', runPrompt);
+    promptInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void runPrompt();
+      }
+    });
+
+    window.dantecode.onOutput((data) => {
+      outputPanel.classList.add('visible');
+      outputLog.textContent += data;
+      outputLog.scrollTop = outputLog.scrollHeight;
+      void refreshStatus();
+    });
+
+    void refreshStatus();
+    setInterval(() => { void refreshStatus(); }, 2000);
+  </script>
 </body>
 </html>`;
 }

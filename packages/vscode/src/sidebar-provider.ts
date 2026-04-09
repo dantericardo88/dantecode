@@ -45,6 +45,7 @@ import {
   generateFollowupSuggestions,
   getRouterMetrics,
   getGlobalHookRunner,
+  loadPersistentRulesPrompt,
 } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -482,6 +483,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.handleFileRemove(String(message.payload["filePath"] ?? ""));
         break;
       case "paste_image":
+        // Check if current model supports vision
+        const [provider] = this.parseModelString(this.currentModel);
+        const supportsVision = provider === "grok" ? this.currentModel.includes("grok-1.5") : false; // Add other vision-capable models as needed
+        if (!supportsVision) {
+          this.postMessage({
+            type: "error",
+            payload: {
+              message: `The current model (${this.currentModel}) does not support image input. Switch to a vision-capable model like Grok-1.5 to attach images.`,
+            },
+          });
+          return;
+        }
         // Image data comes as base64 from the webview; store for next request
         this.pendingImages.push(String(message.payload["data"] ?? ""));
         break;
@@ -521,7 +534,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           if (mentionCategory === "folder") {
             // Add all files in the folder to context
             const folderPattern = `${mentionPath}**`;
-            const folderFiles = await vscode.workspace.findFiles(folderPattern, "**/node_modules/**", 20);
+            const folderFiles = await vscode.workspace.findFiles(
+              folderPattern,
+              "**/node_modules/**",
+              20,
+            );
             for (const uri of folderFiles) {
               if (!this.contextFiles.includes(uri.fsPath)) {
                 this.contextFiles.push(uri.fsPath);
@@ -532,9 +549,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               `Added ${folderFiles.length} files from ${mentionPath} to context`,
             );
           } else {
-            const fullPath = mentionPath.startsWith("/") || mentionPath.includes(":")
-              ? mentionPath
-              : `${projectRoot}/${mentionPath}`.replace(/\\/g, "/");
+            const fullPath =
+              mentionPath.startsWith("/") || mentionPath.includes(":")
+                ? mentionPath
+                : `${projectRoot}/${mentionPath}`.replace(/\\/g, "/");
             if (!this.contextFiles.includes(fullPath)) {
               this.contextFiles.push(fullPath);
               this.sendContextFilesUpdate();
@@ -547,12 +565,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Transcribe audio via Whisper API backend
         try {
           const { transcribeAudioBuffer } = await import("@dantecode/core");
-          const apiKey = await this.secrets.get("OPENAI_API_KEY") ?? await this.secrets.get("ANTHROPIC_API_KEY") ?? "";
+          const apiKey =
+            (await this.secrets.get("OPENAI_API_KEY")) ??
+            (await this.secrets.get("ANTHROPIC_API_KEY")) ??
+            "";
           if (!apiKey) break;
           const audioData = message.payload["data"] as string; // base64
           if (!audioData) break;
           const buffer = Buffer.from(audioData, "base64");
-          const mimeType = (message.payload["mimeType"] ?? "audio/webm") as "audio/webm" | "audio/wav";
+          const mimeType = (message.payload["mimeType"] ?? "audio/webm") as
+            | "audio/webm"
+            | "audio/wav";
           const result = await transcribeAudioBuffer(buffer, mimeType, {
             apiKey,
             language: "en",
@@ -561,7 +584,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             this.postMessage({ type: "voice_transcript", payload: { text: result.text } });
           }
         } catch (err) {
-          console.error("[DanteCode] Whisper transcription failed:", err instanceof Error ? err.message : String(err));
+          console.error(
+            "[DanteCode] Whisper transcription failed:",
+            err instanceof Error ? err.message : String(err),
+          );
         }
         break;
       }
@@ -622,7 +648,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             this.activeSkill = cmdName;
           }
           // Store failure policy for the loop to enforce
-          const rawPolicy = (loaded.command.contract as { failurePolicy?: string } | undefined)?.failurePolicy;
+          const rawPolicy = (loaded.command.contract as { failurePolicy?: string } | undefined)
+            ?.failurePolicy;
           this.activeWorkflowFailurePolicy = rawPolicy === "hard_stop" ? "hard_stop" : "continue";
           // Stage 3 — Stage progress bar: announce workflow stages to the webview
           const stages = loaded.command.contract?.stages ?? [];
@@ -870,10 +897,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       systemParts.push("## Mode: ARCHITECT (Two-Stage)");
       systemParts.push(
         "You are in ARCHITECT mode. First output an architectural plan: what to change and why. " +
-        "Do NOT write full code yet. Describe file paths, function signatures, and change rationale. " +
-        "Keep the plan concise (under 300 words). After planning, the editor phase will implement using SEARCH/REPLACE blocks.",
+          "Do NOT write full code yet. Describe file paths, function signatures, and change rationale. " +
+          "Keep the plan concise (under 300 words). After planning, the editor phase will implement using SEARCH/REPLACE blocks.",
       );
-      systemParts.push("After your plan is reviewed, switch to EDITOR mode to write SEARCH/REPLACE blocks.");
+      systemParts.push(
+        "After your plan is reviewed, switch to EDITOR mode to write SEARCH/REPLACE blocks.",
+      );
       systemParts.push("");
     } else {
       systemParts.push("## Mode: APPLY");
@@ -987,6 +1016,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       systemParts.push("");
       systemParts.push(workflowContextPrompt);
       systemParts.push("");
+    }
+
+    if (projectRoot) {
+      try {
+        const persistentRulesPrompt = await loadPersistentRulesPrompt(projectRoot);
+        if (persistentRulesPrompt) {
+          systemParts.push("");
+          systemParts.push(persistentRulesPrompt);
+          systemParts.push("");
+        }
+      } catch {
+        /* non-critical */
+      }
     }
 
     systemParts.push(getToolDefinitionsPrompt(this.approvalMode));
@@ -1149,7 +1191,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             systemParts.push(`- **${lesson.pattern}**: ${lesson.correction}`);
           }
         }
-      } catch { /* non-critical — lessons may not be available */ }
+      } catch {
+        /* non-critical — lessons may not be available */
+      }
     }
 
     // Include files the user explicitly added to context
@@ -1177,9 +1221,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Trim to last N messages to prevent context window overflow on long sessions
     const MAX_CONTEXT_MESSAGES = 40;
-    const recentMessages = this.messages.length > MAX_CONTEXT_MESSAGES
-      ? this.messages.slice(-MAX_CONTEXT_MESSAGES)
-      : this.messages;
+    const recentMessages =
+      this.messages.length > MAX_CONTEXT_MESSAGES
+        ? this.messages.slice(-MAX_CONTEXT_MESSAGES)
+        : this.messages;
 
     const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
       ...recentMessages.map((msg) => ({
@@ -1269,16 +1314,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               });
             }
             // Stage 3 — Detect stage/wave completions and advance progress bar
-            if (
-              this.workflowStageCount > 0 &&
-              /\[(?:STAGE|WAVE)\s+COMPLETE\]/i.test(chunk)
-            ) {
+            if (this.workflowStageCount > 0 && /\[(?:STAGE|WAVE)\s+COMPLETE\]/i.test(chunk)) {
               this.currentWorkflowStage = Math.min(
                 this.currentWorkflowStage + 1,
                 this.workflowStageCount,
               );
-              const nextStageName =
-                this.workflowStageName; // will be updated below
+              const nextStageName = this.workflowStageName; // will be updated below
               // Update stage name from contract if possible
               this.postMessage({
                 type: "workflow_stage_update",
@@ -1481,8 +1522,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           /\b(?:typecheck[:\s]+(?:PASS|✅)|lint[:\s]+(?:PASS|✅)|test(?:s|ing)?[:\s]+(?:PASS|✅|\d+\/\d+)|pushed?\s+to\s+origin|files?\s+changed.*\+\d+\s+lines?|PDSE\s+score|no\s+further\s+tools?\s+needed|turbo\s+(?:typecheck|lint|test)\s*[:\s]*(?:PASS|pass|\d+))/im;
 
         // No tool calls → check if we should nudge the model to actually execute
-        const legacyNoToolPatternsLoaded =
-          PREMATURE_SUMMARY_RE.test("") || GROK_CONFAB_RE.test("");
+        const legacyNoToolPatternsLoaded = PREMATURE_SUMMARY_RE.test("") || GROK_CONFAB_RE.test("");
         void legacyNoToolPatternsLoaded;
 
         if (toolCalls.length === 0) {
@@ -2591,6 +2631,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private async handlePickImage(): Promise<void> {
+    // Check if current model supports vision
+    const [provider] = this.parseModelString(this.currentModel);
+    const supportsVision = provider === "grok" ? this.currentModel.includes("grok-1.5") : false; // Add other vision-capable models as needed
+    if (!supportsVision) {
+      this.postMessage({
+        type: "error",
+        payload: {
+          message: `The current model (${this.currentModel}) does not support image input. Switch to a vision-capable model like Grok-1.5 to attach images.`,
+        },
+      });
+      return;
+    }
+
     const result = await vscode.window.showOpenDialog({
       canSelectMany: false,
       canSelectFolders: false,

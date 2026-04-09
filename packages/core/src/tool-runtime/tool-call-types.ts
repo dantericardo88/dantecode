@@ -84,6 +84,27 @@ export interface ToolExecutionResult {
   evidence?: ToolExecutionEvidence;
 }
 
+export interface ToolMutationEvidence {
+  filePath: string;
+  beforeHash?: string;
+  afterHash?: string;
+  additions?: number;
+  deletions?: number;
+  diffSummary?: string;
+  observableMutation: boolean;
+  beforeMtimeMs?: number;
+  afterMtimeMs?: number;
+}
+
+export interface ToolValidationEvidence {
+  validationType: "syntax" | "typecheck" | "lint" | "test" | "custom";
+  target: string;
+  passed: boolean;
+  errorCount: number;
+  warningCount: number;
+  output?: string;
+}
+
 export interface ToolExecutionEvidence {
   /** Exit code from Bash executions */
   exitCode?: number;
@@ -95,6 +116,10 @@ export interface ToolExecutionEvidence {
   bytesTransferred?: number;
   /** Duration in ms */
   durationMs?: number;
+  /** Structured mutation proof emitted by mutating tools */
+  mutations?: ToolMutationEvidence[];
+  /** Structured validation proof emitted by validating tools */
+  validations?: ToolValidationEvidence[];
 }
 
 // ─── Artifact Record ──────────────────────────────────────────────────────────
@@ -132,17 +157,17 @@ export type VerificationCheckKind =
   | "file_exists"
   | "file_size_nonzero"
   | "git_repo_valid"
-  | "archive_extracted";
+  | "archive_extracted" | "edit_applied";
 
 export interface VerificationCheck {
   readonly kind: VerificationCheckKind;
   readonly path: string;
   /** Optional minimum size in bytes */
   minSizeBytes?: number;
-}
-
-export interface VerificationResult {
-  readonly passed: boolean;
+  /** For edit_applied: the text that was replaced */
+  before?: string;
+  /** For edit_applied: the text that replaced it */
+  after?: string;
   readonly checks: VerificationCheckOutcome[];
   readonly failedChecks: VerificationCheckOutcome[];
 }
@@ -152,6 +177,13 @@ export interface VerificationCheckOutcome {
   readonly passed: boolean;
   readonly actualValue?: string | number | boolean;
   readonly errorMessage?: string;
+}
+
+/** Aggregated result of all verification checks for a tool call */
+export interface VerificationResult {
+  passed: boolean;
+  checks: VerificationCheckOutcome[];
+  failedChecks: VerificationCheckOutcome[];
 }
 
 // ─── Scheduler Config ─────────────────────────────────────────────────────────
@@ -168,3 +200,8 @@ export interface ToolSchedulerConfig {
   /** Whether to run post-execution verification (default: true) */
   verifyAfterExecution?: boolean;
 }
+
+
+
+
+

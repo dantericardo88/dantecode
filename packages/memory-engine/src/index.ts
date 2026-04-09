@@ -77,6 +77,9 @@ export { RetentionPolicy, defaultRetentionPolicy } from "./policies/retention-po
 export type { RetentionDecision, RetentionEvaluation } from "./policies/retention-policy.js";
 export { ScoringPolicy, defaultScoringPolicy } from "./policies/scoring-policy.js";
 
+// --- Remote embedding provider detection ---
+export { detectBestEmbeddingProvider } from "./remote-embedding-provider.js";
+
 // --- Optional adapters ---
 export { Mem0Adapter, createMem0Adapter } from "./adapters/mem0-adapter.js";
 export type { Mem0Config, Mem0AdapterOptions } from "./adapters/mem0-adapter.js";

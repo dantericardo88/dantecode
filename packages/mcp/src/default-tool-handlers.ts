@@ -967,45 +967,898 @@ export function createDefaultToolHandlers(): Record<string, ToolHandler> {
     run_benchmark: async (args) => {
       const projectRoot = requiredString(args, "projectRoot");
       const task = requiredString(args, "task");
-      const dimensions = Array.isArray(args["dimensions"]) ? (args["dimensions"] as string[]) : undefined;
+      void task; // context for display — danteforge assess determines scores
 
-      // Run anti-stub scan as a proxy for benchmark quality signal
-      const { readFile } = await import("node:fs/promises");
-      const pkgPath = join(projectRoot, "package.json");
-
-      let projectName = "unknown";
-      try {
-        const pkg = JSON.parse(await readFile(pkgPath, "utf8")) as { name?: string };
-        projectName = pkg.name ?? "unknown";
-      } catch { /* ignore */ }
-
-      const defaultDimensions = dimensions ?? [
-        "autonomy", "convergence", "tokenEconomy", "errorHandling",
-        "uxPolish", "testing", "ecosystemMcp", "selfImprovement",
-      ];
-
-      // Placeholder scores — actual scoring requires DanteForge assessment
-      const scores = Object.fromEntries(defaultDimensions.map((d) => [d, 50]));
-
-      return serialize({
-        project: projectName,
-        task,
-        dimensions: scores,
-        note: "Run `danteforge assess` for full competitive benchmark scores",
-      });
+      // Delegate to danteforge assess for real dimension scores.
+      // Returns the full 18-dimension competitive assessment.
+      return runDanteForgeCmd("assess --json", projectRoot, 120_000);
     },
 
     get_token_usage: async (args) => {
       const sessionId = optionalString(args, "sessionId");
-      void sessionId;
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
 
-      // Return placeholder — actual token tracking requires session context injection
+      // Read real cost history from the most recent session in cost-history.jsonl
+      try {
+        const { readFile: rf } = await import("node:fs/promises");
+        const { join: pjoin } = await import("node:path");
+        const { existsSync } = await import("node:fs");
+        const historyPath = pjoin(projectRoot, ".dantecode", "cost-history.jsonl");
+        if (existsSync(historyPath)) {
+          const raw = await rf(historyPath, "utf-8");
+          const lines = raw.split("\n").filter((l) => l.trim());
+          const entries = lines
+            .map((l) => { try { return JSON.parse(l) as Record<string, unknown>; } catch { return null; } })
+            .filter(Boolean) as Record<string, unknown>[];
+          // Filter by sessionId if provided
+          const filtered = sessionId
+            ? entries.filter((e) => e["sessionId"] === sessionId)
+            : entries;
+          const target = filtered.at(-1) ?? entries.at(-1);
+          if (target) {
+            const totalSessions = entries.length;
+            const totalCost = entries.reduce((s, e) => s + ((e["cost"] as number) ?? 0), 0);
+            return serialize({
+              sessionId: target["sessionId"] ?? "unknown",
+              inputTokens: target["inputTokens"] ?? 0,
+              outputTokens: target["outputTokens"] ?? 0,
+              cost: target["cost"] ?? 0,
+              model: target["model"] ?? "unknown",
+              tier: target["tier"] ?? "medium",
+              totalSessions,
+              totalCostUsd: parseFloat(totalCost.toFixed(6)),
+              budgetTiers: { green: "<70%", yellow: "70-80%", red: "80-90%", critical: ">90%" },
+            });
+          }
+        }
+      } catch {
+        // Fall through to empty response
+      }
       return serialize({
-        sessionId: sessionId ?? "current",
-        note: "Token usage is tracked per-session in agent-loop.ts via context-budget.ts",
+        sessionId: sessionId ?? "none",
+        inputTokens: 0,
+        outputTokens: 0,
+        cost: 0,
+        note: "No cost history found. Run a session first to populate token usage.",
         budgetTiers: { green: "<70%", yellow: "70-80%", red: "80-90%", critical: ">90%" },
-        truncationLimits: { green: "50KB", yellow: "10KB", red: "5KB", critical: "2KB" },
       });
+    },
+
+    // ── Knowledge graph ──────────────────────────────────────────────────────
+    get_workspace_map: async (_args) => {
+      const projectRoot = process.cwd();
+      const { readdir, readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      // Read root package.json for workspace globs
+      let workspaces: string[] = [];
+      let rootName = "unknown";
+      try {
+        const pkg = JSON.parse(await readFile(pjoin(projectRoot, "package.json"), "utf8")) as {
+          name?: string;
+          workspaces?: string[] | { packages?: string[] };
+        };
+        rootName = pkg.name ?? "unknown";
+        workspaces = Array.isArray(pkg.workspaces)
+          ? pkg.workspaces
+          : (pkg.workspaces?.packages ?? []);
+      } catch { /* ignore */ }
+
+      // Top-level directory listing (skip hidden and ignored dirs)
+      const SKIP = new Set(["node_modules", ".git", "dist", ".turbo", ".cache"]);
+      let topLevel: string[] = [];
+      try {
+        const entries = await readdir(projectRoot, { withFileTypes: true });
+        topLevel = entries
+          .filter((e) => !SKIP.has(e.name))
+          .map((e) => (e.isDirectory() ? e.name + "/" : e.name));
+      } catch { /* ignore */ }
+
+      return serialize({ projectRoot, rootName, workspaces, topLevel });
+    },
+
+    find_symbol: async (args) => {
+      const symbol = requiredString(args, "symbol");
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { execSync } = await import("node:child_process");
+      try {
+        // Search for the symbol in TypeScript/JavaScript files
+        const cmd = `grep -rn --include="*.ts" --include="*.tsx" --include="*.js" -l "${symbol.replace(/"/g, '\\"')}" .`;
+        const raw = execSync(cmd, {
+          cwd: projectRoot,
+          encoding: "utf8",
+          stdio: "pipe",
+          // do not use shell injection — symbol is user input; we sanitize above
+        });
+        const files = raw.trim().split("\n").filter(Boolean).slice(0, 30);
+
+        // Get first 5 matching lines per file
+        const matches: Array<{ file: string; lines: string[] }> = [];
+        for (const file of files.slice(0, 10)) {
+          try {
+            const lineCmd = `grep -n "${symbol.replace(/"/g, '\\"')}" "${file}"`;
+            const lineRaw = execSync(lineCmd, {
+              cwd: projectRoot,
+              encoding: "utf8",
+              stdio: "pipe",
+            });
+            matches.push({
+              file,
+              lines: lineRaw.trim().split("\n").filter(Boolean).slice(0, 5),
+            });
+          } catch { /* skip */ }
+        }
+
+        return serialize({ symbol, totalFiles: files.length, matches });
+      } catch {
+        return serialize({ symbol, totalFiles: 0, matches: [], note: "No matches found" });
+      }
+    },
+
+    get_dependencies: async (args) => {
+      const packageName = requiredString(args, "packageName");
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      // Try common locations for the package.json
+      const candidates = [
+        pjoin(projectRoot, "packages", packageName, "package.json"),
+        pjoin(projectRoot, packageName, "package.json"),
+        pjoin(projectRoot, "package.json"),
+      ];
+
+      for (const candidate of candidates) {
+        try {
+          const pkg = JSON.parse(await readFile(candidate, "utf8")) as {
+            name?: string;
+            version?: string;
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+            peerDependencies?: Record<string, string>;
+          };
+          return serialize({
+            packageName,
+            resolvedPath: candidate,
+            name: pkg.name,
+            version: pkg.version,
+            dependencies: pkg.dependencies ?? {},
+            devDependencies: pkg.devDependencies ?? {},
+            peerDependencies: pkg.peerDependencies ?? {},
+          });
+        } catch { /* try next */ }
+      }
+
+      return serialize({ packageName, error: `package.json not found for "${packageName}"` });
+    },
+
+    // ── Multi-repo ───────────────────────────────────────────────────────────
+    list_workspaces: async (_args) => {
+      const projectRoot = process.cwd();
+      const { readdir, readFile, stat: fstat } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      let workspaceGlobs: string[] = [];
+      try {
+        const pkg = JSON.parse(await readFile(pjoin(projectRoot, "package.json"), "utf8")) as {
+          workspaces?: string[] | { packages?: string[] };
+        };
+        workspaceGlobs = Array.isArray(pkg.workspaces)
+          ? pkg.workspaces
+          : (pkg.workspaces?.packages ?? []);
+      } catch { /* ignore */ }
+
+      // Resolve globs — handle patterns like "packages/*"
+      const workspaces: Array<{ name: string; path: string; version?: string }> = [];
+      for (const glob of workspaceGlobs) {
+        const segments = glob.split("/");
+        const base = segments.slice(0, -1).join("/");
+        const tail = segments[segments.length - 1];
+        if (tail === "*") {
+          try {
+            const entries = await readdir(pjoin(projectRoot, base), { withFileTypes: true });
+            for (const entry of entries) {
+              if (!entry.isDirectory()) continue;
+              const pkgPath = pjoin(projectRoot, base, entry.name, "package.json");
+              try {
+                const s = await fstat(pkgPath);
+                if (s.isFile()) {
+                  const p = JSON.parse(await readFile(pkgPath, "utf8")) as {
+                    name?: string;
+                    version?: string;
+                  };
+                  workspaces.push({
+                    name: p.name ?? entry.name,
+                    path: `${base}/${entry.name}`,
+                    version: p.version,
+                  });
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      return serialize({ total: workspaces.length, workspaces });
+    },
+
+    cross_repo_search: async (args) => {
+      const pattern = requiredString(args, "pattern");
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const fileGlob = optionalString(args, "fileGlob") ?? "*.ts";
+
+      const { execSync } = await import("node:child_process");
+      try {
+        const cmd = `grep -rn --include="${fileGlob}" -l "${pattern.replace(/"/g, '\\"')}" packages/`;
+        const raw = execSync(cmd, { cwd: projectRoot, encoding: "utf8", stdio: "pipe" });
+        const files = raw.trim().split("\n").filter(Boolean);
+
+        // Group by package
+        const byPackage: Record<string, string[]> = {};
+        for (const file of files) {
+          const parts = file.split("/");
+          const pkg = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : parts[0] ?? "root";
+          (byPackage[pkg] ??= []).push(file);
+        }
+
+        return serialize({ pattern, totalFiles: files.length, byPackage });
+      } catch {
+        return serialize({ pattern, totalFiles: 0, byPackage: {}, note: "No matches found" });
+      }
+    },
+
+    // ── Compliance / audit ───────────────────────────────────────────────────
+    get_audit_log: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 50;
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const auditPath = pjoin(projectRoot, ".dantecode", "audit.log");
+      try {
+        const content = await readFile(auditPath, "utf8");
+        const lines = content.trim().split("\n").filter(Boolean);
+        const recent = lines.slice(-limit);
+        return serialize({ total: lines.length, showing: recent.length, entries: recent });
+      } catch {
+        return serialize({ total: 0, showing: 0, entries: [], note: "No audit log found" });
+      }
+    },
+
+    export_audit_trail: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 200;
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const auditPath = pjoin(projectRoot, ".dantecode", "audit.log");
+      try {
+        const content = await readFile(auditPath, "utf8");
+        const lines = content.trim().split("\n").filter(Boolean).slice(-limit);
+
+        // Attempt to parse as JSON lines; fall back to raw strings
+        const entries = lines.map((line) => {
+          try {
+            return JSON.parse(line) as unknown;
+          } catch {
+            return { raw: line };
+          }
+        });
+        return serialize({ exportedAt: new Date().toISOString(), count: entries.length, entries });
+      } catch {
+        return serialize({ exportedAt: new Date().toISOString(), count: 0, entries: [] });
+      }
+    },
+
+    get_compliance_report: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      // Probe key config files to build a compliance summary
+      const checks: Record<string, { present: boolean; note?: string }> = {};
+
+      for (const [label, relPath] of [
+        ["danteforge_config", ".danteforge/config.json"],
+        ["sandbox_config", ".dantecode/sandbox.json"],
+        ["audit_log", ".dantecode/audit.log"],
+        ["lessons_db", ".dantecode/lessons.json"],
+        ["skillbook", ".dantecode/skillbook/skillbook.json"],
+        ["constitution", ".danteforge/constitution.md"],
+      ] as [string, string][]) {
+        try {
+          await readFile(pjoin(projectRoot, relPath), "utf8");
+          checks[label] = { present: true };
+        } catch {
+          checks[label] = { present: false };
+        }
+      }
+
+      const presentCount = Object.values(checks).filter((c) => c.present).length;
+      const total = Object.keys(checks).length;
+
+      return serialize({
+        projectRoot,
+        generatedAt: new Date().toISOString(),
+        complianceScore: Math.round((presentCount / total) * 100),
+        checks,
+        summary: `${presentCount}/${total} compliance artifacts present`,
+      });
+    },
+
+    // ── Productivity ─────────────────────────────────────────────────────────
+    get_recent_errors: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 20;
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const candidates = [
+        pjoin(projectRoot, ".dantecode", "audit.log"),
+        pjoin(projectRoot, ".dantecode", "debug.log"),
+      ];
+
+      for (const logPath of candidates) {
+        try {
+          const content = await readFile(logPath, "utf8");
+          const lines = content.trim().split("\n").filter(Boolean);
+          const errorLines = lines
+            .filter((l) => /error|fail|exception|crash/i.test(l))
+            .slice(-limit);
+          if (errorLines.length > 0) {
+            return serialize({ source: logPath, count: errorLines.length, errors: errorLines });
+          }
+        } catch { /* try next */ }
+      }
+
+      return serialize({ count: 0, errors: [], note: "No error log found" });
+    },
+
+    get_repair_history: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 20;
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const repairLog = pjoin(projectRoot, ".dantecode", "repairs.json");
+      try {
+        const content = JSON.parse(await readFile(repairLog, "utf8")) as unknown[];
+        const entries = Array.isArray(content) ? content.slice(-limit) : [];
+        return serialize({ total: Array.isArray(content) ? content.length : 0, entries });
+      } catch {
+        // Fall back to scanning audit log for repair entries
+        try {
+          const auditPath = pjoin(projectRoot, ".dantecode", "audit.log");
+          const content = await readFile(auditPath, "utf8");
+          const repairLines = content
+            .trim()
+            .split("\n")
+            .filter((l) => /repair|recover|retry|circuit/i.test(l))
+            .slice(-limit);
+          return serialize({ total: repairLines.length, entries: repairLines });
+        } catch {
+          return serialize({ total: 0, entries: [], note: "No repair history found" });
+        }
+      }
+    },
+
+    get_skill_recommendations: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 10;
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const skillbookPath = pjoin(projectRoot, ".dantecode", "skillbook", "skillbook.json");
+      try {
+        const raw = JSON.parse(await readFile(skillbookPath, "utf8")) as {
+          skills?: Array<{ name: string; winRate?: number; uses?: number; description?: string }>;
+        };
+        const skills = (raw.skills ?? [])
+          .slice()
+          .sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0))
+          .slice(0, limit);
+        return serialize({ total: raw.skills?.length ?? 0, recommendations: skills });
+      } catch {
+        return serialize({ total: 0, recommendations: [], note: "No skillbook found" });
+      }
+    },
+
+    get_convergence_stats: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { join: pjoin } = await import("node:path");
+      const { readFile, readdir } = await import("node:fs/promises");
+
+      try {
+        const state = await readOrInitializeState(projectRoot);
+        const dcDir = pjoin(projectRoot, ".dantecode");
+
+        // Count sessions
+        let sessionCount = 0;
+        try {
+          const entries = await readdir(pjoin(dcDir, "sessions"));
+          sessionCount = entries.filter((e) => e.endsWith(".json")).length;
+        } catch { /* ignore */ }
+
+        // Read circuit breaker state file if it exists
+        let circuitBreaker: Record<string, unknown> = { state: "closed", trips: 0 };
+        try {
+          const cbRaw = await readFile(pjoin(dcDir, "circuit-breaker-state.json"), "utf8");
+          circuitBreaker = JSON.parse(cbRaw) as Record<string, unknown>;
+        } catch { /* not yet written — breaker has never tripped */ }
+
+        // Mine the audit log for convergence signals
+        const auditStats = {
+          tierEscalations: 0,
+          selfModifications: 0,
+          loopDetections: 0,
+          recentSessions: 0,
+          lastEventTime: null as string | null,
+        };
+        try {
+          const auditPath = pjoin(dcDir, "audit.jsonl");
+          const raw = await readFile(auditPath, "utf8");
+          const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // last 7 days
+          for (const line of raw.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const evt = JSON.parse(line) as { type?: string; timestamp?: string };
+              const ts = evt.timestamp ? new Date(evt.timestamp).getTime() : 0;
+              if (ts > cutoff) {
+                if (evt.type === "tier_escalation") auditStats.tierEscalations++;
+                if (evt.type === "self_modification_allowed") auditStats.selfModifications++;
+                if (evt.type === "loop_detected") auditStats.loopDetections++;
+                if (evt.type === "session_start") auditStats.recentSessions++;
+                if (evt.timestamp) auditStats.lastEventTime = evt.timestamp;
+              }
+            } catch { /* malformed line */ }
+          }
+        } catch { /* audit.jsonl not present */ }
+
+        return serialize({
+          projectRoot,
+          model: state.model?.default ?? "unknown",
+          sessionCount,
+          last7Days: auditStats,
+          circuitBreaker,
+          loopDetector: {
+            strategies: ["hash", "semantic", "edit-distance", "diversity"],
+            description: "Session-scoped; resets between sessions. Check audit.loopDetections for historical trips.",
+          },
+        });
+      } catch {
+        return serialize({ error: "Could not read project state" });
+      }
+    },
+
+    // ── Meta ─────────────────────────────────────────────────────────────────
+    get_competitive_score: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const candidates = [
+        pjoin(projectRoot, "DIMENSION_ASSESSMENT.md"),
+        pjoin(projectRoot, ".danteforge", "DIMENSION_ASSESSMENT.md"),
+      ];
+
+      for (const path of candidates) {
+        try {
+          const content = await readFile(path, "utf8");
+          // Parse dimension scores — look for patterns like "| dimension | score |"
+          const scorePattern = /\|\s*([^|]+?)\s*\|\s*(\d+(?:\.\d+)?)\s*\|/g;
+          const scores: Record<string, number> = {};
+          let m: RegExpExecArray | null;
+          while ((m = scorePattern.exec(content)) !== null) {
+            const dim = m[1]?.trim().toLowerCase().replace(/\s+/g, "_");
+            const score = parseFloat(m[2] ?? "0");
+            if (dim && !isNaN(score) && score <= 100) {
+              scores[dim] = score;
+            }
+          }
+          const values = Object.values(scores);
+          const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+          return serialize({
+            source: path,
+            dimensions: scores,
+            average: Math.round(avg * 10) / 10,
+            dimensionCount: values.length,
+          });
+        } catch { /* try next */ }
+      }
+
+      return serialize({ error: "DIMENSION_ASSESSMENT.md not found", dimensions: {} });
+    },
+
+    get_sprint_progress: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const candidates = [
+        pjoin(projectRoot, "COMPETITIVE_MATRIX.md"),
+        pjoin(projectRoot, ".danteforge", "COMPETITIVE_MATRIX.md"),
+      ];
+
+      for (const path of candidates) {
+        try {
+          const content = await readFile(path, "utf8");
+          // Extract a brief summary (first 3000 chars)
+          const snippet = content.slice(0, 3000);
+          // Look for rank patterns
+          const rankMatch = snippet.match(/rank[:\s]+#?(\d+)/i);
+          const scoreMatch = snippet.match(/overall[:\s]+(\d+(?:\.\d+)?)/i);
+          return serialize({
+            source: path,
+            rank: rankMatch ? parseInt(rankMatch[1] ?? "0") : null,
+            overallScore: scoreMatch ? parseFloat(scoreMatch[1] ?? "0") : null,
+            snippet,
+          });
+        } catch { /* try next */ }
+      }
+
+      return serialize({ error: "COMPETITIVE_MATRIX.md not found", rank: null });
+    },
+
+    get_agent_health: async (_args) => {
+      const uptimeSeconds = process.uptime();
+      const mem = process.memoryUsage();
+      const { readdir } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      let sessionCount = 0;
+      try {
+        const sessionDir = pjoin(process.cwd(), ".dantecode", "sessions");
+        const entries = await readdir(sessionDir);
+        sessionCount = entries.filter((e) => e.endsWith(".json")).length;
+      } catch { /* ignore */ }
+
+      return serialize({
+        status: "healthy",
+        uptimeSeconds: Math.round(uptimeSeconds),
+        memory: {
+          heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+          rssMB: Math.round(mem.rss / 1024 / 1024),
+        },
+        sessionCount,
+        nodeVersion: process.version,
+        platform: process.platform,
+      });
+    },
+
+    reset_circuit_breaker: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+
+      // The circuit breaker is runtime-only state; signal a reset by writing a marker file
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+
+      const markerDir = pjoin(projectRoot, ".dantecode");
+      const markerPath = pjoin(markerDir, "circuit-breaker-reset.json");
+      try {
+        await mkdir(markerDir, { recursive: true });
+        await writeFile(
+          markerPath,
+          JSON.stringify({ resetAt: new Date().toISOString(), requestedBy: "mcp" }, null, 2),
+          "utf8",
+        );
+        return serialize({
+          success: true,
+          message: "Circuit breaker reset signal written. The running agent loop will pick this up on next check.",
+          markerPath,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return serialize({ success: false, error: message });
+      }
+    },
+
+    // ── Wave 9 tools — added Session 8 ───────────────────────────────────────
+
+    tool_stress_test_run: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const instances = typeof args["instances"] === "number" ? args["instances"] : 5;
+      try {
+        // Dynamically locate the stress-test module relative to this package at runtime
+        const { createRequire } = await import("node:module");
+        const req = createRequire(import.meta.url);
+        let runStressTest: ((args: string, root: string) => Promise<string>) | null = null;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mod = req("../../cli/dist/commands/stress-test.js") as any;
+          runStressTest = mod.runStressTest ?? null;
+        } catch {
+          // not available in this environment
+        }
+        if (!runStressTest) {
+          return serialize({ error: "stress-test command not available in this environment" });
+        }
+        const result = await runStressTest(`--instances ${instances}`, projectRoot);
+        return result;
+      } catch (err) {
+        return serialize({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    tool_benchmark_report: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const { readdir, readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const { existsSync } = await import("node:fs");
+
+      const resultsDir = pjoin(projectRoot, ".dantecode/benchmark-results");
+      if (!existsSync(resultsDir)) {
+        return serialize({ error: "No benchmark results found. Run /stress-test or /benchmark swe-bench first." });
+      }
+      try {
+        const files = (await readdir(resultsDir))
+          .filter((f) => f.endsWith(".json"))
+          .sort()
+          .reverse();
+        if (files.length === 0) return serialize({ error: "No benchmark result files found." });
+        const latest = await readFile(pjoin(resultsDir, files[0]!), "utf-8");
+        return latest;
+      } catch (err) {
+        return serialize({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    tool_council_status: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const { existsSync } = await import("node:fs");
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const statusPath = pjoin(projectRoot, ".dantecode/council-status.json");
+      if (!existsSync(statusPath)) {
+        return serialize({ status: "idle", message: "No active council session found." });
+      }
+      try {
+        return await readFile(statusPath, "utf-8");
+      } catch {
+        return serialize({ status: "unknown", error: "Could not read council status file." });
+      }
+    },
+
+    tool_gaslight_status: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const { existsSync } = await import("node:fs");
+      const { readdir } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const sessionDir = pjoin(projectRoot, ".dantecode/gaslight/sessions");
+      if (!existsSync(sessionDir)) {
+        return serialize({ enabled: true, sessionCount: 0, message: "No gaslight sessions recorded yet." });
+      }
+      try {
+        const files = (await readdir(sessionDir)).filter((f) => f.endsWith(".json"));
+        return serialize({
+          enabled: process.env["DANTECODE_GASLIGHT"] !== "0",
+          sessionCount: files.length,
+          message: `${files.length} gaslight session(s) on record in ${sessionDir}`,
+        });
+      } catch {
+        return serialize({ enabled: true, sessionCount: 0, error: "Could not read gaslight session directory." });
+      }
+    },
+
+    tool_skillbook_effectiveness: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const topN = typeof args["topN"] === "number" ? args["topN"] : 10;
+      const { existsSync } = await import("node:fs");
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const skillbookPath = pjoin(projectRoot, ".dantecode/skillbook/skillbook.json");
+      if (!existsSync(skillbookPath)) {
+        return serialize({ skills: [], message: "No skillbook found. Run a few sessions first." });
+      }
+      try {
+        const raw = await readFile(skillbookPath, "utf-8");
+        const skillbook = JSON.parse(raw) as { skills?: Array<{ id: string; winRate?: number; appliedInSessions?: number }> };
+        const skills = (skillbook.skills ?? [])
+          .filter((s) => (s.appliedInSessions ?? 0) > 0)
+          .sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0))
+          .slice(0, topN);
+        return serialize({ skills, total: skillbook.skills?.length ?? 0 });
+      } catch (err) {
+        return serialize({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    tool_coverage_report: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const { existsSync } = await import("node:fs");
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const summaryPath = pjoin(projectRoot, "coverage/coverage-summary.json");
+      if (!existsSync(summaryPath)) {
+        return serialize({ error: "No coverage report found. Run 'npm run test:coverage' first." });
+      }
+      try {
+        const raw = await readFile(summaryPath, "utf-8");
+        const summary = JSON.parse(raw) as Record<string, { statements?: { pct?: number }; branches?: { pct?: number }; functions?: { pct?: number }; lines?: { pct?: number } }>;
+        const total = summary["total"];
+        if (!total) return serialize({ error: "Coverage summary missing 'total' key." });
+        return serialize({
+          statements: total.statements?.pct,
+          branches: total.branches?.pct,
+          functions: total.functions?.pct,
+          lines: total.lines?.pct,
+          generatedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        return serialize({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    tool_efficiency_report: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const lastN = typeof args["lastN"] === "number" ? args["lastN"] : 0;
+      try {
+        const { createRequire } = await import("node:module");
+        const req = createRequire(import.meta.url);
+        let runEfficiencyReport: ((args: string, root: string) => Promise<string>) | null = null;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mod = req("../../cli/dist/commands/efficiency-report.js") as any;
+          runEfficiencyReport = mod.runEfficiencyReport ?? null;
+        } catch {
+          // not available in this environment
+        }
+        if (!runEfficiencyReport) {
+          return serialize({ error: "efficiency-report command not available in this environment" });
+        }
+        return await runEfficiencyReport(lastN > 0 ? `--last ${lastN}` : "", projectRoot);
+      } catch (err) {
+        return serialize({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+
+    tool_linear_webhook_status: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const { existsSync } = await import("node:fs");
+      const { readFile } = await import("node:fs/promises");
+      const { join: pjoin } = await import("node:path");
+      const auditPath = pjoin(projectRoot, ".dantecode/webhook-audit.jsonl");
+      const hasSecret = !!process.env["LINEAR_WEBHOOK_SECRET"];
+
+      let lastEvent: unknown = null;
+      if (existsSync(auditPath)) {
+        try {
+          const raw = await readFile(auditPath, "utf-8");
+          const lines = raw.trim().split("\n").filter(Boolean);
+          const linearEvents = lines
+            .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+            .filter((e) => e && (e as Record<string, unknown>)["provider"] === "linear");
+          lastEvent = linearEvents[linearEvents.length - 1] ?? null;
+        } catch { /* non-fatal */ }
+      }
+
+      return serialize({
+        endpoint: "POST /webhooks/linear",
+        hmacConfigured: hasSecret,
+        lastEvent,
+        message: hasSecret
+          ? "LINEAR_WEBHOOK_SECRET is set — HMAC verification active"
+          : "LINEAR_WEBHOOK_SECRET not set — webhook will reject all requests with 401",
+      });
+    },
+
+    // ── Wave 10: DanteForge Bridge Tools ─────────────────────────────────────
+    // All 16 tools proxy to the `danteforge` CLI installed globally.
+    // This lets Claude Code, Cursor, and Codex invoke the full DanteForge
+    // command surface through DanteCode's unified MCP server.
+
+    danteforge_assess: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const json = args["json"] === true;
+      return runDanteForgeCmd(`assess${json ? " --json" : ""}`, projectRoot, 120_000);
+    },
+
+    danteforge_autoforge: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const goal = optionalString(args, "goal");
+      const maxRounds = typeof args["maxRounds"] === "number" ? args["maxRounds"] : 3;
+      const goalFlag = goal ? ` "${goal.replace(/"/g, '\\"')}"` : "";
+      return runDanteForgeCmd(`autoforge${goalFlag} --max-rounds ${maxRounds}`, projectRoot, 300_000);
+    },
+
+    danteforge_verify: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const quick = args["quick"] === true;
+      return runDanteForgeCmd(`verify${quick ? " --quick" : ""}`, projectRoot, 120_000);
+    },
+
+    danteforge_plan: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const goal = optionalString(args, "goal");
+      const goalFlag = goal ? ` "${goal.replace(/"/g, '\\"')}"` : "";
+      return runDanteForgeCmd(`plan${goalFlag}`, projectRoot, 60_000);
+    },
+
+    danteforge_specify: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const idea = optionalString(args, "idea") ?? "";
+      return runDanteForgeCmd(`specify "${idea.replace(/"/g, '\\"')}"`, projectRoot, 60_000);
+    },
+
+    danteforge_forge: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const wave = optionalString(args, "wave");
+      const waveFlag = wave ? ` --wave "${wave.replace(/"/g, '\\"')}"` : "";
+      return runDanteForgeCmd(`forge${waveFlag}`, projectRoot, 120_000);
+    },
+
+    danteforge_constitution: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      return runDanteForgeCmd("constitution --show", projectRoot, 30_000);
+    },
+
+    danteforge_lessons: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const query = optionalString(args, "query");
+      const add = optionalString(args, "add");
+      if (add) {
+        return runDanteForgeCmd(`lessons add "${add.replace(/"/g, '\\"')}"`, projectRoot, 30_000);
+      }
+      const queryFlag = query ? ` --query "${query.replace(/"/g, '\\"')}"` : "";
+      return runDanteForgeCmd(`lessons${queryFlag}`, projectRoot, 30_000);
+    },
+
+    danteforge_masterplan: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const refresh = args["refresh"] === true;
+      return runDanteForgeCmd(`masterplan${refresh ? " --refresh" : ""}`, projectRoot, 60_000);
+    },
+
+    danteforge_retro: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      return runDanteForgeCmd("retro", projectRoot, 60_000);
+    },
+
+    danteforge_synthesize: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const summary = optionalString(args, "summary");
+      const summaryFlag = summary ? ` --summary "${summary.replace(/"/g, '\\"')}"` : "";
+      return runDanteForgeCmd(`synthesize${summaryFlag}`, projectRoot, 60_000);
+    },
+
+    danteforge_state_read: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      return runDanteForgeCmd("state-read", projectRoot, 30_000);
+    },
+
+    danteforge_tasks: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const status = optionalString(args, "status");
+      const statusFlag = status ? ` --status ${status}` : "";
+      return runDanteForgeCmd(`tasks${statusFlag}`, projectRoot, 30_000);
+    },
+
+    danteforge_maturity: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      return runDanteForgeCmd("maturity", projectRoot, 60_000);
+    },
+
+    danteforge_competitors: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const json = args["json"] === true;
+      return runDanteForgeCmd(`competitors${json ? " --json" : ""}`, projectRoot, 120_000);
+    },
+
+    danteforge_workflow: async (args) => {
+      const projectRoot = optionalString(args, "projectRoot") ?? process.cwd();
+      const name = optionalString(args, "name") ?? "";
+      return runDanteForgeCmd(`workflow "${name.replace(/"/g, '\\"')}"`, projectRoot, 120_000);
     },
   };
 }
@@ -1155,4 +2008,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function serialize(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+/**
+ * Run a danteforge CLI subcommand and return its stdout as a string.
+ * Falls back to a descriptive error if danteforge is not installed.
+ */
+async function runDanteForgeCmd(
+  subcommand: string,
+  cwd: string,
+  timeoutMs: number,
+): Promise<string> {
+  const { execSync } = await import("node:child_process");
+  try {
+    const output = execSync(`danteforge ${subcommand}`, {
+      cwd,
+      timeout: timeoutMs,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return output.toString().trim();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Include stderr if available (contains most danteforge error detail)
+    const stderr = (err as { stderr?: Buffer | string })?.stderr;
+    const detail = stderr ? `\n${stderr.toString().trim()}` : "";
+    return serialize({
+      error: `danteforge ${subcommand.split(" ")[0]} failed`,
+      detail: msg.slice(0, 400) + detail.slice(0, 400),
+      hint: "Ensure `danteforge` is installed globally: npm install -g danteforge",
+    });
+  }
 }

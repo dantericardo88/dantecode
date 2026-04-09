@@ -7,6 +7,10 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
+import com.intellij.ui.jcef.JBCefJSQuery
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefLoadHandlerAdapter
 import javax.swing.*
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -51,11 +55,38 @@ class ChatToolWindowFactory : ToolWindowFactory {
 class JcefChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val log = Logger.getInstance(JcefChatPanel::class.java)
     private val browser: JBCefBrowser = JBCefBrowser()
+    private val sendQuery: JBCefJSQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
 
     init {
+        // Wire the JS→Kotlin send handler
+        sendQuery.addHandler { message ->
+            Thread({
+                try {
+                    val service = DanteCodeService.getInstance(project)
+                    val bridge = service.getBridge()
+                    val response = bridge.sendRequest(DanteCodeMessages.CHAT_REQUEST, mapOf("message" to message))
+                    browser.cefBrowser.executeJavaScript(
+                        "addMsg('DanteCode', ${jsString(response)}, false); enableInput();",
+                        browser.url, 0
+                    )
+                } catch (e: Exception) {
+                    browser.cefBrowser.executeJavaScript(
+                        "addMsg('Error', ${jsString(e.message ?: "Unknown error")}, true); enableInput();",
+                        browser.url, 0
+                    )
+                }
+            }, "DanteCode-JCEF-Send").start()
+            null  // null = success (no synchronous response needed)
+        }
         add(browser.component, BorderLayout.CENTER)
         showLoading()
         connectBridge()
+    }
+
+    override fun removeNotify() {
+        super.removeNotify()
+        sendQuery.dispose()
+        browser.dispose()
     }
 
     private fun showLoading() {
@@ -111,6 +142,7 @@ class JcefChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             #send { background: #238636; color: #fff; border: none; border-radius: 6px;
                     padding: 8px 16px; margin-left: 8px; cursor: pointer; font-size: 14px; }
             #send:hover { background: #2ea043; }
+            #send:disabled, #prompt:disabled { opacity: 0.5; cursor: not-allowed; }
             </style></head><body>
             <div id="history"></div>
             <div id="input-area">
@@ -118,22 +150,49 @@ class JcefChatPanel(private val project: Project) : JPanel(BorderLayout()) {
               <button id="send">Send</button>
             </div>
             <script>
-            // Chat will be driven by CefQuery callbacks — for now, basic JS stub
-            const history = document.getElementById('history');
-            const prompt = document.getElementById('prompt');
-            const send = document.getElementById('send');
+            const historyEl = document.getElementById('history');
+            const promptEl  = document.getElementById('prompt');
+            const sendBtn   = document.getElementById('send');
             function addMsg(sender, text, isError) {
               const div = document.createElement('div');
               div.className = 'msg' + (isError ? ' error' : '');
-              div.innerHTML = '<span class="sender">' + sender + ':</span> ' +
-                text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
-              history.appendChild(div);
-              history.scrollTop = history.scrollHeight;
+              const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+              div.innerHTML = '<span class="sender">' + sender + ':</span> ' + escaped;
+              historyEl.appendChild(div);
+              historyEl.scrollTop = historyEl.scrollHeight;
             }
+            function enableInput() {
+              sendBtn.disabled = false;
+              promptEl.disabled = false;
+              promptEl.focus();
+            }
+            function sendMessage() {
+              const text = promptEl.value.trim();
+              if (!text) return;
+              addMsg('You', text, false);
+              promptEl.value = '';
+              sendBtn.disabled = true;
+              promptEl.disabled = true;
+              // __sendToKotlin__ is injected by Kotlin via JBCefJSQuery after page load
+              window.__sendToKotlin__.request(text,
+                function(_r) { /* success handled server-side via addMsg callback */ },
+                function(_code, msg) { addMsg('Error', msg, true); enableInput(); }
+              );
+            }
+            sendBtn.addEventListener('click', sendMessage);
+            promptEl.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) sendMessage(); });
             addMsg('DanteCode', 'Connected. How can I help?', false);
             </script>
             </body></html>
         """.trimIndent())
+        // Inject the JBCefJSQuery bridge function once the page has loaded
+        browser.jbCefClient.addLoadHandler(object : CefLoadHandlerAdapter() {
+            override fun onLoadEnd(b: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
+                if (frame?.isMain == true) {
+                    b?.executeJavaScript(sendQuery.inject("__sendToKotlin__"), b.url, 0)
+                }
+            }
+        }, browser.cefBrowser)
     }
 
     private fun connectBridge() {
@@ -153,6 +212,17 @@ class JcefChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun escapeHtml(s: String): String =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /** Wraps [s] in single quotes and escapes for safe embedding in a JS string literal. */
+    private fun jsString(s: String): String {
+        val escaped = s
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("</", "<\\/")  // prevent </script> injection
+        return "'$escaped'"
+    }
 }
 
 // ---------------------------------------------------------------------------

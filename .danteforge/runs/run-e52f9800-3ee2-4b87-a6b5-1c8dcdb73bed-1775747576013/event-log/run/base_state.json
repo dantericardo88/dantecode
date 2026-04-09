@@ -1,0 +1,44 @@
+{
+  "checkpoint": {
+    "v": 1,
+    "id": "60a06b7a-ad4",
+    "ts": "2026-04-09T15:12:56.021Z",
+    "step": 0,
+    "channelValues": {
+      "id": "run-e52f9800-3ee2-4b87-a6b5-1c8dcdb73bed-1775747576013",
+      "workflow": "agent-loop",
+      "status": "running",
+      "touchedFiles": [],
+      "evidenceCount": 0
+    },
+    "channelVersions": {
+      "id": 1,
+      "workflow": 1,
+      "status": 1,
+      "touchedFiles": 1,
+      "evidenceCount": 1,
+      "lastConfirmedStep": 1,
+      "lastSuccessfulTool": 1,
+      "nextAction": 1,
+      "executionPolicyState": 1
+    }
+  },
+  "metadata": {
+    "source": "input",
+    "step": 0,
+    "triggerCommand": "C:/Program Files/Git/oss"
+  },
+  "replaySummary": {
+    "eventCount": 1,
+    "pendingWriteCount": 0,
+    "digest": "c8672d8f1252ecdc",
+    "lastEventIndex": 0
+  },
+  "workspaceContext": {
+    "projectRoot": "C:\\Projects\\DanteCode",
+    "workspaceRoot": "C:\\Projects\\DanteCode",
+    "repoRoot": "C:\\Projects\\DanteCode",
+    "workspaceIsRepoRoot": true,
+    "installContextKind": "repo_checkout"
+  }
+}

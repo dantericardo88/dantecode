@@ -1,4 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock the danteforge binary — it uses obfuscated code that fails in test environments
+vi.mock("@dantecode/danteforge", () => ({
+  formatLessonsForPrompt: vi.fn(() => ""),
+  queryLessons: vi.fn(async () => []),
+  recordLesson: vi.fn(async () => {}),
+  recordPreference: vi.fn(async () => {}),
+  recordSuccessPattern: vi.fn(async () => {}),
+  runAntiStubScanner: vi.fn(async () => ({ violations: [], passed: true })),
+  runConstitutionCheck: vi.fn(async () => ({ passed: true, violations: [] })),
+  runLocalPDSEScorer: vi.fn(async () => ({ score: 0.9, passed: true })),
+}));
 import { createDefaultToolHandlers } from "./default-tool-handlers.js";
 import { globalVerificationRailRegistry } from "@dantecode/core";
 import { mkdtemp, rm } from "node:fs/promises";

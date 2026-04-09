@@ -1,4 +1,51 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Use vi.hoisted so the store is accessible inside the hoisted vi.mock factory
+const { lessonStore } = vi.hoisted(() => ({
+  lessonStore: [] as Array<{ type: string; pattern: string; correction: string; language?: string }>,
+}));
+
+// Mock the danteforge binary — simulates real behavior for e2e tests
+vi.mock("@dantecode/danteforge", () => ({
+  formatLessonsForPrompt: vi.fn((lessons: Array<{ pattern: string }>) =>
+    lessons.map((l) => `- ${l.pattern}`).join("\n"),
+  ),
+  queryLessons: vi.fn(async (_opts: { language?: string; limit?: number }) =>
+    lessonStore.slice(0, _opts?.limit ?? 10),
+  ),
+  recordLesson: vi.fn(
+    async (opts: { type: string; pattern: string; correction: string; language?: string }) => {
+      lessonStore.push(opts);
+    },
+  ),
+  recordPreference: vi.fn(
+    async (opts: { type?: string; pattern: string; correction: string; language?: string }) => {
+      lessonStore.push({ ...opts, type: opts.type ?? "preference" });
+    },
+  ),
+  recordSuccessPattern: vi.fn(
+    async (opts: { pattern: string; correction: string; language?: string }) => {
+      lessonStore.push({ ...opts, type: "success" });
+    },
+  ),
+  // Called synchronously: runAntiStubScanner(code, projectRoot, filePath)
+  runAntiStubScanner: vi.fn((_code: string, _projectRoot: string, filePath: string) => ({
+    violations: [{ filePath, line: 2, kind: "todo", severity: "warn", message: "TODO found" }],
+    hardViolations: [{ filePath, line: 2, kind: "stub", message: "stub" }],
+    passed: false,
+  })),
+  // Called synchronously: runConstitutionCheck(code, filePath)
+  runConstitutionCheck: vi.fn((_code: string, _filePath: string) => ({
+    passed: true,
+    violations: [],
+  })),
+  // Called synchronously: runLocalPDSEScorer(code, projectRoot)
+  runLocalPDSEScorer: vi.fn((_code: string, _projectRoot: string) => ({
+    overall: 0.9,
+    passedGate: true,
+    score: 0.9,
+  })),
+}));
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +58,8 @@ describe("MCP wave integrations", () => {
   beforeEach(async () => {
     projectRoot = await mkdtemp(join(tmpdir(), "dantecode-mcp-e2e-"));
     await mkdir(join(projectRoot, "src"), { recursive: true });
+    // Clear lesson store between tests to prevent cross-test contamination
+    lessonStore.length = 0;
   });
 
   afterEach(async () => {

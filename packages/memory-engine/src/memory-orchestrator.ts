@@ -89,6 +89,7 @@ export class MemoryOrchestrator {
 
   // Local embedding provider (TF-IDF, zero deps)
   private _localEmbedder: LocalEmbeddingProvider;
+  private _usingRealEmbeddings = false;
 
   constructor(options: MemoryOrchestratorOptions) {
     const {
@@ -167,6 +168,25 @@ export class MemoryOrchestrator {
 
     if (this.mem0) await this.mem0.initialize();
     if (this.zep) await this.zep.initialize();
+  }
+
+  // --------------------------------------------------------------------------
+  // Embedding provider upgrade
+  // --------------------------------------------------------------------------
+
+  /**
+   * Swap the embedding provider used for vector search. Call after initialize().
+   * Notifies VectorStore to flip threshold from Jaccard 0.05 → cosine 0.25.
+   */
+  setEmbeddingProvider(fn: (text: string) => Promise<number[]>): void {
+    this.vectorStore.setEmbeddingProvider(fn);
+    this.vectorStore.notifyRealEmbeddings();
+    this._usingRealEmbeddings = true;
+  }
+
+  /** Returns true if a real (non-TF-IDF) embedding provider is active. */
+  isUsingRealEmbeddings(): boolean {
+    return this._usingRealEmbeddings;
   }
 
   // --------------------------------------------------------------------------

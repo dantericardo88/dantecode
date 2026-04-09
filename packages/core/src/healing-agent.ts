@@ -58,6 +58,12 @@ export interface HealingAgentOptions {
   streamOutput?: boolean;
   /** Override the system prompt entirely. */
   systemPromptOverride?: string;
+  /**
+   * Tool schemas to pass to the LLM so it knows what tools it can call.
+   * Must be injected from the CLI layer via getHealingTools(getAISDKTools()).
+   * Without this the LLM receives no tool definitions and can never emit tool calls.
+   */
+  tools?: Record<string, CoreTool>;
 }
 
 /** Result returned after a full HealingAgent run. */
@@ -94,12 +100,12 @@ export const HEALING_TOOL_NAMES = new Set<string>([
 /**
  * Filter an all-tools map down to the healing-safe subset.
  */
-export function getHealingTools<T extends Record<string, CoreTool>>(
-  allTools: T,
-): Partial<T> {
+export function getHealingTools(
+  allTools: Record<string, { description?: string; parameters: unknown }>,
+): Record<string, CoreTool> {
   return Object.fromEntries(
     Object.entries(allTools).filter(([name]) => HEALING_TOOL_NAMES.has(name)),
-  ) as Partial<T>;
+  ) as Record<string, CoreTool>;
 }
 
 // ----------------------------------------------------------------------------
@@ -139,6 +145,7 @@ export class HealingAgent {
   private readonly maxLlmRounds: number;
   private readonly streamOutput: boolean;
   private readonly systemPromptOverride: string | undefined;
+  private readonly tools: Record<string, CoreTool>;
 
   constructor(
     private readonly modelRouter: ModelRouterImpl,
@@ -149,6 +156,7 @@ export class HealingAgent {
     this.maxLlmRounds = options.maxLlmRounds ?? 2;
     this.streamOutput = options.streamOutput !== false;
     this.systemPromptOverride = options.systemPromptOverride;
+    this.tools = options.tools ?? {};
   }
 
   /**
@@ -190,7 +198,7 @@ export class HealingAgent {
       try {
         streamResult = await this.modelRouter.streamWithTools(
           messages,
-          {} as Record<string, CoreTool>, // Tools injected by executor; schema not needed in core
+          this.tools,
           {
             system: systemPrompt,
             maxTokens: this.maxTokens,

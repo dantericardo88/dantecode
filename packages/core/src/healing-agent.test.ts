@@ -522,3 +522,35 @@ describe("HealingAgent — summary", () => {
     expect(result.summary).toContain("2");
   });
 });
+
+// ---------------------------------------------------------------------------
+// describe: tools injection
+// ---------------------------------------------------------------------------
+
+describe("HealingAgent — tools injection", () => {
+  it("passes injected tools to streamWithTools (not empty object)", async () => {
+    let capturedTools: unknown = undefined;
+    const router = {
+      streamWithTools: vi.fn(async (_msgs: unknown, tools: unknown) => {
+        capturedTools = tools;
+        return makeStream([]);
+      }),
+    } as unknown as ModelRouterImpl;
+    const { executor } = makeExecutor();
+    const fakeTools = { Read: { description: "read", parameters: {} } } as unknown as Record<string, CoreTool>;
+    const agent = new HealingAgent(router, executor, { streamOutput: false, tools: fakeTools });
+    await agent.run("typecheck", "fix", 1, "");
+    expect(capturedTools).toBe(fakeTools);
+    expect(Object.keys(capturedTools as object)).toContain("Read");
+  });
+
+  it("aborted=false when tool schemas provided and LLM emits a tool call", async () => {
+    const fakeTools = { Edit: { description: "edit", parameters: {} } } as unknown as Record<string, CoreTool>;
+    const router = makeRouter([makeStream([toolCallPart("Edit", "tc-real")])]);
+    const { executor } = makeExecutor(1);
+    const agent = new HealingAgent(router, executor, { streamOutput: false, tools: fakeTools, maxLlmRounds: 1 });
+    const result = await agent.run("typecheck", "fix error", 1, "src/foo.ts");
+    expect(result.aborted).toBe(false);
+    expect(result.toolCallCount).toBe(1);
+  });
+});

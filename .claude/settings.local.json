@@ -246,7 +246,8 @@
       "Bash(npm test --workspace=packages/web-research --workspace=packages/memory-engine --workspace=packages/debug-trail --workspace=packages/evidence-chain)",
       "WebSearch",
       "Skill(autoresearch)",
-      "Skill(autoresearch:*)"
+      "Skill(autoresearch:*)",
+      "WebFetch(domain:api.github.com)"
     ],
     "defaultMode": "bypassPermissions",
     "additionalDirectories": [

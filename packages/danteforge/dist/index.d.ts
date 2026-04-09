@@ -1,4 +1,25 @@
-import { PDSEViolation, AutoforgeIteration, PDSEScore, BladeAutoforgeConfig, BladeProgressState, GStackResult, LessonType, ModelConfig, ModelRouterConfig, Lesson, LessonsQuery, LessonSeverity, AutoforgeConfig, GStackCommand, PDSEGateConfig } from '@dantecode/config-types';
+import { PDSEScore, PDSEViolation, AutoforgeIteration, BladeAutoforgeConfig, BladeProgressState, GStackResult, LessonType, ModelConfig, ModelRouterConfig, Lesson, LessonsQuery, LessonSeverity, AutoforgeConfig, GStackCommand, PDSEGateConfig } from '@dantecode/config-types';
+
+declare const GOOD_CODE_SAMPLE = "\nfunction calculateTotal(items: Array<{price: number, quantity: number}>): number {\n  return items.reduce((total, item) => {\n    return total + (item.price * item.quantity);\n  }, 0);\n}\n\n// Usage\nconst cart = [\n  { price: 10.99, quantity: 2 },\n  { price: 5.49, quantity: 1 }\n];\n\nconsole.log('Total:', calculateTotal(cart));\n";
+declare const STUB_CODE_SAMPLE = "\nfunction calculateTotal(items) {\n  // TODO: implement this function\n  return 0;\n}\n\n// Usage\nconst cart = [];\nconsole.log('Total:', calculateTotal(cart));\n";
+declare const HALLUCINATION_CODE_SAMPLE = "\nfunction calculateTotal(items: Array<{price: number, quantity: number}>): number {\n  return items.map(item => item.price).sum(); // .sum() doesn't exist on arrays\n}\n\n// Usage\nconst cart = [\n  { price: 10.99, quantity: 2 },\n  { price: 5.49, quantity: 1 }\n];\n\nconsole.log('Total:', calculateTotal(cart));\n";
+declare const INCONSISTENT_CODE_SAMPLE = "\nfunction calculate_total(items) {  // snake_case in JS\n  let total = 0;\n  for (let i = 0; i < items.length; i++) {  // old-style for loop\n    total += items[i].price * items[i].quantity;\n  }\n  return total;\n}\n\nconst cart = [\n  { price: 10.99, quantity: 2 },\n  { price: 5.49, quantity: 1 }\n];\n\nconsole.log('Total:', calculate_total(cart));  // inconsistent naming\n";
+/**
+ * Run verification on all sample codes to demonstrate PDSE scoring.
+ */
+declare function runVerificationSamples(): Array<{
+    name: string;
+    code: string;
+    score: PDSEScore;
+}>;
+/**
+ * Get expected scores for samples (for testing).
+ */
+declare function getExpectedSampleScores(): Array<{
+    name: string;
+    minScore: number;
+    maxScore: number;
+}>;
 
 type Database = Record<string, never>;
 interface StubPattern {
@@ -83,7 +104,7 @@ interface AutoforgeResult {
     iterationHistory: AutoforgeIteration[];
     finalScore: PDSEScore | null;
     totalDurationMs: number;
-    terminationReason: "passed" | "max_iterations" | "constitution_violation" | "error";
+    terminationReason: "passed" | "max_iterations" | "constitution_violation" | "error" | "escalated";
 }
 interface AutoforgeContext {
     taskDescription: string;
@@ -128,4 +149,4 @@ interface DetectedPattern {
 declare function detectPatterns(messages: ConversationMessage[]): DetectedPattern[];
 declare function detectAndRecordPatterns(messages: ConversationMessage[], projectRoot: string): Promise<Lesson[]>;
 
-export { ALL_PATTERNS, type AntiStubScanResult, type AutoforgeContext, type AutoforgeResult, BACKGROUND_PROCESS_PATTERNS, BladeProgressEmitter, ALL_PATTERNS as CONSTITUTION_PATTERNS, CREDENTIAL_PATTERNS, type ConstitutionCheckResult, type ConstitutionSeverity, type ConstitutionViolation, type ConstitutionViolationType, type ConversationMessage, DANGEROUS_OPERATION_PATTERNS, type DetectedPattern, HARD_VIOLATION_PATTERNS, type ModelRouter, SOFT_VIOLATION_PATTERNS, type StubPattern, allGStackPassed, buildFailureContext, clearLessons, deleteLesson, detectAndRecordPatterns, detectPatterns, formatBladeProgressLine, formatLessonsForPrompt, generateProgressBar, getLessonCount, initLessonsDB, queryLessons, recordLesson, recordPreference, recordSuccessPattern, runAntiStubScanner, runAutoforgeIAL, runConstitutionCheck, runGStack, runGStackSingle, runLocalPDSEScorer, runPDSEScorer, scanFile, summarizeGStackResults };
+export { ALL_PATTERNS, type AntiStubScanResult, type AutoforgeContext, type AutoforgeResult, BACKGROUND_PROCESS_PATTERNS, BladeProgressEmitter, ALL_PATTERNS as CONSTITUTION_PATTERNS, CREDENTIAL_PATTERNS, type ConstitutionCheckResult, type ConstitutionSeverity, type ConstitutionViolation, type ConstitutionViolationType, type ConversationMessage, DANGEROUS_OPERATION_PATTERNS, type DetectedPattern, GOOD_CODE_SAMPLE, HALLUCINATION_CODE_SAMPLE, HARD_VIOLATION_PATTERNS, INCONSISTENT_CODE_SAMPLE, type ModelRouter, SOFT_VIOLATION_PATTERNS, STUB_CODE_SAMPLE, type StubPattern, allGStackPassed, buildFailureContext, clearLessons, deleteLesson, detectAndRecordPatterns, detectPatterns, formatBladeProgressLine, formatLessonsForPrompt, generateProgressBar, getExpectedSampleScores, getLessonCount, initLessonsDB, queryLessons, recordLesson, recordPreference, recordSuccessPattern, runAntiStubScanner, runAutoforgeIAL, runConstitutionCheck, runGStack, runGStackSingle, runLocalPDSEScorer, runPDSEScorer, runVerificationSamples, scanFile, summarizeGStackResults };

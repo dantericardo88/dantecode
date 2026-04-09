@@ -11,6 +11,7 @@ export const GaslightTriggerChannelSchema = z.enum([
   "verification",
   "policy",
   "audit",
+  "novel-task", // confidence score below 0.5 on unfamiliar task type
 ]);
 export type GaslightTriggerChannel = z.infer<typeof GaslightTriggerChannelSchema>;
 

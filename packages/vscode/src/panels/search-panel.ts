@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { WebSearchOrchestrator } from "@dantecode/core";
 
 export class SearchPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.searchView";
@@ -29,20 +30,31 @@ export class SearchPanelProvider implements vscode.WebviewViewProvider {
   }
 
   async search(query: string): Promise<void> {
-    if (!this.view) {
-      return;
+    if (!this.view) return;
+
+    try {
+      const orchestrator = new WebSearchOrchestrator();
+      const result = await orchestrator.search(query, { maxResults: 10, searchDepth: "basic" });
+
+      const results = result.results.map((r, i) => ({
+        file: r.url,
+        line: 0,
+        score: 1 - i * 0.05,
+        snippet: r.snippet || r.title,
+        title: r.title,
+        url: r.url,
+      }));
+
+      void this.view.webview.postMessage({
+        type: "search_results",
+        payload: { query, results },
+      });
+    } catch {
+      void this.view.webview.postMessage({
+        type: "search_results",
+        payload: { query, results: [] },
+      });
     }
-
-    // TODO: Wire to actual semantic search
-    const mockResults = [
-      { file: "src/index.ts", line: 42, score: 0.95, snippet: "function handleSearch(query: string) {" },
-      { file: "src/utils.ts", line: 15, score: 0.82, snippet: "export function searchFiles(pattern: string) {" },
-    ];
-
-    void this.view.webview.postMessage({
-      type: "search_results",
-      payload: { query, results: mockResults },
-    });
   }
 
   async openFile(file: string, line?: number): Promise<void> {

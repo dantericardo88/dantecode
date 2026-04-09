@@ -19,10 +19,15 @@ export class MemoryOrchestrator {
   memoryPrune(threshold?: number): Promise<any>;
   crossSessionRecall(userGoal?: string, limit?: number): Promise<any>;
   memoryVisualize(scope?: any): any;
+  listSessionKnowledge(): Promise<Array<{ sessionId: string; facts: string[]; filesModified: string[]; startedAt?: string }>>;
+  getSessionKnowledge(sessionId: string): Promise<{ sessionId: string; facts: string[]; filesModified: string[]; startedAt?: string } | null>;
+  setEmbeddingProvider(fn: (text: string) => Promise<number[]>): void;
+  isUsingRealEmbeddings(): boolean;
 }
 
 export function createMemoryOrchestrator(options?: any): MemoryOrchestrator;
 export function getGlobalLogger(options?: any): any;
+export function detectBestEmbeddingProvider(): Promise<((text: string) => Promise<number[]>) | null>;
 
 export type MemoryEntry = any;
 export type MemoryOrgan = any;

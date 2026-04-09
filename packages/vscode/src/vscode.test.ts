@@ -437,6 +437,14 @@ vi.mock("@dantecode/core", () => ({
     if (destination === "." || destination === "./" || destination === projectRoot) return false;
     return destination.startsWith("packages/") || destination.startsWith("./packages/");
   }),
+  analyzeBashCommand: vi.fn((_command: string, _projectRoot: string) => ({
+    safe: true,
+    requiresApproval: false,
+    accessesExternalDirectory: false,
+    externalPaths: [],
+    isDestructive: false,
+    estimatedRiskLevel: "low" as const,
+  })),
   isSelfImprovementWriteAllowed: vi.fn(
     (
       filePath: string,
@@ -631,6 +639,26 @@ vi.mock("@dantecode/core", () => ({
   isWorkflowExecutionPrompt: vi.fn().mockReturnValue(false),
   // readAuditEvents — used by commandShowTraces
   readAuditEvents: vi.fn().mockResolvedValue([]),
+  // Session checkpoint/recovery — used by commandResumeSession, commandForkSession, commandDeleteCheckpoint
+  EventSourcedCheckpointer: vi.fn().mockImplementation(() => ({
+    getTuple: vi.fn().mockResolvedValue(null),
+    save: vi.fn().mockResolvedValue(undefined),
+  })),
+  JsonlEventStore: vi.fn().mockImplementation(() => ({
+    append: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockReturnValue([]),
+  })),
+  resumeFromCheckpoint: vi.fn().mockResolvedValue(null),
+  // Missing mocks for sidebar-provider handleChatRequest flow
+  loadWorkflowCommand: vi.fn().mockResolvedValue({ command: null }),
+  createWorkflowExecutionContext: vi.fn().mockReturnValue({}),
+  buildWorkflowInvocationPrompt: vi.fn().mockReturnValue(""),
+  generateFollowupSuggestions: vi.fn().mockResolvedValue([]),
+  getRouterMetrics: vi.fn().mockReturnValue([]),
+  getGlobalHookRunner: vi.fn().mockReturnValue({
+    run: vi.fn().mockResolvedValue(undefined),
+  }),
+  responseLooksComplete: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@dantecode/danteforge", () => ({
@@ -696,6 +724,7 @@ vi.mock("node:fs/promises", () => ({
   mkdir: (...args: unknown[]) => mockMkdir(...args),
   readdir: (...args: unknown[]) => mockReaddir(...args),
   stat: (...args: unknown[]) => mockStat(...args),
+  rm: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock node:fs (sync) for resolveShell in toolBash
@@ -758,8 +787,10 @@ vi.mock("@dantecode/dante-gaslight", () => ({
 
 // Mock node:child_process for toolBash
 const mockExecSync = vi.fn();
+const mockExecFileSync = vi.fn().mockReturnValue("");
 vi.mock("node:child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
+  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 }));
 
 const mockCreateCheckpoint = vi.fn().mockResolvedValue({
@@ -1333,7 +1364,7 @@ describe("VS Code Extension", () => {
       const context = createMockContext();
       createStatusBar(context);
 
-      expect(mockStatusBarItem.command).toBe("dantecode.openChat");
+      expect(mockStatusBarItem.command).toBe("dantecode.statusBarQuickPick");
     });
 
     it("createStatusBar shows the status bar item", () => {
@@ -1523,7 +1554,7 @@ describe("VS Code Extension", () => {
 
       expect(mockStatusBarItem.tooltip).toContain("Model: openai/gpt-4o");
       expect(mockStatusBarItem.tooltip).toContain("PDSE gate: PASSED");
-      expect(mockStatusBarItem.tooltip).toContain("Click to open DanteCode sidebar");
+      expect(mockStatusBarItem.tooltip).toContain("Click for quick actions");
     });
 
     it("formats model name by extracting part after slash", () => {
@@ -1672,7 +1703,7 @@ describe("VS Code Extension", () => {
         mockSecrets,
         mockGlobalState,
       );
-      const postMessage = vi.fn();
+      const postMessage = vi.fn().mockResolvedValue(undefined);
       const onDidReceiveMessage = vi.fn();
       const onDidDispose = vi.fn();
 
@@ -1819,18 +1850,18 @@ describe("VS Code Extension", () => {
       } as unknown as vscode.ExtensionContext;
     }
 
-    it("activate registers all 26 commands", async () => {
+    it("activate registers all 24 commands", async () => {
       const context = createMockContext();
       await activate(context);
 
-      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(26);
+      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(24);
     });
 
     it("activate registers webview view providers", async () => {
       const context = createMockContext();
       await activate(context);
 
-      expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(4);
+      expect(vscode.window.registerWebviewViewProvider).toHaveBeenCalledTimes(2);
     });
 
     it("activate registers inline completion provider", async () => {
@@ -1863,24 +1894,24 @@ describe("VS Code Extension", () => {
       expect(context.subscriptions.length).toBeGreaterThanOrEqual(10);
     });
 
-    it("registers the verification view provider", async () => {
+    it("registers the chat view provider", async () => {
       const context = createMockContext();
       await activate(context);
 
       const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
         .calls;
       const viewTypes = callArgs.map((c: unknown[]) => c[0]);
-      expect(viewTypes).toContain("dantecode.verificationView");
+      expect(viewTypes).toContain("dantecode.chatView");
     });
 
-    it("registers the automation view provider", async () => {
+    it("registers the audit view provider", async () => {
       const context = createMockContext();
       await activate(context);
 
       const callArgs = (vscode.window.registerWebviewViewProvider as ReturnType<typeof vi.fn>).mock
         .calls;
       const viewTypes = callArgs.map((c: unknown[]) => c[0]);
-      expect(viewTypes).toContain("dantecode.automationView");
+      expect(viewTypes).toContain("dantecode.auditView");
     });
 
     it("deactivate does not throw", async () => {
@@ -1982,13 +2013,11 @@ describe("VS Code Extension", () => {
       );
       const terminal = (vscode.window.createTerminal as ReturnType<typeof vi.fn>).mock.results[0]
         ?.value as { sendText: (value: string) => void; show: () => void };
-      expect(terminal.sendText).toHaveBeenCalledWith(expect.stringContaining("git add -u"));
       expect(terminal.sendText).toHaveBeenCalledWith(
         expect.stringContaining("node packages/cli/dist/index.js self-update --verbose"),
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        "DanteCode: Committing, pushing, and self-updating… Reload window when the terminal finishes.",
-        "Reload Now",
+        "DanteCode: Repo self-update started in terminal",
       );
     });
 
@@ -2992,7 +3021,7 @@ describe("Checkpoint Commands", () => {
     expect(mockScanStaleSessions).not.toHaveBeenCalled();
   });
 
-  it.skip("commandForkSession creates new branch from checkpoint", async () => {
+  it("commandForkSession creates new branch from checkpoint", async () => {
     const core = await import("@dantecode/core");
     const childProcess = await import("node:child_process");
 
@@ -3039,7 +3068,7 @@ describe("Checkpoint Commands", () => {
     expect(execFileSyncSpy).not.toHaveBeenCalled();
   });
 
-  it.skip("commandDeleteCheckpoint removes checkpoint directory and event log", async () => {
+  it("commandDeleteCheckpoint removes checkpoint directory and event log", async () => {
     const core = await import("@dantecode/core");
     const fs = await import("node:fs/promises");
 
@@ -3068,7 +3097,7 @@ describe("Checkpoint Commands", () => {
     expect(rmSpy).not.toHaveBeenCalled();
   });
 
-  it.skip("commandResumeSession loads checkpoint and event store", async () => {
+  it("commandResumeSession loads checkpoint and event store", async () => {
     const core = await import("@dantecode/core");
 
     const mockEventStore = {
@@ -3108,7 +3137,7 @@ describe("Checkpoint Commands", () => {
     expect(mockResumeFromCheckpoint).not.toHaveBeenCalled();
   });
 
-  it.skip("commandForkSession shows information message on success", async () => {
+  it("commandForkSession shows information message on success", async () => {
     const core = await import("@dantecode/core");
     const childProcess = await import("node:child_process");
 
@@ -3229,7 +3258,7 @@ describe("Checkpoint Commands", () => {
 // ============================================================================
 
 describe("Status Bar Badges (Wave 3)", () => {
-  it("shows index readiness badge when indexing", async () => {
+  it("shows context percent in status text when > 0", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3240,17 +3269,15 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: { status: "indexing" as const, progress: 45 },
-      contextPressure: undefined,
-      contextPercent: 0,
+      contextPercent: 45,
       activeTasks: 0,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("idx: 45%");
+    expect(text).toContain("45%");
   });
 
-  it("shows index readiness badge when ready", async () => {
+  it("shows model name without context when contextPercent is 0", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3261,17 +3288,15 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: { status: "ready" as const, progress: 100 },
-      contextPressure: undefined,
       contextPercent: 0,
       activeTasks: 0,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("idx: ✓");
+    expect(text).toBe("DanteCode | grok-3");
   });
 
-  it("shows index readiness badge when error", async () => {
+  it("shows active tasks when > 0", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3282,17 +3307,15 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: { status: "error" as const, progress: 0 },
-      contextPressure: undefined,
       contextPercent: 0,
-      activeTasks: 0,
+      activeTasks: 2,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("idx: ✗");
+    expect(text).toContain("2 tasks");
   });
 
-  it("shows context pressure badge in green range", async () => {
+  it("shows context gauge with percent when contextPercent is 30", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3303,17 +3326,15 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: undefined,
-      contextPressure: 30,
-      contextPercent: 0,
+      contextPercent: 30,
       activeTasks: 0,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("ctx: 30%");
+    expect(text).toContain("30%");
   });
 
-  it("shows context pressure badge in yellow range", async () => {
+  it("shows context gauge with percent when contextPercent is 65", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3324,17 +3345,15 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: undefined,
-      contextPressure: 65,
-      contextPercent: 0,
+      contextPercent: 65,
       activeTasks: 0,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("ctx: 65%");
+    expect(text).toContain("65%");
   });
 
-  it("shows context pressure badge in red range", async () => {
+  it("shows context gauge with percent when contextPercent is 85", async () => {
     const { formatStatusBarText } = await import("./status-bar.js");
 
     const state = {
@@ -3345,14 +3364,12 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      indexReadiness: undefined,
-      contextPressure: 85,
-      contextPercent: 0,
+      contextPercent: 85,
       activeTasks: 0,
     } as any;
 
     const text = formatStatusBarText(state);
-    expect(text).toContain("ctx: 85%");
+    expect(text).toContain("85%");
   });
 
   it("getStatusBarColor returns green when pressure is low", async () => {
@@ -3366,16 +3383,14 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      contextPercent: 0,
+      contextPercent: 30,
       activeTasks: 0,
-      contextPressure: 30,
-      indexReadiness: { status: "ready" as const, progress: 100 },
     } as any;
 
     expect(getStatusBarColor(state)).toBe("green");
   });
 
-  it("getStatusBarColor returns yellow when pressure is medium", async () => {
+  it("getStatusBarColor returns yellow when context percent exceeds 75", async () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
@@ -3386,16 +3401,14 @@ describe("Status Bar Badges (Wave 3)", () => {
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
-      contextPercent: 0,
+      contextPercent: 80,
       activeTasks: 0,
-      contextPressure: 60,
-      indexReadiness: { status: "ready" as const, progress: 100 },
     } as any;
 
     expect(getStatusBarColor(state)).toBe("yellow");
   });
 
-  it("getStatusBarColor returns red when pressure is high", async () => {
+  it("getStatusBarColor returns red when hasError is true", async () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
@@ -3405,31 +3418,27 @@ describe("Status Bar Badges (Wave 3)", () => {
       sandboxEnabled: false,
       modelTier: "fast" as const,
       sessionCostUsd: 0,
-      hasError: false,
+      hasError: true,
       contextPercent: 0,
       activeTasks: 0,
-      contextPressure: 85,
-      indexReadiness: { status: "ready" as const, progress: 100 },
     } as any;
 
     expect(getStatusBarColor(state)).toBe("red");
   });
 
-  it("getStatusBarColor returns red when index has error", async () => {
+  it("getStatusBarColor returns red when gate status is failed", async () => {
     const { getStatusBarColor } = await import("./status-bar.js");
 
     const state = {
       item: mockStatusBarItem,
       currentModel: "grok/grok-3",
-      gateStatus: "none" as const,
+      gateStatus: "failed" as const,
       sandboxEnabled: false,
       modelTier: "fast" as const,
       sessionCostUsd: 0,
       hasError: false,
       contextPercent: 0,
       activeTasks: 0,
-      contextPressure: 30,
-      indexReadiness: { status: "error" as const, progress: 0 },
     } as any;
 
     expect(getStatusBarColor(state)).toBe("red");
@@ -3437,7 +3446,7 @@ describe("Status Bar Badges (Wave 3)", () => {
 });
 
 describe("Skills Tree View (Wave 3)", () => {
-  it.skip("creates skill tree items with correct properties", async () => {
+  it("creates skill tree items with correct properties", async () => {
     const { SkillTreeItem } = await import("./skills-tree-provider.js");
     const vscode = await import("vscode");
 
@@ -3463,7 +3472,7 @@ describe("Skills Tree View (Wave 3)", () => {
     expect(item.contextValue).toBe("skill");
   });
 
-  it.skip("creates skill tree items with skillbridge badge", async () => {
+  it("creates skill tree items with skillbridge badge", async () => {
     const { SkillTreeItem } = await import("./skills-tree-provider.js");
     const vscode = await import("vscode");
 
@@ -3482,17 +3491,14 @@ describe("Skills Tree View (Wave 3)", () => {
     expect(item.description).toContain("[bridge]");
   });
 
-  it.skip("SkillsTreeDataProvider lists skills from project", async () => {
+  it("SkillsTreeDataProvider lists skills from project", async () => {
     const { SkillsTreeDataProvider } = await import("./skills-tree-provider.js");
+    const skillAdapter = await import("@dantecode/skill-adapter");
 
-    // Mock skill-adapter
-    vi.mock("@dantecode/skill-adapter", () => ({
-      listSkills: vi.fn().mockResolvedValue([
-        { name: "skill-a", description: "Skill A", source: "project" },
-        { name: "skill-b", description: "Skill B", source: "user" },
-      ]),
-      getSkill: vi.fn(),
-    }));
+    vi.mocked(skillAdapter.listSkills).mockResolvedValue([
+      { name: "skill-a", description: "Skill A", importSource: "project", adapterVersion: "1", path: "" } as any,
+      { name: "skill-b", description: "Skill B", importSource: "user", adapterVersion: "1", path: "" } as any,
+    ]);
 
     const provider = new SkillsTreeDataProvider("/test/project");
     const children = await provider.getChildren();

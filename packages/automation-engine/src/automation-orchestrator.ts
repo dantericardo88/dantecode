@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile as readFileFromFs } from "node:fs/promises";
+import { readFile as readFileFromFs, writeFile as writeFileFs, mkdir as mkdirFs } from "node:fs/promises";
 import * as path from "node:path";
 import type { PDSEScore } from "@dantecode/config-types";
 import {
@@ -24,6 +24,53 @@ import type { WorkflowOptions, WorkflowResult } from "@dantecode/git-engine";
 import { runLocalWorkflow } from "@dantecode/git-engine";
 import { runAutomationAgent, PDSE_GATE_THRESHOLD } from "./automation-agent-bridge.js";
 import type { AgentBridgeConfig, AgentBridgeResult } from "./automation-agent-bridge.js";
+
+// ─── Automation Memory ──────────────────────────────────────────────────────
+
+export interface AutomationMemoryRecord {
+  lastRun: string;
+  summary: string;
+  consecutiveSuccess: number;
+  consecutiveFailure: number;
+}
+
+async function readAutomationMemory(
+  projectRoot: string,
+  automationId: string,
+): Promise<AutomationMemoryRecord | null> {
+  try {
+    const memDir = path.join(projectRoot, ".dantecode", "automation-memory");
+    const filePath = path.join(memDir, `${automationId}.json`);
+    const raw = await readFileFromFs(filePath, "utf-8");
+    return JSON.parse(raw) as AutomationMemoryRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function writeAutomationMemory(
+  projectRoot: string,
+  automationId: string,
+  record: AutomationMemoryRecord,
+): Promise<void> {
+  try {
+    const memDir = path.join(projectRoot, ".dantecode", "automation-memory");
+    await mkdirFs(memDir, { recursive: true });
+    const filePath = path.join(memDir, `${automationId}.json`);
+    await writeFileFs(filePath, JSON.stringify(record, null, 2), "utf-8");
+  } catch {
+    // Never block execution
+  }
+}
+
+function buildMemoryHistoryPrompt(memory: AutomationMemoryRecord): string {
+  return (
+    `\n## Automation History\nLast run: ${memory.summary}\n` +
+    `Consecutive successes: ${memory.consecutiveSuccess}\n`
+  );
+}
+
+// ─── End Automation Memory ───────────────────────────────────────────────────
 
 export type AutomationTrigger = StoredAutomationTrigger;
 
@@ -361,6 +408,10 @@ export class GitAutomationOrchestrator {
     checkpointer: EventSourcedCheckpointer,
     onProgress: (message: string) => void,
   ): Promise<{ output: string; touchedFiles: string[] }> {
+    // Read automation memory before dispatching (for history injection)
+    const automationId = workItem.request.trigger?.sourceId ?? workItem.executionId;
+    const priorMemory = await readAutomationMemory(this.projectRoot, automationId);
+
     // Agent-mode: delegate to agent bridge instead of shell workflow
     if (workItem.request.agentMode) {
       const ctx: Record<string, unknown> = {
@@ -368,9 +419,14 @@ export class GitAutomationOrchestrator {
         projectRoot: this.projectRoot,
         workflowPath: workItem.request.workflowPath,
       };
+      // Inject automation history into agent prompt
+      let agentPrompt = workItem.request.agentMode.prompt;
+      if (priorMemory) {
+        agentPrompt += buildMemoryHistoryPrompt(priorMemory);
+      }
       const bridgeResult = await this.runAgentImpl(
         {
-          prompt: workItem.request.agentMode.prompt,
+          prompt: agentPrompt,
           model: workItem.request.agentMode.model,
           sandboxMode: workItem.request.agentMode.sandboxMode,
           verifyOutput: workItem.request.agentMode.verifyOutput ?? true,
@@ -412,6 +468,18 @@ export class GitAutomationOrchestrator {
         sessionId: bridgeResult.sessionId,
         filesChanged: bridgeResult.filesChanged,
       });
+
+      // Write automation memory after agent-mode run
+      const agentSummary = bridgeResult.output.slice(0, 300);
+      const prevConsecSuccess = priorMemory?.consecutiveSuccess ?? 0;
+      const prevConsecFailure = priorMemory?.consecutiveFailure ?? 0;
+      await writeAutomationMemory(this.projectRoot, automationId, {
+        lastRun: completedAt,
+        summary: agentSummary,
+        consecutiveSuccess: bridgeResult.success ? prevConsecSuccess + 1 : 0,
+        consecutiveFailure: bridgeResult.success ? 0 : prevConsecFailure + 1,
+      });
+
       return { output: bridgeResult.output, touchedFiles: bridgeResult.filesChanged };
     }
 
@@ -483,6 +551,16 @@ export class GitAutomationOrchestrator {
       workflowName: workflowResult.workflowName,
       gateStatus: gate.gateStatus,
       modifiedFiles: gate.modifiedFiles,
+    });
+
+    // Write automation memory after workflow run
+    const prevConsecSuccess = priorMemory?.consecutiveSuccess ?? 0;
+    const prevConsecFailure = priorMemory?.consecutiveFailure ?? 0;
+    await writeAutomationMemory(this.projectRoot, automationId, {
+      lastRun: completedAt,
+      summary: summary.slice(0, 300),
+      consecutiveSuccess: workflowResult.success ? prevConsecSuccess + 1 : 0,
+      consecutiveFailure: workflowResult.success ? 0 : prevConsecFailure + 1,
     });
 
     return {

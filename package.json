@@ -14,6 +14,8 @@
   ],
   "scripts": {
     "update-all": "node -e \"require('child_process').execSync(process.platform === 'win32' ? 'powershell -ExecutionPolicy Bypass -File .\\\\update-all-versions.ps1' : 'bash update-all-versions.sh', {stdio: 'inherit'})\"",
+    "bench": "vitest bench --run",
+    "docs": "node --loader ts-node/esm packages/core/src/generate-docs.ts docs/API.md",
     "build": "turbo run build",
     "dev": "turbo run dev",
     "typecheck": "turbo run typecheck",
@@ -26,6 +28,12 @@
     "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\" \"scripts/**/*.mjs\"",
     "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx}\" \"scripts/**/*.mjs\"",
     "test:coverage": "vitest run --config vitest.config.ts --coverage",
+    "install-hooks": "node scripts/install-hooks.js",
+    "anti-stub-scan": "node scripts/anti-stub-scan.mjs",
+    "constitution-check": "node scripts/constitution-check.mjs",
+    "verify-claims": "node scripts/verify-claims.mjs",
+    "test:ci": "vitest run --config vitest.config.ts --coverage && node packages/cli/scripts/check-coverage.js",
+    "security-check": "npm run test -- --reporter=dot packages/core/src/prompt-sanitizer.test.ts",
     "release:doctor": "node scripts/release-doctor.mjs",
     "release:matrix": "node scripts/release-matrix.mjs",
     "smoke:cli": "node scripts/smoke-cli.mjs",
@@ -62,7 +70,8 @@
     "benchmark:all": "npm run benchmark:providers && npm run benchmark:speed",
     "check:cli-smoke": "node scripts/cli-smoke.mjs",
     "cli": "node packages/cli/dist/index.js",
-    "dantecode": "node packages/cli/dist/index.js"
+    "dantecode": "node packages/cli/dist/index.js",
+    "test:mutation": "stryker run"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

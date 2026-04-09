@@ -16,6 +16,7 @@ export const TriggerChannelSchema = z.enum([
   "verification", // score below threshold
   "policy", // task-class policy (e.g. code-generation, long-research)
   "audit", // random configurable audit rate
+  "novel-task", // confidence score < 0.5 on unfamiliar task type
 ]);
 export type TriggerChannel = z.infer<typeof TriggerChannelSchema>;
 

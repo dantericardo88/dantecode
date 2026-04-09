@@ -55,6 +55,7 @@ import {
   MCPMemoryBridge,
   createSelfHealingLoop,
   HealingAgent,
+  getHealingTools,
 } from "@dantecode/core";
 import type { HealingToolCall, VerificationStage } from "@dantecode/core";
 import type { DeploymentPlatform } from "@dantecode/core";
@@ -133,6 +134,7 @@ import { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, globalApprovalEngine } from "@dantecode/dante-sandbox";
 import { runAgentLoop } from "./agent-loop.js";
 import { executeTool } from "./tools.js";
+import { getAISDKTools } from "./tool-schemas.js";
 import { runSkillsCommand } from "./commands/skills.js";
 import { runSkillPolicyCheck } from "@dantecode/skills-policy";
 import { discoverSkillsWithScopes } from "@dantecode/skills-registry";
@@ -1928,6 +1930,53 @@ async function findCommand(_args: string, state: ReplState): Promise<string> {
   state.session.activeFiles.push(fullPath);
 
   return `${GREEN}✓${RESET} Added to context: ${selected}\n${DIM}Use /files to see all files in context${RESET}`;
+}
+
+async function cmdCommand(_args: string, state: ReplState): Promise<string> {
+  // Get all available commands
+  const registry = await loadSlashCommandRegistry(state.projectRoot, getNativeCommandDefinitions());
+  const allCommands = registry.map((cmd) => ({
+    name: cmd.name,
+    description: cmd.description,
+  }));
+
+  const { fuzzyFindCommand } = await import("./fuzzy-finder.js");
+
+  const selected = await fuzzyFindCommand(allCommands, {
+    prompt: "Select command to run:",
+    maxResults: 15,
+    minScore: 0.1,
+  });
+
+  if (!selected) {
+    return `${DIM}Cancelled${RESET}`;
+  }
+
+  return `${GREEN}Selected command:${RESET} /${selected}\n${DIM}Type /${selected} to run it${RESET}`;
+}
+
+async function skillFindCommand(_args: string, state: ReplState): Promise<string> {
+  // Get all available skills
+  const { listSkills } = await import("@dantecode/skill-adapter");
+  const skillsList = await listSkills(state.projectRoot);
+  const skills = skillsList.map((skill) => ({
+    name: skill.name,
+    description: skill.description || "No description available",
+  }));
+
+  const { fuzzyFindSkill } = await import("./fuzzy-finder.js");
+
+  const selected = await fuzzyFindSkill(skills, {
+    prompt: "Select skill to use:",
+    maxResults: 15,
+    minScore: 0.1,
+  });
+
+  if (!selected) {
+    return `${DIM}Cancelled${RESET}`;
+  }
+
+  return `${GREEN}Selected skill:${RESET} ${selected}\n${DIM}Use /skill ${selected} to run it${RESET}`;
 }
 
 async function diffCommand(_args: string, state: ReplState): Promise<string> {
@@ -4132,12 +4181,12 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
 
         // Adaptive strategy: don't give up immediately — pivot approach
         // Strategy ladder: STANDARD → REDUCED_SCOPE → MINIMAL_REPRODUCTION → abort
-        const isFirstLoop = loopCheck.iterationCount <= (hardCeiling * 0.5);
+        const isFirstLoop = loopCheck.iterationCount <= hardCeiling * 0.5;
         if (isFirstLoop && retryCount < maxRetries) {
           process.stdout.write(
             `\n${YELLOW}[loop-detect] Stuck pattern detected — pivoting to reduced-scope strategy${RESET}\n` +
-            `  Reason: ${loopCheck.reason}\n` +
-            `  Clearing context and re-anchoring on minimal failing case...\n`,
+              `  Reason: ${loopCheck.reason}\n` +
+              `  Clearing context and re-anchoring on minimal failing case...\n`,
           );
           // Re-anchor: reset to current code state, use minimal task description
           currentCode = await readFile(resolvedTargetFile, "utf-8").catch(() => currentCode);
@@ -4146,16 +4195,19 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         }
 
         // All adaptive strategies exhausted — run RecoveryEngine before aborting
-        process.stdout.write(`\n${YELLOW}Adaptive strategies exhausted — running diagnostics...${RESET}\n`);
+        process.stdout.write(
+          `\n${YELLOW}Adaptive strategies exhausted — running diagnostics...${RESET}\n`,
+        );
         const loopDiag = recovery.runRepoRootVerification(state.projectRoot);
         const loopDiagLines = loopDiag.stepResults.map(
           (s) => `  ${s.passed ? GREEN + "✓" : RED + "✗"} ${s.name}${RESET}`,
         );
         process.stdout.write(loopDiagLines.join("\n") + "\n");
         checkpointMgr.stopPeriodicCheckpoints();
-        const loopFailedChecks = loopDiag.failedSteps.length > 0
-          ? `\n  Failing checks: ${loopDiag.failedSteps.join(", ")}`
-          : "";
+        const loopFailedChecks =
+          loopDiag.failedSteps.length > 0
+            ? `\n  Failing checks: ${loopDiag.failedSteps.join(", ")}`
+            : "";
         return `${RED}${BOLD}Autoforge LOOP DETECTED${RESET}: ${loopCheck.reason} — ${loopCheck.details}\n  Iterations: ${loopCheck.iterationCount}, consecutive repeats: ${loopCheck.consecutiveRepeats}${loopFailedChecks}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
       }
 
@@ -4204,7 +4256,9 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
         if (failureAction.action === "escalate") {
           // Auto-trigger RecoveryEngine on escalation to provide actionable diagnostics
           // before giving up. Runs typecheck/lint/test to surface which checks are broken.
-          process.stdout.write(`\n${YELLOW}Escalation — running repo verification to diagnose...${RESET}\n`);
+          process.stdout.write(
+            `\n${YELLOW}Escalation — running repo verification to diagnose...${RESET}\n`,
+          );
           const diagResult = recovery.runRepoRootVerification(state.projectRoot);
           const diagLines = diagResult.stepResults.map(
             (s) => `  ${s.passed ? GREEN + "✓" : RED + "✗"} ${s.name}${RESET}`,
@@ -4226,9 +4280,10 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
             },
           });
           checkpointMgr.stopPeriodicCheckpoints();
-          const failedChecks = diagResult.failedSteps.length > 0
-            ? `\n  Failing checks: ${diagResult.failedSteps.join(", ")}`
-            : "";
+          const failedChecks =
+            diagResult.failedSteps.length > 0
+              ? `\n  Failing checks: ${diagResult.failedSteps.join(", ")}`
+              : "";
           return `${RED}${BOLD}Autoforge ESCALATED${RESET}: ${taskBreaker.getTotalFailures()} failures, recovery exhausted.\n  Last error: ${errMsg}${failedChecks}\n  Session: ${sessionId} (resume with --resume=${sessionId})`;
         }
 
@@ -4452,7 +4507,9 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
       // loop on the project to catch typecheck/lint/unit failures and attempt
       // targeted repair without human intervention.
       try {
-        process.stdout.write(`\n${DIM}[self-heal] Running verify→repair cycle on ${displayTargetFile}...${RESET}\n`);
+        process.stdout.write(
+          `\n${DIM}[self-heal] Running verify→repair cycle on ${displayTargetFile}...${RESET}\n`,
+        );
         const healingLoop = createSelfHealingLoop(state.projectRoot, {
           stages: ["typecheck", "lint", "unit"],
           maxAttemptsPerStage: 2,
@@ -4483,29 +4540,37 @@ async function autoforgeCommand(args: string, state: ReplState): Promise<string>
           return { filesModified, outputs, summary: `${calls.length} call(s)` };
         };
 
+        const healingTools = getHealingTools(getAISDKTools());
         const healingAgent = new HealingAgent(modelRouter, healingToolExecutor, {
           maxTokens: 4096,
           maxLlmRounds: 2,
           streamOutput: true,
+          tools: healingTools,
         });
 
-        const healResult = await healingLoop.run(async (stage: string, prompt: string, attempt: number) => {
-          process.stdout.write(`\n${DIM}[self-heal] ${stage} repair — attempt ${attempt}...${RESET}\n`);
-          const agentResult = await healingAgent.run(
-            stage as VerificationStage,
-            prompt,
-            attempt,
-            displayTargetFile,
-          );
-          if (agentResult.filesModified > 0) {
-            process.stdout.write(`\n${GREEN}[self-heal] ${agentResult.summary}${RESET}\n`);
-          } else if (!agentResult.aborted) {
-            process.stdout.write(`\n${YELLOW}[self-heal] ${agentResult.summary}${RESET}\n`);
-          }
-        });
+        const healResult = await healingLoop.run(
+          async (stage: string, prompt: string, attempt: number) => {
+            process.stdout.write(
+              `\n${DIM}[self-heal] ${stage} repair — attempt ${attempt}...${RESET}\n`,
+            );
+            const agentResult = await healingAgent.run(
+              stage as VerificationStage,
+              prompt,
+              attempt,
+              displayTargetFile,
+            );
+            if (agentResult.filesModified > 0) {
+              process.stdout.write(`\n${GREEN}[self-heal] ${agentResult.summary}${RESET}\n`);
+            } else if (!agentResult.aborted) {
+              process.stdout.write(`\n${YELLOW}[self-heal] ${agentResult.summary}${RESET}\n`);
+            }
+          },
+        );
 
         if (healResult.allHealed) {
-          lines.push(`  ${GREEN}Self-healing: all stages now passing (PDSE: ${(healResult.finalReport.pdseScore * 100).toFixed(1)}/100)${RESET}`);
+          lines.push(
+            `  ${GREEN}Self-healing: all stages now passing (PDSE: ${(healResult.finalReport.pdseScore * 100).toFixed(1)}/100)${RESET}`,
+          );
         } else {
           lines.push(`  Self-healing: ${healResult.summary.split("\n")[0] ?? "partial"}`);
         }
@@ -8402,7 +8467,9 @@ async function statusCommand(_args: string, state: ReplState): Promise<string> {
 
   // Benchmark scores — lazy-load to avoid startup cost
   try {
-    const { generateBenchmarkReport } = await import("./commands/benchmark-report.js").catch(() => ({ generateBenchmarkReport: null as null }));
+    const { generateBenchmarkReport } = await import("./commands/benchmark-report.js").catch(
+      () => ({ generateBenchmarkReport: null as null }),
+    );
     if (generateBenchmarkReport) {
       const benchSummary = await generateBenchmarkReport(state.projectRoot).catch(() => "");
       if (benchSummary && !benchSummary.startsWith("No benchmark")) {
@@ -8954,12 +9021,19 @@ ${BOLD}${YELLOW}Health Check Categories:${RESET}
     const { VerificationTrendTracker } = await import("@dantecode/core");
     const { homedir } = await import("node:os");
     const { join: pathJoin } = await import("node:path");
-    const tracker = new VerificationTrendTracker(pathJoin(homedir(), ".dantecode", "pdse-trends.jsonl"));
+    const tracker = new VerificationTrendTracker(
+      pathJoin(homedir(), ".dantecode", "pdse-trends.jsonl"),
+    );
     const daysArg = args.match(/--days=(\d+)/)?.[1];
     const days = daysArg ? parseInt(daysArg) : 30;
     const report = await tracker.generateReport(days);
     if (report && report.dataPoints > 0) {
-      const trendArrow = report.trend === "improving" ? "\u2191" : report.trend === "degrading" ? "\u2193" : "\u2192";
+      const trendArrow =
+        report.trend === "improving"
+          ? "\u2191"
+          : report.trend === "degrading"
+            ? "\u2193"
+            : "\u2192";
       const lines = [
         "",
         `${BOLD}${CYAN}=== PDSE Health Report (last ${days} days) ===${RESET}`,
@@ -8971,7 +9045,9 @@ ${BOLD}${YELLOW}Health Check Categories:${RESET}
       if (report.regressions.length > 0) {
         lines.push("", `Regressions (${report.regressions.length}):`);
         for (const reg of report.regressions.slice(0, 5)) {
-          lines.push(`  ${reg.filePath}: ${reg.previousScore} \u2192 ${reg.currentScore} (${reg.delta > 0 ? "+" : ""}${reg.delta})`);
+          lines.push(
+            `  ${reg.filePath}: ${reg.previousScore} \u2192 ${reg.currentScore} (${reg.delta > 0 ? "+" : ""}${reg.delta})`,
+          );
         }
       }
       if (report.alerts.length > 0) {
@@ -8984,7 +9060,9 @@ ${BOLD}${YELLOW}Health Check Categories:${RESET}
     } else {
       pdseSection = `\n${DIM}No PDSE health data yet. Open a file in VS Code to start tracking.${RESET}`;
     }
-  } catch { /* non-fatal — PDSE section is optional */ }
+  } catch {
+    /* non-fatal — PDSE section is optional */
+  }
 
   return councilSection + pdseSection;
 }
@@ -9014,9 +9092,10 @@ async function qualityCommand(_args: string, state: ReplState): Promise<string> 
   }
 
   const passed = results.filter((r) => r.passed).length;
-  const avgPdse = results.length > 0
-    ? Math.round(results.reduce((sum, r) => sum + r.pdseScore, 0) / results.length)
-    : 0;
+  const avgPdse =
+    results.length > 0
+      ? Math.round(results.reduce((sum, r) => sum + r.pdseScore, 0) / results.length)
+      : 0;
   const avgColor = avgPdse >= 85 ? GREEN : avgPdse >= 70 ? YELLOW : RED;
 
   lines.push("");
@@ -9083,7 +9162,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "quality",
-    description: "Show recent DanteForge quality gate results (anti-stub, constitution, PDSE) for this session",
+    description:
+      "Show recent DanteForge quality gate results (anti-stub, constitution, PDSE) for this session",
     usage: "/quality",
     handler: qualityCommand,
     tier: 1,
@@ -9160,6 +9240,22 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: findCommand,
     tier: 2,
     category: "core",
+  },
+  {
+    name: "cmd",
+    description: "Interactive fuzzy finder for slash commands",
+    usage: "/cmd",
+    handler: cmdCommand,
+    tier: 1,
+    category: "core",
+  },
+  {
+    name: "skill-find",
+    description: "Interactive fuzzy finder for available skills",
+    usage: "/skill-find",
+    handler: skillFindCommand,
+    tier: 2,
+    category: "skills",
   },
   {
     name: "diff",
@@ -9685,7 +9781,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "health",
-    description: "Show PDSE code health trends over time — per-file quality scores and trend direction",
+    description:
+      "Show PDSE code health trends over time — per-file quality scores and trend direction",
     usage: "/health [--days=30]",
     handler: healthCommand,
     tier: 2,
@@ -9895,7 +9992,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
           lines.push(
             `  ${YELLOW}${t.id}${RESET}  ${t.expression}  runs=${t.runCount}  next≈${nextStr}`,
           );
-          lines.push(`    ${DIM}${t.prompt.slice(0, 80)}${t.prompt.length > 80 ? "…" : ""}${RESET}`);
+          lines.push(
+            `    ${DIM}${t.prompt.slice(0, 80)}${t.prompt.length > 80 ? "…" : ""}${RESET}`,
+          );
         }
         return lines.join("\n");
       }
@@ -9916,8 +10015,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
         // Support both quoted and unquoted, expression is always 5 fields
         const rest = trimmed.slice("create".length).trim();
         // Try quoted expression first: "expr" "prompt"
-        const quotedMatch = /^"([^"]+)"\s+"([\s\S]+)"$/.exec(rest) ||
-          /^'([^']+)'\s+'([\s\S]+)'$/.exec(rest);
+        const quotedMatch =
+          /^"([^"]+)"\s+"([\s\S]+)"$/.exec(rest) || /^'([^']+)'\s+'([\s\S]+)'$/.exec(rest);
         if (quotedMatch) {
           const expression = quotedMatch[1]!;
           const prompt = quotedMatch[2]!;
@@ -10017,9 +10116,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
         );
       }
 
-      process.stdout.write(
-        `${CYAN}Deploying to ${platform}...${RESET}\n`,
-      );
+      process.stdout.write(`${CYAN}Deploying to ${platform}...${RESET}\n`);
 
       const result = await deploy({
         platform,
@@ -10076,14 +10173,11 @@ const SLASH_COMMANDS: SlashCommand[] = [
       void (async () => {
         try {
           const router = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
-          const answer = await router.generate(
-            [{ role: "user", content: question }],
-            {
-              system: "Answer briefly and directly. 1-3 sentences max. No preamble.",
-              maxTokens: 200,
-              taskType: "btw",
-            },
-          );
+          const answer = await router.generate([{ role: "user", content: question }], {
+            system: "Answer briefly and directly. 1-3 sentences max. No preamble.",
+            maxTokens: 200,
+            taskType: "btw",
+          });
           // Write directly to stdout — this is intentionally async
           process.stdout.write(`\n${DIM}[btw] ${answer.trim()}${RESET}\n`);
         } catch {
@@ -10133,27 +10227,39 @@ const SLASH_COMMANDS: SlashCommand[] = [
   // --------------------------------------------------------------------------
   {
     name: "arena",
-    description: "Compare 2+ models on the same task in isolated worktrees — picks the best PDSE score",
+    description:
+      "Compare 2+ models on the same task in isolated worktrees — picks the best PDSE score",
     usage: "/arena <model1,model2> [goal]",
     tier: 2,
     category: "agents",
     handler: async (args: string, state: ReplState): Promise<string> => {
-      const durablePrompt = state.session.messages
-        .filter((m) => m.role === "user")
-        .map((m) => (typeof m.content === "string" ? m.content : ""))
-        .at(-1) ?? "";
+      const durablePrompt =
+        state.session.messages
+          .filter((m) => m.role === "user")
+          .map((m) => (typeof m.content === "string" ? m.content : ""))
+          .at(-1) ?? "";
       const parts = args.split(/\s+/);
       const modelList = parts[0] ?? "";
       const goal = parts.slice(1).join(" ").trim() || durablePrompt;
       if (!modelList || !modelList.includes(",")) {
         return `${YELLOW}Usage: /arena <model1,model2,...> [goal]${RESET}\nExample: /arena grok/grok-3,anthropic/claude-sonnet-4-6 "refactor the auth module"`;
       }
-      const modelIds = modelList.split(",").map((m) => m.trim()).filter(Boolean);
+      const modelIds = modelList
+        .split(",")
+        .map((m) => m.trim())
+        .filter(Boolean);
       const { ArenaRunner } = await import("@dantecode/core");
       const arenaModels = modelIds.map((id) => {
         const [provider, ...rest] = id.split("/");
         return {
-          provider: (provider ?? "grok") as "anthropic" | "grok" | "openai" | "google" | "groq" | "ollama" | "custom",
+          provider: (provider ?? "grok") as
+            | "anthropic"
+            | "grok"
+            | "openai"
+            | "google"
+            | "groq"
+            | "ollama"
+            | "custom",
           modelId: rest.join("/") || (provider ?? "grok-3"),
         };
       });
@@ -10166,11 +10272,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
         maxRoundsPerModel: 10,
       });
       const session = await runner.run((modelId: string, status: string, round?: number) => {
-        process.stdout.write(`  ${DIM}[${modelId}] ${status}${round ? ` (round ${round})` : ""}${RESET}\n`);
+        process.stdout.write(
+          `  ${DIM}[${modelId}] ${status}${round ? ` (round ${round})` : ""}${RESET}\n`,
+        );
       });
       process.stdout.write(ArenaRunner.formatComparison(session) + "\n");
       if (session.results[0]) {
-        process.stdout.write(`${GREEN}Winner: ${session.results[0].modelId} (PDSE: ${session.results[0].pdseScore ?? "N/A"})${RESET}\n`);
+        process.stdout.write(
+          `${GREEN}Winner: ${session.results[0].modelId} (PDSE: ${session.results[0].pdseScore ?? "N/A"})${RESET}\n`,
+        );
         if (session.results.length > 1) {
           await runner.applyWinner(session, session.results[0].modelId);
           process.stdout.write(`${GREEN}Applied winner's changes to working directory.${RESET}\n`);
@@ -10189,10 +10299,11 @@ const SLASH_COMMANDS: SlashCommand[] = [
     tier: 2,
     category: "agents",
     handler: async (args: string, state: ReplState): Promise<string> => {
-      const durablePrompt = state.session.messages
-        .filter((m) => m.role === "user")
-        .map((m) => (typeof m.content === "string" ? m.content : ""))
-        .at(-1) ?? "";
+      const durablePrompt =
+        state.session.messages
+          .filter((m) => m.role === "user")
+          .map((m) => (typeof m.content === "string" ? m.content : ""))
+          .at(-1) ?? "";
       const scaleParts = args.trim().split(/\s+/);
       const n = parseInt(scaleParts[0] ?? "3", 10);
       const validN = isNaN(n) || n < 2 ? 3 : Math.min(n, 6);
@@ -10230,7 +10341,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
           const icon = variant.variantIndex === result.bestVariant.variantIndex ? "★" : "○";
           process.stdout.write(
             `  ${icon} Variant ${variant.variantIndex + 1}: PDSE ${variant.pdseScore?.toFixed(1) ?? "N/A"} | ` +
-            `${variant.modifiedFiles.length} files | ${Math.round(variant.durationMs / 1000)}s | ${variant.status}\n`,
+              `${variant.modifiedFiles.length} files | ${Math.round(variant.durationMs / 1000)}s | ${variant.status}\n`,
           );
         }
 
@@ -10311,7 +10422,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   // --------------------------------------------------------------------------
   {
     name: "test",
-    description: "Generate comprehensive tests for a source file, auto-run, and fix failures (Aider pattern)",
+    description:
+      "Generate comprehensive tests for a source file, auto-run, and fix failures (Aider pattern)",
     usage: "/test <file> [--framework vitest|jest|pytest|go-test]",
     tier: 1,
     category: "core",
@@ -10319,8 +10431,11 @@ const SLASH_COMMANDS: SlashCommand[] = [
       const { generateTests } = await import("./commands/test-generator.js");
       const parts = args.trim().split(/\s+/);
       const sourceFile = parts[0];
-      const frameworkFlag = parts.find(p => p.startsWith("--framework="))?.split("=")[1] as import("./commands/test-generator.js").TestFramework | undefined;
-      if (!sourceFile) return `${YELLOW}Usage: /test <file> [--framework vitest|jest|pytest]${RESET}`;
+      const frameworkFlag = parts.find((p) => p.startsWith("--framework="))?.split("=")[1] as
+        | import("./commands/test-generator.js").TestFramework
+        | undefined;
+      if (!sourceFile)
+        return `${YELLOW}Usage: /test <file> [--framework vitest|jest|pytest]${RESET}`;
       const routerConfig: ModelRouterConfig = {
         default: state.state.model.default,
         fallback: state.state.model.fallback,
@@ -10329,7 +10444,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
       const router = new ModelRouterImpl(routerConfig, state.projectRoot, state.session.id);
       const result = await generateTests(sourceFile, state.projectRoot, router, frameworkFlag);
       const statusLine = result.testsRun
-        ? result.passed ? `${GREEN}Tests passed${RESET}` : `${RED}Tests failed:\n${result.output.slice(0, 500)}${RESET}`
+        ? result.passed
+          ? `${GREEN}Tests passed${RESET}`
+          : `${RED}Tests failed:\n${result.output.slice(0, 500)}${RESET}`
         : result.output;
       return `Test file: ${result.testFilePath}\n${statusLine}`;
     },
@@ -10339,7 +10456,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   // --------------------------------------------------------------------------
   {
     name: "docs",
-    description: "Add JSDoc/docstring documentation to all undocumented public APIs using SEARCH/REPLACE",
+    description:
+      "Add JSDoc/docstring documentation to all undocumented public APIs using SEARCH/REPLACE",
     usage: "/docs <file> [--style jsdoc|sphinx|godoc]",
     tier: 2,
     category: "core",
@@ -10347,7 +10465,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
       const { generateDocs } = await import("./commands/doc-generator.js");
       const parts = args.trim().split(/\s+/);
       const sourceFile = parts[0];
-      const styleFlag = parts.find(p => p.startsWith("--style="))?.split("=")[1] as import("./commands/doc-generator.js").DocStyle | undefined;
+      const styleFlag = parts.find((p) => p.startsWith("--style="))?.split("=")[1] as
+        | import("./commands/doc-generator.js").DocStyle
+        | undefined;
       if (!sourceFile) return `${YELLOW}Usage: /docs <file> [--style jsdoc|sphinx|godoc]${RESET}`;
       const routerConfig: ModelRouterConfig = {
         default: state.state.model.default,
@@ -10364,7 +10484,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   // --------------------------------------------------------------------------
   {
     name: "pieces",
-    description: "Interact with Pieces long-term memory (MCP bridge). Usage: status | recall <query> | store <content>",
+    description:
+      "Interact with Pieces long-term memory (MCP bridge). Usage: status | recall <query> | store <content>",
     usage: "/pieces <status|recall <query>|store <content>>",
     tier: 2,
     category: "memory",
@@ -10391,7 +10512,9 @@ const SLASH_COMMANDS: SlashCommand[] = [
       if (sub === "store") {
         const content = parts.slice(1).join(" ");
         if (!content) return `${YELLOW}Usage: /pieces store <content>${RESET}`;
-        const ok = await bridge.storeContext(content, [`session:${state.session.id.slice(0, 8)}`]).catch(() => false);
+        const ok = await bridge
+          .storeContext(content, [`session:${state.session.id.slice(0, 8)}`])
+          .catch(() => false);
         return ok
           ? `${GREEN}Stored in Pieces memory.${RESET}`
           : `${RED}Failed to store in Pieces memory.${RESET}`;
@@ -10432,13 +10555,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
   // --------------------------------------------------------------------------
   {
     name: "migrate",
-    description: "Migrate codebase: js-to-ts, cjs-to-esm, jest-to-vitest, npm-to-pnpm (Amazon Q pattern)",
+    description:
+      "Migrate codebase: js-to-ts, cjs-to-esm, jest-to-vitest, npm-to-pnpm (Amazon Q pattern)",
     usage: "/migrate <type>",
     tier: 2,
     category: "core",
     handler: async (args: string, state: ReplState): Promise<string> => {
       const { runMigration } = await import("./commands/migration-agent.js");
-      const migrationType = args.trim().split(/\s+/)[0] as import("./commands/migration-agent.js").MigrationType;
+      const migrationType = args
+        .trim()
+        .split(/\s+/)[0] as import("./commands/migration-agent.js").MigrationType;
       const validTypes = ["js-to-ts", "cjs-to-esm", "jest-to-vitest", "npm-to-pnpm"];
       if (!migrationType || !validTypes.includes(migrationType)) {
         return `${YELLOW}Usage: /migrate <type>\nValid types: ${validTypes.join(", ")}${RESET}`;

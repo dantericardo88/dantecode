@@ -85,6 +85,26 @@ export function detectPolicyTrigger(
 }
 
 /**
+ * Detect if a confidence score below 0.5 should trigger novel-task refinement.
+ * Fires when the caller signals low confidence on an unfamiliar / novel task.
+ */
+export function detectNovelTaskTrigger(
+  confidenceScore: number,
+  config: GaslightConfig,
+  sessionId?: string,
+): GaslightTrigger | null {
+  if (!config.enabled) return null;
+  if (confidenceScore >= 0.5) return null;
+
+  return {
+    channel: "novel-task",
+    score: confidenceScore,
+    sessionId,
+    at: new Date().toISOString(),
+  };
+}
+
+/**
  * Randomly trigger for audit sampling.
  */
 export function detectAuditTrigger(
@@ -109,12 +129,15 @@ export function detectAuditTrigger(
 export function detectTrigger(opts: {
   message?: string;
   verificationScore?: number;
+  /** Confidence score from ConfidenceSynthesizer (0-1). Values < 0.5 fire novel-task. */
+  confidenceScore?: number;
   taskClass?: string;
   config: GaslightConfig;
   sessionId?: string;
   randomFn?: () => number;
 }): GaslightTrigger | null {
-  const { message, verificationScore, taskClass, config, sessionId, randomFn } = opts;
+  const { message, verificationScore, confidenceScore, taskClass, config, sessionId, randomFn } =
+    opts;
 
   if (message) {
     const t = detectExplicitTrigger(message, config, sessionId);
@@ -123,6 +146,11 @@ export function detectTrigger(opts: {
 
   if (verificationScore !== undefined) {
     const t = detectVerificationTrigger(verificationScore, config, sessionId);
+    if (t) return t;
+  }
+
+  if (confidenceScore !== undefined) {
+    const t = detectNovelTaskTrigger(confidenceScore, config, sessionId);
     if (t) return t;
   }
 

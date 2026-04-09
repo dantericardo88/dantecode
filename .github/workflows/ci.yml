@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 2 * * 1'  # Every Monday at 2am UTC
+    - cron: "0 2 * * 1" # Every Monday at 2am UTC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -139,6 +139,14 @@ jobs:
         run: npm run smoke:skill-import
       - name: Run external project smoke check
         run: npm run smoke:external
+      - name: Upload coverage to Codecov
+        if: matrix.node-version == needs.catalog.outputs.primary_node
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/coverage-summary.json
+          flags: unittests
+          fail_ci_if_error: false
       - name: Upload coverage artifact
         if: matrix.node-version == needs.catalog.outputs.primary_node
         uses: actions/upload-artifact@v4
@@ -176,7 +184,23 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Run anti-stub scanner on own source
-        run: node scripts/anti-stub-check.cjs
+        run: npm run anti-stub-scan
+      - name: Run constitution checker on own source
+        run: npm run constitution-check
+
+  evidence-based-verification:
+    runs-on: ubuntu-24.04
+    needs: [catalog, anti-stub-self-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.catalog.outputs.primary_node }}
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - name: Run evidence-based claim verification
+        run: npm run verify-claims
 
   swe-bench:
     name: SWE-bench Evaluation
@@ -186,11 +210,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
       - name: Install dependencies
         run: npm ci
       - name: Build packages
@@ -242,7 +266,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
       - name: Build JetBrains Plugin

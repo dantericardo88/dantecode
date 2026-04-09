@@ -5,12 +5,26 @@
 import * as vscode from "vscode";
 import { listSkills, type SkillRegistryEntry } from "@dantecode/skill-adapter";
 
+// Extend SkillRegistryEntry with optional test/legacy fields
+type SkillEntry = SkillRegistryEntry & {
+  source?: string;
+  license?: string;
+  id?: string;
+  metadata?: Record<string, string | undefined>;
+};
+
 export class SkillTreeItem extends vscode.TreeItem {
+  public readonly skill: SkillEntry;
+  private readonly _src: string;
+
   constructor(
-    public readonly skill: SkillRegistryEntry,
-    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+    skill: SkillEntry,
+    collapsibleState: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.None,
   ) {
-    super(skill.name, collapsibleState);
+    super(skill.name ?? skill.id ?? "skill", collapsibleState);
+    this.skill = skill;
+    // Normalize: accept both `importSource` (runtime) and `source` (test/legacy)
+    this._src = skill.importSource ?? skill.source ?? "project";
 
     this.tooltip = this.buildTooltip();
     this.description = this.buildDescription();
@@ -20,11 +34,22 @@ export class SkillTreeItem extends vscode.TreeItem {
 
   private buildTooltip(): string {
     const lines = [
-      `${this.skill.name}`,
+      this.skill.name,
       "",
       `Description: ${this.skill.description || "No description"}`,
-      `Import Source: ${this.skill.importSource || "unknown"}`,
+      `Source: ${this._src}`,
     ];
+
+    if (this.skill.license) {
+      lines.push(`License: ${this.skill.license}`);
+    }
+    const meta = this.skill.metadata;
+    if (meta?.trustTier) {
+      lines.push(`Trust: ${meta.trustTier}`);
+    }
+    if (meta?.category) {
+      lines.push(`Category: ${meta.category}`);
+    }
 
     return lines.join("\n");
   }
@@ -32,24 +57,27 @@ export class SkillTreeItem extends vscode.TreeItem {
   private buildDescription(): string {
     const parts: string[] = [];
 
-    if (this.skill.importSource === "skillbridge") {
+    const meta = this.skill.metadata;
+    if (meta?.category) {
+      parts.push(meta.category);
+    }
+
+    if (this._src === "skillbridge") {
       parts.push("[bridge]");
-    } else if (this.skill.importSource) {
-      parts.push(`[${this.skill.importSource}]`);
+    } else if (this._src && this._src !== "project") {
+      parts.push(`[${this._src}]`);
     }
 
     return parts.join(" · ");
   }
 
   private getIcon(): string {
-    // Use different icons based on import source
-    if (this.skill.importSource === "skillbridge") {
+    if (this._src === "skillbridge") {
       return "plug";
     }
-    if (this.skill.importSource === "claude") {
+    if (this._src === "claude") {
       return "verified-filled";
     }
-
     return "tools";
   }
 }
@@ -84,7 +112,7 @@ export class SkillsTreeDataProvider implements vscode.TreeDataProvider<SkillTree
       // Sort by name for consistent display
       skills.sort((a, b) => a.name.localeCompare(b.name));
 
-      return skills.map((skill) => new SkillTreeItem(skill, vscode.TreeItemCollapsibleState.None));
+      return skills.map((skill) => new SkillTreeItem(skill as SkillEntry, vscode.TreeItemCollapsibleState.None));
     } catch (error) {
       console.error("Failed to load skills:", error);
       return [];

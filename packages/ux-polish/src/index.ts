@@ -121,6 +121,9 @@ export type { Toast, ToastOptions, ToastLevel } from "./components/toast.js";
 export { showMenu } from "./components/menu.js";
 export type { MenuItem, MenuOptions } from "./components/menu.js";
 
+export { confirmAction } from "./components/confirmation-dialog.js";
+export type { ConfirmationOptions, ConfirmationResult } from "./components/confirmation-dialog.js";
+
 // ---------------------------------------------------------------------------
 // Surfaces
 // ---------------------------------------------------------------------------

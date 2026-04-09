@@ -5,6 +5,7 @@
 
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import {
   appendAuditEvent,
@@ -13,6 +14,9 @@ import {
   isSelfImprovementWriteAllowed,
   acquireUrl,
   acquireArchive,
+  classifyError,
+  DanteErrorType,
+  executionIntegrity,
 } from "@dantecode/core";
 import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
 import {
@@ -28,6 +32,7 @@ import {
 } from "./html-parser.js";
 import { MultiEngineSearch, createSearchEngine } from "./web-search-engine.js";
 import { synthesizeResults, formatSynthesizedResult } from "@dantecode/core";
+import { BashMutationDetector } from "./bash-mutation-detector.js";
 import type { SandboxBridge } from "./sandbox-bridge.js";
 import { DanteSandbox, toToolResult as sandboxToToolResult } from "@dantecode/dante-sandbox";
 import { renderBeforeAfter, getThemeEngine } from "@dantecode/ux-polish";
@@ -43,6 +48,32 @@ import { validateStructuredContent } from "./structured-write-guard.js";
 export interface ToolResult {
   content: string;
   isError: boolean;
+  /** Canonical runtime proof preserved by the scheduler/durable store. */
+  evidence?: ToolExecutionEvidence;
+  /** Execution integrity metadata for completion gate */
+  executionMetadata?: {
+    /** File that was modified (for mutating tools) */
+    filePath?: string;
+    /** Hash before mutation */
+    beforeHash?: string;
+    /** Hash after mutation */
+    afterHash?: string;
+    /** Lines added */
+    additions?: number;
+    /** Lines deleted */
+    deletions?: number;
+    /** Unified diff summary */
+    diffSummary?: string;
+    /** Validation results (for validation tools) */
+    validationResults?: {
+      passed: boolean;
+      errorCount: number;
+      warningCount: number;
+      target: string;
+    };
+    /** Whether this tool actually changed something */
+    observableMutation: boolean;
+  };
 }
 
 /** Result from a sub-agent execution. */
@@ -52,6 +83,13 @@ export interface SubAgentResult {
   durationMs: number;
   success: boolean;
   error?: string;
+  /** M5: Execution evidence from the child agent for parent ledger propagation. */
+  evidence?: {
+    mutations: import("@dantecode/core").MutationRecord[];
+    validations: import("@dantecode/core").ValidationRecord[];
+    toolCalls: import("@dantecode/core").ToolExecutionRecord[];
+    gateResult?: import("@dantecode/core").CompletionGateResult;
+  };
 }
 
 /** Options for sub-agent spawning. */
@@ -101,6 +139,10 @@ export interface CliToolExecutionContext {
   secretsScanner?: {
     scan: (text: string) => { clean: boolean; findings?: Array<{ type: string }> };
   };
+  /** M2/M5: Execution integrity manager for bash mutation detection and subagent evidence. */
+  executionIntegrity?: import("@dantecode/core").ExecutionIntegrityManager;
+  /** M2: Current message ID for ledger tracking. */
+  messageId?: string;
 }
 
 /** Supported tool names. */
@@ -125,6 +167,43 @@ export type ToolName =
   | "AcquireArchive"
   | "GitHooksInstall";
 
+interface ReadTrackerEntry {
+  readAt: string;
+  mtimeMs: number;
+  contentHash: string;
+}
+
+interface ToolMutationEvidenceRecord {
+  filePath: string;
+  beforeHash?: string;
+  afterHash?: string;
+  additions?: number;
+  deletions?: number;
+  diffSummary?: string;
+  observableMutation: boolean;
+  beforeMtimeMs?: number;
+  afterMtimeMs?: number;
+}
+
+interface ToolValidationEvidenceRecord {
+  validationType: "syntax" | "typecheck" | "lint" | "test" | "custom";
+  target: string;
+  passed: boolean;
+  errorCount: number;
+  warningCount: number;
+  output?: string;
+}
+
+interface ToolExecutionEvidence {
+  exitCode?: number;
+  filesWritten?: string[];
+  filesRead?: string[];
+  bytesTransferred?: number;
+  durationMs?: number;
+  mutations?: ToolMutationEvidenceRecord[];
+  validations?: ToolValidationEvidenceRecord[];
+}
+
 // ----------------------------------------------------------------------------
 // Path Resolution
 // ----------------------------------------------------------------------------
@@ -138,6 +217,102 @@ function resolvePath(filePath: string, projectRoot: string): string {
     return filePath;
   }
   return resolve(projectRoot, filePath);
+}
+
+const fileWriteLocks = new Map<string, Promise<void>>();
+
+async function withFileWriteLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+  const previous = fileWriteLocks.get(filePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => {
+    release = resolveLock;
+  });
+
+  fileWriteLocks.set(filePath, previous.then(() => current));
+  await previous;
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (fileWriteLocks.get(filePath) === current) {
+      fileWriteLocks.delete(filePath);
+    }
+  }
+}
+
+function hashContent(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function createReadTrackerEntry(content: string, mtimeMs: number): string {
+  return JSON.stringify({
+    readAt: new Date().toISOString(),
+    mtimeMs,
+    contentHash: hashContent(content),
+  } satisfies ReadTrackerEntry);
+}
+
+function parseReadTrackerEntry(rawValue: string | undefined): ReadTrackerEntry | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as Partial<ReadTrackerEntry>;
+    if (
+      typeof parsed.readAt === "string" &&
+      typeof parsed.mtimeMs === "number" &&
+      typeof parsed.contentHash === "string"
+    ) {
+      return {
+        readAt: parsed.readAt,
+        mtimeMs: parsed.mtimeMs,
+        contentHash: parsed.contentHash,
+      };
+    }
+  } catch {
+    // Fall through to legacy compatibility.
+  }
+
+  return {
+    readAt: rawValue,
+    mtimeMs: 0,
+    contentHash: "",
+  };
+}
+
+function buildMutationEvidence(
+  filePath: string,
+  beforeContent: string | undefined,
+  afterContent: string,
+  beforeMtimeMs: number | undefined,
+  afterMtimeMs: number,
+  diffSummary: string,
+  forcedBeforeHash?: string | null,
+): ToolExecutionEvidence {
+  const beforeLines = beforeContent?.split("\n") ?? [];
+  const afterLines = afterContent.split("\n");
+  const additions = Math.max(0, afterLines.length - beforeLines.length);
+  const deletions = Math.max(0, beforeLines.length - afterLines.length);
+
+  return {
+    filesWritten: [filePath],
+    mutations: [
+      {
+        filePath,
+        beforeHash: forcedBeforeHash !== undefined ? (forcedBeforeHash ?? undefined) : (beforeContent === undefined ? undefined : hashContent(beforeContent)),
+        afterHash: hashContent(afterContent),
+        beforeHashUnavailable: forcedBeforeHash === null,
+        additions,
+        deletions,
+        diffSummary,
+        observableMutation: beforeContent !== afterContent,
+        beforeMtimeMs,
+        afterMtimeMs,
+      },
+    ],
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -163,6 +338,7 @@ async function toolRead(
 
   try {
     const raw = await readFile(resolved, "utf-8");
+    const fileStats = await stat(resolved);
     const lines = raw.split("\n");
     const startLine = Math.max(0, offset);
     const endLine = Math.min(lines.length, startLine + limit);
@@ -174,20 +350,35 @@ async function toolRead(
     });
 
     if (context?.readTracker && startLine === 0 && endLine >= lines.length) {
-      context.readTracker.set(buildReadTrackerKey(context, resolved), new Date().toISOString());
+      context.readTracker.set(buildReadTrackerKey(context, resolved), createReadTrackerEntry(raw, fileStats.mtimeMs));
     }
 
-    return { content: numbered.join("\n"), isError: false };
+    return {
+      content: numbered.join("\n"),
+      isError: false,
+      evidence: {
+        filesRead: [resolved],
+      },
+      metadata: {
+        mtimeMs: fileStats.mtimeMs,
+      },
+    };
   } catch (err: unknown) {
+    const errorType = classifyError(err);
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error reading file: ${message}`, isError: true };
+    const kindSuffix = errorType !== DanteErrorType.Unknown ? ` [${errorType}]` : "";
+    return { content: `Error reading file${kindSuffix}: ${message}`, isError: true };
   }
 }
 
 /**
  * Write tool: writes content to a file, creating parent directories as needed.
  */
-async function toolWrite(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolWrite(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const content = input["content"] as string | undefined;
 
@@ -218,6 +409,24 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
   }
 
   try {
+    return await withFileWriteLock(resolved, async () => {
+    let existingStats: Awaited<ReturnType<typeof stat>> | undefined;
+    try {
+      existingStats = await stat(resolved);
+    } catch {
+      existingStats = undefined;
+    }
+
+    if (existingStats) {
+      const writeCheck = executionIntegrity.canWriteFile(filePath, existingStats.mtimeMs);
+      if (!writeCheck.allowed) {
+        return {
+          content: `Error: ${writeCheck.reason}. Re-run Read on ${resolved} so the latest contents are in context before writing.`,
+          isError: true,
+        };
+      }
+    }
+
     // Step 1: Capture before-state (best-effort — never blocks the write)
     let beforeSnapshotId: string | undefined;
     let beforeHash: string | undefined;
@@ -249,6 +458,7 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
     // Step 3: Actual write — always happens regardless of debug-trail state
     await mkdir(dirname(resolved), { recursive: true });
     await writeFile(resolved, effectiveContent, "utf-8");
+    const afterStats = await stat(resolved);
     const lineCount = effectiveContent.split("\n").length;
 
     // Step 3b: JSON post-write verification — read back and parse to confirm integrity
@@ -298,13 +508,46 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
       })();
     }
 
+    const evidence = buildMutationEvidence(
+      resolved,
+      beforeContent,
+      effectiveContent,
+      existingStats?.mtimeMs,
+      afterStats.mtimeMs,
+      `Wrote ${resolved}: ${lineCount} line(s)`,
+    );
+    const mutation = evidence.mutations?.[0];
+    if (context?.readTracker) {
+      context.readTracker.set(
+        buildReadTrackerKey(context, resolved),
+        createReadTrackerEntry(effectiveContent, afterStats.mtimeMs),
+      );
+    }
+
     return {
       content: `Successfully wrote ${lineCount} lines to ${resolved}`,
       isError: false,
+      evidence,
+      executionMetadata: mutation
+        ? {
+            filePath: mutation.filePath,
+            beforeHash: mutation.beforeHash,
+            afterHash: mutation.afterHash,
+            additions: mutation.additions,
+            deletions: mutation.deletions,
+            diffSummary: mutation.diffSummary,
+            observableMutation: mutation.observableMutation,
+            beforeMtimeMs: mutation.beforeMtimeMs,
+            afterMtimeMs: mutation.afterMtimeMs,
+          }
+        : undefined,
     };
+    });
   } catch (err: unknown) {
+    const errorType = classifyError(err);
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error writing file: ${message}`, isError: true };
+    const kindSuffix = errorType !== DanteErrorType.Unknown ? ` [${errorType}]` : "";
+    return { content: `Error writing file${kindSuffix}: ${message}`, isError: true };
   }
 }
 
@@ -332,81 +575,91 @@ async function toolEdit(
   }
 
   const resolved = resolvePath(filePath, projectRoot);
-  if (context?.readTracker && !context.readTracker.has(buildReadTrackerKey(context, resolved))) {
-    return {
-      content: `Error: Read the full current file before Edit. Re-run Read on ${resolved} with no offset/limit so the latest contents are in context.`,
-      isError: true,
-    };
-  }
-
   try {
-    const attemptKey = buildEditAttemptKey(context, resolved, oldString, newString);
-    const attemptCount = context?.editAttempts?.get(attemptKey) ?? 0;
-    if (attemptCount >= 2) {
-      return {
-        content: `Error: Third identical Edit attempt blocked for ${resolved} in this round. Re-read the file and switch to a smaller section rewrite or use Write with the full updated file.`,
-        isError: true,
-      };
-    }
+    return await withFileWriteLock(resolved, async () => {
+      const attemptKey = buildEditAttemptKey(context, resolved, oldString, newString);
+      const attemptCount = context?.editAttempts?.get(attemptKey) ?? 0;
+      if (attemptCount >= 2) {
+        return {
+          content: `Error: Third identical Edit attempt blocked for ${resolved} in this round. Re-read the file and switch to a smaller section rewrite or use Write with the full updated file.`,
+          isError: true,
+        };
+      }
 
-    const existing = await readFile(resolved, "utf-8");
+      const existingStats = await stat(resolved);
+      const writeCheck = executionIntegrity.canWriteFile(filePath, existingStats.mtimeMs);
+      if (!writeCheck.allowed) {
+        return {
+          content: `Error: ${writeCheck.reason}. Re-run Read on ${resolved} before editing to avoid a stale write.`,
+          isError: true,
+        };
+      }
 
-    if (!existing.includes(oldString)) {
-      return buildEditRecoveryResult(
-        context,
-        attemptKey,
-        resolved,
-        `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
-        existing,
-      );
-    }
+      const existing = await readFile(resolved, "utf-8");
 
-    // Check for uniqueness if not replaceAll
-    if (!replaceAll) {
-      const firstIndex = existing.indexOf(oldString);
-      const secondIndex = existing.indexOf(oldString, firstIndex + 1);
-      if (secondIndex !== -1) {
+      if (!existing.includes(oldString)) {
         return buildEditRecoveryResult(
           context,
           attemptKey,
           resolved,
-          `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
+          `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
           existing,
         );
       }
-    }
 
-    let updated: string;
-    if (replaceAll) {
-      updated = existing.split(oldString).join(newString);
-    } else {
-      updated = existing.replace(oldString, newString);
-    }
-
-    // Step 1: Capture before-state (file already read into `existing` — snapshot it)
-    let beforeSnapshotId: string | undefined;
-    let beforeHash: string | undefined;
-    let editTrailSnapshotter: import("@dantecode/debug-trail").FileSnapshotter | null = null;
-    let editTrailLogger: import("@dantecode/debug-trail").AuditLogger | null = null;
-    try {
-      const trailMod = await import("@dantecode/debug-trail");
-      editTrailLogger = trailMod.getGlobalLogger() ?? null;
-      if (editTrailLogger) {
-        editTrailSnapshotter = new trailMod.FileSnapshotter();
-        const prov = editTrailLogger.getProvenance();
-        const before = await editTrailSnapshotter.captureBeforeState(resolved, "te-before", prov);
-        beforeSnapshotId = before.beforeSnapshotId ?? undefined;
-        beforeHash = before.beforeHash ?? undefined;
+      // Check for uniqueness if not replaceAll
+      if (!replaceAll) {
+        const firstIndex = existing.indexOf(oldString);
+        const secondIndex = existing.indexOf(oldString, firstIndex + 1);
+        if (secondIndex !== -1) {
+          return buildEditRecoveryResult(
+            context,
+            attemptKey,
+            resolved,
+            `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
+            existing,
+          );
+        }
       }
-    } catch {
-      /* before-state is best-effort */
-    }
 
-    // Step 2: Actual write
-    await writeFile(resolved, updated, "utf-8");
-    context?.editAttempts?.delete(attemptKey);
+      const updated = replaceAll
+        ? existing.split(oldString).join(newString)
+        : existing.replace(oldString, newString);
 
-    const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
+      // Step 1: Capture before-state (file already read into `existing` — snapshot it)
+      let beforeSnapshotId: string | undefined;
+      let beforeHash: string | undefined;
+      let editTrailSnapshotter: import("@dantecode/debug-trail").FileSnapshotter | null = null;
+      let editTrailLogger: import("@dantecode/debug-trail").AuditLogger | null = null;
+      try {
+        const trailMod = await import("@dantecode/debug-trail");
+        editTrailLogger = trailMod.getGlobalLogger() ?? null;
+        if (editTrailLogger) {
+          editTrailSnapshotter = new trailMod.FileSnapshotter();
+          const prov = editTrailLogger.getProvenance();
+          const before = await editTrailSnapshotter.captureBeforeState(
+            resolved,
+            "te-before",
+            prov,
+          );
+          beforeSnapshotId = before.beforeSnapshotId ?? undefined;
+          beforeHash = before.beforeHash ?? undefined;
+        }
+      } catch {
+        /* debug-trail fallback: try direct read for before-hash */
+        try {
+          beforeHash = hashContent(existing);
+        } catch {
+          beforeHash = null as any; // Signal failure to buildMutationEvidence
+        }
+      }
+
+      // Step 2: Actual write
+      await writeFile(resolved, updated, "utf-8");
+      const afterStats = await stat(resolved);
+      context?.editAttempts?.delete(attemptKey);
+
+      const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
 
     // Render diff to terminal (TTY only, compact mode for edits, fire-and-forget)
     if (process.stdout.isTTY) {
@@ -425,31 +678,69 @@ async function toolEdit(
     }
 
     // Step 3: Capture after-state and log (fire-and-forget — never fails the tool)
-    if (editTrailLogger && editTrailSnapshotter) {
-      void (async () => {
-        try {
-          const prov = editTrailLogger!.getProvenance();
-          const after = await editTrailSnapshotter!.captureAfterState(resolved, "te-after", prov);
-          await editTrailLogger!.logFileWrite(
-            resolved,
-            beforeHash,
-            after.afterHash ?? undefined,
-            beforeSnapshotId,
-            after.afterSnapshotId ?? undefined,
-          );
-        } catch {
-          /* never fail the tool */
-        }
-      })();
-    }
+      if (editTrailLogger && editTrailSnapshotter) {
+        void (async () => {
+          try {
+            const prov = editTrailLogger!.getProvenance();
+            const after = await editTrailSnapshotter!.captureAfterState(
+              resolved,
+              "te-after",
+              prov,
+            );
+            await editTrailLogger!.logFileWrite(
+              resolved,
+              beforeHash,
+              after.afterHash ?? undefined,
+              beforeSnapshotId,
+              after.afterSnapshotId ?? undefined,
+            );
+          } catch {
+            /* never fail the tool */
+          }
+        })();
+      }
 
-    return {
-      content: `Successfully edited ${resolved} (${replacementCount} replacement${replacementCount !== 1 ? "s" : ""})`,
-      isError: false,
-    };
+      const evidence = buildMutationEvidence(
+        resolved,
+        existing,
+        updated,
+        existingStats.mtimeMs,
+        afterStats.mtimeMs,
+        `Edited ${resolved}: ${replacementCount} replacement(s)`,
+        beforeHash,
+      );
+      const mutation = evidence.mutations?.[0];
+      if (context?.readTracker) {
+        context.readTracker.set(
+          buildReadTrackerKey(context, resolved),
+          createReadTrackerEntry(updated, afterStats.mtimeMs),
+        );
+      }
+
+      return {
+        content: `Successfully edited ${resolved} (${replacementCount} replacement${replacementCount !== 1 ? "s" : ""})`,
+        isError: false,
+        evidence,
+        executionMetadata: mutation
+          ? {
+              filePath: mutation.filePath,
+              beforeHash: mutation.beforeHash ?? beforeHash,
+              afterHash: mutation.afterHash,
+              additions: mutation.additions,
+              deletions: mutation.deletions,
+              diffSummary: mutation.diffSummary,
+              observableMutation: mutation.observableMutation,
+              beforeMtimeMs: mutation.beforeMtimeMs,
+              afterMtimeMs: mutation.afterMtimeMs,
+            }
+          : undefined,
+      };
+    });
   } catch (err: unknown) {
+    const errorType = classifyError(err);
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error editing file: ${message}`, isError: true };
+    const kindSuffix = errorType !== DanteErrorType.Unknown ? ` [${errorType}]` : "";
+    return { content: `Error editing file${kindSuffix}: ${message}`, isError: true };
   }
 }
 
@@ -473,32 +764,99 @@ async function toolBash(
 
   const timeoutMs = typeof input["timeout"] === "number" ? input["timeout"] : 120000;
 
+  // M2: Snapshot file state before bash execution for mutation detection
+  const mutationDetector = new BashMutationDetector(projectRoot);
+  let beforeSnapshot: Map<string, import("./bash-mutation-detector.js").FileSnapshot> | undefined;
+  try {
+    beforeSnapshot = mutationDetector.snapshotBefore();
+  } catch {
+    // Non-fatal — mutation detection is best-effort
+  }
+
   // Route through sandbox bridge when enabled — real isolation via Docker or LocalExecutor.
   // This is the critical fix: when enableSandbox=true, commands are no longer executed
   // directly on the host via execSync; they go through the sandboxed executor.
-  if (context?.sandboxBridge) {
-    return context.sandboxBridge.runInSandbox(command, timeoutMs);
-  }
+  let toolResult: ToolResult;
 
-  // DanteSandbox enforcement is mandatory — every Bash command goes through the gate.
-  if (!DanteSandbox.isReady()) {
-    // This should never happen: DanteSandbox.setup() runs before the agent loop starts.
-    // If it does, fail closed rather than silently falling back to unsandboxed execution.
+  if (context?.sandboxBridge) {
+    toolResult = await context.sandboxBridge.runInSandbox(command, timeoutMs);
+  } else if (!DanteSandbox.isReady()) {
     return {
       content:
         "[DanteCode] FATAL: DanteSandbox is not initialized. Call DanteSandbox.setup() before tool execution.",
       isError: true,
     };
+  } else {
+    const result = await DanteSandbox.execute(command, {
+      cwd: projectRoot,
+      timeoutMs,
+      taskType: "bash",
+      actor: "tools",
+      sessionId: context?.sessionId,
+    });
+    toolResult = sandboxToToolResult(result);
   }
 
-  const result = await DanteSandbox.execute(command, {
-    cwd: projectRoot,
-    timeoutMs,
-    taskType: "bash",
-    actor: "tools",
-    sessionId: context?.sessionId,
-  });
-  return sandboxToToolResult(result);
+  // M2: Detect file mutations after bash execution
+  let bashMutationsDetected = 0;
+  if (beforeSnapshot) {
+    try {
+      const detectedMutations = mutationDetector.detectMutations(beforeSnapshot);
+      bashMutationsDetected = detectedMutations.length;
+      if (detectedMutations.length > 0 && context?.executionIntegrity && context.sessionId) {
+        mutationDetector.recordDetected(
+          detectedMutations,
+          context.executionIntegrity,
+          context.sessionId,
+          context.messageId ?? `msg-bash`,
+        );
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  const validationType = inferCommandValidationType(command);
+  if (!validationType) {
+    return {
+      ...toolResult,
+      executionMetadata: {
+        observableMutation: bashMutationsDetected > 0,
+      },
+    };
+  }
+
+  const errorCountMatch = toolResult.content.match(/(\d+)\s*(?:errors?|failures?)/i);
+  const warningCountMatch = toolResult.content.match(/(\d+)\s*warnings?/i);
+  const validationEvidence = {
+    validationType,
+    target: command,
+    passed: !toolResult.isError,
+    errorCount: errorCountMatch
+      ? Number.parseInt(errorCountMatch[1] ?? "0", 10)
+      : toolResult.isError
+        ? 1
+        : 0,
+    warningCount: warningCountMatch ? Number.parseInt(warningCountMatch[1] ?? "0", 10) : 0,
+    output: toolResult.content,
+  } as const;
+
+  return {
+    ...toolResult,
+    evidence: {
+      exitCode: toolResult.isError ? 1 : 0,
+      validations: [validationEvidence],
+    },
+    executionMetadata: {
+      observableMutation: bashMutationsDetected > 0,
+      validationResults: {
+        passed: validationEvidence.passed,
+        errorCount: validationEvidence.errorCount,
+        warningCount: validationEvidence.warningCount,
+        target: validationEvidence.target,
+      },
+    },
+  };
 }
 
 /**
@@ -1016,22 +1374,52 @@ async function toolGitHooksInstall(
  * TodoWrite tool: manages the session's to-do list.
  * Accepts a full replacement of the todo list.
  */
+// M6: Keywords that imply code changes (used for TodoWrite evidence coupling)
+const CODE_CHANGE_KEYWORDS = /\b(implement|fix|add|create|modify|refactor|update|wire|build|write|patch|change|extend|migrate)\b/i;
+const NON_CODE_KEYWORDS = /\b(research|review|analyze|investigate|read|understand|document|plan|explore|check|inspect|study)\b/i;
+
+function todoImpliesCodeChange(text: string): boolean {
+  if (NON_CODE_KEYWORDS.test(text) && !CODE_CHANGE_KEYWORDS.test(text)) return false;
+  return CODE_CHANGE_KEYWORDS.test(text);
+}
+
 async function toolTodoWrite(
   input: Record<string, unknown>,
   _projectRoot: string,
+  context?: CliToolExecutionContext,
 ): Promise<ToolResult> {
   const todos = input["todos"] as Array<Record<string, unknown>> | undefined;
   if (!todos || !Array.isArray(todos)) {
     return { content: "Error: todos array parameter is required", isError: true };
   }
 
-  const formattedTodos: TodoItem[] = todos.map((t, i) => ({
-    id: String(t["id"] || `todo-${i + 1}`),
-    text: String(t["content"] || t["text"] || ""),
-    status: (t["status"] as TodoStatus) || "pending",
-    createdAt: new Date().toISOString(),
-    completedAt: t["status"] === "completed" ? new Date().toISOString() : undefined,
-  }));
+  // M6: Check if the execution integrity manager has mutations in the current session
+  const hasMutations = (() => {
+    if (!context?.executionIntegrity || !context.sessionId) return true; // be permissive if no context
+    const ledgers = (context.executionIntegrity as any).getSessionLedgers?.(context.sessionId) as any[] | undefined;
+    if (!ledgers) return true;
+    return ledgers.some((l: any) => l.mutations && l.mutations.length > 0);
+  })();
+
+  const warnings: string[] = [];
+  const formattedTodos: TodoItem[] = todos.map((t, i) => {
+    let status = (t["status"] as TodoStatus) || "pending";
+    const text = String(t["content"] || t["text"] || "");
+
+    // M6: Evidence coupling — block completion of code-change tasks without mutations
+    if (status === "completed" && todoImpliesCodeChange(text) && !hasMutations) {
+      status = "in_progress";
+      warnings.push(`[INTEGRITY] "${text.slice(0, 50)}..." kept as in_progress — no file mutations recorded.`);
+    }
+
+    return {
+      id: String(t["id"] || `todo-${i + 1}`),
+      text,
+      status,
+      createdAt: new Date().toISOString(),
+      completedAt: status === "completed" ? new Date().toISOString() : undefined,
+    };
+  });
 
   const display = formattedTodos
     .map((t) => {
@@ -1041,8 +1429,10 @@ async function toolTodoWrite(
     })
     .join("\n");
 
+  const warningSection = warnings.length > 0 ? `\n\n${warnings.join("\n")}` : "";
+
   return {
-    content: `Updated ${formattedTodos.length} to-do items:\n${display}`,
+    content: `Updated ${formattedTodos.length} to-do items:\n${display}${warningSection}`,
     isError: false,
   };
 }
@@ -1323,6 +1713,19 @@ async function toolSubAgent(
     }
 
     parts.push(`\nOutput:\n${result.output}`);
+
+    // M5: Propagate child evidence to parent ledger
+    if (result.evidence && context.executionIntegrity && context.sessionId) {
+      context.executionIntegrity.recordSubAgentEvidence(
+        context.sessionId,
+        context.messageId ?? "msg-subagent",
+        `subagent-${Date.now()}`,
+        result.evidence,
+      );
+      if (result.evidence.gateResult && !result.evidence.gateResult.gatePassed) {
+        parts.push(`\n[INTEGRITY WARNING] Sub-agent completion gate failed: ${result.evidence.gateResult.reasonCode}`);
+      }
+    }
 
     return { content: parts.join("\n"), isError: false };
   } catch (err: unknown) {
@@ -2277,7 +2680,7 @@ export async function executeTool(
       result = await toolRead(input, projectRoot, context);
       break;
     case "Write":
-      result = await toolWrite(input, projectRoot);
+      result = await toolWrite(input, projectRoot, context);
       break;
     case "Edit":
       result = await toolEdit(input, projectRoot, context);
@@ -2301,7 +2704,7 @@ export async function executeTool(
       result = await toolGitHooksInstall(input, projectRoot);
       break;
     case "TodoWrite":
-      result = await toolTodoWrite(input, projectRoot);
+      result = await toolTodoWrite(input, projectRoot, context);
       break;
     case "WebSearch":
       result = await toolWebSearch(input, projectRoot);
@@ -2427,6 +2830,29 @@ function buildEditAttemptKey(
   newString: string,
 ): string {
   return `${context?.roundId ?? "default-round"}:${resolvedPath}:${oldString}:${newString}`;
+}
+
+function inferCommandValidationType(command: string):
+  | "syntax"
+  | "typecheck"
+  | "lint"
+  | "test"
+  | "custom"
+  | undefined {
+  const lower = command.toLowerCase();
+  if (/\b(vitest|jest|mocha|pytest|cargo\s+test|npm\s+test|pnpm\s+test|bun\s+test)\b/i.test(lower)) {
+    return "test";
+  }
+  if (/\b(eslint|lint)\b/i.test(lower)) {
+    return "lint";
+  }
+  if (/\b(tsc|typecheck)\b/i.test(lower)) {
+    return "typecheck";
+  }
+  if (/\b(check|validate)\b/i.test(lower)) {
+    return "custom";
+  }
+  return undefined;
 }
 
 function buildEditRecoveryResult(

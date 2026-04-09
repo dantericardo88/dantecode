@@ -43,11 +43,12 @@ export interface VectorSearchResult {
 export class VectorStore {
   private readonly localStore: LocalStore;
   private readonly capacity: number;
-  private readonly threshold: number;
+  private threshold: number;
   /** In-memory index: scopedKey → VectorEntry. */
   private readonly entries = new Map<string, VectorEntry>();
   /** Optional embedding provider (model-router hookable). */
   embeddingProvider?: (text: string) => Promise<number[]>;
+  private _usingRealEmbeddings = false;
 
   constructor(
     localStore: LocalStore,
@@ -66,6 +67,20 @@ export class VectorStore {
   /** Hook in a model-router embedding provider for richer recall. */
   setEmbeddingProvider(fn: (text: string) => Promise<number[]>): void {
     this.embeddingProvider = fn;
+  }
+
+  /**
+   * Notify that a real (non-TF-IDF) embedding provider is active.
+   * Flips similarity threshold from Jaccard 0.05 to cosine 0.25.
+   */
+  notifyRealEmbeddings(): void {
+    this._usingRealEmbeddings = true;
+    this.threshold = 0.25;
+  }
+
+  /** Returns true if a real embedding provider has been activated. */
+  isUsingRealEmbeddings(): boolean {
+    return this._usingRealEmbeddings;
   }
 
   // --------------------------------------------------------------------------

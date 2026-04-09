@@ -89,7 +89,9 @@ export const HARD_VIOLATION_PATTERNS: StubPattern[] = [
     "stub_detected",
   ),
   createStubPattern(/^\s*\.\.\.\s*$/, "Ellipsis stub detected", "stub_detected"),
-  createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected", [".py"]),
+  createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected", [
+    ".py",
+  ]),
   createStubPattern(/\bplaceholder\b/i, "Placeholder text found", "stub_detected"),
   createStubPattern(/\bnotImplemented\b/, "notImplemented symbol found", "stub_detected"),
   createStubPattern(/\/\/\s*\.{3,}/, "Comment ellipsis indicates stubbed code", "stub_detected"),
@@ -859,13 +861,20 @@ export async function runAutoforgeIAL(
 
   // Adaptive strategy tracking — detect stuck loops and reduce scope before escalating.
   const loopDetector = new LoopDetector({ maxIterations, identicalThreshold: 3 });
-  const taskBreaker = new TaskCircuitBreaker({ identicalFailureThreshold: 3, maxRecoveryAttempts: 2 });
+  const taskBreaker = new TaskCircuitBreaker({
+    identicalFailureThreshold: 3,
+    maxRecoveryAttempts: 2,
+  });
   let strategyMode: "standard" | "reduced_scope" | "minimal" = "standard";
 
   // Vercel AI SDK pattern: composable stop conditions.
   // Evaluates all conditions in parallel; stops if any returns true.
   const stopConditions = config.stopConditions ?? [];
-  async function isStopConditionMet(ctx: { steps: number; pdseScore: number | null; allGStackPassed: boolean }): Promise<boolean> {
+  async function isStopConditionMet(ctx: {
+    steps: number;
+    pdseScore: number | null;
+    allGStackPassed: boolean;
+  }): Promise<boolean> {
     if (stopConditions.length === 0) return false;
     const results = await Promise.all(stopConditions.map((cond) => cond(ctx)));
     return results.some(Boolean);
@@ -977,7 +986,13 @@ export async function runAutoforgeIAL(
     }
 
     // Composable stop condition check (Vercel AI SDK pattern)
-    if (await isStopConditionMet({ steps: iteration, pdseScore: score.overall, allGStackPassed: gstackAllPassed })) {
+    if (
+      await isStopConditionMet({
+        steps: iteration,
+        pdseScore: score.overall,
+        allGStackPassed: gstackAllPassed,
+      })
+    ) {
       return {
         finalCode: currentCode,
         iterations: iteration,
@@ -1274,3 +1289,13 @@ export async function detectAndRecordPatterns(
 // ----------------------------------------------------------------------------
 
 export { ALL_PATTERNS as CONSTITUTION_PATTERNS };
+
+// ----------------------------------------------------------------------------
+export {
+  runVerificationSamples,
+  getExpectedSampleScores,
+  GOOD_CODE_SAMPLE,
+  STUB_CODE_SAMPLE,
+  HALLUCINATION_CODE_SAMPLE,
+  INCONSISTENT_CODE_SAMPLE,
+} from "./verification-samples.js";

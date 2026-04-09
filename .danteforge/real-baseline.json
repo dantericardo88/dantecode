@@ -1,0 +1,100 @@
+  "assessment": {
+    "rawScore": 65,
+    "harshScore": 25,
+    "displayScore": 2.5,
+    "dimensions": {
+      "functionality": 85,
+      "testing": 56,
+      "errorHandling": 50,
+      "security": 70,
+      "uxPolish": 50,
+      "documentation": 85,
+      "performance": 70,
+      "maintainability": 77,
+      "planningQuality": 82,
+      "selfImprovement": 55,
+      "developerExperience": 91,
+      "autonomy": 37,
+      "specDrivenPipeline": 80,
+      "convergenceSelfHealing": 38,
+      "tokenEconomy": 40,
+      "ecosystemMcp": 60,
+      "enterpriseReadiness": 35,
+      "communityAdoption": 15
+    },
+    "displayDimensions": {
+      "functionality": 8.5,
+      "testing": 5.6,
+      "errorHandling": 5,
+      "security": 7,
+      "uxPolish": 5,
+      "documentation": 8.5,
+      "performance": 7,
+      "maintainability": 7.7,
+      "planningQuality": 8.2,
+      "selfImprovement": 5.5,
+      "developerExperience": 9.1,
+      "autonomy": 3.7,
+      "specDrivenPipeline": 8,
+      "convergenceSelfHealing": 3.8,
+      "tokenEconomy": 4,
+      "ecosystemMcp": 6,
+      "enterpriseReadiness": 3.5,
+      "communityAdoption": 1.5
+    },
+    "penalties": [
+      {
+        "category": "fake-completion",
+        "reason": "Completion tracker reports 141% but maturity level is below target",
+        "deduction": 20,
+        "evidence": "overall=141%, maturity=4, target=5"
+      },
+      {
+        "category": "test-coverage",
+        "reason": "Testing dimension at 56/100 (threshold: 70)",
+        "deduction": 15,
+        "evidence": "dimensions.testing=56"
+      },
+      {
+        "category": "plateau",
+        "reason": "Score plateau: last 3 cycles scored 30, 30, 30 (range ≤ 2)",
+        "deduction": 5,
+        "evidence": "scores=30,30,30"
+      }
+    ],
+    "stubsDetected": [],
+    "fakeCompletionRisk": "high",
+    "verdict": "blocked",
+    "maturityAssessment": {
+      "currentLevel": 4,
+      "targetLevel": 5,
+      "overallScore": 69,
+      "dimensions": {
+        "functionality": 85,
+        "testing": 56,
+        "errorHandling": 50,
+        "security": 70,
+        "uxPolish": 50,
+        "documentation": 85,
+        "performance": 70,
+        "maintainability": 77
+      },
+      "gaps": [
+        {
+          "dimension": "errorHandling",
+          "currentScore": 50,
+          "targetScore": 70,
+          "gapSize": 20,
+          "severity": "major",
+          "recommendation": "Add try/catch blocks and create custom error classes"
+        },
+        {
+          "dimension": "uxPolish",
+          "currentScore": 50,
+          "targetScore": 70,
+          "gapSize": 20,
+          "severity": "major",
+          "recommendation": "Add loading states, ARIA labels, and responsive design"
+        },
+        {
+          "dimension": "testing",

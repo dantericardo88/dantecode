@@ -180,7 +180,7 @@ export function createDefaultSandboxSpec(projectRoot: string): SandboxSpec {
   return {
     image: "ghcr.io/dantecode/sandbox:latest",
     workdir: "/workspace",
-    networkMode: "bridge",
+    networkMode: "none", // Network isolation: no external network access
     mounts: [
       {
         hostPath: projectRoot,

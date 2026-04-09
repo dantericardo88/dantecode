@@ -11,6 +11,7 @@ import {
   CLAUDE_WORKFLOW_MODE,
   buildWavePrompt,
   buildWorkflowInvocationPrompt,
+  loadPersistentRulesPrompt,
 } from "@dantecode/core";
 import type { Session } from "@dantecode/config-types";
 import { queryLessons, formatLessonsForPrompt } from "@dantecode/danteforge";
@@ -134,6 +135,15 @@ export async function buildSystemPrompt(
   if (config.workflowContext) {
     const preamble = buildWorkflowInvocationPrompt(config.workflowContext);
     sections.push(preamble, "");
+  }
+
+  try {
+    const persistentRulesPrompt = await loadPersistentRulesPrompt(session.projectRoot);
+    if (persistentRulesPrompt) {
+      sections.push(persistentRulesPrompt, "");
+    }
+  } catch {
+    // Non-fatal
   }
 
   sections.push("## Project Context", "", `Project root: ${session.projectRoot}`);

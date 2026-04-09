@@ -42,7 +42,7 @@ describe("sandbox", () => {
 
       expect(spec.image).toBe("ghcr.io/dantecode/sandbox:latest");
       expect(spec.workdir).toBe("/workspace");
-      expect(spec.networkMode).toBe("bridge");
+      expect(spec.networkMode).toBe("none");
       expect(spec.memoryLimitMb).toBe(2048);
       expect(spec.cpuLimit).toBe(2);
       expect(spec.timeoutMs).toBe(300_000);

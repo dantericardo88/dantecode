@@ -33,7 +33,7 @@ const RESET = "\x1b[0m";
 // Sub-command implementations
 // ────────────────────────────────────────────────────────
 
-function cmdStatus(projectRoot: string): void {
+function cmdStatus(projectRoot: string, topN?: number): void {
   const integration = new DanteSkillbookIntegration({ cwd: projectRoot, gitStage: false });
   const stats = integration.stats();
 
@@ -52,6 +52,28 @@ function cmdStatus(projectRoot: string): void {
     console.log(`  Last updated:  ${DIM}${stats.lastUpdatedAt}${RESET}`);
   }
   console.log(`  Skillbook at:  ${DIM}.dantecode/skillbook/skillbook.json${RESET}`);
+
+  if (topN !== undefined && topN > 0) {
+    const top = integration.getTopSkills(topN);
+    if (top.length === 0) {
+      console.log(`\n${DIM}No skills with win-rate data yet.${RESET}`);
+    } else {
+      console.log(`\n${BOLD}Top ${topN} Skills by Win-Rate${RESET}`);
+      console.log(
+        `  ${"#".padEnd(4)}${"Title".padEnd(40)}${"Win-Rate".padEnd(10)}${"Uses".padEnd(8)}Section`,
+      );
+      console.log(`  ${"-".repeat(70)}`);
+      top.forEach((skill: { title: string; winRate?: number; useCount?: number; section: string }, i: number) => {
+        const rank = String(i + 1).padEnd(4);
+        const title = (skill.title.length > 38 ? `${skill.title.slice(0, 35)}...` : skill.title).padEnd(40);
+        const winRate = skill.winRate !== undefined ? `${(skill.winRate * 100).toFixed(0)}%` : "n/a";
+        const winRateStr = winRate.padEnd(10);
+        const uses = String(skill.useCount ?? 0).padEnd(8);
+        const section = skill.section;
+        console.log(`  ${CYAN}${rank}${RESET}${title}${GREEN}${winRateStr}${RESET}${DIM}${uses}${section}${RESET}`);
+      });
+    }
+  }
 }
 
 function cmdReview(projectRoot: string): void {
@@ -179,8 +201,8 @@ ${BOLD}Usage:${RESET}
   dantecode skillbook <subcommand> [options]
 
 ${BOLD}Subcommands:${RESET}
-  ${CYAN}status${RESET}               Show skillbook stats (total skills, sections, last update)
-  ${CYAN}stats${RESET}                Alias for status
+  ${CYAN}status [--top <n>]${RESET}   Show skillbook stats; --top N prints top N skills by win-rate
+  ${CYAN}stats [--top <n>]${RESET}    Alias for status
   ${CYAN}review${RESET}               List pending review-queue items awaiting human approval
   ${CYAN}approve <id>${RESET}         Approve a review-queue item and apply it to the skillbook
   ${CYAN}reject <id>${RESET}          Reject a review-queue item and discard it
@@ -207,9 +229,17 @@ export async function runSkillbookCommand(args: string[], projectRoot: string): 
 
   switch (sub) {
     case "status":
-    case "stats":
-      cmdStatus(projectRoot);
+    case "stats": {
+      // Parse optional --top <n> flag
+      const topIdx = rest.indexOf("--top");
+      let topN: number | undefined;
+      if (topIdx !== -1 && rest[topIdx + 1]) {
+        const parsed = parseInt(rest[topIdx + 1] as string, 10);
+        if (!isNaN(parsed) && parsed > 0) topN = parsed;
+      }
+      cmdStatus(projectRoot, topN);
       return;
+    }
     case "review":
       cmdReview(projectRoot);
       return;

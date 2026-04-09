@@ -7,6 +7,7 @@
 
 import { UXEngine } from "@dantecode/core";
 import type { ThemeName } from "@dantecode/core";
+import { renderDiff, Spinner, RichRenderer } from "@dantecode/ux-polish";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,6 +69,18 @@ export class StreamRenderer {
   private readonly thinkingBudget: number | undefined;
   private readonly contextPercent: number | undefined;
   private readonly budgetTier: "green" | "yellow" | "red" | "critical" | undefined;
+  /** Shared RichRenderer instance for inline markdown line coloring (non-richMode path). */
+  private readonly _richRenderer: RichRenderer = new RichRenderer();
+  /** Buffer for current incomplete line (non-richMode markdown routing). */
+  private _lineBuffer = "";
+  /** Spinner shown during inference wait (before first token). */
+  private _thinkingSpinner: Spinner | null = null;
+  /** Whether first token has arrived (spinner cleared). */
+  private _firstTokenReceived = false;
+  /** Timestamp when the thinking spinner was started. */
+  private _spinnerStartTime = 0;
+  /** Interval handle for multi-phase spinner label updates. */
+  private _spinnerInterval: NodeJS.Timeout | null = null;
 
   constructor(options: StreamRendererOptions | boolean = false) {
     // Backward compat: `new StreamRenderer(true)` = silent
@@ -151,6 +164,61 @@ export class StreamRenderer {
   }
 
   /**
+   * Start the "Thinking..." spinner before the first token arrives.
+   * Uses a multi-phase label that evolves over time.
+   * Called externally on stream start. Safe to call multiple times (idempotent).
+   */
+  startThinkingSpinner(): void {
+    if (this.silent || this._thinkingSpinner || this._firstTokenReceived) return;
+    this._spinnerStartTime = Date.now();
+    this._thinkingSpinner = new Spinner({ text: "Thinking...", color: "cyan" });
+    this._thinkingSpinner.start();
+
+    // Multi-phase label updates every 500ms
+    this._spinnerInterval = setInterval(() => {
+      if (!this._thinkingSpinner) return;
+      const elapsed = Date.now() - this._spinnerStartTime;
+      let label: string;
+      if (elapsed < 500) {
+        label = "Thinking...";
+      } else if (elapsed < 2000) {
+        label = `Thinking... [${this.reasoningTier ?? "standard"}]`;
+      } else if (elapsed < 10000) {
+        label = `Still thinking... (${Math.floor(elapsed / 1000)}s)`;
+      } else {
+        label = `Deep thinking... (${Math.floor(elapsed / 1000)}s) — complex task`;
+      }
+      this._thinkingSpinner.update(label);
+    }, 500);
+  }
+
+  /**
+   * Stop and clear the spinner when the first token arrives.
+   * Idempotent — safe to call on every token.
+   */
+  stopThinkingSpinner(): void {
+    if (!this._thinkingSpinner) return;
+    if (this._spinnerInterval) {
+      clearInterval(this._spinnerInterval);
+      this._spinnerInterval = null;
+    }
+    this._thinkingSpinner.stop();
+    this._thinkingSpinner = null;
+    this._firstTokenReceived = true;
+  }
+
+  /**
+   * Update the spinner label to reflect a phase transition.
+   * - `executing`: shown while agent is running tools
+   * - `repairing`: shown during error recovery
+   */
+  updateSpinnerPhase(phase: "executing" | "repairing"): void {
+    if (!this._thinkingSpinner) return;
+    const label = phase === "executing" ? "Executing tools..." : "Repairing...";
+    this._thinkingSpinner.update(label);
+  }
+
+  /**
    * Write a token chunk to the output.
    * In silent mode, buffers only (no stdout output).
    * In richMode, tokens are buffered and flushed line-by-line for markdown rendering.
@@ -161,11 +229,95 @@ export class StreamRenderer {
     this.buffer += token;
     if (this.silent) return;
 
+    // Stop the thinking spinner when first token arrives
+    if (!this._firstTokenReceived) {
+      this.stopThinkingSpinner();
+    }
+
     if (this.richMode) {
       // Flush complete lines for markdown rendering; hold incomplete last line
       this._flushLines();
     } else {
-      process.stdout.write(token);
+      // Check if this token completes a diff block and route to renderDiff
+      // Detect when buffer contains a diff header at a line start
+      const hasDiffHeader =
+        this.buffer.includes("\ndiff --git ") ||
+        this.buffer.includes("\n--- a/") ||
+        this.buffer.startsWith("diff --git ") ||
+        this.buffer.startsWith("--- a/");
+      if (hasDiffHeader && (token.endsWith("\n") || token.includes("\n"))) {
+        // Try to extract and render any complete diff segments
+        const lines = this.buffer.split("\n");
+        const firstDiffIdx = lines.findIndex(
+          (l) => l.startsWith("diff --git ") || l.startsWith("--- a/"),
+        );
+        if (firstDiffIdx !== -1) {
+          // Render preceding non-diff lines normally
+          const preLines = lines.slice(0, firstDiffIdx);
+          if (preLines.length > 0) {
+            process.stdout.write(preLines.join("\n") + (firstDiffIdx > 0 ? "\n" : ""));
+          }
+          // Render the diff block with renderDiff
+          const diffLines = lines.slice(firstDiffIdx);
+          const diffText = diffLines.join("\n");
+          try {
+            const result = renderDiff(diffText, { maxLines: 80 });
+            process.stdout.write(result.rendered);
+          } catch {
+            // Fallback to raw text if renderDiff throws
+            process.stdout.write(diffText);
+          }
+          return;
+        }
+      }
+      // Buffer tokens line-by-line for inline markdown rendering
+      this._lineBuffer += token;
+      const nlIdx = this._lineBuffer.indexOf("\n");
+      if (nlIdx !== -1) {
+        // Process all complete lines
+        const complete = this._lineBuffer.slice(0, nlIdx + 1);
+        this._lineBuffer = this._lineBuffer.slice(nlIdx + 1);
+        this._renderLineWithMarkdown(complete);
+      }
+      // Flush remaining partial token chars immediately (no newline yet)
+      // so streaming feels responsive — partial lines go out raw
+      else if (token.length > 0) {
+        process.stdout.write(token);
+        // Compensate: when _lineBuffer gets a \n later the prefix was already written
+        // so we track we've flushed it
+        this._lineBuffer = "";
+      }
+    }
+  }
+
+  /**
+   * Route a complete line through RichRenderer if it starts with a markdown marker.
+   * Falls back to raw output on error.
+   */
+  private _renderLineWithMarkdown(line: string): void {
+    const trimmed = line.trimStart();
+    const isMarkdownLine =
+      trimmed.startsWith("## ") ||
+      trimmed.startsWith("### ") ||
+      trimmed.startsWith("**") ||
+      trimmed.startsWith("- ") ||
+      trimmed.startsWith("* ") ||
+      trimmed.startsWith("`");
+
+    if (!isMarkdownLine) {
+      process.stdout.write(line);
+      return;
+    }
+
+    try {
+      const result = this._richRenderer.render("cli", { kind: "markdown", content: line });
+      if (result.rendered && result.output) {
+        process.stdout.write(result.output.endsWith("\n") ? result.output : result.output + "\n");
+      } else {
+        process.stdout.write(line);
+      }
+    } catch {
+      process.stdout.write(line);
     }
   }
 
@@ -185,6 +337,17 @@ export class StreamRenderer {
     this.toolLineCount = 0;
     this._richLineBuffer = "";
     this._renderedUpTo = 0;
+    this._lineBuffer = "";
+    if (this._spinnerInterval) {
+      clearInterval(this._spinnerInterval);
+      this._spinnerInterval = null;
+    }
+    if (this._thinkingSpinner) {
+      this._thinkingSpinner.stop();
+      this._thinkingSpinner = null;
+    }
+    this._firstTokenReceived = false;
+    this._spinnerStartTime = 0;
   }
 
   /**

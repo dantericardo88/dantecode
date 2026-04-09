@@ -271,6 +271,50 @@ describe("GitHubClient", () => {
     });
   });
 
+  describe("GitHubClient error path coverage", () => {
+    it("rate limit (429) → error thrown after retries exhausted", async () => {
+      const err = Object.assign(new Error("Too Many Requests"), { status: 429 });
+      // Use mockRejectedValue (not Once) so all retry attempts get the same error
+      mockOctokit.rest.issues.create.mockRejectedValue(err);
+      const client = makeClient();
+      // 429 triggers retry via withRetry — createIssue uses withRetry-less try/catch,
+      // so translateOctokitError sees 429 and falls through to generic "GitHub API error"
+      await expect(client.createIssue({ title: "Test" })).rejects.toThrow(/GitHub API error|Too Many/i);
+      // Restore to prevent mock bleed-through
+      mockOctokit.rest.issues.create.mockReset();
+    });
+
+    it("auth failure (401) → specific auth error message", async () => {
+      const err = Object.assign(new Error("Unauthorized"), { status: 401 });
+      mockOctokit.rest.issues.get.mockRejectedValueOnce(err);
+      const client = makeClient();
+      await expect(client.getIssue(1)).rejects.toThrow("authentication failed");
+    });
+
+    it("network timeout → timeout error propagated", async () => {
+      const networkError = new Error("ECONNRESET: connection reset by peer");
+      mockOctokit.rest.pulls.get.mockRejectedValueOnce(networkError);
+      const client = makeClient();
+      await expect(client.getPR(1)).rejects.toThrow(/ECONNRESET|connection reset|GitHub API error/);
+    });
+
+    it("pagination end → returns empty array, not error", async () => {
+      mockOctokit.paginate.iterator.mockReturnValueOnce(
+        (async function* () {
+          // Empty generator — no pages
+        })(),
+      );
+      const client = makeClient();
+      const files = await client.listPRFiles(99);
+      expect(files).toEqual([]);
+    });
+
+    it("invalid / empty token → validation error on construct", () => {
+      expect(() => new GitHubClient({ token: "" })).toThrow(/non-empty token|GITHUB_TOKEN/);
+      expect(() => new GitHubClient({ token: "   " })).toThrow(/non-empty token|GITHUB_TOKEN/);
+    });
+  });
+
   describe("GitHubClient v2 hardening", () => {
     it("constructor throws when token is empty", () => {
       expect(() => new GitHubClient({ token: "" })).toThrow("non-empty token");

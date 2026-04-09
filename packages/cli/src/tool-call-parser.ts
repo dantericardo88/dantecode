@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { repairMalformedJsonPayload } from "./provider-normalization.js";
 
 /**
  * Represents a tool call extracted from the model's response text.
@@ -147,34 +148,67 @@ export type ParseResult<T> =
   | { success: true; data: T }
   | { success: false; error: string; context: string };
 
+function normalizeJsonPayloadCandidates(payload: string): string[] {
+  const trimmed = payload.trim();
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const candidates = new Set<string>([trimmed, withoutFence]);
+
+  const firstBrace = withoutFence.indexOf("{");
+  const lastBrace = withoutFence.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.add(withoutFence.slice(firstBrace, lastBrace + 1).trim());
+  }
+
+  return [...candidates].filter((candidate) => candidate.length > 0);
+}
+
+function parseJsonRecord<T extends Record<string, unknown>>(payload: string): ParseResult<T> {
+  const candidates = normalizeJsonPayloadCandidates(payload);
+  let lastError = "Unknown JSON parse error";
+  let lastContext = payload.slice(0, 200);
+
+  for (const candidate of candidates) {
+    try {
+      return { success: true, data: JSON.parse(candidate) as T };
+    } catch {
+      try {
+        const escaped = escapeLiteralControlCharsInJsonStrings(candidate);
+        return { success: true, data: JSON.parse(escaped) as T };
+      } catch (error) {
+        // Fallback: try specialized provider-normalization for malformed payloads
+        const repaired = repairMalformedJsonPayload(candidate);
+        if (repaired) {
+          try {
+            return { success: true, data: JSON.parse(repaired) as T };
+          } catch {
+            // Drop through to lastError tracking
+          }
+        }
+        
+        lastError = error instanceof Error ? error.message : String(error);
+        lastContext = candidate.slice(0, 200);
+      }
+    }
+  }
+
+  return { success: false, error: lastError, context: lastContext };
+}
+
 export function parseToolCallPayload(
   payload: string,
 ): ParseResult<{ name?: string; input?: Record<string, unknown>; dependsOn?: string[] }> {
-  // Try raw parse first
-  try {
-    const data = JSON.parse(payload) as {
-      name?: string;
-      input?: Record<string, unknown>;
-      dependsOn?: string[];
-    };
-    return { success: true, data };
-  } catch (e1) {
-    // Try with automatic escape fixes
-    try {
-      const escaped = escapeLiteralControlCharsInJsonStrings(payload);
-      const data = JSON.parse(escaped) as {
-        name?: string;
-        input?: Record<string, unknown>;
-        dependsOn?: string[];
-      };
-      return { success: true, data };
-    } catch (e2) {
-      // Return detailed diagnostic error
-      const error = e2 instanceof Error ? e2.message : String(e2);
-      const context = payload.slice(0, 200); // First 200 chars for context
-      return { success: false, error, context };
-    }
-  }
+  return parseJsonRecord<{
+    name?: string;
+    input?: Record<string, unknown>;
+    dependsOn?: string[];
+  }>(payload);
+}
+
+export function parseToolCallInputPayload(payload: string): ParseResult<Record<string, unknown>> {
+  return parseJsonRecord<Record<string, unknown>>(payload);
 }
 
 /**

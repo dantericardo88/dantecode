@@ -1,0 +1,11 @@
+{
+  "id": "898ddfa1",
+  "index": 0,
+  "timestamp": "2026-04-09T15:12:56.026Z",
+  "kind": "checkpoint",
+  "source": "system",
+  "data": {
+    "checkpointId": "60a06b7a-ad4",
+    "step": 0
+  }
+}

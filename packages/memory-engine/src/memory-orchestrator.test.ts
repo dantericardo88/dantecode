@@ -247,6 +247,84 @@ describe("MemoryOrchestrator — memoryPrune", () => {
 });
 
 // ---------------------------------------------------------------------------
+// setEmbeddingProvider / isUsingRealEmbeddings
+// ---------------------------------------------------------------------------
+
+describe("MemoryOrchestrator — embedding provider public API", () => {
+  it("isUsingRealEmbeddings() returns false before setEmbeddingProvider()", async () => {
+    const { orch, dir } = await makeOrchestrator();
+    try {
+      await orch.initialize();
+      expect(orch.isUsingRealEmbeddings()).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("isUsingRealEmbeddings() returns true after setEmbeddingProvider()", async () => {
+    const { orch, dir } = await makeOrchestrator();
+    try {
+      await orch.initialize();
+      orch.setEmbeddingProvider(async () => [0.1, 0.2, 0.3]);
+      expect(orch.isUsingRealEmbeddings()).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("setEmbeddingProvider() can be called multiple times without throwing", async () => {
+    const { orch, dir } = await makeOrchestrator();
+    try {
+      await orch.initialize();
+      expect(() => {
+        orch.setEmbeddingProvider(async () => [0.1]);
+        orch.setEmbeddingProvider(async () => [0.2]);
+      }).not.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("memoryRecall() is async and returns a Promise", async () => {
+    const { orch, dir } = await makeOrchestrator();
+    try {
+      await orch.initialize();
+      const p = orch.memoryRecall("test query");
+      expect(p).toBeInstanceOf(Promise);
+      await p;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("full cycle: store → setEmbeddingProvider → recall returns result", async () => {
+    const { orch, dir } = await makeOrchestrator();
+    try {
+      await orch.initialize();
+
+      // Store an item
+      await orch.memoryStore("embed-test", "real embedding provider cosine similarity", "session");
+
+      // Wire a simple embedding provider
+      orch.setEmbeddingProvider(async (text) => {
+        const lower = text.toLowerCase();
+        if (lower.includes("embed") || lower.includes("cosine") || lower.includes("provider")) {
+          return [1, 0, 0];
+        }
+        return [0, 1, 0];
+      });
+
+      // Recall should not throw and should work
+      const result = await orch.memoryRecall("embedding cosine provider", 5);
+      expect(Array.isArray(result.results)).toBe(true);
+      expect(typeof result.latencyMs).toBe("number");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // listSessionKnowledge
 // ---------------------------------------------------------------------------
 

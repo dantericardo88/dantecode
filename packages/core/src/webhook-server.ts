@@ -6,6 +6,7 @@
 // ============================================================================
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { EventTriggerRegistry } from "./event-triggers.js";
 import type { BackgroundAgentRunner } from "./background-agent.js";
 import { appendAuditEvent } from "./audit.js";
@@ -29,6 +30,8 @@ export interface WebhookServerConfig {
   apiToken?: string;
   /** Optional Slack signing secret for verifying Slack webhook signatures. */
   slackSigningSecret?: string;
+  /** Optional Linear webhook secret for verifying Linear webhook signatures (HMAC-SHA256). */
+  linearWebhookSecret?: string;
   /** Optional config for the Issue-to-PR pipeline. When set, issue webhooks
    *  trigger the full pipeline (worktree → agent → verify → PR → comment). */
   issueToPR?: IssueToPRConfig;
@@ -308,6 +311,99 @@ async function handleSlackWebhook(
 }
 
 /**
+ * POST /webhooks/linear
+ *
+ * Reads the raw body, verifies the Linear HMAC-SHA256 signature
+ * (header: `linear-signature`), parses the JSON payload, and enqueues
+ * an agent task for actionable issue events (Issue.created, Issue.assigned).
+ *
+ * Linear webhook signature: HMAC-SHA256 of the raw request body using the
+ * webhook secret configured in the Linear workspace settings.
+ */
+async function handleLinearWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: WebhookServerConfig,
+): Promise<void> {
+  const rawBody = await readBody(req);
+
+  // Signature verification (optional — skip if no secret configured)
+  if (config.linearWebhookSecret) {
+    const signatureHeader = req.headers["linear-signature"];
+    if (typeof signatureHeader !== "string" || !signatureHeader) {
+      sendJSON(res, 401, { error: "Missing linear-signature header" });
+      return;
+    }
+    const expected = createHmac("sha256", config.linearWebhookSecret)
+      .update(rawBody)
+      .digest("hex");
+    try {
+      const sigBuf = Buffer.from(signatureHeader);
+      const expBuf = Buffer.from(expected);
+      if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+        sendJSON(res, 401, { error: "Invalid Linear webhook signature" });
+        return;
+      }
+    } catch {
+      sendJSON(res, 401, { error: "Invalid Linear webhook signature" });
+      return;
+    }
+  }
+
+  // Parse JSON payload
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    sendJSON(res, 400, { error: "Invalid JSON body" });
+    return;
+  }
+
+  const type = payload.type as string | undefined;
+  const action = payload.action as string | undefined;
+  const data = payload.data as Record<string, unknown> | undefined;
+
+  // Only handle actionable issue events
+  const actionable =
+    type === "Issue" && (action === "created" || action === "assigned") && data != null;
+
+  if (!actionable) {
+    sendJSON(res, 200, {
+      accepted: false,
+      reason: `Event ${type ?? "unknown"}/${action ?? "unknown"} not handled`,
+    });
+    return;
+  }
+
+  const title = (data?.title as string) ?? "(no title)";
+  const description = (data?.description as string) ?? "";
+  const issueId = (data?.id as string) ?? "";
+  const identifier = (data?.identifier as string) ?? issueId;
+
+  const prompt = `[Linear ${identifier}] ${title}${description ? `\n\n${description}` : ""}`;
+
+  const taskId = config.backgroundRunner.enqueue(prompt);
+
+  appendAuditEvent(config.projectRoot, {
+    sessionId: taskId,
+    timestamp: new Date().toISOString(),
+    type: "webhook_received",
+    payload: { source: "linear", event: `${type}/${action}`, taskId, issueId: identifier },
+    modelId: "",
+    projectRoot: config.projectRoot,
+  }).catch(() => {
+    /* non-fatal */
+  });
+
+  sendJSON(res, 200, {
+    accepted: true,
+    taskId,
+    source: "linear",
+    issueId: identifier,
+  });
+}
+
+/**
  * POST /api/tasks
  *
  * Bearer-token authenticated endpoint for submitting tasks via REST API.
@@ -395,6 +491,7 @@ function handleHealth(res: ServerResponse, config: WebhookServerConfig, startTim
  * Routes:
  *   POST /webhooks/github  — GitHub webhook receiver
  *   POST /webhooks/slack   — Slack webhook receiver
+ *   POST /webhooks/linear  — Linear webhook receiver (Issue.created, Issue.assigned)
  *   POST /api/tasks        — REST API task submission
  *   GET  /health           — Health check
  *
@@ -418,6 +515,12 @@ export function createWebhookServer(config: WebhookServerConfig): WebhookServerH
       // ── POST /webhooks/slack ───────────────────────────────────────────
       if (method === "POST" && url === "/webhooks/slack") {
         await handleSlackWebhook(req, res, config);
+        return;
+      }
+
+      // ── POST /webhooks/linear ──────────────────────────────────────────
+      if (method === "POST" && url === "/webhooks/linear") {
+        await handleLinearWebhook(req, res, config);
         return;
       }
 

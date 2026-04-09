@@ -1,0 +1,128 @@
+name: SWE-bench Benchmark
+
+on:
+  schedule:
+    # Weekly run: Sunday at 2am UTC
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      instances:
+        description: "Number of instances to evaluate"
+        default: "50"
+        required: false
+      parallel:
+        description: "Number of parallel workers"
+        default: "4"
+        required: false
+
+jobs:
+  benchmark:
+    name: SWE-bench Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build swe-bench harness
+        run: npm run build --workspace=packages/swe-bench
+
+      - name: Build CLI
+        run: npm run build --workspace=packages/cli
+
+      - name: Run SWE-bench evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          INSTANCES="${{ github.event.inputs.instances || '50' }}"
+          PARALLEL="${{ github.event.inputs.parallel || '4' }}"
+          OUTPUT=".dantecode/benchmark-$(date +%Y-%m-%d).json"
+
+          echo "Running $INSTANCES instances with $PARALLEL parallel workers..."
+          npm run benchmark --workspace=packages/cli -- \
+            --instances "$INSTANCES" \
+            --parallel "$PARALLEL" \
+            --local \
+            --output "$OUTPUT" \
+            2>&1 | tee /tmp/benchmark-output.txt
+
+          echo "BENCHMARK_OUTPUT=$(cat /tmp/benchmark-output.txt | tail -5 | tr '\n' ' ')" >> "$GITHUB_ENV"
+          echo "RESULT_FILE=$OUTPUT" >> "$GITHUB_ENV"
+          echo "RUN_DATE=$(date +%Y-%m-%d)" >> "$GITHUB_ENV"
+
+      - name: Extract score
+        id: score
+        run: |
+          RESULT_FILE="${{ env.RESULT_FILE }}"
+          if [ -f "$RESULT_FILE" ]; then
+            RESOLVED=$(node -e "const d=JSON.parse(require('fs').readFileSync('$RESULT_FILE','utf8')); console.log(d.score.resolved)")
+            TOTAL=$(node -e "const d=JSON.parse(require('fs').readFileSync('$RESULT_FILE','utf8')); console.log(d.score.total)")
+            RATE=$(node -e "const d=JSON.parse(require('fs').readFileSync('$RESULT_FILE','utf8')); console.log((d.score.resolvedRate*100).toFixed(1)+'%')")
+            DURATION=$(node -e "const d=JSON.parse(require('fs').readFileSync('$RESULT_FILE','utf8')); const s=Math.floor(d.durationMs/1000); console.log(Math.floor(s/60)+'m '+s%60+'s')")
+            echo "resolved=$RESOLVED" >> "$GITHUB_OUTPUT"
+            echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+            echo "rate=$RATE" >> "$GITHUB_OUTPUT"
+            echo "duration=$DURATION" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolved=0" >> "$GITHUB_OUTPUT"
+            echo "total=0" >> "$GITHUB_OUTPUT"
+            echo "rate=0.0%" >> "$GITHUB_OUTPUT"
+            echo "duration=unknown" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Append result to BENCHMARK_RESULTS.md
+        run: |
+          DATE="${{ env.RUN_DATE }}"
+          RESOLVED="${{ steps.score.outputs.resolved }}"
+          TOTAL="${{ steps.score.outputs.total }}"
+          RATE="${{ steps.score.outputs.rate }}"
+          INSTANCES="${{ github.event.inputs.instances || '50' }}"
+
+          # Append new row to the Historical Results table
+          ROW="| $DATE | 0.9.2 | $INSTANCES | $RESOLVED | $RATE | ubuntu-latest | CI run (scheduled) |"
+
+          # Insert before the italics line at end of table
+          sed -i "s|^\*CI runs on ubuntu-latest.*|$ROW\n\*CI runs on ubuntu-latest will be added here automatically via \`.github\/workflows\/benchmark.yml\`\*|" BENCHMARK_RESULTS.md
+
+      - name: Commit results
+        run: |
+          git config user.email "ci@dantecode.dev"
+          git config user.name "DanteCode CI"
+          git add BENCHMARK_RESULTS.md
+          git add .dantecode/benchmark-*.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "ci: SWE-bench run ${{ env.RUN_DATE }} — ${{ steps.score.outputs.resolved }}/${{ steps.score.outputs.total }} (${{ steps.score.outputs.rate }})"
+          git push
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results-${{ env.RUN_DATE }}
+          path: .dantecode/benchmark-*.json
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "## SWE-bench Results — ${{ env.RUN_DATE }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Metric | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Resolved | ${{ steps.score.outputs.resolved }}/${{ steps.score.outputs.total }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Rate | ${{ steps.score.outputs.rate }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Duration | ${{ steps.score.outputs.duration }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platform | ubuntu-latest |" >> "$GITHUB_STEP_SUMMARY"

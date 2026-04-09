@@ -13,6 +13,9 @@ export default defineConfig({
     testTimeout: 30_000,
     coverage: {
       provider: "v8",
+      // all: true ensures even untested files appear in coverage — prevents
+      // hiding unexercised code by simply not importing it in tests.
+      all: true,
       // OSS v1 gates the stable runtime packages here. Preview/experimental
       // surfaces still run in `npm test`, but do not block these thresholds.
       include: [
@@ -26,14 +29,16 @@ export default defineConfig({
         "packages/web-research/src/**/*.ts",
         "packages/web-extractor/src/**/*.ts",
         "packages/agent-orchestrator/src/**/*.ts",
+        "packages/cli/src/**/*.ts",
       ],
       exclude: ["**/*.test.ts", "**/*.d.ts", "**/index.ts"],
       reporter: ["text", "text-summary", "json-summary"],
       reportsDirectory: "./coverage",
       thresholds: {
-        statements: 30,
-        functions: 80,
-        lines: 30,
+        statements: 60,
+        branches: 50,
+        functions: 85,
+        lines: 60,
         "packages/memory-engine/src/**/*.ts": {
           statements: 70,
           functions: 70,
@@ -63,6 +68,12 @@ export default defineConfig({
           statements: 70,
           functions: 60,
           lines: 70,
+        },
+        "packages/cli/src/**/*.ts": {
+          statements: 50,
+          branches: 45,
+          functions: 65,
+          lines: 50,
         },
       },
     },

@@ -43,6 +43,7 @@ export const CHANNEL_TO_SECTION: Record<TriggerChannel, string> = {
   verification: "quality-gates",
   policy: "task-patterns",
   audit: "general",
+  "novel-task": "novel-patterns",
 };
 
 /**

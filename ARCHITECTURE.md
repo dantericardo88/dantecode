@@ -79,7 +79,7 @@ npm run measure:scores       # Auto-measure 6 scoring dimensions
 Individual gates:
 
 ```bash
-npm run build                # 21 packages via turbo
+npm run build                # 32 packages via turbo
 npm run typecheck            # 38 packages (tsc --noEmit)
 npm run lint                 # 31 lint tasks
 npm run format:check         # Prettier
@@ -143,7 +143,7 @@ User Input → REPL → Agent Loop → Model Router → Tool Execution → Verif
 
 ### Key Design Decisions
 
-**Decision 1: Monorepo (27 packages)**
+**Decision 1: Monorepo (32 packages)**
 - ✅ Atomic refactoring, shared tooling, single version
 - ⚠️ Build complexity (turbo required), circular dep risk
 
@@ -191,8 +191,7 @@ User Input → REPL → Agent Loop → Model Router → Tool Execution → Verif
 
 - [VISION.md](VISION.md)
 - [SCORING.md](SCORING.md)
-- [RELEASE.md](RELEASE.md)
 - [SPEC.md](SPEC.md)
-- [PLAN.md](PLAN.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [DEPLOYMENT.md](DEPLOYMENT.md) — Production deployment guide (Docker/K8s/bare metal)
+- [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) — SWE-bench evaluation history

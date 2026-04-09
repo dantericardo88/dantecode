@@ -23,6 +23,7 @@ import { CredentialVault } from "./credential-vault.js";
 import { retryWithBackoff, RetryableErrors } from "./retry-with-backoff.js";
 import { MetricCounter, TraceRecorder } from "@dantecode/observability";
 import { globalTokenCache } from "./token-cache.js";
+import { classifyError, DanteErrorType } from "./error-classifier.js";
 
 // ─── Observability ──────────────────────────────────────────────────────────
 
@@ -68,6 +69,17 @@ type ProviderOptionValue =
   | { [key: string]: ProviderOptionValue };
 
 type ProviderOptions = Record<string, { [key: string]: ProviderOptionValue }>;
+
+function getProviderOptionsNamespace(provider: ModelConfig["provider"]): string {
+  switch (provider) {
+    case "grok":
+      // xAI/Grok is routed through the OpenAI-compatible provider adapter, so the
+      // AI SDK expects OpenAI-flavored provider options here.
+      return "openai";
+    default:
+      return provider;
+  }
+}
 
 /**
  * Options passed to generate() and stream() methods.
@@ -403,6 +415,13 @@ export class ModelRouterImpl {
             thinkingBudget: options.thinkingBudget ?? 0,
           },
         };
+      case "grok":
+        return {
+          openai: {
+            reasoningEffort,
+            thinkingBudget: options.thinkingBudget ?? 0,
+          },
+        };
       case "google":
         return {
           google: {
@@ -414,7 +433,7 @@ export class ModelRouterImpl {
         };
       default:
         return {
-          [config.provider]: {
+          [getProviderOptionsNamespace(config.provider)]: {
             reasoningEffort,
             thinkingBudget: options.thinkingBudget ?? 0,
           },
@@ -466,7 +485,8 @@ export class ModelRouterImpl {
     messages: CoreMessage[],
     options: GenerateOptions,
   ): Promise<
-    { success: true; text: string; error?: never } | { success: false; text: string; error: Error }
+    | { success: true; text: string; error?: never }
+    | { success: false; text: string; error: Error; errorType: DanteErrorType }
   > {
     const startTime = Date.now();
 
@@ -560,15 +580,17 @@ export class ModelRouterImpl {
       routerTracer.endSpan(genSpan.id);
       return { success: true, text: result.text };
     } catch (err: unknown) {
+      const errorType = classifyError(err);
       const durationMs = Date.now() - startTime;
       const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
 
       // ─── Observability: Track error metrics ───
       routerMetrics.increment("model.requests.error");
+      routerMetrics.increment(`model.requests.error.${errorType}`);
       routerTracer.endSpan(genSpan.id, error);
 
-      return { success: false, text: "", error };
+      return { success: false, text: "", error, errorType };
     }
   }
 
@@ -590,7 +612,7 @@ export class ModelRouterImpl {
         stream: StreamTextResult<Record<string, never>, never>;
         error?: never;
       }
-    | { success: false; stream: never; error: Error }
+    | { success: false; stream: never; error: Error; errorType: DanteErrorType }
   > {
     const startTime = Date.now();
 
@@ -651,13 +673,16 @@ export class ModelRouterImpl {
         stream: result as StreamTextResult<Record<string, never>, never>,
       };
     } catch (err: unknown) {
+      const errorType = classifyError(err);
       const durationMs = Date.now() - startTime;
       const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
-      return { success: false, error } as {
+      routerMetrics.increment(`model.requests.error.${errorType}`);
+      return { success: false, error, errorType } as {
         success: false;
         stream: never;
         error: Error;
+        errorType: DanteErrorType;
       };
     }
   }
@@ -672,13 +697,14 @@ export class ModelRouterImpl {
     options: GenerateOptions,
   ): Promise<
     | { success: true; stream: StreamTextResult<T, never>; error?: never }
-    | { success: false; stream: never; error: Error }
+    | { success: false; stream: never; error: Error; errorType: DanteErrorType }
   > {
     const startTime = Date.now();
 
     try {
       const builder = this.resolveProvider(config);
-      const model = builder(config);
+      const enrichedConfig = await this._enrichConfigApiKey(config);
+      const model = builder(enrichedConfig);
       const providerOptions = this.buildProviderOptions(config, options);
 
       this.logEntry(config, "attempt", 0);
@@ -729,10 +755,17 @@ export class ModelRouterImpl {
 
       return { success: true, stream: result as StreamTextResult<T, never> };
     } catch (err: unknown) {
+      const errorType = classifyError(err);
       const durationMs = Date.now() - startTime;
       const error = err instanceof Error ? err : new Error(String(err));
       this.logEntry(config, "error", durationMs, error.message);
-      return { success: false, error } as { success: false; stream: never; error: Error };
+      routerMetrics.increment(`model.requests.error.${errorType}`);
+      return { success: false, error, errorType } as {
+        success: false;
+        stream: never;
+        error: Error;
+        errorType: DanteErrorType;
+      };
     }
   }
 

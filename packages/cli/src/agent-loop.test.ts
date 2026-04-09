@@ -5,14 +5,16 @@
 // planning phase, approach memory, pivot logic, progress tracking.
 // ============================================================================
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolve } from "node:path";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock external dependencies BEFORE importing module under test
 
 // Mock generateText at the "ai" module level — ModelRouterImpl calls this internally.
 const {
   mockGenerateText,
+  mockStreamText,
+  mockSwallowError,
   mockGetLatestWaitingRun,
   mockLoadSessionSnapshot,
   mockPauseRun,
@@ -33,6 +35,8 @@ const {
   mockGetFallbackModelId,
 } = vi.hoisted(() => ({
   mockGenerateText: vi.fn(),
+  mockStreamText: vi.fn(),
+  mockSwallowError: vi.fn(),
   mockGetLatestWaitingRun: vi.fn().mockResolvedValue(null),
   mockLoadSessionSnapshot: vi.fn().mockResolvedValue(null),
   mockPauseRun: vi.fn(),
@@ -55,7 +59,7 @@ const {
 
 vi.mock("ai", () => ({
   generateText: mockGenerateText,
-  streamText: vi.fn(),
+  streamText: mockStreamText,
 }));
 
 // Track analyzeComplexity return value so tests can override it
@@ -97,6 +101,20 @@ vi.mock("@dantecode/core", async () => {
           yield text;
         })(),
       };
+    }
+
+    async streamWithTools(
+      messages: Array<{ role: string; content: string }>,
+      _tools: Record<string, unknown>,
+      _options?: Record<string, unknown>,
+    ): Promise<{ fullStream: AsyncIterable<unknown> }> {
+      const result = await mockStreamText({
+        model: { modelId: "mock" },
+        messages,
+        tools: _tools,
+        system: _options?.system,
+      });
+      return result;
     }
 
     extractModelComplexityRating(_responseText: string, _userPrompt?: string): number | null {
@@ -261,6 +279,7 @@ vi.mock("@dantecode/core", async () => {
     BackgroundTaskStore: MockBackgroundTaskStore,
     _mockGetRecentSummaries: mockGetRecentSummaries,
     appendAuditEvent: vi.fn().mockResolvedValue(undefined),
+    swallowError: mockSwallowError,
     shouldContinueLoop: vi.fn(() => true),
     estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
     estimateMessageTokens: vi.fn((msgs: Array<{ content: string }>) =>
@@ -657,6 +676,7 @@ vi.mock("@dantecode/core", async () => {
       startSpan: vi.fn(() => ({ spanId: "trace-span-1", traceId: "trace-1" })),
       endSpan: vi.fn(),
       recordEvent: vi.fn(),
+      logEvent: vi.fn(),
       logDecision: vi.fn(),
       flush: vi.fn(),
     })),
@@ -947,6 +967,8 @@ describe("runAgentLoop smoke tests", () => {
     mockIsUsingFallback.mockReturnValue(false);
     mockGetFallbackModelId.mockReturnValue(undefined);
     mockGenerateText.mockReset();
+    mockStreamText.mockReset();
+    mockSwallowError.mockReset();
     mockExecuteTool.mockReset();
     mockExecuteTool.mockResolvedValue({ content: "ok", isError: false });
     mockGetLatestWaitingRun.mockResolvedValue(null);
@@ -1121,6 +1143,96 @@ describe("runAgentLoop smoke tests", () => {
         projectRoot: "/tmp/test-project",
         execute: expect.any(Function),
       }),
+    );
+  });
+
+  it("repairs streamed native tool-call deltas before dispatching tools", async () => {
+    mockSwallowError.mockImplementation((error: unknown, scope?: string) => {
+      if (scope === "native-tool-calling") {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+    });
+
+    mockStreamText
+      .mockResolvedValueOnce({
+        fullStream: (async function* () {
+          yield { type: "tool-call-streaming-start", toolCallId: "call_1", toolName: "Read" };
+          yield {
+            type: "tool-call-delta",
+            toolCallId: "call_1",
+            toolName: "Read",
+            argsTextDelta: "{\"file_path\":",
+          };
+          yield {
+            type: "tool-call-delta",
+            toolCallId: "call_1",
+            toolName: "Read",
+            argsTextDelta: "\"src/index.ts\"}",
+          };
+          yield {
+            type: "step-finish",
+            messageId: "msg_1",
+            usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+          };
+        })(),
+      })
+      .mockResolvedValueOnce({
+        fullStream: (async function* () {
+          yield { type: "text-delta", textDelta: "Read completed." };
+          yield {
+            type: "step-finish",
+            messageId: "msg_2",
+            usage: { promptTokens: 8, completionTokens: 4, totalTokens: 12 },
+          };
+        })(),
+      });
+
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+
+    await runAgentLoop(
+      "Read src/index.ts",
+      makeSession(),
+      makeConfig({
+        state: {
+          model: {
+            default: {
+              provider: "grok",
+              modelId: "grok-3",
+              maxTokens: 4096,
+              temperature: 0.1,
+              contextWindow: 131072,
+              supportsVision: false,
+              supportsToolCalls: true,
+            },
+            fallback: [],
+            taskOverrides: {},
+          },
+          project: { name: "test", language: "typescript" },
+          pdse: {
+            threshold: 60,
+            hardViolationsAllowed: 0,
+            maxRegenerationAttempts: 3,
+            weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 },
+          },
+          autoforge: {
+            enabled: false,
+            maxIterations: 1,
+            gstackCommands: [],
+            lessonInjectionEnabled: false,
+            abortOnSecurityViolation: false,
+          },
+        } as unknown as DanteCodeState,
+      }),
+    );
+
+    expect(mockSchedulerExecuteBatch).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          toolName: "Read",
+          input: { file_path: "src/index.ts" },
+        }),
+      ],
+      expect.any(Object),
     );
   });
 
@@ -1816,6 +1928,7 @@ describe("Memory Bridge: lesson injection", () => {
     expect(result.messages.length).toBeGreaterThanOrEqual(2);
     expect(result.updatedAt).toBeDefined();
   });
+
 });
 
 // ---------------------------------------------------------------------------

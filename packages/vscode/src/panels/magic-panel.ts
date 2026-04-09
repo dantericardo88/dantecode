@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 export class MagicPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "dantecode.magicView";
@@ -27,29 +29,58 @@ export class MagicPanelProvider implements vscode.WebviewViewProvider {
   }
 
   async startMagic(goal: string): Promise<void> {
-    if (!this.view) {
-      return;
-    }
+    if (!this.view) return;
 
-    // Send start event
-    void this.view.webview.postMessage({
-      type: "magic_started",
-      payload: { goal },
+    const view = this.view;
+
+    void view.webview.postMessage({ type: "magic_started", payload: { goal } });
+
+    const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
+    // Resolve CLI entry point relative to the extension's package root
+    const extensionRoot = join(this.extensionUri.fsPath, "..", "..");
+    const cliPath = join(extensionRoot, "packages", "cli", "dist", "index.js");
+
+    const child = spawn("node", [cliPath, "/magic", goal], {
+      cwd: projectRoot || extensionRoot,
+      env: { ...process.env },
     });
 
-    // TODO: Wire to actual /magic command execution
-    // For now, simulate progress
-    for (let i = 0; i <= 100; i += 10) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      void this.view.webview.postMessage({
+    let progress = 5;
+    child.stdout.on("data", (chunk: Buffer) => {
+      const text = chunk.toString();
+      progress = Math.min(95, progress + 3);
+      const phase = progress < 30 ? "Planning" : progress < 70 ? "Building" : "Verifying";
+      void view.webview.postMessage({
+        type: "magic_progress",
+        payload: { progress, phase, status: "running", details: text },
+      });
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      void view.webview.postMessage({
+        type: "magic_progress",
+        payload: { progress, phase: "Running", status: "running", details: chunk.toString() },
+      });
+    });
+
+    child.on("close", (code) => {
+      void view.webview.postMessage({
         type: "magic_progress",
         payload: {
-          progress: i,
-          phase: i < 30 ? "Planning" : i < 70 ? "Building" : "Verifying",
-          status: i < 100 ? "running" : "complete",
+          progress: 100,
+          phase: code === 0 ? "Complete" : "Failed",
+          status: "complete",
+          details: code === 0 ? "Magic complete." : `Exited with code ${code}`,
         },
       });
-    }
+    });
+
+    child.on("error", (err) => {
+      void view.webview.postMessage({
+        type: "magic_progress",
+        payload: { progress: 0, phase: "Error", status: "complete", details: err.message },
+      });
+    });
   }
 
   updateProgress(progress: number, phase: string, status: string, details?: string): void {

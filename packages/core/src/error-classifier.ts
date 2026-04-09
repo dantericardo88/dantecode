@@ -16,6 +16,8 @@ export enum DanteErrorType {
   ContextWindow = "contextWindow",
   /** Transient network error. Retry with backoff. */
   Network = "network",
+  /** Circuit breaker is open for this provider. Wait for reset window — do NOT retry immediately. */
+  CircuitOpen = "circuitOpen",
   /** Unknown / unclassified error. Retry with caution. */
   Unknown = "unknown",
 }
@@ -113,6 +115,17 @@ interface ClassifiableError {
  * 6. Unknown (fallback)
  */
 export function classifyError(err: unknown): DanteErrorType {
+  // 0. CircuitOpenError — duck-type check avoids circular import from circuit-breaker.ts.
+  // CircuitOpenError always has name="CircuitOpenError" and a string "provider" field.
+  if (
+    err instanceof Error &&
+    err.name === "CircuitOpenError" &&
+    "provider" in err &&
+    typeof (err as Record<string, unknown>)["provider"] === "string"
+  ) {
+    return DanteErrorType.CircuitOpen;
+  }
+
   const e = toClassifiable(err);
   const message = e.message ?? "";
   const status = e.status ?? e.response?.status;
@@ -166,6 +179,15 @@ export function isRetryable(type: DanteErrorType): boolean {
  */
 export function isTerminal(type: DanteErrorType): boolean {
   return TERMINAL_ERROR_TYPES.has(type);
+}
+
+/**
+ * Returns true for circuit-open errors.
+ * The circuit breaker has its own reset window — do not use standard retry backoff.
+ * The error carries a `provider` field indicating which provider is blocked.
+ */
+export function isCircuitOpen(type: DanteErrorType): boolean {
+  return type === DanteErrorType.CircuitOpen;
 }
 
 /**

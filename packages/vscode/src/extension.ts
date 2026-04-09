@@ -5,8 +5,18 @@
 
 import * as vscode from "vscode";
 import * as path from "path";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext } from "@dantecode/core";
+import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  DEFAULT_MODEL_ID,
+  EXECUTION_TRUTH_RELATIVE_PATH,
+  MODEL_CATALOG,
+  detectInstallContext,
+  RecoveryManager,
+  EventSourcedCheckpointer,
+  resumeFromCheckpoint,
+  JsonlEventStore,
+} from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
@@ -36,6 +46,57 @@ let diagnosticProvider: PDSEDiagnosticProvider | undefined;
 let onboardingProvider: OnboardingProvider | undefined;
 let checkpointManager: CheckpointManager | undefined;
 let diffReviewProvider: DiffReviewProvider | undefined;
+
+async function refreshExecutionTruthSurface(): Promise<void> {
+  if (!statusBarState) {
+    return;
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) {
+    return;
+  }
+
+  try {
+    const truthPath = path.join(workspaceRoot, EXECUTION_TRUTH_RELATIVE_PATH);
+    const raw = await readFile(truthPath, "utf8");
+    const payload = JSON.parse(raw) as {
+      provider?: string;
+      model?: string;
+      mode?: string;
+      changedFiles?: string[];
+      mutationCount?: number;
+      validationCount?: number;
+      gateStatus?: "passed" | "failed";
+      reasonCode?: string;
+      lastVerifiedAt?: string;
+    };
+
+    updateStatusBarInfo(statusBarState, {
+      model:
+        payload.provider && payload.model
+          ? `${payload.provider}/${payload.model}`
+          : payload.model,
+      provider: payload.provider,
+      mode: payload.mode,
+      changedFiles: payload.changedFiles ?? [],
+      mutationCount: payload.mutationCount ?? 0,
+      validationCount: payload.validationCount ?? 0,
+      reasonCode: payload.reasonCode,
+      lastVerifiedAt: payload.lastVerifiedAt,
+    });
+
+    if (payload.gateStatus) {
+      updateStatusBar(
+        statusBarState,
+        payload.provider && payload.model ? `${payload.provider}/${payload.model}` : statusBarState.currentModel,
+        payload.gateStatus,
+      );
+    }
+  } catch {
+    // Ignore missing or malformed truth payloads.
+  }
+}
 
 /** Tracks the last diff hunk file path for accept/reject commands. */
 let pendingDiffFilePath: string | undefined;
@@ -143,6 +204,17 @@ export function activate(context: vscode.ExtensionContext): void {
   try {
     statusBarState = createStatusBar(context);
     updateStatusBar(statusBarState, DEFAULT_MODEL_ID, "none");
+    void refreshExecutionTruthSurface();
+
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (folder) {
+      const truthPattern = new vscode.RelativePattern(folder, EXECUTION_TRUTH_RELATIVE_PATH);
+      const truthWatcher = vscode.workspace.createFileSystemWatcher(truthPattern);
+      truthWatcher.onDidCreate(() => void refreshExecutionTruthSurface());
+      truthWatcher.onDidChange(() => void refreshExecutionTruthSurface());
+      truthWatcher.onDidDelete(() => void refreshExecutionTruthSurface());
+      context.subscriptions.push(truthWatcher);
+    }
   } catch (err) {
     log(`Status bar creation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -217,6 +289,9 @@ function registerCommands(context: vscode.ExtensionContext): void {
     ["dantecode.createCheckpoint", commandCreateCheckpoint],
     ["dantecode.listCheckpoints", commandListCheckpoints],
     ["dantecode.rewindCheckpoint", commandRewindCheckpoint],
+    ["dantecode.resumeSession", (id?: unknown) => commandResumeSession(typeof id === "string" ? id : undefined)],
+    ["dantecode.forkSession", commandForkSession],
+    ["dantecode.deleteCheckpoint", commandDeleteCheckpoint],
     ["dantecode.setupApiKeys", commandSetupApiKeys],
   ];
 
@@ -695,6 +770,150 @@ async function commandSetupApiKeys(): Promise<void> {
   }
 
   void vscode.commands.executeCommand("workbench.action.openSettings", "dantecode");
+}
+
+async function commandResumeSession(sessionId?: string): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  const mgr = new RecoveryManager({ projectRoot });
+  const sessions = await mgr.scanStaleSessions();
+  const resumable = sessions.filter((s) => s.status === "resumable");
+
+  let targetId = sessionId;
+  if (!targetId) {
+    if (resumable.length === 0) {
+      void vscode.window.showInformationMessage("DanteCode: No resumable sessions found");
+      return;
+    }
+    const pick = await vscode.window.showQuickPick(
+      resumable.map((s) => ({
+        label: s.sessionId.slice(0, 12),
+        description: s.timestamp ? new Date(s.timestamp).toLocaleString() : "",
+        detail: `Step ${s.step ?? "?"} — ${s.worktreeRef ?? "no branch"}`,
+        sessionId: s.sessionId,
+      })),
+      { placeHolder: "Select session to resume" },
+    );
+    if (!pick) return;
+    targetId = pick.sessionId;
+  }
+
+  try {
+    const eventStore = new JsonlEventStore(projectRoot, targetId);
+    const context = await resumeFromCheckpoint(projectRoot, targetId, eventStore);
+    if (!context) {
+      void vscode.window.showErrorMessage(
+        `DanteCode: No checkpoint found for session ${targetId.slice(0, 12)}`,
+      );
+      return;
+    }
+    await vscode.commands.executeCommand("dantecode.openChat");
+    void vscode.window.showInformationMessage(
+      `DanteCode: Resumed session ${targetId.slice(0, 12)} at step ${context.checkpoint.step}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Failed to resume session — ${msg}`);
+  }
+}
+
+async function commandForkSession(): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  const mgr = new RecoveryManager({ projectRoot });
+  const sessions = await mgr.scanStaleSessions();
+  const resumable = sessions.filter((s) => s.status === "resumable");
+
+  if (resumable.length === 0) {
+    void vscode.window.showInformationMessage("DanteCode: No resumable sessions to fork");
+    return;
+  }
+
+  const pick = await vscode.window.showQuickPick(
+    resumable.map((s) => ({
+      label: s.sessionId.slice(0, 12),
+      description: s.timestamp ? new Date(s.timestamp).toLocaleString() : "",
+      detail: `Step ${s.step ?? "?"} — ${s.worktreeRef ?? "no branch"}`,
+      sessionId: s.sessionId,
+    })),
+    { placeHolder: "Select session to fork" },
+  );
+  if (!pick) return;
+
+  const checkpointer = new EventSourcedCheckpointer(projectRoot, pick.sessionId);
+  const tuple = await checkpointer.getTuple();
+  if (!tuple) {
+    void vscode.window.showErrorMessage("DanteCode: Checkpoint not found");
+    return;
+  }
+
+  const ref = tuple.checkpoint.worktreeRef ?? "main";
+  try {
+    execFileSync(
+      "git",
+      ["checkout", "-b", `fork/${pick.sessionId.slice(0, 8)}-${Date.now()}`, ref],
+      { cwd: projectRoot, stdio: "pipe" },
+    );
+    void vscode.window.showInformationMessage(`DanteCode: Forked session to branch ${ref}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Fork failed — ${msg}`);
+  }
+}
+
+async function commandDeleteCheckpoint(): Promise<void> {
+  const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!projectRoot) {
+    void vscode.window.showWarningMessage("DanteCode: Open a workspace first");
+    return;
+  }
+
+  const mgr = new RecoveryManager({ projectRoot });
+  const sessions = await mgr.scanStaleSessions();
+
+  if (sessions.length === 0) {
+    void vscode.window.showInformationMessage("DanteCode: No checkpoints found");
+    return;
+  }
+
+  const pick = await vscode.window.showQuickPick(
+    sessions.map((s) => ({
+      label: s.sessionId.slice(0, 12),
+      description: s.status,
+      detail: s.checkpointPath,
+      checkpointPath: s.checkpointPath,
+      sessionId: s.sessionId,
+    })),
+    { placeHolder: "Select checkpoint to delete" },
+  );
+  if (!pick) return;
+
+  const confirm = await vscode.window.showWarningMessage(
+    `Delete checkpoint ${pick.label}? This cannot be undone.`,
+    "Delete",
+    "Cancel",
+  );
+  if (confirm !== "Delete") return;
+
+  const checkpointDir = pick.checkpointPath
+    .replace(/[/\\]base_state\.json$/, "");
+  try {
+    await rm(checkpointDir, { recursive: true, force: true });
+    void vscode.window.showInformationMessage(
+      `DanteCode: Deleted checkpoint ${pick.sessionId.slice(0, 12)}`,
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    void vscode.window.showErrorMessage(`DanteCode: Failed to delete checkpoint — ${msg}`);
+  }
 }
 
 async function commandSelfUpdate(context: vscode.ExtensionContext): Promise<void> {

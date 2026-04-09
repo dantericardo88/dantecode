@@ -1,0 +1,50 @@
+{
+  "checkpoint": {
+    "v": 1,
+    "id": "9a658cc0-c0e",
+    "ts": "2026-04-09T14:43:34.509Z",
+    "step": 0,
+    "channelValues": {
+      "id": "run-b1e19062-61f3-41cc-be88-6d41329f528d-1775745793994",
+      "workflow": "inferno",
+      "status": "failed",
+      "touchedFiles": [],
+      "evidenceCount": 0,
+      "lastConfirmedStep": "Started execution.",
+      "nextAction": "Resolve the model error before retrying.",
+      "executionPolicyState": {
+        "retryHistory": [],
+        "phases": []
+      }
+    },
+    "channelVersions": {
+      "id": 1,
+      "workflow": 1,
+      "status": 1,
+      "touchedFiles": 1,
+      "evidenceCount": 1,
+      "lastConfirmedStep": 1,
+      "lastSuccessfulTool": 1,
+      "nextAction": 1,
+      "executionPolicyState": 1
+    }
+  },
+  "metadata": {
+    "source": "update",
+    "step": 0,
+    "triggerCommand": "/inferno"
+  },
+  "replaySummary": {
+    "eventCount": 1,
+    "pendingWriteCount": 0,
+    "digest": "7be0a94b300b460c",
+    "lastEventIndex": 0
+  },
+  "workspaceContext": {
+    "projectRoot": "C:\\Projects\\DanteCode",
+    "workspaceRoot": "C:\\Projects\\DanteCode",
+    "repoRoot": "C:\\Projects\\DanteCode",
+    "workspaceIsRepoRoot": true,
+    "installContextKind": "repo_checkout"
+  }
+}

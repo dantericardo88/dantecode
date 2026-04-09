@@ -275,3 +275,16 @@ export class ErrorHelper {
 
 /** Singleton helper with default options (colors on). */
 export const errorHelper = new ErrorHelper();
+
+/**
+ * Swallow a caught error without discarding it silently.
+ * Logs a structured message to stderr with error kind + first hint.
+ * Use this instead of `.catch(() => {})` for fire-and-forget operations.
+ */
+export function swallowError(err: unknown, context: string): void {
+  const analysis = errorHelper.classify(String(err instanceof Error ? err.message : err));
+  // Log to console.error with structured context — never silently discard
+  console.error(
+    `[swallowError:${context}] kind=${analysis.kind}${analysis.suggestions.length > 0 ? ` hint=${analysis.suggestions[0]}` : ""}`,
+  );
+}

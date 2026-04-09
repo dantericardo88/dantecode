@@ -32,6 +32,10 @@ export class DanteSkillbookIntegration {
   prune(policy?: any): void;
   save(): void;
   reload(): void;
+  getTopSkills(n: number): any[];
+  recordSkillUse(skillId: string): void;
+  recordSessionOutcome(skillIds: string[], succeeded: boolean): void;
+  getEffectivenessReport(): Array<{ skillId: string; winRate: number; appliedInSessions: number; effectivenessScore: number }>;
 }
 
 export function getRelevantSkills(skills: any[], context: any, limit?: number): any[];

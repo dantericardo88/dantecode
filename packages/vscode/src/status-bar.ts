@@ -10,6 +10,8 @@ export type GateStatus = "passed" | "failed" | "pending" | "none";
 export interface StatusBarState {
   item: vscode.StatusBarItem;
   currentModel: string;
+  provider?: string;
+  mode?: string;
   gateStatus: GateStatus;
   sandboxEnabled: boolean;
   /** Blade v1.2: current model tier for cost routing display. */
@@ -24,15 +26,27 @@ export interface StatusBarState {
   hasError: boolean;
   /** Last known PDSE score (0-100). -1 means not scored yet. */
   pdseScore?: number;
+  mutationCount?: number;
+  validationCount?: number;
+  changedFiles?: string[];
+  reasonCode?: string;
+  lastVerifiedAt?: string;
 }
 
 /** Info payload for the updateStatusBarInfo() convenience method. */
 export interface StatusBarInfo {
   model?: string;
+  provider?: string;
+  mode?: string;
   contextPercent?: number;
   activeTasks?: number;
   hasError?: boolean;
   pdseScore?: number;
+  mutationCount?: number;
+  validationCount?: number;
+  changedFiles?: string[];
+  reasonCode?: string;
+  lastVerifiedAt?: string;
 }
 
 const GATE_ICONS: Record<GateStatus, string> = {
@@ -66,6 +80,8 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
   const state: StatusBarState = {
     item,
     currentModel: defaultModel,
+    provider: undefined,
+    mode: undefined,
     gateStatus: "none",
     sandboxEnabled,
     modelTier: "fast",
@@ -74,6 +90,11 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     activeTasks: 0,
     hasError: false,
     pdseScore: -1,
+    mutationCount: 0,
+    validationCount: 0,
+    changedFiles: [],
+    reasonCode: undefined,
+    lastVerifiedAt: undefined,
   };
 
   // Register the quick-pick command for status bar clicks
@@ -199,6 +220,12 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
   if (info.model !== undefined) {
     state.currentModel = info.model;
   }
+  if (info.provider !== undefined) {
+    state.provider = info.provider;
+  }
+  if (info.mode !== undefined) {
+    state.mode = info.mode;
+  }
   if (info.contextPercent !== undefined) {
     state.contextPercent = info.contextPercent;
   }
@@ -210,6 +237,21 @@ export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo):
   }
   if (info.pdseScore !== undefined) {
     state.pdseScore = info.pdseScore;
+  }
+  if (info.mutationCount !== undefined) {
+    state.mutationCount = info.mutationCount;
+  }
+  if (info.validationCount !== undefined) {
+    state.validationCount = info.validationCount;
+  }
+  if (info.changedFiles !== undefined) {
+    state.changedFiles = info.changedFiles;
+  }
+  if (info.reasonCode !== undefined) {
+    state.reasonCode = info.reasonCode;
+  }
+  if (info.lastVerifiedAt !== undefined) {
+    state.lastVerifiedAt = info.lastVerifiedAt;
   }
   renderStatusBar(state);
 }
@@ -245,6 +287,14 @@ export function formatStatusBarText(state: StatusBarState): string {
 
   if (state.activeTasks > 0) {
     parts.push(`${state.activeTasks} task${state.activeTasks !== 1 ? "s" : ""}`);
+  }
+
+  if ((state.mutationCount ?? 0) > 0) {
+    parts.push(`${state.mutationCount} mut`);
+  }
+
+  if ((state.validationCount ?? 0) > 0) {
+    parts.push(`${state.validationCount} val`);
   }
 
   return parts.join(" | ");
@@ -288,11 +338,20 @@ function renderStatusBar(state: StatusBarState): void {
   const pdseLabel = (state.pdseScore ?? -1) >= 0 ? `PDSE score: ${state.pdseScore}/100` : "PDSE score: not scored";
   item.tooltip = [
     `Model: ${state.currentModel}`,
+    `Provider: ${state.provider ?? "unknown"}`,
+    `Mode: ${state.mode ?? "unknown"}`,
     `Tier: ${state.modelTier}`,
     `Context: ${state.contextPercent}%`,
     `Active tasks: ${state.activeTasks}`,
+    `Mutations: ${state.mutationCount ?? 0}`,
+    `Validations: ${state.validationCount ?? 0}`,
     pdseLabel,
     GATE_TOOLTIPS[gateStatus],
+    state.reasonCode ? `Gate reason: ${state.reasonCode}` : "Gate reason: none",
+    state.lastVerifiedAt ? `Last verified: ${state.lastVerifiedAt}` : "Last verified: none",
+    state.changedFiles && state.changedFiles.length > 0
+      ? `Changed files: ${state.changedFiles.join(", ")}`
+      : "Changed files: none",
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
     "",

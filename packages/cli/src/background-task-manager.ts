@@ -323,11 +323,24 @@ export function createSubAgentExecutor(
           }
         }
 
+        // M5: Capture real evidence from the sub-agent session (Truth Surface enforcement)
+        const { executionIntegrity } = await import("@dantecode/core");
+        const ledgers = executionIntegrity.getSessionLedgers(subSession.id);
+        const childEvidence = {
+          mutations: ledgers.flatMap(l => l.mutations),
+          validations: ledgers.flatMap(l => l.validations),
+          toolCalls: ledgers.flatMap(l => l.toolCalls),
+          gateResult: ledgers.find(l => (l as any).completionStatus?.canComplete !== undefined) 
+            ? (ledgers.find(l => (l as any).completionStatus?.canComplete !== undefined) as any).completionStatus 
+            : undefined
+        };
+
         return {
           success: true,
           output: typeof lastAssistant?.content === "string" ? lastAssistant.content : "",
           touchedFiles,
           durationMs: Date.now() - startTime,
+          evidence: childEvidence
         };
       } catch (error: unknown) {
         return {

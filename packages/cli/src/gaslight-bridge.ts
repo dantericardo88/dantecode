@@ -7,7 +7,9 @@
 
 import type { Session } from "@dantecode/config-types";
 import type { ModelRouterImpl } from "@dantecode/core";
+import { swallowError } from "@dantecode/core";
 import type { DanteGaslightIntegration } from "@dantecode/dante-gaslight";
+import { DanteSkillbookIntegration } from "@dantecode/dante-skillbook";
 import {
   jaccardWordOverlap,
   adaptiveJaccardThreshold,
@@ -34,6 +36,69 @@ export interface GaslightBridgeContext {
 export interface GaslightBridgeResult {
   /** true if the user aborted after a FearSet NO-GO recommendation. */
   aborted: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Synchronously persists a gaslight session as a new Skillbook skill.
+ * applyProposals() is synchronous — no async needed.
+ * Called via setImmediate to avoid blocking onLessonEligible.
+ */
+function scheduleSkillbookPersist(
+  sessionId: string,
+  gaslight: DanteGaslightIntegration,
+  ctx: GaslightBridgeContext,
+  silent: boolean,
+): void {
+  try {
+    const session_record = gaslight.getSession(sessionId);
+    if (!session_record?.finalOutput) {
+      return;
+    }
+    const skillbookIntegration = new DanteSkillbookIntegration({
+      cwd: ctx.session.projectRoot,
+    });
+    const proposal = {
+      action: "add" as const,
+      rationale: `Gaslight-distilled lesson from session ${sessionId}`,
+      candidateSkill: {
+        id: sessionId,
+        title: `Gaslight lesson: ${sessionId.slice(0, 16)}`,
+        content: session_record.finalOutput.slice(0, 500),
+        section: "gaslight-lesson",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    const result = skillbookIntegration.applyProposals([proposal], ["pass"]);
+    const msg =
+      `[gaslight→skillbook] applied=${result.applied} queued=${result.queued} ` +
+      `rejected=${result.rejected}`;
+    if (!silent) {
+      process.stdout.write(`${GREEN}${msg}${RESET}\n`);
+    }
+    if (result.applied > 0) {
+      // Store evidence on session if available
+      const ev = (ctx.session as { evidence?: string[] }).evidence;
+      if (Array.isArray(ev)) {
+        ev.push(`gaslight→skillbook: ${msg}`);
+      }
+    }
+  } catch (err) {
+    swallowError(err as Error, "gaslight-lesson-to-skillbook");
+    if (!silent) {
+      process.stdout.write(
+        `${RED}[gaslight→skillbook] Error persisting lesson: ${String(err)}${RESET}\n`,
+      );
+    }
+    const ev = (ctx.session as { evidence?: string[] }).evidence;
+    if (Array.isArray(ev)) {
+      ev.push(`gaslight→skillbook error: ${String(err)}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +343,8 @@ export async function runGaslightBridge(ctx: GaslightBridgeContext): Promise<Gas
               return draft; // keep original if rewrite fails
             }
           },
-          // LessonEligible: session passed — surface to user for bridge distillation
+          // LessonEligible: session passed — surface to user and wire to Skillbook
+          // Wave 7a: auto-persist the finalDraft into the Skillbook as a new skill
           onLessonEligible: (sessionId: string) => {
             if (!silent) {
               process.stdout.write(
@@ -286,6 +352,15 @@ export async function runGaslightBridge(ctx: GaslightBridgeContext): Promise<Gas
                   `Run ${BOLD}dantecode gaslight bridge${RESET}${GREEN} to distill to Skillbook.${RESET}\n`,
               );
             }
+            // Wave 7a: fire-and-forget Gaslight→Skillbook closed loop
+            // Uses setImmediate so it doesn't block the onLessonEligible callback.
+            setImmediate(() => {
+              try {
+                scheduleSkillbookPersist(sessionId, gaslight, ctx, silent);
+              } catch (e) {
+                swallowError(e as Error, "gaslight-skillbook");
+              }
+            });
           },
         },
       });

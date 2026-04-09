@@ -5,7 +5,8 @@
 import type { LanguageModelV1 } from "ai";
 import type { ModelConfig } from "@dantecode/config-types";
 
-export { buildGrokProvider } from "./grok.js";
+export { buildGrokProvider, GROK_CAPABILITIES } from "./grok.js";
+export { normalizeGrokToolCall, repairMalformedJson, type GrokModelCapabilities } from "./grok-normalizer.js";
 export { buildAnthropicProvider } from "./anthropic.js";
 export { buildOpenAIProvider } from "./openai.js";
 export { buildOllamaProvider } from "./ollama.js";

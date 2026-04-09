@@ -4,6 +4,8 @@
 // Future: migrate to Worker threads for true parallelism
 // ============================================================================
 
+import { BackgroundSemanticIndex } from "./semantic-index.js";
+
 /**
  * This module provides background indexing infrastructure.
  * Currently implemented as async functions that run in the same process.
@@ -26,10 +28,15 @@ export interface WorkerResponse {
 }
 
 /**
- * Placeholder for future worker thread implementation.
- * Currently, all indexing happens in-process via BackgroundSemanticIndex.
+ * Creates a background semantic index instance.
+ * Worker threads migration deferred — BackgroundSemanticIndex provides
+ * equivalent non-blocking indexing via Promise queuing.
  */
-export function createIndexWorker(): void {
-  // Future: spawn Worker thread here
-  throw new Error("Worker threads not yet implemented. Use BackgroundSemanticIndex directly.");
+export function createIndexWorker(): BackgroundSemanticIndex {
+  // Worker threads migration deferred — BackgroundSemanticIndex provides
+  // equivalent non-blocking indexing via Promise queuing.
+  return new BackgroundSemanticIndex({
+    projectRoot: process.cwd(),
+    sessionId: "worker-default",
+  });
 }

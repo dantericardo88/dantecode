@@ -17,22 +17,17 @@ export interface VerifyOptions {
   quick?: boolean;
 }
 
-export async function runVerify(
-  projectRoot: string,
-  options: VerifyOptions = {}
-): Promise<string> {
-  const {
-    getRegisteredFeatures,
-    getFeatureWiring,
-    ALL_SCENARIOS,
-    runFeatureTest,
-  } = await import("@dantecode/core");
+export async function runVerify(projectRoot: string, options: VerifyOptions = {}): Promise<string> {
+  const { getRegisteredFeatures, getFeatureWiring, ALL_SCENARIOS, runFeatureTest } =
+    await import("@dantecode/core");
+
+  const { ProgressIndicator } = await import("../ux/progress-bar.js");
 
   const lines: string[] = [];
   lines.push(`\n${BOLD}DanteCode Feature Verification Report${RESET}`);
   lines.push("═".repeat(72));
   lines.push(
-    `${"Feature".padEnd(28)}${"Wired".padEnd(10)}${"Test".padEnd(10)}${"Score".padEnd(8)}Status`
+    `${"Feature".padEnd(28)}${"Wired".padEnd(10)}${"Test".padEnd(10)}${"Score".padEnd(8)}Status`,
   );
   lines.push("─".repeat(72));
 
@@ -45,14 +40,22 @@ export async function runVerify(
         ? ALL_SCENARIOS.slice(0, 4)
         : ALL_SCENARIOS;
 
+    const progress = new ProgressIndicator(`Running ${scenarios.length} feature tests`);
+    progress.start();
+
+    let completed = 0;
     for (const scenario of scenarios) {
+      progress.update(`Testing ${scenario.name} (${completed + 1}/${scenarios.length})`);
       const result = await runFeatureTest(scenario, projectRoot);
       testResults.set(result.featureName, {
         passed: result.passed,
         score: result.score,
         error: result.error,
       });
+      completed++;
     }
+
+    progress.complete(`Completed ${scenarios.length} feature tests`);
   }
 
   let totalScore = 0;
@@ -80,21 +83,21 @@ export async function runVerify(
         : `${RED}FAIL${RESET}`;
 
     const baseScore = isWired ? 8 : 0;
-    const finalScore = testResult
-      ? Math.min(baseScore, testResult.score)
-      : baseScore;
+    const finalScore = testResult ? Math.min(baseScore, testResult.score) : baseScore;
 
     const statusLabel =
-      finalScore >= 8 ? `${GREEN}GREEN${RESET}` :
-      finalScore >= 6 ? `${YELLOW}YELLOW${RESET}` :
-      `${RED}RED${RESET}`;
+      finalScore >= 8
+        ? `${GREEN}GREEN${RESET}`
+        : finalScore >= 6
+          ? `${YELLOW}YELLOW${RESET}`
+          : `${RED}RED${RESET}`;
 
     if (finalScore >= 8) greenCount++;
     else if (finalScore >= 6) yellowCount++;
     else redCount++;
 
     lines.push(
-      `${featureName.padEnd(28)}${wiringIcon.padEnd(18)}${testIcon.padEnd(18)}${String(finalScore + "/10").padEnd(8)}${statusLabel}`
+      `${featureName.padEnd(28)}${wiringIcon.padEnd(18)}${testIcon.padEnd(18)}${String(finalScore + "/10").padEnd(8)}${statusLabel}`,
     );
 
     if (finalScore < 6) {
@@ -112,12 +115,14 @@ export async function runVerify(
 
   lines.push(
     `${BOLD}Overall: ${avg}/10${RESET}  |  ` +
-    `${GREEN}${greenCount} GREEN${RESET}  |  ` +
-    `${YELLOW}${yellowCount} YELLOW${RESET}  |  ` +
-    `${RED}${redCount} RED${RESET}`
+      `${GREEN}${greenCount} GREEN${RESET}  |  ` +
+      `${YELLOW}${yellowCount} YELLOW${RESET}  |  ` +
+      `${RED}${redCount} RED${RESET}`,
   );
   lines.push("═".repeat(72));
-  lines.push(`${DIM}This is the authoritative score. No claimed score above this is valid.${RESET}`);
+  lines.push(
+    `${DIM}This is the authoritative score. No claimed score above this is valid.${RESET}`,
+  );
   lines.push(`${DIM}Run: /verify --feature=<name> for detailed evidence on one feature.${RESET}\n`);
 
   return lines.join("\n");

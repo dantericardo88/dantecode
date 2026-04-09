@@ -9,6 +9,16 @@ export const SkillSchema = z.object({
   trustScore: z.number().min(0).max(1).optional(),
   sourceSessionId: z.string().optional(),
   sourceRunId: z.string().optional(),
+  /** Number of times this skill produced a "pass" outcome. */
+  successCount: z.number().int().min(0).optional(),
+  /** Total times this skill was applied (pass or not). */
+  useCount: z.number().int().min(0).optional(),
+  /** Computed win-rate: successCount / useCount. */
+  winRate: z.number().min(0).max(1).optional(),
+  /** Number of sessions where this skill was injected. */
+  appliedInSessions: z.number().int().min(0).optional(),
+  /** Sessions where skill was injected AND the session succeeded. */
+  sessionsSucceeded: z.number().int().min(0).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

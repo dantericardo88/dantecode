@@ -401,6 +401,37 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
   }
 
   /**
+   * Launch multiple lanes concurrently — all lanes begin work simultaneously.
+   *
+   * Unlike sequential `assignLane()` calls, this method fires all lane assignments
+   * in parallel using `Promise.allSettled`, so agents start at the same time rather
+   * than one after another. The sequential `pollAllLanes()` loop continues to monitor
+   * completion status safely (state machine correctness is preserved in the poll path).
+   *
+   * Returns the settled results — callers should inspect each result individually.
+   * Rejected results are non-fatal: a lane that fails to start is logged but does not
+   * abort the other lanes.
+   */
+  async launchLanesConcurrently(
+    requests: LaneAssignmentRequest[],
+  ): Promise<PromiseSettledResult<Awaited<ReturnType<typeof this.assignLane>>>[]> {
+    this.assertStatus("running");
+    const results = await Promise.allSettled(requests.map((req) => this.assignLane(req)));
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      const req = requests[i];
+      if (r?.status === "rejected") {
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        this.emitError(
+          `Lane launch failed for ${req?.preferredAgent ?? "unknown"}: ${reason}`,
+          "launchLanesConcurrently",
+        );
+      }
+    }
+    return results;
+  }
+
+  /**
    * Reassign a lane to a replacement agent (e.g. after a cap event).
    */
   async reassignLane(request: ReassignmentRequest) {
@@ -497,8 +528,9 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (!this.runState) return;
     this.stopPolling();
     this.observer?.stop();
-    // Abort any in-process agent loops before transitioning to failed (parallel).
-    await Promise.all(
+    // Abort any in-process agent loops before transitioning to failed.
+    // Use allSettled so a single adapter failure cannot block other aborts.
+    await Promise.allSettled(
       this.runState.agents
         .filter(
           (s) => s.status === "running" || s.status === "retry-pending" || s.status === "paused",
@@ -506,11 +538,7 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
         .map((s) => {
           const adapter = this.adapters.get(s.agentKind);
           const sessionId = s.sessionId ?? s.laneId;
-          return adapter
-            ? adapter.abortTask(sessionId).catch(() => {
-                /* per-lane fault isolation */
-              })
-            : Promise.resolve();
+          return adapter ? adapter.abortTask(sessionId) : Promise.resolve();
         }),
     );
     // Use transition() when the current state allows it so state:transition is emitted.
@@ -1015,13 +1043,12 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
     // in the same poll cycle (fixes same-cycle retry storm — P1).
     const sessionsThisCycle = [...this.runState.agents];
 
+    // ── PHASE 1: Promote retry-pending sessions synchronously (no I/O) ──────
     for (const session of sessionsThisCycle) {
-      // ── Promote retry-pending sessions whose backoff has elapsed ──────────
       if (session.status === "retry-pending") {
         if (session.retryAfterTs !== undefined && Date.now() >= session.retryAfterTs) {
           session.status = "running";
           session.retryAfterTs = undefined;
-          // Unfreeze lanes paused waiting for this retry lane
           for (const other of this.runState.agents) {
             if (other.pausedForRetry === session.laneId && other.status === "paused") {
               other.status = "running";
@@ -1032,22 +1059,38 @@ export class CouncilOrchestrator extends EventEmitter<OrchestratorEvents> {
               });
             }
           }
-          // Fall through — session is now "running", will be polled below
-        } else {
-          continue; // backoff not elapsed — skip this cycle
         }
       }
+    }
 
-      // ── Only poll running lanes ────────────────────────────────────────────
+    // ── PHASE 2: Fire all pollStatus calls in parallel ────────────────────
+    // Collect running sessions (including those just promoted from retry-pending).
+    type PollEntry = { session: (typeof sessionsThisCycle)[number]; adapter: CouncilAgentAdapter; sessionId: string };
+    const toPoll: PollEntry[] = [];
+    for (const session of sessionsThisCycle) {
       if (session.status !== "running") continue;
-
       const adapter = this.adapters.get(session.agentKind);
       if (!adapter) continue;
+      toPoll.push({ session, adapter, sessionId: session.sessionId ?? session.laneId });
+    }
 
-      const sessionId = session.sessionId ?? session.laneId;
+    const pollResults = await Promise.allSettled(
+      toPoll.map(({ adapter, sessionId }) => adapter.pollStatus(sessionId)),
+    );
+
+    // ── PHASE 3: Process results sequentially (state mutations + heavy I/O per lane) ──
+    for (let _pi = 0; _pi < toPoll.length; _pi++) {
+      const { session, adapter, sessionId } = toPoll[_pi]!;
+      const _settled = pollResults[_pi]!;
 
       try {
-        const status = await adapter.pollStatus(sessionId);
+        // Surface poll errors the same way as the original per-lane catch {}
+        if (_settled.status === "rejected") continue;
+        // Re-check: processing a prior lane's result in this same cycle may have
+        // paused or transitioned this session (e.g. P6 cross-lane freeze).
+        // Skip if no longer "running" — identical to the original sequential guard.
+        if (session.status !== "running") continue;
+        const status = _settled.value;
 
         // ── FleetBudget: record usage reported by this poll response ──────
         // Adapters report cumulative totals — FleetBudget.record() handles delta math.

@@ -100,6 +100,11 @@ export class DanteGaslightIntegration {
     message?: string;
     draft?: string;
     verificationScore?: number;
+    /**
+     * Confidence score from ConfidenceSynthesizer (0-1).
+     * When below 0.5, fires the "novel-task" trigger channel.
+     */
+    confidenceScore?: number;
     taskClass?: string;
     sessionId?: string;
     /**
@@ -113,6 +118,7 @@ export class DanteGaslightIntegration {
     const trigger = detectTrigger({
       message: opts.message,
       verificationScore: opts.verificationScore,
+      confidenceScore: opts.confidenceScore,
       taskClass: opts.taskClass,
       config: this.config,
       sessionId: opts.sessionId,

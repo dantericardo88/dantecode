@@ -38,8 +38,53 @@ export {
   buildDeepSeekProvider,
   buildTogetherProvider,
   buildPerplexityProvider,
+  normalizeGrokToolCall,
+  repairMalformedJson,
 } from "./providers/index.js";
 export type { ProviderBuilder } from "./providers/index.js";
+
+// ─── Provider Proof Tests ─────────────────────────────────────────────────────
+
+export { runProviderProofTests } from "./providers/provider-proof-tests.js";
+
+// ─── Evidence-Based Claims (Anti-Overclaiming System) ──────────────────────────
+
+export {
+  makeVerifiedClaim,
+  validateClaim,
+  formatValidationResult,
+  type VerificationEvidence,
+  type ClaimValidation,
+} from "./evidence-based-claims.js";
+
+// ─── Execution Integrity System (Kilo Code's Soul) ──────────────────────────────
+
+export {
+  executionIntegrity,
+  ExecutionIntegrityManager,
+  ToolClass,
+  CompletionFailureReason,
+  type ExecutionLedger,
+  type ToolExecutionRecord,
+  type MutationRecord,
+  type ValidationRecord,
+  type CompletionGateResult,
+} from "./execution-integrity.js";
+
+export {
+  EXECUTION_TRUTH_RELATIVE_PATH,
+  EXECUTION_TRUTH_DIR,
+  persistExecutionEvidenceBundle,
+  type ExecutionTruthPayload,
+} from "./execution-truth.js";
+
+export {
+  loadPersistentRules,
+  formatPersistentRulesForPrompt,
+  loadPersistentRulesPrompt,
+  type PersistentRuleFile,
+  type PersistentRulesBundle,
+} from "./persistent-rules.js";
 
 // ----------------------------------------------------------------------------
 // Runtime Catalog
@@ -492,11 +537,7 @@ export type {
 // ─── Repair Strategy Engine ─────────────────────────────────────────────────
 
 export { RepairStrategyEngine } from "./repair-strategy-engine.js";
-export type {
-  ErrorCategory,
-  ClassifiedError,
-  RepairPlan,
-} from "./repair-strategy-engine.js";
+export type { ErrorCategory, ClassifiedError, RepairPlan } from "./repair-strategy-engine.js";
 
 // ─── Self-Healing Loop ───────────────────────────────────────────────────────
 
@@ -892,6 +933,15 @@ export { GitHookHandler } from "./git-hook-handler.js";
 // ─── Tool Adapters ────────────────────────────────────────────────────────────
 
 export { adaptToolResult, formatEvidenceSummary } from "./tool-runtime/tool-adapters.js";
+export type {
+  ToolCallRecord,
+  ToolExecutionEvidence,
+  ToolExecutionResult,
+  ToolMutationEvidence,
+  ToolValidationEvidence,
+  VerificationCheck,
+  VerificationResult,
+} from "./tool-runtime/tool-call-types.js";
 
 // ─── Artifact Store ───────────────────────────────────────────────────────────
 
@@ -1130,7 +1180,11 @@ export type { ScoredMemory, QualityScore } from "./memory-quality-scorer.js";
 
 // ─── Memory Consolidator ──────────────────────────────────────────────────
 export { MemoryConsolidator } from "./memory-consolidator.js";
-export type { MemoryConsolidatorOptions, MemoryEntry, ConsolidationResult } from "./memory-consolidator.js";
+export type {
+  MemoryConsolidatorOptions,
+  MemoryEntry,
+  ConsolidationResult,
+} from "./memory-consolidator.js";
 
 // ─── Search Quality ─────────────────────────────────────────────────────────
 
@@ -1457,7 +1511,10 @@ export type { ArchitectEditorConfig } from "./architect-editor-mode.js";
 // ─── Post-Edit Linter ────────────────────────────────────────────────────────
 
 export { runPostEditLint, buildLintFixPrompt } from "./post-edit-linter.js";
-export type { LintResult as PostEditLintResult, LintError as PostEditLintError } from "./post-edit-linter.js";
+export type {
+  LintResult as PostEditLintResult,
+  LintError as PostEditLintError,
+} from "./post-edit-linter.js";
 
 // ─── Voice Input ─────────────────────────────────────────────────────────────
 
@@ -1472,12 +1529,7 @@ export type { CronTask } from "./session-cron.js";
 // ─── Arena Mode ───────────────────────────────────────────────────────────────
 
 export { ArenaRunner, applyVariantToMain as arenaApplyVariantToMain } from "./arena-mode.js";
-export type {
-  ArenaModel,
-  ArenaRunConfig,
-  ArenaResult,
-  ArenaSession,
-} from "./arena-mode.js";
+export type { ArenaModel, ArenaRunConfig, ArenaResult, ArenaSession } from "./arena-mode.js";
 
 // ─── Inference-Time Scaling ───────────────────────────────────────────────────
 
@@ -1507,10 +1559,7 @@ export {
   findReferencedTypeFiles,
   detectPrimaryLanguage,
 } from "./context-selector.js";
-export type {
-  ContextCandidate,
-  ContextSelectorOptions,
-} from "./context-selector.js";
+export type { ContextCandidate, ContextSelectorOptions } from "./context-selector.js";
 
 // ─── Token Cache ──────────────────────────────────────────────────────────────
 
@@ -1548,11 +1597,7 @@ export type {
 // ─── Agent Delegation ─────────────────────────────────────────────────────────
 
 export { AgentDelegationManager, globalDelegationManager } from "./agent-delegation.js";
-export type {
-  DelegationRequest,
-  DelegationResult,
-  ActiveDelegation,
-} from "./agent-delegation.js";
+export type { DelegationRequest, DelegationResult, ActiveDelegation } from "./agent-delegation.js";
 
 // ─── Platform Sandbox ─────────────────────────────────────────────────────────
 
@@ -1570,11 +1615,7 @@ export type {
 // ─── Deployer ─────────────────────────────────────────────────────────────────
 
 export { deploy, detectDeploymentPlatform } from "./deployer.js";
-export type {
-  DeploymentConfig,
-  DeploymentResult,
-  DeploymentPlatform,
-} from "./deployer.js";
+export type { DeploymentConfig, DeploymentResult, DeploymentPlatform } from "./deployer.js";
 
 // ─── XML Artifact Parser ──────────────────────────────────────────────────────
 

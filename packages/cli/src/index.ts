@@ -3,27 +3,33 @@
 // Parses CLI arguments, routes to the appropriate command or REPL.
 // ============================================================================
 
+// Wave 5a: Startup phase timing — captured at module load time
+if (process.env.DANTECODE_PROFILE) {
+  process.stderr.write(`[profile] cli:start\n`);
+}
+
 import { resolve } from "node:path";
 import { getHelpText } from "./banner.js";
 import { startRepl, runOneShotPrompt } from "./repl.js";
 import type { ExecutionProfile, ReplOptions } from "./repl.js";
-import { runInitCommand } from "./commands/init.js";
-import { runSkillsCommand } from "./commands/skills.js";
-import { runAgentCommand } from "./commands/agent.js";
-import { runConfigCommand } from "./commands/config.js";
-import { runGitCommand } from "./commands/git.js";
-import { runCouncilCommand } from "./commands/council.js";
-import { runSelfUpdateCommand } from "./commands/self-update.js";
-import { runGaslightCommand } from "./commands/gaslight.js";
-import { runSkillbookCommand } from "./commands/skillbook.js";
-import { runFearsetCommand } from "./commands/fearset.js";
-import { runResearchCommand } from "./commands/research.js";
-import { runReviewCommand } from "./commands/review.js";
-import { runTriageCommand } from "./commands/triage.js";
-import { runAuditCommand } from "./commands/audit.js";
-import { runVaultCommand } from "./commands/vault.js";
+// Commands are now lazily loaded for faster startup
+// import { runInitCommand } from "./commands/init.js";
+// import { runSkillsCommand } from "./commands/skills.js";
+// import { runAgentCommand } from "./commands/agent.js";
+// import { runConfigCommand } from "./commands/config.js";
+// import { runGitCommand } from "./commands/git.js";
+// import { runCouncilCommand } from "./commands/council.js";
+// import { runSelfUpdateCommand } from "./commands/self-update.js";
+// import { runGaslightCommand } from "./commands/gaslight.js";
+// import { runSkillbookCommand } from "./commands/skillbook.js";
+// import { runFearsetCommand } from "./commands/fearset.js";
+// import { runResearchCommand } from "./commands/research.js";
+// import { runReviewCommand } from "./commands/review.js";
+// import { runTriageCommand } from "./commands/triage.js";
+// import { runAuditCommand } from "./commands/audit.js";
+// import { runVaultCommand } from "./commands/vault.js";
 // serve command added below in switch statement
-import { runServeCommand } from "./commands/serve.js";
+// import { runServeCommand } from "./commands/serve.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -397,60 +403,92 @@ async function main(): Promise<void> {
     executionProfile: parsed.executionProfile,
   };
 
-  // Route to the appropriate command
+  // Route to the appropriate command (lazy loaded for faster startup)
   if (parsed.command) {
     switch (parsed.command) {
-      case "init":
+      case "init": {
+        const { runInitCommand } = await import("./commands/init.js");
         await runInitCommand(projectRoot, parsed.subArgs.includes("--force"));
         return;
-      case "skills":
+      }
+      case "skills": {
+        const { runSkillsCommand } = await import("./commands/skills.js");
         await runSkillsCommand(parsed.subArgs, projectRoot);
         return;
-      case "agent":
+      }
+      case "agent": {
+        const { runAgentCommand } = await import("./commands/agent.js");
         await runAgentCommand(parsed.subArgs, projectRoot);
         return;
-      case "config":
+      }
+      case "config": {
+        const { runConfigCommand } = await import("./commands/config.js");
         await runConfigCommand(parsed.subArgs, projectRoot);
         return;
-      case "git":
+      }
+      case "git": {
+        const { runGitCommand } = await import("./commands/git.js");
         await runGitCommand(parsed.subArgs, projectRoot);
         return;
-      case "council":
+      }
+      case "council": {
+        const { runCouncilCommand } = await import("./commands/council.js");
         await runCouncilCommand(parsed.subArgs, projectRoot);
         return;
-      case "self-update":
+      }
+      case "self-update": {
+        const { runSelfUpdateCommand } = await import("./commands/self-update.js");
         await runSelfUpdateCommand(projectRoot, {
           verbose: parsed.verbose,
           dryRun: parsed.subArgs.includes("--dry-run"),
         });
         return;
-      case "gaslight":
+      }
+      case "gaslight": {
+        const { runGaslightCommand } = await import("./commands/gaslight.js");
         await runGaslightCommand(parsed.subArgs, projectRoot);
         return;
-      case "skillbook":
+      }
+      case "skillbook": {
+        const { runSkillbookCommand } = await import("./commands/skillbook.js");
         await runSkillbookCommand(parsed.subArgs, projectRoot);
         return;
-      case "fearset":
+      }
+      case "fearset": {
+        const { runFearsetCommand } = await import("./commands/fearset.js");
         await runFearsetCommand(parsed.subArgs, projectRoot);
         return;
-      case "research":
+      }
+      case "research": {
+        const { runResearchCommand } = await import("./commands/research.js");
         await runResearchCommand(parsed.subArgs, projectRoot);
         return;
-      case "audit":
+      }
+      case "audit": {
+        const { runAuditCommand } = await import("./commands/audit.js");
         await runAuditCommand(parsed.subArgs, projectRoot);
         return;
-      case "vault":
+      }
+      case "vault": {
+        const { runVaultCommand } = await import("./commands/vault.js");
         await runVaultCommand(parsed.subArgs);
         return;
-      case "review":
+      }
+      case "review": {
+        const { runReviewCommand } = await import("./commands/review.js");
         await runReviewCommand(parsed.subArgs, projectRoot);
         return;
-      case "triage":
+      }
+      case "triage": {
+        const { runTriageCommand } = await import("./commands/triage.js");
         await runTriageCommand(parsed.subArgs, projectRoot);
         return;
-      case "serve":
+      }
+      case "serve": {
+        const { runServeCommand } = await import("./commands/serve.js");
         await runServeCommand(parsed.subArgs);
         return;
+      }
     }
   }
 
