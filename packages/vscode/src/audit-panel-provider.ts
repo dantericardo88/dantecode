@@ -551,7 +551,8 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
       // Track which events are expanded
       const expandedEvents = new Set();
 
-      function renderProofPayload(type, payload) {
+      // Exported for testing
+      window.renderProofPayload = function(type, payload) {
         var html = '<div class="proof-content">';
 
         // Add proof badge
@@ -606,7 +607,7 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
 
         html += '</div>';
         return html;
-      }
+      };
 
       window.addEventListener('message', function(event) {
         var message = event.data;

@@ -2419,6 +2419,40 @@ describe("V+E Retrofit: Evidence-Based Execution", () => {
     expect(result.executionLedger?.mutationRecords[0].readSnapshotId).toBe("snap1");
     expect(result.touchedFiles).toEqual(["feature.js"]);
     expect(result.executionLedger?.completionGateResult?.ok).toBe(true);
+    // Assert non-empty toolCallId linkage in completed proof chain
+    expect(result.executionLedger?.mutationRecords[0].toolCallId).toBeDefined();
+    expect(result.executionLedger?.mutationRecords[0].toolCallId).not.toBe("");
+  });
+
+  it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
+    setMockFileContent("/tmp/test-project", "buggy.js", "console.log('bug');");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"buggy.js","old_string":"console.log(\'bug\');","new_string":"console.log(\'bug\');"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "No observable mutation: file content unchanged after edit operation.",
+      isError: false,
+      ok: false,
+      reasonCode: "no-observable-mutation",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Edit",
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug in buggy.js", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords[0].toolName).toBe("Edit");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(0);
+    expect(result.touchedFiles).toHaveLength(0);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+    expect(result.executionLedger?.completionGateResult?.reasonCode).toBe(
+      "mutation-requested-but-no-files-changed",
+    );
   });
 
   it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
