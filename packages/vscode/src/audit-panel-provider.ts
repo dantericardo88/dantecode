@@ -474,6 +474,50 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
       padding: 4px 12px;
       text-align: right;
     }
+
+    .proof-content {
+      font-size: 11px;
+    }
+
+    .proof-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      margin: 4px 0;
+      font-size: 10px;
+      font-weight: bold;
+      border-radius: 3px;
+      color: var(--vscode-badge-foreground);
+    }
+
+    .proof-badge.mutation {
+      background: var(--vscode-charts-green);
+    }
+
+    .proof-badge.validation {
+      background: var(--vscode-charts-blue);
+    }
+
+    .proof-badge.gate-passed {
+      background: var(--vscode-testing-iconPassed);
+    }
+
+    .proof-badge.gate-failed {
+      background: var(--vscode-testing-iconFailed);
+    }
+
+    .proof-badge.tool {
+      background: var(--vscode-charts-orange);
+    }
+
+    .proof-field {
+      margin: 4px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .proof-field strong {
+      color: var(--vscode-sideBarTitle-foreground);
+    }
   </style>
 </head>
 <body>
@@ -506,6 +550,63 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
 
       // Track which events are expanded
       const expandedEvents = new Set();
+
+      function renderProofPayload(type, payload) {
+        var html = '<div class="proof-content">';
+
+        // Add proof badge
+        if (type === 'mutation_observed') {
+          html += '<div class="proof-badge mutation">MUTATION</div>';
+        } else if (type === 'validation_observed') {
+          html += '<div class="proof-badge validation">VALIDATION</div>';
+        } else if (type === 'completion_gate_passed') {
+          html += '<div class="proof-badge gate-passed">GATE PASSED</div>';
+        } else if (type === 'completion_gate_failed') {
+          html += '<div class="proof-badge gate-failed">GATE FAILED</div>';
+        } else if (type.startsWith('tool_call_')) {
+          html += '<div class="proof-badge tool">' + (type === 'tool_call_succeeded' ? 'TOOL SUCCESS' : type === 'tool_call_failed' ? 'TOOL FAILED' : 'TOOL START') + '</div>';
+        }
+
+        // Structured fields
+        if (type === 'tool_call_started' || type === 'tool_call_succeeded' || type === 'tool_call_failed') {
+          html += '<div class="proof-field"><strong>Tool:</strong> ' + escapeHtml(payload.toolName || 'Unknown') + '</div>';
+          html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + escapeHtml(payload.toolCallId || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Input:</strong> ' + escapeHtml(JSON.stringify(payload.input, null, 2)) + '</div>';
+          if (payload.result) {
+            html += '<div class="proof-field"><strong>Result:</strong> ' + escapeHtml(payload.result.content || 'N/A') + '</div>';
+          }
+        } else if (type === 'mutation_observed') {
+          html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + escapeHtml(payload.toolCallId || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>File:</strong> ' + escapeHtml(payload.path || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Before Hash:</strong> ' + escapeHtml(payload.beforeHash || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>After Hash:</strong> ' + escapeHtml(payload.afterHash || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Diff Summary:</strong> ' + escapeHtml(payload.diffSummary || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Additions/Deletions:</strong> +' + (payload.additions || 0) + ' -' + (payload.deletions || 0) + '</div>';
+          if (payload.readSnapshotId) {
+            html += '<div class="proof-field"><strong>Read Snapshot ID:</strong> ' + escapeHtml(payload.readSnapshotId) + '</div>';
+          }
+        } else if (type === 'validation_observed') {
+          html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + escapeHtml(payload.toolCallId || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Type:</strong> ' + escapeHtml(payload.type || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Command:</strong> ' + escapeHtml(payload.command || 'N/A') + '</div>';
+          html += '<div class="proof-field"><strong>Passed:</strong> ' + (payload.passed ? 'Yes' : 'No') + '</div>';
+          html += '<div class="proof-field"><strong>Output:</strong> ' + escapeHtml(payload.output || 'N/A') + '</div>';
+        } else if (type === 'completion_gate_failed' || type === 'completion_gate_passed') {
+          html += '<div class="proof-field"><strong>Passed:</strong> ' + (payload.ok ? 'Yes' : 'No') + '</div>';
+          if (payload.reasonCode) {
+            html += '<div class="proof-field"><strong>Reason:</strong> ' + escapeHtml(payload.reasonCode) + '</div>';
+          }
+          if (payload.message) {
+            html += '<div class="proof-field"><strong>Message:</strong> ' + escapeHtml(payload.message) + '</div>';
+          }
+        }
+
+        // Raw JSON as details
+        html += '<details><summary>Raw JSON</summary><pre>' + escapeHtml(JSON.stringify(payload, null, 2)) + '</pre></details>';
+
+        html += '</div>';
+        return html;
+      }
 
       window.addEventListener('message', function(event) {
         var message = event.data;
@@ -581,7 +682,12 @@ export class AuditPanelProvider implements vscode.WebviewViewProvider {
             // Payload (collapsed by default)
             var payload = document.createElement('div');
             payload.className = 'event-payload';
-            payload.textContent = JSON.stringify(evt.payload, null, 2);
+            var proofTypes = ['tool_call_started', 'tool_call_succeeded', 'tool_call_failed', 'mutation_observed', 'validation_observed', 'completion_gate_failed', 'completion_gate_passed'];
+            if (proofTypes.includes(evt.type)) {
+              payload.innerHTML = renderProofPayload(evt.type, evt.payload);
+            } else {
+              payload.textContent = JSON.stringify(evt.payload, null, 2);
+            }
             item.appendChild(payload);
 
             // Restore expansion state
