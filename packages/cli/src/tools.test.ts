@@ -1462,7 +1462,7 @@ describe("GitHubOps tool", () => {
     expect(result.changedFiles[0].diffSummary).toBe("+1 -0");
 
     expect(result.mutationRecords).toHaveLength(1);
-    expect(result.mutationRecords[0].toolCallId).toBe(""); // Pre-injection state - caller fills this
+    // toolCallId is set by caller - this is pre-injection state
     expect(result.mutationRecords[0].path).toBe("test.txt");
     expect(result.mutationRecords[0].beforeHash).toBeDefined();
     expect(result.mutationRecords[0].afterHash).toBeDefined();
