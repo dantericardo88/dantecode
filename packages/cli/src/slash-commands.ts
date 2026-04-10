@@ -24,6 +24,8 @@ import {
   LoopDetector,
   parseSkillWaves,
   createWaveState,
+  generateRepoMemory,
+  BoundedRepairLoop,
 } from "@dantecode/core";
 import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
 import {
@@ -719,8 +721,7 @@ async function agentsCommand(_args: string, state: ReplState): Promise<string> {
   try {
     const entries = await readdir(agentsDir);
     const agentFiles = entries.filter(
-      (entry: string) =>
-        entry.endsWith(".yaml") || entry.endsWith(".yml") || entry.endsWith(".md"),
+      (entry: string) => entry.endsWith(".yaml") || entry.endsWith(".yml") || entry.endsWith(".md"),
     );
 
     if (agentFiles.length === 0) {
@@ -2212,6 +2213,40 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 // ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
+async function repoMemoryCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const memory = await generateRepoMemory(state.projectRoot);
+    return `${GREEN}Repo memory generated:${RESET}\n` +
+           `  File nodes: ${memory.fileGraph.length}\n` +
+           `  Symbol nodes: ${memory.symbolGraph.length}\n` +
+           `  Test mappings: ${memory.testMap.length}\n` +
+           `  Hotspots: ${memory.hotspots.length}\n` +
+           `  Saved to: .dantecode/repo_memory.json`;
+  } catch (error) {
+    return `${RED}Failed to generate repo memory: ${error}${RESET}`;
+  }
+}
+
+async function repairCommand(args: string, state: ReplState): Promise<string> {
+  const repairLoop = new BoundedRepairLoop();
+  const errorOutput = args || "Simulated error for testing";
+
+  try {
+    const attempt = await repairLoop.attemptRepair(errorOutput, state.projectRoot);
+    if (attempt) {
+      return `${GREEN}Repair attempt ${attempt.attemptNumber}:${RESET}\n` +
+             `  Category: ${attempt.classification.category}\n` +
+             `  Strategy: ${attempt.plan.strategy}\n` +
+             `  Result: ${attempt.result}\n` +
+             `  Prompt generated for repair.`;
+    } else {
+      return `${YELLOW}No repair attempted (max retries reached or not actionable)${RESET}`;
+    }
+  } catch (error) {
+    return `${RED}Repair failed: ${error}${RESET}`;
+  }
+}
+}
 
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
@@ -2387,6 +2422,18 @@ const SLASH_COMMANDS: SlashCommand[] = [
     description: "Search code index for relevant code",
     usage: "/search <query>",
     handler: searchCommand,
+  },
+  {
+    name: "repo-memory",
+    description: "Generate persistent repo intelligence maps",
+    usage: "/repo-memory",
+    handler: repoMemoryCommand,
+  },
+  {
+    name: "repair",
+    description: "Trigger bounded repair loop on recent failures",
+    usage: "/repair [error-output]",
+    handler: repairCommand,
   },
 ];
 

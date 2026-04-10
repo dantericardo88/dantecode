@@ -483,3 +483,36 @@ export type { RerankContext, RankedSearchResult, RerankOptions } from "./search-
 
 export { SemanticSearchCache } from "./search-cache.js";
 export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";
+
+// ─── Repo Brain ─────────────────────────────────────────────────────────────
+
+export { generateRepoMemory, loadRepoMemory } from "./repo-brain.js";
+export type { FileNode, SymbolNode, TestRelevance, Hotspot, RepoMemory } from "./repo-brain.js";
+
+// ─── Bounded Repair Loop ─────────────────────────────────────────────────────
+
+export {
+  BoundedRepairLoop,
+  classifyFailure,
+  planRepair,
+  executeRepair,
+  shouldRollback,
+  rollbackChanges,
+  verifyAfterRepair,
+} from "./bounded-repair.js";
+export type {
+  FailureClassification,
+  RepairPlan,
+  RepairAttempt,
+  BoundedRepairContext,
+} from "./bounded-repair.js";
+
+// ─── ACP Adapter Layer ────────────────────────────────────────────────────────
+
+export {
+  ACPAdapter,
+  ExternalToolAgent,
+  DanteForgeACPVerifier,
+  globalACPAdapter,
+} from "./acp-adapter.js";
+export type { ACPTool, ACPAgent, ACPResult } from "./acp-adapter.js";

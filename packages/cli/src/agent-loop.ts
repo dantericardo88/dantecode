@@ -282,6 +282,9 @@ const PIPELINE_CONTINUATION_INSTRUCTION =
   "todo list or the pipeline plan and continue from where you left off.";
 
 // ----------------------------------------------------------------------------
+const SAFE_TOOLS = new Set(["Read", "Glob", "Grep"]);
+
+// ----------------------------------------------------------------------------
 // Anti-confabulation guards (Grok empty-response / phantom-completion fix)
 // ----------------------------------------------------------------------------
 
@@ -1692,7 +1695,31 @@ export async function runAgentLoop(
     let roundMajorEditGateResult: MajorEditBatchGateResult | null = null;
     let toolIndex = 0;
 
-    for (const toolCall of toolCalls) {
+    // Separate safe and unsafe tool calls for batching
+    const safeToolCalls = toolCalls.filter((tc) => SAFE_TOOLS.has(tc.name));
+    const unsafeToolCalls = toolCalls.filter((tc) => !SAFE_TOOLS.has(tc.name));
+
+    // Execute safe tool calls in parallel
+    const safeResultsMap = new Map<string, ToolResult>();
+    if (safeToolCalls.length > 0) {
+      const safePromises = safeToolCalls.map(async (tc) => {
+        const result = await executeTool(tc.name, tc.input, session.projectRoot, {
+          sessionId: session.id,
+          roundId: `round-${roundCounter}`,
+          sandboxEnabled: false,
+          selfImprovement: config.selfImprovement,
+          readTracker,
+          editAttempts,
+          subAgentExecutor: createSubAgentExecutor(session, config),
+        });
+        safeResultsMap.set(tc.id, result);
+      });
+      await Promise.all(safePromises);
+      executedToolsThisTurn += safeToolCalls.length;
+      currentApproachToolCalls += safeToolCalls.length;
+    }
+
+    for (const toolCall of unsafeToolCalls) {
       executedToolsThisTurn++;
       toolCallsThisTurn++;
       currentApproachToolCalls++;
@@ -2138,6 +2165,102 @@ export async function runAgentLoop(
       }
     }
 
+    // Append safe tool results
+    for (const tc of safeToolCalls) {
+      const result = safeResultsMap.get(tc.id);
+      if (result) {
+        toolResults.push(result.content);
+
+        // Record tool call in execution ledger
+        const toolCallRecord: ToolCallRecord = {
+          id: tc.id,
+          toolName: tc.name,
+          input: tc.input,
+          result: {
+            toolUseId: tc.id,
+            content: result.content,
+            isError: result.isError,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        executionLedger.toolCallRecords.push(toolCallRecord);
+
+        for (const mutation of result.mutationRecords || []) {
+          mutation.toolCallId = toolCallRecord.id;
+        }
+        for (const validation of result.validationRecords || []) {
+          validation.toolCallId = toolCallRecord.id;
+        }
+
+        executionLedger.mutationRecords.push(...(result.mutationRecords || []));
+        executionLedger.validationRecords.push(...(result.validationRecords || []));
+
+        // Record in audit log
+        await recordToolCall(
+          session.projectRoot,
+          session.id,
+          `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+          toolCallRecord,
+        );
+        for (const mutation of result.mutationRecords || []) {
+          await recordMutation(
+            session.projectRoot,
+            session.id,
+            `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            mutation,
+          );
+        }
+        for (const validation of result.validationRecords || []) {
+          await recordValidation(
+            session.projectRoot,
+            session.id,
+            `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            validation,
+          );
+        }
+
+        // Add session messages
+        const toolUseMessage: SessionMessage = {
+          id: randomUUID(),
+          role: "assistant",
+          content: `Using tool: ${tc.name}`,
+          timestamp: new Date().toISOString(),
+          toolUse: {
+            id: tc.id,
+            name: tc.name,
+            input: tc.input,
+          },
+        };
+        session.messages.push(toolUseMessage);
+
+        const toolResultMessage: SessionMessage = {
+          id: randomUUID(),
+          role: "tool",
+          content: result.content,
+          timestamp: new Date().toISOString(),
+          toolResult: {
+            toolUseId: tc.id,
+            content: result.content,
+            isError: result.isError,
+          },
+        };
+        session.messages.push(toolResultMessage);
+
+        // Update progress
+        toolCallsThisTurn++;
+        if (toolCallsThisTurn % PROGRESS_EMIT_INTERVAL === 0) {
+          const progressLine = `[progress: ${toolCallsThisTurn} tool calls | ${filesModified} files modified | ${testsRun} tests run]`;
+          process.stdout.write(`\n${DIM}${progressLine}${RESET}\n`);
+          session.messages.push({
+            id: randomUUID(),
+            role: "system" as "user",
+            content: progressLine,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
     // Reflection checkpoint: inject chain-of-thought reasoning prompt at intervals
     if (
       executedToolsThisTurn > 0 &&
@@ -2476,15 +2599,19 @@ export async function runAgentLoop(
 
   // Evaluate completion gate
   const gateResult = evaluateCompletionGate(session, executionLedger, requestClass);
-  await recordCompletionGate(session.projectRoot, session.id, `${config.state.model.default.provider}/${config.state.model.default.modelId}`, gateResult);
+  await recordCompletionGate(
+    session.projectRoot,
+    session.id,
+    `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+    gateResult,
+  );
   if (!gateResult.ok) {
     sessionStatus = "INCOMPLETE";
     if (!config.silent) {
-      process.stdout.write(`\n${RED}[completion gate failed] ${gateResult.reasonCode}: ${gateResult.message}${RESET}\n`);
+      process.stdout.write(
+        `\n${RED}[completion gate failed] ${gateResult.reasonCode}: ${gateResult.message}${RESET}\n`,
+      );
     }
-  } else if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
-    sessionStatus = "INCOMPLETE";
-  }
   } else if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
     sessionStatus = "INCOMPLETE";
   }
