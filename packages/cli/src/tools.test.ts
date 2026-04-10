@@ -1438,7 +1438,7 @@ describe("GitHubOps tool", () => {
     // The actual stale check depends on the mock setup, but we verify the path exists
   });
 
-  it("successful Write establishes full mutation proof chain", async () => {
+  it("successful Write establishes full mutation proof chain with lineage", async () => {
     mockReadFile.mockResolvedValue("old content");
     mockWriteFile.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
@@ -1450,15 +1450,29 @@ describe("GitHubOps tool", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.changedFiles[0]).toMatchObject({
-      path: "test.txt",
-      beforeHash: expect.any(String),
-      afterHash: expect.any(String),
-      lineCount: 1,
-      additions: 1,
-      deletions: 0,
-      diffSummary: "+1 -0",
-    });
+    expect(result.changedFiles).toHaveLength(1);
+    expect(result.changedFiles[0].path).toBe("test.txt");
+    expect(result.changedFiles[0].beforeHash).toBeDefined();
+    expect(result.changedFiles[0].afterHash).toBeDefined();
+    expect(result.changedFiles[0].afterHash).not.toBe(result.changedFiles[0].beforeHash);
+    expect(result.changedFiles[0].lineCount).toBe(1);
+    expect(result.changedFiles[0].additions).toBe(1);
+    expect(result.changedFiles[0].deletions).toBe(0);
+    expect(result.changedFiles[0].diffSummary).toBe("+1 -0");
+
+    expect(result.mutationRecords).toHaveLength(1);
+    expect(result.mutationRecords[0].toolCallId).toBe(""); // Pre-injection state
+    expect(result.mutationRecords[0].path).toBe("test.txt");
+    expect(result.mutationRecords[0].beforeHash).toBeDefined();
+    expect(result.mutationRecords[0].afterHash).toBeDefined();
+    expect(result.mutationRecords[0].afterHash).not.toBe(result.mutationRecords[0].beforeHash);
+    expect(result.mutationRecords[0].diffSummary).toBe("+1 -0");
+    expect(result.mutationRecords[0].lineCount).toBe(1);
+    expect(result.mutationRecords[0].additions).toBe(1);
+    expect(result.mutationRecords[0].deletions).toBe(0);
+    expect(result.mutationRecords[0].readSnapshotId).toBeDefined();
+    expect(result.mutationRecords[0].timestamp).toBeDefined();
+  });
     expect(result.mutationRecords[0]).toMatchObject({
       toolCallId: "", // Will be set by caller
       path: "test.txt",

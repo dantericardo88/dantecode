@@ -2420,8 +2420,11 @@ describe("V+E Retrofit: Evidence-Based Execution", () => {
     expect(result.touchedFiles).toEqual(["feature.js"]);
     expect(result.executionLedger?.completionGateResult?.ok).toBe(true);
     // Assert non-empty toolCallId linkage in completed proof chain
+    expect(result.executionLedger?.mutationRecords).toHaveLength(1);
     expect(result.executionLedger?.mutationRecords[0].toolCallId).toBeDefined();
     expect(result.executionLedger?.mutationRecords[0].toolCallId).not.toBe("");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords[0].toolName).toBe("Write");
   });
 
   it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
