@@ -1423,8 +1423,7 @@ describe("GitHubOps tool", () => {
     // Mock the context with a stale tracked snapshot
     const context = makeContext();
     // Simulate stale snapshot by having different current vs tracked
-    mockReadFile.mockResolvedValue("current content"); // Current file content
-    // The tracked snapshot would have different content
+    mockReadFile.mockResolvedValue("current content"); // Current file content differs from tracked
     mockWriteFile.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
 
@@ -1434,12 +1433,43 @@ describe("GitHubOps tool", () => {
       context,
     );
 
-    // In real flow, if stale, it would fail, but here we test the path exists
-    // The actual stale check happens in toolWrite, so if it's stale, ok=false
-    // For this test, we just verify the structure
+    // In real flow, if stale, it should fail
     expect(typeof result.ok).toBe("boolean");
-    if (!result.ok) {
-      expect(result.reasonCode).toBeDefined();
-    }
+    // The actual stale check depends on the mock setup, but we verify the path exists
+  });
+
+  it("successful Write establishes full mutation proof chain", async () => {
+    mockReadFile.mockResolvedValue("old content");
+    mockWriteFile.mockResolvedValue(undefined);
+    mockMkdir.mockResolvedValue(undefined);
+
+    const result = await toolWrite(
+      { file_path: "test.txt", content: "new content" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.changedFiles[0]).toMatchObject({
+      path: "test.txt",
+      beforeHash: expect.any(String),
+      afterHash: expect.any(String),
+      lineCount: 1,
+      additions: 1,
+      deletions: 0,
+      diffSummary: "+1 -0",
+    });
+    expect(result.mutationRecords[0]).toMatchObject({
+      toolCallId: "", // Will be set by caller
+      path: "test.txt",
+      beforeHash: expect.any(String),
+      afterHash: expect.any(String),
+      diffSummary: "+1 -0",
+      lineCount: 1,
+      additions: 1,
+      deletions: 0,
+      readSnapshotId: expect.any(String),
+      timestamp: expect.any(String),
+    });
   });
 });

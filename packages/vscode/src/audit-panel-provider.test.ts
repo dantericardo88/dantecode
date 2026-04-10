@@ -25,32 +25,11 @@ const mockVscode = {
 vi.mock("vscode", () => mockVscode);
 
 // Import after mocking
-import { AuditPanelProvider } from "./audit-panel-provider.js";
+import { AuditPanelProvider, renderProofPayloadForTesting } from "./audit-panel-provider.js";
 
 describe("AuditPanelProvider", () => {
   describe("Proof-first rendering with concrete V+E event payloads", () => {
     it("renders mutation_observed with concrete proof field values", () => {
-      const provider = new AuditPanelProvider(mockUri);
-      const html = provider.getHtmlForWebview({} as any);
-
-      // Create a global renderProofPayload for testing
-      global.renderProofPayload = (type, payload) => {
-        var html = '<div class="proof-content">';
-        html += '<div class="proof-badge mutation">MUTATION</div>';
-        html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + (payload.toolCallId || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>File:</strong> ' + (payload.path || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Before Hash:</strong> ' + (payload.beforeHash || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>After Hash:</strong> ' + (payload.afterHash || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Diff Summary:</strong> ' + (payload.diffSummary || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Additions/Deletions:</strong> +' + (payload.additions || 0) + ' -' + (payload.deletions || 0) + '</div>';
-        if (payload.readSnapshotId) {
-          html += '<div class="proof-field"><strong>Read Snapshot ID:</strong> ' + payload.readSnapshotId + '</div>';
-        }
-        html += '<details><summary>Raw JSON</summary><pre>' + JSON.stringify(payload, null, 2) + '</pre></details>';
-        html += '</div>';
-        return html;
-      };
-
       const payload = {
         toolCallId: "tool-123",
         path: "src/example.ts",
@@ -63,7 +42,7 @@ describe("AuditPanelProvider", () => {
         timestamp: "2024-01-01T00:00:00.000Z"
       };
 
-      const rendered = global.renderProofPayload('mutation_observed', payload);
+      const rendered = renderProofPayloadForTesting('mutation_observed', payload);
 
       expect(rendered).toContain('MUTATION');
       expect(rendered).toContain('tool-123');
@@ -78,18 +57,6 @@ describe("AuditPanelProvider", () => {
     });
 
     it("renders validation_observed with concrete proof field values", () => {
-      global.renderProofPayload = (type, payload) => {
-        var html = '<div class="proof-content">';
-        html += '<div class="proof-badge validation">VALIDATION</div>';
-        html += '<div class="proof-field"><strong>Tool Call ID:</strong> ' + (payload.toolCallId || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Type:</strong> ' + (payload.type || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Command:</strong> ' + (payload.command || 'N/A') + '</div>';
-        html += '<div class="proof-field"><strong>Passed:</strong> ' + (payload.passed ? 'Yes' : 'No') + '</div>';
-        html += '<details><summary>Raw JSON</summary><pre>' + JSON.stringify(payload, null, 2) + '</pre></details>';
-        html += '</div>';
-        return html;
-      };
-
       const payload = {
         toolCallId: "call-456",
         type: "lint",
@@ -99,7 +66,7 @@ describe("AuditPanelProvider", () => {
         timestamp: "2024-01-01T00:00:00.000Z"
       };
 
-      const rendered = global.renderProofPayload('validation_observed', payload);
+      const rendered = renderProofPayloadForTesting('validation_observed', payload);
 
       expect(rendered).toContain('VALIDATION');
       expect(rendered).toContain('call-456');
@@ -107,6 +74,57 @@ describe("AuditPanelProvider", () => {
       expect(rendered).toContain('npm run lint');
       expect(rendered).toContain('Yes');
       expect(rendered).toContain('No issues found');
+    });
+
+    it("renders completion_gate_failed with concrete reasonCode", () => {
+      const payload = {
+        ok: false,
+        reasonCode: "no-observable-mutation",
+        message: "No observable mutation detected",
+        timestamp: "2024-01-01T00:00:00.000Z"
+      };
+
+      const rendered = renderProofPayloadForTesting('completion_gate_failed', payload);
+
+      expect(rendered).toContain('GATE FAILED');
+      expect(rendered).toContain('No');
+      expect(rendered).toContain('no-observable-mutation');
+      expect(rendered).toContain('No observable mutation detected');
+    });
+
+    it("renders tool_call_succeeded with concrete tool metadata", () => {
+      const payload = {
+        toolCallId: "call-789",
+        toolName: "Write",
+        input: { file_path: "test.txt", content: "hello" },
+        result: { toolUseId: "call-789", content: "Successfully wrote", isError: false },
+        timestamp: "2024-01-01T00:00:00.000Z"
+      };
+
+      const rendered = renderProofPayloadForTesting('tool_call_succeeded', payload);
+
+      expect(rendered).toContain('TOOL SUCCESS');
+      expect(rendered).toContain('Write');
+      expect(rendered).toContain('call-789');
+      expect(rendered).toContain('"file_path": "test.txt"');
+    });
+
+    it("raw JSON appears only as secondary expandable details", () => {
+      const provider = new AuditPanelProvider(mockUri);
+      const html = provider.getHtmlForWebview({} as any);
+
+      expect(html).toContain("Raw JSON");
+      expect(html).toContain("<details>");
+      expect(html).toContain("<summary>Raw JSON</summary>");
+      expect(html).toContain("<pre>");
+    });
+
+    it("non-proof events still render with generic JSON fallback", () => {
+      const provider = new AuditPanelProvider(mockUri);
+      const html = provider.getHtmlForWebview({} as any);
+
+      // Non-proof events should use JSON.stringify directly
+      expect(html).toContain("JSON.stringify(evt.payload, null, 2)");
     });
 
     it("renders completion_gate_failed with concrete reasonCode", () => {
