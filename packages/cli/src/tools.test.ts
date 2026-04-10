@@ -1355,7 +1355,7 @@ describe("GitHubOps tool", () => {
     expect(result.content).toBe("command output");
   });
 
-  it("successful Write emits hashes and snapshot linkage", async () => {
+  it("successful Write emits complete proof fields and snapshot linkage", async () => {
     mockReadFile.mockResolvedValue("old content");
     mockWriteFile.mockResolvedValue(undefined);
     mockMkdir.mockResolvedValue(undefined);
@@ -1371,7 +1371,51 @@ describe("GitHubOps tool", () => {
     expect(result.changedFiles[0].beforeHash).toBeDefined();
     expect(result.changedFiles[0].afterHash).toBeDefined();
     expect(result.changedFiles[0].afterHash).not.toBe(result.changedFiles[0].beforeHash);
+    expect(result.changedFiles[0].lineCount).toBeDefined();
+    expect(result.changedFiles[0].additions).toBeDefined();
+    expect(result.changedFiles[0].deletions).toBeDefined();
+    expect(result.changedFiles[0].diffSummary).toBeDefined();
+
     expect(result.mutationRecords).toHaveLength(1);
+    expect(result.mutationRecords[0].toolCallId).toBe(""); // Set by caller
+    expect(result.mutationRecords[0].path).toBe("test.txt");
+    expect(result.mutationRecords[0].beforeHash).toBeDefined();
+    expect(result.mutationRecords[0].afterHash).toBeDefined();
     expect(result.mutationRecords[0].readSnapshotId).toBeDefined();
+    expect(result.mutationRecords[0].timestamp).toBeDefined();
+  });
+
+  it("no-op Write produces no proof and fails closed", async () => {
+    mockReadFile.mockResolvedValue("same content");
+    mockWriteFile.mockResolvedValue(undefined);
+    mockMkdir.mockResolvedValue(undefined);
+
+    const result = await toolWrite(
+      { file_path: "test.txt", content: "same content" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe("no-observable-mutation");
+    expect(result.changedFiles).toHaveLength(0);
+    expect(result.mutationRecords).toHaveLength(0);
+    expect(result.content).toContain("No observable mutation");
+  });
+
+  it("no-op Edit produces no proof and fails closed", async () => {
+    mockReadFile.mockResolvedValue("some content");
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await toolEdit(
+      { file_path: "test.txt", old_string: "missing text", new_string: "replacement" },
+      "/proj",
+      makeContext(),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe("no-match");
+    expect(result.changedFiles).toHaveLength(0);
+    expect(result.mutationRecords).toHaveLength(0);
   });
 });

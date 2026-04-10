@@ -2363,4 +2363,92 @@ describe("V+E Retrofit: Evidence-Based Execution", () => {
     expect(result.touchedFiles).toEqual(["file1.txt", "file2.txt"]);
     expect(result.touchedFiles).toHaveLength(2);
   });
+
+  it("full-chain V+E success: mutating request → tool call → mutation proof → ledger → gate pass", async () => {
+    setMockFileContent("/tmp/test-project", "feature.js", "");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"feature.js","content":"function newFeature() { return true; }"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "Successfully wrote 1 lines to feature.js",
+      isError: false,
+      ok: true,
+      changedFiles: [
+        {
+          path: "feature.js",
+          beforeHash: "",
+          afterHash: "hash123",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          diffSummary: "+1 -0",
+        },
+      ],
+      mutationRecords: [
+        {
+          id: "m1",
+          toolCallId: "c1",
+          path: "feature.js",
+          beforeHash: "",
+          afterHash: "hash123",
+          diffSummary: "+1 -0",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          timestamp: "2024-01-01T00:00:00.000Z",
+          readSnapshotId: "snap1",
+        },
+      ],
+      toolName: "Write",
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop(
+      "implement a new feature in feature.js",
+      session,
+      makeConfig(),
+    );
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords[0].toolName).toBe("Write");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(1);
+    expect(result.executionLedger?.mutationRecords[0].toolCallId).toBe("c1");
+    expect(result.executionLedger?.mutationRecords[0].readSnapshotId).toBe("snap1");
+    expect(result.touchedFiles).toEqual(["feature.js"]);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(true);
+  });
+
+  it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
+    setMockFileContent("/tmp/test-project", "buggy.js", "console.log('bug');");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"buggy.js","old_string":"console.log(\'bug\');","new_string":"console.log(\'bug\');"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "No observable mutation: file content unchanged after edit operation.",
+      isError: false,
+      ok: false,
+      reasonCode: "no-observable-mutation",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Edit",
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug in buggy.js", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords[0].toolName).toBe("Edit");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(0);
+    expect(result.touchedFiles).toHaveLength(0);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+    expect(result.executionLedger?.completionGateResult?.reasonCode).toBe(
+      "mutation-requested-but-no-files-changed",
+    );
+  });
 });
