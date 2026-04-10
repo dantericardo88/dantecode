@@ -2425,6 +2425,10 @@ describe("V+E Retrofit: Evidence-Based Execution", () => {
     expect(result.executionLedger?.mutationRecords[0].toolCallId).not.toBe("");
     expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
     expect(result.executionLedger?.toolCallRecords[0].toolName).toBe("Write");
+    // Assert toolCallId matches the actual ToolCallRecord id
+    expect(result.executionLedger?.mutationRecords[0].toolCallId).toBe(
+      result.executionLedger?.toolCallRecords[0].id,
+    );
   });
 
   it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {

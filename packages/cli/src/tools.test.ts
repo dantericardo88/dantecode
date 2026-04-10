@@ -80,6 +80,7 @@ function makeContext(overrides: Partial<CliToolExecutionContext> = {}): CliToolE
     readTracker: new Map(),
     editAttempts: new Map(),
     sandboxEnabled: false,
+    trackedSnapshots: new Map(),
     ...overrides,
   };
 }
@@ -1461,7 +1462,7 @@ describe("GitHubOps tool", () => {
     expect(result.changedFiles[0].diffSummary).toBe("+1 -0");
 
     expect(result.mutationRecords).toHaveLength(1);
-    expect(result.mutationRecords[0].toolCallId).toBe(""); // Pre-injection state - caller will fill
+    expect(result.mutationRecords[0].toolCallId).toBe(""); // Pre-injection state - caller fills this
     expect(result.mutationRecords[0].path).toBe("test.txt");
     expect(result.mutationRecords[0].beforeHash).toBeDefined();
     expect(result.mutationRecords[0].afterHash).toBeDefined();
@@ -1472,6 +1473,51 @@ describe("GitHubOps tool", () => {
     expect(result.mutationRecords[0].deletions).toBe(0);
     expect(result.mutationRecords[0].readSnapshotId).toBeDefined();
     expect(result.mutationRecords[0].timestamp).toBeDefined();
+  });
+
+  it("stale tracked snapshot fails Write through real tool path", async () => {
+    // Set up stale tracked snapshot in context
+    const staleSnapshot = { id: "stale", path: "/proj/test.txt", capturedAt: "2024-01-01T00:00:00.000Z", size: 10, mtimeMs: 1000, hash: "oldhash", lineEnding: "LF" as const };
+    mockReadFile.mockResolvedValue("current content"); // File changed
+    mockWriteFile.mockResolvedValue(undefined);
+    mockMkdir.mockResolvedValue(undefined);
+
+    const context = makeContext();
+    context.trackedSnapshots!.set("/proj/test.txt", staleSnapshot);
+
+    const result = await toolWrite(
+      { file_path: "test.txt", content: "new content" },
+      "/proj",
+      context,
+    );
+
+    // Should fail due to stale snapshot
+    expect(result.ok).toBe(false);
+    expect(result.changedFiles).toHaveLength(0);
+    expect(result.mutationRecords).toHaveLength(0);
+    expect(result.content).toContain("stale");
+  });
+
+  it("superseded tracked snapshot fails Edit through real tool path", async () => {
+    // Set up tracked snapshot with different hash (superseded)
+    const trackedSnapshot = { id: "tracked", path: "/proj/test.txt", capturedAt: "2024-01-01T00:00:00.000Z", size: 15, mtimeMs: 1000, hash: "original", lineEnding: "LF" as const };
+    mockReadFile.mockResolvedValue("modified externally"); // File changed externally
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const context = makeContext();
+    context.trackedSnapshots!.set("/proj/test.txt", trackedSnapshot);
+
+    const result = await toolEdit(
+      { file_path: "test.txt", old_string: "modified externally", new_string: "edited content" },
+      "/proj",
+      context,
+    );
+
+    // Should fail due to superseded snapshot (different hash)
+    expect(result.ok).toBe(false);
+    expect(result.changedFiles).toHaveLength(0);
+    expect(result.mutationRecords).toHaveLength(0);
+    expect(result.content).toContain("stale");
   });
 
   it("stale snapshot basis fails Write through real tool path", async () => {
