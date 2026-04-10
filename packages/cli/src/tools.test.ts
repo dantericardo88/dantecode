@@ -53,12 +53,14 @@ vi.mock("@dantecode/core", async () => {
   const providers = await vi.importActual<object>("../../core/src/search-providers.ts");
   const orchestrator = await vi.importActual<object>("../../core/src/web-search-orchestrator.ts");
   const reranker = await vi.importActual<object>("../../core/src/search-reranker.ts");
+  const runtime = await vi.importActual<object>("../../core/src/tool-runtime.ts");
   return {
     ...policy,
     ...search,
     ...providers,
     ...orchestrator,
     ...reranker,
+    ...runtime,
     appendAuditEvent: mockAppendAuditEvent,
     resolvePreferredShell: mockResolvePreferredShell,
   };
@@ -123,6 +125,7 @@ describe("cli tools hardening", () => {
   });
 
   it("allows protected writes in explicit self-improvement mode", async () => {
+    mockReadFile.mockRejectedValueOnce(new Error("ENOENT"));
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
 
@@ -168,7 +171,7 @@ describe("cli tools hardening", () => {
 
   it("returns current file contents after the first edit mismatch", async () => {
     const context = makeContext();
-    mockReadFile.mockResolvedValueOnce("line 1\nline 2\n");
+    mockReadFile.mockResolvedValueOnce("const value = 1;\n");
 
     const readResult = await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
     expect(readResult.isError).toBe(false);
@@ -235,6 +238,56 @@ describe("cli tools hardening", () => {
 
     expect(third.isError).toBe(true);
     expect(third.content).toContain("Third identical Edit attempt blocked");
+  });
+
+  it("edits CRLF files while preserving line endings", async () => {
+    const context = makeContext();
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Edit",
+      {
+        file_path: "src/app.ts",
+        old_string: "const value = 1;\n",
+        new_string: "const value = 2;\n",
+      },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("normalized line endings");
+    const writtenPath = String(mockWriteFile.mock.calls[0]?.[0] ?? "").replace(/\\/g, "/");
+    expect(writtenPath).toMatch(/\/src\/app\.ts$/);
+    expect(mockWriteFile.mock.calls[0]?.[1]).toBe("const value = 2;\r\n");
+    expect(mockWriteFile.mock.calls[0]?.[2]).toBe("utf-8");
+  });
+
+  it("rejects edits when the file changed after the last full read", async () => {
+    const context = makeContext();
+    mockReadFile.mockResolvedValueOnce("const value = 1;\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    const trackedSnapshot = context.readTracker?.values().next().value;
+    expect(trackedSnapshot).toBeDefined();
+    if (trackedSnapshot) {
+      trackedSnapshot.hash = "outdated";
+    }
+
+    mockReadFile.mockResolvedValueOnce("const value = 2;\n");
+    const result = await executeTool(
+      "Edit",
+      { file_path: "src/app.ts", old_string: "const value = 2;\n", new_string: "const value = 3;\n" },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("changed since the last full Read");
   });
 
   it("uses the shared preferred shell for Bash commands", async () => {

@@ -8,11 +8,18 @@ import { execSync } from "node:child_process";
 import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import {
   appendAuditEvent,
+  applyExactEdit,
+  createFileSnapshot,
+  formatStaleSnapshotMessage,
+  isSnapshotStale,
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
+  preserveLineEndingsForWrite,
   resolvePreferredShell,
+  truncateToolOutput,
 } from "@dantecode/core";
+import type { FileSnapshot } from "@dantecode/core";
 import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
 import {
   sandboxCheckCommand,
@@ -74,7 +81,7 @@ export interface CliToolExecutionContext {
   roundId?: string;
   sandboxEnabled?: boolean;
   selfImprovement?: SelfImprovementContext;
-  readTracker?: Map<string, string>;
+  readTracker?: Map<string, FileSnapshot>;
   editAttempts?: Map<string, number>;
   /** Injected by the agent loop to enable sub-agent spawning. */
   subAgentExecutor?: SubAgentExecutor;
@@ -112,6 +119,42 @@ function resolvePath(filePath: string, projectRoot: string): string {
   return resolve(projectRoot, filePath);
 }
 
+async function buildTrackedSnapshot(
+  resolvedPath: string,
+  content: string,
+): Promise<FileSnapshot> {
+  try {
+    const fileStats = await stat(resolvedPath);
+    return createFileSnapshot(resolvedPath, content, {
+      mtimeMs: fileStats.mtimeMs,
+      size: fileStats.size,
+    });
+  } catch {
+    return createFileSnapshot(resolvedPath, content);
+  }
+}
+
+function getTrackedSnapshot(
+  context: CliToolExecutionContext | undefined,
+  resolvedPath: string,
+): FileSnapshot | undefined {
+  if (!context?.readTracker) {
+    return undefined;
+  }
+  return context.readTracker.get(buildReadTrackerKey(context, resolvedPath));
+}
+
+function setTrackedSnapshot(
+  context: CliToolExecutionContext | undefined,
+  resolvedPath: string,
+  snapshot: FileSnapshot,
+): void {
+  if (!context?.readTracker) {
+    return;
+  }
+  context.readTracker.set(buildReadTrackerKey(context, resolvedPath), snapshot);
+}
+
 // ----------------------------------------------------------------------------
 // Individual Tool Handlers
 // ----------------------------------------------------------------------------
@@ -146,7 +189,7 @@ async function toolRead(
     });
 
     if (context?.readTracker && startLine === 0 && endLine >= lines.length) {
-      context.readTracker.set(buildReadTrackerKey(context, resolved), new Date().toISOString());
+      setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, raw));
     }
 
     return { content: numbered.join("\n"), isError: false };
@@ -159,7 +202,11 @@ async function toolRead(
 /**
  * Write tool: writes content to a file, creating parent directories as needed.
  */
-async function toolWrite(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolWrite(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: CliToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const content = input["content"] as string | undefined;
 
@@ -173,9 +220,23 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
   const resolved = resolvePath(filePath, projectRoot);
 
   try {
+    const existing = await readFile(resolved, "utf-8").catch(() => null);
+    const priorSnapshot = getTrackedSnapshot(context, resolved);
+    if (existing !== null && priorSnapshot) {
+      const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
+      if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
+        return {
+          content: formatStaleSnapshotMessage(resolved),
+          isError: true,
+        };
+      }
+    }
+
+    const contentToWrite = preserveLineEndingsForWrite(content, existing ?? undefined);
     await mkdir(dirname(resolved), { recursive: true });
-    await writeFile(resolved, content, "utf-8");
-    const lineCount = content.split("\n").length;
+    await writeFile(resolved, contentToWrite, "utf-8");
+    setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, contentToWrite));
+    const lineCount = contentToWrite.split(/\r?\n/).length;
     return {
       content: `Successfully wrote ${lineCount} lines to ${resolved}`,
       isError: false,
@@ -228,8 +289,20 @@ async function toolEdit(
     }
 
     const existing = await readFile(resolved, "utf-8");
+    const priorSnapshot = getTrackedSnapshot(context, resolved);
+    if (priorSnapshot) {
+      const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
+      if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
+        return {
+          content: formatStaleSnapshotMessage(resolved),
+          isError: true,
+        };
+      }
+    }
 
-    if (!existing.includes(oldString)) {
+    const editResult = applyExactEdit(existing, oldString, newString, replaceAll);
+
+    if (!editResult.matched || !editResult.updatedContent) {
       return buildEditRecoveryResult(
         context,
         attemptKey,
@@ -240,34 +313,28 @@ async function toolEdit(
     }
 
     // Check for uniqueness if not replaceAll
-    if (!replaceAll) {
-      const firstIndex = existing.indexOf(oldString);
-      const secondIndex = existing.indexOf(oldString, firstIndex + 1);
-      if (secondIndex !== -1) {
-        return buildEditRecoveryResult(
-          context,
-          attemptKey,
-          resolved,
-          `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
-          existing,
-        );
-      }
+    if (!replaceAll && editResult.occurrenceCount > 1) {
+      return buildEditRecoveryResult(
+        context,
+        attemptKey,
+        resolved,
+        `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
+        existing,
+      );
     }
 
-    let updated: string;
-    if (replaceAll) {
-      updated = existing.split(oldString).join(newString);
-    } else {
-      updated = existing.replace(oldString, newString);
-    }
-
-    await writeFile(resolved, updated, "utf-8");
+    await writeFile(resolved, editResult.updatedContent, "utf-8");
+    setTrackedSnapshot(
+      context,
+      resolved,
+      await buildTrackedSnapshot(resolved, editResult.updatedContent),
+    );
     context?.editAttempts?.delete(attemptKey);
 
-    const replacementCount = replaceAll ? existing.split(oldString).length - 1 : 1;
-
     return {
-      content: `Successfully edited ${resolved} (${replacementCount} replacement${replacementCount !== 1 ? "s" : ""})`,
+      content:
+        `Successfully edited ${resolved} (${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""})` +
+        (editResult.usedNormalizedLineEndings ? " [normalized line endings]" : ""),
       isError: false,
     };
   } catch (err: unknown) {
@@ -1590,7 +1657,7 @@ export async function executeTool(
       result = await toolRead(input, projectRoot, context);
       break;
     case "Write":
-      result = await toolWrite(input, projectRoot);
+      result = await toolWrite(input, projectRoot, context);
       break;
     case "Edit":
       result = await toolEdit(input, projectRoot, context);
@@ -1665,7 +1732,10 @@ export async function executeTool(
     }
   }
 
-  return result;
+  return {
+    ...result,
+    content: truncateToolOutput(result.content),
+  };
 }
 
 function normalizeExecutionContext(
@@ -1677,7 +1747,7 @@ function normalizeExecutionContext(
       sessionId: sessionOrContext,
       roundId: "default-round",
       sandboxEnabled,
-      readTracker: new Map(),
+      readTracker: new Map<string, FileSnapshot>(),
       editAttempts: new Map(),
     };
   }
@@ -1687,7 +1757,7 @@ function normalizeExecutionContext(
     roundId: sessionOrContext.roundId ?? "default-round",
     sandboxEnabled: sessionOrContext.sandboxEnabled ?? sandboxEnabled,
     selfImprovement: sessionOrContext.selfImprovement,
-    readTracker: sessionOrContext.readTracker ?? new Map(),
+    readTracker: sessionOrContext.readTracker ?? new Map<string, FileSnapshot>(),
     editAttempts: sessionOrContext.editAttempts ?? new Map(),
     subAgentExecutor: sessionOrContext.subAgentExecutor,
   };

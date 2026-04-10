@@ -3,6 +3,7 @@
 // Each slash command is a function that operates on the REPL state.
 // ============================================================================
 
+import * as readline from "node:readline";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
@@ -105,6 +106,19 @@ export interface ReplState {
   activeSkill: string | null;
   /** Wave orchestrator state for step-by-step skill execution (Claude Workflow Mode). */
   waveState: WaveOrchestratorState | null;
+  /**
+   * Permissions for destructive actions. Defaults to edit: "ask", bash: "ask", tools: "allow".
+   * - "allow": always allow execution
+   * - "ask": prompt user for approval before execution
+   * - "deny": always block execution
+   */
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
+  /** Readline interface for interactive prompts (used for 'ask' permissions). */
+  rl?: readline.Interface;
 }
 
 /** A single slash command handler. */
@@ -670,7 +684,7 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
       "2. Then execute each step ONE AT A TIME with real tool calls.",
       "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
       "4. After each step, verify your work (Read the file, run a check, etc.).",
-      "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+      '5. For GitHub search: `gh search repos "query" --limit 10 --json name,url,description,stargazersCount`',
       "6. For web content: `curl -sL 'url' | head -200`",
       "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
       "8. Mark each TodoWrite step completed as you finish it.",
@@ -705,7 +719,8 @@ async function agentsCommand(_args: string, state: ReplState): Promise<string> {
   try {
     const entries = await readdir(agentsDir);
     const agentFiles = entries.filter(
-      (e) => e.endsWith(".yaml") || e.endsWith(".yml") || e.endsWith(".md"),
+      (entry: string) =>
+        entry.endsWith(".yaml") || entry.endsWith(".yml") || entry.endsWith(".md"),
     );
 
     if (agentFiles.length === 0) {

@@ -4,7 +4,7 @@
 
 // ─── Model Router ─────────────────────────────────────────────────────────────
 
-export { ModelRouterImpl, shouldContinueLoop } from "./model-router.js";
+export { BudgetExceededError, ModelRouterImpl, shouldContinueLoop } from "./model-router.js";
 export type { GenerateOptions, LoopExitReason } from "./model-router.js";
 
 // ─── Providers ────────────────────────────────────────────────────────────────
@@ -72,6 +72,50 @@ export {
 
 export { estimateTokens, estimateMessageTokens, getContextUtilization } from "./token-counter.js";
 export type { ContextUtilization } from "./token-counter.js";
+
+export { classifyApiError, parseRetryAfterMs } from "./api-error-classifier.js";
+export type { ParsedApiError, ParsedApiErrorCategory } from "./api-error-classifier.js";
+
+export {
+  DEFAULT_RETRY_POLICY,
+  computeRetryDelayMs,
+  retryWithBackoff,
+  sleepWithAbort,
+} from "./retry-policy.js";
+export type { RetryContext, RetryPolicy } from "./retry-policy.js";
+
+export {
+  getProviderExecutionProfile,
+  inferReasoningCapability,
+} from "./provider-execution-profile.js";
+export type {
+  ProviderExecutionProfile,
+  ProviderOptions,
+} from "./provider-execution-profile.js";
+
+export { compactTextTranscript } from "./transcript-compaction.js";
+export type {
+  TextTranscriptMessage,
+  TranscriptCompactionResult,
+} from "./transcript-compaction.js";
+
+export {
+  applyExactEdit,
+  createFileSnapshot,
+  detectLineEnding,
+  formatStaleSnapshotMessage,
+  isSnapshotStale,
+  normalizeLineEndings,
+  preserveLineEndingsForWrite,
+  truncateToolOutput,
+} from "./tool-runtime.js";
+export type {
+  ExactEditResult,
+  FileSnapshot,
+  LineEndingStyle,
+} from "./tool-runtime.js";
+
+export { getProviderPromptSupplement } from "./provider-prompt-supplements.js";
 
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 

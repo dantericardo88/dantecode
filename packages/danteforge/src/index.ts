@@ -6,7 +6,7 @@
 
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import type {
@@ -84,6 +84,17 @@ export const HARD_VIOLATION_PATTERNS: StubPattern[] = [
     'Throwing "stub" is a stub',
     "stub_detected",
   ),
+  createStubPattern(/\btodo!\s*\(/i, "Rust todo! macro indicates incomplete code", "stub_detected"),
+  createStubPattern(
+    /\bunimplemented!\s*\(/i,
+    "Rust unimplemented! macro indicates incomplete code",
+    "stub_detected",
+  ),
+  createStubPattern(
+    /panic\s*\(\s*['"`]not\s+implemented['"`]\s*\)/i,
+    'Go panic("not implemented") is a stub',
+    "stub_detected",
+  ),
   createStubPattern(/^\s*\.\.\.\s*$/, "Ellipsis stub detected", "stub_detected"),
   createStubPattern(/^\s*pass\s*$/, "pass statement leaves implementation empty", "stub_detected"),
   createStubPattern(/\bplaceholder\b/i, "Placeholder text found", "stub_detected"),
@@ -134,6 +145,57 @@ function buildViolation(
   };
 }
 
+const PASS_STUB_PATTERN_SOURCE = /^\s*pass\s*$/.source;
+const ELLIPSIS_STUB_PATTERN_SOURCE = /^\s*\.\.\.\s*$/.source;
+
+// Patterns that are language-native and should be excluded for specific file types.
+// Key: regex source of the StubPattern, Value: set of extensions to skip.
+const LANGUAGE_EXCLUSIONS: Record<string, Set<string>> = {
+  [ELLIPSIS_STUB_PATTERN_SOURCE]: new Set([".pyi"]),
+};
+
+function getLineIndent(line: string): number {
+  return (line.match(/^\s*/) ?? [""])[0].length;
+}
+
+function findEnclosingPythonFunction(lines: string[], lineIndex: number): string | null {
+  const currentIndent = getLineIndent(lines[lineIndex] ?? "");
+
+  for (let index = lineIndex - 1; index >= 0; index--) {
+    const line = lines[index] ?? "";
+    const match = line.match(/^(\s*)def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if (!match) {
+      continue;
+    }
+
+    const functionIndent = match[1]!.length;
+    if (functionIndent < currentIndent || index === lineIndex - 1) {
+      return match[2] ?? null;
+    }
+  }
+
+  return null;
+}
+
+function shouldSkipHardViolation(
+  pattern: StubPattern,
+  line: string,
+  lineIndex: number,
+  lines: string[],
+  ext: string,
+): boolean {
+  const exclusions = LANGUAGE_EXCLUSIONS[pattern.regex.source];
+  if (exclusions && ext && exclusions.has(ext)) {
+    return true;
+  }
+
+  if (ext === ".py" && pattern.regex.source === PASS_STUB_PATTERN_SOURCE && /^\s*pass\s*$/.test(line)) {
+    return findEnclosingPythonFunction(lines, lineIndex) === "__init__";
+  }
+
+  return false;
+}
+
 export function runAntiStubScanner(
   content: string,
   _projectRoot: string,
@@ -143,8 +205,14 @@ export function runAntiStubScanner(
   const hardViolations: PDSEViolation[] = [];
   const softViolations: PDSEViolation[] = [];
 
+  // Determine file extension for language-aware filtering
+  const ext = filePath ? extname(filePath).toLowerCase() : "";
+
   lines.forEach((line, index) => {
     for (const pattern of HARD_VIOLATION_PATTERNS) {
+      if (shouldSkipHardViolation(pattern, line, index, lines, ext)) {
+        continue;
+      }
       const violation = buildViolation(line, index + 1, filePath, pattern, "hard");
       if (violation !== null) {
         hardViolations.push(violation);

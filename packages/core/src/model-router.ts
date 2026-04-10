@@ -19,16 +19,16 @@ import type {
 } from "@dantecode/config-types";
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
+import { classifyApiError } from "./api-error-classifier.js";
+import { getProviderExecutionProfile } from "./provider-execution-profile.js";
+import { retryWithBackoff } from "./retry-policy.js";
 
-type ProviderOptionValue =
-  | string
-  | number
-  | boolean
-  | null
-  | ProviderOptionValue[]
-  | { [key: string]: ProviderOptionValue };
-
-type ProviderOptions = Record<string, { [key: string]: ProviderOptionValue }>;
+export class BudgetExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BudgetExceededError";
+  }
+}
 
 /**
  * Options passed to generate() and stream() methods.
@@ -53,7 +53,7 @@ interface RouterLogEntry {
   timestamp: string;
   provider: string;
   modelId: string;
-  action: "attempt" | "success" | "fallback" | "error";
+  action: "attempt" | "success" | "fallback" | "retry" | "error" | "blocked";
   durationMs: number;
   error?: string;
 }
@@ -131,6 +131,7 @@ export class ModelRouterImpl {
   private _sessionTokensUsed = 0;
   private _currentTier: "fast" | "capable" = "fast";
   private _consecutiveGstackFailures = 0;
+  private _budgetExceeded = false;
   // Model-assisted complexity scoring cache
   private _modelRatedComplexity: number | null = null;
   private _firstTurnCompleted = false;
@@ -160,6 +161,9 @@ export class ModelRouterImpl {
     const primaryResult = await this.tryGenerate(modelConfig, messages, options);
     if (primaryResult.success) {
       return primaryResult.text;
+    }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
     }
 
     // Cascade through fallbacks
@@ -200,6 +204,9 @@ export class ModelRouterImpl {
     if (primaryResult.success) {
       return primaryResult.stream;
     }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
+    }
 
     // Cascade through fallbacks
     for (const fallbackConfig of fallbacks) {
@@ -233,6 +240,7 @@ export class ModelRouterImpl {
     options: GenerateOptions = {},
   ): Promise<StreamTextResult<T, never>> {
     const modelConfig = this.resolveModelConfig(options.taskType);
+    this.assertBudgetAvailable();
 
     // Guard: if the model doesn't support tool calls, throw so the caller
     // can fall back to the XML-parsing path
@@ -248,6 +256,9 @@ export class ModelRouterImpl {
     const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
       return primaryResult.stream;
+    }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
     }
 
     // Cascade through fallback models that support tool calls
@@ -283,57 +294,6 @@ export class ModelRouterImpl {
     return this.routerConfig.default;
   }
 
-  private buildProviderOptions(
-    config: ModelConfig,
-    options: GenerateOptions,
-  ): ProviderOptions | undefined {
-    if (
-      !config.supportsExtendedThinking ||
-      !options.thinkingBudget ||
-      options.thinkingBudget <= 0
-    ) {
-      return undefined;
-    }
-
-    const reasoningEffort = config.reasoningEffort ?? "medium";
-
-    switch (config.provider) {
-      case "anthropic":
-        return {
-          anthropic: {
-            thinking: {
-              type: "enabled",
-              budgetTokens: options.thinkingBudget,
-            },
-            reasoningEffort,
-          },
-        };
-      case "openai":
-        return {
-          openai: {
-            reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
-          },
-        };
-      case "google":
-        return {
-          google: {
-            reasoningEffort,
-            thinkingConfig: {
-              thinkingBudget: options.thinkingBudget,
-            },
-          },
-        };
-      default:
-        return {
-          [config.provider]: {
-            reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
-          },
-        };
-    }
-  }
-
   /**
    * Resolves the provider builder function for a given model config.
    *
@@ -366,21 +326,42 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = await generateText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-      });
+      const result = await retryWithBackoff(
+        async () =>
+          generateText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(profile.providerOptions ? { providerOptions: profile.providerOptions } : {}),
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
+        },
+      );
 
       const durationMs = Date.now() - startTime;
       this.logEntry(config, "success", durationMs);
@@ -430,32 +411,53 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(profile.providerOptions ? { providerOptions: profile.providerOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          // D6: Track cost for this streaming request
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+              // D6: Track cost for this streaming request
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+            },
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
         },
-      });
+      );
 
       return {
         success: true,
@@ -488,32 +490,53 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        tools,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            tools,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(profile.providerOptions ? { providerOptions: profile.providerOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+            },
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
         },
-      });
+      );
 
       return { success: true, stream: result as StreamTextResult<T, never> };
     } catch (err: unknown) {
@@ -553,6 +576,49 @@ export class ModelRouterImpl {
     }
   }
 
+  private async recordRetryAuditEvent(
+    config: ModelConfig,
+    category: string,
+    delayMs: number,
+  ): Promise<void> {
+    try {
+      await appendAuditEvent(this.projectRoot, {
+        type: "request_retry",
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        modelId: `${config.provider}/${config.modelId}`,
+        projectRoot: this.projectRoot,
+        payload: {
+          category,
+          delayMs,
+          provider: config.provider,
+          modelId: config.modelId,
+        },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private async recordBudgetBlockedAuditEvent(reason: string): Promise<void> {
+    try {
+      await appendAuditEvent(this.projectRoot, {
+        type: "budget_blocked",
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        modelId: `${this.routerConfig.default.provider}/${this.routerConfig.default.modelId}`,
+        projectRoot: this.projectRoot,
+        payload: {
+          reason,
+          sessionTotalUsd: this._sessionCostUsd,
+          monthlySpendUsd: this.routerConfig.budget?.currentMonthlySpendUsd ?? 0,
+        },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   /**
    * Appends a log entry to the internal router log for diagnostics.
    */
@@ -584,6 +650,37 @@ export class ModelRouterImpl {
    */
   clearLogs(): void {
     this.logs.length = 0;
+  }
+
+  private assertBudgetAvailable(): void {
+    const budget = this.routerConfig.budget;
+    if (!budget?.enforce) {
+      this._budgetExceeded = false;
+      return;
+    }
+
+    if (budget.sessionMaxUsd !== undefined && this._sessionCostUsd >= budget.sessionMaxUsd) {
+      this._budgetExceeded = true;
+      const message = `Session budget exceeded ($${this._sessionCostUsd.toFixed(4)} / $${budget.sessionMaxUsd.toFixed(4)})`;
+      this.logEntry(this.routerConfig.default, "blocked", 0, message);
+      void this.recordBudgetBlockedAuditEvent(message);
+      throw new BudgetExceededError(message);
+    }
+
+    if (
+      budget.monthlyMaxUsd !== undefined &&
+      (budget.currentMonthlySpendUsd ?? 0) >= budget.monthlyMaxUsd
+    ) {
+      this._budgetExceeded = true;
+      const message =
+        `Monthly budget exceeded ($${(budget.currentMonthlySpendUsd ?? 0).toFixed(4)} / ` +
+        `$${budget.monthlyMaxUsd.toFixed(4)})`;
+      this.logEntry(this.routerConfig.default, "blocked", 0, message);
+      void this.recordBudgetBlockedAuditEvent(message);
+      throw new BudgetExceededError(message);
+    }
+
+    this._budgetExceeded = false;
   }
 
   // --------------------------------------------------------------------------
@@ -811,11 +908,21 @@ export class ModelRouterImpl {
     const lastCost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
     this._sessionCostUsd += lastCost;
     this._sessionTokensUsed += inputTokens + outputTokens;
+    const sessionBudgetUsd = this.routerConfig.budget?.sessionMaxUsd;
+    const monthlyBudgetUsd = this.routerConfig.budget?.monthlyMaxUsd;
+    this._budgetExceeded = Boolean(
+      (sessionBudgetUsd !== undefined && this._sessionCostUsd >= sessionBudgetUsd) ||
+        (monthlyBudgetUsd !== undefined &&
+          (this.routerConfig.budget?.currentMonthlySpendUsd ?? 0) >= monthlyBudgetUsd),
+    );
     return {
       sessionTotalUsd: this._sessionCostUsd,
       lastRequestUsd: lastCost,
       modelTier: this._currentTier,
       tokensUsedSession: this._sessionTokensUsed,
+      sessionBudgetUsd,
+      monthlyBudgetUsd,
+      budgetExceeded: this._budgetExceeded,
     };
   }
 
@@ -827,6 +934,7 @@ export class ModelRouterImpl {
     this._sessionTokensUsed = 0;
     this._currentTier = "fast";
     this._consecutiveGstackFailures = 0;
+    this._budgetExceeded = false;
     this._modelRatedComplexity = null;
     this._firstTurnCompleted = false;
   }
@@ -840,6 +948,9 @@ export class ModelRouterImpl {
       lastRequestUsd: 0,
       modelTier: this._currentTier,
       tokensUsedSession: this._sessionTokensUsed,
+      sessionBudgetUsd: this.routerConfig.budget?.sessionMaxUsd,
+      monthlyBudgetUsd: this.routerConfig.budget?.monthlyMaxUsd,
+      budgetExceeded: this._budgetExceeded,
     };
   }
 

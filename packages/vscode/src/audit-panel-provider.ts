@@ -51,6 +51,9 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   loop_terminated: "Loop Terminated",
   tier_escalation: "Tier Escalation",
   cost_update: "Cost Update",
+  request_retry: "Request Retried",
+  context_compacted: "Context Compacted",
+  budget_blocked: "Budget Blocked",
   webhook_received: "Webhook Received",
 };
 
@@ -84,6 +87,9 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   constitution_violation: "shield",
   sandbox_start: "vm-running",
   sandbox_stop: "vm",
+  request_retry: "history",
+  context_compacted: "fold",
+  budget_blocked: "circle-slash",
 };
 
 /**

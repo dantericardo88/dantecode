@@ -137,6 +137,20 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     process.stdout.write(banner);
   }
 
+  const permissions = state.permissions || {
+    edit: "ask",
+    bash: "ask",
+    tools: "allow",
+  };
+
+  // Create readline interface before wiring any interactive permission prompts.
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `${CYAN}>${RESET} `,
+    terminal: true,
+  });
+
   // Initialize REPL state
   const replState: ReplState = {
     session,
@@ -154,6 +168,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    permissions,
+    rl: rl,
   };
 
   // Agent loop config
@@ -163,6 +179,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
     silent: options.silent,
+    permissions: permissions,
+    rl: rl,
   };
 
   // Initialize sandbox bridge when --sandbox is enabled
@@ -170,14 +188,6 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
     replState.sandboxBridge = agentConfig.sandboxBridge;
   }
-
-  // Create readline interface
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: `${CYAN}>${RESET} `,
-    terminal: true,
-  });
 
   // Handle Ctrl+C gracefully — first press aborts streaming, second exits
   let ctrlCCount = 0;

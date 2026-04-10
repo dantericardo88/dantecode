@@ -12,10 +12,22 @@ import { resolve } from "node:path";
 
 // Mock generateText at the "ai" module level — ModelRouterImpl calls this internally.
 const mockGenerateText = vi.fn();
+const mockReadFile = vi.fn();
+const mockFileContents = new Map<string, string>();
 
 vi.mock("ai", () => ({
   generateText: mockGenerateText,
   streamText: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", () => ({
+  readFile: (path: string) => {
+    const normalized = String(path).replace(/\\/g, "/");
+    if (mockFileContents.has(normalized)) {
+      return Promise.resolve(mockFileContents.get(normalized)!);
+    }
+    return mockReadFile(path);
+  },
 }));
 
 // Track analyzeComplexity return value so tests can override it
@@ -133,26 +145,50 @@ vi.mock("@dantecode/core", () => {
       percent: 0,
       tier: "green",
     })),
+    compactTextTranscript: vi.fn((messages: Array<{ role: string; content: string }>) => ({
+      messages,
+      strategy: "none",
+      droppedMessages: 0,
+    })),
+    truncateToolOutput: vi.fn((content: string) => content),
+    getProviderPromptSupplement: vi
+      .fn()
+      .mockReturnValue("## Provider-Specific Rules\nExecute tools first."),
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
     // Skill wave orchestrator — real implementations for integration testing
-    getCurrentWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string; instructions: string }> }) => {
-      if (state.currentIndex >= state.waves.length) return null;
-      return state.waves[state.currentIndex];
-    }),
-    advanceWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number }>; completedWaves: number[] }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return false;
-      state.completedWaves.push(current.number);
-      state.currentIndex++;
-      return state.currentIndex < state.waves.length;
-    }),
+    getCurrentWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number; title: string; instructions: string }>;
+      }) => {
+        if (state.currentIndex >= state.waves.length) return null;
+        return state.waves[state.currentIndex];
+      },
+    ),
+    advanceWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number }>;
+        completedWaves: number[];
+      }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return false;
+        state.completedWaves.push(current.number);
+        state.currentIndex++;
+        return state.currentIndex < state.waves.length;
+      },
+    ),
     recordWaveFailure: vi.fn(() => true),
-    buildWavePrompt: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return "All waves complete.";
-      return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
-    }),
+    buildWavePrompt: vi.fn(
+      (state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return "All waves complete.";
+        return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
+      },
+    ),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
     // Approach memory + prompt cache mocks
@@ -160,11 +196,19 @@ vi.mock("@dantecode/core", () => {
       async load() {}
       async save() {}
       async record() {}
-      async findSimilar() { return []; }
-      async getFailedApproaches() { return []; }
-      async getAll() { return []; }
+      async findSimilar() {
+        return [];
+      }
+      async getFailedApproaches() {
+        return [];
+      }
+      async getAll() {
+        return [];
+      }
       async clear() {}
-      get size() { return 0; }
+      get size() {
+        return 0;
+      }
     },
     formatApproachesForPrompt: vi.fn().mockReturnValue(""),
   };
@@ -306,6 +350,10 @@ function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
   };
 }
 
+function setMockFileContent(projectRoot: string, filePath: string, content: string): void {
+  mockFileContents.set(resolve(projectRoot, filePath).replace(/\\/g, "/"), content);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -313,6 +361,8 @@ function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
 describe("runAgentLoop smoke tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFileContents.clear();
+    mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     mockAnalyzeComplexityValue = 0.3;
     mockEscalateTier.mockReset();
   });
@@ -789,6 +839,7 @@ describe("Approach memory: recording after verification", () => {
       .mockResolvedValueOnce({ content: "Tests passed", isError: false }); // npm test
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "export const x = 1;");
     const result = await runAgentLoop("Update app", session, makeConfig());
 
     // The loop should complete. executeTool should have been called at least once
@@ -818,6 +869,7 @@ describe("Approach memory: recording after verification", () => {
       .mockResolvedValueOnce({ content: "Error: test failed", isError: true }); // npm test
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "broken code");
     const result = await runAgentLoop("Update app", session, config);
 
     // The verification should have been attempted (executeTool called for Bash)
@@ -854,7 +906,9 @@ describe("Approach memory: recording after verification", () => {
     mockParseVerificationErrors.mockReturnValue([{ message: "same failure" }]);
     mockComputeErrorSignature.mockReturnValue("repeat-sig");
 
-    await runAgentLoop("Update app", makeSession(), config);
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "broken code");
+    await runAgentLoop("Update app", session, config);
 
     expect(mockEscalateTier).toHaveBeenCalledWith(expect.stringContaining("repeat-sig"));
   });
@@ -887,7 +941,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Harden the CLI tools", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const gated = true;",
+    );
+    await runAgentLoop("Harden the CLI tools", session, makeConfig());
 
     const bashCommands = mockExecuteTool.mock.calls
       .filter(([name]) => name === "Bash")
@@ -930,7 +990,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Write and commit protected changes", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const broken = true;",
+    );
+    await runAgentLoop("Write and commit protected changes", session, makeConfig());
 
     expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitCommit")).toBe(false);
   });
@@ -969,7 +1035,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Write and push protected changes", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const broken = true;",
+    );
+    await runAgentLoop("Write and push protected changes", session, makeConfig());
 
     expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitPush")).toBe(false);
   });
@@ -1540,6 +1612,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/main.ts", "world");
     await runAgentLoop("/magic fix the bug", session, makeConfig());
 
     // 3 calls: confab-rejected summary → real edit → final
@@ -1554,6 +1627,36 @@ describe("Universal skill completion (skillActive)", () => {
       m.content.includes("NO files were actually modified"),
     );
     expect(hasConfabWarning).toBe(true);
+  });
+
+  it("rejects confabulated completion claims when 0 files modified in normal execution tasks", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All requested changes are complete.",
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Actually editing now.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/main.ts","old_string":"hello","new_string":"world"}}\n</tool_use>',
+      usage: { totalTokens: 60 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Change applied successfully.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/main.ts", "world");
+    await runAgentLoop("Fix the bug in src/main.ts", session, makeConfig());
+
+    const secondCallArgs = mockGenerateText.mock.calls[1]![0];
+    const userMsgs = secondCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("NO files were actually modified"),
+      ),
+    ).toBe(true);
   });
 
   it("blocks GitCommit when 0 files modified in pipeline workflow", async () => {
@@ -1581,6 +1684,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "new");
     await runAgentLoop("/magic implement feature", session, makeConfig());
 
     // Verify GitCommit was blocked — the block message should appear in round 2 messages
@@ -1600,9 +1704,21 @@ describe("Universal skill completion (skillActive)", () => {
     });
     // Mock Read to populate readTracker (simulating real executeTool behavior)
     mockExecuteTool.mockImplementationOnce(
-      async (_name: string, input: Record<string, unknown>, projectRoot: string, context?: { readTracker?: Map<string, string> }) => {
+      async (
+        _name: string,
+        input: Record<string, unknown>,
+        projectRoot: string,
+        context?: { readTracker?: Map<string, unknown> },
+      ) => {
         if (context?.readTracker && input.file_path) {
-          context.readTracker.set(resolve(projectRoot, input.file_path as string), "mock-hash");
+          context.readTracker.set(resolve(projectRoot, input.file_path as string), {
+            path: resolve(projectRoot, input.file_path as string),
+            capturedAt: new Date().toISOString(),
+            size: 16,
+            mtimeMs: 1,
+            hash: "mock-hash",
+            lineEnding: "lf",
+          });
         }
         return { content: "existing content", isError: false };
       },
@@ -1630,6 +1746,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/big-file.ts", "better");
     await runAgentLoop("/magic refactor the file", session, makeConfig());
 
     // Verify the Write was blocked — block message in round 3 messages
@@ -1639,6 +1756,123 @@ describe("Universal skill completion (skillActive)", () => {
         m.role === "user" && m.content.includes("Write BLOCKED"),
     );
     expect(blockMsg).toBeDefined();
+  });
+
+  it("warns when the same Bash command returns identical output twice", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests and investigate the result", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn when same command returns different outputs", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Tests failed", isError: true });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    // Should not have warning about identical output
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not warn when different Bash commands are run", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm run lint"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Lint passed", isError: false });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests and lint", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    // Should not have warning about identical output
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(false);
+  });
+
+  it("appends a system-generated session result summary", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Hello! I can help with that.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Say hello", session, makeConfig());
+
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "system" &&
+          typeof message.content === "string" &&
+          message.content.includes("Session Result"),
+      ),
+    ).toBe(true);
   });
 
   // ---- Skill execution protocol: tool recipes injected when skillActive ----
@@ -1682,6 +1916,22 @@ describe("Universal skill completion (skillActive)", () => {
     const callArgs = mockGenerateText.mock.calls[0]![0];
     const systemPrompt = callArgs.system as string;
     expect(systemPrompt).not.toContain("Tool Recipes for Skill Execution");
+  });
+
+  it("injects provider-specific guidance and base TodoWrite rules into the system prompt", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Ready to work.",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Implement the feature", session, makeConfig());
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    expect(systemPrompt).toContain("Prioritize technical accuracy");
+    expect(systemPrompt).toContain("Use the TodoWrite tool FREQUENTLY");
+    expect(systemPrompt).toContain("Provider-Specific Rules");
   });
 
   it("elevates round budget to 50 when skillActive is true", async () => {
@@ -1819,8 +2069,9 @@ describe("Universal skill completion (skillActive)", () => {
 
   it("injects reflection checkpoint after 15 tool calls", async () => {
     // Build 15 Read tool calls as XML tool_use blocks in the model's text
-    const toolCallsXml = Array.from({ length: 15 }, (_, i) =>
-      `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
+    const toolCallsXml = Array.from(
+      { length: 15 },
+      (_, i) => `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
     ).join("\n");
 
     // First call: 15 tool calls embedded in text
@@ -1842,8 +2093,7 @@ describe("Universal skill completion (skillActive)", () => {
     const lastCallArgs = mockGenerateText.mock.calls[mockGenerateText.mock.calls.length - 1]![0];
     const allMsgs = lastCallArgs.messages as Array<{ role: string; content: string }>;
     const hasReflection = allMsgs.some(
-      (m) =>
-        typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
+      (m) => typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
     );
     expect(hasReflection).toBe(true);
   });

@@ -4,14 +4,15 @@
 // runs the DanteForge pipeline on generated code, and streams responses.
 // ============================================================================
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ModelRouterImpl,
   SessionStore,
-  estimateMessageTokens,
+  compactTextTranscript,
   getContextUtilization,
+  getProviderPromptSupplement,
   isProtectedWriteTarget,
   promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
@@ -26,10 +27,12 @@ import {
   CLAUDE_WORKFLOW_MODE,
   ApproachMemory,
   formatApproachesForPrompt,
+  truncateToolOutput,
 } from "@dantecode/core";
-import type { WaveOrchestratorState } from "@dantecode/core";
+import type { FileSnapshot, WaveOrchestratorState } from "@dantecode/core";
 import {
   recordSuccessPattern,
+  runAntiStubScanner,
   queryLessons,
   formatLessonsForPrompt,
   detectAndRecordPatterns,
@@ -48,11 +51,26 @@ import {
   generateRepoMap,
   formatRepoMapForContext,
 } from "@dantecode/git-engine";
-import { executeTool, getToolDefinitions, type SubAgentExecutor, type SubAgentOptions, type SubAgentResult } from "./tools.js";
+import {
+  executeTool,
+  getToolDefinitions,
+  type SubAgentExecutor,
+  type SubAgentOptions,
+  type SubAgentResult,
+} from "./tools.js";
 import { normalizeAndCheckBash } from "./safety.js";
 import { StreamRenderer } from "./stream-renderer.js";
 import { getAISDKTools } from "./tool-schemas.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import * as readline from "node:readline";
+
+type PermissionCategory = "edit" | "bash" | "tools";
+
+function questionAsync(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+}
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -107,6 +125,106 @@ export interface AgentLoopConfig {
    * verification gates between waves (Claude Workflow Mode).
    */
   waveState?: WaveOrchestratorState;
+  /**
+   * Permissions for destructive actions. Defaults to edit: "ask", bash: "ask", tools: "allow".
+   * - "allow": always allow execution
+   * - "ask": prompt user for approval before execution
+   * - "deny": always block execution
+   */
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
+  /** Readline interface for interactive permission prompts (used for 'ask' permissions). */
+  rl?: readline.Interface;
+}
+
+// ----------------------------------------------------------------------------
+// Permission Checking
+// ----------------------------------------------------------------------------
+
+const DEFAULT_RUNTIME_PERMISSIONS: Record<PermissionCategory, "allow" | "ask" | "deny"> = {
+  edit: "allow",
+  bash: "allow",
+  tools: "allow",
+};
+
+function getPermissionCategory(toolName: string): PermissionCategory {
+  if (toolName === "Write" || toolName === "Edit") {
+    return "edit";
+  }
+  if (toolName === "Bash") {
+    return "bash";
+  }
+  return "tools";
+}
+
+function getPermissionLevel(
+  config: AgentLoopConfig,
+  category: PermissionCategory,
+): "allow" | "ask" | "deny" {
+  return (
+    config.permissions?.[category] ??
+    config.state.permissions?.[category] ??
+    DEFAULT_RUNTIME_PERMISSIONS[category]
+  );
+}
+
+/**
+ * Checks if a tool execution is permitted based on the configured permissions.
+ * Returns null if allowed, or an error message if denied.
+ * For "ask" permissions, prompts the user via terminal and returns null if approved.
+ */
+async function checkToolPermission(
+  toolName: string,
+  config: AgentLoopConfig,
+): Promise<string | null> {
+  const category = getPermissionCategory(toolName);
+  const permission = getPermissionLevel(config, category);
+
+  if (permission === "allow") {
+    return null;
+  }
+
+  if (permission === "deny") {
+    return `Permission denied: ${category} actions are disabled.`;
+  }
+
+  if (!config.rl) {
+    return `Permission denied: ${category} actions require interactive approval, but no terminal available.`;
+  }
+
+  const actionDescription = getCategoryDescription(toolName, category);
+  const promptMessage = `Allow ${actionDescription}? (yes/no): `;
+
+  try {
+    const answer = await questionAsync(config.rl, promptMessage);
+    if (answer.trim().toLowerCase() === "yes" || answer.trim().toLowerCase() === "y") {
+      return null;
+    }
+    return `Permission denied by user: ${actionDescription}`;
+  } catch (err) {
+    return `Error during permission prompt: ${err}`;
+  }
+}
+
+function getCategoryDescription(toolName: string, category: PermissionCategory): string {
+  switch (category) {
+    case "edit":
+      if (toolName === "Write") {
+        return "writing a new file or overwriting an existing file";
+      } else if (toolName === "Edit") {
+        return "editing an existing file";
+      }
+      return "file edit operation";
+    case "bash":
+      return "execution of Bash command";
+    case "tools":
+      return `use of tool "${toolName}"`;
+    default:
+      return `action requiring ${category} permission`;
+  }
 }
 
 /** Entry in the approach memory log, tracking tried strategies and outcomes. */
@@ -198,6 +316,9 @@ const CONFABULATION_WARNING =
   "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
   "the next step with real tool calls.";
 
+const COMPLETION_CLAIM_PATTERN =
+  /\b(?:done|complete|completed|finished|all changes made|task complete|implemented|created|updated|modified|written|applied successfully)\b/i;
+
 // ----------------------------------------------------------------------------
 // System Prompt Builder
 // ----------------------------------------------------------------------------
@@ -211,7 +332,15 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
   const toolList = toolDefs.map((t) => `- ${t.name}: ${t.description}`).join("\n");
 
   const sections: string[] = [
-    "You are DanteCode, an expert AI coding agent. You help users write, edit, debug, and maintain code.",
+    "You are DanteCode, a rigorous coding agent that accomplishes tasks through tool execution.",
+    "",
+    "## Identity Rules",
+    "",
+    "- Your goal is to ACCOMPLISH the task, not engage in conversation.",
+    "- Prioritize technical accuracy over validating user beliefs. If something failed, say it failed.",
+    "- Never claim a file changed, a bug was fixed, or tests passed unless a tool result confirmed it in this session.",
+    "- Every execution round must move the task forward with real tool use. Pure narration is not work.",
+    "- When the task is complete, report what was done and what was verified. Do not pad the answer with filler.",
     "",
     "## Available Tools",
     "",
@@ -226,9 +355,17 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     "3. Use Edit for small changes, Write for new files or complete rewrites.",
     "4. Run Bash commands to verify your changes (e.g., type-check, test, lint).",
     "5. Be precise with file paths. Use the Glob tool to find files if unsure.",
-    "6. Explain what you are doing and why.",
+    "6. Keep explanations brief and execution-heavy. Use tools first, prose second.",
+    "",
+    "## Task Management",
+    "",
+    "Use the TodoWrite tool FREQUENTLY to track execution for any multi-step task.",
+    "Break complex work into numbered steps before editing.",
+    "Mark each todo complete immediately after finishing it. Do not batch completions.",
     "",
   ];
+
+  sections.push(getProviderPromptSupplement(config.state.model.default.provider), "");
 
   // Skill execution: when a skill is active, inject either the full Claude Workflow
   // Mode (if wave orchestration is active) or the basic tool recipes + execution protocol.
@@ -250,7 +387,7 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
         "```bash",
         'gh search repos "react state management" --limit 10 --json name,url,description,stargazersCount',
         "```",
-        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+        'To search code: `gh search code "pattern" --limit 10 --json path,repository`',
         "",
         "### Fetching Web Content",
         "```bash",
@@ -286,11 +423,7 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     }
   }
 
-  sections.push(
-    "## Project Context",
-    "",
-    `Project root: ${session.projectRoot}`,
-  );
+  sections.push("## Project Context", "", `Project root: ${session.projectRoot}`);
 
   if (config.state.project.name) {
     sections.push(`Project name: ${config.state.project.name}`);
@@ -578,7 +711,7 @@ async function runMajorEditBatchGate(
   session: Session,
   roundCounter: number,
   config: AgentLoopConfig,
-  readTracker: Map<string, string>,
+  readTracker: Map<string, FileSnapshot>,
   editAttempts: Map<string, number>,
 ): Promise<MajorEditBatchGateResult> {
   const steps = [
@@ -625,120 +758,11 @@ function compactMessages(
   messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
   contextWindow: number,
 ): Array<{ role: "user" | "assistant" | "system"; content: string }> {
-  const tokens = estimateMessageTokens(messages);
-
-  // Tier 1: Under 50% — no compaction needed
-  if (tokens < contextWindow * 0.5) {
-    return messages;
-  }
-
-  // Tier 2: 50-75% — summarize old tool results, keep recent 5 tool calls intact
-  if (tokens < contextWindow * 0.75) {
-    const KEEP_RECENT_TOOLS = 5;
-    let toolResultCount = 0;
-    const result: typeof messages = [];
-
-    // Walk from end to start, counting tool results
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]!;
-      const isToolResult = msg.role === "user" && msg.content.startsWith("Tool execution results:");
-
-      if (isToolResult) {
-        toolResultCount++;
-        if (toolResultCount > KEEP_RECENT_TOOLS) {
-          // Summarize old tool result to one line
-          const firstLine = msg.content.split("\n")[1] ?? "tool result";
-          result.unshift({
-            role: msg.role,
-            content: `[Summarized] ${firstLine.slice(0, 120)}`,
-          });
-          continue;
-        }
-      }
-      result.unshift(msg);
-    }
-    return result;
-  }
-
-  // Tier 3: 75-90% — summarize dropped messages (keep key facts)
-  const KEEP_RECENT = 10;
-  if (messages.length <= KEEP_RECENT + 1) {
-    return messages;
-  }
-
-  const first = messages[0]!;
-  const recent = messages.slice(-KEEP_RECENT);
-  const dropped = messages.slice(1, messages.length - KEEP_RECENT);
-
-  // Generate a structured summary of dropped messages
-  const summary = summarizeDroppedMessages(dropped);
-
-  return [
-    first,
-    {
-      role: "system" as const,
-      content: summary,
-    },
-    ...recent,
-  ];
-}
-
-/**
- * Generate a meaningful summary of dropped messages, preserving key facts
- * about what files were read, edited, and what commands were run.
- */
-function summarizeDroppedMessages(
-  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
-): string {
-  const filesRead = new Set<string>();
-  const filesEdited = new Set<string>();
-  const bashCommands: string[] = [];
-  const keyDecisions: string[] = [];
-
-  for (const msg of messages) {
-    const text = msg.content;
-
-    // Extract file reads
-    const readMatches = text.matchAll(/(?:Read|read|Reading)\s+[`"]?([^\s`"]+\.\w+)/g);
-    for (const m of readMatches) filesRead.add(m[1]!);
-
-    // Extract file edits/writes
-    const editMatches = text.matchAll(/(?:Edit|Write|Edited|Wrote|Modified)\s+[`"]?([^\s`"]+\.\w+)/g);
-    for (const m of editMatches) filesEdited.add(m[1]!);
-
-    // Extract bash commands (first line only)
-    const bashMatches = text.matchAll(/(?:Bash|command|ran|execute)[:\s]+[`"]?([^\n`"]{5,80})/gi);
-    for (const m of bashMatches) {
-      if (bashCommands.length < 5) bashCommands.push(m[1]!.trim());
-    }
-
-    // Extract tool result file paths
-    const toolPathMatches = text.matchAll(/file_path[":=\s]+([^\s"',}]+\.\w+)/g);
-    for (const m of toolPathMatches) {
-      if (msg.role === "user") filesRead.add(m[1]!);
-    }
-  }
-
-  const parts = [
-    `[Context compacted: ${messages.length} earlier messages summarized]`,
-    "",
-    "## Earlier Session Activity",
-  ];
-
-  if (filesRead.size > 0) {
-    parts.push(`Files read: ${[...filesRead].slice(0, 15).join(", ")}`);
-  }
-  if (filesEdited.size > 0) {
-    parts.push(`Files modified: ${[...filesEdited].slice(0, 10).join(", ")}`);
-  }
-  if (bashCommands.length > 0) {
-    parts.push(`Commands run: ${bashCommands.join("; ")}`);
-  }
-  if (keyDecisions.length > 0) {
-    parts.push(`Key decisions: ${keyDecisions.join("; ")}`);
-  }
-
-  return parts.join("\n");
+  return compactTextTranscript(messages, {
+    contextWindow,
+    preserveRecentMessages: 10,
+    preserveRecentToolResults: 5,
+  }).messages;
 }
 
 /**
@@ -761,6 +785,32 @@ function extractClaimedFiles(text: string): string[] {
     }
   }
   return [...files];
+}
+
+function looksLikeCompletionClaim(text: string): boolean {
+  return PREMATURE_SUMMARY_PATTERN.test(text) || COMPLETION_CLAIM_PATTERN.test(text);
+}
+
+function fingerprintOutput(content: string): string {
+  return createHash("sha256").update(content, "utf-8").digest("hex").slice(0, 16);
+}
+
+function buildSessionResultSummary(summary: {
+  touchedFiles: string[];
+  testsRun: number;
+  toolCalls: number;
+  confabulationWarnings: number;
+  status: "COMPLETE" | "INCOMPLETE" | "FAILED";
+}): string {
+  return [
+    "┌─ Session Result ──────────────────────┐",
+    `│ Files modified: ${summary.touchedFiles.length}`.padEnd(39) + "│",
+    `│ Tests run: ${summary.testsRun}`.padEnd(39) + "│",
+    `│ Tool calls: ${summary.toolCalls}`.padEnd(39) + "│",
+    `│ Confab warnings: ${summary.confabulationWarnings}`.padEnd(39) + "│",
+    `│ Status: ${summary.status}`.padEnd(39) + "│",
+    "└──────────────────────────────────────┘",
+  ].join("\n");
 }
 
 function supportsExtendedThinking(model: ModelConfig): boolean {
@@ -843,7 +893,6 @@ function createSubAgentExecutor(
   parentSession: Session,
   parentConfig: AgentLoopConfig,
 ): SubAgentExecutor {
-  // Track background tasks for async sub-agent execution
   const backgroundTasks = new Map<string, Promise<SubAgentResult>>();
   const completedTasks = new Map<string, SubAgentResult>();
 
@@ -870,7 +919,7 @@ function createSubAgentExecutor(
           agentType: "sub-agent",
           startedAt: new Date().toISOString(),
           touchedFiles: [],
-          status: "running" as const,
+          status: "running",
           subAgentIds: [],
         },
       ],
@@ -883,23 +932,27 @@ function createSubAgentExecutor(
       silent: true,
       onToken: undefined,
       abortSignal: parentConfig.abortSignal,
+      rl: undefined,
     };
 
     try {
       const completedSession = await runAgentLoop(prompt, childSession, childConfig);
 
-      const assistantMsgs = completedSession.messages.filter(
-        (m: SessionMessage) => m.role === "assistant",
+      const assistantMessages = completedSession.messages.filter(
+        (message: SessionMessage) => message.role === "assistant",
       );
-      const lastMsg = assistantMsgs[assistantMsgs.length - 1];
-      const output = lastMsg?.content ?? "(no output)";
+      const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
+      const output = lastAssistantMessage?.content ?? "(no output)";
 
       const touchedFiles: string[] = [];
-      for (const msg of completedSession.messages) {
-        if (msg.role === "assistant" && typeof msg.content === "string") {
-          const writeMatches = msg.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
-          for (const match of writeMatches) {
-            if (match[1]) touchedFiles.push(match[1]);
+      for (const message of completedSession.messages) {
+        if (message.role !== "assistant" || typeof message.content !== "string") {
+          continue;
+        }
+        const writeMatches = message.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
+        for (const match of writeMatches) {
+          if (match[1]) {
+            touchedFiles.push(match[1]);
           }
         }
       }
@@ -1097,6 +1150,10 @@ export async function runAgentLoop(
     config.skillActive ||
     EXECUTION_WORKFLOW_PATTERN.test(prompt) ||
     isExecutionContinuationPrompt(prompt, session);
+  const executionRequested =
+    isPipelineWorkflow ||
+    promptRequestsToolExecution(prompt) ||
+    session.messages.some((m) => Boolean(m.toolUse));
 
   // ---- Feature: Planning phase (for complex tasks) ----
   // Inject planning instruction before first model call when complexity >= 0.7
@@ -1135,8 +1192,12 @@ export async function runAgentLoop(
   let testsRun = 0;
   let roundCounter = 0;
   let lastMajorEditGatePassed = true;
-  const readTracker = new Map<string, string>();
+  let sessionStatus: "COMPLETE" | "INCOMPLETE" | "FAILED" = "COMPLETE";
+  const readTracker = new Map<string, FileSnapshot>();
   const editAttempts = new Map<string, number>();
+  // Track Bash command outputs by hash to detect duplicate outputs (first 200 chars)
+  // Map<command, Set<fingerprint>>
+  const bashSnapshots = new Map<string, Set<string>>();
 
   if (config.verbose && thinkingBudget) {
     process.stdout.write(
@@ -1164,7 +1225,12 @@ export async function runAgentLoop(
 
   while (maxToolRounds > 0) {
     // CLI auto-continuation: when rounds just hit 0 mid-pipeline, refill budget
-    if (maxToolRounds <= 1 && isPipelineWorkflow && autoContinuations < MAX_AUTO_CONTINUATIONS && filesModified > 0) {
+    if (
+      maxToolRounds <= 1 &&
+      isPipelineWorkflow &&
+      autoContinuations < MAX_AUTO_CONTINUATIONS &&
+      filesModified > 0
+    ) {
       autoContinuations++;
       maxToolRounds += config.skillActive ? 50 : 15;
       messages.push({
@@ -1317,6 +1383,7 @@ export async function runAgentLoop(
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+      sessionStatus = "FAILED";
 
       const errorMsg: SessionMessage = {
         id: randomUUID(),
@@ -1325,6 +1392,22 @@ export async function runAgentLoop(
         timestamp: new Date().toISOString(),
       };
       session.messages.push(errorMsg);
+      const sessionResult = buildSessionResultSummary({
+        touchedFiles,
+        testsRun,
+        toolCalls: toolCallsThisTurn,
+        confabulationWarnings: confabulationNudges,
+        status: sessionStatus,
+      });
+      session.messages.push({
+        id: randomUUID(),
+        role: "system",
+        content: sessionResult,
+        timestamp: new Date().toISOString(),
+      });
+      if (!config.silent) {
+        process.stdout.write(`\n${DIM}${sessionResult}${RESET}\n`);
+      }
       return session;
     }
 
@@ -1339,6 +1422,7 @@ export async function runAgentLoop(
         );
       }
       if (consecutiveEmptyRounds >= MAX_CONSECUTIVE_EMPTY_ROUNDS) {
+        sessionStatus = "FAILED";
         process.stdout.write(
           `\n${RED}${BOLD}[confab-guard] ${MAX_CONSECUTIVE_EMPTY_ROUNDS} consecutive empty responses — aborting${RESET}\n`,
         );
@@ -1367,7 +1451,7 @@ export async function runAgentLoop(
     if (toolCalls.length === 0) {
       if (
         executedToolsThisTurn === 0 &&
-        (promptRequestsToolExecution(prompt) || isExecutionContinuationPrompt(prompt, session)) &&
+        executionRequested &&
         responseNeedsToolExecutionNudge(responseText) &&
         executionNudges < MAX_EXECUTION_NUDGES &&
         maxToolRounds > 0
@@ -1458,13 +1542,13 @@ export async function runAgentLoop(
         continue;
       }
 
-      // Anti-confabulation gate: if in a pipeline workflow and the model claims
-      // completion/done but no files were actually modified, reject the claim.
+      // Anti-confabulation gate: reject completion claims when no files were
+      // actually modified during an execution-oriented task.
       if (
-        isPipelineWorkflow &&
+        executionRequested &&
         filesModified === 0 &&
         confabulationNudges < MAX_CONFABULATION_NUDGES &&
-        PREMATURE_SUMMARY_PATTERN.test(responseText)
+        looksLikeCompletionClaim(responseText)
       ) {
         confabulationNudges++;
         messages.push({ role: "assistant" as const, content: responseText });
@@ -1544,7 +1628,8 @@ export async function runAgentLoop(
         const writeContent = toolCall.input["content"] as string | undefined;
         if (writeContent && writeContent.length > WRITE_SIZE_WARNING_THRESHOLD) {
           const writeFilePath = toolCall.input["file_path"] as string | undefined;
-          const fileExists = writeFilePath && readTracker.has(resolve(session.projectRoot, writeFilePath));
+          const fileExists =
+            writeFilePath && readTracker.has(resolve(session.projectRoot, writeFilePath));
           if (fileExists) {
             // Block: model is rewriting an existing file with a massive payload
             if (!config.silent) {
@@ -1554,8 +1639,8 @@ export async function runAgentLoop(
             }
             toolResults.push(
               `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
-              `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
-              `Break your changes into multiple small Edit calls targeting specific sections.`,
+                `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+                `Break your changes into multiple small Edit calls targeting specific sections.`,
             );
             continue;
           }
@@ -1622,11 +1707,7 @@ export async function runAgentLoop(
       // Premature commit blocker: block GitCommit/GitPush when no files have been
       // modified this session. Grok models confabulate file edits in their narrative
       // text, then try to commit non-existent changes.
-      if (
-        (toolCall.name === "GitCommit" || toolCall.name === "GitPush") &&
-        filesModified === 0 &&
-        isPipelineWorkflow
-      ) {
+      if ((toolCall.name === "GitCommit" || toolCall.name === "GitPush") && filesModified === 0) {
         if (!config.silent) {
           process.stdout.write(
             `\n${RED}[confab-guard] BLOCKED ${toolCall.name} — 0 files modified this session. Write/Edit files first.${RESET}\n`,
@@ -1634,8 +1715,8 @@ export async function runAgentLoop(
         }
         toolResults.push(
           `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
-          `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
-          `then commit. Do NOT claim you already made changes — only tool results count.`,
+            `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+            `then commit. Do NOT claim you already made changes — only tool results count.`,
         );
         continue;
       }
@@ -1691,6 +1772,12 @@ export async function runAgentLoop(
         typeof toolCall.input["command"] === "string";
 
       let result: { content: string; isError: boolean };
+      // Check permissions before executing the tool
+      const permissionError = await checkToolPermission(toolCall.name, config);
+      if (permissionError) {
+        toolResults.push(permissionError);
+        continue;
+      }
       if (isMCPTool) {
         try {
           const mcpResult = await config.mcpClient!.callToolByName(toolCall.name, toolCall.input);
@@ -1716,34 +1803,96 @@ export async function runAgentLoop(
         });
       }
 
-      // Tool output truncation (opencode pattern): cap large outputs to avoid
-      // blowing the context window. Truncate to 2000 lines / 50KB.
-      const MAX_OUTPUT_LINES = 2000;
-      const MAX_OUTPUT_BYTES = 50 * 1024;
-      let outputContent = result.content;
-      const outputLines = outputContent.split("\n");
-      if (outputLines.length > MAX_OUTPUT_LINES) {
-        outputContent =
-          outputLines.slice(0, MAX_OUTPUT_LINES).join("\n") +
-          `\n\n... (truncated, ${outputLines.length} total lines)`;
-      }
-      if (outputContent.length > MAX_OUTPUT_BYTES) {
-        outputContent =
-          outputContent.slice(0, MAX_OUTPUT_BYTES) +
-          `\n\n... (truncated, ${result.content.length} total bytes)`;
+      if (toolCall.name === "Bash") {
+        const command =
+          typeof toolCall.input["command"] === "string" ? toolCall.input["command"] : "";
+        const snapshotKey = command.trim().replace(/\s+/g, " ");
+        const outputHash = fingerprintOutput(result.content);
+        const previousHashes = bashSnapshots.get(snapshotKey);
+        if (previousHashes && previousHashes.has(outputHash)) {
+          result = {
+            ...result,
+            content:
+              result.content +
+              "\n\nSYSTEM: This command produced identical output to a previous run. " +
+              "Do not claim new results from repeated identical commands.",
+          };
+        }
+        if (!previousHashes) {
+          bashSnapshots.set(snapshotKey, new Set([outputHash]));
+        } else {
+          previousHashes.add(outputHash);
+        }
       }
 
-      // Track files written for DanteForge pipeline
       const writtenFile = getWrittenFilePath(toolCall.name, toolCall.input);
-      if (writtenFile) {
+      if (
+        writtenFile &&
+        !result.isError &&
+        (toolCall.name === "Write" || toolCall.name === "Edit")
+      ) {
+        const resolvedPath = resolve(session.projectRoot, writtenFile);
+        try {
+          const writtenContent = await readFile(resolvedPath, "utf-8");
+          const expectedWriteContent =
+            typeof toolCall.input["content"] === "string" ? toolCall.input["content"] : undefined;
+          const expectedEditedContent =
+            typeof toolCall.input["new_string"] === "string"
+              ? toolCall.input["new_string"]
+              : undefined;
+
+          const verificationFailed =
+            writtenContent.trim().length === 0 ||
+            (toolCall.name === "Write" &&
+              expectedWriteContent !== undefined &&
+              writtenContent !== expectedWriteContent) ||
+            (toolCall.name === "Edit" &&
+              expectedEditedContent !== undefined &&
+              !writtenContent.includes(expectedEditedContent));
+
+          if (verificationFailed) {
+            result = {
+              content:
+                `SYSTEM: ${toolCall.name} tool reported success, but file verification failed — ` +
+                `the file at ${writtenFile} is missing, empty, or does not contain the expected content. ` +
+                `The write did NOT succeed. Retry the write operation after re-reading the file.`,
+              isError: true,
+            };
+          } else {
+            if (!touchedFiles.includes(resolvedPath)) {
+              touchedFiles.push(resolvedPath);
+            }
+            roundWrittenFiles.push(resolvedPath);
+            filesModified++;
+
+            const stubCheck = runAntiStubScanner(writtenContent, session.projectRoot, writtenFile);
+            if (!stubCheck.passed) {
+              const violations = stubCheck.hardViolations
+                .slice(0, 3)
+                .map((violation) => `${violation.message} (line ${violation.line})`)
+                .join("; ");
+              result = {
+                content:
+                  result.content +
+                  `\n\nSYSTEM: The file you just wrote contains stub code (${violations}). ` +
+                  "This is NOT production-ready. Fix the stubs before proceeding.",
+                isError: true,
+              };
+            }
+          }
+        } catch {
+          result = {
+            content:
+              `SYSTEM: ${toolCall.name} tool reported success, but file verification failed — ` +
+              `the file at ${writtenFile} could not be read back from disk.`,
+            isError: true,
+          };
+        }
+      } else if (writtenFile && !result.isError) {
         const resolvedPath = resolve(session.projectRoot, writtenFile);
         if (!touchedFiles.includes(resolvedPath)) {
           touchedFiles.push(resolvedPath);
         }
-        if (!result.isError && (toolCall.name === "Write" || toolCall.name === "Edit")) {
-          roundWrittenFiles.push(resolvedPath);
-        }
-        // Progress tracking: count files modified
         filesModified++;
       }
 
@@ -1754,6 +1903,22 @@ export async function runAgentLoop(
           testsRun++;
         }
       }
+
+      // Shared tool output truncation: keep the head/tail of large results while
+      // preserving a full fidelity copy in the tool result message.
+      const MAX_OUTPUT_LINES = 2000;
+      let outputContent = result.content;
+      const outputLines = outputContent.split("\n");
+      if (outputLines.length > MAX_OUTPUT_LINES) {
+        outputContent =
+          outputLines.slice(0, MAX_OUTPUT_LINES).join("\n") +
+          `\n\n... (truncated, ${outputLines.length} total lines)`;
+      }
+      outputContent = truncateToolOutput(outputContent, {
+        maxChars: 50 * 1024,
+        headChars: 32 * 1024,
+        tailChars: 8 * 1024,
+      });
 
       // Show result summary (suppressed in silent mode)
       if (!config.silent) {
@@ -1976,12 +2141,14 @@ export async function runAgentLoop(
             toolCalls: currentApproachToolCalls,
           });
           // Persist success to cross-session memory
-          persistentMemory.record({
-            description: approachDesc,
-            outcome: "success",
-            toolCalls: currentApproachToolCalls,
-            sessionId: session.id,
-          }).catch(() => {});
+          persistentMemory
+            .record({
+              description: approachDesc,
+              outcome: "success",
+              toolCalls: currentApproachToolCalls,
+              sessionId: session.id,
+            })
+            .catch(() => {});
           // Reset pivot tracking on success
           consecutiveSameSignatureFailures = 0;
           lastPivotErrorSignature = "";
@@ -1992,13 +2159,15 @@ export async function runAgentLoop(
             toolCalls: currentApproachToolCalls,
           });
           // Persist failure to cross-session memory
-          persistentMemory.record({
-            description: approachDesc,
-            outcome: "failed",
-            errorSignature: lastErrorSignature || undefined,
-            toolCalls: currentApproachToolCalls,
-            sessionId: session.id,
-          }).catch(() => {});
+          persistentMemory
+            .record({
+              description: approachDesc,
+              outcome: "failed",
+              errorSignature: lastErrorSignature || undefined,
+              toolCalls: currentApproachToolCalls,
+              sessionId: session.id,
+            })
+            .catch(() => {});
 
           // Inject approach memory into the retry prompt so the model knows what was tried
           if (approachLog.length > 1) {
@@ -2020,11 +2189,7 @@ export async function runAgentLoop(
 
     // Wave advancement (after tool execution): if the model signaled [WAVE COMPLETE]
     // in a response that also had tool calls, advance to the next wave now.
-    if (
-      config.waveState &&
-      isWaveComplete(responseText) &&
-      maxToolRounds > 0
-    ) {
+    if (config.waveState && isWaveComplete(responseText) && maxToolRounds > 0) {
       const waveState = config.waveState;
       const completedWave = getCurrentWave(waveState);
       const hasMore = advanceWave(waveState);
@@ -2068,12 +2233,14 @@ export async function runAgentLoop(
 
   // Diff-based anti-confabulation: compare claimed vs actual file changes (advisory)
   if (config.verbose && touchedFiles.length > 0) {
-    const lastAssistant = messages.filter(m => m.role === "assistant").pop();
+    const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
     if (lastAssistant) {
       const claimedFiles = extractClaimedFiles(lastAssistant.content);
       if (claimedFiles.length > 0) {
-        const actualSet = new Set(touchedFiles.map(f => f.replace(/\\/g, "/")));
-        const unverified = claimedFiles.filter((f: string) => !actualSet.has(f.replace(/\\/g, "/")));
+        const actualSet = new Set(touchedFiles.map((f) => f.replace(/\\/g, "/")));
+        const unverified = claimedFiles.filter(
+          (f: string) => !actualSet.has(f.replace(/\\/g, "/")),
+        );
         if (unverified.length > 0) {
           process.stdout.write(
             `\n${YELLOW}[confab-diff] Model claimed changes to files not in actual write set: ${unverified.join(", ")}${RESET}\n`,
@@ -2140,6 +2307,27 @@ export async function runAgentLoop(
 
   // Update session timestamp
   session.updatedAt = new Date().toISOString();
+
+  if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
+    sessionStatus = "INCOMPLETE";
+  }
+
+  const sessionResult = buildSessionResultSummary({
+    touchedFiles,
+    testsRun,
+    toolCalls: toolCallsThisTurn,
+    confabulationWarnings: confabulationNudges,
+    status: sessionStatus,
+  });
+  session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content: sessionResult,
+    timestamp: new Date().toISOString(),
+  });
+  if (!config.silent) {
+    process.stdout.write(`\n${DIM}${sessionResult}${RESET}\n`);
+  }
 
   if (localSandboxBridge) {
     await localSandboxBridge.shutdown();

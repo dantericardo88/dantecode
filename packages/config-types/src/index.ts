@@ -17,7 +17,7 @@ export type ModelProvider =
   | "custom";
 
 /** Reasoning effort setting for models that support extended thinking. */
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 /** Configuration for a single model endpoint. */
 export interface ModelConfig {
@@ -27,11 +27,22 @@ export interface ModelConfig {
   baseUrl?: string;
   maxTokens: number;
   temperature: number;
+  topP?: number;
+  topK?: number;
   contextWindow: number;
   supportsVision: boolean;
   supportsToolCalls: boolean;
   supportsExtendedThinking?: boolean;
   reasoningEffort?: ReasoningEffort;
+  thinkingBudget?: number;
+}
+
+/** Enforceable spend ceilings applied by the model router. */
+export interface BudgetPolicy {
+  enforce?: boolean;
+  sessionMaxUsd?: number;
+  monthlyMaxUsd?: number;
+  currentMonthlySpendUsd?: number;
 }
 
 /** Router configuration that selects models with fallback and per-task overrides. */
@@ -39,6 +50,7 @@ export interface ModelRouterConfig {
   default: ModelConfig;
   fallback: ModelConfig[];
   overrides: Record<string, ModelConfig>;
+  budget?: BudgetPolicy;
 }
 
 // ----------------------------------------------------------------------------
@@ -444,6 +456,9 @@ export type AuditEventType =
   | "loop_terminated"
   | "tier_escalation"
   | "cost_update"
+  | "request_retry"
+  | "context_compacted"
+  | "budget_blocked"
   | "webhook_received";
 
 /** A single auditable event within the system. */
@@ -524,6 +539,12 @@ export interface CostEstimate {
   modelTier: "fast" | "capable";
   /** Total tokens used this session. */
   tokensUsedSession: number;
+  /** Configured session ceiling when budget enforcement is active. */
+  sessionBudgetUsd?: number;
+  /** Configured monthly ceiling when budget enforcement is active. */
+  monthlyBudgetUsd?: number;
+  /** True when generation is currently blocked by budget policy. */
+  budgetExceeded?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -677,6 +698,11 @@ export interface DanteCodeState {
   sessionHistory: SessionHistoryEntry[];
   lessons: LessonsConfig;
   project: ProjectConfig;
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -976,4 +1002,9 @@ export interface DanteCodeConfig {
   audit: DanteCodeConfigAudit;
   lessons: DanteCodeConfigLessons;
   project: DanteCodeConfigProject;
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
 }

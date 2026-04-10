@@ -196,7 +196,12 @@ vi.mock("vscode", () => {
 });
 
 // Mock DanteCode packages
-vi.mock("@dantecode/core", () => ({
+vi.mock("@dantecode/core", async () => {
+  const runtime = await vi.importActual<object>("../../core/src/tool-runtime.ts");
+  const transcript = await vi.importActual<object>("../../core/src/transcript-compaction.ts");
+  return {
+    ...runtime,
+    ...transcript,
   DEFAULT_MODEL_ID: "grok/grok-3",
   MODEL_CATALOG: [
     {
@@ -406,8 +411,10 @@ vi.mock("@dantecode/core", () => ({
   responseNeedsToolExecutionNudge: vi.fn((text: string) =>
     /\b(plan|will|executing plan|running:|created|updated|modified)\b/i.test(text),
   ),
+  getProviderPromptSupplement: vi.fn(() => "## Provider-Specific Rules\nExecute tools first."),
   resolvePreferredShell: vi.fn(() => "/bin/bash"),
-}));
+  };
+});
 
 vi.mock("@dantecode/danteforge", () => ({
   runLocalPDSEScorer: vi.fn().mockReturnValue({
@@ -1322,6 +1329,60 @@ describe("VS Code Extension", () => {
       await p.handleNewChat();
       expect(p.activeSkill).toBeNull();
     });
+
+    it("allows a one-time edit action when edit permission is set to ask", async () => {
+      const uri = vscode.Uri.file("/test");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+      const promptPermission = (
+        provider as unknown as {
+          agentConfig: { permissions: { edit: "allow" | "ask" | "deny" } };
+          resolveToolPermissionBlock: (
+            toolName: string,
+            permission: "edit" | "bash" | "tools",
+          ) => Promise<string | null>;
+        }
+      );
+
+      promptPermission.agentConfig.permissions.edit = "ask";
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Allow once" as never);
+
+      await expect(promptPermission.resolveToolPermissionBlock("Edit", "edit")).resolves.toBeNull();
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        "DanteCode wants to modify files via Edit. Allow this action once?",
+        { modal: true },
+        "Allow once",
+        "Block",
+      );
+    });
+
+    it("blocks a one-time bash action when ask permission is declined", async () => {
+      const uri = vscode.Uri.file("/test");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+      const promptPermission = (
+        provider as unknown as {
+          agentConfig: { permissions: { bash: "allow" | "ask" | "deny" } };
+          resolveToolPermissionBlock: (
+            toolName: string,
+            permission: "edit" | "bash" | "tools",
+          ) => Promise<string | null>;
+        }
+      );
+
+      promptPermission.agentConfig.permissions.bash = "ask";
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Block" as never);
+
+      await expect(promptPermission.resolveToolPermissionBlock("Bash", "bash")).resolves.toBe(
+        'Tool "Bash" blocked: Shell command execution was not approved.',
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2038,6 +2099,65 @@ describe("executeTool integration", () => {
     expect(result.content).toContain("Successfully edited");
     expect(generateColoredHunk).toHaveBeenCalledWith(oldContent, newContent, "src/app.ts");
     expect(onDiffHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves CRLF files when Edit receives LF payloads", async () => {
+    const context = makeContext({
+      readTracker: new Map(),
+      editAttempts: new Map(),
+    });
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Edit",
+      {
+        file_path: "src/app.ts",
+        old_string: "const value = 1;\n",
+        new_string: "const value = 2;\n",
+      },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("normalized line endings");
+    expect(mockWriteFile.mock.calls[0]?.[1]).toBe("const value = 2;\r\n");
+  });
+
+  it("blocks Edit when the file changed after the last full Read", async () => {
+    const context = makeContext({
+      readTracker: new Map(),
+      editAttempts: new Map(),
+    });
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    const trackedSnapshot = context.readTracker?.values().next().value;
+    expect(trackedSnapshot).toBeDefined();
+    if (trackedSnapshot) {
+      trackedSnapshot.hash = "outdated";
+    }
+
+    mockReadFile.mockResolvedValueOnce("const value = 2;\n");
+    const result = await executeTool(
+      "Edit",
+      {
+        file_path: "src/app.ts",
+        old_string: "const value = 2;\n",
+        new_string: "const value = 3;\n",
+      },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("changed since the last full Read");
   });
 
   it("works without context (backward compatible)", async () => {

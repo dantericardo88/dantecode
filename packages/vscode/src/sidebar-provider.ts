@@ -25,9 +25,11 @@ import {
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
+  compactTextTranscript,
   createSelfImprovementContext,
   detectSelfImprovementContext,
   getContextUtilization,
+  getProviderPromptSupplement,
   getProviderCatalogEntry,
   groupCatalogModels,
   parseModelReference,
@@ -35,6 +37,7 @@ import {
   responseNeedsToolExecutionNudge,
   shouldContinueLoop,
 } from "@dantecode/core";
+import type { FileSnapshot } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runAntiStubScanner,
@@ -129,6 +132,7 @@ type AgentMode = "plan" | "build" | "yolo";
 
 /** Permission levels for tool categories. */
 type PermissionLevel = "allow" | "ask" | "deny";
+type PermissionKind = "edit" | "bash" | "tools";
 
 /** Persisted agent configuration stored in globalState + .dantecode/config.json. */
 interface AgentConfig {
@@ -406,6 +410,51 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   // --------------------------------------------------------------------------
+  // Permission helpers
+  // --------------------------------------------------------------------------
+
+  private async resolveToolPermissionBlock(
+    toolName: string,
+    permission: PermissionKind,
+  ): Promise<string | null> {
+    const level = this.agentConfig.permissions[permission];
+    if (level === "allow") {
+      return null;
+    }
+
+    if (level === "deny") {
+      if (permission === "edit") {
+        return `Tool "${toolName}" blocked: File editing is denied by permissions.`;
+      }
+      if (permission === "bash") {
+        return `Tool "${toolName}" blocked: Shell commands are denied by permissions.`;
+      }
+      return `Tool "${toolName}" blocked: Tool execution is denied by permissions.`;
+    }
+
+    const prompt =
+      permission === "edit"
+        ? `DanteCode wants to modify files via ${toolName}. Allow this action once?`
+        : permission === "bash"
+          ? `DanteCode wants to run a shell command via ${toolName}. Allow this action once?`
+          : `DanteCode wants to use the ${toolName} tool. Allow this action once?`;
+    const deniedMessage =
+      permission === "edit"
+        ? `Tool "${toolName}" blocked: File editing was not approved.`
+        : permission === "bash"
+          ? `Tool "${toolName}" blocked: Shell command execution was not approved.`
+          : `Tool "${toolName}" blocked: Tool execution was not approved.`;
+
+    const selection = await vscode.window.showWarningMessage(
+      prompt,
+      { modal: true },
+      "Allow once",
+      "Block",
+    );
+    return selection === "Allow once" ? null : deniedMessage;
+  }
+
+  // --------------------------------------------------------------------------
   // Chat request handler (with API key retrieval)
   // --------------------------------------------------------------------------
 
@@ -423,7 +472,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             triggerCommand: `skill:${this.activeSkill}`,
           })
         : undefined);
-    const readTracker = new Map<string, string>();
+    const readTracker = new Map<string, FileSnapshot>();
     const editAttempts = new Map<string, number>();
 
     this.messages.push({ role: "user", content: text });
@@ -500,7 +549,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
     // Resolve agent mode settings
-    const { agentMode, permissions, runUntilComplete } = this.agentConfig;
+    const { agentMode, runUntilComplete } = this.agentConfig;
     // Dynamic round budget: pipeline workflows (/magic, /autoforge, /party) can
     // request more rounds via requiredRounds. YOLO mode gets 50, runUntilComplete
     // gets 30, pipeline gets its requested budget, otherwise use the user's setting.
@@ -611,6 +660,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
       systemParts.push("");
     }
+
+    systemParts.push(getProviderPromptSupplement(provider));
+    systemParts.push("");
 
     // Skill execution: inject tool recipes and execution protocol when a skill is active.
     // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations that
@@ -869,9 +921,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Autonomous Agent Loop — streams response, extracts tool calls, loops
     // ────────────────────────────────────────────────────────────────────────
 
-    const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+    const agentMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
       ...this.messages.map((msg) => ({
-        role: msg.role as "user" | "assistant",
+        role: msg.role as "user" | "assistant" | "system",
         content: msg.content,
       })),
     ];
@@ -886,6 +938,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         maxToolRounds--;
         roundNumber++;
         const isFirstRound = roundNumber === 1;
+
+        const compacted = compactTextTranscript(agentMessages, {
+          contextWindow: modelConfig.contextWindow,
+          preserveRecentMessages: 10,
+          preserveRecentToolResults: 5,
+        });
+        if (compacted.strategy !== "none") {
+          agentMessages.splice(0, agentMessages.length, ...compacted.messages);
+          void appendAuditEvent(projectRoot, {
+            type: "context_compacted",
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            modelId: this.currentModel,
+            projectRoot,
+            payload: {
+              strategy: compacted.strategy,
+              droppedMessages: compacted.droppedMessages,
+              remainingMessages: compacted.messages.length,
+            },
+          });
+        }
 
         // D6: Select model tier before each request
         const tier = router.selectTier({
@@ -1251,16 +1324,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             );
             continue;
           }
-          if (permissions.edit === "deny" && isWriteTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: File editing is denied by permissions.`,
-            );
-            continue;
-          }
-          if (permissions.bash === "deny" && isBashTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`,
-            );
+          const permissionBlock = await this.resolveToolPermissionBlock(
+            toolCall.name,
+            isWriteTool ? "edit" : isBashTool ? "bash" : "tools",
+          );
+          if (permissionBlock) {
+            toolResultParts.push(permissionBlock);
             continue;
           }
 
