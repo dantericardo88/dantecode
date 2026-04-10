@@ -8,8 +8,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  ModelRouterImpl,
-  SessionStore,
+  appendAuditEvent,
+  recordToolCall,
+  recordMutation,
+  recordValidation,
+  recordCompletionGate,
   compactTextTranscript,
   getContextUtilization,
   getProviderPromptSupplement,
@@ -44,6 +47,10 @@ import type {
   DanteCodeState,
   ModelConfig,
   SelfImprovementContext,
+  RequestClass,
+  CompletionGateResult,
+  ExecutionLedger,
+  MutationRecord,
 } from "@dantecode/config-types";
 import {
   getStatus,
@@ -318,6 +325,101 @@ const CONFABULATION_WARNING =
 
 const COMPLETION_CLAIM_PATTERN =
   /\b(?:done|complete|completed|finished|all changes made|task complete|implemented|created|updated|modified|written|applied successfully)\b/i;
+
+// -----------------------------------------------------------------------------
+// Completion Gate & Request Classification
+// -----------------------------------------------------------------------------
+
+function classifyRequest(prompt: string, session: Session): RequestClass {
+  // Check if prompt indicates mutating intent
+  const mutatingPatterns = [
+    /\b(?:write|edit|create|update|modify|delete|add|remove|change|fix|implement|build)\b.*\b(?:file|code|function|class|component)\b/i,
+    /\b(?:run|execute)\b.*\b(?:tests?|lint|build|compile)\b/i,
+    /\b(?:commit|push|merge)\b.*\b(?:changes?|files?)\b/i,
+    /\b(?:generate|produce|output)\b.*\b(?:code|file|content)\b/i,
+  ];
+
+  // Check if prompt indicates validation intent
+  const validationPatterns = [
+    /\b(?:verify|check|validate|test|lint|build|compile|run)\b.*\b(?:code|file|function|class|component)\b/i,
+    /\b(?:does|is|are)\b.*\b(?:work|correct|valid|proper)\b/i,
+  ];
+
+  // Check if prompt indicates orchestration intent
+  const orchestrationPatterns = [
+    /\b(?:orchestrate|coordinate|manage|schedule|plan)\b/i,
+    /\b(?:multiple|several|many)\b.*\b(?:tasks?|steps?|operations?)\b/i,
+  ];
+
+  if (mutatingPatterns.some((p) => p.test(prompt))) {
+    return "mutating";
+  }
+  if (validationPatterns.some((p) => p.test(prompt))) {
+    return "validation_only";
+  }
+  if (orchestrationPatterns.some((p) => p.test(prompt))) {
+    return "orchestration";
+  }
+
+  // Default to non_mutating if no clear intent
+  return "non_mutating";
+}
+
+function evaluateCompletionGate(
+  session: Session,
+  ledger: ExecutionLedger,
+  requestClass: RequestClass,
+): CompletionGateResult {
+  const timestamp = new Date().toISOString();
+
+  // Non-mutating requests can always pass
+  if (requestClass === "non_mutating") {
+    return {
+      ok: true,
+      timestamp,
+    };
+  }
+
+  // For mutating requests, require at least one mutation record
+  if (requestClass === "mutating" && ledger.mutationRecords.length === 0) {
+    return {
+      ok: false,
+      reasonCode: "narrative-without-mutation",
+      message: "Mutating request but no mutation records found in execution ledger",
+      timestamp,
+    };
+  }
+
+  // For validation requests, require at least one validation record
+  if (requestClass === "validation_only" && ledger.validationRecords.length === 0) {
+    return {
+      ok: false,
+      reasonCode: "claimed-validation-not-run",
+      message: "Validation request but no validation records found in execution ledger",
+      timestamp,
+    };
+  }
+
+  // For orchestration, require some evidence (mutations or validations)
+  if (
+    requestClass === "orchestration" &&
+    ledger.mutationRecords.length === 0 &&
+    ledger.validationRecords.length === 0
+  ) {
+    return {
+      ok: false,
+      reasonCode: "orchestration-without-evidence",
+      message: "Orchestration request but no execution evidence found in ledger",
+      timestamp,
+    };
+  }
+
+  // All checks passed
+  return {
+    ok: true,
+    timestamp,
+  };
+}
 
 // ----------------------------------------------------------------------------
 // System Prompt Builder
@@ -944,18 +1046,8 @@ function createSubAgentExecutor(
       const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
       const output = lastAssistantMessage?.content ?? "(no output)";
 
-      const touchedFiles: string[] = [];
-      for (const message of completedSession.messages) {
-        if (message.role !== "assistant" || typeof message.content !== "string") {
-          continue;
-        }
-        const writeMatches = message.content.matchAll(/Successfully (?:wrote|edited) ([^\s(]+)/g);
-        for (const match of writeMatches) {
-          if (match[1]) {
-            touchedFiles.push(match[1]);
-          }
-        }
-      }
+      const touchedFiles: string[] =
+        completedSession.executionLedger?.mutationRecords.map((r) => r.path) || [];
 
       return {
         output: typeof output === "string" ? output : JSON.stringify(output),
@@ -1126,6 +1218,11 @@ export async function runAgentLoop(
       : 15;
   let totalTokensUsed = 0;
   const touchedFiles: string[] = [];
+  const executionLedger: ExecutionLedger = {
+    toolCallRecords: [],
+    mutationRecords: [],
+    validationRecords: [],
+  };
   // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
   const recentToolSignatures: string[] = [];
   const STUCK_LOOP_THRESHOLD = 3; // 3 identical consecutive calls = stuck
@@ -1154,6 +1251,7 @@ export async function runAgentLoop(
     isPipelineWorkflow ||
     promptRequestsToolExecution(prompt) ||
     session.messages.some((m) => Boolean(m.toolUse));
+  const requestClass = classifyRequest(prompt, session);
 
   // ---- Feature: Planning phase (for complex tasks) ----
   // Inject planning instruction before first model call when complexity >= 0.7
@@ -1801,6 +1899,46 @@ export async function runAgentLoop(
           editAttempts,
           subAgentExecutor: createSubAgentExecutor(session, config),
         });
+
+        // Record tool call in execution ledger
+        const toolCallRecord: ToolCallRecord = {
+          id: toolCall.id,
+          toolName: toolCall.name,
+          input: toolCall.input,
+          result: {
+            toolUseId: toolCall.id,
+            content: result.content,
+            isError: result.isError,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        executionLedger.toolCallRecords.push(toolCallRecord);
+        executionLedger.mutationRecords.push(...(result.mutationRecords || []));
+        executionLedger.validationRecords.push(...(result.validationRecords || []));
+
+        // Record in audit log
+        await recordToolCall(
+          session.projectRoot,
+          session.id,
+          `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+          toolCallRecord,
+        );
+        for (const mutation of result.mutationRecords || []) {
+          await recordMutation(
+            session.projectRoot,
+            session.id,
+            `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            mutation,
+          );
+        }
+        for (const validation of result.validationRecords || []) {
+          await recordValidation(
+            session.projectRoot,
+            session.id,
+            `${config.state.model.default.provider}/${config.state.model.default.modelId}`,
+            validation,
+          );
+        }
       }
 
       if (toolCall.name === "Bash") {
@@ -2308,9 +2446,27 @@ export async function runAgentLoop(
   // Update session timestamp
   session.updatedAt = new Date().toISOString();
 
-  if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
+  // Derive touchedFiles from execution ledger
+  touchedFiles.length = 0;
+  touchedFiles.push(...executionLedger.mutationRecords.map((r) => r.path));
+
+  // Evaluate completion gate
+  const gateResult = evaluateCompletionGate(session, executionLedger, requestClass);
+  await recordCompletionGate(session.projectRoot, session.id, `${config.state.model.default.provider}/${config.state.model.default.modelId}`, gateResult);
+  if (!gateResult.ok) {
+    sessionStatus = "INCOMPLETE";
+    if (!config.silent) {
+      process.stdout.write(`\n${RED}[completion gate failed] ${gateResult.reasonCode}: ${gateResult.message}${RESET}\n`);
+    }
+  } else if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
     sessionStatus = "INCOMPLETE";
   }
+  } else if (maxToolRounds === 0 && executionRequested && sessionStatus !== "FAILED") {
+    sessionStatus = "INCOMPLETE";
+  }
+
+  // Attach ledger to session
+  session.executionLedger = executionLedger;
 
   const sessionResult = buildSessionResultSummary({
     touchedFiles,

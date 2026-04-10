@@ -20,7 +20,17 @@ import {
   truncateToolOutput,
 } from "@dantecode/core";
 import type { FileSnapshot } from "@dantecode/core";
-import type { SelfImprovementContext, TodoItem, TodoStatus } from "@dantecode/config-types";
+import type {
+  SelfImprovementContext,
+  TodoItem,
+  TodoStatus,
+  ToolCallRecord,
+  MutationRecord,
+  ValidationRecord,
+  CompletionGateResult,
+  ChangedFileRecord,
+  RequestClass,
+} from "@dantecode/config-types";
 import {
   sandboxCheckCommand,
   sandboxCheckPath,
@@ -32,14 +42,8 @@ import {
   extractByCSS,
   extractPageMetadata as extractPageMeta,
 } from "./html-parser.js";
-import {
-  MultiEngineSearch,
-  createSearchEngine,
-} from "./web-search-engine.js";
-import {
-  synthesizeResults,
-  formatSynthesizedResult,
-} from "@dantecode/core";
+import { MultiEngineSearch, createSearchEngine } from "./web-search-engine.js";
+import { synthesizeResults, formatSynthesizedResult } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -47,8 +51,15 @@ import {
 
 /** The result returned from any tool execution. */
 export interface ToolResult {
+  toolName: ToolName;
   content: string;
   isError: boolean;
+  ok: boolean;
+  changedFiles?: ChangedFileRecord[];
+  mutationRecords?: MutationRecord[];
+  validationRecords?: ValidationRecord[];
+  proof?: string;
+  reasonCode?: string;
 }
 
 /** Result from a sub-agent execution. */
@@ -119,10 +130,7 @@ function resolvePath(filePath: string, projectRoot: string): string {
   return resolve(projectRoot, filePath);
 }
 
-async function buildTrackedSnapshot(
-  resolvedPath: string,
-  content: string,
-): Promise<FileSnapshot> {
+async function buildTrackedSnapshot(resolvedPath: string, content: string): Promise<FileSnapshot> {
   try {
     const fileStats = await stat(resolvedPath);
     return createFileSnapshot(resolvedPath, content, {
@@ -169,7 +177,12 @@ async function toolRead(
 ): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   if (!filePath) {
-    return { content: "Error: file_path parameter is required", isError: true };
+    return {
+      toolName: "Read",
+      content: "Error: file_path parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const resolved = resolvePath(filePath, projectRoot);
@@ -192,10 +205,15 @@ async function toolRead(
       setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, raw));
     }
 
-    return { content: numbered.join("\n"), isError: false };
+    return { toolName: "Read", content: numbered.join("\n"), isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error reading file: ${message}`, isError: true };
+    return {
+      toolName: "Read",
+      content: `Error reading file: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -211,10 +229,20 @@ async function toolWrite(
   const content = input["content"] as string | undefined;
 
   if (!filePath) {
-    return { content: "Error: file_path parameter is required", isError: true };
+    return {
+      toolName: "Write",
+      content: "Error: file_path parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
   if (content === undefined) {
-    return { content: "Error: content parameter is required", isError: true };
+    return {
+      toolName: "Write",
+      content: "Error: content parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const resolved = resolvePath(filePath, projectRoot);
@@ -226,8 +254,10 @@ async function toolWrite(
       const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
       if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
         return {
+          toolName: "Write",
           content: formatStaleSnapshotMessage(resolved),
           isError: true,
+          ok: false,
         };
       }
     }
@@ -237,13 +267,55 @@ async function toolWrite(
     await writeFile(resolved, contentToWrite, "utf-8");
     setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, contentToWrite));
     const lineCount = contentToWrite.split(/\r?\n/).length;
+
+    // Compute hashes and diff
+    const beforeHash = existing ? await createFileSnapshot(resolved, existing).hash : "";
+    const afterHash = await createFileSnapshot(resolved, contentToWrite).hash;
+    const additions = contentToWrite.split(/\r?\n/).length - (existing?.split(/\r?\n/).length || 0);
+    const deletions = (existing?.split(/\r?\n/).length || 0) - contentToWrite.split(/\r?\n/).length;
+    const diffSummary =
+      additions > 0 || deletions > 0
+        ? `+${Math.max(additions, 0)} -${Math.max(deletions, 0)}`
+        : "no changes";
+
+    const changedFile: ChangedFileRecord = {
+      path: relative(projectRoot, resolved).replace(/\\/g, "/"),
+      beforeHash,
+      afterHash,
+      lineCount,
+      additions: Math.max(additions, 0),
+      deletions: Math.max(deletions, 0),
+      diffSummary,
+    };
+
+    const mutationRecord: MutationRecord = {
+      id: `mutation-${Date.now()}`,
+      toolCallId: "", // Will be filled by caller
+      path: changedFile.path,
+      beforeHash,
+      afterHash,
+      diffSummary,
+      lineCount,
+      additions: changedFile.additions,
+      deletions: changedFile.deletions,
+    };
+
     return {
+      toolName: "Write",
       content: `Successfully wrote ${lineCount} lines to ${resolved}`,
       isError: false,
+      ok: true,
+      changedFiles: [changedFile],
+      mutationRecords: [mutationRecord],
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error writing file: ${message}`, isError: true };
+    return {
+      toolName: "Write",
+      content: `Error writing file: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -261,20 +333,37 @@ async function toolEdit(
   const replaceAll = input["replace_all"] === true;
 
   if (!filePath) {
-    return { content: "Error: file_path parameter is required", isError: true };
+    return {
+      toolName: "Edit",
+      content: "Error: file_path parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
   if (oldString === undefined) {
-    return { content: "Error: old_string parameter is required", isError: true };
+    return {
+      toolName: "Edit",
+      content: "Error: old_string parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
   if (newString === undefined) {
-    return { content: "Error: new_string parameter is required", isError: true };
+    return {
+      toolName: "Edit",
+      content: "Error: new_string parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const resolved = resolvePath(filePath, projectRoot);
   if (context?.readTracker && !context.readTracker.has(buildReadTrackerKey(context, resolved))) {
     return {
+      toolName: "Edit",
       content: `Error: Read the full current file before Edit. Re-run Read on ${resolved} with no offset/limit so the latest contents are in context.`,
       isError: true,
+      ok: false,
     };
   }
 
@@ -283,8 +372,10 @@ async function toolEdit(
     const attemptCount = context?.editAttempts?.get(attemptKey) ?? 0;
     if (attemptCount >= 2) {
       return {
+        toolName: "Edit",
         content: `Error: Third identical Edit attempt blocked for ${resolved} in this round. Re-read the file and switch to a smaller section rewrite or use Write with the full updated file.`,
         isError: true,
+        ok: false,
       };
     }
 
@@ -294,8 +385,10 @@ async function toolEdit(
       const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
       if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
         return {
+          toolName: "Edit",
           content: formatStaleSnapshotMessage(resolved),
           isError: true,
+          ok: false,
         };
       }
     }
@@ -303,24 +396,24 @@ async function toolEdit(
     const editResult = applyExactEdit(existing, oldString, newString, replaceAll);
 
     if (!editResult.matched || !editResult.updatedContent) {
-      return buildEditRecoveryResult(
-        context,
-        attemptKey,
-        resolved,
-        `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
-        existing,
-      );
+      return {
+        toolName: "Edit",
+        content: `Error: old_string not found in ${resolved}. The string to replace must exist exactly in the file.`,
+        isError: true,
+        ok: false,
+        reasonCode: "no-match",
+      };
     }
 
     // Check for uniqueness if not replaceAll
     if (!replaceAll && editResult.occurrenceCount > 1) {
-      return buildEditRecoveryResult(
-        context,
-        attemptKey,
-        resolved,
-        `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
-        existing,
-      );
+      return {
+        toolName: "Edit",
+        content: `Error: old_string appears multiple times in ${resolved}. Use replace_all: true to replace all occurrences, or provide a more specific string with surrounding context.`,
+        isError: true,
+        ok: false,
+        reasonCode: "multiple-matches",
+      };
     }
 
     await writeFile(resolved, editResult.updatedContent, "utf-8");
@@ -331,15 +424,52 @@ async function toolEdit(
     );
     context?.editAttempts?.delete(attemptKey);
 
+    // Compute hashes and diff
+    const beforeHash = await createFileSnapshot(resolved, existing).hash;
+    const afterHash = await createFileSnapshot(resolved, editResult.updatedContent).hash;
+    const diffSummary = `${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""}`;
+
+    const changedFile: ChangedFileRecord = {
+      path: relative(projectRoot, resolved).replace(/\\/g, "/"),
+      beforeHash,
+      afterHash,
+      lineCount: editResult.updatedContent.split(/\r?\n/).length,
+      additions: 0, // Approximate, could compute properly
+      deletions: 0,
+      diffSummary,
+    };
+
+    const mutationRecord: MutationRecord = {
+      id: `mutation-${Date.now()}`,
+      toolCallId: "",
+      path: changedFile.path,
+      beforeHash,
+      afterHash,
+      diffSummary,
+      lineCount: changedFile.lineCount,
+      additions: 0,
+      deletions: 0,
+      timestamp: new Date().toISOString(),
+    };
+
     return {
+      toolName: "Edit",
       content:
         `Successfully edited ${resolved} (${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""})` +
         (editResult.usedNormalizedLineEndings ? " [normalized line endings]" : ""),
       isError: false,
+      ok: true,
+      changedFiles: [changedFile],
+      mutationRecords: [mutationRecord],
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error editing file: ${message}`, isError: true };
+    return {
+      toolName: "Edit",
+      content: `Error editing file: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -349,7 +479,12 @@ async function toolEdit(
 async function toolBash(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const command = input["command"] as string | undefined;
   if (!command) {
-    return { content: "Error: command parameter is required", isError: true };
+    return {
+      toolName: "Bash",
+      content: "Error: command parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const timeoutMs = typeof input["timeout"] === "number" ? input["timeout"] : 120000;
@@ -363,7 +498,7 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
       stdio: ["pipe", "pipe", "pipe"],
       shell: resolvePreferredShell(),
     });
-    return { content: result || "(no output)", isError: false };
+    return { toolName: "GitHubSearch", content: result || "(no output)", isError: false, ok: true };
   } catch (err: unknown) {
     const error = err as {
       stdout?: string;
@@ -381,7 +516,7 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
     ]
       .filter(Boolean)
       .join("\n");
-    return { content: output, isError: exitCode !== 0 };
+    return { toolName: "Bash", content: output, isError: exitCode !== 0, ok: exitCode === 0 };
   }
 }
 
@@ -391,7 +526,12 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
 async function toolGlob(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const pattern = input["pattern"] as string | undefined;
   if (!pattern) {
-    return { content: "Error: pattern parameter is required", isError: true };
+    return {
+      toolName: "Glob",
+      content: "Error: pattern parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const searchPath =
@@ -404,13 +544,23 @@ async function toolGlob(input: Record<string, unknown>, projectRoot: string): Pr
     await walkDir(searchPath, projectRoot, regexPattern, matches, 0, 10000);
 
     if (matches.length === 0) {
-      return { content: `No files matching pattern: ${pattern}`, isError: false };
+      return {
+        toolName: "Glob",
+        content: `No files matching pattern: ${pattern}`,
+        isError: false,
+        ok: true,
+      };
     }
 
-    return { content: matches.join("\n"), isError: false };
+    return { toolName: "Glob", content: matches.join("\n"), isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error searching files: ${message}`, isError: true };
+    return {
+      toolName: "Glob",
+      content: `Error searching files: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -542,7 +692,12 @@ async function walkDir(
 async function toolGrep(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
   const pattern = input["pattern"] as string | undefined;
   if (!pattern) {
-    return { content: "Error: pattern parameter is required", isError: true };
+    return {
+      toolName: "Grep",
+      content: "Error: pattern parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const searchPath =
@@ -579,14 +734,19 @@ async function toolGrep(input: Record<string, unknown>, projectRoot: string): Pr
     }
 
     if (results.length === 0) {
-      return { content: `No matches found for pattern: ${pattern}`, isError: false };
+      return {
+        toolName: "Grep",
+        content: `No matches found for pattern: ${pattern}`,
+        isError: false,
+        ok: true,
+      };
     }
 
     const limited = headLimit > 0 ? results.slice(0, headLimit) : results;
-    return { content: limited.join("\n"), isError: false };
+    return { toolName: "Grep", content: limited.join("\n"), isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error searching: ${message}`, isError: true };
+    return { toolName: "Grep", content: `Error searching: ${message}`, isError: true, ok: false };
   }
 }
 
@@ -766,7 +926,12 @@ async function toolGitCommit(
 ): Promise<ToolResult> {
   const message = input["message"] as string | undefined;
   if (!message) {
-    return { content: "Error: message parameter is required", isError: true };
+    return {
+      toolName: "GitCommit",
+      content: "Error: message parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const files = Array.isArray(input["files"]) ? (input["files"] as string[]) : [];
@@ -787,12 +952,19 @@ async function toolGitCommit(
     );
 
     return {
+      toolName: "GitCommit",
       content: `Commit created: ${result.commitHash}\nMessage: ${result.message}\nFiles: ${result.filesCommitted.join(", ")}`,
       isError: false,
+      ok: true,
     };
   } catch (err: unknown) {
     const message_ = err instanceof Error ? err.message : String(err);
-    return { content: `Error committing: ${message_}`, isError: true };
+    return {
+      toolName: "GitCommit",
+      content: `Error committing: ${message_}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -813,16 +985,18 @@ async function toolGitPush(
     const result = pushBranch({ remote, branch, setUpstream }, projectRoot);
 
     return {
+      toolName: "GitPush",
       content:
         `Push verified: ${result.remote}/${result.branch}\n` +
         `Local HEAD: ${result.localCommit}\n` +
         `Remote ref: ${result.remoteCommit}` +
         (result.output ? `\nOutput: ${result.output}` : ""),
       isError: false,
+      ok: true,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `Error pushing: ${message}`, isError: true };
+    return { toolName: "GitPush", content: `Error pushing: ${message}`, isError: true, ok: false };
   }
 }
 
@@ -836,7 +1010,12 @@ async function toolTodoWrite(
 ): Promise<ToolResult> {
   const todos = input["todos"] as Array<Record<string, unknown>> | undefined;
   if (!todos || !Array.isArray(todos)) {
-    return { content: "Error: todos array parameter is required", isError: true };
+    return {
+      toolName: "TodoWrite",
+      content: "Error: todos array parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const formattedTodos: TodoItem[] = todos.map((t, i) => ({
@@ -856,8 +1035,10 @@ async function toolTodoWrite(
     .join("\n");
 
   return {
+    toolName: "TodoWrite",
     content: `Updated ${formattedTodos.length} to-do items:\n${display}`,
     isError: false,
+    ok: true,
   };
 }
 
@@ -900,10 +1081,16 @@ async function toolWebSearch(
 ): Promise<ToolResult> {
   const query = input["query"] as string | undefined;
   if (!query) {
-    return { content: "Error: query parameter is required", isError: true };
+    return {
+      toolName: "WebSearch",
+      content: "Error: query parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
-  const maxResults = typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 15;
+  const maxResults =
+    typeof input["max_results"] === "number" ? Math.min(input["max_results"], 20) : 15;
   const provider = (input["provider"] as string | undefined) ?? undefined;
   const searchDepth = (input["search_depth"] as "basic" | "advanced" | undefined) ?? "basic";
   const followUp = input["follow_up"] === true;
@@ -925,7 +1112,12 @@ async function toolWebSearch(
     });
 
     if (orchestrated.results.length === 0) {
-      return { content: `No search results found for: "${query}"`, isError: false };
+      return {
+        toolName: "WebSearch",
+        content: `No search results found for: "${query}"`,
+        isError: false,
+        ok: true,
+      };
     }
 
     const results = orchestrated.results;
@@ -936,19 +1128,22 @@ async function toolWebSearch(
         const parts = [`${i + 1}. **${r.title}**`, `   URL: ${r.url}`];
         if (r.snippet) parts.push(`   ${r.snippet}`);
         if (r.source && r.source.includes("+")) parts.push(`   Sources: ${r.source}`);
-        if (r.relevanceScore !== undefined) parts.push(`   Relevance: ${(r.relevanceScore * 100).toFixed(0)}%`);
+        if (r.relevanceScore !== undefined)
+          parts.push(`   Relevance: ${(r.relevanceScore * 100).toFixed(0)}%`);
         return parts.join("\n");
       })
       .join("\n\n");
 
     // Build provider info
-    const providerInfo = orchestrated.providersUsed.length > 1
-      ? ` (providers: ${orchestrated.providersUsed.join(", ")})`
-      : orchestrated.providersUsed.length === 1
-        ? ` (${orchestrated.providersUsed[0]})`
-        : "";
+    const providerInfo =
+      orchestrated.providersUsed.length > 1
+        ? ` (providers: ${orchestrated.providersUsed.join(", ")})`
+        : orchestrated.providersUsed.length === 1
+          ? ` (${orchestrated.providersUsed[0]})`
+          : "";
 
-    const costInfo = orchestrated.totalCost > 0 ? ` | cost: $${orchestrated.totalCost.toFixed(4)}` : "";
+    const costInfo =
+      orchestrated.totalCost > 0 ? ` | cost: $${orchestrated.totalCost.toFixed(4)}` : "";
 
     let output = `Search results for "${query}"${providerInfo} (${results.length} results${costInfo}):\n\n${formatted}`;
 
@@ -961,10 +1156,15 @@ async function toolWebSearch(
       }
     }
 
-    return { content: output, isError: false };
+    return { toolName: "WebSearch", content: output, isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `WebSearch error: ${message}`, isError: true };
+    return {
+      toolName: "WebSearch",
+      content: `WebSearch error: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -978,7 +1178,12 @@ async function toolWebFetch(
 ): Promise<ToolResult> {
   const url = input["url"] as string | undefined;
   if (!url) {
-    return { content: "Error: url parameter is required", isError: true };
+    return {
+      toolName: "WebFetch",
+      content: "Error: url parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   // Validate URL
@@ -986,12 +1191,22 @@ async function toolWebFetch(
   try {
     parsedUrl = new URL(url);
   } catch {
-    return { content: `Error: invalid URL: ${url}`, isError: true };
+    return {
+      toolName: "WebFetch",
+      content: `Error: invalid URL: ${url}`,
+      isError: true,
+      ok: false,
+    };
   }
 
   // Block non-HTTP(S) protocols
   if (!parsedUrl.protocol.startsWith("http")) {
-    return { content: `Error: only HTTP/HTTPS URLs are supported, got ${parsedUrl.protocol}`, isError: true };
+    return {
+      toolName: "WebFetch",
+      content: `Error: only HTTP/HTTPS URLs are supported, got ${parsedUrl.protocol}`,
+      isError: true,
+      ok: false,
+    };
   }
 
   const maxChars = typeof input["max_chars"] === "number" ? input["max_chars"] : 20000;
@@ -1001,7 +1216,7 @@ async function toolWebFetch(
   const cacheKey = `fetch:${url}:${maxChars}:${selector ?? ""}:${raw}`;
   const cached = getCachedFetchResult(cacheKey);
   if (cached) {
-    return { content: cached, isError: false };
+    return { toolName: "WebFetch", content: cached, isError: false, ok: true };
   }
 
   try {
@@ -1016,8 +1231,10 @@ async function toolWebFetch(
 
     if (!response.ok) {
       return {
+        toolName: "WebFetch",
         content: `WebFetch failed: HTTP ${response.status} ${response.statusText} for ${url}`,
         isError: true,
+        ok: false,
       };
     }
 
@@ -1042,7 +1259,9 @@ async function toolWebFetch(
 
     // Truncate to max_chars
     if (content.length > maxChars) {
-      content = content.slice(0, maxChars) + `\n\n... (truncated at ${maxChars} chars, total: ${content.length})`;
+      content =
+        content.slice(0, maxChars) +
+        `\n\n... (truncated at ${maxChars} chars, total: ${content.length})`;
     }
 
     // Extract page metadata for context
@@ -1058,10 +1277,15 @@ async function toolWebFetch(
 
     const output = `Fetched ${url} (${contentType || "unknown type"}, ${body.length} bytes):\n\n${metaHeader}${content}`;
     setCachedFetchResult(cacheKey, output);
-    return { content: output, isError: false };
+    return { toolName: "WebFetch", content: output, isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `WebFetch error: ${message}`, isError: true };
+    return {
+      toolName: "WebFetch",
+      content: `WebFetch error: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -1081,33 +1305,46 @@ async function toolSubAgent(
 ): Promise<ToolResult> {
   const prompt = input["prompt"] as string | undefined;
   if (!prompt) {
-    return { content: "Error: prompt parameter is required", isError: true };
+    return {
+      toolName: "SubAgent",
+      content: "Error: prompt parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   if (!context?.subAgentExecutor) {
     return {
-      content: "Error: Sub-agent execution is not available in the current context. The agent loop must provide a subAgentExecutor.",
+      toolName: "SubAgent",
+      content:
+        "Error: Sub-agent execution is not available in the current context. The agent loop must provide a subAgentExecutor.",
       isError: true,
+      ok: false,
     };
   }
 
-  const maxRounds = typeof input["max_rounds"] === "number" ? Math.min(input["max_rounds"], 100) : 30;
+  const maxRounds =
+    typeof input["max_rounds"] === "number" ? Math.min(input["max_rounds"], 100) : 30;
   const background = input["background"] === true;
   const worktreeIsolation = input["worktree_isolation"] === true;
 
   try {
-    const result = await context.subAgentExecutor(prompt, { maxRounds, background, worktreeIsolation });
+    const result = await context.subAgentExecutor(prompt, {
+      maxRounds,
+      background,
+      worktreeIsolation,
+    });
 
     if (!result.success) {
       return {
+        toolName: "SubAgent",
         content: `Sub-agent failed (${result.durationMs}ms): ${result.error ?? "unknown error"}\n\nPartial output:\n${result.output}`,
         isError: true,
+        ok: false,
       };
     }
 
-    const parts: string[] = [
-      `Sub-agent completed successfully (${result.durationMs}ms).`,
-    ];
+    const parts: string[] = [`Sub-agent completed successfully (${result.durationMs}ms).`];
 
     if (result.touchedFiles.length > 0) {
       parts.push(`\nFiles modified (${result.touchedFiles.length}):`);
@@ -1121,10 +1358,15 @@ async function toolSubAgent(
 
     parts.push(`\nOutput:\n${result.output}`);
 
-    return { content: parts.join("\n"), isError: false };
+    return { toolName: "SubAgent", content: parts.join("\n"), isError: false, ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return { content: `SubAgent error: ${message}`, isError: true };
+    return {
+      toolName: "SubAgent",
+      content: `SubAgent error: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -1142,7 +1384,12 @@ async function toolGitHubSearch(
 ): Promise<ToolResult> {
   const query = input["query"] as string | undefined;
   if (!query) {
-    return { content: "Error: query parameter is required", isError: true };
+    return {
+      toolName: "GitHubSearch",
+      content: "Error: query parameter is required",
+      isError: true,
+      ok: false,
+    };
   }
 
   const searchType = (input["type"] as string) || "repos";
@@ -1152,8 +1399,10 @@ async function toolGitHubSearch(
   const validTypes = ["repos", "code", "issues", "prs"];
   if (!validTypes.includes(searchType)) {
     return {
+      toolName: "GitHubSearch",
       content: `Error: type must be one of: ${validTypes.join(", ")}`,
       isError: true,
+      ok: false,
     };
   }
 
@@ -1191,36 +1440,53 @@ async function toolGitHubSearch(
     try {
       parsed = JSON.parse(result);
     } catch {
-      return { content: result || "(no output)", isError: false };
+      return { toolName: "Bash", content: result || "(no output)", isError: false, ok: true };
     }
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return { content: `No ${searchType} found for: "${query}"`, isError: false };
+      return {
+        toolName: "GitHubSearch",
+        content: `No ${searchType} found for: "${query}"`,
+        isError: false,
+        ok: true,
+      };
     }
 
     // Format results based on type
     const formatted = formatGitHubResults(searchType, parsed);
     return {
+      toolName: "GitHubSearch",
       content: `GitHub ${searchType} search for "${query}" (${parsed.length} results):\n\n${formatted}`,
       isError: false,
+      ok: true,
     };
   } catch (err: unknown) {
     const error = err as { stderr?: string; message?: string };
     const stderr = typeof error.stderr === "string" ? error.stderr : "";
     if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
       return {
-        content: "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
+        toolName: "GitHubSearch",
+        content:
+          "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
         isError: true,
+        ok: false,
       };
     }
     if (stderr.includes("not logged in") || stderr.includes("auth login")) {
       return {
+        toolName: "GitHubSearch",
         content: "Error: GitHub CLI is not authenticated. Run `gh auth login` first.",
         isError: true,
+        ok: false,
       };
     }
     const message = stderr || (err instanceof Error ? err.message : String(err));
-    return { content: `GitHubSearch error: ${message}`, isError: true };
+    return {
+      toolName: "GitHubSearch",
+      content: `GitHubSearch error: ${message}`,
+      isError: true,
+      ok: false,
+    };
   }
 }
 
@@ -1230,14 +1496,16 @@ async function toolGitHubSearch(
 function formatGitHubResults(type: string, results: unknown[]): string {
   switch (type) {
     case "repos":
-      return (results as Array<{
-        name?: string;
-        url?: string;
-        description?: string;
-        stargazersCount?: number;
-        language?: string;
-        updatedAt?: string;
-      }>)
+      return (
+        results as Array<{
+          name?: string;
+          url?: string;
+          description?: string;
+          stargazersCount?: number;
+          language?: string;
+          updatedAt?: string;
+        }>
+      )
         .map((r, i) => {
           const parts = [`${i + 1}. **${r.name ?? "unknown"}**`];
           if (r.description) parts.push(`   ${r.description}`);
@@ -1252,11 +1520,13 @@ function formatGitHubResults(type: string, results: unknown[]): string {
         .join("\n\n");
 
     case "code":
-      return (results as Array<{
-        repository?: { nameWithOwner?: string };
-        path?: string;
-        textMatches?: Array<{ fragment?: string }>;
-      }>)
+      return (
+        results as Array<{
+          repository?: { nameWithOwner?: string };
+          path?: string;
+          textMatches?: Array<{ fragment?: string }>;
+        }>
+      )
         .map((r, i) => {
           const repo = r.repository?.nameWithOwner ?? "unknown";
           const path = r.path ?? "unknown";
@@ -1270,19 +1540,24 @@ function formatGitHubResults(type: string, results: unknown[]): string {
 
     case "issues":
     case "prs":
-      return (results as Array<{
-        title?: string;
-        url?: string;
-        state?: string;
-        repository?: { nameWithOwner?: string };
-        createdAt?: string;
-        labels?: Array<{ name?: string }>;
-      }>)
+      return (
+        results as Array<{
+          title?: string;
+          url?: string;
+          state?: string;
+          repository?: { nameWithOwner?: string };
+          createdAt?: string;
+          labels?: Array<{ name?: string }>;
+        }>
+      )
         .map((r, i) => {
           const parts = [`${i + 1}. **${r.title ?? "untitled"}** [${r.state ?? "unknown"}]`];
           parts.push(`   ${r.repository?.nameWithOwner ?? "unknown"}`);
           parts.push(`   URL: ${r.url ?? "N/A"}`);
-          const labels = r.labels?.map((l) => l.name).filter(Boolean).join(", ");
+          const labels = r.labels
+            ?.map((l) => l.name)
+            .filter(Boolean)
+            .join(", ");
           if (labels) parts.push(`   Labels: ${labels}`);
           return parts.join("\n");
         })
@@ -1299,16 +1574,38 @@ function formatGitHubResults(type: string, results: unknown[]): string {
 
 /** Valid GitHubOps actions */
 type GitHubOpsAction =
-  | "search_repos" | "search_code" | "search_issues" | "search_prs"
-  | "create_pr" | "view_pr" | "review_pr" | "merge_pr" | "list_prs"
-  | "create_issue" | "comment_issue" | "close_issue" | "list_issues"
-  | "trigger_workflow" | "view_run";
+  | "search_repos"
+  | "search_code"
+  | "search_issues"
+  | "search_prs"
+  | "create_pr"
+  | "view_pr"
+  | "review_pr"
+  | "merge_pr"
+  | "list_prs"
+  | "create_issue"
+  | "comment_issue"
+  | "close_issue"
+  | "list_issues"
+  | "trigger_workflow"
+  | "view_run";
 
 const VALID_ACTIONS = new Set<string>([
-  "search_repos", "search_code", "search_issues", "search_prs",
-  "create_pr", "view_pr", "review_pr", "merge_pr", "list_prs",
-  "create_issue", "comment_issue", "close_issue", "list_issues",
-  "trigger_workflow", "view_run",
+  "search_repos",
+  "search_code",
+  "search_issues",
+  "search_prs",
+  "create_pr",
+  "view_pr",
+  "review_pr",
+  "merge_pr",
+  "list_prs",
+  "create_issue",
+  "comment_issue",
+  "close_issue",
+  "list_issues",
+  "trigger_workflow",
+  "view_run",
 ]);
 
 /**
@@ -1350,10 +1647,7 @@ async function toolGitHubOps(
       case "search_issues":
       case "search_prs": {
         const searchType = action.replace("search_", "");
-        return toolGitHubSearch(
-          { ...input, type: searchType },
-          projectRoot,
-        );
+        return toolGitHubSearch({ ...input, type: searchType }, projectRoot);
       }
 
       // ---- PR operations ----
@@ -1399,7 +1693,10 @@ async function toolGitHubOps(
         const validReviewActions = ["approve", "request-changes", "comment"];
         const ra = reviewAction || "comment";
         if (!validReviewActions.includes(ra)) {
-          return { content: `Error: review_action must be one of: ${validReviewActions.join(", ")}`, isError: true };
+          return {
+            content: `Error: review_action must be one of: ${validReviewActions.join(", ")}`,
+            isError: true,
+          };
         }
 
         const args = [`gh pr review ${number} --${ra}`];
@@ -1416,7 +1713,10 @@ async function toolGitHubOps(
         const validMethods = ["merge", "squash", "rebase"];
         const mm = method || "merge";
         if (!validMethods.includes(mm)) {
-          return { content: `Error: merge_method must be one of: ${validMethods.join(", ")}`, isError: true };
+          return {
+            content: `Error: merge_method must be one of: ${validMethods.join(", ")}`,
+            isError: true,
+          };
         }
 
         const out = execGh(`gh pr merge ${number} --${mm}`, projectRoot);
@@ -1425,20 +1725,30 @@ async function toolGitHubOps(
 
       case "list_prs": {
         const state = (input["state"] as string) || "open";
-        const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+        const limit =
+          typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const out = execGh(
           `gh pr list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,headRefName`,
           projectRoot,
         );
         const prs = JSON.parse(out) as Array<{
-          number?: number; title?: string; state?: string; url?: string;
-          author?: { login?: string }; createdAt?: string; headRefName?: string;
+          number?: number;
+          title?: string;
+          state?: string;
+          url?: string;
+          author?: { login?: string };
+          createdAt?: string;
+          headRefName?: string;
         }>;
         if (prs.length === 0) return { content: `No ${state} PRs found.`, isError: false };
-        const lines = prs.map((pr, i) =>
-          `${i + 1}. #${pr.number ?? "?"} **${pr.title ?? "untitled"}** [${pr.state ?? "?"}]\n   Branch: ${pr.headRefName ?? "?"} | Author: ${pr.author?.login ?? "?"}\n   ${pr.url ?? ""}`
+        const lines = prs.map(
+          (pr, i) =>
+            `${i + 1}. #${pr.number ?? "?"} **${pr.title ?? "untitled"}** [${pr.state ?? "?"}]\n   Branch: ${pr.headRefName ?? "?"} | Author: ${pr.author?.login ?? "?"}\n   ${pr.url ?? ""}`,
         );
-        return { content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+        return {
+          content: `PRs (${state}, ${prs.length} results):\n\n${lines.join("\n\n")}`,
+          isError: false,
+        };
       }
 
       // ---- Issue operations ----
@@ -1461,10 +1771,14 @@ async function toolGitHubOps(
       case "comment_issue": {
         const number = input["number"] as number | undefined;
         const body = input["body"] as string | undefined;
-        if (!number) return { content: "Error: number is required for comment_issue", isError: true };
+        if (!number)
+          return { content: "Error: number is required for comment_issue", isError: true };
         if (!body) return { content: "Error: body is required for comment_issue", isError: true };
 
-        const out = execGh(`gh issue comment ${number} --body ${JSON.stringify(body)}`, projectRoot);
+        const out = execGh(
+          `gh issue comment ${number} --body ${JSON.stringify(body)}`,
+          projectRoot,
+        );
         return { content: `Comment added to #${number}:\n${out.trim()}`, isError: false };
       }
 
@@ -1481,36 +1795,53 @@ async function toolGitHubOps(
 
       case "list_issues": {
         const state = (input["state"] as string) || "open";
-        const limit = typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
+        const limit =
+          typeof input["limit"] === "number" ? Math.min(input["limit"] as number, 50) : 10;
         const labels = input["labels"] as string[] | string | undefined;
-        const args = [`gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`];
+        const args = [
+          `gh issue list --state ${state} --limit ${limit} --json number,title,state,url,author,createdAt,labels`,
+        ];
         if (labels) {
           const labelList = Array.isArray(labels) ? labels.join(",") : labels;
           args.push(`--label ${JSON.stringify(labelList)}`);
         }
         const out = execGh(args.join(" "), projectRoot);
         const issues = JSON.parse(out) as Array<{
-          number?: number; title?: string; state?: string; url?: string;
-          author?: { login?: string }; labels?: Array<{ name?: string }>;
+          number?: number;
+          title?: string;
+          state?: string;
+          url?: string;
+          author?: { login?: string };
+          labels?: Array<{ name?: string }>;
         }>;
         if (issues.length === 0) return { content: `No ${state} issues found.`, isError: false };
         const lines = issues.map((iss, i) => {
-          const lbls = iss.labels?.map(l => l.name).filter(Boolean).join(", ");
+          const lbls = iss.labels
+            ?.map((l) => l.name)
+            .filter(Boolean)
+            .join(", ");
           return `${i + 1}. #${iss.number ?? "?"} **${iss.title ?? "untitled"}** [${iss.state ?? "?"}]${lbls ? `\n   Labels: ${lbls}` : ""}\n   ${iss.url ?? ""}`;
         });
-        return { content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`, isError: false };
+        return {
+          content: `Issues (${state}, ${issues.length} results):\n\n${lines.join("\n\n")}`,
+          isError: false,
+        };
       }
 
       // ---- Workflow operations ----
       case "trigger_workflow": {
         const workflow = input["workflow"] as string | undefined;
         const ref = input["ref"] as string | undefined;
-        if (!workflow) return { content: "Error: workflow is required for trigger_workflow", isError: true };
+        if (!workflow)
+          return { content: "Error: workflow is required for trigger_workflow", isError: true };
 
         const args = [`gh workflow run ${JSON.stringify(workflow)}`];
         if (ref) args.push(`--ref ${JSON.stringify(ref)}`);
         const out = execGh(args.join(" "), projectRoot);
-        return { content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`, isError: false };
+        return {
+          content: `Workflow triggered:\n${out.trim() || "(dispatched successfully)"}`,
+          isError: false,
+        };
       }
 
       case "view_run": {
@@ -1539,7 +1870,8 @@ async function toolGitHubOps(
     const stderr = typeof error.stderr === "string" ? error.stderr : "";
     if (stderr.includes("gh: command not found") || stderr.includes("not recognized")) {
       return {
-        content: "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
+        content:
+          "Error: GitHub CLI (gh) is not installed or not in PATH. Install from https://cli.github.com/",
         isError: true,
       };
     }
@@ -2001,7 +2333,8 @@ export function getToolDefinitions(): Array<{
           provider: {
             type: "string",
             enum: ["auto", "tavily", "exa", "serper", "google", "brave", "duckduckgo"],
-            description: "Preferred search provider (default: auto — uses best available with cost-aware fallback)",
+            description:
+              "Preferred search provider (default: auto — uses best available with cost-aware fallback)",
           },
           search_depth: {
             type: "string",
@@ -2043,7 +2376,8 @@ export function getToolDefinitions(): Array<{
           },
           selector: {
             type: "string",
-            description: "CSS selector (#id, .class, tag, tag#id, tag.class) to extract specific content",
+            description:
+              "CSS selector (#id, .class, tag, tag#id, tag.class) to extract specific content",
           },
           raw: {
             type: "boolean",
@@ -2087,8 +2421,15 @@ export function getToolDefinitions(): Array<{
           },
           query: { type: "string", description: "Search query (for search_* actions)" },
           title: { type: "string", description: "Title (for create_pr, create_issue)" },
-          body: { type: "string", description: "Body text (for create_pr, create_issue, comment_issue, review_pr)" },
-          number: { type: "number", description: "PR or issue number (for view_pr, review_pr, merge_pr, comment_issue, close_issue)" },
+          body: {
+            type: "string",
+            description: "Body text (for create_pr, create_issue, comment_issue, review_pr)",
+          },
+          number: {
+            type: "number",
+            description:
+              "PR or issue number (for view_pr, review_pr, merge_pr, comment_issue, close_issue)",
+          },
           base: { type: "string", description: "Base branch for PR (for create_pr)" },
           draft: { type: "boolean", description: "Create as draft PR (for create_pr)" },
           review_action: {
@@ -2099,7 +2440,10 @@ export function getToolDefinitions(): Array<{
             type: "string",
             description: "Merge method: merge, squash, or rebase (for merge_pr)",
           },
-          state: { type: "string", description: "Filter by state: open, closed, all (for list_prs, list_issues)" },
+          state: {
+            type: "string",
+            description: "Filter by state: open, closed, all (for list_prs, list_issues)",
+          },
           labels: {
             type: "string",
             description: "Comma-separated labels (for create_issue, list_issues)",
@@ -2108,7 +2452,10 @@ export function getToolDefinitions(): Array<{
           workflow: { type: "string", description: "Workflow name or file (for trigger_workflow)" },
           ref: { type: "string", description: "Git ref for workflow (for trigger_workflow)" },
           run_id: { type: "string", description: "Run ID (for view_run)" },
-          limit: { type: "number", description: "Max results (for search/list actions, default: 10, max: 50)" },
+          limit: {
+            type: "number",
+            description: "Max results (for search/list actions, default: 10, max: 50)",
+          },
         },
         required: ["action"],
       },
@@ -2122,7 +2469,8 @@ export function getToolDefinitions(): Array<{
         properties: {
           prompt: {
             type: "string",
-            description: "The task description for the sub-agent, or 'status <taskId>' to check a background task",
+            description:
+              "The task description for the sub-agent, or 'status <taskId>' to check a background task",
           },
           max_rounds: {
             type: "number",
@@ -2130,11 +2478,13 @@ export function getToolDefinitions(): Array<{
           },
           background: {
             type: "boolean",
-            description: "Run in background and return task ID instead of waiting for completion (default: false)",
+            description:
+              "Run in background and return task ID instead of waiting for completion (default: false)",
           },
           worktree_isolation: {
             type: "boolean",
-            description: "Run in an isolated git worktree to prevent file conflicts with other agents (default: false)",
+            description:
+              "Run in an isolated git worktree to prevent file conflicts with other agents (default: false)",
           },
         },
         required: ["prompt"],

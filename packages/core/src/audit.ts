@@ -5,7 +5,14 @@
 import { readFile, appendFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AuditEvent, AuditEventType } from "@dantecode/config-types";
+import type {
+  AuditEvent,
+  AuditEventType,
+  ToolCallRecord,
+  MutationRecord,
+  ValidationRecord,
+  CompletionGateResult,
+} from "@dantecode/config-types";
 
 /**
  * The relative path within the project root where the audit log is stored.
@@ -175,6 +182,113 @@ export async function countAuditEvents(
 ): Promise<number> {
   const events = await readAuditEvents(projectRoot, options);
   return events.length;
+}
+
+/**
+ * Records a tool call execution in the audit log.
+ */
+export async function recordToolCall(
+  projectRoot: string,
+  sessionId: string,
+  modelId: string,
+  toolCallRecord: ToolCallRecord,
+): Promise<void> {
+  const type: AuditEventType = toolCallRecord.result.isError
+    ? "tool_call_failed"
+    : "tool_call_succeeded";
+  await appendAuditEvent(projectRoot, {
+    sessionId,
+    timestamp: toolCallRecord.timestamp,
+    type,
+    payload: {
+      toolCallId: toolCallRecord.id,
+      toolName: toolCallRecord.toolName,
+      input: toolCallRecord.input,
+      result: toolCallRecord.result,
+    },
+    modelId,
+    projectRoot,
+  });
+}
+
+/**
+ * Records an observed mutation in the audit log.
+ */
+export async function recordMutation(
+  projectRoot: string,
+  sessionId: string,
+  modelId: string,
+  mutationRecord: MutationRecord,
+): Promise<void> {
+  await appendAuditEvent(projectRoot, {
+    sessionId,
+    timestamp: mutationRecord.timestamp || new Date().toISOString(),
+    type: "mutation_observed",
+    payload: {
+      mutationId: mutationRecord.id,
+      toolCallId: mutationRecord.toolCallId,
+      path: mutationRecord.path,
+      beforeHash: mutationRecord.beforeHash,
+      afterHash: mutationRecord.afterHash,
+      diffSummary: mutationRecord.diffSummary,
+      lineCount: mutationRecord.lineCount,
+      additions: mutationRecord.additions,
+      deletions: mutationRecord.deletions,
+    },
+    modelId,
+    projectRoot,
+  });
+}
+
+/**
+ * Records an observed validation in the audit log.
+ */
+export async function recordValidation(
+  projectRoot: string,
+  sessionId: string,
+  modelId: string,
+  validationRecord: ValidationRecord,
+): Promise<void> {
+  await appendAuditEvent(projectRoot, {
+    sessionId,
+    timestamp: validationRecord.timestamp,
+    type: "validation_observed",
+    payload: {
+      validationId: validationRecord.id,
+      toolCallId: validationRecord.toolCallId,
+      type: validationRecord.type,
+      command: validationRecord.command,
+      exitCode: validationRecord.exitCode,
+      output: validationRecord.output,
+      passed: validationRecord.passed,
+    },
+    modelId,
+    projectRoot,
+  });
+}
+
+/**
+ * Records a completion gate evaluation in the audit log.
+ */
+export async function recordCompletionGate(
+  projectRoot: string,
+  sessionId: string,
+  modelId: string,
+  gateResult: CompletionGateResult,
+): Promise<void> {
+  const type: AuditEventType = gateResult.ok ? "completion_gate_passed" : "completion_gate_failed";
+  await appendAuditEvent(projectRoot, {
+    sessionId,
+    timestamp: gateResult.timestamp,
+    type,
+    payload: {
+      ok: gateResult.ok,
+      reasonCode: gateResult.reasonCode,
+      message: gateResult.message,
+    },
+    modelId,
+    projectRoot,
+  });
 }
 
 /**

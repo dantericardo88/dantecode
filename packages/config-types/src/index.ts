@@ -79,6 +79,76 @@ export interface ToolResultBlock {
   isError: boolean;
 }
 
+// -----------------------------------------------------------------------------
+// Evidence & Execution Proof Types
+// -----------------------------------------------------------------------------
+
+/** Classification of request intent for completion gate evaluation. */
+export type RequestClass = "non_mutating" | "mutating" | "validation_only" | "orchestration";
+
+/** Record of a single tool call execution. */
+export interface ToolCallRecord {
+  id: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  result: ToolResultBlock;
+  timestamp: string;
+  durationMs?: number;
+}
+
+/** Record of a file mutation observed after a tool execution. */
+export interface MutationRecord {
+  id: string;
+  toolCallId: string;
+  path: string;
+  beforeHash: string;
+  afterHash: string;
+  diffSummary: string;
+  lineCount: number;
+  additions: number;
+  deletions: number;
+  timestamp: string;
+}
+
+/** Record of a validation run performed during execution. */
+export interface ValidationRecord {
+  id: string;
+  toolCallId?: string;
+  type: "lint" | "test" | "typecheck" | "build";
+  command: string;
+  exitCode: number;
+  output: string;
+  passed: boolean;
+  timestamp: string;
+}
+
+/** Result of evaluating the completion gate for a request. */
+export interface CompletionGateResult {
+  ok: boolean;
+  reasonCode?: string;
+  message?: string;
+  timestamp: string;
+}
+
+/** Summary of a changed file from a mutation. */
+export interface ChangedFileRecord {
+  path: string;
+  beforeHash: string;
+  afterHash: string;
+  lineCount: number;
+  additions: number;
+  deletions: number;
+  diffSummary: string;
+}
+
+/** Ledger of all execution evidence for a session or turn. */
+export interface ExecutionLedger {
+  toolCallRecords: ToolCallRecord[];
+  mutationRecords: MutationRecord[];
+  validationRecords: ValidationRecord[];
+  completionGateResult?: CompletionGateResult;
+}
+
 /** A single message within a session conversation. */
 export interface SessionMessage {
   id: string;
@@ -103,6 +173,9 @@ export interface TodoItem {
   createdAt: string;
   completedAt?: string;
   parentId?: string;
+  completionGate?: CompletionGateResult;
+  mutationRecordIds?: string[];
+  validationRecordIds?: string[];
 }
 
 /** Status of an agent frame within the agent stack. */
@@ -116,6 +189,9 @@ export interface AgentFrame {
   touchedFiles: string[];
   status: AgentFrameStatus;
   subAgentIds: string[];
+  completionGate?: CompletionGateResult;
+  mutationRecordIds?: string[];
+  validationRecordIds?: string[];
 }
 
 /** A full interactive session. */
@@ -132,6 +208,7 @@ export interface Session {
   sandboxContainerId?: string;
   agentStack: AgentFrame[];
   todoList: TodoItem[];
+  executionLedger?: ExecutionLedger;
 }
 
 // ----------------------------------------------------------------------------
@@ -459,7 +536,14 @@ export type AuditEventType =
   | "request_retry"
   | "context_compacted"
   | "budget_blocked"
-  | "webhook_received";
+  | "webhook_received"
+  | "tool_call_started"
+  | "tool_call_succeeded"
+  | "tool_call_failed"
+  | "mutation_observed"
+  | "validation_observed"
+  | "completion_gate_failed"
+  | "completion_gate_passed";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {

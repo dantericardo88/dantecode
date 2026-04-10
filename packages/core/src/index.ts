@@ -88,16 +88,22 @@ export {
   getProviderExecutionProfile,
   inferReasoningCapability,
 } from "./provider-execution-profile.js";
-export type {
-  ProviderExecutionProfile,
-  ProviderOptions,
-} from "./provider-execution-profile.js";
+export type { ProviderExecutionProfile, ProviderOptions } from "./provider-execution-profile.js";
 
 export { compactTextTranscript } from "./transcript-compaction.js";
+export type { TextTranscriptMessage, TranscriptCompactionResult } from "./transcript-compaction.js";
+
+// ─── Evidence & Execution Proof Types ────────────────────────────────────────
+
 export type {
-  TextTranscriptMessage,
-  TranscriptCompactionResult,
-} from "./transcript-compaction.js";
+  ExecutionLedger,
+  ToolCallRecord,
+  MutationRecord,
+  ValidationRecord,
+  CompletionGateResult,
+  ChangedFileRecord,
+  RequestClass,
+} from "@dantecode/config-types";
 
 export {
   applyExactEdit,
@@ -109,11 +115,7 @@ export {
   preserveLineEndingsForWrite,
   truncateToolOutput,
 } from "./tool-runtime.js";
-export type {
-  ExactEditResult,
-  FileSnapshot,
-  LineEndingStyle,
-} from "./tool-runtime.js";
+export type { ExactEditResult, FileSnapshot, LineEndingStyle } from "./tool-runtime.js";
 
 export { getProviderPromptSupplement } from "./provider-prompt-supplements.js";
 
@@ -402,10 +404,7 @@ export {
   CLAUDE_WORKFLOW_MODE,
   WAVE_COMPLETE_RE,
 } from "./skill-wave-orchestrator.js";
-export type {
-  SkillWave,
-  WaveOrchestratorState,
-} from "./skill-wave-orchestrator.js";
+export type { SkillWave, WaveOrchestratorState } from "./skill-wave-orchestrator.js";
 
 // ─── Approach Memory ────────────────────────────────────────────────────────
 
@@ -463,10 +462,7 @@ export {
   createWebSearchOrchestrator,
   clearOrchestratorCache,
 } from "./web-search-orchestrator.js";
-export type {
-  WebSearchOptions,
-  OrchestratedSearchResult,
-} from "./web-search-orchestrator.js";
+export type { WebSearchOptions, OrchestratedSearchResult } from "./web-search-orchestrator.js";
 
 // ─── Search Synthesizer ────────────────────────────────────────────────────
 
@@ -476,25 +472,14 @@ export {
   formatCitationBlock,
   formatSynthesizedResult,
 } from "./search-synthesizer.js";
-export type {
-  Citation,
-  SynthesizedResult,
-  SynthesizerOptions,
-} from "./search-synthesizer.js";
+export type { Citation, SynthesizedResult, SynthesizerOptions } from "./search-synthesizer.js";
 
 // ─── Search Reranker ───────────────────────────────────────────────────────
 
 export { rerankResults } from "./search-reranker.js";
-export type {
-  RerankContext,
-  RankedSearchResult,
-  RerankOptions,
-} from "./search-reranker.js";
+export type { RerankContext, RankedSearchResult, RerankOptions } from "./search-reranker.js";
 
 // ─── Search Cache ──────────────────────────────────────────────────────────
 
 export { SemanticSearchCache } from "./search-cache.js";
-export type {
-  SearchCacheEntry,
-  SearchCacheOptions,
-} from "./search-cache.js";
+export type { SearchCacheEntry, SearchCacheOptions } from "./search-cache.js";

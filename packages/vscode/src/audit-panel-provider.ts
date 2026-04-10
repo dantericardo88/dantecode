@@ -55,6 +55,13 @@ const EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   context_compacted: "Context Compacted",
   budget_blocked: "Budget Blocked",
   webhook_received: "Webhook Received",
+  tool_call_started: "Tool Call Started",
+  tool_call_succeeded: "Tool Call Succeeded",
+  tool_call_failed: "Tool Call Failed",
+  mutation_observed: "Mutation Observed",
+  validation_observed: "Validation Observed",
+  completion_gate_failed: "Completion Gate Failed",
+  completion_gate_passed: "Completion Gate Passed",
 };
 
 /**
@@ -90,6 +97,13 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   request_retry: "history",
   context_compacted: "fold",
   budget_blocked: "circle-slash",
+  tool_call_started: "play-circle",
+  tool_call_succeeded: "check",
+  tool_call_failed: "error",
+  mutation_observed: "diff-added",
+  validation_observed: "checklist",
+  completion_gate_failed: "shield-x",
+  completion_gate_passed: "shield-check",
 };
 
 /**
@@ -97,14 +111,34 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
  * Maps to VS Code theme color CSS variables.
  */
 function getEventColor(type: AuditEventType): string {
-  if (type.includes("fail") || type.includes("violation") || type.includes("abort")) {
+  if (
+    type.includes("fail") ||
+    type.includes("violation") ||
+    type.includes("abort") ||
+    type === "tool_call_failed" ||
+    type === "completion_gate_failed"
+  ) {
     return "var(--vscode-testing-iconFailed)";
   }
-  if (type.includes("pass") || type.includes("success") || type.includes("complete")) {
+  if (
+    type.includes("pass") ||
+    type.includes("success") ||
+    type.includes("complete") ||
+    type === "tool_call_succeeded" ||
+    type === "completion_gate_passed"
+  ) {
     return "var(--vscode-testing-iconPassed)";
   }
-  if (type.includes("start") || type.includes("spawn") || type.includes("create")) {
+  if (
+    type.includes("start") ||
+    type.includes("spawn") ||
+    type.includes("create") ||
+    type === "tool_call_started"
+  ) {
     return "var(--vscode-textLink-foreground)";
+  }
+  if (type === "mutation_observed" || type === "validation_observed") {
+    return "var(--vscode-charts-green)";
   }
   return "var(--vscode-descriptionForeground)";
 }
