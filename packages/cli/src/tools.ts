@@ -268,9 +268,27 @@ async function toolWrite(
     setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, contentToWrite));
     const lineCount = contentToWrite.split(/\r?\n/).length;
 
+    // Create snapshots for linkage
+    const beforeSnapshot = existing ? await createFileSnapshot(resolved, existing) : null;
+    const afterSnapshot = await createFileSnapshot(resolved, contentToWrite);
+
     // Compute hashes and diff
-    const beforeHash = existing ? await createFileSnapshot(resolved, existing).hash : "";
-    const afterHash = await createFileSnapshot(resolved, contentToWrite).hash;
+    const beforeHash = beforeSnapshot?.hash || "";
+    const afterHash = afterSnapshot.hash;
+
+    // Fail closed on no observable mutation
+    if (beforeHash === afterHash) {
+      return {
+        toolName: "Write",
+        content: `No observable mutation: file content unchanged after write operation.`,
+        isError: false,
+        ok: false,
+        reasonCode: "no-observable-mutation",
+        changedFiles: [],
+        mutationRecords: [],
+      };
+    }
+
     const additions = contentToWrite.split(/\r?\n/).length - (existing?.split(/\r?\n/).length || 0);
     const deletions = (existing?.split(/\r?\n/).length || 0) - contentToWrite.split(/\r?\n/).length;
     const diffSummary =
@@ -290,7 +308,7 @@ async function toolWrite(
 
     const mutationRecord: MutationRecord = {
       id: `mutation-${Date.now()}`,
-      toolCallId: "", // Will be filled by caller
+      toolCallId: "", // Will be set by caller
       path: changedFile.path,
       beforeHash,
       afterHash,
@@ -298,6 +316,8 @@ async function toolWrite(
       lineCount,
       additions: changedFile.additions,
       deletions: changedFile.deletions,
+      timestamp: new Date().toISOString(),
+      readSnapshotId: beforeSnapshot?.id,
     };
 
     return {
@@ -424,9 +444,27 @@ async function toolEdit(
     );
     context?.editAttempts?.delete(attemptKey);
 
+    // Create snapshots for linkage
+    const beforeSnapshot = await createFileSnapshot(resolved, existing);
+    const afterSnapshot = await createFileSnapshot(resolved, editResult.updatedContent);
+
     // Compute hashes and diff
-    const beforeHash = await createFileSnapshot(resolved, existing).hash;
-    const afterHash = await createFileSnapshot(resolved, editResult.updatedContent).hash;
+    const beforeHash = beforeSnapshot.hash;
+    const afterHash = afterSnapshot.hash;
+
+    // Fail closed on no observable mutation
+    if (beforeHash === afterHash) {
+      return {
+        toolName: "Edit",
+        content: `No observable mutation: file content unchanged after edit operation.`,
+        isError: false,
+        ok: false,
+        reasonCode: "no-observable-mutation",
+        changedFiles: [],
+        mutationRecords: [],
+      };
+    }
+
     const diffSummary = `${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""}`;
 
     const changedFile: ChangedFileRecord = {
@@ -441,7 +479,7 @@ async function toolEdit(
 
     const mutationRecord: MutationRecord = {
       id: `mutation-${Date.now()}`,
-      toolCallId: "",
+      toolCallId: "", // Will be set by caller
       path: changedFile.path,
       beforeHash,
       afterHash,
@@ -450,6 +488,7 @@ async function toolEdit(
       additions: 0,
       deletions: 0,
       timestamp: new Date().toISOString(),
+      readSnapshotId: beforeSnapshot.id,
     };
 
     return {
@@ -498,7 +537,7 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
       stdio: ["pipe", "pipe", "pipe"],
       shell: resolvePreferredShell(),
     });
-    return { toolName: "GitHubSearch", content: result || "(no output)", isError: false, ok: true };
+    return { toolName: "Bash", content: result || "(no output)", isError: false, ok: true };
   } catch (err: unknown) {
     const error = err as {
       stdout?: string;

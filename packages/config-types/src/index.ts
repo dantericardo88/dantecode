@@ -108,6 +108,7 @@ export interface MutationRecord {
   additions: number;
   deletions: number;
   timestamp: string;
+  readSnapshotId?: string;
 }
 
 /** Record of a validation run performed during execution. */

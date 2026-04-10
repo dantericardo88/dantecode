@@ -331,38 +331,53 @@ const COMPLETION_CLAIM_PATTERN =
 // -----------------------------------------------------------------------------
 
 function classifyRequest(prompt: string, session: Session): RequestClass {
-  // Check if prompt indicates mutating intent
+  // Check if prompt indicates mutating intent - be conservative and default to mutating for ambiguous edit-like requests
   const mutatingPatterns = [
-    /\b(?:write|edit|create|update|modify|delete|add|remove|change|fix|implement|build)\b.*\b(?:file|code|function|class|component)\b/i,
-    /\b(?:run|execute)\b.*\b(?:tests?|lint|build|compile)\b/i,
-    /\b(?:commit|push|merge)\b.*\b(?:changes?|files?)\b/i,
-    /\b(?:generate|produce|output)\b.*\b(?:code|file|content)\b/i,
+    /\b(?:write|edit|create|update|modify|delete|add|remove|change|fix|implement|build|refactor|rewrite|patch|wire|connect|configure|setup)\b/i,
+    /\b(?:run|execute)\b.*\b(?:tests?|lint|build|compile|script)\b/i,
+    /\b(?:commit|push|merge|pull)\b.*\b(?:changes?|files?|code)\b/i,
+    /\b(?:generate|produce|output|create)\b.*\b(?:code|file|content|component|function|class)\b/i,
+    /\b(?:make|add|remove|replace)\b.*\b(?:file|directory|folder|path)\b/i,
+    /\b(?:save|store|persist)\b.*\b(?:changes?|data|state)\b/i,
   ];
 
   // Check if prompt indicates validation intent
   const validationPatterns = [
-    /\b(?:verify|check|validate|test|lint|build|compile|run)\b.*\b(?:code|file|function|class|component)\b/i,
-    /\b(?:does|is|are)\b.*\b(?:work|correct|valid|proper)\b/i,
+    /\b(?:verify|check|validate|test|lint|build|compile|run)\b.*\b(?:code|file|function|class|component)\b.*\b(?:only|without|changes?)\b/i,
+    /\b(?:does|is|are)\b.*\b(?:work|correct|valid|proper|broken)\b.*\b(?:\?|without changes?)\b/i,
+    /\b(?:analyze|review|examine|inspect)\b.*\b(?:code|file)\b.*\b(?:without|no changes?)\b/i,
   ];
 
   // Check if prompt indicates orchestration intent
   const orchestrationPatterns = [
-    /\b(?:orchestrate|coordinate|manage|schedule|plan)\b/i,
-    /\b(?:multiple|several|many)\b.*\b(?:tasks?|steps?|operations?)\b/i,
+    /\b(?:orchestrate|coordinate|manage|schedule|plan|organize)\b/i,
+    /\b(?:multiple|several|many|various)\b.*\b(?:tasks?|steps?|operations?|phases?)\b/i,
+    /\b(?:workflow|pipeline|sequence|series)\b.*\b(?:of|steps?|tasks?)\b/i,
   ];
 
-  if (mutatingPatterns.some((p) => p.test(prompt))) {
-    return "mutating";
-  }
-  if (validationPatterns.some((p) => p.test(prompt))) {
-    return "validation_only";
+  // Explicit non-mutating indicators
+  const nonMutatingPatterns = [
+    /\b(?:explain|describe|tell|show|what|how|why|when|where)\b.*\b(?:is|are|does|works?|means?)\b/i,
+    /\b(?:read|view|see|look|check|examine)\b.*\b(?:file|code|content)\b.*\b(?:without|no|don't) changes?\b/i,
+    /\b(?:analyze|review|inspect|audit)\b.*\b(?:only|without modifying)\b/i,
+  ];
+
+  if (nonMutatingPatterns.some((p) => p.test(prompt))) {
+    return "non_mutating";
   }
   if (orchestrationPatterns.some((p) => p.test(prompt))) {
     return "orchestration";
   }
+  if (validationPatterns.some((p) => p.test(prompt))) {
+    return "validation_only";
+  }
+  if (mutatingPatterns.some((p) => p.test(prompt))) {
+    return "mutating";
+  }
 
-  // Default to non_mutating if no clear intent
-  return "non_mutating";
+  // Default to mutating for ambiguous requests to prevent false negatives
+  // Most user requests to AI involve some form of code/file change
+  return "mutating";
 }
 
 function evaluateCompletionGate(
@@ -1913,6 +1928,15 @@ export async function runAgentLoop(
           timestamp: new Date().toISOString(),
         };
         executionLedger.toolCallRecords.push(toolCallRecord);
+
+        // Link records to tool call
+        for (const mutation of result.mutationRecords || []) {
+          mutation.toolCallId = toolCallRecord.id;
+        }
+        for (const validation of result.validationRecords || []) {
+          validation.toolCallId = toolCallRecord.id;
+        }
+
         executionLedger.mutationRecords.push(...(result.mutationRecords || []));
         executionLedger.validationRecords.push(...(result.validationRecords || []));
 

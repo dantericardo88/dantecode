@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 export type LineEndingStyle = "lf" | "crlf" | "mixed" | "none";
 
 export interface FileSnapshot {
+  id: string;
   path: string;
   capturedAt: string;
   size: number;
@@ -79,6 +80,7 @@ export function createFileSnapshot(
   } = {},
 ): FileSnapshot {
   return {
+    id: `snapshot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     path,
     capturedAt: metadata.capturedAt ?? new Date().toISOString(),
     size: metadata.size ?? Buffer.byteLength(content, "utf-8"),

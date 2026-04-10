@@ -121,7 +121,9 @@ function assembleFragments(fragments: unknown[]): Record<string, unknown> {
 
   for (const fragment of fragments) {
     if (typeof fragment === "object" && fragment !== null) {
-      Object.assign(assembled, fragment);
+      const frag = fragment as Record<string, unknown>;
+      if (frag.partial === true) continue; // Skip partial fragments
+      Object.assign(assembled, frag);
     }
   }
 
