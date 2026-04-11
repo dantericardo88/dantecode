@@ -121,11 +121,12 @@ function assembleFragments(fragments: unknown[]): Record<string, unknown> {
 
   for (const fragment of fragments) {
     if (typeof fragment === "object" && fragment !== null) {
-      const frag = fragment as Record<string, unknown>;
-      if (frag.partial === true) continue; // Skip partial fragments
-      Object.assign(assembled, frag);
+      Object.assign(assembled, fragment);
     }
   }
+
+  // Remove partial marker from assembled result
+  delete assembled.partial;
 
   return assembled;
 }

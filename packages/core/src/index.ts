@@ -516,3 +516,8 @@ export {
   globalACPAdapter,
 } from "./acp-adapter.js";
 export type { ACPTool, ACPAgent, ACPResult } from "./acp-adapter.js";
+
+// ─── Evaluation Lab ────────────────────────────────────────────────────────────
+
+export { evaluationLab } from "./evaluation-lab.js";
+export type { GoldenTask, EvaluationResult, BenchmarkSuite } from "./evaluation-lab.js";

@@ -5,6 +5,7 @@ interface StubPattern {
     regex: RegExp;
     message: string;
     violationType: PDSEViolation["type"];
+    excludeExtensions?: string[];
 }
 interface AntiStubScanResult {
     hardViolations: PDSEViolation[];

@@ -73,12 +73,12 @@ export class ExternalToolAgent implements ACPAgent {
 
   constructor(private toolPath: string) {}
 
-  async executeTask(task: string, context: Record<string, unknown>): Promise<ACPResult> {
+  async executeTask(_task: string, context: Record<string, unknown>): Promise<ACPResult> {
     // Simulate calling external tool
     // In real implementation, spawn process or HTTP call
     try {
       // Placeholder for actual tool execution
-      const output = `Executed task: ${task} with context ${JSON.stringify(context)}`;
+      const output = `Executed task: ${_task} with context ${JSON.stringify(context)}`;
       return {
         success: true,
         output,
@@ -100,7 +100,7 @@ export class DanteForgeACPVerifier implements ACPAgent {
   name = "danteforge-verifier";
   capabilities = ["verification", "anti-stub", "quality-scoring"];
 
-  async executeTask(task: string, context: Record<string, unknown>): Promise<ACPResult> {
+  async executeTask(_task: string, context: Record<string, unknown>): Promise<ACPResult> {
     // Use DanteForge to verify output
     const code = context.code as string;
     if (!code) {

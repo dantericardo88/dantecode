@@ -5,12 +5,7 @@
 // ============================================================================
 
 import { execSync } from "node:child_process";
-import {
-  parseVerificationErrors,
-  formatErrorsForFixPrompt,
-  computeErrorSignature,
-} from "./error-parser.js";
-import type { ParsedError } from "./error-parser.js";
+import { parseVerificationErrors, computeErrorSignature } from "./error-parser.js";
 
 export interface FailureClassification {
   category: "compile" | "test" | "lint" | "runtime" | "verification" | "unknown";
@@ -52,9 +47,9 @@ export interface BoundedRepairContext {
 
 export async function classifyFailure(
   errorOutput: string,
-  projectRoot: string,
+  _projectRoot: string,
 ): Promise<FailureClassification> {
-  const parsedErrors = await parseVerificationErrors(errorOutput, projectRoot);
+  const parsedErrors = parseVerificationErrors(errorOutput);
 
   if (parsedErrors.length === 0) {
     return {
@@ -66,27 +61,27 @@ export async function classifyFailure(
     };
   }
 
-  const primaryError = parsedErrors[0];
-  const signature = computeErrorSignature(primaryError);
+  const primaryError = parsedErrors[0]!;
+  const signature = computeErrorSignature([primaryError]);
 
   // Classify based on error type
   let category: FailureClassification["category"] = "unknown";
   let severity: FailureClassification["severity"] = "medium";
   let actionable = true;
 
-  if (primaryError.type === "typescript" || primaryError.type === "syntax") {
+  if (primaryError.errorType === "typescript" || primaryError.errorType === "syntax") {
     category = "compile";
-    severity = primaryError.level === "error" ? "high" : "medium";
-  } else if (primaryError.type === "test") {
+    severity = "high";
+  } else if (primaryError.errorType === "test") {
     category = "test";
     severity = "high";
-  } else if (primaryError.type === "lint") {
+  } else if (primaryError.errorType === "lint") {
     category = "lint";
     severity = "low";
-  } else if (primaryError.type === "runtime") {
+  } else if (primaryError.errorType === "runtime") {
     category = "runtime";
     severity = "high";
-  } else if (primaryError.type === "verification") {
+  } else if (primaryError.errorType === "verification") {
     category = "verification";
     severity = "medium";
   }
@@ -141,19 +136,8 @@ export function planRepair(
 export async function executeRepair(
   plan: RepairPlan,
   classification: FailureClassification,
-  projectRoot: string,
+  _projectRoot: string,
 ): Promise<{ prompt: string; success: boolean }> {
-  const errorDetails = formatErrorsForFixPrompt([
-    {
-      type: classification.category as any,
-      level: classification.severity === "high" ? "error" : "warning",
-      message: classification.description,
-      file: "",
-      line: 0,
-      column: 0,
-    },
-  ]);
-
   const prompt = `AUTONOMOUS REPAIR ATTEMPT (${plan.strategy})
 
 Failure Classification:
@@ -167,7 +151,7 @@ Repair Plan:
 - Steps: ${plan.steps.join(", ")}
 
 Error Details:
-${errorDetails}
+${classification.description}
 
 Please execute the repair following the planned steps. Focus on the specific issue identified.`;
 

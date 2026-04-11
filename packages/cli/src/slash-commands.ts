@@ -26,7 +26,12 @@ import {
   createWaveState,
   generateRepoMemory,
   BoundedRepairLoop,
+  evaluationLab,
+  runSecurityAudit,
+  chaosTester,
+  testMCPIntegration,
 } from "@dantecode/core";
+import { skillsManager } from "./skills-manager.js";
 import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -901,7 +906,7 @@ Implement each pattern directly — no stubs, no TODOs, no placeholders. Run typ
 Run the full QA pipeline. Fix any failures. Continue until ALL checks pass or 3 retry cycles complete.
 
 ## Cleanup
-rm -rf /tmp/oss-research-* when done.
+Clean up /tmp/oss-research-* directories when done.
 
 Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. Verify every change compiles and passes tests.`;
 
@@ -2246,6 +2251,108 @@ async function repairCommand(args: string, state: ReplState): Promise<string> {
     return `${RED}Repair failed: ${error}${RESET}`;
   }
 }
+
+async function pluginsCommand(args: string, state: ReplState): Promise<string> {
+  const plugins = skillsManager.listPlugins();
+  const commands = skillsManager.listCommands();
+
+  let output = `${GREEN}Loaded Plugins:${RESET}\n`;
+  for (const plugin of plugins) {
+    output += `  - ${plugin}\n`;
+  }
+
+  output += `\n${GREEN}Custom Commands:${RESET}\n`;
+  for (const cmd of commands) {
+    output += `  - /${cmd.name}: ${cmd.description}\n`;
+  }
+
+  return output;
+}
+
+async function benchmarkCommand(args: string, state: ReplState): Promise<string> {
+  const suiteName = args.trim() || "speed-to-verified-completion";
+
+  try {
+    const results = await evaluationLab.runSuite(suiteName, state.projectRoot);
+    const overallScore = evaluationLab.calculateOverallScore(results);
+
+    let output = `${GREEN}Benchmark Results for ${suiteName}:${RESET}\n`;
+    output += `Overall Score: ${overallScore.toFixed(1)}/100\n\n`;
+
+    for (const result of results) {
+      output += `${result.taskId}: ${result.passed ? 'PASS' : 'FAIL'} `;
+      output += `(Score: ${result.score}, Duration: ${result.duration}ms, Rounds: ${result.rounds})\n`;
+      if (result.errors.length > 0) {
+        output += `  Errors: ${result.errors.join(', ')}\n`;
+      }
+    }
+
+    return output;
+  } catch (error) {
+    return `${RED}Benchmark failed: ${error}${RESET}`;
+  }
+}
+
+async function auditCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const audit = await runSecurityAudit(state.projectRoot);
+
+    let output = `${GREEN}Security Audit Results:${RESET}\n`;
+    output += `Compliance Score: ${audit.complianceScore}/100\n`;
+    output += `Last Audit: ${audit.lastAudit}\n\n`;
+
+    if (audit.vulnerabilities.length > 0) {
+      output += `${RED}Vulnerabilities Found:${RESET}\n`;
+      for (const vuln of audit.vulnerabilities) {
+        output += `  ${vuln.severity.toUpperCase()}: ${vuln.description}\n`;
+        output += `    Mitigation: ${vuln.mitigation}\n\n`;
+      }
+    } else {
+      output += `${GREEN}No vulnerabilities detected${RESET}\n`;
+    }
+
+    return output;
+  } catch (error) {
+    return `${RED}Audit failed: ${error}${RESET}`;
+  }
+}
+
+async function chaosTestCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const testFn = async () => {
+      // Simple test: run a basic command
+      return "Chaos test executed";
+    };
+
+    const result = await chaosTester.runChaosTest(testFn);
+
+    let output = `${GREEN}Chaos Test Results:${RESET}\n`;
+    output += `Overall Success: ${result.overallSuccess ? 'PASS' : 'FAIL'}\n\n`;
+
+    for (const r of result.results) {
+      output += `${r.fault}: ${r.success ? 'PASS' : 'FAIL'}`;
+      if (r.error) output += ` (${r.error})`;
+      output += `\n`;
+    }
+
+    return output;
+  } catch (error) {
+    return `${RED}Chaos test failed: ${error}${RESET}`;
+  }
+}
+
+async function testMCPCommand(args: string, state: ReplState): Promise<string> {
+  try {
+    const success = await testMCPIntegration();
+    if (success) {
+      return `${GREEN}MCP Integration Test: PASSED${RESET}\nExternal tool calling and listing works correctly.`;
+    } else {
+      return `${RED}MCP Integration Test: FAILED${RESET}\nTool bridging or external connection failed.`;
+    }
+  } catch (error) {
+    return `${RED}MCP test error: ${error}${RESET}`;
+  }
+}
 }
 
 const SLASH_COMMANDS: SlashCommand[] = [
@@ -2435,6 +2542,36 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/repair [error-output]",
     handler: repairCommand,
   },
+  {
+    name: "plugins",
+    description: "List loaded plugins and custom commands",
+    usage: "/plugins",
+    handler: pluginsCommand,
+  },
+  {
+    name: "benchmark",
+    description: "Run evaluation benchmarks",
+    usage: "/benchmark [suite-name]",
+    handler: benchmarkCommand,
+  },
+  {
+    name: "audit",
+    description: "Run security audit",
+    usage: "/audit",
+    handler: auditCommand,
+  },
+  {
+    name: "chaos-test",
+    description: "Run chaos testing",
+    usage: "/chaos-test",
+    handler: chaosTestCommand,
+  },
+  {
+    name: "test-mcp",
+    description: "Test MCP integration",
+    usage: "/test-mcp",
+    handler: testMCPCommand,
+  },
 ];
 
 // ----------------------------------------------------------------------------
@@ -2462,7 +2599,17 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
       : withoutSlash.slice(0, spaceIndex).toLowerCase();
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
-  const command = SLASH_COMMANDS.find((c) => c.name === commandName);
+  // Check built-in commands first
+  let command = SLASH_COMMANDS.find((c) => c.name === commandName);
+
+  // If not found, check custom plugin commands
+  if (!command) {
+    const customCommand = skillsManager.getCommand(commandName);
+    if (customCommand) {
+      return customCommand.handler(args, state);
+    }
+  }
+
   if (!command) {
     return `${RED}Unknown command: /${commandName}${RESET}\n${DIM}Type /help to see available commands.${RESET}`;
   }

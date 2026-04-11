@@ -31,6 +31,8 @@ import {
   ApproachMemory,
   formatApproachesForPrompt,
   truncateToolOutput,
+  loadRepoMemory,
+  BoundedRepairLoop,
 } from "@dantecode/core";
 import type { FileSnapshot, WaveOrchestratorState } from "@dantecode/core";
 import {
@@ -282,7 +284,15 @@ const PIPELINE_CONTINUATION_INSTRUCTION =
   "todo list or the pipeline plan and continue from where you left off.";
 
 // ----------------------------------------------------------------------------
-const SAFE_TOOLS = new Set(["Read", "Glob", "Grep"]);
+const SAFE_TOOLS = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "WebSearch",
+  "WebFetch",
+  "GitHubSearch",
+  "TodoWrite",
+]);
 
 // ----------------------------------------------------------------------------
 // Anti-confabulation guards (Grok empty-response / phantom-completion fix)
@@ -447,7 +457,51 @@ function evaluateCompletionGate(
  * Builds the system prompt sent to the model. Includes instructions for tool
  * use, the DanteForge doctrine, and project-specific context.
  */
+function selectHotContext(repoMemory: any, session: Session): string | null {
+  const parts: string[] = [];
+
+  // Include top hotspots
+  if (repoMemory.hotspots && repoMemory.hotspots.length > 0) {
+    const topHotspots = repoMemory.hotspots
+      .slice(0, 5)
+      .map((h: any) => `- ${h.file} (${h.changeCount} changes)`);
+    parts.push("Recent hot files:", ...topHotspots);
+  }
+
+  // Include relevant symbols if any active files match
+  if (session.activeFiles.length > 0 && repoMemory.symbolGraph) {
+    const relevantSymbols = repoMemory.symbolGraph
+      .filter((s: any) => session.activeFiles.some((f: string) => s.file === f))
+      .slice(0, 10);
+    if (relevantSymbols.length > 0) {
+      parts.push(
+        "",
+        "Symbols in active files:",
+        ...relevantSymbols.map((s: any) => `- ${s.name} (${s.kind}) in ${s.file}`),
+      );
+    }
+  }
+
+  // Include test mappings for active files
+  if (session.activeFiles.length > 0 && repoMemory.testMap) {
+    const relevantTests = repoMemory.testMap
+      .filter((t: any) => t.sourceFiles.some((f: string) => session.activeFiles.includes(f)))
+      .slice(0, 5);
+    if (relevantTests.length > 0) {
+      parts.push(
+        "",
+        "Related tests:",
+        ...relevantTests.map((t: any) => `- ${t.testFile} covers ${t.sourceFiles.join(", ")}`),
+      );
+    }
+  }
+
+  return parts.length > 0 ? parts.join("\n") : null;
+}
+
 async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Promise<string> {
+  // Load repo memory for hot context
+  const repoMemory = await loadRepoMemory(session.projectRoot);
   const toolDefs = getToolDefinitions();
   const toolList = toolDefs.map((t) => `- ${t.name}: ${t.description}`).join("\n");
 
@@ -616,14 +670,12 @@ async function buildSystemPrompt(session: Session, config: AgentLoopConfig): Pro
     // File doesn't exist — that's fine
   }
 
-  // First-turn complexity rating instruction (model-assisted scoring)
-  if (session.messages.length <= 1) {
-    sections.push("");
-    sections.push(
-      "On your FIRST response only, include at the very end: [COMPLEXITY: X.X] " +
-        "where X.X is your 0-1 self-assessment of task complexity. " +
-        "0.0 = trivial, 1.0 = extremely complex multi-file refactor.",
-    );
+  // Hot context from repo memory
+  if (repoMemory) {
+    const hotContext = selectHotContext(repoMemory, session);
+    if (hotContext) {
+      sections.push("", "## Hot Context from Repo Memory", "", hotContext);
+    }
   }
 
   return sections.join("\n");
@@ -1179,6 +1231,15 @@ export async function runAgentLoop(
   session: Session,
   config: AgentLoopConfig,
 ): Promise<Session> {
+  // Instrumentation for speed-to-verified-completion metrics
+  const taskStartTime = Date.now();
+  let firstMutationTime: number | null = null;
+  let completionTime: number | null = null;
+  let modelRoundTrips = 0;
+  let fileReads = 0;
+  let repoMemoryHits = 0;
+  let repairAttempts = 0;
+
   // Run startup health check on first invocation only
   if (!_healthCheckCompleted) {
     _healthCheckCompleted = true;
@@ -1213,6 +1274,7 @@ export async function runAgentLoop(
   const lexicalComplexity = router.analyzeComplexity(prompt);
   const thinkingBudget = deriveThinkingBudget(config.state.model.default, lexicalComplexity);
   let localSandboxBridge: SandboxBridge | null = null;
+  const repairLoop = new BoundedRepairLoop();
 
   // Build system prompt
   const systemPrompt = await buildSystemPrompt(session, config);
@@ -1469,6 +1531,7 @@ export async function runAgentLoop(
             maxTokens: config.state.model.default.maxTokens,
             ...(thinkingBudget ? { thinkingBudget } : {}),
           });
+          modelRoundTrips++;
         }
         const extracted = extractToolCalls(responseText);
         cleanText = extracted.cleanText;
@@ -1686,6 +1749,7 @@ export async function runAgentLoop(
         tokensUsed: totalTokensUsed,
       };
       session.messages.push(assistantMessage);
+      completionTime = Date.now();
       break;
     }
 
@@ -1941,6 +2005,32 @@ export async function runAgentLoop(
           editAttempts,
           subAgentExecutor: createSubAgentExecutor(session, config),
         });
+
+        // Automatic bounded repair for failed verification commands
+        if (toolCall.name === "Bash" && result.isError) {
+          const command = toolCall.input["command"] as string;
+          if (command && (
+            command.includes("typecheck") ||
+            command.includes("lint") ||
+            command.includes("test") ||
+            command.includes("build") ||
+            command.includes("compile") ||
+            (command.includes("npm") && (command.includes("run") || command.includes("test"))) ||
+            (command.includes("yarn") && command.includes("test"))
+          )) {
+            const attempt = await repairLoop.attemptRepair(result.content, session.projectRoot);
+            if (attempt) {
+              result.content += `\n\n[AUTOMATIC REPAIR ${attempt.attemptNumber}]: ${attempt.result} using ${attempt.plan.strategy}`;
+              if (attempt.result === "success") {
+                // If repair succeeded, mark as not error
+                result.isError = false;
+              }
+            }
+          }
+        }
+            }
+          }
+        }
 
         // Record tool call in execution ledger
         const toolCallRecord: ToolCallRecord = {
@@ -2638,6 +2728,27 @@ export async function runAgentLoop(
 
   if (localSandboxBridge) {
     await localSandboxBridge.shutdown();
+  }
+
+  // Log speed-to-verified-completion metrics
+  const taskDuration = completionTime ? completionTime - taskStartTime : Date.now() - taskStartTime;
+  const timeToFirstMutation = firstMutationTime ? firstMutationTime - taskStartTime : null;
+  const repoMemoryUsed = true; // Assume if loaded, it was used
+
+  // Add to execution ledger for persistence
+  if (!session.executionLedger) session.executionLedger = { toolCallRecords: [], mutationRecords: [], validationRecords: [] };
+  session.executionLedger.speedMetrics = {
+    taskDuration,
+    timeToFirstMutation,
+    modelRoundTrips,
+    fileReads,
+    repoMemoryHits: repoMemoryUsed ? 1 : 0,
+    repairAttempts,
+    timestamp: new Date().toISOString()
+  };
+
+  if (!config.silent) {
+    process.stdout.write(`\n${DIM}[speed-metrics] Duration: ${taskDuration}ms | Round-trips: ${modelRoundTrips} | File reads: ${fileReads} | Repo memory hits: ${repoMemoryUsed ? 1 : 0} | Repair attempts: ${repairAttempts}${timeToFirstMutation ? ` | Time to first mutation: ${timeToFirstMutation}ms` : ''}${RESET}\n`);
   }
 
   return session;

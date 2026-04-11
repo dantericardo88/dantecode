@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, relative, dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { execSync } from "node:child_process";
 import { generateRepoMap } from "@dantecode/git-engine";
 
@@ -109,7 +109,9 @@ function extractImports(content: string): string[] {
   const importRegex = /import\s+.*?\s+from\s+['"]([^'"]+)['"]/g;
   let match;
   while ((match = importRegex.exec(content)) !== null) {
-    imports.push(match[1]);
+    if (match[1]) {
+      imports.push(match[1]);
+    }
   }
   return imports;
 }
@@ -119,7 +121,9 @@ function extractExports(content: string): string[] {
   const exportRegex = /export\s+(?:const|let|var|function|class|interface|type)\s+(\w+)/g;
   let match;
   while ((match = exportRegex.exec(content)) !== null) {
-    exports.push(match[1]);
+    if (match[1]) {
+      exports.push(match[1]);
+    }
   }
   return exports;
 }
@@ -131,10 +135,14 @@ function extractSymbols(content: string): string[] {
   const classRegex = /class\s+(\w+)/g;
   let match;
   while ((match = funcRegex.exec(content)) !== null) {
-    symbols.push(match[1]);
+    if (match[1]) {
+      symbols.push(match[1]);
+    }
   }
   while ((match = classRegex.exec(content)) !== null) {
-    symbols.push(match[1]);
+    if (match[1]) {
+      symbols.push(match[1]);
+    }
   }
   return [...new Set(symbols)];
 }
@@ -169,7 +177,7 @@ async function generateSymbolGraph(projectRoot: string, repoMap: any[]): Promise
   return nodes;
 }
 
-async function generateTestMap(projectRoot: string, repoMap: any[]): Promise<TestRelevance[]> {
+async function generateTestMap(_projectRoot: string, repoMap: any[]): Promise<TestRelevance[]> {
   const testMap: TestRelevance[] = [];
 
   const testFiles = repoMap.filter((e) => e.path.includes(".test.") || e.path.includes(".spec."));
@@ -205,7 +213,7 @@ async function generateHotspots(projectRoot: string): Promise<Hotspot[]> {
       .map(([file, count]) => ({ file, changeCount: count }))
       .sort((a, b) => b.changeCount - a.changeCount)
       .slice(0, 50);
-  } catch (e) {
+  } catch {
     return [];
   }
 }
