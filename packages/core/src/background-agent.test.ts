@@ -3,6 +3,9 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+// Raise test timeout for all tests in this file — async I/O (persistTask, saveCheckpoint)
+// can be slow under turbo's parallel execution of 15 packages. 35s covers vi.waitFor(30s).
+vi.setConfig({ testTimeout: 35_000, hookTimeout: 30_000 });
 import { BackgroundAgentRunner } from "./background-agent.js";
 import type { EnqueueOptions } from "./background-agent.js";
 import type { BackgroundAgentTask } from "@dantecode/config-types";
@@ -152,7 +155,7 @@ describe("BackgroundAgentRunner", () => {
         () => {
           expect(runner.getTask(id)?.status).toBe("completed");
         },
-        { timeout: 5_000 },
+        { timeout: 30_000 },
       );
       expect(runner.cancel(id)).toBe(false);
     });
@@ -180,7 +183,7 @@ describe("BackgroundAgentRunner", () => {
           expect(runner.getTask(firstId)?.status).toBe("completed");
           expect(runner.getTask(secondId)?.status).toBe("completed");
         },
-        { timeout: 5_000 },
+        { timeout: 30_000 },
       );
       const cleared = runner.clearFinished();
       expect(cleared).toBe(2);
@@ -215,7 +218,7 @@ describe("BackgroundAgentRunner", () => {
         () => {
           expect(completed).toHaveLength(3);
         },
-        { timeout: 5_000 },
+        { timeout: 30_000 },
       );
       expect(completed).toHaveLength(3);
     });
@@ -235,7 +238,7 @@ describe("BackgroundAgentRunner", () => {
       await vi.waitFor(() => {
         expect(updates.length).toBeGreaterThanOrEqual(3);
         expect(updates[updates.length - 1]?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
 
       // Should have: queued, running, step 1, step 2, completed
       expect(updates.length).toBeGreaterThanOrEqual(3);
@@ -263,10 +266,10 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
       await vi.waitFor(() => {
         expect(mockSandboxStop).toHaveBeenCalledTimes(1);
-      });
+      }, { timeout: 30_000 });
 
       const task = runner.getTask(id);
       expect(task!.status).toBe("completed");
@@ -286,7 +289,7 @@ describe("BackgroundAgentRunner", () => {
       const id = runner.enqueue("will fail");
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("failed");
-      });
+      }, { timeout: 30_000 });
 
       const task = runner.getTask(id);
       expect(task!.status).toBe("failed");
@@ -324,7 +327,7 @@ describe("BackgroundAgentRunner", () => {
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => {
         expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
-      });
+      }, { timeout: 30_000 });
       expect(retryRunner.getTask(id)?.status).toBe("paused");
       expect(retryRunner.getTask(id)?.progress).toContain("identical_consecutive");
     });
@@ -381,7 +384,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
       await vi.waitFor(() => {
         expect(
           mockExec.mock.calls.some(
@@ -389,7 +392,7 @@ describe("BackgroundAgentRunner", () => {
               typeof c[0] === "string" && c[0].includes("git add") && c[0].includes("git commit"),
           ),
         ).toBe(true);
-      });
+      }, { timeout: 30_000 });
 
       // exec should have been called with git add + commit
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
@@ -409,7 +412,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
@@ -437,7 +440,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(retryRunner.getTask(id)?.status).toBe("paused");
-      });
+      }, { timeout: 30_000 });
       expect(retryRunner.getTask(id)?.progress).toContain("Loop detected");
 
       const resumed = await retryRunner.resume(id);
@@ -445,7 +448,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(retryRunner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
       expect(retryRunner.getTask(id)?.output).toBe("recovered");
     });
 
@@ -459,7 +462,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const gitCall = calls.find((c) => typeof c === "string" && c.includes("git commit"));
@@ -485,7 +488,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
 
       // Task should still be completed despite commit failure
       const task = runner.getTask(id);
@@ -505,7 +508,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
 
       await vi.waitFor(() => {
         expect(
@@ -513,7 +516,7 @@ describe("BackgroundAgentRunner", () => {
             (c: unknown[]) => typeof c[0] === "string" && c[0].includes("gh pr create"),
           ),
         ).toBe(true);
-      });
+      }, { timeout: 30_000 });
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const prCall = calls.find((c) => typeof c === "string" && c.includes("gh pr create"));
@@ -539,10 +542,10 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.progress).toContain("PR creation failed");
-      });
+      }, { timeout: 30_000 });
 
       const task = runner.getTask(id);
       expect(task!.status).toBe("completed");
@@ -560,7 +563,7 @@ describe("BackgroundAgentRunner", () => {
 
       await vi.waitFor(() => {
         expect(runner.getTask(id)?.status).toBe("completed");
-      });
+      }, { timeout: 30_000 });
 
       const calls = mockExec.mock.calls.map((c: unknown[]) => c[0] as string);
       const prCall = calls.find((c) => typeof c === "string" && c.includes("gh pr create"));

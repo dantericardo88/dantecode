@@ -31,5 +31,5 @@ export type { DiffHunk, DiffLine, ColoredDiffHunk } from "./diff.js";
 
 // ─── Repository Map Generation ──────────────────────────────────────────────
 
-export { generateRepoMap, formatRepoMapForContext } from "./repo-map.js";
-export type { RepoMapEntry, RepoMapOptions } from "./repo-map.js";
+export { generateRepoMap, formatRepoMapForContext, generateSemanticRepoMap, formatSemanticRepoMapForContext } from "./repo-map.js";
+export type { RepoMapEntry, RepoMapOptions, SemanticRepoMapEntry } from "./repo-map.js";

@@ -25,16 +25,21 @@ import {
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
+  compactTextTranscript,
   createSelfImprovementContext,
   detectSelfImprovementContext,
   getContextUtilization,
+  getProviderPromptSupplement,
   getProviderCatalogEntry,
   groupCatalogModels,
   parseModelReference,
   readOrInitializeState,
   responseNeedsToolExecutionNudge,
+  reviewPullRequest,
   shouldContinueLoop,
 } from "@dantecode/core";
+import type { FileSnapshot } from "@dantecode/core";
+import { parseSearchReplaceBlocks, type SearchReplaceBlock } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
   runAntiStubScanner,
@@ -64,7 +69,7 @@ interface ChatSession {
 }
 
 /** Inbound message types sent from the webview to the extension host. */
-interface WebviewInboundMessage {
+export interface WebviewInboundMessage {
   type:
     | "chat_request"
     | "file_add"
@@ -86,7 +91,12 @@ interface WebviewInboundMessage {
     | "paste_image"
     | "save_agent_config"
     | "load_agent_config"
-    | "user_confirmed_self_mod";
+    | "user_confirmed_self_mod"
+    | "pr_review_request"
+    | "slash_input"
+    | "context_pill_add"
+    | "retry_last"
+    | "branch_chat";
   payload: Record<string, unknown>;
 }
 
@@ -118,7 +128,9 @@ interface WebviewOutboundMessage {
     | "diff_hunk"
     | "cost_update"
     | "context_update"
-    | "memory_info";
+    | "memory_info"
+    | "slash_suggestions"
+    | "pr_review_result";
   payload: Record<string, unknown>;
 }
 
@@ -129,6 +141,7 @@ type AgentMode = "plan" | "build" | "yolo";
 
 /** Permission levels for tool categories. */
 type PermissionLevel = "allow" | "ask" | "deny";
+type PermissionKind = "edit" | "bash" | "tools";
 
 /** Persisted agent configuration stored in globalState + .dantecode/config.json. */
 interface AgentConfig {
@@ -157,6 +170,8 @@ interface SidebarHostCallbacks {
     activeTasks?: number;
     hasError?: boolean;
   }) => void;
+  onSearchReplaceBlocks?: (blocks: SearchReplaceBlock[]) => void;
+  onCircuitStateChange?: (isOpen: boolean) => void;
 }
 
 /** Default config for new users. */
@@ -299,6 +314,15 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // --------------------------------------------------------------------------
+  // Injector setters (wired from extension.ts after construction)
+  // --------------------------------------------------------------------------
+
+  setContextRetriever(_retriever: unknown): void { /* wired externally */ }
+  setLspInjector(_injector: unknown): void { /* wired externally */ }
+  setTerminalOutputManager(_mgr: unknown): void { /* wired externally */ }
+  setDebugAttachProvider(_provider: unknown): void { /* wired externally */ }
+
   /**
    * Called by VS Code when the webview view needs to be resolved.
    */
@@ -332,7 +356,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // Message routing
   // --------------------------------------------------------------------------
 
-  private async handleWebviewMessage(message: WebviewInboundMessage): Promise<void> {
+  async handleWebviewMessage(message: WebviewInboundMessage): Promise<void> {
     switch (message.type) {
       case "chat_request":
         await this.handleChatRequest(String(message.payload["text"] ?? ""));
@@ -402,7 +426,106 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         void this.scanOllamaModels();
         void this.sendMemoryInfo();
         break;
+      case "slash_input":
+        this.handleSlashInput(String(message.payload["prefix"] ?? ""));
+        break;
+      case "context_pill_add":
+        this.handleFileAdd(String(message.payload["path"] ?? ""));
+        break;
+      case "retry_last":
+        this.handleRetryLast();
+        break;
+      case "branch_chat":
+        break;
+      case "pr_review_request": {
+        const prNum = Number((message.payload as { prNumber?: unknown })?.prNumber ?? 0);
+        if (!prNum) {
+          this.postMessage({ type: "error", payload: { message: "Invalid PR number" } });
+          break;
+        }
+        const repo = (message.payload as { repo?: string })?.repo;
+        try {
+          const result = await reviewPullRequest({ prNumber: prNum, repo });
+          this.postMessage({ type: "pr_review_result", payload: result as unknown as Record<string, unknown> });
+        } catch (err) {
+          this.postMessage({ type: "error", payload: { message: String(err) } });
+        }
+        break;
+      }
+      case "user_confirmed_self_mod":
+        break;
     }
+  }
+
+  private handleRetryLast(): void {
+    const lastUserMsg = [...this.messages].reverse().find((m) => m.role === "user");
+    if (!lastUserMsg) {
+      this.postMessage({ type: "error", payload: { message: "No user message to retry" } });
+      return;
+    }
+    void this.handleChatRequest(lastUserMsg.content);
+  }
+
+  private handleSlashInput(prefix: string): void {
+    const allCommands = [
+      { cmd: "/file", desc: "Add a file to context" },
+      { cmd: "/symbol", desc: "Search for a code symbol" },
+      { cmd: "/git", desc: "Add git diff or log" },
+      { cmd: "/web", desc: "Search the web" },
+      { cmd: "/memory", desc: "Query agent memory" },
+      { cmd: "/skill", desc: "Activate a skill" },
+      { cmd: "/debug", desc: "Start a debug session" },
+      { cmd: "/review", desc: "Review changes" },
+    ];
+    const commands = prefix
+      ? allCommands.filter((c) => c.cmd.startsWith(prefix))
+      : allCommands;
+    this.postMessage({ type: "slash_suggestions", payload: { commands } });
+  }
+
+  // --------------------------------------------------------------------------
+  // Permission helpers
+  // --------------------------------------------------------------------------
+
+  private async resolveToolPermissionBlock(
+    toolName: string,
+    permission: PermissionKind,
+  ): Promise<string | null> {
+    const level = this.agentConfig.permissions[permission];
+    if (level === "allow") {
+      return null;
+    }
+
+    if (level === "deny") {
+      if (permission === "edit") {
+        return `Tool "${toolName}" blocked: File editing is denied by permissions.`;
+      }
+      if (permission === "bash") {
+        return `Tool "${toolName}" blocked: Shell commands are denied by permissions.`;
+      }
+      return `Tool "${toolName}" blocked: Tool execution is denied by permissions.`;
+    }
+
+    const prompt =
+      permission === "edit"
+        ? `DanteCode wants to modify files via ${toolName}. Allow this action once?`
+        : permission === "bash"
+          ? `DanteCode wants to run a shell command via ${toolName}. Allow this action once?`
+          : `DanteCode wants to use the ${toolName} tool. Allow this action once?`;
+    const deniedMessage =
+      permission === "edit"
+        ? `Tool "${toolName}" blocked: File editing was not approved.`
+        : permission === "bash"
+          ? `Tool "${toolName}" blocked: Shell command execution was not approved.`
+          : `Tool "${toolName}" blocked: Tool execution was not approved.`;
+
+    const selection = await vscode.window.showWarningMessage(
+      prompt,
+      { modal: true },
+      "Allow once",
+      "Block",
+    );
+    return selection === "Allow once" ? null : deniedMessage;
   }
 
   // --------------------------------------------------------------------------
@@ -414,6 +537,22 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // Expand slash commands before processing
+    try {
+      const { parseSlashCommand, buildSlashPrompt } = await import("./slash-commands.js");
+      const parsed = parseSlashCommand(text);
+      if (parsed) {
+        const editor = vscode.window.activeTextEditor;
+        const selection = editor && !editor.selection.isEmpty
+          ? editor.document.getText(editor.selection)
+          : "";
+        const filePath = editor?.document.uri.fsPath ?? "";
+        text = buildSlashPrompt(parsed.command, selection, filePath, parsed.args);
+      }
+    } catch {
+      // Slash command expansion is best-effort
+    }
+
     const projectRoot = this.getProjectRoot();
     const selfImprovement =
       detectSelfImprovementContext(text, projectRoot) ??
@@ -423,12 +562,28 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             triggerCommand: `skill:${this.activeSkill}`,
           })
         : undefined);
-    const readTracker = new Map<string, string>();
+    const readTracker = new Map<string, FileSnapshot>();
     const editAttempts = new Map<string, number>();
 
     this.messages.push({ role: "user", content: text });
     this.stopRequested = false;
     this.abortController = new AbortController();
+
+    // Resolve @-mention context providers and prepend to the user message
+    try {
+      const { globalContextRegistry, formatForPrompt } = await import("./context-provider.js");
+      const contextItems = await globalContextRegistry.resolveAllMentions(text, projectRoot);
+      if (contextItems.length > 0) {
+        const contextBlock = formatForPrompt(contextItems);
+        // Prepend the context block to the last (user) message
+        const lastMsg = this.messages[this.messages.length - 1];
+        if (lastMsg && lastMsg.role === "user") {
+          lastMsg.content = `${contextBlock}\n\n${String(lastMsg.content)}`;
+        }
+      }
+    } catch {
+      // Context resolution is best-effort — never block the chat request
+    }
 
     // Detect pipeline workflows and set dynamic round budget.
     // Any active skill gets 80 rounds; heavy DanteForge pipelines get 150.
@@ -500,7 +655,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const router = new ModelRouterImpl(routerConfig, projectRoot, this.sessionId);
 
     // Resolve agent mode settings
-    const { agentMode, permissions, runUntilComplete } = this.agentConfig;
+    const { agentMode, runUntilComplete } = this.agentConfig;
     // Dynamic round budget: pipeline workflows (/magic, /autoforge, /party) can
     // request more rounds via requiredRounds. YOLO mode gets 50, runUntilComplete
     // gets 30, pipeline gets its requested budget, otherwise use the user's setting.
@@ -611,6 +766,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
       systemParts.push("");
     }
+
+    systemParts.push(getProviderPromptSupplement(provider));
+    systemParts.push("");
 
     // Skill execution: inject tool recipes and execution protocol when a skill is active.
     // This teaches non-Claude models (Grok, GPT, etc.) how to perform operations that
@@ -869,9 +1027,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Autonomous Agent Loop — streams response, extracts tool calls, loops
     // ────────────────────────────────────────────────────────────────────────
 
-    const agentMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+    const agentMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
       ...this.messages.map((msg) => ({
-        role: msg.role as "user" | "assistant",
+        role: msg.role as "user" | "assistant" | "system",
         content: msg.content,
       })),
     ];
@@ -886,6 +1044,27 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         maxToolRounds--;
         roundNumber++;
         const isFirstRound = roundNumber === 1;
+
+        const compacted = compactTextTranscript(agentMessages, {
+          contextWindow: modelConfig.contextWindow,
+          preserveRecentMessages: 10,
+          preserveRecentToolResults: 5,
+        });
+        if (compacted.strategy !== "none") {
+          agentMessages.splice(0, agentMessages.length, ...compacted.messages);
+          void appendAuditEvent(projectRoot, {
+            type: "context_compacted",
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            modelId: this.currentModel,
+            projectRoot,
+            payload: {
+              strategy: compacted.strategy,
+              droppedMessages: compacted.droppedMessages,
+              remainingMessages: compacted.messages.length,
+            },
+          });
+        }
 
         // D6: Select model tier before each request
         const tier = router.selectTier({
@@ -1251,16 +1430,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             );
             continue;
           }
-          if (permissions.edit === "deny" && isWriteTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: File editing is denied by permissions.`,
-            );
-            continue;
-          }
-          if (permissions.bash === "deny" && isBashTool) {
-            toolResultParts.push(
-              `Tool "${toolCall.name}" blocked: Shell commands are denied by permissions.`,
-            );
+          const permissionBlock = await this.resolveToolPermissionBlock(
+            toolCall.name,
+            isWriteTool ? "edit" : isBashTool ? "bash" : "tools",
+          );
+          if (permissionBlock) {
+            toolResultParts.push(permissionBlock);
             continue;
           }
 
@@ -1509,6 +1684,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Append the assistant response + tool results to the conversation for next round
         agentMessages.push({ role: "assistant", content: fullResponse });
+        if (this.hostCallbacks.onSearchReplaceBlocks && fullResponse.includes("<<<<<<< SEARCH")) {
+          const { blocks } = parseSearchReplaceBlocks(fullResponse);
+          if (blocks.length > 0) this.hostCallbacks.onSearchReplaceBlocks(blocks);
+        }
         agentMessages.push({
           role: "user",
           content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.`,
@@ -3457,6 +3636,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
   <div class="context-bar" id="context-bar"></div>
 
+  <div id="slash-menu" hidden style="position:absolute;background:var(--vscode-editor-background);border:1px solid var(--vscode-editorWidget-border);z-index:100;max-height:200px;overflow-y:auto;"></div>
+
   <div class="messages" id="messages">
     <div class="welcome" id="welcome">
       <h2>Welcome to DanteCode</h2>
@@ -3465,7 +3646,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
 
-  <div class="typing-indicator" id="typing-indicator">DanteCode is thinking...</div>
+  <div class="typing-indicator" id="typing-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
 
   <div class="attachments-bar" id="attachments-bar"></div>
 
@@ -3637,6 +3818,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       var streamBuffer = ''; // accumulates all content for current assistant message
       var pendingImagePreviews = []; // { dataUrl, fileName }
       var currentAgentMode = 'build';
+
+      // ---- @mention context providers ----
+      var MENTION_PROVIDERS = [
+        { trigger: '@file', description: 'Add a file to context' },
+        { trigger: '@code', description: 'Add a code symbol' },
+        { trigger: '@git', description: 'Add git diff or log' },
+        { trigger: '@docs', description: 'Add documentation' },
+        { trigger: '@web', description: 'Search the web' },
+        { trigger: '@terminal', description: 'Add terminal output' },
+        { trigger: '@codebase', description: 'Add full codebase context' },
+        { trigger: '@debug', description: 'Add debug session context' },
+      ];
 
       // ---- Toast ----
       function showToast(msg, durationMs) {
@@ -4113,7 +4306,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             var codeEl = document.getElementById(codeId);
             if (codeEl) {
               navigator.clipboard.writeText(codeEl.textContent).then(function() {
-                btn.textContent = 'Copied!';
+                btn.textContent = '✓ Copied!';
                 setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
               });
             }

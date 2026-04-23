@@ -1,0 +1,2 @@
+{"totalRecoveries":12,"successfulRecoveries":9,"recoverySuccessRate":0.75,"avgRetriesBeforeSuccess":2.1,"mostCommonErrors":["timeout","parse_error","network_error"],"avgRecoveryDurationMs":3400,"timestamp":"2026-04-22T09:00:00.000Z"}
+{"totalRecoveries":18,"successfulRecoveries":15,"recoverySuccessRate":0.8333333333333334,"avgRetriesBeforeSuccess":1.8,"mostCommonErrors":["timeout","network_error","auth_error"],"avgRecoveryDurationMs":2900,"timestamp":"2026-04-22T10:00:00.000Z"}

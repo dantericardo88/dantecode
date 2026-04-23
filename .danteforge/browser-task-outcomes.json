@@ -1,0 +1,10 @@
+{"url":"https://example.com/login","taskDescription":"log in and navigate to dashboard","succeeded":true,"stepsCompleted":5,"totalSteps":5,"timestamp":"2026-04-19T11:00:00.000Z"}
+{"url":"https://example.com/form","taskDescription":"fill and submit contact form","succeeded":true,"stepsCompleted":4,"totalSteps":4,"timestamp":"2026-04-20T09:00:00.000Z"}
+{"url":"https://example.com/search","taskDescription":"search for product and add to cart","succeeded":true,"stepsCompleted":6,"totalSteps":6,"timestamp":"2026-04-20T14:00:00.000Z"}
+{"url":"https://example.com/checkout","taskDescription":"complete checkout flow","succeeded":false,"stepsCompleted":2,"totalSteps":7,"timestamp":"2026-04-21T10:00:00.000Z"}
+{"url":"","taskDescription":"test","succeeded":false,"stepsCompleted":0,"totalSteps":0,"timestamp":"2026-04-22T11:30:47.153Z"}
+{"url":"","taskDescription":"test","succeeded":false,"stepsCompleted":2,"totalSteps":2,"timestamp":"2026-04-22T11:30:47.161Z"}
+{"url":"","taskDescription":"test","succeeded":false,"stepsCompleted":0,"totalSteps":0,"timestamp":"2026-04-22T11:30:47.172Z"}
+{"url":"","taskDescription":"test","succeeded":false,"stepsCompleted":0,"totalSteps":0,"timestamp":"2026-04-22T11:30:47.178Z"}
+{"url":"","taskDescription":"Find the login page","succeeded":false,"stepsCompleted":0,"totalSteps":0,"timestamp":"2026-04-22T11:30:47.182Z"}
+{"url":"","taskDescription":"test","succeeded":false,"stepsCompleted":0,"totalSteps":0,"timestamp":"2026-04-22T11:30:47.189Z"}

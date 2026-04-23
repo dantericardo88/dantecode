@@ -1,0 +1,35 @@
+{
+  "name": "@dantecode/memory-engine",
+  "version": "1.0.0",
+  "description": "DanteCode memory engine for short-term orchestration and retrieval",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dantericardo88/dantecode.git",
+    "directory": "packages/memory-engine"
+  },
+  "keywords": [
+    "dantecode",
+    "memory",
+    "retrieval",
+    "agent"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -348,3 +348,35 @@ export function getStatus(projectRoot: string): GitStatusResult {
 
   return result;
 }
+
+// ─── Conventional Commit Generation ─────────────────────────────────────────
+
+const CONVENTIONAL_PREFIXES = ["feat:", "fix:", "refactor:", "chore:", "docs:", "test:", "perf:", "build:", "ci:", "style:"];
+const FALLBACK_MESSAGE = "chore: apply changes";
+
+/**
+ * Generate a conventional commit message from a diff using an LLM.
+ * Falls back to "chore: apply changes" on error, timeout, or non-conventional result.
+ */
+export async function generateConventionalCommitMessage(
+  diff: string,
+  llmCall: (prompt: string) => Promise<string>,
+  timeoutMs = 5000,
+): Promise<string> {
+  const prompt = `Write a conventional commit message for this diff. Use one of: feat, fix, refactor, chore, docs, test, perf. Format: <type>: <short description> (max 72 chars).\n\nDiff:\n${diff}`;
+
+  try {
+    const raw = await Promise.race([
+      llmCall(prompt),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+    ]);
+
+    const trimmed = raw.trim().split("\n")[0]?.trim() ?? "";
+    const isConventional = CONVENTIONAL_PREFIXES.some((p) => trimmed.toLowerCase().startsWith(p));
+    if (!isConventional) return FALLBACK_MESSAGE;
+
+    return trimmed.length > MAX_SUBJECT_LENGTH ? trimmed.slice(0, MAX_SUBJECT_LENGTH) : trimmed;
+  } catch {
+    return FALLBACK_MESSAGE;
+  }
+}

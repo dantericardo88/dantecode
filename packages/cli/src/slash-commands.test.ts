@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { DanteCodeState, Session } from "@dantecode/config-types";
+import type { Session } from "@dantecode/config-types";
 import type { ReplState } from "./slash-commands.js";
 
 const {
@@ -83,6 +83,10 @@ function makeState(projectRoot: string): ReplState {
   return {
     session: makeRuntimeSession(projectRoot),
     state: {
+      version: "1.0.0",
+      projectRoot,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       model: {
         default: {
           provider: "grok",
@@ -114,7 +118,66 @@ function makeState(projectRoot: string): ReplState {
         lessonInjectionEnabled: true,
         abortOnSecurityViolation: true,
       },
-    } as unknown as DanteCodeState,
+      git: {
+        autoCommit: true,
+        commitPrefix: "dantecode:",
+        worktreeEnabled: true,
+        worktreeBase: ".dantecode/worktrees",
+        signCommits: false,
+      },
+      sandbox: {
+        enabled: true,
+        defaultImage: "ghcr.io/dantecode/sandbox:latest",
+        networkMode: "bridge",
+        memoryLimitMb: 2048,
+        cpuLimit: 2.0,
+        timeoutMs: 300000,
+        autoStart: true,
+      },
+      skills: {
+        directories: [".dantecode/skills", "~/.dantecode/skills"],
+        autoImport: false,
+        constitutionEnforced: true,
+        antiStubEnabled: true,
+      },
+      agents: {
+        maxConcurrent: 4,
+        nomaEnabled: true,
+        fileLockingEnabled: true,
+        defaultLane: "lead",
+      },
+      audit: {
+        enabled: true,
+        logDirectory: ".dantecode",
+        retentionDays: 90,
+        includePayloads: true,
+        sensitiveFieldMask: ["apiKey", "token", "secret", "password"],
+      },
+      sessionHistory: [],
+      lessons: {
+        enabled: true,
+        maxPerProject: 500,
+        autoInject: true,
+        minSeverity: "warning",
+      },
+      project: {
+        name: "",
+        language: "",
+        sourceDirectories: ["src"],
+        excludePatterns: [
+          "node_modules/",
+          "dist/",
+          ".next/",
+          "__pycache__/",
+          ".dantecode/worktrees/",
+        ],
+      },
+      permissions: {
+        edit: "ask",
+        bash: "ask",
+        tools: "allow",
+      },
+    },
     projectRoot,
     verbose: false,
     enableGit: true,
@@ -128,6 +191,7 @@ function makeState(projectRoot: string): ReplState {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    mcpClient: null,
   };
 }
 

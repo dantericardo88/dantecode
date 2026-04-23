@@ -402,6 +402,7 @@ describe("model-router", () => {
       const callArgs = (generateText as Mock).mock.calls[0]![0];
       expect(callArgs.providerOptions).toEqual({
         anthropic: {
+          cacheControl: true,
           thinking: {
             type: "enabled",
             budgetTokens: 2048,
@@ -422,6 +423,27 @@ describe("model-router", () => {
 
       const callArgs = (generateText as Mock).mock.calls[0]![0];
       expect(callArgs.providerOptions).toBeUndefined();
+    });
+
+    it("retries retryable provider failures before succeeding", async () => {
+      (generateText as Mock)
+        .mockRejectedValueOnce(
+          Object.assign(new Error("Rate limit exceeded"), {
+            status: 429,
+            headers: { "retry-after-ms": "1" },
+          }),
+        )
+        .mockResolvedValueOnce({
+          text: "retried response",
+          usage: { totalTokens: 10 },
+        });
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s-retry-1");
+      const result = await router.generate(testMessages);
+
+      expect(result).toBe("retried response");
+      expect(generateText).toHaveBeenCalledTimes(2);
+      expect(router.getLogs().some((entry) => entry.action === "retry")).toBe(true);
     });
   });
 
@@ -1013,5 +1035,34 @@ describe("D6 cost tracking integration", () => {
     const afterReset = router.getCostEstimate();
     expect(afterReset.sessionTotalUsd).toBe(0);
     expect(afterReset.tokensUsedSession).toBe(0);
+  });
+
+  it("blocks additional requests once the session budget is exceeded", async () => {
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: "first call",
+        usage: { promptTokens: 1000, completionTokens: 500, totalTokens: 1500 },
+      })
+      .mockResolvedValueOnce({
+        text: "second call",
+        usage: { promptTokens: 10, completionTokens: 10, totalTokens: 20 },
+      });
+
+    const router = new ModelRouterImpl(
+      makeRouterConfig({
+        fallback: [],
+        budget: {
+          enforce: true,
+          sessionMaxUsd: 0.0001,
+        },
+      }),
+      "/tmp",
+      "s-budget-1",
+    );
+
+    await router.generate(testMessages);
+    await expect(router.generate(testMessages)).rejects.toThrow("Session budget exceeded");
+    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(router.getCostEstimate().budgetExceeded).toBe(true);
   });
 });

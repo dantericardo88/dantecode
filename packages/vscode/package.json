@@ -159,6 +159,16 @@
         "category": "DanteCode"
       },
       {
+        "command": "dantecode.acceptDiffBlock",
+        "title": "DanteCode: Accept SEARCH/REPLACE Block",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rejectDiffBlock",
+        "title": "DanteCode: Reject SEARCH/REPLACE Block",
+        "category": "DanteCode"
+      },
+      {
         "command": "dantecode.createCheckpoint",
         "title": "DanteCode: Create Checkpoint",
         "category": "DanteCode"
@@ -176,6 +186,56 @@
       {
         "command": "dantecode.setupApiKeys",
         "title": "DanteCode: Setup API Keys",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.inlineEdit",
+        "title": "DanteCode: Inline Edit Selection",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.fixDiagnostic",
+        "title": "DanteCode: Fix Diagnostic with AI",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.explainDiagnostic",
+        "title": "DanteCode: Explain Diagnostic",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.slashCommandTest",
+        "title": "DanteCode: Write Tests for Symbol",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.acceptInlineEdit",
+        "title": "DanteCode: Accept Inline Edit",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rejectInlineEdit",
+        "title": "DanteCode: Reject Inline Edit",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.partialAcceptInlineEdit",
+        "title": "DanteCode: Partial Accept Inline Edit (First Hunk)",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.rebuildIndex",
+        "title": "DanteCode: Rebuild Codebase Index",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.completionStats",
+        "title": "DanteCode: Show Completion Stats",
+        "category": "DanteCode"
+      },
+      {
+        "command": "dantecode.clearCompletionStats",
+        "title": "DanteCode: Clear Completion Stats",
         "category": "DanteCode"
       }
     ],
@@ -206,6 +266,17 @@
         "key": "ctrl+shift+b",
         "mac": "cmd+shift+b",
         "when": "focusedView == 'dantecode.chatView'"
+      },
+      {
+        "command": "dantecode.inlineEdit",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorFocus"
+      },
+      {
+        "command": "dantecode.partialAcceptInlineEdit",
+        "key": "shift+tab",
+        "when": "editorFocus && dantecode.inlineDiffActive"
       }
     ],
     "configuration": {
@@ -266,6 +337,64 @@
           "type": "boolean",
           "default": true,
           "description": "Show PDSE quality warnings as ghost-text comments and Problems panel entries when inline completion scores below threshold."
+        },
+        "dantecode.codebaseIndex.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable background codebase indexing for @codebase mentions in chat. The index is built in the background on workspace open."
+        },
+        "dantecode.codebaseIndex.embeddingProvider": {
+          "type": "string",
+          "enum": ["none", "openai", "google", "ollama"],
+          "enumDescriptions": [
+            "TF-IDF only — fast, no API key required",
+            "OpenAI text-embedding-3-small (requires OPENAI_API_KEY env var)",
+            "Google text-embedding-004 (requires GOOGLE_API_KEY or GEMINI_API_KEY env var)",
+            "Ollama nomic-embed-text — local inference, no API key needed"
+          ],
+          "default": "none",
+          "description": "Embedding provider for hybrid semantic search. 'none' uses fast TF-IDF lexical search (score 7.5). Set to 'ollama' for free local embeddings."
+        },
+        "dantecode.codebaseIndex.maxChunkLines": {
+          "type": "number",
+          "default": 200,
+          "minimum": 50,
+          "maximum": 500,
+          "description": "Maximum lines per code chunk. Smaller values produce more granular search results."
+        },
+        "dantecode.codebaseIndex.maxResults": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 25,
+          "description": "Maximum number of code chunks returned by @codebase search and injected into the prompt."
+        },
+        "dantecode.fimFallbackModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional fallback model for inline completions when the primary FIM model times out. Format: provider/model-id"
+        },
+        "dantecode.fimTimeoutMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 500,
+          "maximum": 30000,
+          "description": "Timeout (ms) before falling back to the secondary FIM model. Default: 3000ms."
+        },
+        "dantecode.fimLocalModel": {
+          "type": "string",
+          "default": "",
+          "description": "Local Ollama model for FIM completions (e.g. 'qwen2.5-coder:1.5b'). Leave empty to auto-detect any *coder* model."
+        },
+        "dantecode.fimOllamaAutoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect and use a local Ollama model for faster FIM completions (target: 45-70ms TTFB). Probes every 30 seconds."
+        },
+        "dantecode.fimOllamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama base URL used for local model health checks. Change if Ollama runs on a non-default port."
         }
       }
     },
@@ -280,6 +409,11 @@
           "command": "dantecode.runPDSE",
           "group": "dantecode",
           "when": "editorFocus"
+        },
+        {
+          "command": "dantecode.inlineEdit",
+          "group": "dantecode",
+          "when": "editorHasSelection"
         }
       ]
     },

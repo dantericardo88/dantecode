@@ -1,0 +1,6 @@
+{"eventId":"a1b2c3d4-0001-0001-0001-000000000001","sessionId":"sess-001","eventType":"session_start","timestamp":"2026-04-22T08:00:00.000Z","actor":"system","severity":"info"}
+{"eventId":"a1b2c3d4-0002-0002-0002-000000000002","sessionId":"sess-001","eventType":"file_read","timestamp":"2026-04-22T08:00:05.000Z","actor":"agent","resource":"packages/core/src/index.ts","severity":"info"}
+{"eventId":"a1b2c3d4-0003-0003-0003-000000000003","sessionId":"sess-001","eventType":"file_write","timestamp":"2026-04-22T08:01:00.000Z","actor":"agent","resource":"packages/core/src/compliance-audit-trail.ts","severity":"info"}
+{"eventId":"a1b2c3d4-0004-0004-0004-000000000004","sessionId":"sess-001","eventType":"tool_call","timestamp":"2026-04-22T08:01:30.000Z","actor":"agent","resource":"Bash","metadata":{"command":"npm run typecheck"},"severity":"info"}
+{"eventId":"a1b2c3d4-0005-0005-0005-000000000005","sessionId":"sess-001","eventType":"security_alert","timestamp":"2026-04-22T08:02:00.000Z","actor":"system","resource":"packages/core/src/auth.ts","metadata":{"reason":"hardcoded_secret_detected"},"severity":"error"}
+{"eventId":"a1b2c3d4-0006-0006-0006-000000000006","sessionId":"sess-001","eventType":"session_end","timestamp":"2026-04-22T08:05:00.000Z","actor":"system","severity":"info"}

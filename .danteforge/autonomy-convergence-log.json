@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-21T00:00:00.000Z","taskId":"t-001","roundsUsed":8,"maxRounds":20,"finishedCleanly":true,"loopDetected":false,"userInterventions":0,"status":"complete"}
+{"timestamp":"2026-04-21T00:30:00.000Z","taskId":"t-002","roundsUsed":5,"maxRounds":20,"finishedCleanly":true,"loopDetected":false,"userInterventions":0,"status":"complete"}
+{"timestamp":"2026-04-21T01:00:00.000Z","taskId":"t-003","roundsUsed":15,"maxRounds":20,"finishedCleanly":false,"loopDetected":true,"userInterventions":1,"status":"loop"}
+{"timestamp":"2026-04-21T01:30:00.000Z","taskId":"t-004","roundsUsed":12,"maxRounds":20,"finishedCleanly":true,"loopDetected":false,"userInterventions":0,"status":"complete"}
+{"timestamp":"2026-04-21T02:00:00.000Z","taskId":"t-005","roundsUsed":6,"maxRounds":20,"finishedCleanly":true,"loopDetected":false,"userInterventions":0,"status":"complete"}

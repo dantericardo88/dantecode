@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+// Raise timeouts for git subprocess tests — slow under turbo parallel load
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 import {
   autoCommit,
   getLastCommitHash,
@@ -232,7 +234,7 @@ describe("commit system", () => {
       revertLastCommit(repoDir);
       const afterHash = getLastCommitHash(repoDir);
       expect(afterHash).not.toBe(beforeHash);
-    });
+    }, 15000);
   });
 
   describe("pushBranch", () => {
@@ -269,5 +271,65 @@ describe("commit system", () => {
     it("throws a helpful error when the remote is missing", () => {
       expect(() => pushBranch({}, repoDir)).toThrow(/git push:/);
     });
+  });
+});
+
+// ─── Sprint E — generateConventionalCommitMessage ────────────────────────────
+
+import { describe as describe2, it as it2, expect as expect2, vi as vi2 } from "vitest";
+import { generateConventionalCommitMessage } from "./commit.js";
+
+describe2("generateConventionalCommitMessage()", () => {
+  const sampleDiff = `diff --git a/src/auth.ts b/src/auth.ts\n+export function login() { return true; }`;
+
+  it2("calls llmCall with the diff text", async () => {
+    const llm = vi2.fn().mockResolvedValue("feat: add login function");
+    await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(llm).toHaveBeenCalledTimes(1);
+    expect2(llm.mock.calls[0]![0]).toContain("diff");
+  });
+
+  it2("returns a string starting with a conventional prefix", async () => {
+    const llm = vi2.fn().mockResolvedValue("feat: add login function");
+    const result = await generateConventionalCommitMessage(sampleDiff, llm);
+    const prefixes = ["feat:", "fix:", "refactor:", "chore:", "docs:", "test:", "perf:"];
+    const startsWithPrefix = prefixes.some((p) => result.toLowerCase().startsWith(p));
+    expect2(startsWithPrefix).toBe(true);
+  });
+
+  it2("returned message is ≤ 72 characters", async () => {
+    const llm = vi2.fn().mockResolvedValue("feat: add a very long function name that might exceed the maximum allowed length for a commit subject line");
+    const result = await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(result.length).toBeLessThanOrEqual(72);
+  });
+
+  it2("falls back to generic message when llm throws", async () => {
+    const llm = vi2.fn().mockRejectedValue(new Error("LLM unavailable"));
+    const result = await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(result).toBe("chore: apply changes");
+  });
+
+  it2("falls back to generic message when llm times out", async () => {
+    const llm = vi2.fn().mockImplementation(() => new Promise(() => {})); // never resolves
+    const result = await generateConventionalCommitMessage(sampleDiff, llm, 50); // 50ms timeout
+    expect2(result).toBe("chore: apply changes");
+  });
+
+  it2("falls back when LLM returns non-conventional message", async () => {
+    const llm = vi2.fn().mockResolvedValue("Updated the authentication module with some improvements");
+    const result = await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(result).toBe("chore: apply changes");
+  });
+
+  it2("fallback message is chore: apply changes", async () => {
+    const llm = vi2.fn().mockRejectedValue(new Error("err"));
+    const result = await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(result).toBe("chore: apply changes");
+  });
+
+  it2("llm is called once (not per file)", async () => {
+    const llm = vi2.fn().mockResolvedValue("fix: resolve null pointer");
+    await generateConventionalCommitMessage(sampleDiff, llm);
+    expect2(llm).toHaveBeenCalledTimes(1);
   });
 });

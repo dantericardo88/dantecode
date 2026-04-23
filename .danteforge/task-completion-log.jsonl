@@ -1,0 +1,5 @@
+{"sessionId":"seed-001","prompt":"add type annotation to UserService.getUser in src/services/user.ts","verdict":"COMPLETED","reason":"last tool result clean, no errors detected","toolCallCount":4,"timestamp":"2026-04-22T09:00:00.000Z"}
+{"sessionId":"seed-002","prompt":"fix failing test in packages/core/src/__tests__/bounded-repair.test.ts","verdict":"COMPLETED","reason":"last tool result clean, no errors detected","toolCallCount":7,"timestamp":"2026-04-22T10:15:00.000Z"}
+{"sessionId":"seed-003","prompt":"refactor all components across multiple packages to use new logger","verdict":"ATTEMPTED","reason":"last tool result contained errors","toolCallCount":12,"timestamp":"2026-04-22T11:30:00.000Z"}
+{"sessionId":"seed-004","prompt":"update imports in src/index.ts to use named exports","verdict":"COMPLETED","reason":"last tool result clean, no errors detected","toolCallCount":3,"timestamp":"2026-04-22T13:00:00.000Z"}
+{"sessionId":"seed-005","prompt":"improve overall code quality across the entire codebase","verdict":"FAILED","reason":"3 consecutive tool failures","toolCallCount":5,"timestamp":"2026-04-22T14:45:00.000Z"}

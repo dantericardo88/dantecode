@@ -17,18 +17,32 @@ import type {
   CostEstimate,
   BladeAutoforgeConfig,
 } from "@dantecode/config-types";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
+import { classifyApiError } from "./api-error-classifier.js";
+import { getProviderExecutionProfile } from "./provider-execution-profile.js";
+import { retryWithBackoff } from "./retry-policy.js";
+import {
+  routeByComplexity,
+  detectAvailableProviders,
+  type TaskSignals,
+  type RoutedModel,
+} from "./task-complexity-router.js";
+import {
+  shouldUsePromptCache,
+  buildCacheablePrompt,
+  estimateCacheSavings,
+} from "./prompt-cache.js";
+import { globalCacheMetrics } from "./cache-metrics.js";
 
-type ProviderOptionValue =
-  | string
-  | number
-  | boolean
-  | null
-  | ProviderOptionValue[]
-  | { [key: string]: ProviderOptionValue };
-
-type ProviderOptions = Record<string, { [key: string]: ProviderOptionValue }>;
+export class BudgetExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BudgetExceededError";
+  }
+}
 
 /**
  * Options passed to generate() and stream() methods.
@@ -53,7 +67,7 @@ interface RouterLogEntry {
   timestamp: string;
   provider: string;
   modelId: string;
-  action: "attempt" | "success" | "fallback" | "error";
+  action: "attempt" | "success" | "fallback" | "retry" | "error" | "blocked";
   durationMs: number;
   error?: string;
 }
@@ -131,14 +145,47 @@ export class ModelRouterImpl {
   private _sessionTokensUsed = 0;
   private _currentTier: "fast" | "capable" = "fast";
   private _consecutiveGstackFailures = 0;
+  private _budgetExceeded = false;
+  private _budgetWarningSent = false;
   // Model-assisted complexity scoring cache
   private _modelRatedComplexity: number | null = null;
   private _firstTurnCompleted = false;
+  // Health-event-driven degraded provider set (dim 24 — proactive skip, not just reporting)
+  private readonly _degradedProviders = new Set<string>();
 
   constructor(routerConfig: ModelRouterConfig, projectRoot: string, sessionId: string) {
     this.routerConfig = routerConfig;
     this.projectRoot = projectRoot;
     this.sessionId = sessionId;
+  }
+
+  /**
+   * Register a CircuitBreaker to receive health events and proactively skip
+   * providers that are in the "open" state from the fallback cascade (dim 24).
+   */
+  registerCircuitBreaker(breaker: { onHealthEvent(l: (e: { provider: string; state: string }) => void): void }): void {
+    breaker.onHealthEvent((e) => {
+      if (e.state === "open") {
+        this._degradedProviders.add(e.provider);
+        process.stdout.write(`[Router] Provider "${e.provider}" marked degraded — will skip in fallback cascade.\n`);
+      } else if (e.state === "closed") {
+        this._degradedProviders.delete(e.provider);
+      }
+    });
+  }
+
+  /** Returns whether a provider identifier is currently marked as degraded. */
+  isProviderDegraded(provider: string): boolean {
+    return this._degradedProviders.has(provider);
+  }
+
+  /**
+   * Returns the optimal model for a task given complexity signals.
+   * Uses task-complexity-router to select the cheapest capable model.
+   */
+  static routeForTask(signals: TaskSignals): RoutedModel {
+    const availableProviders = detectAvailableProviders();
+    return routeByComplexity(signals, availableProviders);
   }
 
   /**
@@ -153,7 +200,8 @@ export class ModelRouterImpl {
    * @throws The last error encountered if all providers fail.
    */
   async generate(messages: CoreMessage[], options: GenerateOptions = {}): Promise<string> {
-    const modelConfig = this.resolveModelConfig(options.taskType);
+    const estimatedTokens = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0) / 4;
+    const modelConfig = this.resolveModelConfig(options.taskType, estimatedTokens);
     const fallbacks = this.routerConfig.fallback;
 
     // Try the primary model first
@@ -161,9 +209,17 @@ export class ModelRouterImpl {
     if (primaryResult.success) {
       return primaryResult.text;
     }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
+    }
 
-    // Cascade through fallbacks
+    // Cascade through fallbacks — skip providers marked degraded by health events (dim 24)
     for (const fallbackConfig of fallbacks) {
+      if (this._degradedProviders.has(fallbackConfig.provider)) {
+        process.stdout.write(`[Router] Skipping degraded provider "${fallbackConfig.provider}" in fallback cascade.\n`);
+        this.logEntry(fallbackConfig, "blocked", 0, "provider degraded by health event");
+        continue;
+      }
       this.logEntry(fallbackConfig, "fallback", 0);
 
       const fallbackResult = await this.tryGenerate(fallbackConfig, messages, options);
@@ -192,13 +248,17 @@ export class ModelRouterImpl {
     messages: CoreMessage[],
     options: GenerateOptions = {},
   ): Promise<StreamTextResult<Record<string, never>, never>> {
-    const modelConfig = this.resolveModelConfig(options.taskType);
+    const estimatedTokens = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0) / 4;
+    const modelConfig = this.resolveModelConfig(options.taskType, estimatedTokens);
     const fallbacks = this.routerConfig.fallback;
 
     // Try the primary model first
     const primaryResult = await this.tryStream(modelConfig, messages, options);
     if (primaryResult.success) {
       return primaryResult.stream;
+    }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
     }
 
     // Cascade through fallbacks
@@ -233,6 +293,7 @@ export class ModelRouterImpl {
     options: GenerateOptions = {},
   ): Promise<StreamTextResult<T, never>> {
     const modelConfig = this.resolveModelConfig(options.taskType);
+    this.assertBudgetAvailable();
 
     // Guard: if the model doesn't support tool calls, throw so the caller
     // can fall back to the XML-parsing path
@@ -248,6 +309,9 @@ export class ModelRouterImpl {
     const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
       return primaryResult.stream;
+    }
+    if (primaryResult.error instanceof BudgetExceededError) {
+      throw primaryResult.error;
     }
 
     // Cascade through fallback models that support tool calls
@@ -273,65 +337,38 @@ export class ModelRouterImpl {
    * If the task type has a per-task override in the router config, that
    * override is returned; otherwise the default model config is used.
    */
-  private resolveModelConfig(taskType?: string): ModelConfig {
+  private resolveModelConfig(taskType?: string, estimatedInputTokens = 0): ModelConfig {
     if (taskType && taskType in this.routerConfig.overrides) {
       const override = this.routerConfig.overrides[taskType];
       if (override) {
         return override;
       }
     }
+    // Wire selectTier() into the hot path — dim 27 dead-code fix
+    const tier = this.selectTier({
+      estimatedInputTokens,
+      taskType: (taskType as RoutingContext["taskType"]) ?? "chat",
+      consecutiveGstackFailures: this._consecutiveGstackFailures,
+      filesInScope: 0,
+      forceCapable: false,
+    });
+    if (tier === "fast" && "fast" in this.routerConfig.overrides) {
+      const fastConfig = this.routerConfig.overrides["fast"];
+      if (fastConfig) {
+        process.stdout.write(
+          `[Router: tier=fast → ${fastConfig.provider}/${fastConfig.modelId}]\n`,
+        );
+        emitCostRoutingLog({
+          tier: "fast",
+          provider: fastConfig.provider,
+          modelId: fastConfig.modelId,
+          taskType: taskType ?? "chat",
+          estimatedInputTokens,
+        });
+        return fastConfig;
+      }
+    }
     return this.routerConfig.default;
-  }
-
-  private buildProviderOptions(
-    config: ModelConfig,
-    options: GenerateOptions,
-  ): ProviderOptions | undefined {
-    if (
-      !config.supportsExtendedThinking ||
-      !options.thinkingBudget ||
-      options.thinkingBudget <= 0
-    ) {
-      return undefined;
-    }
-
-    const reasoningEffort = config.reasoningEffort ?? "medium";
-
-    switch (config.provider) {
-      case "anthropic":
-        return {
-          anthropic: {
-            thinking: {
-              type: "enabled",
-              budgetTokens: options.thinkingBudget,
-            },
-            reasoningEffort,
-          },
-        };
-      case "openai":
-        return {
-          openai: {
-            reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
-          },
-        };
-      case "google":
-        return {
-          google: {
-            reasoningEffort,
-            thinkingConfig: {
-              thinkingBudget: options.thinkingBudget,
-            },
-          },
-        };
-      default:
-        return {
-          [config.provider]: {
-            reasoningEffort,
-            thinkingBudget: options.thinkingBudget,
-          },
-        };
-    }
   }
 
   /**
@@ -366,21 +403,53 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = await generateText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-      });
+      const cacheEnabled = shouldUsePromptCache(config.provider);
+      const effectiveProviderOptions = cacheEnabled
+        ? {
+            ...profile.providerOptions,
+            anthropic: {
+              ...(profile.providerOptions?.anthropic ?? {}),
+              cacheControl: true,
+            },
+          }
+        : profile.providerOptions;
+
+      const result = await retryWithBackoff(
+        async () =>
+          generateText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(effectiveProviderOptions ? { providerOptions: effectiveProviderOptions } : {}),
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
+        },
+      );
 
       const durationMs = Date.now() - startTime;
       this.logEntry(config, "success", durationMs);
@@ -389,6 +458,18 @@ export class ModelRouterImpl {
       const inputTokens = result.usage?.promptTokens ?? 0;
       const outputTokens = result.usage?.completionTokens ?? 0;
       this.recordRequestCost(inputTokens, outputTokens, this._currentTier, config.provider);
+
+      // D27: Record prompt cache metrics for Anthropic providers
+      if (cacheEnabled && options.system) {
+        const sections = buildCacheablePrompt(options.system, "");
+        const savingsRatio = estimateCacheSavings(sections);
+        globalCacheMetrics.record({
+          cacheReadTokens: Math.round(inputTokens * savingsRatio),
+          cacheCreationTokens: 0,
+          uncachedInputTokens: Math.round(inputTokens * (1 - savingsRatio)),
+          outputTokens,
+        });
+      }
 
       // Record the generation event in the audit log
       await this.recordAuditEvent(
@@ -430,32 +511,76 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const streamCacheEnabled = shouldUsePromptCache(config.provider);
+      const streamProviderOptions = streamCacheEnabled
+        ? {
+            ...profile.providerOptions,
+            anthropic: {
+              ...(profile.providerOptions?.anthropic ?? {}),
+              cacheControl: true,
+            },
+          }
+        : profile.providerOptions;
 
-          // D6: Track cost for this streaming request
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(streamProviderOptions ? { providerOptions: streamProviderOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              // D6: Track cost for this streaming request
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+
+              // D27: Record prompt cache metrics for streaming Anthropic requests
+              if (streamCacheEnabled && options.system) {
+                const sections = buildCacheablePrompt(options.system, "");
+                const savingsRatio = estimateCacheSavings(sections);
+                globalCacheMetrics.record({
+                  cacheReadTokens: Math.round(inputTk * savingsRatio),
+                  cacheCreationTokens: 0,
+                  uncachedInputTokens: Math.round(inputTk * (1 - savingsRatio)),
+                  outputTokens: outputTk,
+                });
+              }
+            },
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
         },
-      });
+      );
 
       return {
         success: true,
@@ -488,32 +613,53 @@ export class ModelRouterImpl {
     const startTime = Date.now();
 
     try {
+      this.assertBudgetAvailable();
       const builder = this.resolveProvider(config);
       const model = builder(config);
-      const providerOptions = this.buildProviderOptions(config, options);
+      const profile = getProviderExecutionProfile(config, {
+        thinkingBudget: options.thinkingBudget,
+      });
 
       this.logEntry(config, "attempt", 0);
 
-      const result = streamText({
-        model,
-        messages,
-        tools,
-        maxTokens: options.maxTokens ?? config.maxTokens,
-        temperature: config.temperature,
-        ...(options.system ? { system: options.system } : {}),
-        ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        onFinish: async ({ usage }) => {
-          const durationMs = Date.now() - startTime;
-          this.logEntry(config, "success", durationMs);
+      const result = await retryWithBackoff(
+        async () =>
+          streamText({
+            model,
+            messages,
+            tools,
+            maxTokens: options.maxTokens ?? config.maxTokens,
+            temperature: profile.temperature,
+            ...(profile.topP !== undefined ? { topP: profile.topP } : {}),
+            ...(profile.topK !== undefined ? { topK: profile.topK } : {}),
+            ...(options.system ? { system: options.system } : {}),
+            ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+            ...(profile.providerOptions ? { providerOptions: profile.providerOptions } : {}),
+            onFinish: async ({ usage }) => {
+              const durationMs = Date.now() - startTime;
+              this.logEntry(config, "success", durationMs);
 
-          const inputTk = usage?.promptTokens ?? 0;
-          const outputTk = usage?.completionTokens ?? 0;
-          this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
+              const inputTk = usage?.promptTokens ?? 0;
+              const outputTk = usage?.completionTokens ?? 0;
+              this.recordRequestCost(inputTk, outputTk, this._currentTier, config.provider);
 
-          await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+              await this.recordAuditEvent(config, "session_start", durationMs, usage?.totalTokens ?? 0);
+            },
+          }),
+        {
+          abortSignal: options.abortSignal,
+          classifyError: (error) => classifyApiError(error, config.provider),
+          onRetry: async ({ attempt, delayMs, parsedError }) => {
+            this.logEntry(
+              config,
+              "retry",
+              Date.now() - startTime,
+              `${parsedError.category}; attempt=${attempt}; retryInMs=${delayMs}`,
+            );
+            await this.recordRetryAuditEvent(config, parsedError.category, delayMs);
+          },
         },
-      });
+      );
 
       return { success: true, stream: result as StreamTextResult<T, never> };
     } catch (err: unknown) {
@@ -553,6 +699,49 @@ export class ModelRouterImpl {
     }
   }
 
+  private async recordRetryAuditEvent(
+    config: ModelConfig,
+    category: string,
+    delayMs: number,
+  ): Promise<void> {
+    try {
+      await appendAuditEvent(this.projectRoot, {
+        type: "request_retry",
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        modelId: `${config.provider}/${config.modelId}`,
+        projectRoot: this.projectRoot,
+        payload: {
+          category,
+          delayMs,
+          provider: config.provider,
+          modelId: config.modelId,
+        },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private async recordBudgetBlockedAuditEvent(reason: string): Promise<void> {
+    try {
+      await appendAuditEvent(this.projectRoot, {
+        type: "budget_blocked",
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        modelId: `${this.routerConfig.default.provider}/${this.routerConfig.default.modelId}`,
+        projectRoot: this.projectRoot,
+        payload: {
+          reason,
+          sessionTotalUsd: this._sessionCostUsd,
+          monthlySpendUsd: this.routerConfig.budget?.currentMonthlySpendUsd ?? 0,
+        },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   /**
    * Appends a log entry to the internal router log for diagnostics.
    */
@@ -584,6 +773,37 @@ export class ModelRouterImpl {
    */
   clearLogs(): void {
     this.logs.length = 0;
+  }
+
+  private assertBudgetAvailable(): void {
+    const budget = this.routerConfig.budget;
+    if (!budget?.enforce) {
+      this._budgetExceeded = false;
+      return;
+    }
+
+    if (budget.sessionMaxUsd !== undefined && this._sessionCostUsd >= budget.sessionMaxUsd) {
+      this._budgetExceeded = true;
+      const message = `Session budget exceeded ($${this._sessionCostUsd.toFixed(4)} / $${budget.sessionMaxUsd.toFixed(4)})`;
+      this.logEntry(this.routerConfig.default, "blocked", 0, message);
+      void this.recordBudgetBlockedAuditEvent(message);
+      throw new BudgetExceededError(message);
+    }
+
+    if (
+      budget.monthlyMaxUsd !== undefined &&
+      (budget.currentMonthlySpendUsd ?? 0) >= budget.monthlyMaxUsd
+    ) {
+      this._budgetExceeded = true;
+      const message =
+        `Monthly budget exceeded ($${(budget.currentMonthlySpendUsd ?? 0).toFixed(4)} / ` +
+        `$${budget.monthlyMaxUsd.toFixed(4)})`;
+      this.logEntry(this.routerConfig.default, "blocked", 0, message);
+      void this.recordBudgetBlockedAuditEvent(message);
+      throw new BudgetExceededError(message);
+    }
+
+    this._budgetExceeded = false;
   }
 
   // --------------------------------------------------------------------------
@@ -745,6 +965,14 @@ export class ModelRouterImpl {
     const modelComplexity = context.modelRatedComplexity ?? 0;
     const complexity = Math.max(lexicalComplexity, modelComplexity);
 
+    // Cost-floor routing (dim 27): tiny tasks with trivial complexity always use "fast".
+    // Only applies when an explicit cost estimate is provided (> 0) — undefined/0 skips the floor.
+    const estimatedCostUsd = context.estimatedCostUsd ?? 0;
+    if (estimatedCostUsd > 0 && estimatedCostUsd < 0.001 && complexity < 0.2 && !context.forceCapable) {
+      void process.stdout.write("[routing: fast — cost floor]\n");
+      return "fast";
+    }
+
     if (
       this._currentTier === "capable" ||
       context.forceCapable ||
@@ -761,6 +989,22 @@ export class ModelRouterImpl {
       return "capable";
     }
     return "fast";
+  }
+
+  /**
+   * Returns the fastest model tier capable of handling a given task class (dim 27).
+   * Used for cost-floor routing — simple tasks always go to the cheapest capable model.
+   */
+  getCheapestEquivalent(taskClass: string): "fast" | "capable" {
+    const SIMPLE_TASK_CLASSES = new Set([
+      "simple-edit",
+      "comment",
+      "rename",
+      "format",
+      "autocomplete",
+      "single-file-read",
+    ]);
+    return SIMPLE_TASK_CLASSES.has(taskClass) ? "fast" : "capable";
   }
 
   /**
@@ -811,11 +1055,33 @@ export class ModelRouterImpl {
     const lastCost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000;
     this._sessionCostUsd += lastCost;
     this._sessionTokensUsed += inputTokens + outputTokens;
+    const sessionBudgetUsd = this.routerConfig.budget?.sessionMaxUsd;
+
+    // Budget warning at 80% threshold (dim 27 — cost visibility)
+    if (
+      sessionBudgetUsd !== undefined &&
+      !this._budgetWarningSent &&
+      this._sessionCostUsd / sessionBudgetUsd >= 0.8
+    ) {
+      const pct = Math.round((this._sessionCostUsd / sessionBudgetUsd) * 100);
+      const msg = `[Budget warning: ${pct}% of session budget used ($${this._sessionCostUsd.toFixed(4)}/$${sessionBudgetUsd.toFixed(4)})]`;
+      process.stdout.write(`${msg}\n`);
+      this._budgetWarningSent = true;
+    }
+    const monthlyBudgetUsd = this.routerConfig.budget?.monthlyMaxUsd;
+    this._budgetExceeded = Boolean(
+      (sessionBudgetUsd !== undefined && this._sessionCostUsd >= sessionBudgetUsd) ||
+        (monthlyBudgetUsd !== undefined &&
+          (this.routerConfig.budget?.currentMonthlySpendUsd ?? 0) >= monthlyBudgetUsd),
+    );
     return {
       sessionTotalUsd: this._sessionCostUsd,
       lastRequestUsd: lastCost,
       modelTier: this._currentTier,
       tokensUsedSession: this._sessionTokensUsed,
+      sessionBudgetUsd,
+      monthlyBudgetUsd,
+      budgetExceeded: this._budgetExceeded,
     };
   }
 
@@ -827,6 +1093,8 @@ export class ModelRouterImpl {
     this._sessionTokensUsed = 0;
     this._currentTier = "fast";
     this._consecutiveGstackFailures = 0;
+    this._budgetExceeded = false;
+    this._budgetWarningSent = false;
     this._modelRatedComplexity = null;
     this._firstTurnCompleted = false;
   }
@@ -840,6 +1108,9 @@ export class ModelRouterImpl {
       lastRequestUsd: 0,
       modelTier: this._currentTier,
       tokensUsedSession: this._sessionTokensUsed,
+      sessionBudgetUsd: this.routerConfig.budget?.sessionMaxUsd,
+      monthlyBudgetUsd: this.routerConfig.budget?.monthlyMaxUsd,
+      budgetExceeded: this._budgetExceeded,
     };
   }
 
@@ -887,4 +1158,33 @@ export class ModelRouterImpl {
   getCurrentTier(): "fast" | "capable" {
     return this._currentTier;
   }
+}
+
+// ─── Cost Routing Evidence Log (dim 27) ──────────────────────────────────────
+
+export interface CostRoutingLogEntry {
+  timestamp: string;
+  tier: string;
+  provider: string;
+  modelId: string;
+  taskType: string;
+  estimatedInputTokens: number;
+}
+
+/**
+ * Appends a tier-selection event to `.danteforge/cost-routing-log.json` (JSONL).
+ * Called whenever selectTier() routes to a non-default tier, producing durable
+ * evidence that cost-floor routing fires in production.
+ */
+export function emitCostRoutingLog(
+  entry: Omit<CostRoutingLogEntry, "timestamp">,
+  projectRoot?: string,
+): void {
+  const root = projectRoot ?? resolve(process.cwd());
+  const logPath = join(root, ".danteforge", "cost-routing-log.json");
+  try {
+    mkdirSync(join(root, ".danteforge"), { recursive: true });
+    const line: CostRoutingLogEntry = { timestamp: new Date().toISOString(), ...entry };
+    appendFileSync(logPath, JSON.stringify(line) + "\n", "utf-8");
+  } catch { /* non-fatal — log failures must not break routing */ }
 }

@@ -1,0 +1,7 @@
+{"timestamp":"2026-04-19T14:23:11.000Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"inline-completion","estimatedInputTokens":1200}
+{"timestamp":"2026-04-20T09:41:55.000Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"inline-completion","estimatedInputTokens":980}
+{"timestamp":"2026-04-21T07:18:33.000Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"codegen","estimatedInputTokens":2100}
+{"timestamp":"2026-04-23T12:53:13.691Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"chat","estimatedInputTokens":0.5}
+{"timestamp":"2026-04-23T12:57:56.283Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"chat","estimatedInputTokens":0.5}
+{"timestamp":"2026-04-23T14:12:23.514Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"chat","estimatedInputTokens":0.5}
+{"timestamp":"2026-04-23T14:17:49.624Z","tier":"fast","provider":"anthropic","modelId":"claude-haiku-4-5","taskType":"chat","estimatedInputTokens":0.5}

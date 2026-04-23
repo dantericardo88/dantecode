@@ -1,0 +1,8 @@
+experiment	metric_value	status	description
+0	70	keep	unmodified baseline
+32	94	discard	Add hard-task keyword list to classifyTaskDifficulty
+33	94	discard	Add a file-count estimate from the prompt to classifyTaskDifficulty, as it can indicate the complexity of a task.
+34	94	discard	Add a simple heuristic to estimate the number of files mentioned in the prompt by looking for phrases like 'N files', 'all files', or 'every file'. This will provide an additional signal for classifying hard tasks without significantly complicating the logic.
+35	94	discard	Add a simple heuristic to estimate the number of files mentioned in the prompt by looking for phrases like 'N files', 'all files', or 'every file'. This will provide an additional signal for classifying hard tasks without significantly complicating the logic.
+37	73	discard	Add a simple heuristic to estimate the number of files mentioned in the prompt by looking for phrases like 'N files', 'all files', or 'every file'. This will provide an additional signal for classifying hard tasks without significantly complicating the logic.
+38	73	discard	Add a simple heuristic to estimate the number of files mentioned in the prompt by looking for phrases like 'N files', 'all files', or 'every file'. This will provide an additional signal for classifying hard tasks without significantly complicating the logic.

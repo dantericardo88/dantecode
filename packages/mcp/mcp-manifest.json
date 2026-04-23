@@ -1,0 +1,22 @@
+{
+  "name": "dantecode",
+  "version": "1.0.0",
+  "description": "DanteCode quality gates: PDSE scoring, anti-stub scanning, constitution checking, lesson management",
+  "transport": "stdio",
+  "command": "dantecode",
+  "args": ["--mcp"],
+  "tools": [
+    "pdse_score",
+    "anti_stub_scan",
+    "constitution_check",
+    "lessons_query",
+    "semantic_search",
+    "record_lesson",
+    "autoforge_verify"
+  ],
+  "install": {
+    "claude_desktop": "claude mcp add dantecode -- dantecode --mcp",
+    "cursor": "Add to .cursor/mcp.json: { \"dantecode\": { \"command\": \"dantecode\", \"args\": [\"--mcp\"] } }",
+    "manual": "Any MCP-compatible client: stdio transport, command: dantecode, args: [\"--mcp\"]"
+  }
+}

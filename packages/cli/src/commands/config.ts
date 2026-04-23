@@ -4,8 +4,16 @@
 // ============================================================================
 
 import { readStateYaml, writeStateYaml, stateYamlExists } from "@dantecode/core";
+import {
+  validateDantecodeConfig,
+  applyConfigDefaults,
+  DEFAULT_DANTECODE_CONFIG,
+  type DantecodeConfig,
+} from "@dantecode/core";
 import type { DanteCodeState } from "@dantecode/config-types";
 import YAML from "yaml";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { runInitCommand } from "./init.js";
 
 // ----------------------------------------------------------------------------
@@ -272,6 +280,125 @@ async function configModels(projectRoot: string): Promise<void> {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stdout.write(`${RED}Error reading config: ${message}${RESET}\n`);
+  }
+}
+
+// ── DantecodeConfig JSON file helpers (Dim 40) ───────────────────────────────
+
+const DANTECODE_CONFIG_FILE = "config.json";
+const DANTECODE_CONFIG_DIR = ".dantecode";
+
+function dantecodeConfigPath(projectRoot: string): string {
+  return join(resolve(projectRoot), DANTECODE_CONFIG_DIR, DANTECODE_CONFIG_FILE);
+}
+
+export async function readProjectConfig(projectRoot: string): Promise<DantecodeConfig> {
+  try {
+    const raw = JSON.parse(await readFile(dantecodeConfigPath(projectRoot), "utf-8")) as unknown;
+    return applyConfigDefaults(raw as Partial<DantecodeConfig>);
+  } catch {
+    return applyConfigDefaults({});
+  }
+}
+
+export async function writeProjectConfig(config: DantecodeConfig, projectRoot: string): Promise<void> {
+  const dir = join(resolve(projectRoot), DANTECODE_CONFIG_DIR);
+  await mkdir(dir, { recursive: true });
+  await writeFile(dantecodeConfigPath(projectRoot), JSON.stringify(config, null, 2) + "\n", "utf-8");
+}
+
+export function getConfigValue(config: DantecodeConfig, dotPath: string): unknown {
+  const parts = dotPath.split(".");
+  let cur: unknown = config;
+  for (const part of parts) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+export function setConfigValue(config: DantecodeConfig, dotPath: string, value: string): DantecodeConfig {
+  const clone = JSON.parse(JSON.stringify(config)) as DantecodeConfig;
+  const parts = dotPath.split(".");
+  let cur: Record<string, unknown> = clone as unknown as Record<string, unknown>;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i]!;
+    if (typeof cur[key] !== "object" || cur[key] === null) cur[key] = {};
+    cur = cur[key] as Record<string, unknown>;
+  }
+  const lastKey = parts[parts.length - 1]!;
+  if (value === "true") cur[lastKey] = true;
+  else if (value === "false") cur[lastKey] = false;
+  else if (/^\d+$/.test(value)) cur[lastKey] = parseInt(value, 10);
+  else cur[lastKey] = value;
+  return clone;
+}
+
+function maskDantecodeConfig(config: DantecodeConfig): DantecodeConfig {
+  const clone = JSON.parse(JSON.stringify(config)) as DantecodeConfig;
+  const key = clone.provider.apiKey;
+  if (key && key.length > 8) clone.provider.apiKey = key.slice(0, 8) + "****";
+  return clone;
+}
+
+export async function cmdConfig(args: string[], projectRoot: string): Promise<void> {
+  const [subcommand, ...rest] = args;
+  switch (subcommand) {
+    case "get": {
+      const key = rest[0];
+      if (!key) { console.log(`${RED}Usage: dantecode config get <key>${RESET}`); return; }
+      const config = await readProjectConfig(projectRoot);
+      const val = getConfigValue(config, key);
+      if (val === undefined) console.log(`${YELLOW}No value found at: ${key}${RESET}`);
+      else console.log(typeof val === "object" ? JSON.stringify(val, null, 2) : String(val));
+      break;
+    }
+    case "set": {
+      const [key, val] = rest;
+      if (!key || val === undefined) { console.log(`${RED}Usage: dantecode config set <key> <value>${RESET}`); return; }
+      const config = await readProjectConfig(projectRoot);
+      await writeProjectConfig(setConfigValue(config, key, val), projectRoot);
+      console.log(`${GREEN}✓ Set ${key} = ${val}${RESET}`);
+      break;
+    }
+    case "list": {
+      const config = await readProjectConfig(projectRoot);
+      console.log(`${BOLD}DanteCode Configuration${RESET} ${DIM}(${dantecodeConfigPath(projectRoot)})${RESET}\n`);
+      console.log(JSON.stringify(maskDantecodeConfig(config), null, 2));
+      break;
+    }
+    case "validate": {
+      const config = await readProjectConfig(projectRoot);
+      const result = validateDantecodeConfig(config);
+      if (result.valid && result.warnings.length === 0) {
+        console.log(`${GREEN}✓ Config is valid${RESET}`);
+      } else {
+        if (result.errors.length > 0) {
+          console.log(`${RED}${result.errors.length} error(s):${RESET}`);
+          for (const e of result.errors) {
+            console.log(`  ${RED}[${e.field}]${RESET} ${e.message}`);
+            console.log(`  ${DIM}→ ${e.fix}${RESET}`);
+          }
+        }
+        if (result.warnings.length > 0) {
+          for (const w of result.warnings) console.log(`  ${YELLOW}[${w.field}]${RESET} ${w.message}`);
+        }
+      }
+      break;
+    }
+    case "reset": {
+      await writeProjectConfig(DEFAULT_DANTECODE_CONFIG, projectRoot);
+      console.log(`${GREEN}✓ Config reset to defaults${RESET}`);
+      break;
+    }
+    default: {
+      console.log(`${BOLD}dantecode config${RESET} — manage DanteCode configuration`);
+      console.log(`  config get <key>    Print value at dotted path`);
+      console.log(`  config set <key> <val>  Update value`);
+      console.log(`  config list         Show full config (API key masked)`);
+      console.log(`  config validate     Check for errors`);
+      console.log(`  config reset        Restore defaults`);
+    }
   }
 }
 

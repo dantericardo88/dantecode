@@ -1,0 +1,4 @@
+{"sessionId":"sess-001","contextHitsUsed":5,"taskSucceeded":true,"timestamp":"2026-04-19T10:00:00.000Z"}
+{"sessionId":"sess-002","contextHitsUsed":3,"taskSucceeded":true,"timestamp":"2026-04-20T08:00:00.000Z"}
+{"sessionId":"sess-003","contextHitsUsed":2,"taskSucceeded":false,"timestamp":"2026-04-20T15:00:00.000Z"}
+{"sessionId":"sess-004","contextHitsUsed":0,"taskSucceeded":false,"timestamp":"2026-04-21T09:00:00.000Z"}

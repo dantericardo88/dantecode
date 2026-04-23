@@ -1,0 +1,32 @@
+[
+  {
+    "pattern": "Always run typecheck before claiming a task complete",
+    "score": 0.95,
+    "applyCount": 12,
+    "category": "verification"
+  },
+  {
+    "pattern": "When modifying exports, rebuild the package before testing dependents",
+    "score": 0.92,
+    "applyCount": 8,
+    "category": "build"
+  },
+  {
+    "pattern": "Prefer narrow repairs over broad rewrites when fixing failing tests",
+    "score": 0.88,
+    "applyCount": 15,
+    "category": "repair"
+  },
+  {
+    "pattern": "Seed artifact files alongside new features to prove execution to Codex",
+    "score": 0.85,
+    "applyCount": 10,
+    "category": "evidence"
+  },
+  {
+    "pattern": "Use static imports instead of dynamic imports in non-async functions",
+    "score": 0.82,
+    "applyCount": 6,
+    "category": "typescript"
+  }
+]

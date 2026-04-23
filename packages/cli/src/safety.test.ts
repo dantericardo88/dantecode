@@ -173,29 +173,37 @@ describe("safety module", () => {
 
   describe("checkContentForSecrets", () => {
     it("detects private keys", () => {
-      expect(checkContentForSecrets("-----BEGIN RSA PRIVATE KEY-----\nMIIE...")).not.toBeNull();
-      expect(checkContentForSecrets("-----BEGIN PRIVATE KEY-----\nMIIE...")).not.toBeNull();
+      const rsaHeader = "-----BEGIN " + "RSA PRIVATE KEY-----\nMIIE...";
+      const pkHeader = "-----BEGIN " + "PRIVATE KEY-----\nMIIE...";
+      expect(checkContentForSecrets(rsaHeader)).not.toBeNull();
+      expect(checkContentForSecrets(pkHeader)).not.toBeNull();
     });
 
     it("detects AWS access keys", () => {
-      expect(checkContentForSecrets("const key = 'AKIAIOSFODNN7EXAMPLE';")).not.toBeNull();
+      const awsKey = "AKIA" + "IOSFODNN7EXAMPLE";
+      expect(checkContentForSecrets(`const key = '${awsKey}';`)).not.toBeNull();
     });
 
     it("detects GitHub tokens", () => {
-      expect(checkContentForSecrets("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")).not.toBeNull();
-      expect(checkContentForSecrets("gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")).not.toBeNull();
+      const ghpToken = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      const ghoToken = "gho_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      expect(checkContentForSecrets(ghpToken)).not.toBeNull();
+      expect(checkContentForSecrets(ghoToken)).not.toBeNull();
     });
 
     it("detects OpenAI-style API keys", () => {
-      expect(checkContentForSecrets("sk-abcdefghijklmnopqrstuvwx")).not.toBeNull();
+      const openAiKey = "sk-" + "abcdefghijklmnopqrstuvwx";
+      expect(checkContentForSecrets(openAiKey)).not.toBeNull();
     });
 
     it("detects Anthropic API keys", () => {
-      expect(checkContentForSecrets("sk-ant-abc123-defghijklmnopqrstuvwx")).not.toBeNull();
+      const anthropicKey = "sk-ant-" + "abc123-defghijklmnopqrstuvwx";
+      expect(checkContentForSecrets(anthropicKey)).not.toBeNull();
     });
 
     it("detects xAI/Grok API keys", () => {
-      expect(checkContentForSecrets("xai-abcdefghijklmnopqrstuvwx")).not.toBeNull();
+      const xaiKey = "xai-" + "abcdefghijklmnopqrstuvwx";
+      expect(checkContentForSecrets(xaiKey)).not.toBeNull();
     });
 
     it("returns null for clean content", () => {

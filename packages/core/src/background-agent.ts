@@ -23,6 +23,7 @@ import { BackgroundTaskStore } from "./background-task-store.js";
 import { CircuitBreaker } from "./circuit-breaker.js";
 import { RecoveryEngine } from "./recovery-engine.js";
 import { LoopDetector } from "./loop-detector.js";
+import { ProviderHealthRouter } from "./provider-health-router.js";
 
 const execAsync = promisify(exec);
 const SANDBOX_PACKAGE_NAME = "@dantecode/sandbox";
@@ -88,6 +89,8 @@ export class BackgroundAgentRunner {
   private onProgress?: BackgroundProgressCallback;
   private workFn?: AgentWorkFn;
   private readonly restorePromise: Promise<void>;
+  /** Sprint AI — Dim 24: tracks provider health for active routing decisions */
+  readonly healthRouter: import("./provider-health-router.js").ProviderHealthRouter;
 
   constructor(
     maxConcurrent = 1,
@@ -103,6 +106,11 @@ export class BackgroundAgentRunner {
     this.resetTimeoutMs = this.breaker.getResetTimeoutMs();
     this.taskStore = new BackgroundTaskStore(projectRoot);
     this.restorePromise = this.restorePersistedTasks();
+    // Wire health events → router so routing decisions stay current
+    this.healthRouter = new ProviderHealthRouter(projectRoot);
+    this.breaker.onHealthEvent((evt) => {
+      this.healthRouter.handleHealthEvent(evt.provider, evt.state, evt.failures);
+    });
   }
 
   /** Set the function that does actual agent work. */
@@ -361,6 +369,10 @@ export class BackgroundAgentRunner {
     task.error = err instanceof Error ? err.message : String(err);
     task.attemptCount = (task.attemptCount ?? 0) + 1;
     task.breakerState = this.breaker.getState(task.id);
+
+    // Print multi-provider health snapshot on failure (dim 24)
+    const healthLine = this.breaker.formatHealthLine();
+    process.stdout.write(`${healthLine}\n`);
 
     // Loop detection: track failure patterns per task
     if (!this.loopDetectors.has(task.id)) {

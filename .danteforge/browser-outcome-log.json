@@ -1,0 +1,4 @@
+{"sessionId":"bos-001","taskDescription":"Navigate to GitHub and open a pull request","urlsVisited":3,"screenshotsTaken":2,"actionsPerformed":7,"succeeded":true,"durationMs":4200,"timestamp":"2026-04-22T10:00:00.000Z"}
+{"sessionId":"bos-002","taskDescription":"Fill out a sign-up form on the demo site","urlsVisited":1,"screenshotsTaken":1,"actionsPerformed":5,"succeeded":false,"failureReason":"captcha_blocked","durationMs":2100,"timestamp":"2026-04-22T10:05:00.000Z"}
+{"sessionId":"bos-003","taskDescription":"Search for a product and add it to cart","urlsVisited":4,"screenshotsTaken":3,"actionsPerformed":9,"succeeded":true,"durationMs":6000,"timestamp":"2026-04-22T10:10:00.000Z"}
+{"sessionId":"bos-004","taskDescription":"Log in and navigate to account settings","urlsVisited":2,"screenshotsTaken":1,"actionsPerformed":4,"succeeded":false,"failureReason":"login_failed","durationMs":1500,"timestamp":"2026-04-22T10:15:00.000Z"}

@@ -1,0 +1,6 @@
+{"reviewId":"rev-001","reviewPrecision":0.85,"bugsFoundPostMerge":0,"prTitle":"Add auth middleware","recordedAt":"2026-04-21T10:00:00.000Z"}
+{"reviewId":"rev-002","reviewPrecision":0.90,"bugsFoundPostMerge":0,"prTitle":"Refactor user service","recordedAt":"2026-04-21T11:00:00.000Z"}
+{"reviewId":"rev-003","reviewPrecision":0.78,"bugsFoundPostMerge":1,"prTitle":"Add payment gateway","recordedAt":"2026-04-21T12:00:00.000Z"}
+{"reviewId":"rev-004","reviewPrecision":0.45,"bugsFoundPostMerge":2,"prTitle":"Update API endpoints","recordedAt":"2026-04-22T09:00:00.000Z"}
+{"reviewId":"rev-005","reviewPrecision":0.35,"bugsFoundPostMerge":3,"prTitle":"Migrate database schema","recordedAt":"2026-04-22T10:00:00.000Z"}
+{"reviewId":"rev-006","reviewPrecision":0.55,"bugsFoundPostMerge":2,"prTitle":"Add caching layer","recordedAt":"2026-04-22T11:00:00.000Z"}

@@ -11,6 +11,13 @@
 /** The three states of a circuit breaker. */
 export type CircuitBreakerState = "closed" | "open" | "half-open";
 
+/** Health event emitted when a circuit transitions to open state. */
+export interface ProviderHealthEvent {
+  provider: string;
+  state: CircuitBreakerState;
+  failures: number;
+}
+
 /** Per-provider state tracked by the circuit breaker. */
 interface ProviderCircuitState {
   /** Current breaker state. */
@@ -66,6 +73,9 @@ export class CircuitBreaker {
     // Check if an open circuit should transition to half-open
     if (ps.state === "open" && Date.now() - ps.openedAt >= this.resetTimeoutMs) {
       ps.state = "half-open";
+      this.healthListeners.forEach((cb) =>
+        cb({ provider, state: "half-open", failures: ps.consecutiveFailures }),
+      );
     }
 
     return ps.state;
@@ -160,7 +170,37 @@ export class CircuitBreaker {
     if (ps.consecutiveFailures >= this.failureThreshold) {
       ps.state = "open";
       ps.openedAt = Date.now();
+      this.healthListeners.forEach((cb) => cb({ provider, state: "open" as const, failures: ps.consecutiveFailures }));
     }
+  }
+
+  private readonly healthListeners: Array<(evt: ProviderHealthEvent) => void> = [];
+
+  onHealthEvent(cb: (evt: ProviderHealthEvent) => void): void {
+    this.healthListeners.push(cb);
+  }
+
+  formatHealthLine(): string {
+    const parts: string[] = [];
+    for (const [provider] of this.states) {
+      const state = this.getState(provider);
+      const ps = this.states.get(provider)!;
+      if (state !== "closed" || ps.consecutiveFailures > 0) {
+        parts.push(`${provider}:${state}(${ps.consecutiveFailures})`);
+      }
+    }
+    return parts.length > 0 ? `[Provider health] ${parts.join(" ")}` : "[Provider health] all providers healthy";
+  }
+
+  getHealthSnapshot(): Record<string, { state: CircuitBreakerState; failures: number }> {
+    const snapshot: Record<string, { state: CircuitBreakerState; failures: number }> = {};
+    for (const [provider, ps] of this.states) {
+      // Exclude pristine closed entries (successfully reset with no recorded failures)
+      if (ps.state === "closed" && ps.consecutiveFailures === 0) continue;
+      const state = this.getState(provider);
+      snapshot[provider] = { state, failures: ps.consecutiveFailures };
+    }
+    return snapshot;
   }
 }
 

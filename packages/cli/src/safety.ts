@@ -33,16 +33,24 @@ export const DANGEROUS_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }>
     reason: "hard reset to remote main/master",
   },
   // System attacks
-  { pattern: /:\(\)\s*\{\s*:\|\s*:\s*&\s*\}\s*;?\s*:/, reason: "fork bomb detected" },
+  { pattern: /:\s*\(\s*\)\s*\{.*:\s*\|.*:.*&.*\}/, reason: "fork bomb detected" },
   {
     pattern: /\bdd\s+if=\/dev\/(zero|random|urandom)\s+of=\/dev\/[sh]d/,
     reason: "disk overwrite with dd",
   },
   { pattern: /\bmkfs\b/, reason: "filesystem format command" },
   { pattern: /\bchmod\s+-R\s+777\s+\/\s*$/, reason: "chmod 777 on root filesystem" },
-  // Pipe-to-shell
+  // Pipe-to-shell (broad — catches curl, wget, cat, nc, python, and any other source)
+  { pattern: /\|\s*(ba)?sh\b/i, reason: "pipe to shell — arbitrary code execution" },
   { pattern: /\bcurl\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
   { pattern: /\bwget\s+.*\|\s*(ba)?sh\b/, reason: "pipe remote script to shell" },
+  // Command substitution with destructive commands: $(rm -rf /), $(curl ... | bash)
+  { pattern: /\$\([^)]*\b(rm|dd|mkfs|shred|chmod|chown|wget|curl)\b/i, reason: "command substitution with destructive command" },
+  // Backtick substitution with destructive commands: `rm -rf /`
+  { pattern: /`[^`]*\b(rm|dd|mkfs|shred|chmod|chown|wget|curl)\b[^`]*`/i, reason: "backtick substitution with destructive command" },
+  // Source/dot injection — loading external scripts into current shell
+  { pattern: /^\s*source\s+\S/i, reason: "source command — loading external script" },
+  { pattern: /(?:^|[;&|])\s*\.\s+\//, reason: "dot-space injection — sourcing external script at absolute path" },
   // find with destructive actions
   { pattern: /\bfind\s+\/\s+.*-delete\b/, reason: "find with -delete on root filesystem" },
   { pattern: /\bfind\s+\/\s+.*-exec\s+rm\b/, reason: "find with -exec rm on root filesystem" },
@@ -120,6 +128,30 @@ export function normalizeAndCheckBash(command: string): string | null {
     return "eval with environment variable expansion";
   }
 
+  // Base64 decode combined with exec/eval (encoding attacks without direct shell pipe)
+  if (/base64.*\bexec\b|\beval\b.*base64|Buffer\.from\b.*base64/i.test(normalized)) {
+    return "base64 decode with code execution";
+  }
+
+  // Multi-flag rm targeting root filesystem (whitespace evasion: rm -r -f /)
+  if (/\brm\b(?:\s+-\w+)+\s+\/\s*$/.test(normalized)) {
+    return "rm with flags targeting root filesystem";
+  }
+
+  // Inspect bash/sh -c argument strings for nested dangerous commands
+  const shCMatch = normalized.match(/\b(?:ba)?sh\s+-c\s+['"]([^'"]+)['"]/);
+  if (shCMatch) {
+    const innerReason = normalizeAndCheckBash(shCMatch[1]!);
+    if (innerReason) return innerReason;
+  }
+
+  // Strip surrounding quotes from command tokens and re-check (quote-bypass evasion)
+  const unquoted = normalized.replace(/["']([^"'\s]+)["']/g, "$1");
+  if (unquoted !== normalized) {
+    const unquotedReason = checkBashSafety(unquoted);
+    if (unquotedReason) return unquotedReason;
+  }
+
   // Check the full normalized command against patterns
   return checkBashSafety(normalized);
 }
@@ -150,8 +182,10 @@ export function sandboxCheckCommand(command: string, sandboxEnabled: boolean): T
   for (const pattern of SANDBOX_BLOCKED_PATTERNS) {
     if (pattern.test(command)) {
       return {
+        toolName: "Bash",
         content: `Sandbox: command blocked (matches restricted pattern). Disable sandbox to run: ${command}`,
         isError: true,
+        ok: false,
       };
     }
   }
@@ -170,8 +204,10 @@ export function sandboxCheckPath(
   const resolved = resolve(projectRoot, filePath);
   if (!resolved.startsWith(projectRoot)) {
     return {
+      toolName: "Write",
       content: `Sandbox: write blocked — path escapes project root: ${resolved}`,
       isError: true,
+      ok: false,
     };
   }
   return null;

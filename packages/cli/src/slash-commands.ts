@@ -3,6 +3,7 @@
 // Each slash command is a function that operates on the REPL state.
 // ============================================================================
 
+import * as readline from "node:readline";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import { execSync } from "node:child_process";
@@ -23,7 +24,12 @@ import {
   LoopDetector,
   parseSkillWaves,
   createWaveState,
+  generateRepoMemory,
+  BoundedRepairLoop,
+  runSecurityAudit,
+  chaosTester,
 } from "@dantecode/core";
+import { skillsManager } from "./skills-manager.js";
 import type { MultiAgentProgressCallback, WaveOrchestratorState } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -36,6 +42,8 @@ import {
   formatBladeProgressLine,
 } from "@dantecode/danteforge";
 import { listSkills, getSkill } from "@dantecode/skill-adapter";
+import { testMCPIntegration } from "@dantecode/mcp";
+import type { MCPClientManager } from "@dantecode/mcp";
 import {
   getStatus,
   getDiff,
@@ -92,11 +100,7 @@ export interface ReplState {
   /** Live sandbox bridge when sandbox mode is enabled. */
   sandboxBridge: SandboxBridge | null;
   /** MCP client manager for external tool integration. */
-  mcpClient?: {
-    isConnected: () => boolean;
-    getConnectedServers: () => string[];
-    listTools: () => Array<{ name: string; description: string; serverName: string }>;
-  };
+  mcpClient: MCPClientManager | null;
   /** Background agent runner (lazily initialized by /bg). */
   _bgRunner?: unknown;
   /** Code index (lazily initialized by /index and /search). */
@@ -105,6 +109,21 @@ export interface ReplState {
   activeSkill: string | null;
   /** Wave orchestrator state for step-by-step skill execution (Claude Workflow Mode). */
   waveState: WaveOrchestratorState | null;
+  /**
+   * Permissions for destructive actions. Defaults to edit: "ask", bash: "ask", tools: "allow".
+   * - "allow": always allow execution
+   * - "ask": prompt user for approval before execution
+   * - "deny": always block execution
+   */
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
+  /** Readline interface for interactive prompts (used for 'ask' permissions). */
+  rl?: readline.Interface;
+  /** Latest cost estimate from the most recent agent loop run. Updated via onCostUpdate. */
+  lastCostEstimate?: import("@dantecode/config-types").CostEstimate & { provider?: string };
 }
 
 /** A single slash command handler. */
@@ -556,7 +575,61 @@ async function tokensCommand(_args: string, state: ReplState): Promise<string> {
     `  Context: ${util.percent}% (${util.tier}) — ${util.tokens}/${util.maxTokens} tokens`,
   ];
 
+  // Append cost block
+  lines.push("");
+  lines.push(`${BOLD}Cost${RESET}`);
+  lines.push("");
+  const modelId = `${state.state.model.default.provider}/${state.state.model.default.modelId}`;
+  lines.push(`  Provider:       ${modelId}`);
+  const ce = state.lastCostEstimate;
+  if (!ce) {
+    lines.push(`  Cost:           (run a prompt first)`);
+  } else {
+    const lastReq = ce.lastRequestUsd > 0 ? `$${ce.lastRequestUsd.toFixed(4)}` : "$0.0000";
+    const sessTotal = ce.sessionTotalUsd > 0 ? `$${ce.sessionTotalUsd.toFixed(4)}` : "$0.0000";
+    lines.push(`  Last request:   ${lastReq}`);
+    lines.push(`  Session cost:   ${sessTotal}  (${ce.tokensUsedSession.toLocaleString()} tokens)`);
+    const budgetUsd = state.state.model.budget?.sessionMaxUsd;
+    if (budgetUsd !== undefined && budgetUsd > 0) {
+      const pct = Math.min(100, Math.round((ce.sessionTotalUsd / budgetUsd) * 100));
+      const filled = Math.round(pct / 10);
+      const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+      const barColor = pct >= 80 ? RED : pct >= 50 ? YELLOW : GREEN;
+      lines.push(`  Budget:         ${barColor}${bar}${RESET}  ${pct}%  ($${ce.sessionTotalUsd.toFixed(4)} / $${budgetUsd.toFixed(2)})`);
+      if (pct >= 80) lines.push(`                  ${YELLOW}⚠  Warning: ${pct}% of session budget consumed${RESET}`);
+    }
+    lines.push(`  ${DIM}Use /cost for full dashboard  •  /cost rates for provider rate table${RESET}`);
+  }
+
   return lines.join("\n");
+}
+
+async function costCommand(args: string, state: ReplState): Promise<string> {
+  const { loadCostHistory, formatCostDashboard, formatRateTable } = await import(
+    "./cost-tracker.js"
+  );
+
+  if (args.trim() === "rates") {
+    return formatRateTable();
+  }
+
+  const history = await loadCostHistory(state.projectRoot);
+  const estimate = state.lastCostEstimate ?? {
+    sessionTotalUsd: 0,
+    lastRequestUsd: 0,
+    modelTier: "fast" as const,
+    tokensUsedSession: 0,
+    budgetExceeded: false,
+  };
+  const provider =
+    state.lastCostEstimate?.provider ??
+    `${state.state.model.default.provider}/${state.state.model.default.modelId}`;
+  return formatCostDashboard(
+    estimate,
+    provider,
+    history,
+    state.state.model.budget?.sessionMaxUsd,
+  );
 }
 
 async function webCommand(args: string, _state: ReplState): Promise<string> {
@@ -670,7 +743,7 @@ async function skillCommand(args: string, state: ReplState): Promise<string> {
       "2. Then execute each step ONE AT A TIME with real tool calls.",
       "3. NEVER skip steps. NEVER narrate what you would do — actually DO it with tools.",
       "4. After each step, verify your work (Read the file, run a check, etc.).",
-      "5. For GitHub search: `gh search repos \"query\" --limit 10 --json name,url,description,stargazersCount`",
+      '5. For GitHub search: `gh search repos "query" --limit 10 --json name,url,description,stargazersCount`',
       "6. For web content: `curl -sL 'url' | head -200`",
       "7. For cloning repos: `git clone --depth 1 'url' /tmp/oss-scan/name`",
       "8. Mark each TodoWrite step completed as you finish it.",
@@ -705,7 +778,7 @@ async function agentsCommand(_args: string, state: ReplState): Promise<string> {
   try {
     const entries = await readdir(agentsDir);
     const agentFiles = entries.filter(
-      (e) => e.endsWith(".yaml") || e.endsWith(".yml") || e.endsWith(".md"),
+      (entry: string) => entry.endsWith(".yaml") || entry.endsWith(".yml") || entry.endsWith(".md"),
     );
 
     if (agentFiles.length === 0) {
@@ -885,7 +958,7 @@ Implement each pattern directly — no stubs, no TODOs, no placeholders. Run typ
 Run the full QA pipeline. Fix any failures. Continue until ALL checks pass or 3 retry cycles complete.
 
 ## Cleanup
-rm -rf /tmp/oss-research-* when done.
+Clean up /tmp/oss-research-* directories when done.
 
 Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. Verify every change compiles and passes tests.`;
 
@@ -2197,6 +2270,131 @@ async function historyCommand(args: string, state: ReplState): Promise<string> {
 // ----------------------------------------------------------------------------
 // Slash Command Registry
 // ----------------------------------------------------------------------------
+async function repoMemoryCommand(_args: string, state: ReplState): Promise<string> {
+  try {
+    const memory = await generateRepoMemory(state.projectRoot);
+    return `${GREEN}Repo memory generated:${RESET}\n` +
+           `  File nodes: ${memory.fileGraph.length}\n` +
+           `  Symbol nodes: ${memory.symbolGraph.length}\n` +
+           `  Test mappings: ${memory.testMap.length}\n` +
+           `  Hotspots: ${memory.hotspots.length}\n` +
+           `  Saved to: .dantecode/repo_memory.json`;
+  } catch (error) {
+    return `${RED}Failed to generate repo memory: ${error}${RESET}`;
+  }
+}
+
+async function repairCommand(args: string, state: ReplState): Promise<string> {
+  const repairLoop = new BoundedRepairLoop();
+  const errorOutput = args || "Simulated error for testing";
+
+  try {
+    const attempt = await repairLoop.attemptRepair(errorOutput, state.projectRoot);
+    if (attempt) {
+      return `${GREEN}Repair attempt ${attempt.attemptNumber}:${RESET}\n` +
+             `  Category: ${attempt.classification.category}\n` +
+             `  Strategy: ${attempt.plan.strategy}\n` +
+             `  Result: ${attempt.result}\n` +
+             `  Prompt generated for repair.`;
+    } else {
+      return `${YELLOW}No repair attempted (max retries reached or not actionable)${RESET}`;
+    }
+  } catch (error) {
+    return `${RED}Repair failed: ${error}${RESET}`;
+  }
+}
+
+async function pluginsCommand(_args: string, _state: ReplState): Promise<string> {
+  const plugins = skillsManager.listPlugins();
+  const commands = skillsManager.listCommands();
+
+  let output = `${GREEN}Loaded Plugins:${RESET}\n`;
+  for (const plugin of plugins) {
+    output += `  - ${plugin}\n`;
+  }
+
+  output += `\n${GREEN}Custom Commands:${RESET}\n`;
+  for (const cmd of commands) {
+    output += `  - /${cmd.name}: ${cmd.description}\n`;
+  }
+
+  return output;
+}
+
+async function benchmarkCommand(args: string, state: ReplState): Promise<string> {
+  const maxInstances = args.trim() ? parseInt(args.trim(), 10) : undefined;
+
+  try {
+    const { runBuiltinBenchmark, formatBenchmarkReport } = await import(
+      "./commands/benchmark.js"
+    );
+    const report = await runBuiltinBenchmark(state.projectRoot, { maxInstances });
+    return formatBenchmarkReport(report);
+  } catch (error) {
+    return `${RED}Benchmark failed: ${error}${RESET}`;
+  }
+}
+
+async function securityAuditCommand(_args: string, state: ReplState): Promise<string> {
+  try {
+    const audit = await runSecurityAudit(state.projectRoot);
+
+    let output = `${GREEN}Security Audit Results:${RESET}\n`;
+    output += `Compliance Score: ${audit.complianceScore}/100\n`;
+    output += `Last Audit: ${audit.lastAudit}\n\n`;
+
+    if (audit.vulnerabilities.length > 0) {
+      output += `${RED}Vulnerabilities Found:${RESET}\n`;
+      for (const vuln of audit.vulnerabilities) {
+        output += `  ${vuln.severity.toUpperCase()}: ${vuln.description}\n`;
+        output += `    Mitigation: ${vuln.mitigation}\n\n`;
+      }
+    } else {
+      output += `${GREEN}No vulnerabilities detected${RESET}\n`;
+    }
+
+    return output;
+  } catch (error) {
+    return `${RED}Audit failed: ${error}${RESET}`;
+  }
+}
+
+async function chaosTestCommand(_args: string, _state: ReplState): Promise<string> {
+  try {
+    const testFn = async () => {
+      // Simple test: run a basic command
+      return "Chaos test executed";
+    };
+
+    const result = await chaosTester.runChaosTest(testFn);
+
+    let output = `${GREEN}Chaos Test Results:${RESET}\n`;
+    output += `Overall Success: ${result.overallSuccess ? 'PASS' : 'FAIL'}\n\n`;
+
+    for (const r of result.results) {
+      output += `${r.fault}: ${r.success ? 'PASS' : 'FAIL'}`;
+      if (r.error) output += ` (${r.error})`;
+      output += `\n`;
+    }
+
+    return output;
+  } catch (error) {
+    return `${RED}Chaos test failed: ${error}${RESET}`;
+  }
+}
+
+async function testMCPCommand(_args: string, _state: ReplState): Promise<string> {
+  try {
+    const success = await testMCPIntegration();
+    if (success) {
+      return `${GREEN}MCP Integration Test: PASSED${RESET}\nExternal tool calling and listing works correctly.`;
+    } else {
+      return `${RED}MCP Integration Test: FAILED${RESET}\nTool bridging or external connection failed.`;
+    }
+  } catch (error) {
+    return `${RED}MCP test error: ${error}${RESET}`;
+  }
+}
 
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help", description: "Show all slash commands", usage: "/help", handler: helpCommand },
@@ -2271,6 +2469,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: clearCommand,
   },
   { name: "tokens", description: "Show token usage", usage: "/tokens", handler: tokensCommand },
+  {
+    name: "cost",
+    description: "Show cost dashboard with session spending and provider rates",
+    usage: "/cost [rates]",
+    handler: costCommand,
+  },
   {
     name: "web",
     description: "Fetch URL content into context",
@@ -2373,6 +2577,48 @@ const SLASH_COMMANDS: SlashCommand[] = [
     usage: "/search <query>",
     handler: searchCommand,
   },
+  {
+    name: "repo-memory",
+    description: "Generate persistent repo intelligence maps",
+    usage: "/repo-memory",
+    handler: repoMemoryCommand,
+  },
+  {
+    name: "repair",
+    description: "Trigger bounded repair loop on recent failures",
+    usage: "/repair [error-output]",
+    handler: repairCommand,
+  },
+  {
+    name: "plugins",
+    description: "List loaded plugins and custom commands",
+    usage: "/plugins",
+    handler: pluginsCommand,
+  },
+  {
+    name: "benchmark",
+    description: "Run evaluation benchmarks",
+    usage: "/benchmark [suite-name]",
+    handler: benchmarkCommand,
+  },
+  {
+    name: "security-audit",
+    description: "Run security audit scan",
+    usage: "/security-audit",
+    handler: securityAuditCommand,
+  },
+  {
+    name: "chaos-test",
+    description: "Run chaos testing",
+    usage: "/chaos-test",
+    handler: chaosTestCommand,
+  },
+  {
+    name: "test-mcp",
+    description: "Test MCP integration",
+    usage: "/test-mcp",
+    handler: testMCPCommand,
+  },
 ];
 
 // ----------------------------------------------------------------------------
@@ -2400,7 +2646,17 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
       : withoutSlash.slice(0, spaceIndex).toLowerCase();
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
-  const command = SLASH_COMMANDS.find((c) => c.name === commandName);
+  // Check built-in commands first
+  let command = SLASH_COMMANDS.find((c) => c.name === commandName);
+
+  // If not found, check custom plugin commands
+  if (!command) {
+    const customCommand = skillsManager.getCommand(commandName);
+    if (customCommand) {
+      return customCommand.handler(args, state);
+    }
+  }
+
   if (!command) {
     return `${RED}Unknown command: /${commandName}${RESET}\n${DIM}Type /help to see available commands.${RESET}`;
   }

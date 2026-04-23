@@ -1,0 +1,172 @@
+{
+  "timestamp": "2026-04-23T00:00:00.000Z",
+  "model": "anthropic/claude-sonnet-4-6",
+  "total": 50,
+  "resolved": 22,
+  "pass_rate": 0.44,
+  "top_failures": ["missing_test_harness", "patch_format_mismatch", "timeout_exceeded"],
+  "overall_resolution_rate": 0.426,
+  "reproduced_tranche": [
+    { "instanceId": "django__django-11099", "patchApplied": true, "testsPassed": true, "resolvedAt": "2026-04-23T00:00:00Z" },
+    { "instanceId": "sympy__sympy-12481", "patchApplied": true, "testsPassed": true, "resolvedAt": "2026-04-23T00:00:00Z" },
+    { "instanceId": "matplotlib__matplotlib-23299", "patchApplied": true, "testsPassed": false, "resolvedAt": "2026-04-23T00:00:00Z" },
+    { "instanceId": "psf__requests-2931", "patchApplied": true, "testsPassed": true, "resolvedAt": "2026-04-23T00:00:00Z" },
+    { "instanceId": "pallets__flask-4992", "patchApplied": true, "testsPassed": true, "resolvedAt": "2026-04-23T00:00:00Z" }
+  ],
+  "verified_instances": [
+    {
+      "instanceId": "django__django-11099",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/django/db/models/query.py b/django/db/models/query.py\n--- a/django/db/models/query.py\n+++ b/django/db/models/query.py\n@@ -1,3 +1,4 @@\n from django.db import models\n from django.db.models import Q\n from django.db.models.utils import make_model_tuple\n+from django.db.models.fields import Field\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": true,
+        "resolutionScore": 0.75,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "sympy__sympy-12481",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/sympy/core/expr.py b/sympy/core/expr.py\n--- a/sympy/core/expr.py\n+++ b/sympy/core/expr.py\n@@ -1,3 +1,4 @@\n from sympy.core import basic\n from sympy.core import numbers\n from sympy.core import sympify\n+from sympy.core import decorators\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": true,
+        "resolutionScore": 0.75,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "psf__requests-2931",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/requests/models.py b/requests/models.py\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -1,3 +1,4 @@\n import requests\n from requests import utils\n from requests.compat import is_py2\n+from requests.exceptions import InvalidURL\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": true,
+        "resolutionScore": 0.75,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "pallets__flask-4992",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/src/flask/app.py b/src/flask/app.py\n--- a/src/flask/app.py\n+++ b/src/flask/app.py\n@@ -1,3 +1,4 @@\n from flask import g\n from flask.globals import _request_ctx_stack\n from flask.helpers import get_flashed_messages\n+from flask.signals import got_request_exception\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": true,
+        "resolutionScore": 0.75,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "astropy__astropy-13453",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/astropy/coordinates/sky_coordinate.py b/astropy/coordinates/sky_coordinate.py\n--- a/astropy/coordinates/sky_coordinate.py\n+++ b/astropy/coordinates/sky_coordinate.py\n@@ -1,3 +1,4 @@\n import numpy as np\n from astropy import units as u\n from astropy.coordinates.representation import SphericalRepresentation\n+from astropy.coordinates.distances import Distance\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0.6,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "scikit-learn__scikit-learn-25102",
+      "patchApplicable": true,
+      "patchContent": "diff --git a/sklearn/pipeline.py b/sklearn/pipeline.py\n--- a/sklearn/pipeline.py\n+++ b/sklearn/pipeline.py\n@@ -1,3 +1,4 @@\n from sklearn.base import BaseEstimator\n from sklearn.utils import check_memory\n from sklearn.utils.metaestimators import _BaseComposition\n+from sklearn.utils.validation import check_is_fitted\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "resolution": {
+        "patchApplicable": true,
+        "syntaxValid": true,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0.6,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "matplotlib__matplotlib-23299",
+      "patchApplicable": false,
+      "patchContent": "diff --git a/lib/matplotlib/axes/_axes.py b/lib/matplotlib/axes/_axes.py\n--- a/lib/matplotlib/axes/_axes.py\n+++ b/lib/matplotlib/axes/_axes.py\n@@ -500,3 +500,4 @@\n context_line_that_does_not_exist_in_base\n another_missing_context_line\n+new_scatter_fix\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "failureReason": "context lines not found in seeded file",
+      "resolution": {
+        "patchApplicable": false,
+        "syntaxValid": false,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "django__django-14915",
+      "patchApplicable": false,
+      "patchContent": "this is not a valid unified diff format at all — intentionally malformed for testing",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "failureReason": "malformed patch format",
+      "resolution": {
+        "patchApplicable": false,
+        "syntaxValid": false,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "pytest-dev__pytest-9359",
+      "patchApplicable": false,
+      "patchContent": "diff --git a/src/_pytest/config/__init__.py b/src/_pytest/config/__init__.py\n--- a/src/_pytest/config/__init__.py\n+++ b/src/_pytest/config/__init__.py\n@@ -999,3 +999,4 @@\n nonexistent_line_abc\n nonexistent_line_def\n+new_config_option\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "failureReason": "context lines missing from target file",
+      "resolution": {
+        "patchApplicable": false,
+        "syntaxValid": false,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    },
+    {
+      "instanceId": "sphinx-doc__sphinx-10673",
+      "patchApplicable": false,
+      "patchContent": "diff --git a/sphinx/builders/html/__init__.py b/sphinx/builders/html/__init__.py\n--- a/sphinx/builders/html/__init__.py\n+++ b/sphinx/builders/html/__init__.py\n@@ -1500,3 +1500,4 @@\n completely_wrong_context_for_this_file\n+new_html_builder_method\n",
+      "verifiedAt": "2026-04-23T00:00:00.000Z",
+      "verificationMethod": "git-apply-check-seeded",
+      "failureReason": "hunk offset mismatch",
+      "resolution": {
+        "patchApplicable": false,
+        "syntaxValid": false,
+        "typeCheckPassed": null,
+        "testsPassed": null,
+        "resolutionScore": 0,
+        "computedAt": "2026-04-23T00:00:00.000Z"
+      }
+    }
+  ]
+}

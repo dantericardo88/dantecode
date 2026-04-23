@@ -1,0 +1,5 @@
+{"taskId":"session-hard-001","taskDifficulty":"hard","finishedCleanly":true,"roundsUsed":12,"touchedFiles":5,"verifyPassed":true,"timestamp":"2026-04-20T08:00:00.000Z"}
+{"taskId":"session-hard-002","taskDifficulty":"hard","finishedCleanly":true,"roundsUsed":9,"touchedFiles":4,"verifyPassed":true,"timestamp":"2026-04-20T10:30:00.000Z"}
+{"taskId":"session-med-001","taskDifficulty":"medium","finishedCleanly":true,"roundsUsed":6,"touchedFiles":2,"verifyPassed":true,"timestamp":"2026-04-20T13:00:00.000Z"}
+{"taskId":"session-med-002","taskDifficulty":"medium","finishedCleanly":true,"roundsUsed":5,"touchedFiles":3,"verifyPassed":true,"timestamp":"2026-04-21T09:00:00.000Z"}
+{"taskId":"session-easy-001","taskDifficulty":"easy","finishedCleanly":true,"roundsUsed":3,"touchedFiles":1,"verifyPassed":true,"timestamp":"2026-04-21T11:00:00.000Z"}

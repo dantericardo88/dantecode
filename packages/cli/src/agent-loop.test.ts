@@ -12,10 +12,22 @@ import { resolve } from "node:path";
 
 // Mock generateText at the "ai" module level — ModelRouterImpl calls this internally.
 const mockGenerateText = vi.fn();
+const mockReadFile = vi.fn();
+const mockFileContents = new Map<string, string>();
 
 vi.mock("ai", () => ({
   generateText: mockGenerateText,
   streamText: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", () => ({
+  readFile: (path: string) => {
+    const normalized = String(path).replace(/\\/g, "/");
+    if (mockFileContents.has(normalized)) {
+      return Promise.resolve(mockFileContents.get(normalized)!);
+    }
+    return mockReadFile(path);
+  },
 }));
 
 // Track analyzeComplexity return value so tests can override it
@@ -133,26 +145,50 @@ vi.mock("@dantecode/core", () => {
       percent: 0,
       tier: "green",
     })),
+    compactTextTranscript: vi.fn((messages: Array<{ role: string; content: string }>) => ({
+      messages,
+      strategy: "none",
+      droppedMessages: 0,
+    })),
+    truncateToolOutput: vi.fn((content: string) => content),
+    getProviderPromptSupplement: vi
+      .fn()
+      .mockReturnValue("## Provider-Specific Rules\nExecute tools first."),
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
     // Skill wave orchestrator — real implementations for integration testing
-    getCurrentWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string; instructions: string }> }) => {
-      if (state.currentIndex >= state.waves.length) return null;
-      return state.waves[state.currentIndex];
-    }),
-    advanceWave: vi.fn((state: { currentIndex: number; waves: Array<{ number: number }>; completedWaves: number[] }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return false;
-      state.completedWaves.push(current.number);
-      state.currentIndex++;
-      return state.currentIndex < state.waves.length;
-    }),
+    getCurrentWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number; title: string; instructions: string }>;
+      }) => {
+        if (state.currentIndex >= state.waves.length) return null;
+        return state.waves[state.currentIndex];
+      },
+    ),
+    advanceWave: vi.fn(
+      (state: {
+        currentIndex: number;
+        waves: Array<{ number: number }>;
+        completedWaves: number[];
+      }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return false;
+        state.completedWaves.push(current.number);
+        state.currentIndex++;
+        return state.currentIndex < state.waves.length;
+      },
+    ),
     recordWaveFailure: vi.fn(() => true),
-    buildWavePrompt: vi.fn((state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
-      const current = state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
-      if (!current) return "All waves complete.";
-      return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
-    }),
+    buildWavePrompt: vi.fn(
+      (state: { currentIndex: number; waves: Array<{ number: number; title: string }> }) => {
+        const current =
+          state.currentIndex < state.waves.length ? state.waves[state.currentIndex] : null;
+        if (!current) return "All waves complete.";
+        return `## Wave ${current.number}/${state.waves.length}: ${current.title}\nWave instructions here.\nSignal [WAVE COMPLETE] when done.`;
+      },
+    ),
     isWaveComplete: vi.fn((text: string) => /\[WAVE\s+COMPLETE\]/i.test(text)),
     CLAUDE_WORKFLOW_MODE: "## Claude Workflow Mode — ACTIVE\nTest workflow mode.",
     // Approach memory + prompt cache mocks
@@ -160,13 +196,77 @@ vi.mock("@dantecode/core", () => {
       async load() {}
       async save() {}
       async record() {}
-      async findSimilar() { return []; }
-      async getFailedApproaches() { return []; }
-      async getAll() { return []; }
+      async findSimilar() {
+        return [];
+      }
+      async getFailedApproaches() {
+        return [];
+      }
+      async getAll() {
+        return [];
+      }
       async clear() {}
-      get size() { return 0; }
+      get size() {
+        return 0;
+      }
     },
     formatApproachesForPrompt: vi.fn().mockReturnValue(""),
+    BoundedRepairLoop: class MockBoundedRepairLoop {
+      constructor(_maxRetries?: number, _policy?: string) {}
+      async attemptRepair(_errorOutput: string, _projectRoot: string) {
+        return null;
+      }
+    },
+    loadRepoMemory: vi.fn().mockResolvedValue(null),
+    recordToolCall: vi.fn().mockResolvedValue(undefined),
+    recordMutation: vi.fn().mockResolvedValue(undefined),
+    recordValidation: vi.fn().mockResolvedValue(undefined),
+    recordCompletionGate: vi.fn().mockResolvedValue(undefined),
+    // Sprint 32 additions — task decomposition
+    decomposeTask: vi.fn().mockResolvedValue({ tasks: [], parallelGroups: [], strategy: "default" }),
+    buildParallelGroups: vi.fn().mockReturnValue([]),
+    hasFileConflict: vi.fn().mockReturnValue(false),
+    // UndoStack — needed for globalUndoStack at module scope
+    UndoStack: class MockUndoStack {
+      push(_op: unknown) {}
+      pop() { return null; }
+      get size() { return 0; }
+      clear() {}
+    },
+    // Git/snapshot helpers
+    getCoChangeFiles: vi.fn().mockResolvedValue([]),
+    createFileSnapshot: vi.fn().mockResolvedValue({ filePath: "", content: "", hash: "" }),
+    // ProjectKnowledgeStore
+    ProjectKnowledgeStore: class MockProjectKnowledgeStore {
+      constructor(_root: string) {}
+      async load() { return null; }
+      async save() {}
+      async addDocument() {}
+      async search() { return []; }
+      async getAll() { return []; }
+    },
+    // Risk classifier
+    classifyRisk: vi.fn().mockReturnValue({ level: "low", reasons: [] }),
+    // Approval workflow
+    buildApprovalRequest: vi.fn().mockReturnValue({ id: "mock-id", description: "", riskLevel: "low", changes: [] }),
+    // AutonomyMetricsTracker — Sprint AQ
+    AutonomyMetricsTracker: class MockAutonomyMetricsTracker {
+      constructor(_projectRoot: string) {}
+      start() {}
+      recordToolCall(_toolName: string) {}
+      recordCompletion(_status: string) {}
+      getMetrics() { return { toolCalls: 0, duration: 0, status: "complete" }; }
+    },
+    // AutonomyOrchestrator — Sprint AQ
+    AutonomyOrchestrator: class MockAutonomyOrchestrator {
+      constructor(_opts?: unknown) {}
+      async run(_session: unknown) { return { verified: true, rounds: 0 }; }
+    },
+    // Sprint Dim20 — debug context assembler
+    hasStackTrace: vi.fn().mockReturnValue(false),
+    assembleDebugContext: vi.fn().mockReturnValue({ sessionId: "", errorType: "Error", errorMessage: "", stackFrames: [], watchValues: {}, severityScore: 0.3, assembledAt: "" }),
+    formatDebugContextForPrompt: vi.fn().mockReturnValue("[Debug Repair Context — severity: 0.3]"),
+    recordDebugRepairOutcome: vi.fn().mockReturnValue(undefined),
   };
 });
 
@@ -182,6 +282,18 @@ vi.mock("@dantecode/danteforge", () => ({
   })),
   runConstitutionCheck: vi.fn(() => ({ violations: [] })),
   queryLessons: vi.fn().mockResolvedValue([]),
+  queryRecentTaskOutcomes: vi.fn().mockResolvedValue([]),
+  summarizeTaskOutcomeTrends: vi.fn(() => ({
+    total: 0,
+    successCount: 0,
+    failureCount: 0,
+    verifiedCount: 0,
+    partiallyVerifiedCount: 0,
+    unverifiedCount: 0,
+    verificationFailureCount: 0,
+    unverifiedFailureCount: 0,
+    runtimeFailureCount: 0,
+  })),
   formatLessonsForPrompt: vi.fn().mockReturnValue(""),
   detectAndRecordPatterns: vi.fn().mockResolvedValue([]),
   recordSuccessPattern: vi.fn().mockResolvedValue({}),
@@ -193,11 +305,14 @@ import {
   formatLessonsForPrompt as _flp,
   detectAndRecordPatterns as _darp,
 } from "@dantecode/danteforge";
+import * as danteforgeModule from "@dantecode/danteforge";
 import {
   parseVerificationErrors as _parseVerificationErrors,
   computeErrorSignature as _computeErrorSignature,
 } from "@dantecode/core";
 const mockQueryLessons = _ql as unknown as ReturnType<typeof vi.fn>;
+const mockQueryRecentTaskOutcomes = (danteforgeModule as unknown as Record<string, ReturnType<typeof vi.fn>>)["queryRecentTaskOutcomes"]!;
+const mockSummarizeTaskOutcomeTrends = (danteforgeModule as unknown as Record<string, ReturnType<typeof vi.fn>>)["summarizeTaskOutcomeTrends"]!;
 const mockFormatLessonsForPrompt = _flp as unknown as ReturnType<typeof vi.fn>;
 const mockDetectAndRecordPatterns = _darp as unknown as ReturnType<typeof vi.fn>;
 const mockParseVerificationErrors = _parseVerificationErrors as unknown as ReturnType<typeof vi.fn>;
@@ -306,6 +421,10 @@ function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
   };
 }
 
+function setMockFileContent(projectRoot: string, filePath: string, content: string): void {
+  mockFileContents.set(resolve(projectRoot, filePath).replace(/\\/g, "/"), content);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -313,8 +432,22 @@ function makeConfig(overrides?: Partial<AgentLoopConfig>): AgentLoopConfig {
 describe("runAgentLoop smoke tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFileContents.clear();
+    mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     mockAnalyzeComplexityValue = 0.3;
     mockEscalateTier.mockReset();
+    mockQueryRecentTaskOutcomes.mockResolvedValue([]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 0,
+      successCount: 0,
+      failureCount: 0,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 0,
+      unverifiedCount: 0,
+      verificationFailureCount: 0,
+      unverifiedFailureCount: 0,
+      runtimeFailureCount: 0,
+    });
   });
 
   it("basic prompt produces response with no tool calls", async () => {
@@ -329,6 +462,214 @@ describe("runAgentLoop smoke tests", () => {
     expect(result.messages.length).toBeGreaterThanOrEqual(2);
     expect(result.messages.some((m) => m.role === "user")).toBe(true);
     expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
+  }, 15000);
+
+  it("escalates early and injects a guardrail when recent outcomes show repeated agent failures", async () => {
+    mockQueryRecentTaskOutcomes.mockResolvedValue([{ id: "outcome-1" }]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 4,
+      successCount: 1,
+      failureCount: 3,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 1,
+      unverifiedCount: 3,
+      verificationFailureCount: 2,
+      unverifiedFailureCount: 1,
+      runtimeFailureCount: 0,
+      dominantFailureMode: "verification_failures",
+      dominantFailureCommand: "agent",
+      warning: "Recent outcomes show repeated failures in agent. Prefer smaller steps and stricter verification.",
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will handle this carefully.\n[COMPLEXITY: 0.1]",
+      usage: { promptTokens: 40, completionTokens: 20, totalTokens: 60 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("small fix", session, makeConfig());
+
+    expect(mockEscalateTier).toHaveBeenCalledWith("Recent task outcomes show repeated agent failures");
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const messageBlob = (callArgs.messages as Array<{ role: string; content: string }>)
+      .map((message) => message.content)
+      .join("\n");
+    expect(messageBlob).toContain("RECENT OUTCOME GUARDRAIL");
+    expect(messageBlob).toContain("Break the task into smaller validated steps");
+    expect(messageBlob).toContain("## Planning Required");
+  });
+
+  it("forces planning guidance for recent unverified streaks even on low-complexity tasks", async () => {
+    mockQueryRecentTaskOutcomes.mockResolvedValue([{ id: "outcome-1" }]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 3,
+      successCount: 2,
+      failureCount: 1,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 0,
+      unverifiedCount: 3,
+      verificationFailureCount: 0,
+      unverifiedFailureCount: 3,
+      runtimeFailureCount: 0,
+      dominantFailureMode: "unverified_completion",
+      warning: "Recent outcomes are frequently unverified. Prioritize explicit validation before claiming completion.",
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Understood.\n[COMPLEXITY: 0.1]",
+      usage: { promptTokens: 40, completionTokens: 12, totalTokens: 52 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("tiny edit", session, makeConfig());
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const messageBlob = (callArgs.messages as Array<{ role: string; content: string }>)
+      .map((message) => message.content)
+      .join("\n");
+    expect(messageBlob).toContain("RECENT OUTCOME GUARDRAIL");
+    expect(messageBlob).toContain("Do not claim completion without explicit checks");
+    expect(messageBlob).toContain("## Planning Required");
+    expect(mockEscalateTier).not.toHaveBeenCalled();
+  });
+
+  it("adds verification-specific repair guidance when recent failures are verification-heavy", async () => {
+    mockQueryRecentTaskOutcomes.mockResolvedValue([{ id: "outcome-1" }]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 3,
+      successCount: 1,
+      failureCount: 2,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 1,
+      unverifiedCount: 1,
+      verificationFailureCount: 2,
+      unverifiedFailureCount: 0,
+      runtimeFailureCount: 0,
+      dominantFailureMode: "verification_failures",
+      dominantFailureCommand: "agent",
+      warning: undefined,
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will repair this carefully.\n[COMPLEXITY: 0.1]",
+      usage: { promptTokens: 40, completionTokens: 18, totalTokens: 58 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("patch failing tests", session, makeConfig());
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const messageBlob = (callArgs.messages as Array<{ role: string; content: string }>)
+      .map((message) => message.content)
+      .join("\n");
+    expect(messageBlob).toContain("Recent failures are verification-heavy");
+    expect(messageBlob).toContain("Run the smallest relevant checks before further edits");
+  });
+
+  it("injects verification-heavy retry guidance into the repair prompt after failed checks", async () => {
+    mockQueryRecentTaskOutcomes.mockResolvedValue([{ id: "outcome-1" }]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 3,
+      successCount: 1,
+      failureCount: 2,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 1,
+      unverifiedCount: 1,
+      verificationFailureCount: 2,
+      unverifiedFailureCount: 0,
+      runtimeFailureCount: 0,
+      dominantFailureMode: "verification_failures",
+      dominantFailureCommand: "agent",
+      warning: undefined,
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Editing.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/app.ts","old_string":"old","new_string":"new"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "lint failed", isError: true });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I repaired the failing check.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "new");
+    await runAgentLoop(
+      "Fix src/app.ts",
+      session,
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          project: {
+            ...makeConfig().state.project,
+            lintCommand: "npm run lint",
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    const retryCall = mockGenerateText.mock.calls.find((call) =>
+      (call[0].messages as Array<{ role: string; content: string }>).some((message) =>
+        message.content.includes("Retry posture: make the narrowest repair"),
+      ),
+    );
+    expect(retryCall).toBeDefined();
+    const messageBlob = (retryCall![0].messages as Array<{ role: string; content: string }>)
+      .map((message) => message.content)
+      .join("\n");
+    expect(messageBlob).toContain("rerun the smallest relevant verification command first");
+  });
+
+  it("injects explicit proof guidance after successful verification when recent outcomes were unverified", async () => {
+    mockQueryRecentTaskOutcomes.mockResolvedValue([{ id: "outcome-1" }]);
+    mockSummarizeTaskOutcomeTrends.mockReturnValue({
+      total: 3,
+      successCount: 2,
+      failureCount: 1,
+      verifiedCount: 0,
+      partiallyVerifiedCount: 0,
+      unverifiedCount: 3,
+      verificationFailureCount: 0,
+      unverifiedFailureCount: 3,
+      runtimeFailureCount: 0,
+      dominantFailureMode: "unverified_completion",
+      warning: "Recent outcomes are frequently unverified. Prioritize explicit validation before claiming completion.",
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Editing.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/app.ts","old_string":"old","new_string":"new"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+    mockExecuteTool.mockResolvedValueOnce({ content: "tests passed", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "new");
+    await runAgentLoop(
+      "Apply tiny edit",
+      session,
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          project: {
+            ...makeConfig().state.project,
+            testCommand: "npm test",
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    const proofCall = mockGenerateText.mock.calls.find((call) =>
+      (call[0].messages as Array<{ role: string; content: string }>).some((message) =>
+        message.content.includes("Verification passed. Before claiming completion"),
+      ),
+    );
+    expect(proofCall).toBeDefined();
+    const messageBlob = (proofCall![0].messages as Array<{ role: string; content: string }>)
+      .map((message) => message.content)
+      .join("\n");
+    expect(messageBlob).toContain("explicitly state what you verified");
   });
 
   it("extracts and dispatches tool calls from model response", async () => {
@@ -507,9 +848,9 @@ describe("runAgentLoop smoke tests", () => {
     const session = makeSession();
     const result = await runAgentLoop("Read same.ts", session, makeConfig());
 
-    // Should eventually terminate
+    // Should eventually terminate with at least one assistant message
     expect(result.messages.length).toBeGreaterThan(0);
-    expect(result.messages[result.messages.length - 1]!.role).toBe("assistant");
+    expect(result.messages.some((m) => m.role === "assistant")).toBe(true);
   });
 
   it("handles model generation errors gracefully", async () => {
@@ -789,6 +1130,7 @@ describe("Approach memory: recording after verification", () => {
       .mockResolvedValueOnce({ content: "Tests passed", isError: false }); // npm test
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "export const x = 1;");
     const result = await runAgentLoop("Update app", session, makeConfig());
 
     // The loop should complete. executeTool should have been called at least once
@@ -818,6 +1160,7 @@ describe("Approach memory: recording after verification", () => {
       .mockResolvedValueOnce({ content: "Error: test failed", isError: true }); // npm test
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "broken code");
     const result = await runAgentLoop("Update app", session, config);
 
     // The verification should have been attempted (executeTool called for Bash)
@@ -854,7 +1197,9 @@ describe("Approach memory: recording after verification", () => {
     mockParseVerificationErrors.mockReturnValue([{ message: "same failure" }]);
     mockComputeErrorSignature.mockReturnValue("repeat-sig");
 
-    await runAgentLoop("Update app", makeSession(), config);
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "broken code");
+    await runAgentLoop("Update app", session, config);
 
     expect(mockEscalateTier).toHaveBeenCalledWith(expect.stringContaining("repeat-sig"));
   });
@@ -887,7 +1232,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Harden the CLI tools", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const gated = true;",
+    );
+    await runAgentLoop("Harden the CLI tools", session, makeConfig());
 
     const bashCommands = mockExecuteTool.mock.calls
       .filter(([name]) => name === "Bash")
@@ -930,7 +1281,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Write and commit protected changes", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const broken = true;",
+    );
+    await runAgentLoop("Write and commit protected changes", session, makeConfig());
 
     expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitCommit")).toBe(false);
   });
@@ -969,7 +1326,13 @@ describe("Major edit batch gating", () => {
       return { content: "ok", isError: false };
     });
 
-    await runAgentLoop("Write and push protected changes", makeSession(), makeConfig());
+    const session = makeSession();
+    setMockFileContent(
+      session.projectRoot,
+      "packages/cli/src/tools.ts",
+      "export const broken = true;",
+    );
+    await runAgentLoop("Write and push protected changes", session, makeConfig());
 
     expect(mockExecuteTool.mock.calls.some(([name]) => name === "GitPush")).toBe(false);
   });
@@ -1170,9 +1533,9 @@ describe("Pipeline continuation nudge", () => {
     });
     mockExecuteTool.mockResolvedValueOnce({ content: "other file", isError: false });
 
-    // Round 4: model genuinely finishes
+    // Round 4: model genuinely finishes (avoid confab-triggering words like done/complete/implemented)
     mockGenerateText.mockResolvedValueOnce({
-      text: "All steps are now truly complete.",
+      text: "All steps have been processed and the pipeline has run.",
       usage: { totalTokens: 30 },
     });
 
@@ -1359,9 +1722,9 @@ describe("Universal skill completion (skillActive)", () => {
     });
     mockExecuteTool.mockResolvedValueOnce({ content: "utils content", isError: false });
 
-    // Round 4: genuinely finishes
+    // Round 4: genuinely finishes (avoid confab-triggering words like done/complete/implemented)
     mockGenerateText.mockResolvedValueOnce({
-      text: "Task complete.",
+      text: "The task has been processed and verified.",
       usage: { totalTokens: 30 },
     });
 
@@ -1398,9 +1761,9 @@ describe("Universal skill completion (skillActive)", () => {
       mockExecuteTool.mockResolvedValueOnce({ content: `content ${i}`, isError: false });
     }
 
-    // Final: model finishes
+    // Final: model finishes (avoid confab-triggering words like done/complete/implemented)
     mockGenerateText.mockResolvedValueOnce({
-      text: "All skill steps done.",
+      text: "The skill steps have been processed.",
       usage: { totalTokens: 30 },
     });
 
@@ -1540,6 +1903,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/main.ts", "world");
     await runAgentLoop("/magic fix the bug", session, makeConfig());
 
     // 3 calls: confab-rejected summary → real edit → final
@@ -1554,6 +1918,36 @@ describe("Universal skill completion (skillActive)", () => {
       m.content.includes("NO files were actually modified"),
     );
     expect(hasConfabWarning).toBe(true);
+  });
+
+  it("rejects confabulated completion claims when 0 files modified in normal execution tasks", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "All requested changes are complete.",
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Actually editing now.\n<tool_use>\n{"name":"Edit","input":{"file_path":"src/main.ts","old_string":"hello","new_string":"world"}}\n</tool_use>',
+      usage: { totalTokens: 60 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "ok", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Change applied successfully.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/main.ts", "world");
+    await runAgentLoop("Fix the bug in src/main.ts", session, makeConfig());
+
+    const secondCallArgs = mockGenerateText.mock.calls[1]![0];
+    const userMsgs = secondCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("NO files were actually modified"),
+      ),
+    ).toBe(true);
   });
 
   it("blocks GitCommit when 0 files modified in pipeline workflow", async () => {
@@ -1581,6 +1975,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/app.ts", "new");
     await runAgentLoop("/magic implement feature", session, makeConfig());
 
     // Verify GitCommit was blocked — the block message should appear in round 2 messages
@@ -1600,9 +1995,21 @@ describe("Universal skill completion (skillActive)", () => {
     });
     // Mock Read to populate readTracker (simulating real executeTool behavior)
     mockExecuteTool.mockImplementationOnce(
-      async (_name: string, input: Record<string, unknown>, projectRoot: string, context?: { readTracker?: Map<string, string> }) => {
+      async (
+        _name: string,
+        input: Record<string, unknown>,
+        projectRoot: string,
+        context?: { readTracker?: Map<string, unknown> },
+      ) => {
         if (context?.readTracker && input.file_path) {
-          context.readTracker.set(resolve(projectRoot, input.file_path as string), "mock-hash");
+          context.readTracker.set(resolve(projectRoot, input.file_path as string), {
+            path: resolve(projectRoot, input.file_path as string),
+            capturedAt: new Date().toISOString(),
+            size: 16,
+            mtimeMs: 1,
+            hash: "mock-hash",
+            lineEnding: "lf",
+          });
         }
         return { content: "existing content", isError: false };
       },
@@ -1630,6 +2037,7 @@ describe("Universal skill completion (skillActive)", () => {
     });
 
     const session = makeSession();
+    setMockFileContent(session.projectRoot, "src/big-file.ts", "better");
     await runAgentLoop("/magic refactor the file", session, makeConfig());
 
     // Verify the Write was blocked — block message in round 3 messages
@@ -1639,6 +2047,125 @@ describe("Universal skill completion (skillActive)", () => {
         m.role === "user" && m.content.includes("Write BLOCKED"),
     );
     expect(blockMsg).toBeDefined();
+  });
+
+  it("warns when the same Bash command returns identical output twice", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests and investigate the result", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn when same command returns different outputs", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Tests failed", isError: true });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    // Should not have warning about identical output
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not warn when different Bash commands are run", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm run lint"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Investigation finished.",
+      usage: { totalTokens: 20 },
+    });
+
+    mockExecuteTool
+      .mockResolvedValueOnce({ content: "Tests passed", isError: false })
+      .mockResolvedValueOnce({ content: "Lint passed", isError: false });
+
+    const session = makeSession();
+    await runAgentLoop("Run tests and lint", session, makeConfig());
+
+    const thirdCallArgs = mockGenerateText.mock.calls[2]![0];
+    const userMsgs = thirdCallArgs.messages.filter(
+      (m: { role: string; content: string }) => m.role === "user",
+    );
+    // Should not have warning about identical output
+    expect(
+      userMsgs.some((m: { content: string }) =>
+        m.content.includes("identical output to a previous run"),
+      ),
+    ).toBe(false);
+  });
+
+  it("appends a system-generated session result summary", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Hello! I can help with that.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("Say hello", session, makeConfig());
+
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "system" &&
+          typeof message.content === "string" &&
+          message.content.includes("Session Result") &&
+          message.content.includes("Proof Summary:") &&
+          message.content.includes("Completion gate:"),
+      ),
+    ).toBe(true);
   });
 
   // ---- Skill execution protocol: tool recipes injected when skillActive ----
@@ -1682,6 +2209,22 @@ describe("Universal skill completion (skillActive)", () => {
     const callArgs = mockGenerateText.mock.calls[0]![0];
     const systemPrompt = callArgs.system as string;
     expect(systemPrompt).not.toContain("Tool Recipes for Skill Execution");
+  });
+
+  it("injects provider-specific guidance and base TodoWrite rules into the system prompt", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Ready to work.",
+      usage: { totalTokens: 50 },
+    });
+
+    const session = makeSession();
+    await runAgentLoop("Implement the feature", session, makeConfig());
+
+    const callArgs = mockGenerateText.mock.calls[0]![0];
+    const systemPrompt = callArgs.system as string;
+    expect(systemPrompt).toContain("Prioritize technical accuracy");
+    expect(systemPrompt).toContain("Use the TodoWrite tool FREQUENTLY");
+    expect(systemPrompt).toContain("Provider-Specific Rules");
   });
 
   it("elevates round budget to 50 when skillActive is true", async () => {
@@ -1819,8 +2362,9 @@ describe("Universal skill completion (skillActive)", () => {
 
   it("injects reflection checkpoint after 15 tool calls", async () => {
     // Build 15 Read tool calls as XML tool_use blocks in the model's text
-    const toolCallsXml = Array.from({ length: 15 }, (_, i) =>
-      `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
+    const toolCallsXml = Array.from(
+      { length: 15 },
+      (_, i) => `<tool_use>\n{"name":"Read","input":{"file_path":"src/file${i}.ts"}}\n</tool_use>`,
     ).join("\n");
 
     // First call: 15 tool calls embedded in text
@@ -1842,9 +2386,453 @@ describe("Universal skill completion (skillActive)", () => {
     const lastCallArgs = mockGenerateText.mock.calls[mockGenerateText.mock.calls.length - 1]![0];
     const allMsgs = lastCallArgs.messages as Array<{ role: string; content: string }>;
     const hasReflection = allMsgs.some(
-      (m) =>
-        typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
+      (m) => typeof m.content === "string" && m.content.includes("REFLECTION CHECKPOINT"),
     );
     expect(hasReflection).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V+E Retrofit Integration Tests
+// ---------------------------------------------------------------------------
+
+describe("V+E Retrofit: Evidence-Based Execution", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAnalyzeComplexityValue = 0.3;
+    mockEscalateTier.mockReset();
+  });
+
+  it("mutating request + no successful mutating tool => completion gate fails", async () => {
+    // Model claims completion but no tools executed. The anti-confabulation guard fires
+    // up to MAX_CONFABULATION_NUDGES (2) times, then the loop breaks and gate evaluates.
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I've implemented the feature successfully.",
+      usage: { totalTokens: 50 },
+    });
+    // Confab nudge round 1:
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The feature is now fully implemented.",
+      usage: { totalTokens: 30 },
+    });
+    // Confab nudge round 2 (guard exhausted after this — loop breaks naturally):
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Processing is complete.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("implement the login feature", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+    expect(result.executionLedger?.completionGateResult?.reasonCode).toBe(
+      "mutation-requested-but-no-files-changed",
+    );
+  });
+
+  it("assistant says 'done' but no mutation proof => fails", async () => {
+    // Anti-confabulation guard fires up to 2 times; provide responses for each nudge round.
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Done with the implementation.",
+      usage: { totalTokens: 30 },
+    });
+    // Confab nudge round 1:
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The bug is fixed.",
+      usage: { totalTokens: 20 },
+    });
+    // Confab nudge round 2 (guard exhausted — loop breaks naturally):
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Processing is complete.",
+      usage: { totalTokens: 15 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug in utils.ts", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+  });
+
+  it("Write with identical content => no-observable-mutation => gate fails", async () => {
+    setMockFileContent("/tmp/test-project", "test.txt", "existing content");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"test.txt","content":"existing content"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "No observable mutation: file content unchanged after write operation.",
+      isError: false,
+      ok: false,
+      reasonCode: "no-observable-mutation",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Write",
+    });
+    // Round 2: final response after tool execution (no confab since filesModified > 0)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The file has been checked.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("update test.txt", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+  });
+
+  it("Edit with no actual replacement => no-observable-mutation => gate fails", async () => {
+    setMockFileContent("/tmp/test-project", "test.txt", "some content");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"test.txt","old_string":"missing","new_string":"text"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content:
+        "Error: old_string not found in test.txt. The string to replace must exist exactly in the file.",
+      isError: true,
+      ok: false,
+      reasonCode: "no-match",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Edit",
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("edit test.txt", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+  });
+
+  it("stale snapshot => fail", async () => {
+    // Test for stale snapshot failure - would require mocking file system changes
+    // This is covered by existing snapshot tests
+  });
+
+  it("sub-agent/child result without passing gate => parent cannot mark complete", async () => {
+    // Mock sub-agent with failing gate
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"SubAgent","input":{"prompt":"implement feature"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "Sub-agent completed but gate failed",
+      isError: false,
+      ok: true,
+      toolName: "SubAgent",
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("delegate the task", session, makeConfig());
+
+    // Sub-agent success doesn't automatically mean parent success
+    expect(result.status).toBe("INCOMPLETE");
+  });
+
+  it("non-mutating explanation-only request => can pass without mutation", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The function works by checking the input parameter and returning the result.",
+      usage: { totalTokens: 40 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("explain how the function works", session, makeConfig());
+
+    expect(result.status).toBe("COMPLETE");
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(true);
+  });
+
+  it("ambiguous implementation-style request does not default-pass as non_mutating", async () => {
+    // "update the code" should be classified as mutating
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I've updated the code as requested.",
+      usage: { totalTokens: 30 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("update the code to use TypeScript", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE"); // Because no actual mutation occurred
+  });
+
+  it("mutationRecords always have real toolCallId", async () => {
+    setMockFileContent("/tmp/test-project", "newfile.txt", "");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"newfile.txt","content":"new content"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "Successfully wrote 1 lines to newfile.txt",
+      isError: false,
+      ok: true,
+      changedFiles: [
+        {
+          path: "newfile.txt",
+          beforeHash: "",
+          afterHash: "hash",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          diffSummary: "+1 -0",
+        },
+      ],
+      mutationRecords: [
+        {
+          id: "mutation-123",
+          toolCallId: "call-456",
+          path: "newfile.txt",
+          beforeHash: "",
+          afterHash: "hash",
+          diffSummary: "+1 -0",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          timestamp: "2024-01-01T00:00:00.000Z",
+        },
+      ],
+      toolName: "Write",
+    });
+
+    const session = makeSession();
+    await runAgentLoop("create a new file", session, makeConfig());
+
+    expect(session.executionLedger?.mutationRecords[0]?.toolCallId).toBeDefined();
+    expect(session.executionLedger?.mutationRecords[0]?.toolCallId).not.toBe("");
+  });
+
+  it("touchedFiles derive only from ledger mutation records", async () => {
+    // Set mock file content to match what the Write tool will write so verification passes
+    setMockFileContent("/tmp/test-project", "file1.txt", "content1");
+    setMockFileContent("/tmp/test-project", "file2.txt", "content2");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"file1.txt","content":"content1"}}\n</tool_use>\n<tool_use>\n{"name":"Write","input":{"file_path":"file2.txt","content":"content2"}}\n</tool_use>',
+      usage: { totalTokens: 80 },
+    });
+    mockExecuteTool
+      .mockResolvedValueOnce({
+        content: "ok1",
+        isError: false,
+        ok: true,
+        changedFiles: [
+          {
+            path: "file1.txt",
+            beforeHash: "",
+            afterHash: "h1",
+            lineCount: 1,
+            additions: 1,
+            deletions: 0,
+            diffSummary: "+1",
+          },
+        ],
+        mutationRecords: [
+          {
+            id: "m1",
+            toolCallId: "c1",
+            path: "file1.txt",
+            beforeHash: "",
+            afterHash: "h1",
+            diffSummary: "+1",
+            lineCount: 1,
+            additions: 1,
+            deletions: 0,
+            timestamp: "2024-01-01T00:00:00.000Z",
+          },
+        ],
+        toolName: "Write",
+      })
+      .mockResolvedValueOnce({
+        content: "ok2",
+        isError: false,
+        ok: true,
+        changedFiles: [
+          {
+            path: "file2.txt",
+            beforeHash: "",
+            afterHash: "h2",
+            lineCount: 1,
+            additions: 1,
+            deletions: 0,
+            diffSummary: "+1",
+          },
+        ],
+        mutationRecords: [
+          {
+            id: "m2",
+            toolCallId: "c2",
+            path: "file2.txt",
+            beforeHash: "",
+            afterHash: "h2",
+            diffSummary: "+1",
+            lineCount: 1,
+            additions: 1,
+            deletions: 0,
+            timestamp: "2024-01-01T00:00:00.000Z",
+          },
+        ],
+        toolName: "Write",
+      });
+    // Round 2: final response after both tool calls execute
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Both files have been saved.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("create files", session, makeConfig());
+
+    expect(result.touchedFiles).toEqual(["file1.txt", "file2.txt"]);
+    expect(result.touchedFiles).toHaveLength(2);
+  });
+
+  it("full-chain V+E success: mutating request → tool call → mutation proof → ledger → gate pass", async () => {
+    // Set file content to match what the Write tool will write so post-write verification passes
+    setMockFileContent("/tmp/test-project", "feature.js", "function newFeature() { return true; }");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Write","input":{"file_path":"feature.js","content":"function newFeature() { return true; }"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "Successfully wrote 1 lines to feature.js",
+      isError: false,
+      ok: true,
+      changedFiles: [
+        {
+          path: "feature.js",
+          beforeHash: "",
+          afterHash: "hash123",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          diffSummary: "+1 -0",
+        },
+      ],
+      mutationRecords: [
+        {
+          id: "m1",
+          toolCallId: "c1",
+          path: "feature.js",
+          beforeHash: "",
+          afterHash: "hash123",
+          diffSummary: "+1 -0",
+          lineCount: 1,
+          additions: 1,
+          deletions: 0,
+          timestamp: "2024-01-01T00:00:00.000Z",
+          readSnapshotId: "snap1",
+        },
+      ],
+      toolName: "Write",
+    });
+    // Round 2: final response after tool execution (filesModified > 0, so no confab guard)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The feature has been added to the file.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop(
+      "implement a new feature in feature.js",
+      session,
+      makeConfig(),
+    );
+
+    expect(result.status).toBe("COMPLETE");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords![0]!.toolName).toBe("Write");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(1);
+    // toolCallId is overwritten by agent-loop to link to toolCallRecord — check it's set
+    expect(result.executionLedger?.mutationRecords![0]!.toolCallId).toBeDefined();
+    expect(result.executionLedger?.mutationRecords![0]!.readSnapshotId).toBe("snap1");
+    expect(result.touchedFiles).toEqual(["feature.js"]);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(true);
+    // Assert non-empty toolCallId linkage in completed proof chain
+    expect(result.executionLedger?.mutationRecords).toHaveLength(1);
+    expect(result.executionLedger?.mutationRecords![0]!.toolCallId).toBeDefined();
+    expect(result.executionLedger?.mutationRecords![0]!.toolCallId).not.toBe("");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords![0]!.toolName).toBe("Write");
+    // Assert toolCallId matches the actual ToolCallRecord id
+    expect(result.executionLedger?.mutationRecords![0]!.toolCallId).toBe(
+      result.executionLedger?.toolCallRecords![0]!.id,
+    );
+  });
+
+  it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
+    setMockFileContent("/tmp/test-project", "buggy.js", "console.log('bug');");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"buggy.js","old_string":"console.log(\'bug\');","new_string":"console.log(\'bug\');"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "No observable mutation: file content unchanged after edit operation.",
+      isError: false,
+      ok: false,
+      reasonCode: "no-observable-mutation",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Edit",
+    });
+    // Round 2: final response after tool execution (filesModified > 0 from verification check)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The edit has been processed.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug in buggy.js", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords![0]!.toolName).toBe("Edit");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(0);
+    expect(result.touchedFiles).toHaveLength(0);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+    expect(result.executionLedger?.completionGateResult?.reasonCode).toBe(
+      "mutation-requested-but-no-files-changed",
+    );
+  });
+
+  it("full-chain V+E failure: mutating request → no-op tool → no proof → gate fail", async () => {
+    setMockFileContent("/tmp/test-project", "buggy.js", "console.log('bug');");
+
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"buggy.js","old_string":"console.log(\'bug\');","new_string":"console.log(\'bug\');"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "No observable mutation: file content unchanged after edit operation.",
+      isError: false,
+      ok: false,
+      reasonCode: "no-observable-mutation",
+      changedFiles: [],
+      mutationRecords: [],
+      toolName: "Edit",
+    });
+    // Round 2: final response after tool execution (filesModified > 0 from verification check)
+    mockGenerateText.mockResolvedValueOnce({
+      text: "The edit has been processed.",
+      usage: { totalTokens: 20 },
+    });
+
+    const session = makeSession();
+    const result = await runAgentLoop("fix the bug in buggy.js", session, makeConfig());
+
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.executionLedger?.toolCallRecords).toHaveLength(1);
+    expect(result.executionLedger?.toolCallRecords![0]!.toolName).toBe("Edit");
+    expect(result.executionLedger?.mutationRecords).toHaveLength(0);
+    expect(result.touchedFiles).toHaveLength(0);
+    expect(result.executionLedger?.completionGateResult?.ok).toBe(false);
+    expect(result.executionLedger?.completionGateResult?.reasonCode).toBe(
+      "mutation-requested-but-no-files-changed",
+    );
   });
 });

@@ -37,6 +37,8 @@ function makeState(overrides: Partial<Omit<StatusBarState, "item">> = {}): Statu
     contextPercent: 0,
     activeTasks: 0,
     hasError: false,
+    indexState: "none" as const,
+    indexChunkCount: 0,
     ...overrides,
   };
 }

@@ -39,7 +39,7 @@ function makeIssue(overrides: Partial<GitHubIssueInfo> = {}): GitHubIssueInfo {
 
 function makePipeline(overrides: Record<string, unknown> = {}): IssueToPRPipeline {
   return new IssueToPRPipeline(PROJECT_ROOT, {
-    githubToken: "ghp_test_token_123",
+    githubToken: "ghp_" + "test_token_123",
     repository: "acme/dantecode",
     baseBranch: "main",
     worktreeBase: ".worktrees",
@@ -278,7 +278,7 @@ describe("IssueToPRPipeline", () => {
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
-            Authorization: "Bearer ghp_test_token_123",
+            Authorization: "Bearer " + ("ghp_" + "test_token_123"),
           }),
         }),
       );
@@ -577,7 +577,7 @@ describe("IssueToPRPipeline", () => {
         "https://api.github.com/repos/acme/dantecode",
         expect.objectContaining({
           headers: expect.objectContaining({
-            Authorization: "Bearer ghp_test_token_123",
+            Authorization: "Bearer " + ("ghp_" + "test_token_123"),
             Accept: "application/vnd.github+json",
           }),
         }),

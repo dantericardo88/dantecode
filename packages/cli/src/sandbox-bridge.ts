@@ -80,7 +80,7 @@ export class SandboxBridge {
     await this.ensureStarted();
 
     if (!this.executor) {
-      return { content: "Sandbox executor not initialized", isError: true };
+      return { toolName: "Bash", content: "Sandbox executor not initialized", isError: true, ok: false };
     }
 
     const result = await this.executor.run(command, timeoutMs);
@@ -89,14 +89,19 @@ export class SandboxBridge {
 
     if (result.timedOut) {
       return {
+        toolName: "Bash",
         content: `Command timed out after ${timeoutMs}ms.\n${output}`,
         isError: true,
+        ok: false,
       };
     }
 
+    const isError = result.exitCode !== 0;
     return {
+      toolName: "Bash",
       content: output || "(no output)",
-      isError: result.exitCode !== 0,
+      isError,
+      ok: !isError,
     };
   }
 

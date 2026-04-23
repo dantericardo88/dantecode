@@ -1,0 +1,44 @@
+{
+  "status": "fail",
+  "timestamp": "2026-04-14T14:31:35.608Z",
+  "project": "danteforge",
+  "version": "1.0.0",
+  "gitSha": "e77e8e8f74f051cc4e887f88d625e0e1a6b252f6",
+  "platform": "win32",
+  "nodeVersion": "v24.13.1",
+  "cwd": "c:\\Projects\\DanteCode",
+  "projectType": "unknown",
+  "workflowStage": "initialized",
+  "commandMode": {
+    "release": false,
+    "live": false,
+    "recompute": false
+  },
+  "passed": [
+    ".danteforge/ directory exists",
+    "STATE.yaml is valid and loadable",
+    "Workflow stage recorded: initialized",
+    "Audit log has 1 entries"
+  ],
+  "warnings": [],
+  "failures": [
+    "Constitution is not defined",
+    "Repo review (CURRENT_STATE.md) missing",
+    "Constitution (CONSTITUTION.md) missing",
+    "Specification (SPEC.md) missing",
+    "Clarification (CLARIFY.md) missing",
+    "Execution plan (PLAN.md) missing",
+    "Task breakdown (TASKS.md) missing",
+    "No phase 1 tasks are recorded in STATE.yaml",
+    "Workflow stage \"initialized\" is not execution-complete. Run \"danteforge forge 1\" before verify."
+  ],
+  "counts": {
+    "passed": 4,
+    "warnings": 0,
+    "failures": 9
+  },
+  "releaseCheckPassed": null,
+  "liveCheckPassed": null,
+  "currentStateFresh": true,
+  "selfEditPolicyEnforced": true
+}

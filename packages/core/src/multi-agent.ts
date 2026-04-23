@@ -4,6 +4,7 @@
 
 import { ModelRouterImpl, type GenerateOptions } from "./model-router.js";
 import type { DanteCodeState } from "@dantecode/config-types";
+import { decomposeTask, type SandboxGroupingStrategy, type SubTask } from "./task-decomposer.js";
 import { z } from "zod";
 
 /** Callback for reporting multi-agent progress to the UI. */
@@ -19,7 +20,7 @@ type AgentLane = (typeof agentLanes)[number];
 
 type DelegationPlan = Partial<Record<AgentLane, string>>;
 
-type AgentOutput = {
+export type AgentOutput = {
   lane: AgentLane;
   content: string;
   pdseScore: number; // 0-100 heuristic
@@ -88,6 +89,57 @@ export class MultiAgent {
     }
 
     return { plan: {}, outputs: [], compositePdse, iterations };
+  }
+
+  /**
+   * Decompose a high-level task description into sub-tasks using the LLM,
+   * then execute each parallel group sequentially via coordinate().
+   * Harvests OpenHands' sandbox grouping strategy + multi-conversation parallelism.
+   */
+  async decomposeAndRun(
+    taskDescription: string,
+    llmCall: (prompt: string) => Promise<string>,
+    options: {
+      maxSubTasks?: number;
+      strategy?: SandboxGroupingStrategy;
+      projectRoot?: string;
+      generateOptions?: GenerateOptions;
+      onProgress?: MultiAgentProgressCallback;
+    } = {},
+  ): Promise<{ outputs: AgentOutput[]; compositePdse: number; totalIterations: number }> {
+    const { parallelGroups } = await decomposeTask(taskDescription, llmCall, {
+      maxSubTasks: options.maxSubTasks,
+      strategy: options.strategy,
+      projectRoot: options.projectRoot,
+    });
+
+    const allOutputs: AgentOutput[] = [];
+    let totalIterations = 0;
+
+    for (const group of parallelGroups) {
+      // Run each sub-task in the group via coordinate() and collect outputs
+      const groupRuns = await Promise.all(
+        group.map((t: SubTask) =>
+          this.coordinate(
+            t.description,
+            options.generateOptions ?? {},
+            options.onProgress,
+          ),
+        ),
+      );
+
+      for (const run of groupRuns) {
+        allOutputs.push(...run.outputs);
+        totalIterations += run.iterations;
+      }
+    }
+
+    const compositePdse =
+      allOutputs.length === 0
+        ? 0
+        : Math.round(allOutputs.reduce((sum, o) => sum + o.pdseScore, 0) / allOutputs.length);
+
+    return { outputs: allOutputs, compositePdse, totalIterations };
   }
 
   private async delegateTask(task: string): Promise<DelegationPlan> {

@@ -1,0 +1,5 @@
+{"sessionId":"sess-s1","totalCostUsd":0.0482,"taskSucceeded":true,"timestamp":"2026-04-19T10:00:00.000Z"}
+{"sessionId":"sess-s2","totalCostUsd":0.0531,"taskSucceeded":true,"timestamp":"2026-04-20T08:00:00.000Z"}
+{"sessionId":"sess-s3","totalCostUsd":0.0498,"taskSucceeded":true,"timestamp":"2026-04-20T13:00:00.000Z"}
+{"sessionId":"sess-f1","totalCostUsd":0.1183,"taskSucceeded":false,"timestamp":"2026-04-20T16:00:00.000Z"}
+{"sessionId":"sess-f2","totalCostUsd":0.1241,"taskSucceeded":false,"timestamp":"2026-04-21T09:00:00.000Z"}

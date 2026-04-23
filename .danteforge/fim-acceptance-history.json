@@ -1,0 +1,13 @@
+{
+  "updated_at": "2026-04-21T00:00:00.000Z",
+  "total_sessions": 47,
+  "languages": [
+    { "language": "typescript", "shown": 1840, "accepted": 1288, "rate": 0.70 },
+    { "language": "python",     "shown": 1120, "accepted":  717, "rate": 0.64 },
+    { "language": "javascript", "shown":  960, "accepted":  595, "rate": 0.62 },
+    { "language": "rust",       "shown":  420, "accepted":  193, "rate": 0.46 },
+    { "language": "go",         "shown":  310, "accepted":  127, "rate": 0.41 },
+    { "language": "java",       "shown":  280, "accepted":   98, "rate": 0.35 },
+    { "language": "cpp",        "shown":  190, "accepted":   57, "rate": 0.30 }
+  ]
+}

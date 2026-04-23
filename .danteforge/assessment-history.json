@@ -1,0 +1,28 @@
+[
+  {
+    "timestamp": "2026-04-23T14:55:42.089Z",
+    "harshScore": 66,
+    "displayScore": 6.6,
+    "dimensions": {
+      "functionality": 76,
+      "testing": 71,
+      "errorHandling": 50,
+      "security": 75,
+      "uxPolish": 50,
+      "documentation": 71,
+      "performance": 70,
+      "maintainability": 66,
+      "planningQuality": 71,
+      "selfImprovement": 65,
+      "developerExperience": 79,
+      "autonomy": 45,
+      "specDrivenPipeline": 95,
+      "convergenceSelfHealing": 45,
+      "tokenEconomy": 75,
+      "ecosystemMcp": 60,
+      "enterpriseReadiness": 93,
+      "communityAdoption": 15
+    },
+    "penaltyTotal": 0
+  }
+]

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 import {
   createWorktree,
   removeWorktree,

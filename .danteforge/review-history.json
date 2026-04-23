@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-18T10:00:00.000Z","reviewId":"rev-2026-04-18-001","resolvedCount":3,"totalComments":5,"resolutionRate":0.60,"prTitle":"Add user authentication flow"}
+{"timestamp":"2026-04-18T16:00:00.000Z","reviewId":"rev-2026-04-18-002","resolvedCount":4,"totalComments":6,"resolutionRate":0.67,"prTitle":"Refactor session management"}
+{"timestamp":"2026-04-19T09:00:00.000Z","reviewId":"rev-2026-04-19-001","resolvedCount":5,"totalComments":7,"resolutionRate":0.71,"prTitle":"Wire circuit breaker health events"}
+{"timestamp":"2026-04-20T11:00:00.000Z","reviewId":"rev-2026-04-20-001","resolvedCount":6,"totalComments":8,"resolutionRate":0.75,"prTitle":"Sprint O: SWE-bench trend artifact"}
+{"timestamp":"2026-04-21T08:00:00.000Z","reviewId":"rev-2026-04-21-001","resolvedCount":8,"totalComments":9,"resolutionRate":0.89,"prTitle":"Sprint W: FIM acceptance history + 10-run bench"}

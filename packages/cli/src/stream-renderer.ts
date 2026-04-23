@@ -3,6 +3,41 @@
 // Renders streaming model output to the CLI with ANSI formatting.
 // ============================================================================
 
+
+// ── StreamThinkingIndicator ───────────────────────────────────────────────────
+// Emits a "Thinking..." hint to stdout if the first token takes longer than
+// a threshold. Inspired by Cursor's in-progress ghost text UX and Continue's
+// provider latency budget pattern: give user feedback during slow TTFB.
+
+export class StreamThinkingIndicator {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private shown = false;
+
+  startWaiting(thresholdMs = 800, onShow: () => void): void {
+    this.dispose();
+    this.shown = false;
+    this.timer = setTimeout(() => {
+      this.shown = true;
+      onShow();
+    }, thresholdMs);
+  }
+
+  onFirstChunk(): void {
+    this.dispose();
+  }
+
+  dispose(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  get wasShown(): boolean {
+    return this.shown;
+  }
+}
+
 const CYAN = "\x1b[36m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";

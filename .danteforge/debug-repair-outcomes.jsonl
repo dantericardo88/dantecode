@@ -1,0 +1,8 @@
+{"sessionId":"s-dbg-001","hadDebugContext":true,"debugContextCount":2,"verdict":"COMPLETED","severityScore":0.9,"timestamp":"2026-04-23T00:10:00.000Z"}
+{"sessionId":"s-dbg-002","hadDebugContext":true,"debugContextCount":1,"verdict":"COMPLETED","severityScore":0.6,"timestamp":"2026-04-23T00:20:00.000Z"}
+{"sessionId":"s-dbg-003","hadDebugContext":false,"debugContextCount":0,"verdict":"FAILED","severityScore":0,"timestamp":"2026-04-23T00:30:00.000Z"}
+{"sessionId":"s-dbg-004","hadDebugContext":true,"debugContextCount":1,"verdict":"COMPLETED","severityScore":0.9,"timestamp":"2026-04-23T00:40:00.000Z"}
+{"sessionId":"s-dbg-005","hadDebugContext":false,"debugContextCount":0,"verdict":"ATTEMPTED","severityScore":0,"timestamp":"2026-04-23T00:50:00.000Z"}
+{"sessionId":"s-dbg-006","hadDebugContext":false,"debugContextCount":0,"verdict":"FAILED","severityScore":0,"timestamp":"2026-04-23T01:00:00.000Z"}
+{"sessionId":"s-dbg-007","hadDebugContext":true,"debugContextCount":3,"verdict":"COMPLETED","severityScore":0.9,"timestamp":"2026-04-23T01:10:00.000Z"}
+{"sessionId":"s-dbg-008","hadDebugContext":true,"debugContextCount":1,"verdict":"ATTEMPTED","severityScore":0.6,"timestamp":"2026-04-23T01:20:00.000Z"}

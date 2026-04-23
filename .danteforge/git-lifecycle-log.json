@@ -1,0 +1,10 @@
+{"timestamp":"2026-04-18T09:00:00.000Z","stage":"branch_created","branch":"feat/fim-acceptance-history","authorEmail":"dante@example.com","durationFromBranchMs":0}
+{"timestamp":"2026-04-18T09:45:00.000Z","stage":"commit","branch":"feat/fim-acceptance-history","commitSha":"a1b2c3d","filesChanged":3,"linesAdded":87,"linesRemoved":12,"durationFromBranchMs":2700000}
+{"timestamp":"2026-04-18T10:00:00.000Z","stage":"push","branch":"feat/fim-acceptance-history","durationFromBranchMs":3600000}
+{"timestamp":"2026-04-18T10:05:00.000Z","stage":"pr_opened","branch":"feat/fim-acceptance-history","prNumber":42,"prTitle":"feat: wire FIM acceptance history into debounce adjustment","durationFromBranchMs":3900000}
+{"timestamp":"2026-04-18T14:30:00.000Z","stage":"pr_reviewed","branch":"feat/fim-acceptance-history","prNumber":42,"durationFromBranchMs":19800000}
+{"timestamp":"2026-04-19T09:15:00.000Z","stage":"pr_merged","branch":"feat/fim-acceptance-history","prNumber":42,"durationFromBranchMs":86700000}
+{"timestamp":"2026-04-19T10:00:00.000Z","stage":"branch_created","branch":"feat/sprint-w-bench-credibility","authorEmail":"dante@example.com","durationFromBranchMs":0}
+{"timestamp":"2026-04-19T11:30:00.000Z","stage":"commit","branch":"feat/sprint-w-bench-credibility","commitSha":"b2c3d4e","filesChanged":2,"linesAdded":45,"linesRemoved":8,"durationFromBranchMs":5400000}
+{"timestamp":"2026-04-19T12:00:00.000Z","stage":"pr_opened","branch":"feat/sprint-w-bench-credibility","prNumber":43,"prTitle":"feat: extend bench to 10 runs with trend tracking","durationFromBranchMs":7200000}
+{"timestamp":"2026-04-20T09:00:00.000Z","stage":"pr_merged","branch":"feat/sprint-w-bench-credibility","prNumber":43,"durationFromBranchMs":82800000}

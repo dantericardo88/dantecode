@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-21T00:00:00.000Z","selected":"anthropic","skipped":["ollama"],"reason":"skipped degraded providers"}
+{"timestamp":"2026-04-21T00:05:00.000Z","selected":"openai","skipped":["anthropic","ollama"],"reason":"skipped degraded providers"}
+{"timestamp":"2026-04-21T00:10:00.000Z","selected":"anthropic","skipped":[],"reason":"all providers healthy"}
+{"timestamp":"2026-04-21T00:15:00.000Z","selected":"anthropic","skipped":["groq"],"reason":"skipped degraded providers"}
+{"timestamp":"2026-04-21T00:20:00.000Z","selected":"anthropic","skipped":[],"reason":"all providers healthy"}

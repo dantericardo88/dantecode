@@ -1,0 +1,345 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2026-04-23",
+  "repos": [
+    {
+      "name": "plandex",
+      "url": "https://github.com/plandex-ai/plandex",
+      "license": "MIT",
+      "stars": 14000,
+      "clonedAt": "2026-04-14",
+      "status": "cloned",
+      "localPath": ".danteforge/oss-repos/plandex",
+      "patterns": [
+        "adaptive-token-budget",
+        "plan-rewind-commit-sha",
+        "sse-heartbeat-adaptive-timeout",
+        "partial-context-rejection"
+      ]
+    },
+    {
+      "name": "void",
+      "url": "https://github.com/voideditor/void",
+      "license": "MIT+Apache-2.0",
+      "stars": 28000,
+      "clonedAt": "2026-04-14",
+      "status": "cloned",
+      "localPath": ".danteforge/oss-repos/void",
+      "patterns": [
+        "observable-reactive-state-dag",
+        "ghost-text-lcs-diff",
+        "multiline-preview-splitting"
+      ]
+    },
+    {
+      "name": "twinny",
+      "url": "https://github.com/twinnydotdev/twinny",
+      "license": "MIT",
+      "stars": 2000,
+      "clonedAt": "2026-04-14",
+      "status": "cloned",
+      "localPath": ".danteforge/oss-repos/twinny",
+      "patterns": [
+        "fim-provider-architecture",
+        "file-interaction-relevance-scoring",
+        "bracket-balance-stop-detection",
+        "multi-model-fim-template-registry",
+        "streaming-completion-detection"
+      ]
+    },
+    {
+      "name": "screenshot-to-code",
+      "url": "https://github.com/abi/screenshot-to-code",
+      "license": "MIT",
+      "stars": 65000,
+      "clonedAt": "2026-04-14",
+      "status": "cloned",
+      "localPath": ".danteforge/oss-repos/screenshot-to-code",
+      "patterns": [
+        "image-preprocessing-pipeline",
+        "vision-multi-image-prompt-engineering",
+        "streaming-tool-call-delta-buffering",
+        "incremental-code-preview-streaming",
+        "html-content-extraction-fallback-chain"
+      ]
+    },
+    {
+      "name": "tabby",
+      "url": "https://github.com/TabbyML/tabby",
+      "license": "Apache-2.0",
+      "stars": 30000,
+      "status": "fully-harvested",
+      "patterns": [
+        "stop-sequence-trie",
+        "fim-context-budget",
+        "early-ghost-text-emission",
+        "ast-chunker"
+      ]
+    },
+    {
+      "name": "aider",
+      "url": "https://github.com/paul-gauthier/aider",
+      "license": "Apache-2.0",
+      "stars": 25000,
+      "status": "70-percent",
+      "patterns": [
+        "search-replace-parser",
+        "auto-commit",
+        "architect-mode-pending",
+        "watch-mode-pending"
+      ]
+    },
+    {
+      "name": "openhands",
+      "url": "https://github.com/All-Hands-AI/OpenHands",
+      "license": "MIT",
+      "stars": 35000,
+      "status": "50-percent",
+      "patterns": [
+        "browser-cli-tool",
+        "debug-control",
+        "swe-bench-runner",
+        "task-decomposer",
+        "codeact-interpreter-pending"
+      ]
+    },
+    {
+      "name": "e2b",
+      "url": "https://github.com/e2b-dev/e2b",
+      "license": "Apache-2.0",
+      "stars": 7800,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/e2b",
+      "patterns": [
+        "sandbox-port-url-pattern",
+        "preview-url-lifecycle",
+        "environment-start-stop",
+        "port-forwarding-hostname"
+      ]
+    },
+    {
+      "name": "browser-use",
+      "url": "https://github.com/browser-use/browser-use",
+      "license": "MIT",
+      "stars": 50000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/browser-use",
+      "patterns": [
+        "phase-separated-action-loop",
+        "browser-state-to-llm-observation",
+        "screenshot-repair-cycle",
+        "dom-element-extraction"
+      ]
+    },
+    {
+      "name": "webcontainer-core",
+      "url": "https://github.com/stackblitz/webcontainer-core",
+      "license": "MIT",
+      "stars": 4800,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/webcontainer-core",
+      "patterns": [
+        "ready-signal-port-detection",
+        "server-ready-event",
+        "hot-reload-lifecycle"
+      ]
+    },
+    {
+      "name": "cline",
+      "url": "https://github.com/cline/cline",
+      "license": "Apache-2.0",
+      "stars": 45000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/cline",
+      "patterns": [
+        "two-phase-onboarding-ux",
+        "project-type-detection",
+        "first-task-guided-walkthrough",
+        "model-provider-config-wizard"
+      ]
+    },
+    {
+      "name": "continue",
+      "url": "https://github.com/continuedev/continue",
+      "license": "Apache-2.0",
+      "stars": 22000,
+      "clonedAt": "2026-04-14",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/continue",
+      "patterns": [
+        "context-provider-interface",
+        "lsp-type-crawling",
+        "tfidf-semantic-search",
+        "notebook-support",
+        "first-run-setup-wizard",
+        "repo-readiness-check",
+        "guided-first-task"
+      ]
+    },
+    {
+      "name": "openfga",
+      "url": "https://github.com/openfga/openfga",
+      "license": "Apache-2.0",
+      "stars": 9000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/openfga",
+      "patterns": [
+        "tuple-based-authorization",
+        "consistency-level-control",
+        "store-namespace-isolation"
+      ]
+    },
+    {
+      "name": "cerbos",
+      "url": "https://github.com/cerbos/cerbos",
+      "license": "Apache-2.0",
+      "stars": 3500,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/cerbos",
+      "patterns": [
+        "principal-resource-action-trace",
+        "rbac-abac-policy-engine",
+        "conditional-rule-evaluation"
+      ]
+    },
+    {
+      "name": "kratos",
+      "url": "https://github.com/ory/kratos",
+      "license": "Apache-2.0",
+      "stars": 11000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/kratos",
+      "patterns": [
+        "authenticator-assurance-level",
+        "credential-type-registry",
+        "oidc-saml-config-schema"
+      ]
+    },
+    {
+      "name": "keto",
+      "url": "https://github.com/ory/keto",
+      "license": "Apache-2.0",
+      "stars": 5000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/keto",
+      "patterns": [
+        "relation-tuple-model",
+        "namespace-config",
+        "batch-transact"
+      ]
+    },
+    {
+      "name": "casdoor",
+      "url": "https://github.com/casdoor/casdoor",
+      "license": "Apache-2.0",
+      "stars": 10000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/casdoor",
+      "patterns": [
+        "multi-tenant-app-scoping",
+        "scope-tool-binding",
+        "provider-chain"
+      ]
+    },
+    {
+      "name": "opal",
+      "url": "https://github.com/permitio/opal",
+      "license": "Apache-2.0",
+      "stars": 5000,
+      "clonedAt": "2026-04-23",
+      "status": "harvested",
+      "localPath": ".danteforge/oss-repos/opal",
+      "patterns": [
+        "policy-as-code-data-source",
+        "update-event-reporting",
+        "hash-based-dedup"
+      ]
+    },
+    {
+      "name": "axe-core",
+      "url": "https://github.com/dequelabs/axe-core",
+      "license": "MPL-2.0",
+      "status": "allowed",
+      "dimension": "dim48-accessibility",
+      "patternsHarvested": [
+        "rule-schema: id/impact/wcagLevel/wcagCriteria/selector/description/help",
+        "impact levels: critical > serious > moderate > minor",
+        "wcag tag system: wcag2a / wcag2aa / best-practice",
+        "154 rules across 8 categories (color, keyboard, name-role-value, text-alternatives, forms, semantics, language, ARIA)",
+        "violation results schema: violations/passes/incomplete with element snippets"
+      ]
+    },
+    {
+      "name": "react-spectrum",
+      "url": "https://github.com/adobe/react-spectrum",
+      "license": "Apache-2.0",
+      "status": "allowed",
+      "dimension": "dim48-accessibility",
+      "patternsHarvested": [
+        "ARIA live region conventions (role=status, aria-live=polite, aria-atomic)",
+        "Focus ring semantics (useFocusRing, keyboard vs mouse distinction)",
+        "Roving tabindex pattern for keyboard navigation in lists/grids",
+        "useButton: keyboard + mouse event unification with accessibility",
+        "High-contrast theme awareness patterns"
+      ]
+    },
+    {
+      "name": "pa11y",
+      "url": "https://github.com/pa11y/pa11y",
+      "license": "LGPL",
+      "status": "blocked",
+      "dimension": "dim48-accessibility",
+      "patternsHarvested": []
+    },
+    {
+      "name": "react-aria-live",
+      "url": "https://github.com/FormidableLabs/react-aria-live",
+      "license": "none",
+      "status": "blocked",
+      "dimension": "dim48-accessibility",
+      "patternsHarvested": []
+    }
+  ],
+  "implementedPatterns": [
+    "stop-sequence-trie",
+    "fim-context-budget",
+    "early-ghost-text-emission",
+    "ast-chunker",
+    "bracket-balance-stop-detection",
+    "file-interaction-relevance-scoring",
+    "search-replace-parser",
+    "browser-cli-tool",
+    "debug-control",
+    "swe-bench-runner",
+    "task-decomposer",
+    "two-pass-vision-to-code-pipeline",
+    "framework-aware-code-generation",
+    "dev-server-ready-signal-detection",
+    "vscode-preview-panel-iframe",
+    "onboarding-funnel-metrics",
+    "repo-readiness-check",
+    "dev-command-priority-detection",
+    "sso-oidc-saml-config-model",
+    "rbac-abac-principal-resource-check",
+    "enterprise-audit-log-jsonl",
+    "admin-policy-org-config",
+    "aal-mfa-enforcement",
+    "relation-tuple-permission-model"
+  ],
+  "blockedRepos": [
+    {
+      "name": "gpt-pilot",
+      "url": "https://github.com/Pythagora-io/gpt-pilot",
+      "reason": "Fair Source license — not MIT/Apache/BSD"
+    }
+  ]
+}

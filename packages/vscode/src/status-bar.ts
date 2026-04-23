@@ -22,6 +22,10 @@ export interface StatusBarState {
   activeTasks: number;
   /** Whether the status bar is in an error state. */
   hasError: boolean;
+  /** Codebase index state for secondary status display. */
+  indexState: "indexing" | "ready" | "none";
+  /** Number of indexed chunks when state is "ready". */
+  indexChunkCount: number;
 }
 
 /** Info payload for the updateStatusBarInfo() convenience method. */
@@ -70,6 +74,8 @@ export function createStatusBar(context: vscode.ExtensionContext): StatusBarStat
     contextPercent: 0,
     activeTasks: 0,
     hasError: false,
+    indexState: "none" as const,
+    indexChunkCount: 0,
   };
 
   item.command = "dantecode.openChat";
@@ -124,6 +130,20 @@ export function updateStatusBarWithCost(
  * state in a single call. Called after each model response and when background
  * tasks change.
  */
+/**
+ * Codebase Semantic Search: update the index state shown in the status bar tooltip.
+ * Called by extension.ts when CodebaseIndexManager emits a state change.
+ */
+export function setIndexState(
+  state: StatusBarState,
+  indexState: "indexing" | "ready" | "none",
+  chunkCount = 0,
+): void {
+  state.indexState = indexState;
+  state.indexChunkCount = chunkCount;
+  renderStatusBar(state);
+}
+
 export function updateStatusBarInfo(state: StatusBarState, info: StatusBarInfo): void {
   if (info.model !== undefined) {
     state.currentModel = info.model;
@@ -191,6 +211,13 @@ function renderStatusBar(state: StatusBarState): void {
   const tierLabel = state.modelTier === "capable" ? " [capable]" : "";
 
   item.text = `${gateIcon} ${formatStatusBarText(state)}${tierLabel}${sandboxLabel}${costLabel}`;
+  const indexLine =
+    state.indexState === "indexing"
+      ? "$(sync~spin) Indexing codebase..."
+      : state.indexState === "ready"
+        ? `$(database) Codebase: ${state.indexChunkCount.toLocaleString()} chunks`
+        : "";
+
   item.tooltip = [
     `Model: ${state.currentModel}`,
     `Tier: ${state.modelTier}`,
@@ -199,9 +226,10 @@ function renderStatusBar(state: StatusBarState): void {
     GATE_TOOLTIPS[gateStatus],
     `Session cost: ~$${state.sessionCostUsd.toFixed(4)}`,
     `Sandbox: ${sandboxEnabled ? "enabled" : "disabled"}`,
+    indexLine,
     "",
     "Click to open DanteCode sidebar",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   // Theme-aware colors based on health state
   item.backgroundColor = undefined;
@@ -221,5 +249,43 @@ function renderStatusBar(state: StatusBarState): void {
       // Use a subtle green foreground when healthy; no background override
       item.color = new vscode.ThemeColor("charts.green");
       break;
+  }
+}
+
+// ── Circuit Breaker Status Bar (dim 24) ──────────────────────────────────────
+
+let _circuitBreakerItem: vscode.StatusBarItem | undefined;
+
+/**
+ * Create a status bar indicator for the provider circuit breaker (dim 24).
+ * Shows $(check) when all circuits are closed and $(warning) when any are open.
+ */
+export function createCircuitBreakerBar(context: vscode.ExtensionContext): void {
+  _circuitBreakerItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    95,
+  );
+  _circuitBreakerItem.text = "$(check) Providers";
+  _circuitBreakerItem.tooltip = "Provider circuit breakers: all healthy";
+  _circuitBreakerItem.show();
+  context.subscriptions.push(_circuitBreakerItem);
+}
+
+/**
+ * Update the circuit breaker status bar indicator.
+ * @param isOpen - true when at least one provider circuit is open (degraded).
+ */
+export function updateCircuitBreakerBar(isOpen: boolean): void {
+  if (!_circuitBreakerItem) return;
+  if (isOpen) {
+    _circuitBreakerItem.text = "$(warning) Provider degraded";
+    _circuitBreakerItem.tooltip = "A provider circuit breaker is open — check provider health";
+    _circuitBreakerItem.backgroundColor = new vscode.ThemeColor(
+      "statusBarItem.warningBackground",
+    );
+  } else {
+    _circuitBreakerItem.text = "$(check) Providers";
+    _circuitBreakerItem.tooltip = "Provider circuit breakers: all healthy";
+    _circuitBreakerItem.backgroundColor = undefined;
   }
 }

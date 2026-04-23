@@ -333,12 +333,12 @@ describe("BrowserAgent", () => {
   });
 
   // ─── Graceful Fallback (no Playwright) ─────────────────────────────
+  // Uses _forceUnavailable option to simulate missing playwright package
+  // deterministically — no environment-specific skipping needed.
 
   describe("graceful fallback when playwright is not available", () => {
     it("returns error for all actions when playwright is not installed", async () => {
-      // Create a fresh agent without injecting a page — playwright won't be
-      // available in the test environment, so ensurePage() will fail.
-      const noPlaywrightAgent = new BrowserAgent();
+      const noPlaywrightAgent = new BrowserAgent({ _forceUnavailable: true });
 
       const actions: BrowserAction[] = [
         { type: "goto", url: "https://example.com" },
@@ -361,11 +361,11 @@ describe("BrowserAgent", () => {
     });
 
     it("caches the playwright-unavailable check and does not retry", async () => {
-      const noPlaywrightAgent = new BrowserAgent();
+      const noPlaywrightAgent = new BrowserAgent({ _forceUnavailable: true });
 
-      // First call — triggers dynamic import attempt
+      // First call — playwrightAvailable already false, fast-exits
       await noPlaywrightAgent.goto("https://example.com");
-      // Second call — should use cached result
+      // Second call — uses cached false state, no retry
       const result = await noPlaywrightAgent.goto("https://example.com");
 
       expect(result.success).toBe(false);

@@ -116,9 +116,38 @@ vi.mock("vscode", () => {
 
   const TreeItemCollapsibleState = { None: 0, Collapsed: 1, Expanded: 2 };
 
+  const OverviewRulerLane = { Left: 1, Center: 2, Right: 4, Full: 7 };
+
   const StatusBarAlignment = { Left: 1, Right: 2 };
   const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
   const ProgressLocation = { Notification: 15 };
+
+  const CodeActionKind = {
+    QuickFix: { value: "quickfix" },
+    RefactorRewrite: { value: "refactor.rewrite" },
+    Empty: { value: "" },
+  };
+
+  class CodeAction {
+    diagnostics?: unknown[];
+    command?: unknown;
+    isPreferred?: boolean;
+    edit?: unknown;
+    constructor(
+      public title: string,
+      public kind?: unknown,
+    ) {}
+  }
+
+  class CodeLens {
+    command?: unknown;
+    constructor(
+      public range: unknown,
+      command?: unknown,
+    ) {
+      this.command = command;
+    }
+  }
 
   const Uri = {
     parse: (s: string) => ({ toString: () => s, fsPath: s }),
@@ -138,9 +167,13 @@ vi.mock("vscode", () => {
     EventEmitter,
     TreeItem,
     TreeItemCollapsibleState,
+    OverviewRulerLane,
     StatusBarAlignment,
     ConfigurationTarget,
     ProgressLocation,
+    CodeActionKind,
+    CodeAction,
+    CodeLens,
     Uri,
     languages: {
       createDiagnosticCollection: vi.fn(() => ({
@@ -150,6 +183,9 @@ vi.mock("vscode", () => {
         dispose: mockCollectionDispose,
       })),
       registerInlineCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      registerCodeLensProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      registerCodeActionsProvider: vi.fn(() => ({ dispose: vi.fn() })),
+      getDiagnostics: vi.fn(() => []),
     },
     window: {
       createStatusBarItem: vi.fn(() => mockStatusBarItem),
@@ -157,6 +193,7 @@ vi.mock("vscode", () => {
       showWarningMessage: vi.fn(),
       showErrorMessage: vi.fn(),
       showQuickPick: vi.fn(),
+      showInputBox: vi.fn(),
       createOutputChannel: vi.fn(() => ({
         appendLine: vi.fn(),
         clear: vi.fn(),
@@ -166,7 +203,12 @@ vi.mock("vscode", () => {
       registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
       createTreeView: vi.fn(() => ({ dispose: vi.fn() })),
       activeTextEditor: undefined,
+      activeTerminal: undefined,
+      terminals: [],
       createTerminal: vi.fn(() => ({ sendText: vi.fn(), show: vi.fn() })),
+      createTextEditorDecorationType: vi.fn(() => ({ dispose: vi.fn() })),
+      withProgress: vi.fn(async (_opts: unknown, fn: () => Promise<unknown>) => fn()),
+      onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
     },
     workspace: {
       registerTextDocumentContentProvider: vi.fn(() => ({
@@ -177,6 +219,8 @@ vi.mock("vscode", () => {
         update: vi.fn(),
       })),
       onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
       workspaceFolders: [{ uri: { fsPath: "/test/project" } }],
       onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
       createFileSystemWatcher: vi.fn(() => ({
@@ -192,11 +236,25 @@ vi.mock("vscode", () => {
       registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
       executeCommand: vi.fn(),
     },
+    debug: {
+      onDidStartDebugSession: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidTerminateDebugSession: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidReceiveDebugSessionCustomEvent: vi.fn(() => ({ dispose: vi.fn() })),
+      activeDebugSession: undefined,
+      customRequest: vi.fn(),
+    },
   };
 });
 
 // Mock DanteCode packages
-vi.mock("@dantecode/core", () => ({
+vi.mock("@dantecode/core", async () => {
+  const runtime = await vi.importActual<object>("../../core/src/tool-runtime.ts");
+  const transcript = await vi.importActual<object>("../../core/src/transcript-compaction.ts");
+  const debugContext = await vi.importActual<object>("../../core/src/debug-context-manager.ts");
+  return {
+    ...runtime,
+    ...transcript,
+    ...debugContext,
   DEFAULT_MODEL_ID: "grok/grok-3",
   MODEL_CATALOG: [
     {
@@ -406,8 +464,94 @@ vi.mock("@dantecode/core", () => ({
   responseNeedsToolExecutionNudge: vi.fn((text: string) =>
     /\b(plan|will|executing plan|running:|created|updated|modified)\b/i.test(text),
   ),
+  getProviderPromptSupplement: vi.fn(() => "## Provider-Specific Rules\nExecute tools first."),
   resolvePreferredShell: vi.fn(() => "/bin/bash"),
-}));
+  CodeIndex: vi.fn().mockImplementation(() => ({
+    load: vi.fn().mockResolvedValue(false),
+    buildIndex: vi.fn().mockResolvedValue(0),
+    save: vi.fn().mockResolvedValue(undefined),
+    search: vi.fn().mockReturnValue([]),
+    incrementalUpdate: vi.fn().mockResolvedValue(0),
+    size: 0,
+    hasEmbeddings: false,
+  })),
+  createEmbeddingProvider: vi.fn().mockReturnValue(null),
+  CompletionTelemetryService: vi.fn().mockImplementation(() => ({
+    record: vi.fn(),
+    getStats: vi.fn().mockReturnValue({
+      totalViewed: 0, totalAccepted: 0, totalDismissed: 0, totalPartial: 0,
+      acceptanceRate: 0, avgElapsedMs: 0, byLanguage: {}, byModel: {}, windowHours: 24,
+    }),
+    getRecentEvents: vi.fn().mockReturnValue([]),
+    clearStats: vi.fn(),
+    generateCompletionId: vi.fn().mockReturnValue("cmp_aabbccdd1122"),
+  })),
+  globalCoreRegistry: {
+    register: vi.fn(),
+    unregister: vi.fn(),
+    getProvider: vi.fn(),
+    listProviders: vi.fn().mockReturnValue([]),
+    hasProvider: vi.fn().mockReturnValue(false),
+  },
+  ContextProviderRegistry: vi.fn().mockImplementation(() => ({
+    register: vi.fn(),
+    unregister: vi.fn(),
+    getProvider: vi.fn(),
+    listProviders: vi.fn().mockReturnValue([]),
+    hasProvider: vi.fn().mockReturnValue(false),
+  })),
+  ApprovalWorkflow: vi.fn().mockImplementation(() => ({
+    submit: vi.fn().mockReturnValue({ request: { id: "req-1" }, response: null }),
+    decide: vi.fn().mockReturnValue({ requestId: "req-1", status: "approved", decidedAt: new Date().toISOString() }),
+    registerUndo: vi.fn().mockReturnValue("undo-1"),
+    undoLast: vi.fn().mockResolvedValue(undefined),
+    getPrompt: vi.fn().mockReturnValue(undefined),
+  })),
+  captureGitContext: vi.fn().mockReturnValue({
+    repoRoot: "/test",
+    recentChanges: [],
+    workingTreeDiffs: [],
+    currentBranch: "main",
+    generatedAt: new Date().toISOString(),
+  }),
+  formatGitContextForPrompt: vi.fn().mockReturnValue(""),
+  classifyTaskComplexity: vi.fn().mockReturnValue("moderate"),
+  parsePlan: vi.fn().mockReturnValue({ id: "plan-1", goal: "test", steps: [], estimatedChangedFiles: 0, hasDestructiveSteps: false, createdAt: new Date().toISOString() }),
+  buildPlanModeSystemPrompt: vi.fn().mockReturnValue("## Plan Mode Active"),
+  buildPlanModeSystemPromptStructured: vi.fn().mockReturnValue("## Plan Mode Active — Structured Output"),
+  PlanActController: vi.fn().mockImplementation(() => ({
+    reset: vi.fn(),
+    setPlan: vi.fn(),
+    requiresApproval: vi.fn().mockReturnValue(false),
+    canExecute: vi.fn().mockReturnValue(true),
+    formatPlan: vi.fn().mockReturnValue(""),
+    processApproval: vi.fn().mockReturnValue(true),
+  })),
+  globalMcpRegistry: { size: 0, formatManifestForPrompt: vi.fn().mockReturnValue("") },
+  ProjectKnowledgeStore: vi.fn().mockImplementation(() => ({ formatForPrompt: vi.fn().mockReturnValue(""), size: 0 })),
+  detectAvailableProvidersAsync: vi.fn().mockResolvedValue(new Set(["anthropic", "ollama"])),
+  routeByComplexity: vi.fn().mockReturnValue({ provider: "anthropic", modelId: "claude-sonnet-4-6", complexity: "moderate", rationale: "mock" }),
+  WorkspaceLspAggregator: vi.fn().mockImplementation(() => ({
+    indexFile: vi.fn(),
+    buildContextBundle: vi.fn().mockReturnValue({ focusFile: "", reachableDefinitions: [], hovers: [], diagnostics: [], importEdges: [], totalSymbols: 0 }),
+    formatBundleForPrompt: vi.fn().mockReturnValue(""),
+  })),
+  parseImports: vi.fn().mockReturnValue([]),
+  EditSuggestionQueue: vi.fn().mockImplementation(() => ({
+    enqueue: vi.fn(),
+    dequeue: vi.fn().mockReturnValue(null),
+    size: 0,
+    clear: vi.fn(),
+  })),
+  detectBrowserCapabilities: vi.fn().mockResolvedValue({
+    playwright: { available: false },
+    cdp: { available: false, port: 9222 },
+    recommendedMode: "none",
+    installInstructions: "install playwright",
+  }),
+  setEditQualityOutputHook: vi.fn(),
+  };
+});
 
 vi.mock("@dantecode/danteforge", () => ({
   runLocalPDSEScorer: vi.fn().mockReturnValue({
@@ -1020,6 +1164,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "anthropic/claude-sonnet-4", "passed");
@@ -1042,6 +1188,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "passed");
@@ -1060,6 +1208,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -1078,6 +1228,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "pending");
@@ -1096,6 +1248,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "failed");
@@ -1117,6 +1271,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "grok/grok-3", "none");
@@ -1137,6 +1293,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateSandboxStatus(state, true);
@@ -1156,6 +1314,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateSandboxStatus(state, false);
@@ -1175,6 +1335,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "openai/gpt-4o", "passed");
@@ -1195,6 +1357,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "google/gemini-2.5-pro", "none");
@@ -1214,6 +1378,8 @@ describe("VS Code Extension", () => {
         contextPercent: 0,
         activeTasks: 0,
         hasError: false,
+        indexState: "none" as const,
+        indexChunkCount: 0,
       };
 
       updateStatusBar(state, "llama3", "none");
@@ -1322,6 +1488,60 @@ describe("VS Code Extension", () => {
       await p.handleNewChat();
       expect(p.activeSkill).toBeNull();
     });
+
+    it("allows a one-time edit action when edit permission is set to ask", async () => {
+      const uri = vscode.Uri.file("/test");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+      const promptPermission = (
+        provider as unknown as {
+          agentConfig: { permissions: { edit: "allow" | "ask" | "deny" } };
+          resolveToolPermissionBlock: (
+            toolName: string,
+            permission: "edit" | "bash" | "tools",
+          ) => Promise<string | null>;
+        }
+      );
+
+      promptPermission.agentConfig.permissions.edit = "ask";
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Allow once" as never);
+
+      await expect(promptPermission.resolveToolPermissionBlock("Edit", "edit")).resolves.toBeNull();
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        "DanteCode wants to modify files via Edit. Allow this action once?",
+        { modal: true },
+        "Allow once",
+        "Block",
+      );
+    });
+
+    it("blocks a one-time bash action when ask permission is declined", async () => {
+      const uri = vscode.Uri.file("/test");
+      const provider = new ChatSidebarProvider(
+        uri as unknown as vscode.Uri,
+        mockSecrets,
+        mockGlobalState,
+      );
+      const promptPermission = (
+        provider as unknown as {
+          agentConfig: { permissions: { bash: "allow" | "ask" | "deny" } };
+          resolveToolPermissionBlock: (
+            toolName: string,
+            permission: "edit" | "bash" | "tools",
+          ) => Promise<string | null>;
+        }
+      );
+
+      promptPermission.agentConfig.permissions.bash = "ask";
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValue("Block" as never);
+
+      await expect(promptPermission.resolveToolPermissionBlock("Bash", "bash")).resolves.toBe(
+        'Tool "Bash" blocked: Shell command execution was not approved.',
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1364,6 +1584,7 @@ describe("VS Code Extension", () => {
         subscriptions: [] as { dispose: () => void }[],
         extensionUri: vscode.Uri.file("/test"),
         extensionPath: "/test",
+        globalStorageUri: vscode.Uri.file("/test/storage"),
         secrets: {
           get: vi.fn().mockResolvedValue(undefined),
           store: vi.fn().mockResolvedValue(undefined),
@@ -1375,11 +1596,32 @@ describe("VS Code Extension", () => {
       } as unknown as vscode.ExtensionContext;
     }
 
-    it("activate registers all 19 commands", () => {
+    it("activate registers all commands including new IDE integration commands", () => {
       const context = createMockContext();
       activate(context);
 
-      expect(vscode.commands.registerCommand).toHaveBeenCalledTimes(19);
+      const registeredCommands = vi
+        .mocked(vscode.commands.registerCommand)
+        .mock.calls.map(([commandId]) => commandId);
+
+      expect(registeredCommands.length).toBeGreaterThanOrEqual(32);
+      expect(registeredCommands).toEqual(expect.arrayContaining([
+        "dantecode.openChat",
+        "dantecode.selfUpdate",
+        "dantecode.fixDiagnostic",
+        "dantecode.explainDiagnostic",
+        "dantecode.slashCommandTest",
+        "dantecode.rebuildIndex",
+        "dantecode.inlineEdit",
+        "dantecode.acceptInlineEdit",
+        "dantecode.rejectInlineEdit",
+        "dantecode.partialAcceptInlineEdit",
+        "dantecode.acceptDiffBlock",
+        "dantecode.rejectDiffBlock",
+        "dantecode._internalTrackAccept",
+        "dantecode.completionStats",
+        "dantecode.clearCompletionStats",
+      ]));
     });
 
     it("activate registers webview view providers", () => {
@@ -2038,6 +2280,65 @@ describe("executeTool integration", () => {
     expect(result.content).toContain("Successfully edited");
     expect(generateColoredHunk).toHaveBeenCalledWith(oldContent, newContent, "src/app.ts");
     expect(onDiffHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves CRLF files when Edit receives LF payloads", async () => {
+    const context = makeContext({
+      readTracker: new Map(),
+      editAttempts: new Map(),
+    });
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\r\n");
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await executeTool(
+      "Edit",
+      {
+        file_path: "src/app.ts",
+        old_string: "const value = 1;\n",
+        new_string: "const value = 2;\n",
+      },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("normalized line endings");
+    expect(mockWriteFile.mock.calls[0]?.[1]).toBe("const value = 2;\r\n");
+  });
+
+  it("blocks Edit when the file changed after the last full Read", async () => {
+    const context = makeContext({
+      readTracker: new Map(),
+      editAttempts: new Map(),
+    });
+
+    mockReadFile.mockResolvedValueOnce("const value = 1;\n");
+    await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+
+    const trackedSnapshot = context.readTracker?.values().next().value;
+    expect(trackedSnapshot).toBeDefined();
+    if (trackedSnapshot) {
+      trackedSnapshot.hash = "outdated";
+    }
+
+    mockReadFile.mockResolvedValueOnce("const value = 2;\n");
+    const result = await executeTool(
+      "Edit",
+      {
+        file_path: "src/app.ts",
+        old_string: "const value = 2;\n",
+        new_string: "const value = 3;\n",
+      },
+      "/proj",
+      context,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("changed since the last full Read");
   });
 
   it("works without context (backward compatible)", async () => {

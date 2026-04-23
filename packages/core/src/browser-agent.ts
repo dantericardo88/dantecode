@@ -26,6 +26,8 @@ export interface BrowserAgentOptions {
   headless?: boolean;
   timeout?: number;
   viewport?: { width: number; height: number };
+  /** Testing hook: forces playwrightAvailable=false to simulate missing playwright package. */
+  _forceUnavailable?: boolean;
 }
 
 // ─── Typed Internal Interfaces (avoid eslint `Function` type) ────────────────
@@ -85,7 +87,7 @@ interface PlaywrightModule {
 const PLAYWRIGHT_NOT_INSTALLED =
   "Playwright is not installed. Run `npm install playwright` to enable browser automation.";
 
-const DEFAULT_OPTIONS: Required<BrowserAgentOptions> = {
+const DEFAULT_OPTIONS: Required<Omit<BrowserAgentOptions, "_forceUnavailable">> = {
   headless: true,
   timeout: 30_000,
   viewport: { width: 1280, height: 720 },
@@ -176,7 +178,7 @@ export class BrowserAgent {
   private context: PlaywrightBrowserContext | null = null;
   private browser: PlaywrightBrowser | null = null;
   private playwrightAvailable: boolean | null = null;
-  readonly options: Required<BrowserAgentOptions>;
+  readonly options: Required<Omit<BrowserAgentOptions, "_forceUnavailable">>;
 
   constructor(options?: BrowserAgentOptions) {
     this.options = {
@@ -186,6 +188,9 @@ export class BrowserAgent {
         ? { width: options.viewport.width, height: options.viewport.height }
         : { ...DEFAULT_OPTIONS.viewport },
     };
+    if (options?._forceUnavailable) {
+      this.playwrightAvailable = false;
+    }
   }
 
   // ─── Execute Dispatcher ──────────────────────────────────────────────
@@ -360,6 +365,44 @@ export class BrowserAgent {
     }
   }
 
+  /**
+   * Convenience wrapper — take a screenshot and return the base64 PNG string.
+   * Returns an empty string when Playwright is unavailable.
+   */
+  async screenshotBase64(): Promise<string> {
+    const result = await this.screenshot();
+    return result.success ? (result.data ?? "") : "";
+  }
+
+  /**
+   * Capture a DOM snapshot of the current page.
+   * Returns null-like defaults when Playwright is unavailable or the page has no content.
+   */
+  async captureDomSnapshot(): Promise<{
+    capturedAt: string;
+    url: string;
+    title: string;
+    bodyText: string;
+    interactiveElements: never[];
+    metaTags: Record<string, string>;
+  }> {
+    const page = await this.ensurePage();
+    const capturedAt = new Date().toISOString();
+    if (!page) {
+      return { capturedAt, url: "", title: "", bodyText: "", interactiveElements: [], metaTags: {} };
+    }
+    try {
+      const [url, title, bodyText] = await Promise.all([
+        Promise.resolve(page.url()),
+        page.evaluate("document.title") as Promise<string>,
+        page.evaluate("document.body?.innerText?.slice(0, 2000) ?? ''") as Promise<string>,
+      ]);
+      return { capturedAt, url, title, bodyText, interactiveElements: [], metaTags: {} };
+    } catch {
+      return { capturedAt, url: page.url(), title: "", bodyText: "", interactiveElements: [], metaTags: {} };
+    }
+  }
+
   // ─── Lifecycle ───────────────────────────────────────────────────────
 
   /**
@@ -445,6 +488,163 @@ export class BrowserAgent {
       return null;
     }
   }
+}
+
+// ─── Browser Loop (OpenHands BrowsingAgent observe→act harvest) ──────────────
+
+export interface BrowserLoopStep {
+  action: BrowserAction;
+  result: BrowserActionResult;
+  screenshotB64?: string;
+}
+
+/**
+ * Run a browser task loop: given an objective and max steps,
+ * execute browser actions until the objective is met or steps exhausted.
+ * Each step: take screenshot → send to LLM → get action → execute → repeat.
+ * Harvested from OpenHands BrowsingAgent observe→act pattern.
+ */
+export async function runBrowserLoop(
+  objective: string,
+  llmCall: (prompt: string, imageB64?: string) => Promise<string>,
+  options: { maxSteps?: number; startUrl?: string } = {},
+): Promise<{ success: boolean; steps: BrowserLoopStep[]; finalUrl?: string }> {
+  const maxSteps = options.maxSteps ?? 10;
+  const agent = new BrowserAgent({ headless: true });
+  const steps: BrowserLoopStep[] = [];
+
+  if (options.startUrl) {
+    await agent.execute({ type: "goto", url: options.startUrl });
+  }
+
+  for (let i = 0; i < maxSteps; i++) {
+    const ssResult = await agent.execute({ type: "screenshot" });
+    const screenshotB64 = ssResult.data;
+
+    const prompt =
+      `Objective: ${objective}\n\nStep ${i + 1}/${maxSteps}. Previous steps: ${steps.length}.\n` +
+      `Look at the screenshot and decide the next browser action.\n` +
+      `Respond with ONE of these formats:\n` +
+      `- goto <url>\n- click <selector>\n- type <selector> <text>\n- scroll <direction>\n- done\n\nNext action:`;
+    const response = await llmCall(prompt, screenshotB64);
+    const action = _parseBrowserAction(response.trim());
+    if (!action || (action as { type: string }).type === "done") break;
+
+    const result = await agent.execute(action);
+    steps.push({ action, result, screenshotB64 });
+
+    if (!result.success) {
+      const prev = steps[steps.length - 2];
+      if (prev && !prev.result.success) break;
+    }
+  }
+
+  await agent.close();
+  const lastStep = steps[steps.length - 1];
+  return {
+    success: steps.length > 0 && (lastStep?.result.success ?? false),
+    steps,
+    finalUrl: (agent as unknown as { currentUrl?: string }).currentUrl,
+  };
+}
+
+function _parseBrowserAction(text: string): BrowserAction | null {
+  if (text === "done") return null;
+  const gotoMatch = text.match(/^goto\s+(\S+)/i);
+  if (gotoMatch) return { type: "goto", url: gotoMatch[1]! };
+  const clickMatch = text.match(/^click\s+(.+)/i);
+  if (clickMatch) return { type: "click", selector: clickMatch[1]!.trim() };
+  const typeMatch = text.match(/^type\s+(\S+)\s+(.+)/i);
+  if (typeMatch) return { type: "type", selector: typeMatch[1]!, text: typeMatch[2]! };
+  const scrollMatch = text.match(/^scroll\s*(up|down)?/i);
+  if (scrollMatch) return { type: "scroll", direction: (scrollMatch[1]?.toLowerCase() as "up" | "down") ?? "down" };
+  if (/^screenshot/i.test(text)) return { type: "screenshot" };
+  return null;
+}
+
+// ─── Browser Capability Detection (Dim 17) ───────────────────────────────────
+
+export interface PlaywrightCapability {
+  available: boolean;
+  version?: string;
+}
+
+export interface CdpCapability {
+  available: boolean;
+  port: number;
+  browserVersion?: string;
+  webSocketDebuggerUrl?: string;
+}
+
+export interface BrowserCapabilities {
+  playwright: PlaywrightCapability;
+  cdp: CdpCapability;
+  recommendedMode: "playwright" | "cdp" | "none";
+  installInstructions?: string;
+}
+
+export async function detectPlaywright(force?: boolean): Promise<PlaywrightCapability> {
+  if (force !== undefined) return { available: force };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    await (Function("return import('playwright')")() as Promise<unknown>);
+    return { available: true };
+  } catch {
+    return { available: false };
+  }
+}
+
+export async function detectChromeCdp(port: number, force?: CdpCapability): Promise<CdpCapability> {
+  if (force !== undefined) return force;
+  try {
+    const { request } = await import("node:http");
+    const result = await new Promise<CdpCapability>((resolve) => {
+      const req = request({ hostname: "localhost", port, path: "/json/version", timeout: 1000 }, (res) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body) as { Browser?: string; webSocketDebuggerUrl?: string };
+            resolve({ available: true, port, browserVersion: data.Browser, webSocketDebuggerUrl: data.webSocketDebuggerUrl });
+          } catch {
+            resolve({ available: false, port });
+          }
+        });
+      });
+      req.on("error", () => resolve({ available: false, port }));
+      req.on("timeout", () => { req.destroy(); resolve({ available: false, port }); });
+      req.end();
+    });
+    return result;
+  } catch {
+    return { available: false, port };
+  }
+}
+
+export async function detectBrowserCapabilities(
+  cdpPort: number = 9222,
+  force?: { playwright: boolean; cdp: CdpCapability },
+): Promise<BrowserCapabilities> {
+  const pw = force
+    ? await detectPlaywright(force.playwright)
+    : await detectPlaywright();
+  const cdp = force ? force.cdp : await detectChromeCdp(cdpPort);
+
+  let recommendedMode: "playwright" | "cdp" | "none" = "none";
+  let installInstructions: string | undefined;
+
+  if (pw.available) {
+    recommendedMode = "playwright";
+  } else if (cdp.available) {
+    recommendedMode = "cdp";
+  } else {
+    installInstructions =
+      `No browser driver found. Options:\n` +
+      `  1. npm install playwright && npx playwright install chromium\n` +
+      `  2. Start Chrome with: google-chrome --remote-debugging-port=${cdpPort}`;
+  }
+
+  return { playwright: pw, cdp, recommendedMode, installInstructions };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

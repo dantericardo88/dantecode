@@ -57,8 +57,11 @@ describe("CLI Integration", () => {
       const id = runner.enqueue("fix the login bug");
       expect(id).toBeTruthy();
 
-      // Wait for completion
-      await new Promise((r) => setTimeout(r, 100));
+      // Poll for completion — fixed 100ms is flaky under turbo load
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && runner.getTask(id)?.status === "running") {
+        await new Promise((r) => setTimeout(r, 20));
+      }
 
       const task = runner.getTask(id);
       expect(task).not.toBeNull();
@@ -86,7 +89,14 @@ describe("CLI Integration", () => {
 
       runner.enqueue("pass");
       runner.enqueue("fail");
-      await new Promise((r) => setTimeout(r, 100));
+      // Poll up to 2s for both tasks to finish (avoid flakiness under high load)
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const tasks = runner.listTasks();
+        const allDone = tasks.every((t) => t.status === "completed" || t.status === "failed");
+        if (allDone && tasks.length === 2) break;
+        await new Promise((r) => setTimeout(r, 20));
+      }
 
       expect(runner.listTasks()).toHaveLength(2);
       const cleared = runner.clearFinished();
@@ -121,6 +131,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        mcpClient: null,
       };
 
       const output = await routeSlashCommand("/bg --docker fix the flaky CI task", replState);
@@ -167,6 +178,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        mcpClient: null,
         _bgRunner: {
           hasWorkFn: () => true,
           resume,
@@ -216,6 +228,7 @@ describe("CLI Integration", () => {
         sandboxBridge: null,
         activeSkill: null,
         waveState: null,
+        mcpClient: null,
       };
 
       const output = await routeSlashCommand("/autoforge --self-improve", replState);

@@ -1,0 +1,4 @@
+{"sessionId":"sess-az-001","injectedFactCount":3,"influencedFactCount":2,"influenceRate":0.667,"influencedSnippets":["Always use error boundaries around async tool calls","Prefer targeted minimal patches over refactors"],"timestamp":"2026-04-21T00:00:00.000Z"}
+{"sessionId":"sess-az-002","injectedFactCount":2,"influencedFactCount":2,"influenceRate":1.0,"influencedSnippets":["Use guard clauses to handle null early","Avoid deeply nested conditionals"],"timestamp":"2026-04-21T01:00:00.000Z"}
+{"sessionId":"sess-az-003","injectedFactCount":4,"influencedFactCount":0,"influenceRate":0.0,"influencedSnippets":[],"timestamp":"2026-04-21T02:00:00.000Z"}
+{"sessionId":"sess-az-004","injectedFactCount":5,"influencedFactCount":3,"influenceRate":0.6,"influencedSnippets":["Check for duplicate key handling","Use early return pattern","Validate inputs at boundaries"],"timestamp":"2026-04-21T03:00:00.000Z"}

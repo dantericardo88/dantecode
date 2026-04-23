@@ -6,7 +6,7 @@
 
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { initializeState, stateYamlExists } from "@dantecode/core";
+import { initializeState, stateYamlExists, checkRepoReadiness, recordOnboardingStep } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -78,6 +78,10 @@ This project uses:
  */
 export async function runInitCommand(projectRoot: string, force: boolean = false): Promise<void> {
   process.stdout.write(`\n${BOLD}Initializing DanteCode project...${RESET}\n\n`);
+
+  // Sprint Dim35: record init start for onboarding funnel tracking
+  const sessionId = `init-${Date.now()}`;
+  recordOnboardingStep({ sessionId, step: "init-started" }, projectRoot);
 
   const dantecodeDir = join(projectRoot, ".dantecode");
   const created: string[] = [];
@@ -177,6 +181,17 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
       process.stdout.write(`  ${DIM}-${RESET} ${item}\n`);
     }
   }
+
+  // Sprint Dim35: repo readiness check — inspired by Continue's context-gathering pattern
+  const readiness = checkRepoReadiness(projectRoot);
+  process.stdout.write(`\n${BOLD}Repo readiness:${RESET}\n`);
+  process.stdout.write(`  ${readiness.hasPackageJson ? GREEN + "✓" : DIM + "—"}${RESET} Node.js project (package.json)\n`);
+  process.stdout.write(`  ${readiness.hasGit ? GREEN + "✓" : DIM + "—"}${RESET} Git repository\n`);
+  process.stdout.write(`  ${readiness.hasDevScript ? GREEN + "✓" : DIM + "—"}${RESET} Dev script${readiness.devCommand ? ` (${readiness.devCommand})` : ""}\n`);
+  if (readiness.detectedFramework) {
+    process.stdout.write(`  ${GREEN}✓${RESET} Framework: ${readiness.detectedFramework}\n`);
+  }
+  recordOnboardingStep({ sessionId, step: "repo-readiness-checked", framework: readiness.detectedFramework ?? undefined }, projectRoot);
 
   process.stdout.write(`\n${GREEN}${BOLD}DanteCode project initialized!${RESET}\n`);
   process.stdout.write(`${DIM}Run 'dantecode' to start the interactive REPL.${RESET}\n\n`);

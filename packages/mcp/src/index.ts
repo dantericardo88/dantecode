@@ -33,3 +33,7 @@ export {
 export type { ToolHandler } from "./server.js";
 
 export { createDefaultToolHandlers } from "./default-tool-handlers.js";
+
+// ─── Integration Testing ──────────────────────────────────────────────────────
+
+export { testMCPIntegration, DanteCodeMCPServer } from "./integration.js";

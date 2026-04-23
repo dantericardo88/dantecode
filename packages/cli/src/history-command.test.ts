@@ -183,6 +183,7 @@ function makeReplState(overrides?: Record<string, unknown>) {
     sandboxBridge: null,
     activeSkill: null,
     waveState: null,
+    mcpClient: null,
     ...overrides,
   };
 }

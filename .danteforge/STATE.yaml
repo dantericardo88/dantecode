@@ -1,0 +1,116 @@
+project: dantecode
+lastHandoff: initialized
+workflowStage: verify
+currentPhase: 0
+tasks: {}
+auditLog:
+  - "2026-04-14T13:31:35.712Z | mcp: score_all"
+  - "2026-04-14T14:31:35.608Z | verify: 4 passed, 0 warnings, 9 failures"
+  - "2026-04-14T14:31:35.709Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.720Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.730Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.740Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.751Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.760Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.768Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.776Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.785Z | lessons: added [Workflow] rule from verify
+    failure"
+  - "2026-04-14T14:31:35.797Z | mcp: verify: executed via MCP"
+  - "2026-04-14T14:54:14.875Z | mcp: score_all"
+  - "2026-04-14T14:59:14.724Z | mcp: lessons read"
+  - "2026-04-14T15:09:06.987Z | mcp: score_all"
+  - "2026-04-14T15:14:48.223Z | mcp: score_all"
+  - "2026-04-14T15:16:26.074Z | mcp: score_all"
+  - "2026-04-14T19:04:57.553Z | mcp: score_all"
+  - "2026-04-14T20:02:31.647Z | mcp: score_all"
+  - "2026-04-22T18:53:37.593Z | llm: ollama/qwen2.5-coder:latest (769 chars
+    returned)"
+  - "2026-04-22T18:54:43.222Z | llm: ollama/qwen2.5-coder:latest (580 chars
+    returned)"
+  - "2026-04-22T18:56:04.693Z | llm: ollama/qwen2.5-coder:latest (765 chars
+    returned)"
+  - "2026-04-22T18:56:58.181Z | llm: ollama/qwen2.5-coder:latest (403 chars
+    returned)"
+  - "2026-04-22T18:57:59.072Z | llm: ollama/qwen2.5-coder:latest (470 chars
+    returned)"
+  - "2026-04-22T18:59:05.324Z | llm: ollama/qwen2.5-coder:latest (523 chars
+    returned)"
+  - "2026-04-22T18:59:59.202Z | llm: ollama/qwen2.5-coder:latest (283 chars
+    returned)"
+  - "2026-04-22T19:01:13.739Z | llm: ollama/qwen2.5-coder:latest (799 chars
+    returned)"
+  - "2026-04-22T19:02:25.575Z | llm: ollama/qwen2.5-coder:latest (812 chars
+    returned)"
+  - "2026-04-22T19:04:07.655Z | llm: ollama/qwen2.5-coder:latest (1107 chars
+    returned)"
+  - "2026-04-22T19:05:27.055Z | llm: ollama/qwen2.5-coder:latest (612 chars
+    returned)"
+  - "2026-04-22T19:06:45.298Z | llm: ollama/qwen2.5-coder:latest (294 chars
+    returned)"
+  - "2026-04-22T19:08:28.014Z | llm: ollama/qwen2.5-coder:latest (668 chars
+    returned)"
+  - "2026-04-22T19:10:29.919Z | llm: ollama/qwen2.5-coder:latest (919 chars
+    returned)"
+  - "2026-04-22T19:12:26.641Z | llm: ollama/qwen2.5-coder:latest (717 chars
+    returned)"
+  - "2026-04-22T19:14:27.766Z | llm: ollama/qwen2.5-coder:latest (783 chars
+    returned)"
+  - "2026-04-22T19:16:12.500Z | llm: ollama/qwen2.5-coder:latest (259 chars
+    returned)"
+  - "2026-04-22T19:18:48.789Z | llm: ollama/qwen2.5-coder:latest (1011 chars
+    returned)"
+  - "2026-04-22T19:20:44.959Z | llm: ollama/qwen2.5-coder:latest (253 chars
+    returned)"
+  - "2026-04-22T19:41:50.271Z | llm: ollama/qwen2.5-coder:latest (608 chars
+    returned)"
+  - "2026-04-22T19:44:13.586Z | llm: ollama/qwen2.5-coder:latest (306 chars
+    returned)"
+  - "2026-04-22T19:47:04.111Z | llm: ollama/qwen2.5-coder:latest (714 chars
+    returned)"
+  - "2026-04-22T21:56:11.973Z | autoresearch: complete — goal: improve FIM ghost
+    text quality and semantic search relevance, metric: FIM acceptance rate and
+    context chunk relevance score, experiments: 22, kept: 0, improvement: 0.00%"
+  - "2026-04-22T22:00:13.256Z | llm: ollama/qwen2.5-coder:latest (659 chars
+    returned)"
+  - "2026-04-22T22:02:19.400Z | llm: ollama/qwen2.5-coder:latest (780 chars
+    returned)"
+  - "2026-04-22T22:04:54.556Z | llm: ollama/qwen2.5-coder:latest (1285 chars
+    returned)"
+  - "2026-04-22T22:07:22.501Z | llm: ollama/qwen2.5-coder:latest (970 chars
+    returned)"
+  - "2026-04-22T22:13:07.638Z | llm: ollama/qwen2.5-coder:latest (1165 chars
+    returned)"
+  - "2026-04-22T22:16:08.601Z | llm: ollama/qwen2.5-coder:latest (1024 chars
+    returned)"
+  - "2026-04-22T22:26:34.429Z | llm: ollama/qwen2.5-coder:latest (1454 chars
+    returned)"
+  - "2026-04-22T22:26:39.539Z | autoresearch: complete — goal: improve task
+    difficulty classification and error recovery for hard-task autonomy, metric:
+    task difficulty accuracy, error recovery specificity, autonomy signal
+    quality, experiments: 6, kept: 0, improvement: 0.00%"
+profile: balanced
+constitution: CONSTITUTION.md
+enforcementMode: strict
+projectType: unknown
+sessionBaselineScore: 6.6
+sessionBaselineTimestamp: 2026-04-23T14:55:35.701Z
+scoreHistory:
+  - timestamp: 2026-04-23T14:55:36.028Z
+    displayScore: 6.6
+    gitSha: 17f7807
+selfEditPolicy: deny
+lastVerifyStatus: fail
+lastVerifyReceiptPath: c:\Projects\DanteCode\.danteforge\evidence\verify\latest.json
+maxBudgetUsd: 10
+routingAggressiveness: balanced
+skillCount: 0
+hasPluginManifest: false

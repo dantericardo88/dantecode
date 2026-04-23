@@ -242,26 +242,31 @@ describe("inline completion helpers", () => {
     expect(prompt.maxTokens).toBe(256);
   });
 
-  it("uses an 8000-char prefix window for multiline completions", () => {
+  it("prunes prefix when context window is tight (multiline)", () => {
+    // contextWindow=3712 → totalBudget=3000 → prefixChars=8400 → 9001-char input is pruned
     const longPrefix = "a".repeat(9000);
     const prompt = buildFIMPrompt(
-      { prefix: longPrefix + "{", suffix: "\n}\n", language: "typescript", filePath: "f.ts" },
+      { prefix: longPrefix + "{", suffix: "\n}\n", language: "typescript", filePath: "f.ts", contextWindow: 3712 },
       true,
     );
     const prefixInPrompt =
       prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
-    expect(prefixInPrompt.length).toBe(8000);
+    // With the 8400-char budget the 9001-char input is pruned; must be strictly shorter
+    expect(prefixInPrompt.length).toBeLessThan(9001);
+    expect(prefixInPrompt.length).toBeGreaterThanOrEqual(500); // always ≥ MIN_PREFIX_CHARS
   });
 
-  it("uses a 5000-char prefix window for single-line completions", () => {
+  it("prunes prefix when context window is tight (single-line)", () => {
+    // contextWindow=2300 → totalBudget=1844 → prefixChars=5162 → 6000-char input is pruned
     const longPrefix = "a".repeat(6000);
     const prompt = buildFIMPrompt(
-      { prefix: longPrefix, suffix: "", language: "typescript", filePath: "f.ts" },
+      { prefix: longPrefix, suffix: "", language: "typescript", filePath: "f.ts", contextWindow: 2300 },
       false,
     );
     const prefixInPrompt =
       prompt.userPrompt.split("<|fim_prefix|>")[1]?.split("<|fim_suffix|>")[0] ?? "";
-    expect(prefixInPrompt.length).toBe(5000);
+    expect(prefixInPrompt.length).toBeLessThan(6000);
+    expect(prefixInPrompt.length).toBeGreaterThanOrEqual(500);
   });
 
   it("injects cross-file context into system prompt when provided", () => {
@@ -449,9 +454,8 @@ describe("DanteCodeCompletionProvider v2", () => {
     expect(routerMocks.mockGenerate).not.toHaveBeenCalled();
   });
 
-  it("falls back to generate() when streaming fails", async () => {
+  it("returns empty when streaming fails (no generate() fallback in FIM pipeline)", async () => {
     routerMocks.mockStream.mockRejectedValue(new Error("streaming not supported"));
-    routerMocks.mockGenerate.mockResolvedValue("fallback result;");
 
     const provider = new DanteCodeCompletionProvider();
     const document = createDocument("const answer = ", "");
@@ -468,8 +472,8 @@ describe("DanteCodeCompletionProvider v2", () => {
     const items = await pending;
 
     expect(routerMocks.mockStream).toHaveBeenCalled();
-    expect(routerMocks.mockGenerate).toHaveBeenCalled();
-    expect(items).toHaveLength(1);
+    // FIM pipeline uses streaming only; on stream failure returns empty (no generate() fallback)
+    expect(items).toHaveLength(0);
   });
 
   it("truncates single-line streaming at the first newline", async () => {
@@ -718,12 +722,14 @@ describe("DanteCodeCompletionProvider v2", () => {
     expect(routerMocks.mockStream).toHaveBeenCalled();
   });
 
-  it("uses 150-entry cache with 90s TTL", async () => {
+  it("evicts oldest entry after cache capacity exceeded (FIFO + PrefixTreeCache)", async () => {
+    // Provider has FIFO cache (150 entries) and PrefixTreeCache (300 entries).
+    // We need 301 unique entries to evict from both caches, ensuring a model call on re-query.
     const provider = new DanteCodeCompletionProvider();
     const token = createMockToken();
 
-    for (let i = 0; i < 151; i++) {
-      const document = createDocument(`line${i}\nconst x${i} = `, "");
+    for (let i = 0; i < 302; i++) {
+      const document = createDocument(`unique_prefix_${i}_zzz\nconst x${i} = `, "");
       const pending = provider.provideInlineCompletionItems(
         document as never,
         new vscodeMocks.Position(1, 12) as never,
@@ -735,7 +741,8 @@ describe("DanteCodeCompletionProvider v2", () => {
     }
 
     routerMocks.mockStream.mockClear();
-    const doc0 = createDocument("line0\nconst x0 = ", "");
+    // Entry 0 has been evicted from both FIFO (150) and PrefixTreeCache (300)
+    const doc0 = createDocument("unique_prefix_0_zzz\nconst x0 = ", "");
     const pending = provider.provideInlineCompletionItems(
       doc0 as never,
       new vscodeMocks.Position(1, 12) as never,
@@ -1172,5 +1179,150 @@ describe("DanteCodeCompletionProvider v2", () => {
     expect(items).toHaveLength(1);
     const insertText = (items[0] as { insertText: string }).insertText;
     expect(insertText).toContain("below quality threshold");
+  });
+});
+
+// ── Phase 3-6: New tests for v3 features ──────────────────────────────────────
+
+import {
+  computeContextBudget,
+  pruneFromTop,
+  pruneFromBottom,
+  fetchWithFallback,
+} from "./inline-completion.js";
+import { PrefixTreeCache } from "./prefix-tree-cache.js";
+
+describe("computeContextBudget", () => {
+  it("128k context, 512 maxTokens → correct prefix/suffix token split", () => {
+    const { prefixTokens, suffixTokens } = computeContextBudget(128_000, 512);
+    // FimContextBudget: available = 128000 - 512 - 50 = 127438
+    // prefix = floor(127438 * 0.60) = 76462
+    expect(prefixTokens).toBe(76_462);
+    // suffix = floor(127438 * 0.15) = 19115
+    expect(suffixTokens).toBe(19_115);
+  });
+
+  it("16k context, 256 maxTokens → correct split", () => {
+    const { prefixTokens, suffixTokens } = computeContextBudget(16_384, 256);
+    // FimContextBudget: available = 16384 - 256 - 50 = 16078
+    expect(prefixTokens).toBe(Math.floor(16_078 * 0.60));
+    expect(suffixTokens).toBe(Math.floor(16_078 * 0.15));
+  });
+
+  it("prefixChars enforces minimum 500 chars even for tiny context", () => {
+    const { prefixChars } = computeContextBudget(1000, 900);
+    // FimContextBudget: available = max(0, 1000-900-50) = 50 → prefix = 30 → chars = 120 < 500
+    expect(prefixChars).toBeGreaterThanOrEqual(500);
+  });
+
+  it("suffixChars is suffixTokens * 4 (CHARS_PER_TOKEN)", () => {
+    const { suffixTokens, suffixChars } = computeContextBudget(128_000, 512);
+    expect(suffixChars).toBe(suffixTokens * 4);
+  });
+});
+
+describe("pruneFromTop", () => {
+  it("short text is returned unchanged", () => {
+    expect(pruneFromTop("hello", 100)).toBe("hello");
+  });
+
+  it("drops from the TOP (oldest lines), preserving end", () => {
+    const text = "AAAAAA\nBBBBBB\nCCCCCC";
+    // maxChars = 7 → keep last 7 chars = "CCCCCC" (plus the newline before)
+    const result = pruneFromTop(text, 7);
+    expect(result).toContain("CCCCCC");
+    expect(result).not.toContain("AAAAAA");
+  });
+});
+
+describe("pruneFromBottom", () => {
+  it("short text is returned unchanged", () => {
+    expect(pruneFromBottom("hello", 100)).toBe("hello");
+  });
+
+  it("drops from the BOTTOM, preserving start", () => {
+    const text = "AAAAAA\nBBBBBB\nCCCCCC";
+    const result = pruneFromBottom(text, 7);
+    expect(result).toContain("AAAAAA");
+    expect(result).not.toContain("CCCCCC");
+  });
+});
+
+describe("PrefixTreeCache integration", () => {
+  it("returns cached value on prefix match", () => {
+    const cache = new PrefixTreeCache(100);
+    cache.set("function foo", ["completion-A"]);
+    // Longer prefix should still hit (exact match)
+    expect(cache.get("function foo")).toEqual(["completion-A"]);
+  });
+
+  it("get returns undefined on cache miss", () => {
+    const cache = new PrefixTreeCache(100);
+    expect(cache.get("function bar")).toBeUndefined();
+  });
+
+  it("clear() empties the cache", () => {
+    const cache = new PrefixTreeCache(100);
+    cache.set("abc", ["x"]);
+    cache.clear();
+    expect(cache.get("abc")).toBeUndefined();
+  });
+});
+
+describe("fetchWithFallback", () => {
+  it("returns result from first model on success", async () => {
+    const runAttempt = vi.fn().mockResolvedValueOnce("result-A");
+    const outer = new AbortController();
+    const result = await fetchWithFallback(
+      [{ modelString: "m1", timeoutMs: 5000 }, { modelString: "m2", timeoutMs: 5000 }],
+      runAttempt,
+      outer.signal,
+    );
+    expect(result).toBe("result-A");
+    expect(runAttempt).toHaveBeenCalledTimes(1);
+    expect(runAttempt).toHaveBeenCalledWith("m1", expect.any(AbortSignal));
+  });
+
+  it("falls through to second model when first throws", async () => {
+    const runAttempt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockResolvedValueOnce("result-B");
+    const outer = new AbortController();
+    const result = await fetchWithFallback(
+      [{ modelString: "m1", timeoutMs: 5000 }, { modelString: "m2", timeoutMs: 5000 }],
+      runAttempt,
+      outer.signal,
+    );
+    expect(result).toBe("result-B");
+    expect(runAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttempt).toHaveBeenLastCalledWith("m2", expect.any(AbortSignal));
+  });
+
+  it("throws when all models exhausted", async () => {
+    const runAttempt = vi.fn().mockRejectedValue(new Error("fail"));
+    const outer = new AbortController();
+    await expect(
+      fetchWithFallback(
+        [{ modelString: "m1", timeoutMs: 100 }],
+        runAttempt,
+        outer.signal,
+      ),
+    ).rejects.toThrow("exhausted");
+  });
+
+  it("aborts when outer signal fires", async () => {
+    const outer = new AbortController();
+    const runAttempt = vi.fn().mockImplementation(
+      () => new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 1000)),
+    );
+    outer.abort(); // abort immediately
+    await expect(
+      fetchWithFallback(
+        [{ modelString: "m1", timeoutMs: 5000 }],
+        runAttempt,
+        outer.signal,
+      ),
+    ).rejects.toThrow();
   });
 });

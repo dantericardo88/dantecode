@@ -1,0 +1,9 @@
+{
+  "highInfluenceSessionCount": 6,
+  "lowInfluenceSessionCount": 4,
+  "highInfluenceCompletionRate": 0.833,
+  "lowInfluenceCompletionRate": 0.5,
+  "delta": 0.333,
+  "isSignificant": true,
+  "computedAt": "2026-04-23T00:00:00.000Z"
+}

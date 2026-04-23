@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-18T14:30:00.000Z","filePath":"packages/core/src/model-router.ts","linesAdded":42,"linesRemoved":18,"totalLines":60,"hasTests":false,"complexityScore":0.21,"qualityScore":0.50}
+{"timestamp":"2026-04-19T10:15:00.000Z","filePath":"packages/cli/src/__tests__/sprint-o-trend-multiscan.test.ts","linesAdded":178,"linesRemoved":0,"totalLines":178,"hasTests":true,"complexityScore":1.00,"qualityScore":0.80}
+{"timestamp":"2026-04-20T08:45:00.000Z","filePath":"packages/core/src/security-scanner.ts","linesAdded":93,"linesRemoved":12,"totalLines":105,"hasTests":false,"complexityScore":0.18,"qualityScore":0.50}
+{"timestamp":"2026-04-20T15:22:00.000Z","filePath":"packages/cli/src/__tests__/sprint-t-ranking-npmaudit.test.ts","linesAdded":151,"linesRemoved":0,"totalLines":151,"hasTests":true,"complexityScore":1.00,"qualityScore":0.80}
+{"timestamp":"2026-04-21T09:00:00.000Z","filePath":"packages/cli/src/skills-manager.ts","linesAdded":67,"linesRemoved":4,"totalLines":71,"hasTests":false,"complexityScore":0.23,"qualityScore":0.50}

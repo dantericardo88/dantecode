@@ -13,6 +13,7 @@ import { runAgentCommand } from "./commands/agent.js";
 import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
+import { runBenchCommand } from "./commands/bench.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -50,6 +51,8 @@ interface ParsedArgs {
   showVersion: boolean;
   /** --help flag */
   showHelp: boolean;
+  /** --mcp flag — start DanteCode as an MCP stdio server */
+  mcp: boolean;
 }
 
 /**
@@ -66,16 +69,17 @@ function parseArgs(argv: string[]): ParsedArgs {
     prompt: null,
     model: undefined,
     noGit: false,
-    sandbox: false,
+    sandbox: true,
     worktree: false,
     verbose: false,
     silent: false,
     configPath: undefined,
     showVersion: false,
     showHelp: false,
+    mcp: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench"]);
   let i = 0;
   let foundCommand = false;
 
@@ -96,7 +100,14 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
 
     if (arg === "--sandbox") {
+      // --sandbox is the default; kept for backwards compatibility
       result.sandbox = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--no-sandbox") {
+      result.sandbox = false;
       i += 1;
       continue;
     }
@@ -133,6 +144,12 @@ function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--help" || arg === "-h") {
       result.showHelp = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--mcp") {
+      result.mcp = true;
       i += 1;
       continue;
     }
@@ -245,6 +262,17 @@ async function main(): Promise<void> {
     configPath: parsed.configPath,
   };
 
+  // --mcp: start DanteCode as an MCP stdio server (for Claude Desktop, Cursor, etc.)
+  if (parsed.mcp) {
+    const { DanteCodeMCPServer } = await import("@dantecode/mcp");
+    const { loadMCPConfig } = await import("@dantecode/mcp");
+    const mcpConfig = await loadMCPConfig(projectRoot);
+    const server = new DanteCodeMCPServer();
+    await server.connectExternal(mcpConfig);
+    await server.start();
+    return; // stdio transport takes over — process lives until the client disconnects
+  }
+
   // Route to the appropriate command
   if (parsed.command) {
     switch (parsed.command) {
@@ -268,6 +296,9 @@ async function main(): Promise<void> {
           verbose: parsed.verbose,
           dryRun: parsed.subArgs.includes("--dry-run"),
         });
+        return;
+      case "bench":
+        await runBenchCommand(parsed.subArgs, projectRoot);
         return;
     }
   }

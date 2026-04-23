@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { generateRepoMap, formatRepoMapForContext, type RepoMapEntry } from "./repo-map.js";
+import {
+  generateRepoMap,
+  formatRepoMapForContext,
+  generateSemanticRepoMap,
+  formatSemanticRepoMapForContext,
+  type RepoMapEntry,
+  type SemanticRepoMapEntry,
+} from "./repo-map.js";
 import { execSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -210,6 +217,138 @@ describe("repo-map", () => {
       const result = formatRepoMapForContext(entries);
       expect(result).toContain("500 B");
       expect(result).toContain("5.0 KB");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // generateSemanticRepoMap
+  // ---------------------------------------------------------------------------
+
+  describe("generateSemanticRepoMap", () => {
+    it("returns empty array for a repo with no tracked files", () => {
+      execSync('git commit --allow-empty -m "init"', { cwd: repoDir, stdio: "pipe" });
+      const entries = generateSemanticRepoMap(repoDir);
+      expect(entries).toEqual([]);
+    });
+
+    it("ranks a file imported by 5 others above a file touched recently", async () => {
+      // hub.ts is imported by 5 files → should rank above recent.ts (touched now)
+      await writeFile(join(repoDir, "hub.ts"), "export const hub = 1;");
+      for (let i = 0; i < 5; i++) {
+        await writeFile(
+          join(repoDir, `consumer${i}.ts`),
+          `import { hub } from './hub';export const x${i} = hub;`,
+        );
+      }
+      // recent.ts is newer but has no inbound imports
+      await writeFile(join(repoDir, "recent.ts"), "export const recent = 99;");
+      execSync("git add . && git commit -m 'init'", { cwd: repoDir, stdio: "pipe" });
+
+      const entries = generateSemanticRepoMap(repoDir);
+      const hubIdx = entries.findIndex((e) => e.path === "hub.ts");
+      const recentIdx = entries.findIndex((e) => e.path === "recent.ts");
+      expect(hubIdx).toBeGreaterThanOrEqual(0);
+      expect(recentIdx).toBeGreaterThanOrEqual(0);
+      expect(hubIdx).toBeLessThan(recentIdx);
+    });
+
+    it("importCount reflects actual inbound link count", async () => {
+      await writeFile(join(repoDir, "shared.ts"), "export const x = 1;");
+      await writeFile(join(repoDir, "a.ts"), "import { x } from './shared';");
+      await writeFile(join(repoDir, "b.ts"), "import { x } from './shared';");
+      await writeFile(join(repoDir, "c.ts"), "import { x } from './shared';");
+      execSync("git add . && git commit -m 'init'", { cwd: repoDir, stdio: "pipe" });
+
+      const entries = generateSemanticRepoMap(repoDir);
+      const shared = entries.find((e) => e.path === "shared.ts");
+      expect(shared).toBeDefined();
+      expect(shared!.importCount).toBe(3);
+    });
+
+    it("file with no inbound imports has importCount=0", async () => {
+      await writeFile(join(repoDir, "standalone.ts"), "export const y = 2;");
+      execSync("git add . && git commit -m 'init'", { cwd: repoDir, stdio: "pipe" });
+
+      const entries = generateSemanticRepoMap(repoDir);
+      const entry = entries.find((e) => e.path === "standalone.ts");
+      expect(entry).toBeDefined();
+      expect(entry!.importCount).toBe(0);
+    });
+
+    it("respects the maxFiles option", async () => {
+      for (let i = 0; i < 10; i++) {
+        await writeFile(join(repoDir, `f${i}.ts`), `export const v${i} = ${i};`);
+      }
+      execSync("git add . && git commit -m 'init'", { cwd: repoDir, stdio: "pipe" });
+
+      const entries = generateSemanticRepoMap(repoDir, { maxFiles: 5 });
+      expect(entries.length).toBeLessThanOrEqual(5);
+    });
+
+    it("all entries have compositeScore >= 0", async () => {
+      await writeFile(join(repoDir, "app.ts"), "export const a = 1;");
+      execSync("git add . && git commit -m 'init'", { cwd: repoDir, stdio: "pipe" });
+
+      const entries = generateSemanticRepoMap(repoDir);
+      for (const e of entries) {
+        expect(e.compositeScore).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // formatSemanticRepoMapForContext
+  // ---------------------------------------------------------------------------
+
+  describe("formatSemanticRepoMapForContext", () => {
+    it("returns placeholder for empty entries", () => {
+      const result = formatSemanticRepoMapForContext([]);
+      expect(result).toContain("No tracked files found");
+    });
+
+    it("includes the semantic header", () => {
+      const entries: SemanticRepoMapEntry[] = [
+        {
+          path: "src/hub.ts",
+          size: 100,
+          language: "TypeScript",
+          lastModified: new Date().toISOString(),
+          importCount: 5,
+          compositeScore: 16,
+        },
+      ];
+      const result = formatSemanticRepoMapForContext(entries);
+      expect(result).toContain("semantic ranking");
+    });
+
+    it("shows import count badge for imported files", () => {
+      const entries: SemanticRepoMapEntry[] = [
+        {
+          path: "src/hub.ts",
+          size: 100,
+          language: "TypeScript",
+          lastModified: new Date().toISOString(),
+          importCount: 3,
+          compositeScore: 10,
+        },
+      ];
+      const result = formatSemanticRepoMapForContext(entries);
+      expect(result).toContain("imported by 3");
+    });
+
+    it("does not show import badge for files with importCount=0", () => {
+      const entries: SemanticRepoMapEntry[] = [
+        {
+          path: "src/leaf.ts",
+          size: 100,
+          language: "TypeScript",
+          lastModified: new Date().toISOString(),
+          importCount: 0,
+          compositeScore: 0.5,
+        },
+      ];
+      const result = formatSemanticRepoMapForContext(entries);
+      expect(result).not.toContain("imported by");
     });
   });
 });

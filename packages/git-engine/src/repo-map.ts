@@ -3,8 +3,8 @@
 // ============================================================================
 
 import { execSync } from "node:child_process";
-import { statSync } from "node:fs";
-import { join, extname, sep } from "node:path";
+import { statSync, readFileSync } from "node:fs";
+import { join, extname, sep, resolve, dirname } from "node:path";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -393,6 +393,195 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ----------------------------------------------------------------------------
+// Semantic Repo Map — PageRank-lite on import graph
+// ----------------------------------------------------------------------------
+
+/**
+ * A RepoMapEntry extended with import-graph metrics for semantic ranking.
+ */
+export interface SemanticRepoMapEntry extends RepoMapEntry {
+  /** Number of other tracked files that import this file. */
+  importCount: number;
+  /** Composite score: (importCount × 3) + (recencyScore × 1). Higher = more important. */
+  compositeScore: number;
+}
+
+/** Extensions we scan for import statements. */
+const SCANNABLE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
+
+/** Regex to extract module specifiers from ES import statements. */
+const IMPORT_FROM_RE = /\bfrom\s+['"]([^'"]+)['"]/g;
+
+/**
+ * Extract all relative-import targets from the source text of a JS/TS file.
+ * Only relative specifiers (starting with './' or '../') are returned.
+ */
+function extractRelativeImports(source: string): string[] {
+  const result: string[] = [];
+  let match: RegExpExecArray | null;
+  IMPORT_FROM_RE.lastIndex = 0;
+  while ((match = IMPORT_FROM_RE.exec(source)) !== null) {
+    const spec = match[1]!;
+    if (spec.startsWith("./") || spec.startsWith("../")) {
+      result.push(spec);
+    }
+  }
+  return result;
+}
+
+/**
+ * Resolve a relative import specifier to an absolute path, trying common
+ * extensions when the specifier has none.
+ */
+function resolveImport(specifier: string, fromAbsolute: string): string | null {
+  const fromDir = dirname(fromAbsolute);
+  const raw = resolve(fromDir, specifier);
+
+  // If the specifier already has a recognised extension, use it directly.
+  const ext = extname(raw).toLowerCase();
+  if (SCANNABLE_EXTENSIONS.has(ext)) {
+    return raw;
+  }
+
+  // Try appending common extensions (TypeScript-style resolution)
+  const candidates = [".ts", ".tsx", ".js", ".jsx", ".mjs"] as const;
+  for (const candidate of candidates) {
+    try {
+      const tryPath = raw + candidate;
+      statSync(tryPath);
+      return tryPath;
+    } catch { /* not found */ }
+  }
+
+  // Try index file resolution
+  for (const candidate of candidates) {
+    try {
+      const tryPath = join(raw, `index${candidate}`);
+      statSync(tryPath);
+      return tryPath;
+    } catch { /* not found */ }
+  }
+
+  return null;
+}
+
+/**
+ * Generate a semantically-ranked repo map using an import-graph composite score.
+ *
+ * Algorithm:
+ * 1. generateRepoMap() → baseline list of all tracked files
+ * 2. For each scannable (.ts/.js) file: parse import statements
+ * 3. Count inbound links (importCount) per file
+ * 4. recencyScore = 1 / (hoursSinceModified + 1)  (max 1 for brand-new files)
+ * 5. compositeScore = (importCount × 3) + recencyScore
+ * 6. Sort descending → return top maxFiles
+ *
+ * Falls back to recency-only sort if import scanning fails.
+ */
+export function generateSemanticRepoMap(
+  projectRoot: string,
+  options?: { maxFiles?: number },
+): SemanticRepoMapEntry[] {
+  const maxFiles = options?.maxFiles ?? 150;
+
+  // Step 1: baseline recency list (no extension filter — we want all files for scoring)
+  const baseline = generateRepoMap(projectRoot, { maxFiles: 2000 });
+
+  if (baseline.length === 0) {
+    return [];
+  }
+
+  // Build lookup: repo-relative path → absolute path
+  const absPathMap = new Map<string, string>();
+  for (const entry of baseline) {
+    const absPath = join(projectRoot, entry.path.split("/").join(sep));
+    absPathMap.set(absPath, entry.path);
+  }
+
+  // Step 2: count inbound links per absolute path
+  const importCounts = new Map<string, number>();
+  for (const entry of baseline) {
+    const absFrom = join(projectRoot, entry.path.split("/").join(sep));
+    const ext = extname(entry.path).toLowerCase();
+    if (!SCANNABLE_EXTENSIONS.has(ext)) continue;
+
+    let source: string;
+    try {
+      source = readFileSync(absFrom, "utf-8");
+    } catch {
+      continue;
+    }
+
+    for (const spec of extractRelativeImports(source)) {
+      const absTo = resolveImport(spec, absFrom);
+      if (absTo && absPathMap.has(absTo)) {
+        importCounts.set(absTo, (importCounts.get(absTo) ?? 0) + 1);
+      }
+    }
+  }
+
+  const now = Date.now();
+
+  // Step 3–5: compute composite scores
+  const scored: SemanticRepoMapEntry[] = baseline.map((entry) => {
+    const absPath = join(projectRoot, entry.path.split("/").join(sep));
+    const importCount = importCounts.get(absPath) ?? 0;
+    const ageHours = (now - new Date(entry.lastModified).getTime()) / 3_600_000;
+    const recencyScore = 1 / (ageHours + 1);
+    const compositeScore = importCount * 3 + recencyScore;
+    return { ...entry, importCount, compositeScore };
+  });
+
+  // Step 6: sort by composite score, most important first
+  scored.sort((a, b) => b.compositeScore - a.compositeScore);
+
+  return scored.slice(0, maxFiles);
+}
+
+/**
+ * Format SemanticRepoMapEntry[] into a markdown string for LLM context injection.
+ * Shows composite score and import count alongside the usual file metadata.
+ */
+export function formatSemanticRepoMapForContext(entries: SemanticRepoMapEntry[]): string {
+  if (entries.length === 0) {
+    return "*(No tracked files found)*";
+  }
+
+  const lines: string[] = [];
+  lines.push("## Repository Structure (semantic ranking)");
+  lines.push("");
+  lines.push(`**${entries.length} files** (sorted by import-graph importance)`);
+  lines.push("");
+
+  // Group by directory
+  const dirGroups = new Map<string, SemanticRepoMapEntry[]>();
+  for (const entry of entries) {
+    const parts = entry.path.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
+    const group = dirGroups.get(dir);
+    if (group) {
+      group.push(entry);
+    } else {
+      dirGroups.set(dir, [entry]);
+    }
+  }
+
+  for (const [dir, files] of dirGroups) {
+    lines.push(`### \`${dir}/\``);
+    lines.push("");
+    for (const file of files) {
+      const fileName = file.path.split("/").pop() ?? file.path;
+      const sizeStr = formatSize(file.size);
+      const importLabel = file.importCount > 0 ? ` ← imported by ${file.importCount}` : "";
+      lines.push(`- \`${fileName}\` — ${file.language} (${sizeStr}${importLabel})`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
 
 /**

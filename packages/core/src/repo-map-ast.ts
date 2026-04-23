@@ -78,9 +78,40 @@ const INDEXABLE_EXTENSIONS = new Set([
 ]);
 
 /**
- * Extract symbol definitions from source code using regex.
+ * Extract symbol definitions from source code.
+ * Tries tree-sitter AST first; falls back to regex when AST returns [].
  */
-export function extractSymbolDefinitions(content: string, filePath: string): SymbolDefinition[] {
+export async function extractSymbolDefinitions(content: string, filePath: string): Promise<SymbolDefinition[]> {
+  try {
+    const { extractTagsAST, detectTreeSitterLanguage } = await import("./tree-sitter/index.js");
+    const language = detectTreeSitterLanguage(filePath);
+    if (language) {
+      const tags = await extractTagsAST(content, language, filePath);
+      const defs = tags.filter((t) => t.kind === "def");
+      if (defs.length > 0) {
+        const lines = content.split("\n");
+        return defs.map((t) => {
+          const line = t.line + 1; // tree-sitter is 0-indexed
+          const lineContent = lines[t.line]?.trim() ?? t.name;
+          const kindStr = (t as { defKind?: string }).defKind;
+          const kind: SymbolDefinition["kind"] =
+            kindStr === "class" ? "class"
+            : kindStr === "interface" ? "interface"
+            : kindStr === "type" ? "type"
+            : kindStr === "const" || kindStr === "var" || kindStr === "let" ? "const"
+            : kindStr === "enum" ? "enum"
+            : "function";
+          return { name: t.name, kind, signature: lineContent, filePath, line };
+        });
+      }
+    }
+  } catch {
+    // fall through to regex
+  }
+  return extractSymbolDefinitionsRegex(content, filePath);
+}
+
+function extractSymbolDefinitionsRegex(content: string, filePath: string): SymbolDefinition[] {
   const symbols: SymbolDefinition[] = [];
   const lines = content.split("\n");
 
@@ -91,11 +122,8 @@ export function extractSymbolDefinitions(content: string, filePath: string): Sym
       const name = match[1];
       if (!name) continue;
 
-      // Calculate line number
       const beforeMatch = content.slice(0, match.index);
       const line = beforeMatch.split("\n").length;
-
-      // Get the signature (just the matched line, trimmed)
       const lineContent = lines[line - 1]?.trim() ?? match[0].trim();
 
       symbols.push({
@@ -141,29 +169,35 @@ export function extractImports(content: string, filePath: string): ImportEdge[] 
  * Simple PageRank-like scoring.
  * Files that define symbols imported by many other files rank higher.
  */
+export interface ComputeFileScoresOptions {
+  chatFiles?: string[];
+  damping?: number;
+  iterations?: number;
+}
+
 export function computeFileScores(
   importEdges: ImportEdge[],
   filePaths: string[],
-  damping = 0.85,
-  iterations = 10,
+  options: ComputeFileScoresOptions = {},
 ): Map<string, number> {
+  const { chatFiles = [], damping = 0.85, iterations = 10 } = options;
   const n = filePaths.length;
   if (n === 0) return new Map();
 
+  const chatSet = new Set(chatFiles);
   const scores = new Map<string, number>();
   const inLinks = new Map<string, Set<string>>();
   const outCount = new Map<string, number>();
 
-  // Initialize
+  // Initialize — chat files get a boosted starting score
   for (const fp of filePaths) {
-    scores.set(fp, 1 / n);
+    scores.set(fp, chatSet.has(fp) ? 2 / n : 1 / n);
     inLinks.set(fp, new Set());
     outCount.set(fp, 0);
   }
 
   // Build adjacency from import edges
   for (const edge of importEdges) {
-    // Find the target file that matches the import path
     const importBase = edge.to.replace(/^\.\//, "").replace(/\.(ts|tsx|js|jsx)$/, "");
     const target = filePaths.find((fp) => {
       const normalized = fp.replace(/\.(ts|tsx|js|jsx)$/, "");
@@ -178,12 +212,18 @@ export function computeFileScores(
     }
   }
 
+  // Personalization vector: chat files get 2× weight for teleportation
+  const totalWeight = filePaths.reduce((acc, fp) => acc + (chatSet.has(fp) ? 2 : 1), 0);
+  const personalization = new Map<string, number>(
+    filePaths.map((fp) => [fp, (chatSet.has(fp) ? 2 : 1) / totalWeight]),
+  );
+
   // Iterate PageRank
   for (let iter = 0; iter < iterations; iter++) {
     const newScores = new Map<string, number>();
 
     for (const fp of filePaths) {
-      let rank = (1 - damping) / n;
+      let rank = (1 - damping) * (personalization.get(fp) ?? 1 / n);
       const incoming = inLinks.get(fp);
       if (incoming) {
         for (const source of incoming) {
@@ -219,7 +259,7 @@ export function formatRepoMap(rankedFiles: RankedFile[], maxTokenBudget = 2000):
     tokens += fileTokens;
 
     for (const sym of file.symbols) {
-      const symLine = `  ${sym.kind} ${sym.signature}`;
+      const symLine = `  ${sym.kind} ${sym.signature} (line ${sym.line})`;
       const symTokens = Math.ceil(symLine.length / 4);
 
       if (tokens + symTokens > maxTokenBudget) break;
@@ -229,6 +269,44 @@ export function formatRepoMap(rankedFiles: RankedFile[], maxTokenBudget = 2000):
 
     lines.push("");
     tokens += 1;
+  }
+
+  return lines.join("\n");
+}
+
+const MAX_SYMBOLS_PER_FILE = 30;
+
+/**
+ * Render ranked files in a tree-style format (filepath:\n  kind name (line N)).
+ * Slices to MAX_SYMBOLS_PER_FILE per file and appends "... (N more)" for overflow.
+ */
+export function renderToTree(rankedFiles: RankedFile[], maxTokenBudget = 8000): string {
+  if (rankedFiles.length === 0) return "";
+
+  const lines: string[] = [];
+  let tokens = 0;
+
+  for (const file of rankedFiles) {
+    const headerLine = `${file.filePath}:`;
+    const headerTokens = Math.ceil(headerLine.length / 4);
+    if (tokens + headerTokens > maxTokenBudget) break;
+    lines.push(headerLine);
+    tokens += headerTokens;
+
+    const sliced = file.symbols.slice(0, MAX_SYMBOLS_PER_FILE);
+    const overflow = file.symbols.length - sliced.length;
+
+    for (const sym of sliced) {
+      const symLine = `  ${sym.kind} ${sym.name} (line ${sym.line})`;
+      const symTokens = Math.ceil(symLine.length / 4);
+      if (tokens + symTokens > maxTokenBudget) break;
+      lines.push(symLine);
+      tokens += symTokens;
+    }
+
+    if (overflow > 0) {
+      lines.push(`  ... (${overflow} more)`);
+    }
   }
 
   return lines.join("\n");
@@ -256,7 +334,7 @@ export async function buildRepoMap(
       const relPath = relative(projectRoot, fullPath);
       relPaths.push(relPath);
 
-      const symbols = extractSymbolDefinitions(content, relPath);
+      const symbols = await extractSymbolDefinitions(content, relPath);
       allSymbols.set(relPath, symbols);
 
       const imports = extractImports(content, relPath);
@@ -277,6 +355,67 @@ export async function buildRepoMap(
     .sort((a, b) => b.score - a.score);
 
   return ranked;
+}
+
+// ── Aider-style symbol tags ───────────────────────────────────────────────────
+
+export interface SymbolTag {
+  name: string;
+  kind: SymbolDefinition["kind"];
+  definedInFile: string;
+  refCount: number;
+  refFiles: string[];
+}
+
+/**
+ * Given a map of file→symbols and file contents, compute Aider-style tags:
+ * for each symbol, count how many OTHER files reference it by name.
+ */
+export async function extractSymbolTags(
+  allSymbols: Map<string, Array<{ name: string; kind: SymbolDefinition["kind"]; filePath: string }>>,
+  fileContents: Map<string, string>,
+): Promise<SymbolTag[]> {
+  const tags: SymbolTag[] = [];
+  for (const [filePath, symbols] of allSymbols) {
+    for (const sym of symbols) {
+      const refFiles: string[] = [];
+      for (const [otherPath, content] of fileContents) {
+        if (otherPath === filePath) continue;
+        if (content.includes(sym.name)) refFiles.push(otherPath);
+      }
+      tags.push({ name: sym.name, kind: sym.kind, definedInFile: filePath, refCount: refFiles.length, refFiles });
+    }
+  }
+  return tags;
+}
+
+/**
+ * Scans a project root and returns Aider-style SymbolTags with reference counts,
+ * sorted by refCount descending.
+ */
+export async function buildRepoMapTags(
+  projectRoot: string,
+  options: RepoMapOptions = {},
+): Promise<SymbolTag[]> {
+  const excludePatterns = [...DEFAULT_EXCLUDE, ...(options.excludePatterns ?? [])];
+  const files = await collectSourceFiles(projectRoot, excludePatterns);
+
+  const allSymbols = new Map<string, SymbolDefinition[]>();
+  const fileContents = new Map<string, string>();
+
+  for (const fullPath of files) {
+    try {
+      const content = await readFile(fullPath, "utf-8");
+      const relPath = relative(projectRoot, fullPath);
+      fileContents.set(relPath, content);
+      allSymbols.set(relPath, await extractSymbolDefinitions(content, relPath));
+    } catch {
+      // skip
+    }
+  }
+
+  const tags = await extractSymbolTags(allSymbols, fileContents);
+  return tags.sort((a, b) => b.refCount - a.refCount);
 }
 
 async function collectSourceFiles(dir: string, excludePatterns: string[]): Promise<string[]> {

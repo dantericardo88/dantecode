@@ -6,3 +6,5 @@
 // ============================================================================
 
 export { activate, deactivate } from "./extension.js";
+export { DebugControlProvider, globalDebugControl } from "./debug-control-provider.js";
+export type { BreakpointLocation, DebugLaunchConfig, DebugControlResult } from "./debug-control-provider.js";

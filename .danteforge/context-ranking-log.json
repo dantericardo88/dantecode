@@ -1,0 +1,4 @@
+{"sessionId":"seed-001","query":"function declaration async","chunksConsidered":12,"chunksSelected":8,"method":"bm25","timestamp":"2026-04-22T08:00:00.000Z"}
+{"sessionId":"seed-002","query":"import export module typescript","chunksConsidered":20,"chunksSelected":10,"method":"combined","timestamp":"2026-04-22T09:00:00.000Z"}
+{"sessionId":"seed-003","query":"test suite vitest describe it","chunksConsidered":15,"chunksSelected":12,"method":"recency","timestamp":"2026-04-22T10:00:00.000Z"}
+{"sessionId":"seed-004","query":"class interface type generic","chunksConsidered":18,"chunksSelected":9,"method":"bm25","timestamp":"2026-04-22T11:00:00.000Z"}

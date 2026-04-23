@@ -26,12 +26,12 @@ describe("skill-adapter registry", () => {
 
   const testSkill: ParsedSkill = {
     frontmatter: {
-      name: "code-review",
+      name: "my-custom-reviewer",
       description: "Automated code review skill",
       tools: ["Read", "Grep"],
     },
     instructions: "Review the code for bugs, style issues, and potential improvements.",
-    sourcePath: "/skills/code-review.md",
+    sourcePath: "/skills/my-custom-reviewer.md",
   };
 
   const secondSkill: ParsedSkill = {
@@ -67,7 +67,7 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "code-review", testSkill);
       const registry = await loadSkillRegistry(testDir);
       expect(registry).toHaveLength(1);
-      expect(registry[0]?.name).toBe("code-review");
+      expect(registry[0]?.name).toBe("my-custom-reviewer");
       expect(registry[0]?.description).toBe("Automated code review skill");
       expect(registry[0]?.importSource).toBe("claude");
     });
@@ -77,7 +77,7 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "test-writer", secondSkill);
       const registry = await loadSkillRegistry(testDir);
       expect(registry).toHaveLength(2);
-      expect(registry[0]?.name).toBe("code-review");
+      expect(registry[0]?.name).toBe("my-custom-reviewer");
       expect(registry[1]?.name).toBe("test-writer");
     });
 
@@ -99,7 +99,7 @@ describe("skill-adapter registry", () => {
       await writeFile(join(badDir, "SKILL.dc.md"), "No frontmatter here, just content.");
       const registry = await loadSkillRegistry(testDir);
       expect(registry).toHaveLength(1);
-      expect(registry[0]?.name).toBe("code-review");
+      expect(registry[0]?.name).toBe("my-custom-reviewer");
     });
 
     it("includes original tools when present", async () => {
@@ -124,7 +124,7 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "code-review", testSkill);
       const skill = await getSkill("Code-Review", testDir);
       expect(skill).not.toBeNull();
-      expect(skill?.frontmatter.name).toBe("code-review");
+      expect(skill?.frontmatter.name).toBe("my-custom-reviewer");
       expect(skill?.isWrapped).toBe(true);
     });
 
@@ -154,14 +154,16 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "code-review", testSkill);
       await createTestSkill(testDir, "test-writer", secondSkill);
       const list = await listSkills(testDir);
-      expect(list).toHaveLength(2);
+      // listSkills prepends built-in skills; filter to user-imported ones only
+      const userSkills = list.filter((s) => !s.builtin);
+      expect(userSkills).toHaveLength(2);
     });
   });
 
   describe("removeSkill", () => {
     it("removes an existing skill and returns true", async () => {
       await createTestSkill(testDir, "code-review", testSkill);
-      const removed = await removeSkill("code-review", testDir);
+      const removed = await removeSkill("my-custom-reviewer", testDir);
       expect(removed).toBe(true);
       // Verify it's gone
       const registry = await loadSkillRegistry(testDir);
@@ -180,7 +182,7 @@ describe("skill-adapter registry", () => {
 
     it("removes by case-insensitive name match", async () => {
       await createTestSkill(testDir, "code-review", testSkill);
-      const removed = await removeSkill("CODE-REVIEW", testDir);
+      const removed = await removeSkill("MY-CUSTOM-REVIEWER", testDir);
       expect(removed).toBe(true);
     });
   });
@@ -195,7 +197,7 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "code-review", testSkill);
       const result = await validateSkill("code-review", testDir);
       expect(result).not.toBeNull();
-      expect(result?.name).toBe("code-review");
+      expect(result?.name).toBe("my-custom-reviewer");
       expect(result?.antiStubPassed).toBe(true);
       expect(result?.constitutionPassed).toBe(true);
       expect(result?.overallPassed).toBe(true);
@@ -241,7 +243,7 @@ describe("skill-adapter registry", () => {
       await createTestSkill(testDir, "valid-skill", testSkill);
       const registry = await loadSkillRegistry(testDir);
       expect(registry).toHaveLength(1);
-      expect(registry[0]?.name).toBe("code-review");
+      expect(registry[0]?.name).toBe("my-custom-reviewer");
     });
 
     it("loadSkillRegistry skips skills with YAML parsing errors", async () => {

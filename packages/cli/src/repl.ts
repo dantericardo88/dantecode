@@ -14,6 +14,7 @@ import type { ReplState } from "./slash-commands.js";
 import { runAgentLoop } from "./agent-loop.js";
 import type { AgentLoopConfig } from "./agent-loop.js";
 import { SandboxBridge } from "./sandbox-bridge.js";
+import { loadMCPConfig, MCPClientManager, mcpToolsToAISDKTools } from "@dantecode/mcp";
 
 // ----------------------------------------------------------------------------
 // ANSI Colors
@@ -92,6 +93,8 @@ function syncAgentLoopConfig(replState: ReplState, agentConfig: AgentLoopConfig)
   agentConfig.sandboxBridge = replState.enableSandbox
     ? (replState.sandboxBridge ?? undefined)
     : undefined;
+  // Architect/Editor split: wire planning model when configured via taskOverrides
+  agentConfig.architectModel = replState.state.model.taskOverrides["planning"] ?? undefined;
 }
 
 // ----------------------------------------------------------------------------
@@ -131,11 +134,50 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   // Create session
   const session = createSession(options.projectRoot, state.model.default);
 
+  // Load MCP config and connect to any configured external servers (before banner so status is visible)
+  const mcpConfig = await loadMCPConfig(options.projectRoot);
+  const mcpClientManager = new MCPClientManager();
+  await mcpClientManager.connectAll(mcpConfig);
+  const connectedTools = mcpClientManager.listTools();
+
   // Display banner (suppressed in silent mode)
   if (!options.silent) {
     const banner = getBanner(state.model.default, options.projectRoot);
     process.stdout.write(banner);
   }
+
+  // Show sandbox status so security posture is always visible
+  if (options.enableSandbox && !options.silent) {
+    const bridge = new SandboxBridge(options.projectRoot, false);
+    const dockerAvailable = await bridge.isAvailable();
+    const sandboxMode = dockerAvailable ? "Docker container" : "local (audit-logged)";
+    process.stdout.write(`${DIM}[sandbox: ${sandboxMode}]${RESET}\n`);
+  } else if (!options.enableSandbox && !options.silent) {
+    process.stdout.write(`${DIM}[sandbox: disabled — run without --no-sandbox to enable]${RESET}\n`);
+  }
+
+  // Show MCP connection status
+  if (!options.silent && connectedTools.length > 0) {
+    const serverCount = mcpClientManager.getConnectedServers().length;
+    process.stdout.write(
+      `${DIM}[mcp: ${serverCount} server${serverCount !== 1 ? "s" : ""}, ` +
+      `${connectedTools.length} tool${connectedTools.length !== 1 ? "s" : ""}]${RESET}\n`,
+    );
+  }
+
+  const permissions = state.permissions || {
+    edit: "ask",
+    bash: "ask",
+    tools: "allow",
+  };
+
+  // Create readline interface before wiring any interactive permission prompts.
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `${CYAN}>${RESET} `,
+    terminal: true,
+  });
 
   // Initialize REPL state
   const replState: ReplState = {
@@ -152,8 +194,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     pendingAgentPrompt: null,
     activeAbortController: null,
     sandboxBridge: null,
+    mcpClient: null,
     activeSkill: null,
     waveState: null,
+    permissions,
+    rl: rl,
   };
 
   // Agent loop config
@@ -163,6 +208,11 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     enableGit: options.enableGit,
     enableSandbox: options.enableSandbox,
     silent: options.silent,
+    permissions: permissions,
+    rl: rl,
+    onCostUpdate: (estimate, provider) => {
+      replState.lastCostEstimate = { ...estimate, provider };
+    },
   };
 
   // Initialize sandbox bridge when --sandbox is enabled
@@ -171,13 +221,12 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     replState.sandboxBridge = agentConfig.sandboxBridge;
   }
 
-  // Create readline interface
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: `${CYAN}>${RESET} `,
-    terminal: true,
-  });
+  // Wire MCP client into agentConfig and replState (already connected above, before banner)
+  if (connectedTools.length > 0) {
+    agentConfig.mcpTools = mcpToolsToAISDKTools(connectedTools);
+    agentConfig.mcpClient = mcpClientManager;
+  }
+  replState.mcpClient = mcpClientManager;
 
   // Handle Ctrl+C gracefully — first press aborts streaming, second exits
   let ctrlCCount = 0;
@@ -248,6 +297,10 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     // Shut down sandbox container if running
     if (replState.sandboxBridge) {
       await replState.sandboxBridge.shutdown();
+    }
+    // Disconnect all MCP servers
+    if (replState.mcpClient) {
+      await replState.mcpClient.disconnectAll();
     }
     process.stdout.write(`\n${DIM}Session ended. Goodbye!${RESET}\n`);
     process.exit(0);

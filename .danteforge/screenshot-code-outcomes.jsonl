@@ -1,0 +1,8 @@
+{"sessionId":"sc1","framework":"react","confidence":0.9,"accepted":true,"recordedAt":"2026-04-23T09:00:00Z"}
+{"sessionId":"sc2","framework":"html","confidence":0.85,"accepted":true,"recordedAt":"2026-04-23T09:10:00Z"}
+{"sessionId":"sc3","framework":"vue","confidence":0.7,"accepted":false,"recordedAt":"2026-04-23T09:20:00Z"}
+{"sessionId":"sc4","framework":"tailwind","confidence":0.92,"accepted":true,"recordedAt":"2026-04-23T09:30:00Z"}
+{"sessionId":"sc5","framework":"html","confidence":0.45,"accepted":false,"recordedAt":"2026-04-23T09:40:00Z"}
+{"sessionId":"sc6","framework":"react","confidence":0.95,"accepted":true,"recordedAt":"2026-04-23T10:00:00Z","iterationCount":2,"fidelityScore":0.87}
+{"sessionId":"sc7","framework":"tailwind","confidence":0.92,"accepted":true,"recordedAt":"2026-04-23T10:05:00Z","iterationCount":2,"fidelityScore":0.91}
+{"sessionId":"sc8","framework":"html","confidence":0.78,"accepted":false,"recordedAt":"2026-04-23T10:10:00Z","iterationCount":1,"fidelityScore":0.62}

@@ -14,10 +14,13 @@ export type ModelProvider =
   | "google"
   | "groq"
   | "ollama"
+  | "mistral"
+  | "deepseek"
+  | "openrouter"
   | "custom";
 
 /** Reasoning effort setting for models that support extended thinking. */
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 /** Configuration for a single model endpoint. */
 export interface ModelConfig {
@@ -27,11 +30,22 @@ export interface ModelConfig {
   baseUrl?: string;
   maxTokens: number;
   temperature: number;
+  topP?: number;
+  topK?: number;
   contextWindow: number;
   supportsVision: boolean;
   supportsToolCalls: boolean;
   supportsExtendedThinking?: boolean;
   reasoningEffort?: ReasoningEffort;
+  thinkingBudget?: number;
+}
+
+/** Enforceable spend ceilings applied by the model router. */
+export interface BudgetPolicy {
+  enforce?: boolean;
+  sessionMaxUsd?: number;
+  monthlyMaxUsd?: number;
+  currentMonthlySpendUsd?: number;
 }
 
 /** Router configuration that selects models with fallback and per-task overrides. */
@@ -39,6 +53,7 @@ export interface ModelRouterConfig {
   default: ModelConfig;
   fallback: ModelConfig[];
   overrides: Record<string, ModelConfig>;
+  budget?: BudgetPolicy;
 }
 
 // ----------------------------------------------------------------------------
@@ -67,6 +82,89 @@ export interface ToolResultBlock {
   isError: boolean;
 }
 
+// -----------------------------------------------------------------------------
+// Evidence & Execution Proof Types
+// -----------------------------------------------------------------------------
+
+/** Classification of request intent for completion gate evaluation. */
+export type RequestClass = "non_mutating" | "mutating" | "validation_only" | "orchestration";
+
+/** Record of a single tool call execution. */
+export interface ToolCallRecord {
+  id: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  result: ToolResultBlock;
+  timestamp: string;
+  durationMs?: number;
+}
+
+/** Record of a file mutation observed after a tool execution. */
+export interface MutationRecord {
+  id: string;
+  toolCallId: string;
+  path: string;
+  beforeHash: string;
+  afterHash: string;
+  diffSummary: string;
+  lineCount: number;
+  additions: number;
+  deletions: number;
+  timestamp: string;
+  readSnapshotId?: string;
+}
+
+/** Record of a validation run performed during execution. */
+export interface ValidationRecord {
+  id: string;
+  toolCallId?: string;
+  type: "lint" | "test" | "typecheck" | "build";
+  command: string;
+  exitCode: number;
+  output: string;
+  passed: boolean;
+  timestamp: string;
+}
+
+/** Result of evaluating the completion gate for a request. */
+export interface CompletionGateResult {
+  ok: boolean;
+  reasonCode?: string;
+  message?: string;
+  timestamp: string;
+}
+
+/** Summary of a changed file from a mutation. */
+export interface ChangedFileRecord {
+  path: string;
+  beforeHash: string;
+  afterHash: string;
+  lineCount: number;
+  additions: number;
+  deletions: number;
+  diffSummary: string;
+}
+
+/** Speed-to-verified-completion metrics recorded at the end of every agent-loop run. */
+export interface SpeedMetrics {
+  taskDuration: number;
+  timeToFirstMutation: number | null;
+  modelRoundTrips: number;
+  fileReads: number;
+  repoMemoryHits: number;
+  repairAttempts: number;
+  timestamp: string;
+}
+
+/** Ledger of all execution evidence for a session or turn. */
+export interface ExecutionLedger {
+  toolCallRecords: ToolCallRecord[];
+  mutationRecords: MutationRecord[];
+  validationRecords: ValidationRecord[];
+  completionGateResult?: CompletionGateResult;
+  speedMetrics?: SpeedMetrics;
+}
+
 /** A single message within a session conversation. */
 export interface SessionMessage {
   id: string;
@@ -91,6 +189,9 @@ export interface TodoItem {
   createdAt: string;
   completedAt?: string;
   parentId?: string;
+  completionGate?: CompletionGateResult;
+  mutationRecordIds?: string[];
+  validationRecordIds?: string[];
 }
 
 /** Status of an agent frame within the agent stack. */
@@ -104,6 +205,9 @@ export interface AgentFrame {
   touchedFiles: string[];
   status: AgentFrameStatus;
   subAgentIds: string[];
+  completionGate?: CompletionGateResult;
+  mutationRecordIds?: string[];
+  validationRecordIds?: string[];
 }
 
 /** A full interactive session. */
@@ -120,6 +224,9 @@ export interface Session {
   sandboxContainerId?: string;
   agentStack: AgentFrame[];
   todoList: TodoItem[];
+  executionLedger?: ExecutionLedger;
+  status?: "COMPLETE" | "INCOMPLETE" | "FAILED";
+  touchedFiles?: string[];
 }
 
 // ----------------------------------------------------------------------------
@@ -290,6 +397,7 @@ export interface LessonsQuery {
   limit: number;
   minSeverity?: LessonSeverity;
   type?: LessonType;
+  contextTokens?: string[];
 }
 
 // ----------------------------------------------------------------------------
@@ -444,7 +552,17 @@ export type AuditEventType =
   | "loop_terminated"
   | "tier_escalation"
   | "cost_update"
-  | "webhook_received";
+  | "request_retry"
+  | "context_compacted"
+  | "budget_blocked"
+  | "webhook_received"
+  | "tool_call_started"
+  | "tool_call_succeeded"
+  | "tool_call_failed"
+  | "mutation_observed"
+  | "validation_observed"
+  | "completion_gate_failed"
+  | "completion_gate_passed";
 
 /** A single auditable event within the system. */
 export interface AuditEvent {
@@ -512,6 +630,8 @@ export interface RoutingContext {
   promptComplexity?: number;
   /** Model self-rated complexity (0–1), populated after first turn. Overrides lexical score if higher. */
   modelRatedComplexity?: number;
+  /** Estimated cost in USD for the current request (used for cost-floor routing). */
+  estimatedCostUsd?: number;
 }
 
 /** Live cost estimate for the current session. */
@@ -524,6 +644,12 @@ export interface CostEstimate {
   modelTier: "fast" | "capable";
   /** Total tokens used this session. */
   tokensUsedSession: number;
+  /** Configured session ceiling when budget enforcement is active. */
+  sessionBudgetUsd?: number;
+  /** Configured monthly ceiling when budget enforcement is active. */
+  monthlyBudgetUsd?: number;
+  /** True when generation is currently blocked by budget policy. */
+  budgetExceeded?: boolean;
 }
 
 // ----------------------------------------------------------------------------
@@ -666,6 +792,7 @@ export interface DanteCodeState {
     default: ModelConfig;
     fallback: ModelConfig[];
     taskOverrides: Record<string, ModelConfig>;
+    budget?: BudgetPolicy;
   };
   pdse: PDSEGateConfig;
   autoforge: AutoforgeConfig;
@@ -677,6 +804,11 @@ export interface DanteCodeState {
   sessionHistory: SessionHistoryEntry[];
   lessons: LessonsConfig;
   project: ProjectConfig;
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -708,6 +840,7 @@ export interface DanteCodeConfigModel {
       temperature?: number;
     }
   >;
+  budget?: BudgetPolicy;
 }
 
 /** PDSE section of .dantecode/STATE.yaml. */
@@ -976,4 +1109,9 @@ export interface DanteCodeConfig {
   audit: DanteCodeConfigAudit;
   lessons: DanteCodeConfigLessons;
   project: DanteCodeConfigProject;
+  permissions?: {
+    edit: "allow" | "ask" | "deny";
+    bash: "allow" | "ask" | "deny";
+    tools: "allow" | "ask" | "deny";
+  };
 }

@@ -1,0 +1,11 @@
+{
+  "run_count": 10,
+  "first_pass_rate": 0.44,
+  "last_pass_rate": 0.56,
+  "best_pass_rate": 0.56,
+  "worst_pass_rate": 0.44,
+  "slope": 0.013,
+  "direction": "improving",
+  "computed_at": "2026-04-21T06:00:00.000Z",
+  "top_failure_modes": ["test_assertion", "timeout", "no_patch", "compile_error", "import_error"]
+}

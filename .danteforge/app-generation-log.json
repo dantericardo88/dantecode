@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-18T12:00:00.000Z","sessionId":"sess-ag01","filePath":"src/app.ts","verifyPassed":true,"durationMs":1850,"errorCount":0}
+{"timestamp":"2026-04-18T12:05:00.000Z","sessionId":"sess-ag01","filePath":"src/routes/index.ts","verifyPassed":true,"durationMs":1230,"errorCount":0}
+{"timestamp":"2026-04-18T12:10:00.000Z","sessionId":"sess-ag01","filePath":"src/models/user.ts","verifyPassed":false,"durationMs":2100,"errorCount":3,"errorSummary":"Property 'id' is missing in type definition"}
+{"timestamp":"2026-04-19T10:00:00.000Z","sessionId":"sess-ag02","filePath":"src/auth/jwt.ts","verifyPassed":true,"durationMs":1540,"errorCount":0}
+{"timestamp":"2026-04-19T10:05:00.000Z","sessionId":"sess-ag02","filePath":"src/middleware/cors.ts","verifyPassed":true,"durationMs":980,"errorCount":0}

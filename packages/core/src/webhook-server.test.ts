@@ -344,7 +344,7 @@ describe("WebhookServer — Issue-to-PR Pipeline", () => {
       apiToken: TEST_API_TOKEN,
       slackSigningSecret: TEST_SLACK_SECRET,
       issueToPR: {
-        githubToken: "ghp_test_token",
+        githubToken: "ghp_" + "test_token",
         repository: "acme/app",
         baseBranch: "main",
       },

@@ -1,0 +1,5 @@
+{"commentId":"cmt-fp-001","category":"style","bodySnippet":"Add more comments.","reason":"pattern-match","suppressedAt":"2026-04-23T02:00:00.000Z"}
+{"commentId":"cmt-fp-002","category":"naming","bodySnippet":"needs more documentation","reason":"pattern-match","suppressedAt":"2026-04-23T02:10:00.000Z"}
+{"commentId":"cmt-fp-003","category":"style","bodySnippet":"Nit:","reason":"pattern-match","suppressedAt":"2026-04-23T02:20:00.000Z"}
+{"commentId":"cmt-fp-004","category":"naming","bodySnippet":"Consider adding a comment.","reason":"no-location","suppressedAt":"2026-04-23T02:30:00.000Z"}
+{"commentId":"cmt-fp-005","category":"style","bodySnippet":"looks good","reason":"pattern-match","suppressedAt":"2026-04-23T02:40:00.000Z"}

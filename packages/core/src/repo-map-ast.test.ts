@@ -10,73 +10,73 @@ import {
 
 describe("repo-map-ast", () => {
   describe("extractSymbolDefinitions", () => {
-    it("extracts function definitions", () => {
+    it("extracts function definitions", async () => {
       const code = `export function authenticate(user: string): boolean {\n  return true;\n}`;
-      const symbols = extractSymbolDefinitions(code, "auth.ts");
+      const symbols = await extractSymbolDefinitions(code, "auth.ts");
       expect(symbols.some((s) => s.name === "authenticate" && s.kind === "function")).toBe(true);
     });
 
-    it("extracts async functions", () => {
+    it("extracts async functions", async () => {
       const code = `export async function fetchData(url: string): Promise<Response> {\n  return fetch(url);\n}`;
-      const symbols = extractSymbolDefinitions(code, "api.ts");
+      const symbols = await extractSymbolDefinitions(code, "api.ts");
       expect(symbols.some((s) => s.name === "fetchData" && s.kind === "function")).toBe(true);
     });
 
-    it("extracts class definitions", () => {
+    it("extracts class definitions", async () => {
       const code = `export class UserService {\n  getUser() {}\n}`;
-      const symbols = extractSymbolDefinitions(code, "service.ts");
+      const symbols = await extractSymbolDefinitions(code, "service.ts");
       expect(symbols.some((s) => s.name === "UserService" && s.kind === "class")).toBe(true);
     });
 
-    it("extracts abstract classes", () => {
+    it("extracts abstract classes", async () => {
       const code = `export abstract class BaseProvider {\n  abstract connect(): void;\n}`;
-      const symbols = extractSymbolDefinitions(code, "base.ts");
+      const symbols = await extractSymbolDefinitions(code, "base.ts");
       expect(symbols.some((s) => s.name === "BaseProvider" && s.kind === "class")).toBe(true);
     });
 
-    it("extracts interface definitions", () => {
+    it("extracts interface definitions", async () => {
       const code = `export interface Config {\n  apiKey: string;\n}`;
-      const symbols = extractSymbolDefinitions(code, "types.ts");
+      const symbols = await extractSymbolDefinitions(code, "types.ts");
       expect(symbols.some((s) => s.name === "Config" && s.kind === "interface")).toBe(true);
     });
 
-    it("extracts type aliases", () => {
+    it("extracts type aliases", async () => {
       const code = `export type ModelProvider = "grok" | "anthropic" | "openai";`;
-      const symbols = extractSymbolDefinitions(code, "types.ts");
+      const symbols = await extractSymbolDefinitions(code, "types.ts");
       expect(symbols.some((s) => s.name === "ModelProvider" && s.kind === "type")).toBe(true);
     });
 
-    it("extracts const declarations", () => {
+    it("extracts const declarations", async () => {
       const code = `export const DEFAULT_MODEL = "grok-3";`;
-      const symbols = extractSymbolDefinitions(code, "constants.ts");
+      const symbols = await extractSymbolDefinitions(code, "constants.ts");
       expect(symbols.some((s) => s.name === "DEFAULT_MODEL" && s.kind === "const")).toBe(true);
     });
 
-    it("extracts enum definitions", () => {
+    it("extracts enum definitions", async () => {
       const code = `export enum Status {\n  Active,\n  Inactive,\n}`;
-      const symbols = extractSymbolDefinitions(code, "enums.ts");
+      const symbols = await extractSymbolDefinitions(code, "enums.ts");
       expect(symbols.some((s) => s.name === "Status" && s.kind === "enum")).toBe(true);
     });
 
-    it("extracts multiple symbols from a file", () => {
+    it("extracts multiple symbols from a file", async () => {
       const code = [
         `export function add(a: number, b: number): number { return a + b; }`,
         `export interface MathOps { add: Function; }`,
         `export class Calculator {}`,
       ].join("\n");
-      const symbols = extractSymbolDefinitions(code, "math.ts");
+      const symbols = await extractSymbolDefinitions(code, "math.ts");
       expect(symbols.length).toBeGreaterThanOrEqual(3);
     });
 
-    it("returns empty for files with no definitions", () => {
+    it("returns empty for files with no definitions", async () => {
       const code = `// Just a comment\n// Another comment`;
-      const symbols = extractSymbolDefinitions(code, "empty.ts");
+      const symbols = await extractSymbolDefinitions(code, "empty.ts");
       expect(symbols).toEqual([]);
     });
 
-    it("includes correct file path in symbols", () => {
+    it("includes correct file path in symbols", async () => {
       const code = `export function test() {}`;
-      const symbols = extractSymbolDefinitions(code, "src/test.ts");
+      const symbols = await extractSymbolDefinitions(code, "src/test.ts");
       expect(symbols[0]!.filePath).toBe("src/test.ts");
     });
   });

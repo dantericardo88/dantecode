@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-21T00:00:00.000Z","filePath":"src/auth/middleware.ts","language":"typescript","overall":0.8,"linesOfCode":45,"noConsoleLog":true,"hasErrorHandling":true}
+{"timestamp":"2026-04-21T00:30:00.000Z","filePath":"src/api/routes.ts","language":"typescript","overall":0.6,"linesOfCode":82,"noConsoleLog":false,"hasErrorHandling":true}
+{"timestamp":"2026-04-21T01:00:00.000Z","filePath":"src/utils/helpers.ts","language":"typescript","overall":1.0,"linesOfCode":28,"noConsoleLog":true,"hasErrorHandling":true}
+{"timestamp":"2026-04-21T01:30:00.000Z","filePath":"src/db/query.ts","language":"typescript","overall":0.8,"linesOfCode":61,"noConsoleLog":true,"hasErrorHandling":true}
+{"timestamp":"2026-04-21T02:00:00.000Z","filePath":"src/config/loader.ts","language":"typescript","overall":0.6,"linesOfCode":34,"noConsoleLog":true,"hasErrorHandling":false}

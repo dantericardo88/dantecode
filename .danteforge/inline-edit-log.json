@@ -1,0 +1,17 @@
+{"timestamp":"2026-04-18T10:00:00.000Z","filePath":"packages/core/src/model-router.ts","editType":"insert","linesAdded":28,"linesRemoved":0,"confidenceScore":0.82,"qualityScore":0.79}
+{"timestamp":"2026-04-18T14:30:00.000Z","filePath":"packages/cli/src/agent-loop.ts","editType":"modify","linesAdded":15,"linesRemoved":8,"confidenceScore":0.75,"qualityScore":0.71}
+{"timestamp":"2026-04-19T09:00:00.000Z","filePath":"packages/core/src/security-scanner.ts","editType":"insert","linesAdded":42,"linesRemoved":0,"confidenceScore":0.88,"qualityScore":0.84}
+{"timestamp":"2026-04-19T15:30:00.000Z","filePath":"packages/vscode/src/extension.ts","editType":"modify","linesAdded":12,"linesRemoved":5,"confidenceScore":0.69,"qualityScore":0.65}
+{"timestamp":"2026-04-20T10:00:00.000Z","filePath":"packages/core/src/task-decomposer.ts","editType":"modify","linesAdded":35,"linesRemoved":12,"confidenceScore":0.83,"qualityScore":0.80}
+{"timestamp":"2026-04-23T12:53:58.146Z","filePath":"src/test.ts","editType":"replace","linesAdded":5,"linesRemoved":2,"confidenceScore":0.85,"qualityScore":0.8}
+{"timestamp":"2026-04-23T12:53:58.148Z","filePath":"src/test.ts","editType":"insert","linesAdded":1,"linesRemoved":0,"confidenceScore":0.9,"qualityScore":0.9}
+{"timestamp":"2026-04-23T12:53:58.149Z","filePath":"src/hook-test.ts","editType":"replace","linesAdded":10,"linesRemoved":3,"confidenceScore":0.75,"qualityScore":0.6}
+{"timestamp":"2026-04-23T12:58:13.092Z","filePath":"src/test.ts","editType":"replace","linesAdded":5,"linesRemoved":2,"confidenceScore":0.85,"qualityScore":0.8}
+{"timestamp":"2026-04-23T12:58:13.096Z","filePath":"src/test.ts","editType":"insert","linesAdded":1,"linesRemoved":0,"confidenceScore":0.9,"qualityScore":0.9}
+{"timestamp":"2026-04-23T12:58:13.097Z","filePath":"src/hook-test.ts","editType":"replace","linesAdded":10,"linesRemoved":3,"confidenceScore":0.75,"qualityScore":0.6}
+{"timestamp":"2026-04-23T14:12:18.427Z","filePath":"src/test.ts","editType":"replace","linesAdded":5,"linesRemoved":2,"confidenceScore":0.85,"qualityScore":0.8}
+{"timestamp":"2026-04-23T14:12:18.429Z","filePath":"src/test.ts","editType":"insert","linesAdded":1,"linesRemoved":0,"confidenceScore":0.9,"qualityScore":0.9}
+{"timestamp":"2026-04-23T14:12:18.430Z","filePath":"src/hook-test.ts","editType":"replace","linesAdded":10,"linesRemoved":3,"confidenceScore":0.75,"qualityScore":0.6}
+{"timestamp":"2026-04-23T14:18:19.978Z","filePath":"src/test.ts","editType":"replace","linesAdded":5,"linesRemoved":2,"confidenceScore":0.85,"qualityScore":0.8}
+{"timestamp":"2026-04-23T14:18:19.987Z","filePath":"src/test.ts","editType":"insert","linesAdded":1,"linesRemoved":0,"confidenceScore":0.9,"qualityScore":0.9}
+{"timestamp":"2026-04-23T14:18:19.989Z","filePath":"src/hook-test.ts","editType":"replace","linesAdded":10,"linesRemoved":3,"confidenceScore":0.75,"qualityScore":0.6}

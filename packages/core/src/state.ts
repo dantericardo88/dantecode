@@ -22,11 +22,14 @@ const ModelConfigSchema = z.object({
   baseUrl: z.string().optional(),
   maxTokens: z.number().int().positive(),
   temperature: z.number().min(0).max(2),
+  topP: z.number().min(0).max(1).optional(),
+  topK: z.number().int().positive().optional(),
   contextWindow: z.number().int().positive(),
   supportsVision: z.boolean(),
   supportsToolCalls: z.boolean(),
   supportsExtendedThinking: z.boolean().optional(),
-  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  reasoningEffort: z.enum(["low", "medium", "high", "max"]).optional(),
+  thinkingBudget: z.number().int().positive().optional(),
 });
 
 const PDSEGateConfigSchema = z.object({

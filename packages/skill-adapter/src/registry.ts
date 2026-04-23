@@ -43,7 +43,26 @@ export interface SkillRegistryEntry {
   originalTools?: string[];
   /** The mode (primary/subagent) if specified. */
   mode?: string;
+  /** True for DanteCode built-in skills — cannot be deleted. */
+  builtin?: boolean;
 }
+
+// ─── Built-In Skills (dim 22) ─────────────────────────────────────────────────
+// 10 seed skills auto-included in every project without requiring import.
+// Marked with builtin: true and shown with [built-in] badge in skill list.
+
+const BUILTIN_SKILLS: SkillRegistryEntry[] = [
+  { name: "code-review", description: "Review code for bugs, security issues, and style", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "refactor-function", description: "Refactor a function to improve clarity and reduce complexity", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "add-tests", description: "Generate unit tests for the selected code", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "explain-code", description: "Explain how the selected code works in plain language", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "fix-bug", description: "Identify and fix the bug in the selected code", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "generate-docs", description: "Generate JSDoc / docstring documentation for selected functions", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "optimize-query", description: "Optimize a database query for performance", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "add-auth", description: "Add authentication and authorization to an endpoint or route", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "create-component", description: "Create a new UI component with props, styles, and tests", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+  { name: "add-error-handling", description: "Add proper error handling and logging to selected code", importSource: "builtin", adapterVersion: "1.0", wrappedAt: "2026-01-01T00:00:00Z", path: "__builtin__", builtin: true },
+];
 
 /** Result of validating a skill. */
 export interface SkillValidationResult {
@@ -317,7 +336,14 @@ export async function getSkill(name: string, projectRoot: string): Promise<Skill
  * @returns Array of SkillRegistryEntry objects.
  */
 export async function listSkills(projectRoot: string): Promise<SkillRegistryEntry[]> {
-  return loadSkillRegistry(projectRoot);
+  const userSkills = await loadSkillRegistry(projectRoot);
+  // Prepend built-in skills — always available, marked with builtin: true
+  return [...BUILTIN_SKILLS, ...userSkills];
+}
+
+/** Returns the names of all built-in skills (cannot be deleted). */
+export function getBuiltinSkillNames(): Set<string> {
+  return new Set(BUILTIN_SKILLS.map((s) => s.name));
 }
 
 /**
@@ -333,6 +359,10 @@ export async function listSkills(projectRoot: string): Promise<SkillRegistryEntr
  * @returns True if the skill was found and removed, false if not found.
  */
 export async function removeSkill(name: string, projectRoot: string): Promise<boolean> {
+  // Guard: built-in skills cannot be deleted
+  if (getBuiltinSkillNames().has(name.toLowerCase()) || getBuiltinSkillNames().has(name)) {
+    return false;
+  }
   const skillsDir = join(projectRoot, SKILLS_DIR);
   const normalizedName = name.toLowerCase();
 

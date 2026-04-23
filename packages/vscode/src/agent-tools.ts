@@ -12,12 +12,19 @@ import type { ColoredDiffHunk, SelfImprovementContext } from "@dantecode/config-
 import { generateColoredHunk } from "@dantecode/git-engine";
 import {
   appendAuditEvent,
+  applyExactEdit,
+  createFileSnapshot,
   detectInstallContext,
+  formatStaleSnapshotMessage,
+  isSnapshotStale,
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
+  preserveLineEndingsForWrite,
   resolvePreferredShell,
+  truncateToolOutput,
 } from "@dantecode/core";
+import type { FileSnapshot } from "@dantecode/core";
 
 // ----------------------------------------------------------------------------
 // Types
@@ -50,7 +57,7 @@ export interface ToolExecutionContext {
   sessionId?: string;
   sandboxEnabled?: boolean;
   selfImprovement?: SelfImprovementContext;
-  readTracker?: Map<string, string>;
+  readTracker?: Map<string, FileSnapshot>;
   editAttempts?: Map<string, number>;
   onDiffHunk?: (payload: DiffReviewPayload) => void;
   onSelfModificationAttempt?: (filePath: string) => void;
@@ -119,6 +126,42 @@ function resolvePath(filePath: string, projectRoot: string): string {
   return resolve(projectRoot, filePath);
 }
 
+async function buildTrackedSnapshot(
+  resolvedPath: string,
+  content: string,
+): Promise<FileSnapshot> {
+  try {
+    const fileStats = await stat(resolvedPath);
+    return createFileSnapshot(resolvedPath, content, {
+      mtimeMs: fileStats.mtimeMs,
+      size: fileStats.size,
+    });
+  } catch {
+    return createFileSnapshot(resolvedPath, content);
+  }
+}
+
+function getTrackedSnapshot(
+  context: ToolExecutionContext | undefined,
+  resolvedPath: string,
+): FileSnapshot | undefined {
+  if (!context?.readTracker) {
+    return undefined;
+  }
+  return context.readTracker.get(buildReadTrackerKey(context, resolvedPath));
+}
+
+function setTrackedSnapshot(
+  context: ToolExecutionContext | undefined,
+  resolvedPath: string,
+  snapshot: FileSnapshot,
+): void {
+  if (!context?.readTracker) {
+    return;
+  }
+  context.readTracker.set(buildReadTrackerKey(context, resolvedPath), snapshot);
+}
+
 // ----------------------------------------------------------------------------
 // Tool Implementations
 // ----------------------------------------------------------------------------
@@ -146,7 +189,7 @@ async function toolRead(
       return `${String(lineNum).padStart(6)}  ${line}`;
     });
     if (context?.readTracker && startLine === 0 && endLine >= lines.length) {
-      context.readTracker.set(buildReadTrackerKey(context, resolved), new Date().toISOString());
+      setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, raw));
     }
     return { content: numbered.join("\n"), isError: false };
   } catch (err: unknown) {
@@ -155,7 +198,11 @@ async function toolRead(
   }
 }
 
-async function toolWrite(input: Record<string, unknown>, projectRoot: string): Promise<ToolResult> {
+async function toolWrite(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const content = input["content"] as string | undefined;
   if (!filePath) return { content: "Error: file_path parameter is required", isError: true };
@@ -165,11 +212,24 @@ async function toolWrite(input: Record<string, unknown>, projectRoot: string): P
   const resolved = resolvePath(filePath, projectRoot);
   try {
     const existed = await readFile(resolved, "utf-8").catch(() => null);
+    const priorSnapshot = getTrackedSnapshot(context, resolved);
+    if (existed !== null && priorSnapshot) {
+      const currentSnapshot = await buildTrackedSnapshot(resolved, existed);
+      if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
+        return {
+          content: formatStaleSnapshotMessage(resolved),
+          isError: true,
+        };
+      }
+    }
+
+    const contentToWrite = preserveLineEndingsForWrite(content, existed ?? undefined);
     await mkdir(dirname(resolved), { recursive: true });
-    await writeFile(resolved, content, "utf-8");
-    const lineCount = content.split("\n").length;
+    await writeFile(resolved, contentToWrite, "utf-8");
+    setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, contentToWrite));
+    const lineCount = contentToWrite.split(/\r?\n/).length;
     const action = existed !== null ? "Overwrote" : "Created";
-    const preview = content.split("\n").slice(0, 10).join("\n");
+    const preview = contentToWrite.split(/\r?\n/).slice(0, 10).join("\n");
     return {
       content: `${action} ${resolved} (${lineCount} lines)\n\n${preview}${lineCount > 10 ? "\n..." : ""}`,
       isError: false,
@@ -215,7 +275,19 @@ async function toolEdit(
     }
 
     const existing = await readFile(resolved, "utf-8");
-    if (!existing.includes(oldString)) {
+    const priorSnapshot = getTrackedSnapshot(context, resolved);
+    if (priorSnapshot) {
+      const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
+      if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
+        return {
+          content: formatStaleSnapshotMessage(resolved),
+          isError: true,
+        };
+      }
+    }
+
+    const editResult = applyExactEdit(existing, oldString, newString, replaceAll);
+    if (!editResult.matched || !editResult.updatedContent) {
       return buildEditRecoveryResult(
         context,
         attemptKey,
@@ -223,24 +295,21 @@ async function toolEdit(
         existing,
       );
     }
-    if (!replaceAll) {
-      const firstIdx = existing.indexOf(oldString);
-      const secondIdx = existing.indexOf(oldString, firstIdx + 1);
-      if (secondIdx !== -1) {
-        return buildEditRecoveryResult(
-          context,
-          attemptKey,
-          "Error: old_string appears multiple times. Use replace_all: true or provide more context.",
-          existing,
-        );
-      }
+    if (!replaceAll && editResult.occurrenceCount > 1) {
+      return buildEditRecoveryResult(
+        context,
+        attemptKey,
+        "Error: old_string appears multiple times. Use replace_all: true or provide more context.",
+        existing,
+      );
     }
-    const updated = replaceAll
-      ? existing.split(oldString).join(newString)
-      : existing.replace(oldString, newString);
-    await writeFile(resolved, updated, "utf-8");
+    await writeFile(resolved, editResult.updatedContent, "utf-8");
+    setTrackedSnapshot(
+      context,
+      resolved,
+      await buildTrackedSnapshot(resolved, editResult.updatedContent),
+    );
     context?.editAttempts?.delete(attemptKey);
-    const count = replaceAll ? existing.split(oldString).length - 1 : 1;
     // Build a compact diff summary
     const oldLines = oldString.split("\n");
     const newLines = newString.split("\n");
@@ -258,7 +327,10 @@ async function toolEdit(
         .join("\n") +
       (newLines.length > 8 ? `\n... (${newLines.length - 8} more lines added)` : "");
     return {
-      content: `Successfully edited ${resolved} (${count} replacement${count !== 1 ? "s" : ""})\n\n${diffPreview}`,
+      content:
+        `Successfully edited ${resolved} (${editResult.replacementCount} replacement${editResult.replacementCount !== 1 ? "s" : ""})` +
+        (editResult.usedNormalizedLineEndings ? " [normalized line endings]" : "") +
+        `\n\n${diffPreview}`,
       isError: false,
     };
   } catch (err: unknown) {
@@ -743,7 +815,7 @@ export async function executeTool(
       result = await toolRead(input, projectRoot, context);
       break;
     case "Write":
-      result = await toolWrite(input, projectRoot);
+      result = await toolWrite(input, projectRoot, context);
       break;
     case "Edit":
       result = await toolEdit(input, projectRoot, context);
@@ -807,7 +879,10 @@ export async function executeTool(
     }
   }
 
-  return result;
+  return {
+    ...result,
+    content: truncateToolOutput(result.content),
+  };
 }
 
 function buildReadTrackerKey(context: ToolExecutionContext, resolvedPath: string): string {

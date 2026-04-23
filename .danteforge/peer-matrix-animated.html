@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DanteCode Peer Matrix</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #111827;
+      --panel-2: #172033;
+      --text: #e5ecf4;
+      --muted: #9fb0c3;
+      --grid: rgba(255, 255, 255, 0.08);
+      --track: rgba(255, 255, 255, 0.07);
+      --dante: linear-gradient(90deg, #f59e0b, #ef4444);
+      --closed: linear-gradient(90deg, #4f46e5, #06b6d4);
+      --oss: linear-gradient(90deg, #22c55e, #14b8a6);
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(239, 68, 68, 0.16), transparent 28%),
+        radial-gradient(circle at top right, rgba(79, 70, 229, 0.18), transparent 32%),
+        linear-gradient(180deg, #09101a, var(--bg));
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 40px 20px 56px;
+    }
+
+    .hero,
+    .panel {
+      background: linear-gradient(180deg, rgba(23, 32, 51, 0.94), rgba(13, 17, 23, 0.96));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 28px 28px 24px;
+      margin-bottom: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -60px -90px auto;
+      width: 280px;
+      height: 280px;
+      background: radial-gradient(circle, rgba(245, 158, 11, 0.16), transparent 62%);
+      pointer-events: none;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #f8c67a;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 14px 0 10px;
+      font-size: clamp(30px, 5vw, 54px);
+      line-height: 0.98;
+    }
+
+    .subtitle {
+      max-width: 760px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .stat {
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat-value {
+      margin-top: 8px;
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.35fr 0.95fr;
+      gap: 22px;
+    }
+
+    .panel {
+      padding: 22px;
+    }
+
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+    }
+
+    .panel p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .legend i {
+      width: 12px;
+      height: 12px;
+      display: inline-block;
+      border-radius: 999px;
+    }
+
+    .chart {
+      display: grid;
+      gap: 12px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 160px 1fr 64px 68px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .name {
+      font-weight: 600;
+    }
+
+    .kind {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .track {
+      position: relative;
+      height: 18px;
+      background:
+        linear-gradient(90deg, transparent 9.9%, var(--grid) 10%, transparent 10.1%, transparent 19.9%, var(--grid) 20%, transparent 20.1%, transparent 29.9%, var(--grid) 30%, transparent 30.1%, transparent 39.9%, var(--grid) 40%, transparent 40.1%, transparent 49.9%, var(--grid) 50%, transparent 50.1%, transparent 59.9%, var(--grid) 60%, transparent 60.1%, transparent 69.9%, var(--grid) 70%, transparent 70.1%, transparent 79.9%, var(--grid) 80%, transparent 80.1%, transparent 89.9%, var(--grid) 90%, transparent 90.1%),
+        var(--track);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0;
+      border-radius: inherit;
+      transform-origin: left center;
+      animation: grow 1.3s cubic-bezier(.2,.8,.2,1) forwards;
+      animation-delay: calc(var(--order) * 80ms);
+      box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.12);
+    }
+
+    .row[data-group="dante"] .fill { background: var(--dante); }
+    .row[data-group="closed"] .fill { background: var(--closed); }
+    .row[data-group="oss"] .fill { background: var(--oss); }
+
+    .score,
+    .gap {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+
+    .gap {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .callouts {
+      display: grid;
+      gap: 12px;
+    }
+
+    .callout {
+      padding: 16px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .callout span {
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .foot {
+      margin-top: 22px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    @keyframes grow {
+      from { width: 0; }
+      to { width: calc(var(--score) * 10%); }
+    }
+
+    @media (max-width: 980px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 10px 0;
+      }
+
+      .score,
+      .gap {
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <span class="eyebrow">Pure Coding Functionality</span>
+      <h1>DanteCode vs the peer set</h1>
+      <p class="subtitle">
+        This view uses the harsher 2026-04-21 interpretation: DanteCode is strong in verification-first engineering,
+        safety, routing, and proof discipline, but still below the frontier cluster on overall finishing power.
+      </p>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-label">DanteCode score</div>
+          <div class="stat-value">7.2 / 10</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Hyper-critical matrix</div>
+          <div class="stat-value">202 / 280</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Top closed-source gap</div>
+          <div class="stat-value">-0.6</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Open-source position</div>
+          <div class="stat-value">#1</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Animated peer matrix</h2>
+        <p>Stricter market-aware ordering for coding functionality. This includes Codex so the comparison cannot flatter us by omission.</p>
+        <div class="legend">
+          <span><i style="background: linear-gradient(90deg, #f59e0b, #ef4444)"></i>DanteCode</span>
+          <span><i style="background: linear-gradient(90deg, #4f46e5, #06b6d4)"></i>Closed-source</span>
+          <span><i style="background: linear-gradient(90deg, #22c55e, #14b8a6)"></i>Open-source</span>
+        </div>
+        <div class="chart">
+          <div class="row" data-group="closed" style="--score:7.8;--order:1">
+            <div><div class="name">Cursor</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.8</div>
+            <div class="gap">+0.6</div>
+          </div>
+          <div class="row" data-group="closed" style="--score:7.7;--order:2">
+            <div><div class="name">Codex</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.7</div>
+            <div class="gap">+0.5</div>
+          </div>
+          <div class="row" data-group="closed" style="--score:7.6;--order:3">
+            <div><div class="name">Claude Code</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.6</div>
+            <div class="gap">+0.4</div>
+          </div>
+          <div class="row" data-group="closed" style="--score:7.4;--order:4">
+            <div><div class="name">GitHub Copilot</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.4</div>
+            <div class="gap">+0.2</div>
+          </div>
+          <div class="row" data-group="closed" style="--score:7.3;--order:5">
+            <div><div class="name">Windsurf</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.3</div>
+            <div class="gap">+0.1</div>
+          </div>
+          <div class="row" data-group="closed" style="--score:7.3;--order:6">
+            <div><div class="name">Devin</div><div class="kind">closed</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.3</div>
+            <div class="gap">+0.1</div>
+          </div>
+          <div class="row" data-group="dante" style="--score:7.2;--order:7">
+            <div><div class="name">DanteCode</div><div class="kind">ours</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">7.2</div>
+            <div class="gap">baseline</div>
+          </div>
+          <div class="row" data-group="oss" style="--score:6.4;--order:8">
+            <div><div class="name">OpenHands</div><div class="kind">oss</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">6.4</div>
+            <div class="gap">-0.8</div>
+          </div>
+          <div class="row" data-group="oss" style="--score:6.3;--order:9">
+            <div><div class="name">Aider</div><div class="kind">oss</div></div>
+            <div class="track"><div class="fill"></div></div>
+            <div class="score">6.3</div>
+            <div class="gap">-0.9</div>
+          </div>
+        </div>
+        <div class="foot">
+          Closed-source scores here use the stricter landscape ordering from <code>.danteforge/COMPETITIVE_LANDSCAPE_MASTERPLAN.md</code>.
+          DanteCode uses the updated hyper-critical double matrix score from <code>.danteforge/COMPETITIVE_MATRIX.md</code> and <code>.danteforge/COMPETITIVE_MATRIX_REBUILT.md</code>.
+        </div>
+      </section>
+
+      <aside class="panel">
+        <h2>What the picture means</h2>
+        <p>The animation is meant to answer the honest question quickly: are we in the conversation, and where exactly do we still lose?</p>
+        <div class="callouts">
+          <div class="callout">
+            <strong>Where we are strong</strong>
+            <span>Verification-first generation, safety posture, local model routing, and proof-oriented engineering discipline are real advantages.</span>
+          </div>
+          <div class="callout">
+            <strong>Where the frontier still beats us</strong>
+            <span>Hard-task finishing, ambiguity handling, retrieval under pressure, and premium editor/runtime polish still separate us from the top cluster.</span>
+          </div>
+          <div class="callout">
+            <strong>What is true today</strong>
+            <span>DanteCode looks like the strongest open-source coding product in this set, but still sits just below the closed-source frontier cluster on pure coding functionality.</span>
+          </div>
+          <div class="callout">
+            <strong>Fast read</strong>
+            <span>We are not pretending parity. We are showing that we are close enough to learn aggressively, while still being honest about the remaining gap.</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

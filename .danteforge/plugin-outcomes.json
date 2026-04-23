@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-18T11:00:00.000Z","pluginId":"dante-review","commandId":"dante-review:run","status":"success","durationMs":1230,"outputLines":45}
+{"timestamp":"2026-04-18T14:30:00.000Z","pluginId":"dante-test","commandId":"dante-test:run","status":"success","durationMs":8450,"outputLines":123}
+{"timestamp":"2026-04-19T09:15:00.000Z","pluginId":"dante-review","commandId":"dante-review:list","status":"success","durationMs":85,"outputLines":12}
+{"timestamp":"2026-04-19T14:00:00.000Z","pluginId":"dante-test","commandId":"dante-test:coverage","status":"success","durationMs":12300,"outputLines":201}
+{"timestamp":"2026-04-20T10:30:00.000Z","pluginId":"dante-review","commandId":"dante-review:run","status":"success","durationMs":980,"outputLines":38}

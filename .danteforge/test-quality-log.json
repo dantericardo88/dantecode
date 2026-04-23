@@ -1,0 +1,4 @@
+{"filePath":"packages/core/src/__tests__/model-router.test.ts","score":0.85,"breakdown":{"testDensity":0.9,"assertionRatio":1,"edgeCoverage":1,"mockUsage":0.5},"grade":"A"}
+{"filePath":"packages/cli/src/__tests__/sprint-ba-fim-plan.test.ts","score":0.65,"breakdown":{"testDensity":0.7,"assertionRatio":0.8,"edgeCoverage":0,"mockUsage":1},"grade":"B"}
+{"filePath":"packages/core/src/__tests__/task-decomposer.test.ts","score":0.45,"breakdown":{"testDensity":0.5,"assertionRatio":0.6,"edgeCoverage":0,"mockUsage":0.5},"grade":"C"}
+{"filePath":"packages/cli/src/__tests__/quick-smoke.test.ts","score":0.2,"breakdown":{"testDensity":0.2,"assertionRatio":0.4,"edgeCoverage":0,"mockUsage":0},"grade":"D"}

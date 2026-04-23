@@ -1,0 +1,5 @@
+{"timestamp":"2026-04-21T00:00:00.000Z","taskId":"t-001","attempt":1,"failureMode":"typecheck_error","fixApplied":"run_build_before_typecheck","succeeded":true,"durationMs":4500}
+{"timestamp":"2026-04-21T00:30:00.000Z","taskId":"t-002","attempt":1,"failureMode":"missing_export","fixApplied":"add_export_to_index","succeeded":true,"durationMs":1200}
+{"timestamp":"2026-04-21T01:00:00.000Z","taskId":"t-003","attempt":1,"failureMode":"typecheck_error","fixApplied":"run_build_before_typecheck","succeeded":true,"durationMs":3800}
+{"timestamp":"2026-04-21T01:30:00.000Z","taskId":"t-004","attempt":2,"failureMode":"test_failure","fixApplied":"narrow_repair_not_broad_rewrite","succeeded":true,"durationMs":5600}
+{"timestamp":"2026-04-21T02:00:00.000Z","taskId":"t-005","attempt":1,"failureMode":"import_error","fixApplied":"check_static_vs_dynamic_import","succeeded":true,"durationMs":2100}

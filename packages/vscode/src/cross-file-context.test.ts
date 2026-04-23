@@ -235,3 +235,115 @@ describe("gatherCrossFileContext", () => {
     expect(result).not.toContain("src/utils.ts");
   });
 });
+
+// ── Phase 4: recently-edited context integration ───────────────────────────────
+
+describe("gatherCrossFileContext with recentEditPaths", () => {
+  const readFile = async (path: string): Promise<string> => {
+    const files: Record<string, string> = {
+      "/src/main.ts": 'import { greet } from "./helper";\nconst x = 1;',
+      "/src/helper.ts": "export function greet(name: string): string { return name; }",
+      "/src/recent.ts": "export const RECENT_CONST = 42;",
+    };
+    if (files[path]) return files[path]!;
+    throw new Error(`File not found: ${path}`);
+  };
+
+  it("recently-edited files appear in context output", async () => {
+    const result = await gatherCrossFileContext({
+      currentFilePath: "/src/main.ts",
+      openFilePaths: ["/src/helper.ts"],
+      recentEditPaths: ["/src/recent.ts"],
+      readFile,
+    });
+    expect(result).toContain("recent.ts");
+    expect(result).toContain("RECENT_CONST");
+  });
+
+  it("recently-edited files excluded when they are the current file", async () => {
+    const result = await gatherCrossFileContext({
+      currentFilePath: "/src/recent.ts",
+      openFilePaths: ["/src/helper.ts"],
+      recentEditPaths: ["/src/recent.ts"], // same as current
+      readFile,
+    });
+    // The current file must not appear in context
+    expect(result).not.toMatch(/\/src\/recent\.ts/);
+  });
+
+  it("imported files rank higher than recent-only files", async () => {
+    const result = await gatherCrossFileContext({
+      currentFilePath: "/src/main.ts",
+      openFilePaths: ["/src/helper.ts"],
+      recentEditPaths: ["/src/recent.ts"],
+      readFile,
+    });
+    // helper.ts is imported — should appear before or without recent.ts
+    const helperIdx = result.indexOf("greet");
+    const recentIdx = result.indexOf("RECENT_CONST");
+    // If both appear, imported (helper) should come first
+    if (helperIdx >= 0 && recentIdx >= 0) {
+      expect(helperIdx).toBeLessThan(recentIdx);
+    }
+  });
+});
+
+// ── Phase 5: BM25 CompletionContextRetriever ──────────────────────────────────
+
+import { CompletionContextRetriever, bm25Score } from "./completion-context-retriever.js";
+
+describe("bm25Score", () => {
+  it("exact-match document scores higher than unrelated document", () => {
+    const queryTerms = ["function", "validateToken", "string"];
+    const exactDoc = ["function", "validateToken", "token", "string", "boolean"];
+    const unrelatedDoc = ["const", "foo", "bar", "baz", "qux"];
+    const allDocs = [exactDoc, unrelatedDoc];
+    const avgDocLen = (exactDoc.length + unrelatedDoc.length) / 2;
+
+    const exactScore = bm25Score(queryTerms, exactDoc, avgDocLen, allDocs);
+    const unrelatedScore = bm25Score(queryTerms, unrelatedDoc, avgDocLen, allDocs);
+
+    expect(exactScore).toBeGreaterThan(unrelatedScore);
+  });
+
+  it("returns 0 for no term overlap", () => {
+    const score = bm25Score(
+      ["functionA"],
+      ["completely", "different", "words"],
+      3,
+      [["completely", "different", "words"]],
+    );
+    expect(score).toBe(0);
+  });
+});
+
+describe("CompletionContextRetriever", () => {
+  it("returns top-N snippets by BM25 score", async () => {
+    const chunks = [
+      { filePath: "/src/auth.ts", content: "export function validateToken(token: string): boolean { return true; }" },
+      { filePath: "/src/utils.ts", content: "export function formatDate(d: Date): string { return d.toISOString(); }" },
+      { filePath: "/src/api.ts", content: "export function callApi(url: string): Promise<Response> { return fetch(url); }" },
+    ];
+    const retriever = new CompletionContextRetriever(() => chunks);
+    const results = await retriever.retrieve(["validateToken", "token", "string"], 2);
+    expect(results.length).toBeLessThanOrEqual(2);
+    // The auth.ts chunk (most relevant) should be first
+    if (results.length > 0) {
+      expect(results[0]).toContain("auth.ts");
+    }
+  });
+
+  it("returns empty array gracefully when index unavailable", async () => {
+    const retriever = new CompletionContextRetriever(() => []);
+    const results = await retriever.retrieve(["function", "foo"]);
+    expect(results).toEqual([]);
+  });
+
+  it("returns empty array when retriever throws", async () => {
+    const retriever = new CompletionContextRetriever(() => {
+      throw new Error("index unavailable");
+    });
+    const results = await retriever.retrieve(["foo"]);
+    expect(results).toEqual([]);
+  });
+});

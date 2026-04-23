@@ -5,6 +5,7 @@ export default defineConfig({
     root: process.cwd(),
     include: ["src/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**"],
+    testTimeout: 15000,
     coverage: {
       enabled: false,
     },

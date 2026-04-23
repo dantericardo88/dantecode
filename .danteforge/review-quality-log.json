@@ -1,0 +1,3 @@
+{"reviewId":"review-001","precision":0.75,"recall":0.6,"f1":0.667,"matchedIssues":3,"totalReviewComments":4,"totalGroundTruth":5,"timestamp":"2026-04-19T14:00:00.000Z"}
+{"reviewId":"review-002","precision":0.8,"recall":0.8,"f1":0.8,"matchedIssues":4,"totalReviewComments":5,"totalGroundTruth":5,"timestamp":"2026-04-20T09:00:00.000Z"}
+{"reviewId":"review-003","precision":0.857,"recall":0.857,"f1":0.857,"matchedIssues":6,"totalReviewComments":7,"totalGroundTruth":7,"timestamp":"2026-04-21T10:00:00.000Z"}
