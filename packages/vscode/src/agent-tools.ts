@@ -841,6 +841,15 @@ export async function executeTool(
     case "GitPush":
       result = await toolGitPush(input, projectRoot);
       break;
+    case "InvalidTool": {
+      const invalidTool = String(input["tool"] ?? "unknown");
+      const error = String(input["error"] ?? "The requested tool is not registered.");
+      result = {
+        content: `Invalid tool call: ${invalidTool}. ${error}`,
+        isError: true,
+      };
+      break;
+    }
     default:
       result = { content: `Unknown tool: ${name}`, isError: true };
   }

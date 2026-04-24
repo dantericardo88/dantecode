@@ -70,6 +70,9 @@ vi.mock("@dantecode/core", () => {
   return {
     ModelRouterImpl: MockModelRouterImpl,
     SessionStore: MockSessionStore,
+    INVALID_TOOL_NAME: "InvalidTool",
+    normalizeToolCalls: vi.fn((toolCalls: unknown[]) => ({ toolCalls, repairs: [], invalidToolCalls: [] })),
+    detectRepeatedToolCall: vi.fn(() => null),
     appendAuditEvent: vi.fn().mockResolvedValue(undefined),
     shouldContinueLoop: vi.fn(() => true),
     estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),

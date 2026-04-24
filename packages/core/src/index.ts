@@ -438,6 +438,19 @@ export type {
 
 export { LoopDetector, fingerprintAction } from "./loop-detector.js";
 export type { ActionRecord, LoopDetectionResult, LoopDetectorOptions } from "./loop-detector.js";
+export {
+  INVALID_TOOL_NAME,
+  detectRepeatedToolCall,
+  normalizeToolCalls,
+  stableToolCallSignature,
+} from "./tool-call-normalization.js";
+export type {
+  InvalidToolCall,
+  NormalizableToolCall,
+  NormalizeToolCallsResult,
+  RepeatedToolCall,
+  ToolNameRepair,
+} from "./tool-call-normalization.js";
 
 // ─── Magic Pipeline State ────────────────────────────────────────────────────
 

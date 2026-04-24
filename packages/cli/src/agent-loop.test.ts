@@ -14,6 +14,8 @@ import { resolve } from "node:path";
 const mockGenerateText = vi.fn();
 const mockReadFile = vi.fn();
 const mockFileContents = new Map<string, string>();
+const mockNativeFullStreams: Array<Array<Record<string, unknown>>> = [];
+const mockStreamWithToolsError = vi.fn();
 
 vi.mock("ai", () => ({
   generateText: mockGenerateText,
@@ -67,6 +69,25 @@ vi.mock("@dantecode/core", () => {
       return {
         textStream: (async function* () {
           yield text;
+        })(),
+      };
+    }
+
+    async streamWithTools(
+      _messages: Array<{ role: string; content: string }>,
+      _tools: Record<string, unknown>,
+      _options?: Record<string, unknown>,
+    ): Promise<{ fullStream: AsyncIterable<Record<string, unknown>> }> {
+      const error = mockStreamWithToolsError();
+      if (error) {
+        throw error;
+      }
+      const parts = mockNativeFullStreams.shift() ?? [];
+      return {
+        fullStream: (async function* () {
+          for (const part of parts) {
+            yield part;
+          }
         })(),
       };
     }
@@ -267,6 +288,49 @@ vi.mock("@dantecode/core", () => {
     assembleDebugContext: vi.fn().mockReturnValue({ sessionId: "", errorType: "Error", errorMessage: "", stackFrames: [], watchValues: {}, severityScore: 0.3, assembledAt: "" }),
     formatDebugContextForPrompt: vi.fn().mockReturnValue("[Debug Repair Context — severity: 0.3]"),
     recordDebugRepairOutcome: vi.fn().mockReturnValue(undefined),
+    // Sprint Dim 11 — chat-ux
+    renderContextMeter: vi.fn().mockReturnValue("[████████░░░░░░░░░░░░] 40% ctx"),
+    getContextWarningLevel: vi.fn().mockReturnValue("ok"),
+    formatPlanPreview: vi.fn().mockReturnValue(""),
+    getErrorRecoveryHint: vi.fn().mockReturnValue(null),
+    getMessagePrefix: vi.fn().mockReturnValue("⎿"),
+    formatToolResultLine: vi.fn((toolName: string, summary: string, isError?: boolean) =>
+      `  ${isError ? "✗" : "⎿"} ${toolName}: ${summary}`,
+    ),
+    INVALID_TOOL_NAME: "InvalidTool",
+    normalizeToolCalls: vi.fn(
+      (
+        toolCalls: Array<{ name: string; input: Record<string, unknown> }>,
+        allowed: Iterable<string>,
+      ) => {
+        const allowedNames = [...allowed];
+        return {
+          toolCalls: toolCalls.map((toolCall) => {
+            const exact = allowedNames.find((name) => name === toolCall.name);
+            if (exact) return toolCall;
+            const repaired = allowedNames.find(
+              (name) => name.toLowerCase() === toolCall.name.toLowerCase(),
+            );
+            if (repaired) return { ...toolCall, name: repaired };
+            return {
+              ...toolCall,
+              name: "InvalidTool",
+              input: { tool: toolCall.name, error: `Unknown tool "${toolCall.name}"` },
+            };
+          }),
+          repairs: [],
+          invalidToolCalls: [],
+        };
+      },
+    ),
+    detectRepeatedToolCall: vi.fn(() => null),
+    buildContextUpdatePayload: vi.fn().mockReturnValue({
+      percent: 0,
+      tokensUsed: 0,
+      tokensTotal: 128000,
+      warningLevel: "ok",
+      barText: "[░░░░░░░░░░░░░░░░░░░░] 0% ctx",
+    }),
   };
 });
 
@@ -346,7 +410,23 @@ import { executeTool as _et } from "./tools.js";
 const mockExecuteTool = _et as unknown as ReturnType<typeof vi.fn>;
 
 vi.mock("./tool-schemas.js", () => ({
-  getAISDKTools: vi.fn(() => ({})),
+  getAISDKTools: vi.fn(() => ({
+    InvalidTool: {},
+    Read: {},
+    Write: {},
+    Edit: {},
+    Bash: {},
+    Glob: {},
+    Grep: {},
+    GitCommit: {},
+    GitPush: {},
+    TodoWrite: {},
+    WebSearch: {},
+    WebFetch: {},
+    SubAgent: {},
+    GitHubSearch: {},
+    GitHubOps: {},
+  })),
 }));
 
 // Safety module is NOT mocked — we test it for real
@@ -432,6 +512,8 @@ function setMockFileContent(projectRoot: string, filePath: string, content: stri
 describe("runAgentLoop smoke tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNativeFullStreams.length = 0;
+    mockStreamWithToolsError.mockReset().mockReturnValue(null);
     mockFileContents.clear();
     mockReadFile.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     mockAnalyzeComplexityValue = 0.3;
@@ -448,6 +530,144 @@ describe("runAgentLoop smoke tests", () => {
       unverifiedFailureCount: 0,
       runtimeFailureCount: 0,
     });
+  });
+
+  it("does not execute XML-looking prose when native tool calling is enabled", async () => {
+    mockNativeFullStreams.push([
+      {
+        type: "text-delta",
+        textDelta:
+          'I ran it.\n<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+      },
+      { type: "finish", finishReason: "stop" },
+    ]);
+
+    const result = await runAgentLoop(
+      "hello",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockExecuteTool).not.toHaveBeenCalled();
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(result.status).not.toBe("FAILED");
+  });
+
+  it("does not fall back to XML parsing when native tool streaming fails", async () => {
+    mockStreamWithToolsError.mockReturnValueOnce(new Error("native tool protocol failed"));
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
+    });
+
+    const result = await runAgentLoop(
+      "run tests",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(mockExecuteTool).not.toHaveBeenCalled();
+    expect(result.status).toBe("FAILED");
+  });
+
+  it("repairs wrong-case native tool names before dispatch", async () => {
+    mockNativeFullStreams.push(
+      [
+        {
+          type: "tool-call",
+          toolCallId: "tc-1",
+          toolName: "bash",
+          args: { command: "npm test" },
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ],
+      [{ type: "text-delta", textDelta: "done" }, { type: "finish", finishReason: "stop" }],
+    );
+
+    await runAgentLoop(
+      "run tests",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Bash",
+      { command: "npm test" },
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it("routes unknown native tool names to InvalidTool", async () => {
+    mockNativeFullStreams.push(
+      [
+        {
+          type: "tool-call",
+          toolCallId: "tc-1",
+          toolName: "Shell",
+          args: { command: "npm test" },
+        },
+        { type: "finish", finishReason: "tool-calls" },
+      ],
+      [{ type: "text-delta", textDelta: "done" }, { type: "finish", finishReason: "stop" }],
+    );
+
+    await runAgentLoop(
+      "run tests",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "InvalidTool",
+      expect.objectContaining({ tool: "Shell" }),
+      expect.any(String),
+      expect.any(Object),
+    );
   });
 
   it("basic prompt produces response with no tool calls", async () => {

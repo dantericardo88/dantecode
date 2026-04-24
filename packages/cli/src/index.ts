@@ -14,6 +14,7 @@ import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
 import { runBenchCommand } from "./commands/bench.js";
+import { runInstallCommand } from "./commands/install.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -27,7 +28,7 @@ const VERSION = "1.0.0";
 
 /** Parsed result from CLI argument parsing. */
 interface ParsedArgs {
-  /** The primary command (init, skills, agent, config, git) or null for REPL. */
+  /** The primary command (init, skills, agent, config, git, install) or null for REPL. */
   command: string | null;
   /** Sub-arguments passed to the command. */
   subArgs: string[];
@@ -79,7 +80,16 @@ function parseArgs(argv: string[]): ParsedArgs {
     mcp: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench"]);
+  const commands = new Set([
+    "init",
+    "skills",
+    "agent",
+    "config",
+    "git",
+    "self-update",
+    "bench",
+    "install",
+  ]);
   let i = 0;
   let foundCommand = false;
 
@@ -299,6 +309,9 @@ async function main(): Promise<void> {
         return;
       case "bench":
         await runBenchCommand(parsed.subArgs, projectRoot);
+        return;
+      case "install":
+        await runInstallCommand(parsed.subArgs, projectRoot);
         return;
     }
   }

@@ -24,6 +24,14 @@ export interface ToolSchema {
  */
 export function getAISDKTools(mcpTools?: Record<string, ToolSchema>): Record<string, ToolSchema> {
   const nativeTools: Record<string, ToolSchema> = {
+    InvalidTool: {
+      description: "Internal repair target for malformed tool calls. Do not call directly.",
+      parameters: z.object({
+        tool: z.string().describe("The invalid tool name that was requested"),
+        error: z.string().describe("The tool validation error"),
+      }),
+    },
+
     Read: {
       description: "Read a file from disk. Returns content with line numbers.",
       parameters: z.object({

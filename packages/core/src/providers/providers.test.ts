@@ -17,12 +17,19 @@ vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: vi.fn(() => mockOpenAIFactory),
 }));
 
+const mockXaiModel = { modelId: "mock-xai", provider: "xai" };
+const mockXaiFactory = vi.fn(() => mockXaiModel);
+vi.mock("@ai-sdk/xai", () => ({
+  createXai: vi.fn(() => mockXaiFactory),
+}));
+
 import { buildAnthropicProvider } from "./anthropic.js";
 import { buildOpenAIProvider } from "./openai.js";
 import { buildGrokProvider } from "./grok.js";
 import { buildOllamaProvider } from "./ollama.js";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createXai } from "@ai-sdk/xai";
 
 // ---------------------------------------------------------------------------
 // Shared config builder
@@ -61,25 +68,25 @@ describe("providers", () => {
 
     it("uses config.apiKey when provided", () => {
       delete process.env["ANTHROPIC_API_KEY"];
-      const config = makeConfig({ apiKey: "sk-config-key" });
+      const config = makeConfig({ apiKey: "cfg" });
       const model = buildAnthropicProvider(config);
       expect(model).toBe(mockAnthropicModel);
-      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "sk-config-key" });
+      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "cfg" });
       expect(mockAnthropicFactory).toHaveBeenCalledWith("claude-sonnet-4-6");
     });
 
     it("falls back to ANTHROPIC_API_KEY env var", () => {
-      process.env["ANTHROPIC_API_KEY"] = "sk-env-key";
+      process.env["ANTHROPIC_API_KEY"] = "env";
       const model = buildAnthropicProvider(makeConfig());
       expect(model).toBe(mockAnthropicModel);
-      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "sk-env-key" });
+      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "env" });
     });
 
     it("prefers config.apiKey over env var", () => {
-      process.env["ANTHROPIC_API_KEY"] = "sk-env-key";
-      const config = makeConfig({ apiKey: "sk-config-key" });
+      process.env["ANTHROPIC_API_KEY"] = "env";
+      const config = makeConfig({ apiKey: "cfg" });
       buildAnthropicProvider(config);
-      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "sk-config-key" });
+      expect(createAnthropic).toHaveBeenCalledWith({ apiKey: "cfg" });
     });
 
     it("error message includes setup instructions", () => {
@@ -107,21 +114,21 @@ describe("providers", () => {
 
     it("uses config.apiKey when provided", () => {
       delete process.env["OPENAI_API_KEY"];
-      const config = makeConfig({ provider: "openai", modelId: "gpt-4.1", apiKey: "sk-oai-key" });
+      const config = makeConfig({ provider: "openai", modelId: "gpt-4.1", apiKey: "cfg" });
       const model = buildOpenAIProvider(config);
       expect(model).toBe(mockOpenAIModel);
-      expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "sk-oai-key" });
+      expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "cfg" });
     });
 
     it("falls back to OPENAI_API_KEY env var", () => {
-      process.env["OPENAI_API_KEY"] = "sk-oai-env";
+      process.env["OPENAI_API_KEY"] = "env";
       const model = buildOpenAIProvider(makeConfig({ provider: "openai", modelId: "gpt-4.1" }));
       expect(model).toBe(mockOpenAIModel);
-      expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "sk-oai-env" });
+      expect(createOpenAI).toHaveBeenCalledWith({ apiKey: "env" });
     });
 
     it("passes baseUrl when configured", () => {
-      process.env["OPENAI_API_KEY"] = "sk-oai-env";
+      process.env["OPENAI_API_KEY"] = "env";
       buildOpenAIProvider(
         makeConfig({
           provider: "openai",
@@ -130,13 +137,13 @@ describe("providers", () => {
         }),
       );
       expect(createOpenAI).toHaveBeenCalledWith({
-        apiKey: "sk-oai-env",
+        apiKey: "env",
         baseURL: "https://my-proxy.example.com",
       });
     });
 
     it("does not pass baseURL when not configured", () => {
-      process.env["OPENAI_API_KEY"] = "sk-oai-env";
+      process.env["OPENAI_API_KEY"] = "env";
       buildOpenAIProvider(makeConfig({ provider: "openai", modelId: "gpt-4.1" }));
       const callArgs = (createOpenAI as ReturnType<typeof vi.fn>).mock.calls[0]![0];
       expect(callArgs).not.toHaveProperty("baseURL");
@@ -169,46 +176,44 @@ describe("providers", () => {
     it("uses config.apiKey when provided", () => {
       delete process.env["XAI_API_KEY"];
       delete process.env["GROK_API_KEY"];
-      const config = makeConfig({ provider: "grok", modelId: "grok-3", apiKey: "xai-key" });
+      const config = makeConfig({ provider: "grok", modelId: "grok-3", apiKey: "cfg" });
       const model = buildGrokProvider(config);
-      expect(model).toBe(mockOpenAIModel);
-      expect(createOpenAI).toHaveBeenCalledWith(
+      expect(model).toBe(mockXaiModel);
+      expect(createXai).toHaveBeenCalledWith(
         expect.objectContaining({
-          apiKey: "xai-key",
-          baseURL: "https://api.x.ai/v1",
-          compatibility: "compatible",
+          apiKey: "cfg",
+          headers: { "X-Client": "dantecode/1.0.0" },
         }),
       );
+      expect(mockXaiFactory).toHaveBeenCalledWith("grok-3");
     });
 
     it("falls back to XAI_API_KEY env var first", () => {
-      process.env["XAI_API_KEY"] = "xai-primary-env-key";
+      process.env["XAI_API_KEY"] = "pri";
       buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
-      expect(createOpenAI).toHaveBeenCalledWith(
+      expect(createXai).toHaveBeenCalledWith(
         expect.objectContaining({
-          apiKey: "xai-primary-env-key",
-          baseURL: "https://api.x.ai/v1",
+          apiKey: "pri",
         }),
       );
     });
 
     it("falls back to GROK_API_KEY env var", () => {
       delete process.env["XAI_API_KEY"];
-      process.env["GROK_API_KEY"] = "xai-env-key";
+      process.env["GROK_API_KEY"] = "fb";
       buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
-      expect(createOpenAI).toHaveBeenCalledWith(
+      expect(createXai).toHaveBeenCalledWith(
         expect.objectContaining({
-          apiKey: "xai-env-key",
-          baseURL: "https://api.x.ai/v1",
+          apiKey: "fb",
         }),
       );
     });
 
     it("includes X-Client header", () => {
       delete process.env["XAI_API_KEY"];
-      process.env["GROK_API_KEY"] = "xai-env-key";
+      process.env["GROK_API_KEY"] = "fb";
       buildGrokProvider(makeConfig({ provider: "grok", modelId: "grok-3" }));
-      expect(createOpenAI).toHaveBeenCalledWith(
+      expect(createXai).toHaveBeenCalledWith(
         expect.objectContaining({
           headers: { "X-Client": "dantecode/1.0.0" },
         }),

@@ -114,6 +114,7 @@ ${BOLD}COMMANDS${RESET}
   agent               Manage agents (list, run, create)
   config              View/edit configuration (init, show, set, models)
   git                 Git operations (status, log, diff)
+  install             Package and install the VS Code extension into VS Code-family IDEs
 
 ${BOLD}OPTIONS${RESET}
   --model <id>        Override the default model (e.g. grok/grok-3, anthropic/claude-sonnet-4-20250514)

@@ -37,6 +37,9 @@ import {
   responseNeedsToolExecutionNudge,
   reviewPullRequest,
   shouldContinueLoop,
+  INVALID_TOOL_NAME,
+  detectRepeatedToolCall,
+  normalizeToolCalls,
 } from "@dantecode/core";
 import type { FileSnapshot } from "@dantecode/core";
 import { parseSearchReplaceBlocks, type SearchReplaceBlock } from "@dantecode/core";
@@ -55,7 +58,9 @@ import {
   type DiffReviewPayload,
   type ToolResult,
   type ToolExecutionContext,
+  type ExtractedToolCall,
 } from "./agent-tools.js";
+import { getAISDKTools } from "./tool-schemas.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -676,6 +681,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Anti-confabulation guards (Grok empty-response / phantom-completion fix)
     let consecutiveEmptyRounds = 0;
     const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
+    const DOOM_LOOP_THRESHOLD = 3;
+    const recentCanonicalToolCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
     let confabulationNudges = 0;
     const MAX_CONFABULATION_NUDGES = 2;
 
@@ -1075,21 +1082,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           forceCapable: false,
         });
 
-        // Stream the model response
-        const streamResult = await router.stream(agentMessages, {
-          system: systemPrompt,
-          maxTokens: tier === "capable" ? 16384 : 8192,
-          abortSignal: signal,
-        });
+        // Stream the model response. Native-tool-capable models must emit
+        // structured tool-call events; prose/XML is not executable for them.
+        const useNativeTools = modelConfig.supportsToolCalls;
+        const aiSdkTools = useNativeTools ? getAISDKTools() : null;
+        const streamResult = useNativeTools
+          ? await router.streamWithTools(agentMessages, aiSdkTools!, {
+              system: systemPrompt,
+              maxTokens: tier === "capable" ? 16384 : 8192,
+              abortSignal: signal,
+            })
+          : await router.stream(agentMessages, {
+              system: systemPrompt,
+              maxTokens: tier === "capable" ? 16384 : 8192,
+              abortSignal: signal,
+            });
 
         let fullResponse = "";
+        let toolCalls: ExtractedToolCall[] = [];
+        let nativeFinishReason: string | undefined;
 
-        // Set a 60-second timeout for the first chunk (up from 30s for slower models)
+        // Ollama local models may need 2-3 min on first load; cloud providers get 60s
+        const firstChunkTimeoutMs = provider === "ollama" ? 180_000 : 60_000;
+
+        // Cancel the readable stream immediately when the abort signal fires — this
+        // unblocks the for-await iterator even if the underlying fetch is hanging
+        // (Vercel AI SDK's abort propagation doesn't always interrupt async iteration).
+        const cancelStreamOnAbort = () => {
+          if (!useNativeTools) {
+            void ((streamResult as { textStream: AsyncIterable<string> }).textStream as ReadableStream<string> & { cancel?: () => void }).cancel?.();
+          }
+        };
+        signal.addEventListener("abort", cancelStreamOnAbort, { once: true });
+
         const firstChunkTimeout = setTimeout(() => {
           if (fullResponse.length === 0 && this.abortController) {
             this.abortController.abort();
           }
-        }, 60_000);
+        }, firstChunkTimeoutMs);
 
         // Heartbeat while waiting for model to start responding
         // On round 2+, use chunk-only mode to APPEND to the existing buffer
@@ -1113,9 +1143,38 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             }
           }
         }, 4000);
+        const cleanupStreamListeners = () => {
+          clearTimeout(firstChunkTimeout);
+          clearInterval(streamHeartbeat);
+          signal.removeEventListener("abort", cancelStreamOnAbort);
+        };
 
         try {
-          for await (const chunk of streamResult.textStream) {
+          if (useNativeTools) {
+            for await (const part of (streamResult as { fullStream: AsyncIterable<Record<string, unknown>> }).fullStream) {
+              if (fullResponse.length === 0 && toolCalls.length === 0) {
+                cleanupStreamListeners();
+              }
+              if (this.stopRequested) break;
+              if (part["type"] === "text-delta") {
+                const chunk = String(part["textDelta"] ?? "");
+                fullResponse += chunk;
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk, partial: isFirstRound ? fullResponse : "" },
+                });
+              } else if (part["type"] === "tool-call") {
+                toolCalls.push({
+                  id: String(part["toolCallId"] ?? `tc-${Date.now()}-${toolCalls.length}`),
+                  name: String(part["toolName"] ?? ""),
+                  input: (part["args"] ?? {}) as Record<string, unknown>,
+                });
+              } else if (part["type"] === "finish" || part["type"] === "finish-step") {
+                nativeFinishReason = part["finishReason"] as string | undefined;
+              }
+            }
+          } else {
+            for await (const chunk of (streamResult as { textStream: AsyncIterable<string> }).textStream) {
             if (fullResponse.length === 0) {
               clearTimeout(firstChunkTimeout);
               clearInterval(streamHeartbeat);
@@ -1135,6 +1194,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 payload: { chunk, partial: "" },
               });
             }
+            }
           }
         } catch (streamErr: unknown) {
           clearTimeout(firstChunkTimeout);
@@ -1144,7 +1204,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             this.postMessage({
               type: "error",
               payload: {
-                message: `Request to ${this.currentModel} timed out after 30 seconds.\nCheck your API key and network connection.`,
+                message: `Request to ${this.currentModel} timed out after ${Math.round(firstChunkTimeoutMs / 1000)} seconds.\nCheck your API key and network connection.`,
               },
             });
             break;
@@ -1252,8 +1312,46 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Update the status bar with context utilization after each response
         this.updateStatusBar({ contextPercent: ctxUtil.percent });
 
-        // Extract tool calls from the response
-        const { toolCalls } = extractToolCalls(fullResponse);
+        if (!useNativeTools) {
+          const extracted = extractToolCalls(fullResponse);
+          toolCalls = extracted.toolCalls;
+        } else if (
+          toolCalls.length === 0 &&
+          (nativeFinishReason === "tool-calls" || nativeFinishReason === "tool_calls")
+        ) {
+          void appendAuditEvent(projectRoot, {
+            type: "tool_call_failed",
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            modelId: this.currentModel,
+            projectRoot,
+            payload: {
+              nativeToolProtocol: true,
+              emptyToolCallsFinishGuarded: true,
+              finishReason: nativeFinishReason,
+            },
+          });
+        }
+
+        const advertisedToolNames = Object.keys(getAISDKTools()).filter(
+          (name) => name !== INVALID_TOOL_NAME,
+        );
+        const toolCallNormalization = normalizeToolCalls(toolCalls, advertisedToolNames);
+        toolCalls = toolCallNormalization.toolCalls;
+        if (toolCallNormalization.repairs.length > 0 || toolCallNormalization.invalidToolCalls.length > 0) {
+          void appendAuditEvent(projectRoot, {
+            type: "tool_call_failed",
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            modelId: this.currentModel,
+            projectRoot,
+            payload: {
+              nativeToolProtocol: useNativeTools,
+              toolNameRepairs: toolCallNormalization.repairs,
+              invalidToolSentinelHits: toolCallNormalization.invalidToolCalls,
+            },
+          });
+        }
 
         // ---- Anti-confabulation: empty response circuit breaker ----
         if (fullResponse.trim().length === 0 && toolCalls.length === 0) {
@@ -1318,7 +1416,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             agentMessages.push({
               role: "user",
               content:
-                "You described or claimed work without using any tools. Stop narrating and EXECUTE the next step with <tool_use> blocks right now. Read files before editing them, make the change with Write/Edit, and only claim success after a real tool result.",
+                useNativeTools
+                  ? "You described or claimed work without emitting a real native tool call. Stop narrating and EXECUTE the next step with the structured tool API right now. Read files before editing them, make the change with Write/Edit, and only claim success after a real tool result."
+                  : "You described or claimed work without using any tools. Stop narrating and EXECUTE the next step with <tool_use> blocks right now. Read files before editing them, make the change with Write/Edit, and only claim success after a real tool result.",
             });
             this.postMessage({
               type: "chat_response_chunk",
@@ -1406,6 +1506,45 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // so tool execution output is visible in the chat in real-time
 
         const toolResultParts: string[] = [];
+        const gatedToolCalls: ExtractedToolCall[] = [];
+        for (const toolCall of toolCalls) {
+          recentCanonicalToolCalls.push({ name: toolCall.name, input: toolCall.input });
+          if (recentCanonicalToolCalls.length > DOOM_LOOP_THRESHOLD) {
+            recentCanonicalToolCalls.shift();
+          }
+          const repeated = detectRepeatedToolCall(recentCanonicalToolCalls, DOOM_LOOP_THRESHOLD);
+          if (!repeated) {
+            gatedToolCalls.push(toolCall);
+            continue;
+          }
+          const choice = await vscode.window.showWarningMessage(
+            `${repeated.name} was requested with identical arguments ${repeated.count} times in a row. Continue?`,
+            "Continue",
+            "Pause",
+          );
+          if (choice === "Continue") {
+            gatedToolCalls.push(toolCall);
+            continue;
+          }
+          toolResultParts.push(
+            `SYSTEM: Doom loop pause — ${repeated.name} was requested with identical arguments ${repeated.count} times in a row. Stop repeating this call and choose a different approach, or ask the user for help.`,
+          );
+          void appendAuditEvent(projectRoot, {
+            type: "loop_terminated",
+            sessionId: this.sessionId,
+            timestamp: new Date().toISOString(),
+            modelId: this.currentModel,
+            projectRoot,
+            payload: {
+              doomLoopPaused: true,
+              toolName: repeated.name,
+              count: repeated.count,
+              input: repeated.input,
+            },
+          });
+          recentCanonicalToolCalls.length = 0;
+        }
+        toolCalls = gatedToolCalls;
 
         for (let ti = 0; ti < toolCalls.length; ti++) {
           executedToolsThisTurn++;

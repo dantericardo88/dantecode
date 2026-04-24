@@ -86,6 +86,14 @@ import {
   renderContextAttribution,
   renderSessionSummary,
   recordDecisionNarrative,
+  renderContextMeter,
+  formatPlanPreview,
+  getErrorRecoveryHint,
+  formatToolResultLine,
+  appendAuditEvent,
+  INVALID_TOOL_NAME,
+  detectRepeatedToolCall,
+  normalizeToolCalls,
 } from "@dantecode/core";
 import type {
   FileSnapshot,
@@ -1671,6 +1679,7 @@ export async function runAgentLoop(
   };
   // Stuck loop detection (from opencode/OpenHands): track recent tool call signatures
   const recentToolSignatures: string[] = [];
+  const recentCanonicalToolCalls: Array<{ name: string; input: Record<string, unknown> }> = [];
   const STUCK_LOOP_THRESHOLD = 3; // 3 identical consecutive calls = stuck
   // Reflection loop (aider/Cursor pattern): auto-retry verification after code edits
   // Dynamic budget: hard tasks with low historical finish rates get more verify rounds.
@@ -2109,6 +2118,7 @@ export async function runAgentLoop(
         // Native AI SDK tool calling: stream with Zod-schema tools
         try {
           const aiSdkTools = getAISDKTools(config.mcpTools);
+          let nativeFinishReason: string | undefined;
           const streamResult = await router.streamWithTools(messages, aiSdkTools, {
             system: systemPrompt,
             maxTokens: config.state.model.default.maxTokens,
@@ -2116,28 +2126,70 @@ export async function runAgentLoop(
             ...(thinkingBudget ? { thinkingBudget } : {}),
           });
           for await (const part of streamResult.fullStream) {
-            if (part.type === "text-delta") {
-              renderer.write(part.textDelta);
-              config.onToken?.(part.textDelta);
-            } else if (part.type === "reasoning") {
+            const partAny = part as {
+              type: string;
+              textDelta?: string;
+              toolCallId?: string;
+              toolName?: string;
+              args?: Record<string, unknown>;
+              finishReason?: string;
+            };
+            const partType = partAny.type;
+            if (partType === "text-delta") {
+              renderer.write(partAny.textDelta ?? "");
+              config.onToken?.(partAny.textDelta ?? "");
+            } else if (partType === "reasoning") {
               if (config.verbose) {
-                process.stdout.write(`${DIM}[reasoning] ${part.textDelta}${RESET}\n`);
+                process.stdout.write(`${DIM}[reasoning] ${partAny.textDelta ?? ""}${RESET}\n`);
               }
-            } else if (part.type === "tool-call") {
+            } else if (partType === "tool-call") {
               toolCalls.push({
-                id: part.toolCallId,
-                name: part.toolName,
-                input: part.args as Record<string, unknown>,
+                id: partAny.toolCallId ?? randomUUID(),
+                name: partAny.toolName ?? "",
+                input: partAny.args ?? {},
               });
+            } else if (partType === "finish" || partType === "finish-step") {
+              nativeFinishReason = partAny.finishReason;
             }
           }
           responseText = renderer.getFullText();
           renderer.finish();
           cleanText = responseText;
+          if (
+            toolCalls.length === 0 &&
+            (nativeFinishReason === "tool-calls" || nativeFinishReason === "tool_calls") &&
+            config.verbose &&
+            !config.silent
+          ) {
+            process.stdout.write(
+              `${DIM}[tool-protocol] empty ${nativeFinishReason} finish downgraded to stop${RESET}\n`,
+            );
+          }
+          if (
+            toolCalls.length === 0 &&
+            (nativeFinishReason === "tool-calls" || nativeFinishReason === "tool_calls")
+          ) {
+            await appendAuditEvent(session.projectRoot, {
+              type: "tool_call_failed",
+              sessionId: session.id,
+              timestamp: new Date().toISOString(),
+              modelId: config.state.model.default.modelId,
+              projectRoot: session.projectRoot,
+              payload: {
+                nativeToolProtocol: true,
+                emptyToolCallsFinishGuarded: true,
+                finishReason: nativeFinishReason,
+              },
+            });
+          }
           nativeSuccess = true;
-        } catch {
+        } catch (err: unknown) {
           // Native tool calling failed — fall through to XML fallback
           renderer.reset();
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          throw new Error(
+            `Native tool protocol failed for ${config.state.model.default.provider}/${config.state.model.default.modelId}: ${errorMessage}`,
+          );
         }
       }
 
@@ -2529,6 +2581,73 @@ export async function runAgentLoop(
     const roundWrittenFiles: string[] = [];
     let roundMajorEditGateResult: MajorEditBatchGateResult | null = null;
     let toolIndex = 0;
+
+    const advertisedToolNames = Object.keys(getAISDKTools(config.mcpTools)).filter(
+      (name) => name !== INVALID_TOOL_NAME,
+    );
+    const toolCallNormalization = normalizeToolCalls(toolCalls, advertisedToolNames);
+    toolCalls = toolCallNormalization.toolCalls;
+    if (toolCallNormalization.repairs.length > 0 || toolCallNormalization.invalidToolCalls.length > 0) {
+      await appendAuditEvent(session.projectRoot, {
+        type: "tool_call_failed",
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+        modelId: config.state.model.default.modelId,
+        projectRoot: session.projectRoot,
+        payload: {
+          nativeToolProtocol: config.state.model.default.supportsToolCalls,
+          toolNameRepairs: toolCallNormalization.repairs,
+          invalidToolSentinelHits: toolCallNormalization.invalidToolCalls,
+        },
+      });
+    }
+
+    const gatedToolCalls: ExtractedToolCall[] = [];
+    for (const toolCall of toolCalls) {
+      recentCanonicalToolCalls.push({ name: toolCall.name, input: toolCall.input });
+      if (recentCanonicalToolCalls.length > STUCK_LOOP_THRESHOLD) {
+        recentCanonicalToolCalls.shift();
+      }
+      const repeated = detectRepeatedToolCall(recentCanonicalToolCalls, STUCK_LOOP_THRESHOLD);
+      if (!repeated) {
+        gatedToolCalls.push(toolCall);
+        continue;
+      }
+
+      const pauseMessage =
+        `SYSTEM: Doom loop pause — ${repeated.name} was requested with identical arguments ` +
+        `${repeated.count} times in a row. Stop repeating this call and choose a different approach, ` +
+        `or ask the user for help.`;
+      if (config.rl) {
+        const answer = await questionAsync(
+          config.rl,
+          `Doom loop detected for ${repeated.name}. Continue anyway? (yes/no): `,
+        );
+        if (answer.trim().toLowerCase() === "yes" || answer.trim().toLowerCase() === "y") {
+          gatedToolCalls.push(toolCall);
+          continue;
+        }
+      }
+      toolResults.push(pauseMessage);
+      await appendAuditEvent(session.projectRoot, {
+        type: "loop_terminated",
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+        modelId: config.state.model.default.modelId,
+        projectRoot: session.projectRoot,
+        payload: {
+          doomLoopPaused: true,
+          toolName: repeated.name,
+          count: repeated.count,
+          input: repeated.input,
+        },
+      });
+      if (!config.silent) {
+        process.stdout.write(`\n${YELLOW}${BOLD}Doom loop paused:${RESET} ${DIM}${pauseMessage}${RESET}\n`);
+      }
+      recentCanonicalToolCalls.length = 0;
+    }
+    toolCalls = gatedToolCalls;
 
     // CodeAct action dispatcher: handle OpenHands-style tool names before the
     // standard tool execution loop. Models fine-tuned on OpenHands may emit

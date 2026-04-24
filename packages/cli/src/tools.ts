@@ -2350,6 +2350,17 @@ export async function executeTool(
     case "ScreenshotToCode":
       result = await toolScreenshotToCode(input, projectRoot);
       break;
+    case "InvalidTool": {
+      const invalidTool = String(input["tool"] ?? "unknown");
+      const error = String(input["error"] ?? "The requested tool is not registered.");
+      result = {
+        toolName: "InvalidTool" as ToolName,
+        content: `Invalid tool call: ${invalidTool}. ${error}`,
+        isError: true,
+        ok: false,
+      };
+      break;
+    }
     default:
       result = { toolName: "Bash" as ToolName, content: `Unknown tool: ${name}`, isError: true, ok: false };
   }

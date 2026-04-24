@@ -42,7 +42,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     showHelp: false,
   };
 
-  const commands = new Set(["init", "skills", "agent", "config", "git"]);
+  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench", "install"]);
   let i = 0;
   let foundCommand = false;
 
@@ -259,6 +259,12 @@ describe("CLI argument parsing", () => {
       expect(result.subArgs).toEqual(["status"]);
     });
 
+    it("parses 'install' command", () => {
+      const result = parseArgs(["node", "cli", "install", "antigravity", "--dry-run"]);
+      expect(result.command).toBe("install");
+      expect(result.subArgs).toEqual(["antigravity", "--dry-run"]);
+    });
+
     it("passes --model through with a command", () => {
       const result = parseArgs(["node", "cli", "agent", "run", "--model", "grok/grok-3"]);
       expect(result.command).toBe("agent");
@@ -353,6 +359,7 @@ describe("CLI banner", () => {
     expect(help).toContain("REPL SLASH COMMANDS");
     expect(help).toContain("init");
     expect(help).toContain("skills");
+    expect(help).toContain("install");
     expect(help).toContain("--model");
     expect(help).toContain("--help");
     expect(help).toContain("/help");
