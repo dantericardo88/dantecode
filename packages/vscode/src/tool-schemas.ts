@@ -72,9 +72,10 @@ export function getAISDKTools(): Record<string, ToolSchema> {
       }),
     },
     SelfUpdate: {
-      description: "Run the DanteCode self-update workflow.",
+      description: "Run DanteCode self-update or self-deploy. Use action='deploy' to rebuild and reinstall from source when you've edited the DanteCode extension source code.",
       parameters: z.object({
-        command: z.string().optional(),
+        action: z.enum(["update", "deploy", "status"]).optional(),
+        dryRun: z.boolean().optional(),
       }),
     },
     GitCommit: {

@@ -612,6 +612,17 @@ async function toolSelfUpdate(
     });
 
     if (installContext.repoRoot && installContext.workspaceIsRepoRoot) {
+      const action = (input["action"] as string | undefined) ?? "update";
+      if (action === "deploy") {
+        const deployResult = await toolBash(
+          { command: "npm run deploy --workspace=packages/vscode", timeout: 300_000 },
+          installContext.repoRoot,
+        );
+        return {
+          content: `Deploy ${deployResult.isError ? "failed" : "complete — reload VS Code window to apply"}:\n${deployResult.content}`,
+          isError: deployResult.isError,
+        };
+      }
       const result = await toolBash(
         {
           command: `node packages/cli/dist/index.js self-update${dryRun ? " --dry-run" : ""} --verbose`,
@@ -1101,8 +1112,9 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 ### GitPush — Push a branch to a remote and verify the remote ref
   Input: { "remote": "origin", "branch": "main", "set_upstream": true/false }
 
-### SelfUpdate — PDSE-gated self-update (git pull, build, reinstall VSIX)
-  Input: { "dryRun": true/false }
+### SelfUpdate — Self-update or self-deploy
+  Actions: "update" (pull latest release), "deploy" (rebuild from source + reinstall VSIX), "status" (show version)
+  Input: { "action": "deploy" }  ← use deploy after editing DanteCode source to apply the changes
 
 ## CRITICAL: Tool Execution Rules
 - You MUST use tools to complete tasks. Do NOT just describe what you would do — actually DO it.

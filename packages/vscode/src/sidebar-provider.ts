@@ -11,6 +11,7 @@ import {
   relative as pathRelative,
   basename as pathBasename,
 } from "node:path";
+import { existsSync } from "node:fs";
 import type {
   ChatSessionFile,
   ModelConfig,
@@ -626,7 +627,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Ensure Ollama is running before attempting a local model request
     if (provider === "ollama") {
-      await this.ensureOllamaRunning(true);
+      await this.ensureOllamaRunning(true, modelId);
     }
 
     // Validate that cloud providers have an API key before attempting a request
@@ -797,6 +798,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       systemParts.push(
         "Use protected writes only when they directly advance the self-improvement task, and verify each major edit batch from the repository root.",
       );
+      systemParts.push("");
+    }
+
+    // When the open workspace IS the DanteCode repo, surface self-repair context
+    // so the agent knows how to fix, rebuild, and redeploy the extension itself.
+    if (existsSync(pathResolve(projectRoot, "packages/vscode/src/sidebar-provider.ts"))) {
+      systemParts.push("## You are running INSIDE the DanteCode repository");
+      systemParts.push(`- Source root: \`${projectRoot}\``);
+      systemParts.push("- Main extension file: `packages/vscode/src/sidebar-provider.ts`");
+      systemParts.push("- Tool handler: `packages/vscode/src/agent-tools.ts`");
+      systemParts.push("- To rebuild and redeploy after editing source: call **SelfUpdate** with `{ \"action\": \"deploy\" }`");
+      systemParts.push("- Self-modification of extension source is authorized in this workspace.");
+      systemParts.push("- Workflow: Read → Edit/Write → Bash (npm run typecheck) → SelfUpdate({action:\"deploy\"}) → ask user to reload VS Code window");
       systemParts.push("");
     }
 
@@ -1186,9 +1200,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         let toolCalls: ExtractedToolCall[] = [];
         let nativeFinishReason: string | undefined;
 
-        // Ollama local models may need 2-3 min on first load; cloud providers get 30s.
-        // Reasoning models get 90s (they think before speaking).
-        const firstChunkTimeoutMs = provider === "ollama" ? 180_000
+        // Ollama: scale timeout by model size (7B+ can take 3-10 min to cold-load).
+        // Reasoning models get 90s. Cloud providers get 30s. LM Studio gets 5 min.
+        const OLLAMA_SIZE_TIMEOUTS: Array<[string, number]> = [
+          ["70b", 900_000], ["34b", 600_000], ["13b", 480_000], ["7b", 420_000], ["3b", 300_000],
+        ];
+        const firstChunkTimeoutMs = provider === "ollama"
+          ? (OLLAMA_SIZE_TIMEOUTS.find(([tag]) => modelId.toLowerCase().includes(tag))?.[1] ?? 300_000)
+          : provider === "lmstudio" ? 300_000
           : modelConfig.supportsExtendedThinking ? 90_000
           : 30_000;
         // Mid-stream stall: abort if no chunk arrives for this long after the first chunk.
@@ -1314,11 +1333,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           if (signal.aborted && fullResponse.length === 0 && fallbackModels.length > 0) {
             // No response at all + fallbacks available → fall through to empty-response retry
           } else if (signal.aborted && fullResponse.length === 0) {
+            const timeoutSecs = Math.round(firstChunkTimeoutMs / 1000);
+            const timeoutMsg = provider === "ollama"
+              ? `Model ${modelId} did not respond in ${timeoutSecs}s — it may still be loading.\n• Large models (7B+) can take 3-10 min on first use. Try again in a moment.\n• Pre-warm: run \`ollama run ${modelId} ""\` in a terminal first.\n• Check Ollama logs for errors.`
+              : `Request to ${this.currentModel} timed out after ${timeoutSecs} seconds.\nCheck your API key and network connection.`;
             this.postMessage({
               type: "error",
-              payload: {
-                message: `Request to ${this.currentModel} timed out after ${Math.round(firstChunkTimeoutMs / 1000)} seconds.\nCheck your API key and network connection.`,
-              },
+              payload: { message: timeoutMsg },
             });
             break;
           } else if (streamStalled && fullResponse.trim().length > 0) {
@@ -2537,7 +2558,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // Ollama auto-start
   // --------------------------------------------------------------------------
 
-  private async ensureOllamaRunning(inChat = false): Promise<void> {
+  private async ensureOllamaRunning(inChat = false, modelId?: string): Promise<void> {
     const baseUrl = process.env["OLLAMA_BASE_URL"]
       ? process.env["OLLAMA_BASE_URL"].replace(/\/v1\/?$/, "")
       : "http://127.0.0.1:11434";
@@ -2554,7 +2575,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
     };
 
-    if (await isUp()) return;
+    // Fire a non-blocking generate request so the model is loaded into VRAM
+    // before the user's first message arrives — reduces first-token latency.
+    const preWarm = (m: string) =>
+      fetch(`${baseUrl}/api/generate`, {
+        method: "POST",
+        body: JSON.stringify({ model: m, prompt: "", stream: false }),
+        signal: AbortSignal.timeout(2000),
+      }).catch(() => {});
+
+    if (await isUp()) {
+      if (modelId) void preWarm(modelId);
+      return;
+    }
 
     const notify = (msg: string) => {
       if (inChat) {
@@ -2579,6 +2612,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       if (await isUp()) {
         notify("Ollama ready ✓");
         void this.scanOllamaModels();
+        if (modelId) void preWarm(modelId);
         return;
       }
     }
