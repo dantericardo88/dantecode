@@ -38,13 +38,15 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/xai": "^1.2.18",
     "@dantecode/config-types": "1.0.0",
     "ai": "^4.0.0",
-    "@ai-sdk/openai": "^1.0.0",
-    "@ai-sdk/anthropic": "^1.0.0",
-    "@ai-sdk/xai": "^1.2.18",
-    "zod": "^3.24.0",
-    "yaml": "^2.7.0"
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.0"
   },
   "publishConfig": {
     "access": "public"

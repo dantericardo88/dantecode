@@ -1,6 +1,43 @@
+import { createHash } from "node:crypto";
+
 import type { ExecutionLedger, ToolCallRecord } from "@dantecode/config-types";
 
 import type { ToolResult } from "./tools.js";
+
+/**
+ * Produces a tamper-evident SHA-256 seal over the four fields that uniquely
+ * identify a real execution: tool name, serialized input, output content, and
+ * timestamp. A ghost tool call — XML written in LLM prose — cannot produce a
+ * valid seal because it never passes through this code path.
+ */
+export function computeExecutionSeal(
+  toolName: string,
+  input: Record<string, unknown>,
+  output: string,
+  timestamp: string,
+): string {
+  return createHash("sha256")
+    .update(toolName)
+    .update(JSON.stringify(input))
+    .update(output)
+    .update(timestamp)
+    .digest("hex");
+}
+
+/**
+ * Returns true only if the record's seal matches the expected digest computed
+ * from its own fields. A missing seal or any field mutation returns false.
+ */
+export function verifySeal(record: ToolCallRecord): boolean {
+  if (!record.seal) return false;
+  const expected = computeExecutionSeal(
+    record.toolName,
+    record.input,
+    record.result.content,
+    record.timestamp,
+  );
+  return record.seal === expected;
+}
 
 export interface ExecutionEvidenceToolCall {
   id: string;
@@ -56,6 +93,7 @@ export async function recordExecutionEvidence(
       isError: result.isError,
     },
     timestamp,
+    seal: computeExecutionSeal(toolCall.name, toolCall.input, result.content, timestamp),
   };
   context.executionLedger.toolCallRecords.push(toolCallRecord);
 

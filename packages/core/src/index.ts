@@ -193,6 +193,14 @@ export {
 export type { ExactEditResult, FileSnapshot, LineEndingStyle } from "./tool-runtime.js";
 
 export { getProviderPromptSupplement } from "./provider-prompt-supplements.js";
+export {
+  SemanticModelOutputError,
+  isEmptyModelText,
+  isEmptyToolCallFinish,
+  isGrokProvider,
+  isInvalidCouncilOutput,
+} from "./model-output-health.js";
+export type { SemanticFailureReason } from "./model-output-health.js";
 
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 

@@ -103,6 +103,49 @@ describe("MultiAgent", () => {
     expect(score).toBe(86);
   });
 
+  it("reruns an invalid Grok lane after degrading Grok", async () => {
+    const router = {
+      generate: vi
+        .fn()
+        .mockResolvedValueOnce('{"coder":"code it"}')
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce(
+          "```ts\nexport async function fixed() { await work(); }\nexport interface Result { type: string; }\n```",
+        ),
+      markProviderDegraded: vi.fn(),
+    } as unknown as ModelRouterImpl;
+    const grokAgent = new MultiAgent(router, {
+      ...mockState,
+      model: {
+        ...mockState.model,
+        fallback: [{ provider: "anthropic", modelId: "claude-sonnet-4-6", maxTokens: 4096 }],
+      },
+    } as unknown as DanteCodeState);
+
+    const result = await grokAgent.coordinate("Implement safely");
+
+    expect((router as unknown as { markProviderDegraded: ReturnType<typeof vi.fn> }).markProviderDegraded)
+      .toHaveBeenCalledWith("grok", expect.stringContaining("council"));
+    expect(result.outputs).toHaveLength(1);
+    expect(result.outputs[0]!.content).toContain("fixed");
+  });
+
+  it("does not pass council consensus with empty lane output", async () => {
+    const router = {
+      generate: vi.fn(async (_messages: unknown, options?: { system?: string }) =>
+        options?.system?.includes("orchestrator agent") ? '{"coder":"code it"}' : "",
+      ),
+      markProviderDegraded: vi.fn(),
+    } as unknown as ModelRouterImpl;
+    const grokAgent = new MultiAgent(router, mockState);
+
+    const result = await grokAgent.coordinate("Implement safely");
+
+    expect(result.outputs).toHaveLength(0);
+    expect(result.compositePdse).toBe(0);
+    expect(result.iterations).toBe(3);
+  });
+
   // ---------- Integration Tests ----------
 
   it("full happy-path: coordinate() with 3-lane delegation produces PDSE and outputs", async () => {

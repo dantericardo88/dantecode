@@ -235,6 +235,45 @@ describe("model-router", () => {
       expect(actions).toContain("success");
     });
 
+    it("treats an empty primary response as semantic failure and falls back", async () => {
+      (generateText as Mock)
+        .mockResolvedValueOnce({
+          text: "",
+          usage: { totalTokens: 0 },
+        })
+        .mockResolvedValueOnce({
+          text: "fallback response",
+          usage: { totalTokens: 75 },
+        });
+
+      const router = new ModelRouterImpl(makeRouterConfig(), "/tmp", "s1");
+      const result = await router.generate(testMessages);
+
+      expect(result).toBe("fallback response");
+      expect(appendAuditEvent).toHaveBeenCalledWith(
+        "/tmp",
+        expect.objectContaining({
+          type: "tool_call_failed",
+          payload: expect.objectContaining({
+            semanticFailure: true,
+            reasonCode: "empty_response",
+            provider: "grok",
+          }),
+        }),
+      );
+    });
+
+    it("throws a semantic failure when an empty primary response has no fallback", async () => {
+      (generateText as Mock).mockResolvedValueOnce({
+        text: "   ",
+        usage: { totalTokens: 0 },
+      });
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s1");
+
+      await expect(router.generate(testMessages)).rejects.toThrow("empty response");
+    });
+
     it("throws primary error when all providers fail", async () => {
       (generateText as Mock)
         .mockRejectedValueOnce(new Error("primary failed"))
@@ -452,6 +491,22 @@ describe("model-router", () => {
   // -------------------------------------------------------------------------
 
   describe("stream", () => {
+    async function collectText(stream: AsyncIterable<string>): Promise<string> {
+      let text = "";
+      for await (const chunk of stream) {
+        text += chunk;
+      }
+      return text;
+    }
+
+    async function collectParts<T>(stream: AsyncIterable<T>): Promise<T[]> {
+      const parts: T[] = [];
+      for await (const part of stream) {
+        parts.push(part);
+      }
+      return parts;
+    }
+
     it("returns stream result on success", async () => {
       const mockStream = { type: "mock-stream" };
       (streamText as Mock).mockReturnValueOnce(mockStream);
@@ -488,6 +543,79 @@ describe("model-router", () => {
       const actions = router.getLogs().map((l) => l.action);
       expect(actions).toContain("error");
       expect(actions).toContain("fallback");
+    });
+
+    it("falls back when the primary text stream is empty after consumption", async () => {
+      (streamText as Mock)
+        .mockReturnValueOnce({
+          textStream: (async function* () {})(),
+        })
+        .mockReturnValueOnce({
+          textStream: (async function* () {
+            yield "fallback stream";
+          })(),
+        });
+
+      const router = new ModelRouterImpl(makeRouterConfig(), "/tmp", "s1");
+      const result = await router.stream(testMessages);
+      const text = await collectText(result.textStream);
+
+      expect(text).toBe("fallback stream");
+      expect(streamText).toHaveBeenCalledTimes(2);
+      expect(router.isProviderDegraded("grok")).toBe(true);
+      expect(appendAuditEvent).toHaveBeenCalledWith(
+        "/tmp",
+        expect.objectContaining({
+          type: "tool_call_failed",
+          payload: expect.objectContaining({
+            semanticFailure: true,
+            reasonCode: "empty_response",
+            provider: "grok",
+          }),
+        }),
+      );
+    });
+
+    it("fails loudly when an empty text stream has no fallback", async () => {
+      (streamText as Mock).mockReturnValueOnce({
+        textStream: (async function* () {})(),
+      });
+
+      const router = new ModelRouterImpl(makeRouterConfig({ fallback: [] }), "/tmp", "s1");
+      const result = await router.stream(testMessages);
+
+      await expect(collectText(result.textStream)).rejects.toThrow("empty response");
+    });
+
+    it("falls back when native tool stream finishes with zero tool calls", async () => {
+      (streamText as Mock)
+        .mockReturnValueOnce({
+          fullStream: (async function* () {
+            yield { type: "finish", finishReason: "tool-calls" };
+          })(),
+        })
+        .mockReturnValueOnce({
+          fullStream: (async function* () {
+            yield {
+              type: "tool-call",
+              toolCallId: "fallback-tool",
+              toolName: "Read",
+              args: { file_path: "src/app.ts" },
+            };
+          })(),
+        });
+
+      const router = new ModelRouterImpl(makeRouterConfig(), "/tmp", "s1");
+      const result = await router.streamWithTools(testMessages, { Read: {} } as never);
+      const parts = await collectParts(
+        result.fullStream as AsyncIterable<{ type: string; toolCallId?: string }>,
+      );
+
+      expect(parts).toEqual([
+        expect.objectContaining({ type: "tool-call", toolCallId: "fallback-tool" }),
+      ]);
+      expect(streamText).toHaveBeenCalledTimes(2);
+      expect(router.isProviderDegraded("grok")).toBe(true);
     });
 
     it("throws when all stream providers fail", async () => {

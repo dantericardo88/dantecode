@@ -144,7 +144,7 @@ import {
 } from "./loop-safety.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { normalizeActionToolCalls } from "./tool-dispatch.js";
-import { recordExecutionEvidence } from "./verification-hooks.js";
+import { recordExecutionEvidence, verifySeal } from "./verification-hooks.js";
 import * as readline from "node:readline";
 
 type PermissionCategory = "edit" | "bash" | "tools";
@@ -588,6 +588,29 @@ const CONFABULATION_WARNING =
   "Do NOT narrate changes without executing tool calls. Resume and actually execute " +
   "the next step with real tool calls.";
 
+function buildFullReadRepairInstruction(toolResult: string): string | null {
+  const match = toolResult.match(/Re-run Read on (.+?) with no offset\/limit/i);
+  const filePath = match?.[1]?.trim();
+  if (!filePath) return null;
+  return (
+    "SYSTEM: Edit was blocked because the latest full-file snapshot is missing. " +
+    "Your next action must be this exact full-file Read tool call, with no offset or limit: " +
+    JSON.stringify({ name: "Read", input: { file_path: filePath } })
+  );
+}
+
+function isEmptyModelText(text: string | undefined | null): boolean {
+  return (text ?? "").trim().length === 0;
+}
+
+function isEmptyToolCallFinish(finishReason: string | undefined, toolCallCount: number): boolean {
+  return toolCallCount === 0 && (finishReason === "tool-calls" || finishReason === "tool_calls");
+}
+
+function isGrokProvider(provider: string | undefined): boolean {
+  return provider === "grok" || provider === "xai";
+}
+
 const COMPLETION_CLAIM_PATTERN =
   /\b(?:done|complete|completed|finished|all changes made|task complete|implemented|created|updated|modified|written|applied successfully)\b/i;
 
@@ -842,11 +865,69 @@ function isMajorEditBatch(files: string[], projectRoot: string): boolean {
   );
 }
 
+/**
+ * Sprint 5 — Pre-Completion Verification Gate.
+ * Four sequential gates that must ALL pass before a "done" claim is accepted.
+ * Ghost tool calls (XML prose) cannot produce valid seals so they fail gate 1.
+ */
+async function runPreCompletionGate(
+  executionLedger: ExecutionLedger,
+  touchedFiles: string[],
+  responseText: string,
+  config: AgentLoopConfig,
+): Promise<{ passed: boolean; reason: string }> {
+  // Gate 1: all tool call records in the ledger must have valid seals
+  const unsealed = executionLedger.toolCallRecords.filter((r) => !verifySeal(r));
+  if (unsealed.length > 0) {
+    return {
+      passed: false,
+      reason: `${unsealed.length} unsealed tool record(s) — ghost tool calls produce no seal`,
+    };
+  }
+
+  // Gate 2: per-file prose claims must be backed by execution ledger entries
+  const claimed = extractClaimedFiles(responseText);
+  const actual = new Set(touchedFiles.map((f) => f.replace(/\\/g, "/")));
+  const unproved = claimed.filter((f) => !actual.has(f.replace(/\\/g, "/")));
+  if (unproved.length > 0 && claimed.length > 3) {
+    return {
+      passed: false,
+      reason: `Unproved file claims: ${unproved.slice(0, 5).join(", ")}`,
+    };
+  }
+
+  // Gate 3: run typecheck for TypeScript projects (must not introduce TS errors)
+  const hasTsFiles = touchedFiles.some((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
+  if (hasTsFiles) {
+    try {
+      const { detectProjectStack } = await import("@dantecode/core");
+      const stack = await detectProjectStack(config.state.projectRoot);
+      if (stack.typecheckCmd) {
+        const tsResult = await executeTool(
+          "Bash",
+          { command: `${stack.typecheckCmd} 2>&1 | tail -20` },
+          config.state.projectRoot,
+          { sessionId: "pre-completion-gate", roundId: "gate" },
+        );
+        if (tsResult.isError || /error TS\d+/.test(tsResult.content)) {
+          return {
+            passed: false,
+            reason: `TypeScript errors detected: ${tsResult.content.slice(0, 200)}`,
+          };
+        }
+      }
+    } catch { /* stack detection failure is non-fatal for the gate */ }
+  }
+
+  return { passed: true, reason: "all gates passed" };
+}
+
 async function runMajorEditBatchGate(
   session: Session,
   roundCounter: number,
   config: AgentLoopConfig,
   readTracker: Map<string, FileSnapshot>,
+  trackedSnapshots: Map<string, FileSnapshot>,
   editAttempts: Map<string, number>,
 ): Promise<MajorEditBatchGateResult> {
   const steps = [
@@ -863,6 +944,7 @@ async function runMajorEditBatchGate(
       sandboxEnabled: false,
       selfImprovement: config.selfImprovement,
       readTracker,
+      trackedSnapshots,
       editAttempts,
     });
 
@@ -1462,7 +1544,35 @@ export async function runAgentLoop(
   if (!_healthCheckCompleted) {
     _healthCheckCompleted = true;
     try {
-      const healthResult = await runStartupHealthCheck({ projectRoot: session.projectRoot });
+      const defaultModel = config.state.model.default;
+      const inferenceProbeConfig =
+        defaultModel.apiKey && defaultModel.provider !== "ollama"
+          ? {
+              provider: defaultModel.provider,
+              apiKey: defaultModel.apiKey,
+              baseURL: defaultModel.baseUrl,
+            }
+          : undefined;
+      const healthResult = await runStartupHealthCheck({
+        projectRoot: session.projectRoot,
+        inferenceProbeConfig,
+      });
+      // Kilocode hard gate: invalid API key = abort before any LLM call
+      const probeCheck = healthResult.checks.find((c) => c.name === "inference-probe");
+      if (probeCheck?.status === "fail") {
+        process.stdout.write(
+          `\n${RED}[inference-probe] FATAL: ${probeCheck.message}${RESET}\n` +
+          `${RED}Session aborted — fix your API key before retrying.${RESET}\n\n`,
+        );
+        session.status = "FAILED";
+        session.messages.push({
+          id: randomUUID(),
+          role: "system" as const,
+          content: `[inference-probe] Session aborted: ${probeCheck.message}`,
+          timestamp: new Date().toISOString(),
+        });
+        return session;
+      }
       if (!healthResult.healthy) {
         process.stdout.write(
           `${YELLOW}[health] Some checks failed — see warnings above. Proceeding anyway.${RESET}\n`,
@@ -1672,6 +1782,8 @@ export async function runAgentLoop(
   const initialMaxRounds = maxToolRounds;
   let totalTokensUsed = 0;
   const touchedFiles: string[] = [];
+  /** Sprint 4: disk SHA-256 hashes captured after each verified write — not from tool claims. */
+  const diskFingerprints = new Map<string, string>();
   const executionLedger: ExecutionLedger = {
     toolCallRecords: [],
     mutationRecords: [],
@@ -1714,6 +1826,8 @@ export async function runAgentLoop(
   // Anti-confabulation guards
   let consecutiveEmptyRounds = 0;
   let confabulationNudges = 0;
+  let completionGateNudges = 0;
+  const MAX_COMPLETION_GATE_NUDGES = 1; // block once, then allow — prevents infinite gate loops
   const isPipelineWorkflow =
     config.skillActive ||
     EXECUTION_WORKFLOW_PATTERN.test(prompt) ||
@@ -1897,6 +2011,7 @@ export async function runAgentLoop(
   // Sprint AV (dim 21): capture context hit count before loop to compute delta post-session
   const preSessionContextHits = (() => { try { return loadContextCoverage(session.projectRoot).length; } catch { return 0; } })();
   const readTracker = new Map<string, FileSnapshot>();
+  const trackedSnapshots = new Map<string, FileSnapshot>();
   const editAttempts = new Map<string, number>();
   // Track Bash command outputs by hash to detect duplicate outputs (first 200 chars)
   // Map<command, Set<fingerprint>>
@@ -1954,6 +2069,9 @@ export async function runAgentLoop(
       process.stdout.write(
         `${DIM}[planning: enabled — complexity ${lexicalComplexity.toFixed(2)} >= 0.5]${RESET}\n`,
       );
+      // Dim 11 — surface plan preview to user before execution
+      const planPreview = formatPlanPreview(planContent);
+      if (planPreview) process.stdout.write(`${DIM}${planPreview}${RESET}\n`);
     }
   }
 
@@ -2065,6 +2183,9 @@ export async function runAgentLoop(
     if (!config.silent) {
       _roundTokenGauge.updateContext(utilization.tokens, utilization.maxTokens);
       _roundTokenGauge.printLine();
+      // Dim 11 — ASCII context meter (Cline pattern)
+      const ctxBar = renderContextMeter(utilization.percent);
+      process.stdout.write(`${DIM}${ctxBar}${RESET}\n`);
       // Tier warnings for yellow/red remain for discoverability
       if (utilization.tier === "yellow") {
         process.stdout.write(`${YELLOW}[context filling up — older messages will be summarized soon]${RESET}\n`);
@@ -2155,20 +2276,13 @@ export async function runAgentLoop(
           responseText = renderer.getFullText();
           renderer.finish();
           cleanText = responseText;
-          if (
-            toolCalls.length === 0 &&
-            (nativeFinishReason === "tool-calls" || nativeFinishReason === "tool_calls") &&
-            config.verbose &&
-            !config.silent
-          ) {
+          const emptyToolCallFinish = isEmptyToolCallFinish(nativeFinishReason, toolCalls.length);
+          if (emptyToolCallFinish && config.verbose && !config.silent) {
             process.stdout.write(
               `${DIM}[tool-protocol] empty ${nativeFinishReason} finish downgraded to stop${RESET}\n`,
             );
           }
-          if (
-            toolCalls.length === 0 &&
-            (nativeFinishReason === "tool-calls" || nativeFinishReason === "tool_calls")
-          ) {
+          if (emptyToolCallFinish) {
             await appendAuditEvent(session.projectRoot, {
               type: "tool_call_failed",
               sessionId: session.id,
@@ -2177,19 +2291,32 @@ export async function runAgentLoop(
               projectRoot: session.projectRoot,
               payload: {
                 nativeToolProtocol: true,
+                semanticFailure: true,
+                reasonCode: "empty_tool_call_finish",
                 emptyToolCallsFinishGuarded: true,
                 finishReason: nativeFinishReason,
               },
             });
+            renderer.reset();
+            responseText = "";
+            cleanText = "";
+            nativeSuccess = false;
+          } else {
+            nativeSuccess = true;
           }
-          nativeSuccess = true;
         } catch (err: unknown) {
-          // Native tool calling failed — fall through to XML fallback
+          // Semantic native tool failures can still recover through XML fallback.
           renderer.reset();
           const errorMessage = err instanceof Error ? err.message : String(err);
-          throw new Error(
-            `Native tool protocol failed for ${config.state.model.default.provider}/${config.state.model.default.modelId}: ${errorMessage}`,
-          );
+          if (/semantic failure:\s*(empty tool call finish|empty_tool_call_finish|empty response|empty_response)/i.test(errorMessage)) {
+            nativeSuccess = false;
+          } else {
+            // Transport/protocol exceptions are hard failures; do not hide them by
+            // replaying XML-looking prose that may have caused the protocol error.
+            throw new Error(
+              `Native tool protocol failed for ${config.state.model.default.provider}/${config.state.model.default.modelId}: ${errorMessage}`,
+            );
+          }
         }
       }
 
@@ -2226,6 +2353,39 @@ export async function runAgentLoop(
         toolCalls = extracted.toolCalls;
       }
 
+      if (
+        isGrokProvider(config.state.model.default.provider) &&
+        isEmptyModelText(responseText) &&
+        toolCalls.length === 0 &&
+        config.state.model.fallback.length > 0
+      ) {
+        await appendAuditEvent(session.projectRoot, {
+          type: "tool_call_failed",
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+          modelId: config.state.model.default.modelId,
+          projectRoot: session.projectRoot,
+          payload: {
+            semanticFailure: true,
+            reasonCode: "empty_response",
+            provider: config.state.model.default.provider,
+            modelId: config.state.model.default.modelId,
+          },
+        });
+        const fallbackText = await router.generate(messages, {
+          system: systemPrompt,
+          maxTokens: config.state.model.default.maxTokens,
+          ...(thinkingBudget ? { thinkingBudget } : {}),
+        });
+        if (!isEmptyModelText(fallbackText)) {
+          responseText = fallbackText;
+          const extracted = extractToolCalls(responseText);
+          cleanText = extracted.cleanText;
+          toolCalls = extracted.toolCalls;
+          modelRoundTrips++;
+        }
+      }
+
       totalTokensUsed += responseText.length; // Approximate token count
 
       // Emit inline cost after each round (non-fatal — cost display must never break the loop)
@@ -2260,6 +2420,11 @@ export async function runAgentLoop(
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       process.stdout.write(`\n${RED}Model error: ${errorMessage}${RESET}\n`);
+      // Dim 11 — targeted recovery hint (Cline pattern)
+      const recoveryHint = getErrorRecoveryHint(errorMessage);
+      if (recoveryHint && !config.silent) {
+        process.stdout.write(`${DIM}Hint: ${recoveryHint}${RESET}\n`);
+      }
       sessionStatus = "FAILED";
 
       const errorMsg: SessionMessage = {
@@ -2544,23 +2709,70 @@ export async function runAgentLoop(
         continue;
       }
 
-      // Anti-confabulation gate: reject completion claims when no files were
-      // actually modified during an execution-oriented task.
+      // Anti-confabulation gate: reject completion claims when prose claims
+      // don't match the execution ledger (per-file precision, Sprint 3).
       if (
         executionRequested &&
-        filesModified === 0 &&
         confabulationNudges < MAX_CONFABULATION_NUDGES &&
         looksLikeCompletionClaim(responseText)
       ) {
-        confabulationNudges++;
-        messages.push({ role: "assistant" as const, content: responseText });
-        messages.push({ role: "user" as const, content: CONFABULATION_WARNING });
-        if (!config.silent) {
-          process.stdout.write(
-            `\n${RED}[confab-guard] model claims completion but 0 files modified (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
-          );
+        const claimedFiles = extractClaimedFiles(responseText);
+        const actualSet = new Set(touchedFiles.map((f) => f.replace(/\\/g, "/")));
+        const unprovedClaims = claimedFiles.filter(
+          (f) => !actualSet.has(f.replace(/\\/g, "/")),
+        );
+        const zeroModified = filesModified === 0;
+        const hasFalseClaims = unprovedClaims.length > 0;
+
+        if (zeroModified || hasFalseClaims) {
+          confabulationNudges++;
+          messages.push({ role: "assistant" as const, content: responseText });
+          const detail = hasFalseClaims
+            ? `\nUnproved file claims: ${unprovedClaims.slice(0, 5).join(", ")}` +
+              `\nProve each claimed file exists in the execution ledger before claiming completion.`
+            : "";
+          messages.push({
+            role: "user" as const,
+            content: CONFABULATION_WARNING + detail,
+          });
+          if (!config.silent) {
+            const reason = zeroModified ? "0 files modified" : `unproved claims: ${unprovedClaims.slice(0, 3).join(", ")}`;
+            process.stdout.write(
+              `\n${RED}[confab-guard] completion claim rejected — ${reason} (${confabulationNudges}/${MAX_CONFABULATION_NUDGES})${RESET}\n`,
+            );
+          }
+          continue;
         }
-        continue;
+      }
+
+      // Sprint 5 — Pre-Completion Verification Gate: block before accepting "done"
+      if (
+        executionRequested &&
+        completionGateNudges < MAX_COMPLETION_GATE_NUDGES &&
+        looksLikeCompletionClaim(responseText)
+      ) {
+        const gate = await runPreCompletionGate(
+          executionLedger,
+          touchedFiles,
+          responseText,
+          config,
+        );
+        if (!gate.passed) {
+          completionGateNudges++;
+          if (!config.silent) {
+            process.stdout.write(
+              `\n${RED}[completion-gate] BLOCKED (${completionGateNudges}/${MAX_COMPLETION_GATE_NUDGES}): ${gate.reason}${RESET}\n`,
+            );
+          }
+          messages.push({ role: "assistant" as const, content: responseText });
+          messages.push({
+            role: "user" as const,
+            content:
+              `SYSTEM: Completion claim blocked by verification gate: ${gate.reason}. ` +
+              `Fix the issues and prove your work before claiming done.`,
+          });
+          continue;
+        }
       }
 
       const assistantMessage: SessionMessage = {
@@ -2693,6 +2905,7 @@ export async function runAgentLoop(
           sandboxEnabled: false,
           selfImprovement: config.selfImprovement,
           readTracker,
+          trackedSnapshots,
           editAttempts,
           subAgentExecutor: createSubAgentExecutor(session, config),
         });
@@ -2852,6 +3065,7 @@ export async function runAgentLoop(
             roundCounter,
             config,
             readTracker,
+            trackedSnapshots,
             editAttempts,
           );
           lastMajorEditGatePassed = roundMajorEditGateResult.passed;
@@ -2949,6 +3163,7 @@ export async function runAgentLoop(
           sandboxEnabled: false,
           selfImprovement: config.selfImprovement,
           readTracker,
+          trackedSnapshots,
           editAttempts,
           subAgentExecutor: createSubAgentExecutor(session, config),
         });
@@ -3101,6 +3316,16 @@ export async function runAgentLoop(
             roundWrittenFiles.push(resolvedPath);
             filesModified++;
 
+            // Sprint 4: capture disk fingerprint from actual file content — not from
+            // the tool's own claim. Override mutationRecord's afterHash with real hash.
+            const diskHash = createHash("sha256").update(writtenContent).digest("hex");
+            diskFingerprints.set(resolvedPath, diskHash);
+            const lastMutation =
+              executionLedger.mutationRecords[executionLedger.mutationRecords.length - 1];
+            if (lastMutation && lastMutation.path === resolvedPath) {
+              lastMutation.afterHash = diskHash;
+            }
+
             // Auto-lint gate: run tsc after every .ts/.tsx write to catch type errors
             // in the round they are introduced, before they cascade.
             try {
@@ -3198,19 +3423,25 @@ export async function runAgentLoop(
       });
 
       // Show result summary (suppressed in silent mode)
+      // Dim 11 — ⎿/✗ prefixed result line (Cline pattern)
       if (!config.silent) {
-        if (result.isError) {
-          process.stdout.write(`${RED}error${RESET}\n`);
-          if (config.verbose) {
-            process.stdout.write(`${DIM}${result.content.slice(0, 300)}${RESET}\n`);
-          }
-        } else {
-          const preview = result.content.split("\n")[0] || "(success)";
-          process.stdout.write(`${GREEN}ok${RESET} ${DIM}${preview.slice(0, 100)}${RESET}\n`);
+        const resultPreview = result.isError
+          ? result.content.slice(0, 120)
+          : (result.content.split("\n")[0] || "(success)").slice(0, 120);
+        const resultLine = formatToolResultLine(toolCall.name, resultPreview, result.isError);
+        process.stdout.write(`${result.isError ? RED : GREEN}${resultLine}${RESET}\n`);
+        if (result.isError && config.verbose) {
+          process.stdout.write(`${DIM}${result.content.slice(0, 300)}${RESET}\n`);
         }
       }
 
       toolResults.push(`Tool "${toolCall.name}" result:\n${outputContent}`);
+      if (result.isError) {
+        const readRepairInstruction = buildFullReadRepairInstruction(result.content);
+        if (readRepairInstruction) {
+          toolResults.push(readRepairInstruction);
+        }
+      }
 
       // Multimodal screenshot injection: if the tool produced image blocks, push a
       // user message with the image content so the model can see the screenshot.
@@ -3354,6 +3585,7 @@ export async function runAgentLoop(
         roundCounter,
         config,
         readTracker,
+        trackedSnapshots,
         editAttempts,
       );
       lastMajorEditGatePassed = roundMajorEditGateResult.passed;

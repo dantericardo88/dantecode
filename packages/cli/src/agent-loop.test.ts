@@ -85,8 +85,22 @@ vi.mock("@dantecode/core", () => {
       const parts = mockNativeFullStreams.shift() ?? [];
       return {
         fullStream: (async function* () {
+          let finishReason: string | undefined;
+          let toolCallCount = 0;
           for (const part of parts) {
+            if (part.type === "tool-call") {
+              toolCallCount++;
+            }
+            if (part.type === "finish" || part.type === "finish-step") {
+              finishReason = typeof part.finishReason === "string" ? part.finishReason : undefined;
+            }
             yield part;
+          }
+          if (
+            toolCallCount === 0 &&
+            (finishReason === "tool-calls" || finishReason === "tool_calls")
+          ) {
+            throw new Error("grok/grok-3 produced semantic failure: empty tool call finish");
           }
         })(),
       };
@@ -175,6 +189,11 @@ vi.mock("@dantecode/core", () => {
     getProviderPromptSupplement: vi
       .fn()
       .mockReturnValue("## Provider-Specific Rules\nExecute tools first."),
+    isEmptyModelText: vi.fn((text?: string | null) => (text ?? "").trim().length === 0),
+    isEmptyToolCallFinish: vi.fn((finishReason?: string, toolCallCount = 0) =>
+      toolCallCount === 0 && (finishReason === "tool-calls" || finishReason === "tool_calls"),
+    ),
+    isGrokProvider: vi.fn((provider?: string) => provider === "grok" || provider === "xai"),
     isProtectedWriteTarget: vi.fn((filePath: string) => /packages[\\/]/.test(filePath)),
     runStartupHealthCheck: vi.fn().mockResolvedValue({ healthy: true }),
     // Skill wave orchestrator — real implementations for integration testing
@@ -512,6 +531,7 @@ function setMockFileContent(projectRoot: string, filePath: string, content: stri
 describe("runAgentLoop smoke tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGenerateText.mockReset();
     mockNativeFullStreams.length = 0;
     mockStreamWithToolsError.mockReset().mockReturnValue(null);
     mockFileContents.clear();
@@ -566,9 +586,6 @@ describe("runAgentLoop smoke tests", () => {
 
   it("does not fall back to XML parsing when native tool streaming fails", async () => {
     mockStreamWithToolsError.mockReturnValueOnce(new Error("native tool protocol failed"));
-    mockGenerateText.mockResolvedValueOnce({
-      text: '<tool_use>\n{"name":"Bash","input":{"command":"npm test"}}\n</tool_use>',
-    });
 
     const result = await runAgentLoop(
       "run tests",
@@ -590,6 +607,46 @@ describe("runAgentLoop smoke tests", () => {
     expect(mockGenerateText).not.toHaveBeenCalled();
     expect(mockExecuteTool).not.toHaveBeenCalled();
     expect(result.status).toBe("FAILED");
+  });
+
+  it("falls back to XML parsing when router reports semantic native tool failure", async () => {
+    mockStreamWithToolsError.mockReturnValueOnce(
+      new Error("grok/grok-3 produced semantic failure: empty tool call finish"),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 25 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Read complete.",
+      usage: { totalTokens: 10 },
+    });
+
+    await runAgentLoop(
+      "read src/app.ts",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockGenerateText).toHaveBeenCalled();
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Read",
+      { file_path: "src/app.ts" },
+      expect.any(String),
+      expect.any(Object),
+    );
   });
 
   it("repairs wrong-case native tool names before dispatch", async () => {
@@ -665,6 +722,46 @@ describe("runAgentLoop smoke tests", () => {
     expect(mockExecuteTool).toHaveBeenCalledWith(
       "InvalidTool",
       expect.objectContaining({ tool: "Shell" }),
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it("falls back to XML parsing when native tool finish asks for tools but sends none", async () => {
+    mockStreamWithToolsError.mockReturnValueOnce(
+      new Error("grok/grok-3 produced semantic failure: empty tool call finish"),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 25 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Read complete.",
+      usage: { totalTokens: 10 },
+    });
+
+    await runAgentLoop(
+      "read src/app.ts",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            default: {
+              ...makeConfig().state.model.default,
+              supportsToolCalls: true,
+            },
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockGenerateText).toHaveBeenCalled();
+    expect(mockExecuteTool).toHaveBeenCalledWith(
+      "Read",
+      { file_path: "src/app.ts" },
       expect.any(String),
       expect.any(Object),
     );
@@ -2067,6 +2164,44 @@ describe("Universal skill completion (skillActive)", () => {
     expect(abortMsg).toBeDefined();
   });
 
+  it("retries a Grok empty stream through the configured fallback path", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      usage: { totalTokens: 0 },
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Fallback recovered.",
+      usage: { totalTokens: 10 },
+    });
+
+    const result = await runAgentLoop(
+      "fix the bug",
+      makeSession(),
+      makeConfig({
+        state: {
+          ...makeConfig().state,
+          model: {
+            ...makeConfig().state.model,
+            fallback: [
+              {
+                provider: "openai",
+                modelId: "gpt-4o-mini",
+                maxTokens: 4096,
+                temperature: 0.1,
+                contextWindow: 128000,
+                supportsVision: false,
+                supportsToolCalls: false,
+              },
+            ],
+          },
+        } as DanteCodeState,
+      }),
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(2);
+    expect(result.messages.some((m) => m.content === "Fallback recovered.")).toBe(true);
+  });
+
   it("resets empty round counter when tool calls succeed", async () => {
     // Round 1: empty response (count = 1)
     mockGenerateText.mockResolvedValueOnce({
@@ -2098,6 +2233,63 @@ describe("Universal skill completion (skillActive)", () => {
         m.content.includes("consecutive empty responses"),
     );
     expect(abortMsg).toBeUndefined();
+  });
+
+  it("passes one session-level trackedSnapshots map through tool calls across rounds", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Read","input":{"file_path":"src/app.ts"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({ content: "file content", isError: false });
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"src/app.ts","old_string":"old","new_string":"new"}}\n</tool_use>',
+      usage: { totalTokens: 50 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content: "Edited",
+      isError: false,
+      ok: true,
+      toolName: "Edit",
+      changedFiles: [{ path: "src/app.ts", beforeHash: "a", afterHash: "b", lineCount: 1, additions: 1, deletions: 1, diffSummary: "1 replacement" }],
+      mutationRecords: [{ id: "m1", toolCallId: "", path: "src/app.ts", beforeHash: "a", afterHash: "b", diffSummary: "1 replacement", lineCount: 1, additions: 1, deletions: 1, timestamp: new Date().toISOString(), readSnapshotId: "snap1" }],
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "Change applied.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("update src/app.ts", makeSession(), makeConfig());
+
+    const readContext = mockExecuteTool.mock.calls[0]![3] as Record<string, unknown>;
+    const editContext = mockExecuteTool.mock.calls[1]![3] as Record<string, unknown>;
+    expect(readContext.trackedSnapshots).toBeDefined();
+    expect(editContext.trackedSnapshots).toBe(readContext.trackedSnapshots);
+  });
+
+  it("injects a deterministic full-file Read repair after Edit read-gate failure", async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: '<tool_use>\n{"name":"Edit","input":{"file_path":"src/app.ts","old_string":"old","new_string":"new"}}\n</tool_use>',
+      usage: { totalTokens: 40 },
+    });
+    mockExecuteTool.mockResolvedValueOnce({
+      content:
+        "Error: Read the full current file before Edit. Re-run Read on /tmp/test-project/src/app.ts with no offset/limit so the latest contents are in context.",
+      isError: true,
+      ok: false,
+      toolName: "Edit",
+    });
+    mockGenerateText.mockResolvedValueOnce({
+      text: "I will recover.",
+      usage: { totalTokens: 20 },
+    });
+
+    await runAgentLoop("edit src/app.ts", makeSession(), makeConfig());
+
+    const secondCallArgs = mockGenerateText.mock.calls[1]![0];
+    const messages = secondCallArgs.messages as Array<{ role: string; content: string }>;
+    expect(messages.some((m) =>
+      m.content.includes('{"name":"Read","input":{"file_path":"/tmp/test-project/src/app.ts"}}'),
+    )).toBe(true);
   });
 
   it("rejects confabulated completion claims when 0 files modified in pipeline", async () => {

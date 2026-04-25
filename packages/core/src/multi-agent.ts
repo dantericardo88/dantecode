@@ -5,6 +5,7 @@
 import { ModelRouterImpl, type GenerateOptions } from "./model-router.js";
 import type { DanteCodeState } from "@dantecode/config-types";
 import { decomposeTask, type SandboxGroupingStrategy, type SubTask } from "./task-decomposer.js";
+import { isInvalidCouncilOutput } from "./model-output-health.js";
 import { z } from "zod";
 
 /** Callback for reporting multi-agent progress to the UI. */
@@ -228,10 +229,29 @@ Respond ONLY with valid JSON: { "planner": "subtask desc", "coder": "...", ... }
       system: systemPrompts[lane],
       ...options,
     });
+    let validContent = content;
 
-    const pdseScore = this.heuristicPdse(content); // 0-100
+    if (isInvalidCouncilOutput(validContent)) {
+      this.markDefaultProviderDegraded(`invalid council lane output from ${lane}`);
+      validContent = await this.router.generate([{ role: "user", content: subtask }], {
+        system: systemPrompts[lane],
+        ...options,
+      });
+      if (isInvalidCouncilOutput(validContent)) {
+        throw new Error(`Invalid council lane output from ${lane}`);
+      }
+    }
 
-    return { lane, content, pdseScore };
+    const pdseScore = this.heuristicPdse(validContent); // 0-100
+
+    return { lane, content: validContent, pdseScore };
+  }
+
+  private markDefaultProviderDegraded(reason: string): void {
+    const markProviderDegraded = (this.router as unknown as {
+      markProviderDegraded?: (provider: string, reason: string) => void;
+    }).markProviderDegraded;
+    markProviderDegraded?.call(this.router, this.state.model.default.provider, reason);
   }
 
   private computeCompositePdse(outputs: AgentOutput[]): number {

@@ -23,6 +23,11 @@ import { PROVIDER_BUILDERS, type ProviderBuilder } from "./providers/index.js";
 import { appendAuditEvent } from "./audit.js";
 import { classifyApiError } from "./api-error-classifier.js";
 import { getProviderExecutionProfile } from "./provider-execution-profile.js";
+import {
+  SemanticModelOutputError,
+  isEmptyModelText,
+  isEmptyToolCallFinish,
+} from "./model-output-health.js";
 import { retryWithBackoff } from "./retry-policy.js";
 import {
   routeByComplexity,
@@ -70,6 +75,14 @@ interface RouterLogEntry {
   action: "attempt" | "success" | "fallback" | "retry" | "error" | "blocked";
   durationMs: number;
   error?: string;
+}
+
+function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Symbol.asyncIterator in value
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -179,6 +192,12 @@ export class ModelRouterImpl {
     return this._degradedProviders.has(provider);
   }
 
+  /** Mark a provider degraded after semantic failures, not only transport failures. */
+  markProviderDegraded(provider: string, reason = "semantic provider degradation"): void {
+    this._degradedProviders.add(provider);
+    process.stdout.write(`[Router] Provider "${provider}" marked degraded — ${reason}.\n`);
+  }
+
   /**
    * Returns the optimal model for a task given complexity signals.
    * Uses task-complexity-router to select the cheapest capable model.
@@ -204,8 +223,10 @@ export class ModelRouterImpl {
     const modelConfig = this.resolveModelConfig(options.taskType, estimatedTokens);
     const fallbacks = this.routerConfig.fallback;
 
-    // Try the primary model first
-    const primaryResult = await this.tryGenerate(modelConfig, messages, options);
+    // Try the primary model first unless semantic/runtime health has degraded it.
+    const primaryResult = this._degradedProviders.has(modelConfig.provider)
+      ? this.blockedProviderResult(modelConfig, "provider degraded by semantic health")
+      : await this.tryGenerate(modelConfig, messages, options);
     if (primaryResult.success) {
       return primaryResult.text;
     }
@@ -252,23 +273,43 @@ export class ModelRouterImpl {
     const modelConfig = this.resolveModelConfig(options.taskType, estimatedTokens);
     const fallbacks = this.routerConfig.fallback;
 
-    // Try the primary model first
-    const primaryResult = await this.tryStream(modelConfig, messages, options);
+    // Try the primary model first unless semantic/runtime health has degraded it.
+    const primaryResult = this._degradedProviders.has(modelConfig.provider)
+      ? this.blockedStreamResult(modelConfig, "provider degraded by semantic health")
+      : await this.tryStream(modelConfig, messages, options);
     if (primaryResult.success) {
-      return primaryResult.stream;
+      return this.wrapTextStreamWithSemanticHealth(
+        primaryResult.stream,
+        modelConfig,
+        messages,
+        options,
+        fallbacks,
+      );
     }
     if (primaryResult.error instanceof BudgetExceededError) {
       throw primaryResult.error;
     }
 
     // Cascade through fallbacks
-    for (const fallbackConfig of fallbacks) {
+    for (let i = 0; i < fallbacks.length; i++) {
+      const fallbackConfig = fallbacks[i]!;
+      if (this._degradedProviders.has(fallbackConfig.provider)) {
+        process.stdout.write(`[Router] Skipping degraded provider "${fallbackConfig.provider}" in fallback cascade.\n`);
+        this.logEntry(fallbackConfig, "blocked", 0, "provider degraded by health event");
+        continue;
+      }
       this.logEntry(fallbackConfig, "fallback", 0);
 
       const fallbackResult = await this.tryStream(fallbackConfig, messages, options);
 
       if (fallbackResult.success) {
-        return fallbackResult.stream;
+        return this.wrapTextStreamWithSemanticHealth(
+          fallbackResult.stream,
+          fallbackConfig,
+          messages,
+          options,
+          fallbacks.slice(i + 1),
+        );
       }
     }
 
@@ -305,18 +346,33 @@ export class ModelRouterImpl {
 
     const fallbacks = this.routerConfig.fallback;
 
-    // Try the primary model
-    const primaryResult = await this.tryStreamWithTools(modelConfig, messages, tools, options);
+    // Try the primary model unless semantic/runtime health has degraded it.
+    const primaryResult = this._degradedProviders.has(modelConfig.provider)
+      ? this.blockedToolStreamResult(modelConfig, "provider degraded by semantic health")
+      : await this.tryStreamWithTools(modelConfig, messages, tools, options);
     if (primaryResult.success) {
-      return primaryResult.stream;
+      return this.wrapToolStreamWithSemanticHealth(
+        primaryResult.stream,
+        modelConfig,
+        messages,
+        tools,
+        options,
+        fallbacks,
+      );
     }
     if (primaryResult.error instanceof BudgetExceededError) {
       throw primaryResult.error;
     }
 
     // Cascade through fallback models that support tool calls
-    for (const fallbackConfig of fallbacks) {
+    for (let i = 0; i < fallbacks.length; i++) {
+      const fallbackConfig = fallbacks[i]!;
       if (!fallbackConfig.supportsToolCalls) continue;
+      if (this._degradedProviders.has(fallbackConfig.provider)) {
+        process.stdout.write(`[Router] Skipping degraded provider "${fallbackConfig.provider}" in fallback cascade.\n`);
+        this.logEntry(fallbackConfig, "blocked", 0, "provider degraded by health event");
+        continue;
+      }
       this.logEntry(fallbackConfig, "fallback", 0);
       const fallbackResult = await this.tryStreamWithTools(
         fallbackConfig,
@@ -325,7 +381,14 @@ export class ModelRouterImpl {
         options,
       );
       if (fallbackResult.success) {
-        return fallbackResult.stream;
+        return this.wrapToolStreamWithSemanticHealth(
+          fallbackResult.stream,
+          fallbackConfig,
+          messages,
+          tools,
+          options,
+          fallbacks.slice(i + 1),
+        );
       }
     }
 
@@ -452,6 +515,14 @@ export class ModelRouterImpl {
       );
 
       const durationMs = Date.now() - startTime;
+      if (isEmptyModelText(result.text)) {
+        const error = new SemanticModelOutputError(config, "empty_response");
+        this.logEntry(config, "error", durationMs, error.message);
+        this.markProviderDegraded(config.provider, error.reasonCode);
+        await this.recordSemanticFailureAuditEvent(config, error, durationMs);
+        return { success: false, text: "", error };
+      }
+
       this.logEntry(config, "success", durationMs);
 
       // D6: Track cost for this request
@@ -486,6 +557,228 @@ export class ModelRouterImpl {
       this.logEntry(config, "error", durationMs, error.message);
       return { success: false, text: "", error };
     }
+  }
+
+  private blockedProviderResult(
+    config: ModelConfig,
+    reason: string,
+  ): { success: false; text: string; error: Error } {
+    const error = new Error(`Provider ${config.provider}/${config.modelId} blocked: ${reason}`);
+    this.logEntry(config, "blocked", 0, reason);
+    return { success: false, text: "", error };
+  }
+
+  private blockedStreamResult(
+    config: ModelConfig,
+    reason: string,
+  ): { success: false; stream: never; error: Error } {
+    const error = new Error(`Provider ${config.provider}/${config.modelId} blocked: ${reason}`);
+    this.logEntry(config, "blocked", 0, reason);
+    return { success: false, stream: undefined as never, error };
+  }
+
+  private blockedToolStreamResult(
+    config: ModelConfig,
+    reason: string,
+  ): { success: false; stream: never; error: Error } {
+    const error = new Error(`Provider ${config.provider}/${config.modelId} blocked: ${reason}`);
+    this.logEntry(config, "blocked", 0, reason);
+    return { success: false, stream: undefined as never, error };
+  }
+
+  private wrapTextStreamWithSemanticHealth(
+    stream: StreamTextResult<Record<string, never>, never>,
+    config: ModelConfig,
+    messages: CoreMessage[],
+    options: GenerateOptions,
+    fallbacks: ModelConfig[],
+  ): StreamTextResult<Record<string, never>, never> {
+    const textStream = (stream as { textStream?: unknown }).textStream;
+    if (!isAsyncIterable<string>(textStream)) {
+      return stream;
+    }
+
+    const wrappedTextStream = this.createHealthyTextStream(
+      textStream,
+      config,
+      messages,
+      options,
+      fallbacks,
+    );
+    return {
+      ...stream,
+      textStream: wrappedTextStream,
+    } as StreamTextResult<Record<string, never>, never>;
+  }
+
+  private async *createHealthyTextStream(
+    textStream: AsyncIterable<string>,
+    config: ModelConfig,
+    messages: CoreMessage[],
+    options: GenerateOptions,
+    fallbacks: ModelConfig[],
+  ): AsyncIterable<string> {
+    let hasText = false;
+    for await (const chunk of textStream) {
+      if (!isEmptyModelText(chunk)) {
+        hasText = true;
+      }
+      yield chunk;
+    }
+
+    if (hasText) {
+      return;
+    }
+
+    const error = new SemanticModelOutputError(config, "empty_response");
+    this.logEntry(config, "error", 0, error.message);
+    this.markProviderDegraded(config.provider, error.reasonCode);
+    await this.recordSemanticFailureAuditEvent(config, error, 0);
+
+    for (const fallbackConfig of fallbacks) {
+      if (this._degradedProviders.has(fallbackConfig.provider)) {
+        process.stdout.write(`[Router] Skipping degraded provider "${fallbackConfig.provider}" in fallback cascade.\n`);
+        this.logEntry(fallbackConfig, "blocked", 0, "provider degraded by health event");
+        continue;
+      }
+      this.logEntry(fallbackConfig, "fallback", 0);
+      const fallbackResult = await this.tryStream(fallbackConfig, messages, options);
+      if (!fallbackResult.success) {
+        continue;
+      }
+      const fallbackTextStream = (fallbackResult.stream as { textStream?: unknown }).textStream;
+      if (!isAsyncIterable<string>(fallbackTextStream)) {
+        return;
+      }
+
+      let fallbackHasText = false;
+      for await (const chunk of fallbackTextStream) {
+        if (!isEmptyModelText(chunk)) {
+          fallbackHasText = true;
+        }
+        yield chunk;
+      }
+      if (fallbackHasText) {
+        return;
+      }
+
+      const fallbackError = new SemanticModelOutputError(fallbackConfig, "empty_response");
+      this.logEntry(fallbackConfig, "error", 0, fallbackError.message);
+      this.markProviderDegraded(fallbackConfig.provider, fallbackError.reasonCode);
+      await this.recordSemanticFailureAuditEvent(fallbackConfig, fallbackError, 0);
+    }
+
+    throw error;
+  }
+
+  private wrapToolStreamWithSemanticHealth<T extends Record<string, CoreTool>>(
+    stream: StreamTextResult<T, never>,
+    config: ModelConfig,
+    messages: CoreMessage[],
+    tools: T,
+    options: GenerateOptions,
+    fallbacks: ModelConfig[],
+  ): StreamTextResult<T, never> {
+    const fullStream = (stream as { fullStream?: unknown }).fullStream;
+    if (!isAsyncIterable<unknown>(fullStream)) {
+      return stream;
+    }
+
+    const wrappedFullStream = this.createHealthyToolStream(
+      fullStream,
+      config,
+      messages,
+      tools,
+      options,
+      fallbacks,
+    );
+    return {
+      ...stream,
+      fullStream: wrappedFullStream,
+    } as StreamTextResult<T, never>;
+  }
+
+  private async *createHealthyToolStream<T extends Record<string, CoreTool>>(
+    fullStream: AsyncIterable<unknown>,
+    config: ModelConfig,
+    messages: CoreMessage[],
+    tools: T,
+    options: GenerateOptions,
+    fallbacks: ModelConfig[],
+  ): AsyncIterable<unknown> {
+    let hasText = false;
+    let toolCallCount = 0;
+    let finishReason: string | undefined;
+    const pendingFinishParts: unknown[] = [];
+
+    for await (const part of fullStream) {
+      const partRecord = part as {
+        type?: string;
+        textDelta?: string;
+        finishReason?: string;
+      };
+      if (partRecord.type === "text-delta") {
+        if (!isEmptyModelText(partRecord.textDelta)) {
+          hasText = true;
+        }
+        yield part;
+      } else if (partRecord.type === "tool-call") {
+        toolCallCount++;
+        yield part;
+      } else if (partRecord.type === "finish" || partRecord.type === "finish-step") {
+        finishReason = partRecord.finishReason;
+        pendingFinishParts.push(part);
+      } else {
+        yield part;
+      }
+    }
+
+    const emptyToolCallFinish = isEmptyToolCallFinish(finishReason, toolCallCount);
+    const emptyRound = !hasText && toolCallCount === 0;
+    if (!emptyToolCallFinish && !emptyRound) {
+      for (const part of pendingFinishParts) {
+        yield part;
+      }
+      return;
+    }
+
+    const reasonCode = emptyToolCallFinish ? "empty_tool_call_finish" : "empty_response";
+    const error = new SemanticModelOutputError(config, reasonCode);
+    this.logEntry(config, "error", 0, error.message);
+    this.markProviderDegraded(config.provider, error.reasonCode);
+    await this.recordSemanticFailureAuditEvent(config, error, 0);
+
+    for (const fallbackConfig of fallbacks) {
+      if (!fallbackConfig.supportsToolCalls) {
+        continue;
+      }
+      if (this._degradedProviders.has(fallbackConfig.provider)) {
+        process.stdout.write(`[Router] Skipping degraded provider "${fallbackConfig.provider}" in fallback cascade.\n`);
+        this.logEntry(fallbackConfig, "blocked", 0, "provider degraded by health event");
+        continue;
+      }
+      this.logEntry(fallbackConfig, "fallback", 0);
+      const fallbackResult = await this.tryStreamWithTools(
+        fallbackConfig,
+        messages,
+        tools,
+        options,
+      );
+      if (!fallbackResult.success) {
+        continue;
+      }
+      const fallbackFullStream = (fallbackResult.stream as { fullStream?: unknown }).fullStream;
+      if (!isAsyncIterable<unknown>(fallbackFullStream)) {
+        return;
+      }
+
+      for await (const part of fallbackFullStream) {
+        yield part;
+      }
+      return;
+    }
+
+    throw error;
   }
 
   /**
@@ -716,6 +1009,31 @@ export class ModelRouterImpl {
           delayMs,
           provider: config.provider,
           modelId: config.modelId,
+        },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private async recordSemanticFailureAuditEvent(
+    config: ModelConfig,
+    error: SemanticModelOutputError,
+    durationMs: number,
+  ): Promise<void> {
+    try {
+      await appendAuditEvent(this.projectRoot, {
+        type: "tool_call_failed",
+        sessionId: this.sessionId,
+        timestamp: new Date().toISOString(),
+        modelId: `${config.provider}/${config.modelId}`,
+        projectRoot: this.projectRoot,
+        payload: {
+          semanticFailure: true,
+          reasonCode: error.reasonCode,
+          provider: config.provider,
+          modelId: config.modelId,
+          durationMs,
         },
       });
     } catch {

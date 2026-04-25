@@ -22,6 +22,7 @@ You are especially prone to narration, phantom completion, and skipping verifica
 6. If the task is long-running, keep going until the plan is actually complete. Avoid premature summaries and "done" language.
 7. If prior tool output was compacted or truncated, recover missing facts by reading the relevant file again instead of guessing.
 8. When rate-limited or retried, resume the exact task in progress. Do not restart the whole approach unless the previous one is proven wrong.
+9. If Edit fails because the file was not fully read, immediately call Read on that exact file with no offset/limit, then make one small Edit. Do not keep retrying Edit from memory.
 ${KNOWLEDGE_CHECK_SECTION}`;
 }
 

@@ -2416,6 +2416,7 @@ function normalizeExecutionContext(
       roundId: "default-round",
       sandboxEnabled,
       readTracker: new Map<string, FileSnapshot>(),
+      trackedSnapshots: new Map<string, FileSnapshot>(),
       editAttempts: new Map(),
     };
   }
@@ -2426,6 +2427,7 @@ function normalizeExecutionContext(
     sandboxEnabled: sessionOrContext.sandboxEnabled ?? sandboxEnabled,
     selfImprovement: sessionOrContext.selfImprovement,
     readTracker: sessionOrContext.readTracker ?? new Map<string, FileSnapshot>(),
+    trackedSnapshots: sessionOrContext.trackedSnapshots ?? new Map<string, FileSnapshot>(),
     editAttempts: sessionOrContext.editAttempts ?? new Map(),
     subAgentExecutor: sessionOrContext.subAgentExecutor,
   };

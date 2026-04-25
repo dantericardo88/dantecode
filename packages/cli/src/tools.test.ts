@@ -175,6 +175,74 @@ describe("cli tools hardening", () => {
     expect(result.content).toContain("Read the full current file before Edit");
   });
 
+  it("allows a full-file Read from an earlier round to satisfy Edit when disk is unchanged", async () => {
+    const context = makeContext();
+    mockReadFile.mockResolvedValueOnce("const value = 'old';\n");
+
+    const readResult = await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+    expect(readResult.isError).toBe(false);
+
+    context.roundId = "round-2";
+    mockReadFile.mockResolvedValueOnce("const value = 'old';\n");
+    mockWriteFile.mockResolvedValueOnce(undefined);
+
+    const editResult = await executeTool(
+      "Edit",
+      { file_path: "src/app.ts", old_string: "'old'", new_string: "'new'" },
+      "/proj",
+      context,
+    );
+
+    expect(editResult.isError).toBe(false);
+    expect(mockWriteFile).toHaveBeenCalled();
+  });
+
+  it("does not let offset or limited Read satisfy Edit", async () => {
+    const context = makeContext();
+    mockReadFile.mockResolvedValueOnce("line 1\nline 2\nline 3\n");
+
+    const readResult = await executeTool(
+      "Read",
+      { file_path: "src/app.ts", offset: 1, limit: 1 },
+      "/proj",
+      context,
+    );
+    expect(readResult.isError).toBe(false);
+
+    const editResult = await executeTool(
+      "Edit",
+      { file_path: "src/app.ts", old_string: "line 2", new_string: "updated" },
+      "/proj",
+      context,
+    );
+
+    expect(editResult.isError).toBe(true);
+    expect(editResult.content).toContain("Read the full current file before Edit");
+    expect(mockWriteFile).not.toHaveBeenCalled();
+  });
+
+  it("blocks Edit when the full-file Read snapshot is stale", async () => {
+    const context = makeContext();
+    mockReadFile.mockResolvedValueOnce("const value = 'old';\n");
+
+    const readResult = await executeTool("Read", { file_path: "src/app.ts" }, "/proj", context);
+    expect(readResult.isError).toBe(false);
+
+    context.roundId = "round-2";
+    mockReadFile.mockResolvedValueOnce("const value = 'external';\n");
+
+    const editResult = await executeTool(
+      "Edit",
+      { file_path: "src/app.ts", old_string: "'old'", new_string: "'new'" },
+      "/proj",
+      context,
+    );
+
+    expect(editResult.isError).toBe(true);
+    expect(editResult.content).toContain("changed since the last full Read");
+    expect(mockWriteFile).not.toHaveBeenCalled();
+  });
+
   it("returns current file contents after the first edit mismatch", async () => {
     const context = makeContext();
     mockReadFile.mockResolvedValueOnce("const value = 1;\n");
