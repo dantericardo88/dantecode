@@ -38,6 +38,12 @@ const VISION_CAPABLE_MODELS: VisionCapability[] = [
   { provider: "grok", modelId: "grok-4-0709", supportsVision: true, maxImageSize: 20_000_000 },
   {
     provider: "anthropic",
+    modelId: "claude-opus-4-7",
+    supportsVision: true,
+    maxImageSize: 20_000_000,
+  },
+  {
+    provider: "anthropic",
     modelId: "claude-opus-4-6",
     supportsVision: true,
     maxImageSize: 20_000_000,

@@ -64,3 +64,30 @@ Anti-Stub enforcement: Layer 1 (scanner) + Layer 2 (PDSE Clarity=0) + Layer 3 (G
 - `.dantecode/worktrees/` — managed by git-engine
 - `.dantecode/audit.jsonl` — append-only audit log
 - `.dantecode/lessons.db` — managed by danteforge lessons system
+
+## VS Code Extension — Critical Rules
+
+**NEVER overwrite these deployed extension bundles directly:**
+- `C:\Users\richa\.antigravity\extensions\dantecode.dantecode-1.0.0\dist\extension.js`
+- `C:\Users\richa\.vscode\extensions\dantecode.dantecode-1.0.0\dist\extension.js`
+
+These are build artefacts. The authoritative source is `packages/vscode/src/sidebar-provider.ts`.
+
+**NEVER reinstall or replace the extension from a VSIX or zip** — doing so overwrites the deployed bundle with a version that is missing critical fixes.
+
+**NEVER run `vsce package` and deploy the output** without first building from `packages/vscode/src/`.
+
+**Correct workflow for any change to the VS Code extension:**
+1. Edit source in `packages/vscode/src/`
+2. Run `cd packages/vscode && npm run deploy` — this builds AND copies to both extension dirs
+3. Reload Antigravity: `Ctrl+Shift+P` → `Developer: Reload Window`
+
+**Why this matters — fixes that must not be lost:**
+- `streamOllamaDirect()` in `sidebar-provider.ts` (~line 2559): bypasses Vercel AI SDK for Ollama streaming. Without this, all Ollama models hang with `_waiting for model..._` forever.
+- `supportsToolCalls: provider !== "ollama"` (~line 659): prevents passing tool schemas to Ollama models that reject them.
+- Timeout→fallback logic (~line 1186): when a cloud model takes >30s to respond, retries with the fallback model instead of showing a dead-end error.
+- Heartbeat uses `partial` only (never `chunk`) so waiting indicators don't pollute the final response.
+
+## Package.json — activationEvents
+
+`packages/vscode/package.json` must keep `"activationEvents": ["*"]` and `"capabilities": { "untrustedWorkspaces": { "supported": "always" } }`. Do not revert these to defaults — Antigravity IDE requires `"*"` for immediate activation.

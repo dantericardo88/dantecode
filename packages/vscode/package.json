@@ -30,8 +30,13 @@
     "danteforge"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "always"
+    }
+  },
   "main": "./dist/extension.js",
   "scripts": {
     "build": "tsup",
@@ -39,7 +44,8 @@
     "lint": "eslint src/",
     "test": "vitest run --config ../../vitest.package.config.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "package": "vsce package"
+    "package": "vsce package",
+    "deploy": "npm run build && node -e \"const fs=require('fs'),src='dist/extension.js',home=require('os').homedir();['/.antigravity','/.vscode'].forEach(d=>{const t=home+d+'/extensions/dantecode.dantecode-1.0.0/dist/extension.js';try{fs.mkdirSync(require('path').dirname(t),{recursive:true});fs.copyFileSync(src,t);console.log('deployed:',t)}catch(e){console.warn('skip:',t,e.message)}});\""
   },
   "dependencies": {
     "@dantecode/config-types": "1.0.0",

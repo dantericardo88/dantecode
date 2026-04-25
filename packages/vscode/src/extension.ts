@@ -101,6 +101,7 @@ export function getPendingReviewComments(): Array<{ file: string; comment: strin
 // ─── Activate ────────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
+  try {
   const extensionUri = context.extensionUri;
 
   // ── Repo map tree ──
@@ -669,6 +670,11 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── First-run onboarding ──
   if (!OnboardingProvider.hasOnboarded(context)) {
     void onboardingProvider.show();
+  }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`DanteCode activation failed: ${msg}`);
+    console.error("[DanteCode] activate() failed:", err);
   }
 }
 

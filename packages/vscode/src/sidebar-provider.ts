@@ -30,10 +30,10 @@ import {
   detectSelfImprovementContext,
   getContextUtilization,
   getProviderPromptSupplement,
-  getProviderCatalogEntry,
   groupCatalogModels,
   parseModelReference,
   readOrInitializeState,
+  promptRequestsToolExecution,
   responseNeedsToolExecutionNudge,
   reviewPullRequest,
   shouldContinueLoop,
@@ -199,29 +199,21 @@ const PROVIDER_SECRET_KEYS: Record<string, string> = {
   google: "dantecode.googleApiKey",
 };
 
-/** Provider metadata for the settings panel. */
-const SETTINGS_PROVIDER_IDS = new Set(Object.keys(PROVIDER_SECRET_KEYS));
-const PROVIDER_PLACEHOLDERS: Partial<Record<keyof typeof PROVIDER_SECRET_KEYS, string>> = {
-  grok: "xai-...",
-  anthropic: "sk-ant-...",
-  openai: "sk-...",
-  google: "AIza...",
+/** Env var fallbacks checked when SecretStorage has no key. */
+const PROVIDER_ENV_FALLBACKS: Record<string, string[]> = {
+  anthropic: ["ANTHROPIC_API_KEY"],
+  grok: ["XAI_API_KEY", "GROK_API_KEY"],
+  openai: ["OPENAI_API_KEY"],
+  google: ["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"],
 };
-const SETTINGS_PROVIDERS = Array.from(SETTINGS_PROVIDER_IDS)
-  .map((providerId) => {
-    const provider = getProviderCatalogEntry(providerId);
-    if (!provider) {
-      return null;
-    }
 
-    return {
-      id: provider.id,
-      label: provider.label,
-      placeholder: PROVIDER_PLACEHOLDERS[provider.id] ?? "",
-      url: provider.docsUrl ?? "",
-    };
-  })
-  .filter((provider): provider is NonNullable<typeof provider> => provider !== null);
+/** Provider metadata for the settings panel — hardcoded so all 4 always appear. */
+const SETTINGS_PROVIDERS: Array<{ id: string; label: string; placeholder: string; url: string }> = [
+  { id: "anthropic", label: "Anthropic",   placeholder: "sk-ant-...", url: "https://console.anthropic.com/" },
+  { id: "grok",      label: "xAI / Grok",  placeholder: "xai-...",    url: "https://console.x.ai/" },
+  { id: "openai",    label: "OpenAI",      placeholder: "sk-...",     url: "https://platform.openai.com/api-keys" },
+  { id: "google",    label: "Google AI",   placeholder: "AIza...",    url: "https://aistudio.google.com/apikey" },
+];
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -343,10 +335,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this.extensionUri],
     };
 
-    webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+    try {
+      webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
+      vscode.window.showInformationMessage("DanteCode: webview HTML set ✓");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? (err.stack ?? "") : "";
+      webviewView.webview.html = `<!DOCTYPE html><html><body style="font-family:monospace;padding:16px;color:#f44;background:#1e1e1e;"><h3>DanteCode failed to load</h3><pre style="white-space:pre-wrap;font-size:12px;">${msg}\n\n${stack}</pre><p style="color:#aaa;font-size:11px;">Open Help &rarr; Toggle Developer Tools &rarr; Console for details.</p></body></html>`;
+      console.error("[DanteCode] resolveWebviewView failed:", err);
+      return;
+    }
 
     webviewView.webview.onDidReceiveMessage(async (message: WebviewInboundMessage) => {
-      await this.handleWebviewMessage(message);
+      try {
+        await this.handleWebviewMessage(message);
+      } catch (err: unknown) {
+        console.error("[DanteCode] handleWebviewMessage error:", err);
+      }
     });
 
     webviewView.onDidChangeVisibility(() => {
@@ -609,6 +614,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         apiKey = stored;
       }
     }
+    if (!apiKey) {
+      for (const envVar of PROVIDER_ENV_FALLBACKS[provider] ?? []) {
+        const envVal = process.env[envVar];
+        if (envVal) {
+          apiKey = envVal;
+          break;
+        }
+      }
+    }
+
+    // Ensure Ollama is running before attempting a local model request
+    if (provider === "ollama") {
+      await this.ensureOllamaRunning(true);
+    }
 
     // Validate that cloud providers have an API key before attempting a request
     if (provider !== "ollama" && !apiKey) {
@@ -635,18 +654,74 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       apiKey,
       maxTokens: 8192,
       temperature: 0.1,
-      contextWindow: 131072,
-      supportsVision: false,
-      supportsToolCalls: true,
+      contextWindow: this.getModelContextWindow(provider, modelId),
+      supportsVision: provider === "openai" && modelId.startsWith("gpt-5"),
+      supportsToolCalls: provider !== "ollama",
+      supportsExtendedThinking:
+        (provider === "openai" && modelId.startsWith("gpt-5")) ||
+        (provider === "grok" && /reasoning/i.test(modelId)),
     };
 
-    // Build auto-fallback chain for Grok models
+    if (provider !== "ollama" && apiKey) {
+      const probeUrls: Record<string, string> = {
+        grok: "https://api.x.ai/v1/models",
+        anthropic: "https://api.anthropic.com/v1/models",
+        openai: "https://api.openai.com/v1/models",
+        google: "https://generativelanguage.googleapis.com/v1beta/models",
+      };
+      const probeUrl = probeUrls[provider];
+      if (probeUrl) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 5_000);
+          const headers: Record<string, string> =
+            provider === "anthropic"
+              ? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+              : { Authorization: `Bearer ${apiKey}` };
+          const response = await fetch(probeUrl, {
+            method: "GET",
+            headers,
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timer));
+          if (response.status === 401 || response.status === 403) {
+            this.postMessage({
+              type: "error",
+              payload: {
+                message:
+                  `API key rejected by ${provider} (HTTP ${response.status}).\n` +
+                  `Open the settings panel to update your ${provider} API key.`,
+              },
+            });
+            this.messages.pop();
+            return;
+          }
+        } catch {
+          // Network or timeout errors should not block the actual provider call.
+        }
+      }
+    }
+
+    // Build provider-specific auto-fallback chains.
     const fallbackModels: ModelConfig[] = [];
     if (provider === "grok" && apiKey) {
       const grokFallbacks = ["grok-4-1-fast-non-reasoning", "grok-3", "grok-3-mini"];
       for (const fbId of grokFallbacks) {
         if (fbId !== modelId) {
           fallbackModels.push({ ...modelConfig, modelId: fbId });
+        }
+      }
+    } else if (provider === "openai" && apiKey) {
+      const openaiFallbacks = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5"];
+      for (const fbId of openaiFallbacks) {
+        if (fbId !== modelId) {
+          fallbackModels.push({
+            ...modelConfig,
+            modelId: fbId,
+            contextWindow: this.getModelContextWindow("openai", fbId),
+            supportsVision: fbId.startsWith("gpt-5"),
+            supportsToolCalls: true,
+            supportsExtendedThinking: fbId.startsWith("gpt-5"),
+          });
         }
       }
     }
@@ -1082,28 +1157,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           forceCapable: false,
         });
 
-        // Stream the model response. Native-tool-capable models must emit
-        // structured tool-call events; prose/XML is not executable for them.
+        // Normalize model ID before sending to the provider API.
+        // xAI rejects the -non-reasoning/-reasoning suffixes; strip them.
+        const normalizedModelId = this.normalizeModelId(provider, modelId);
+
+        // Direct-SSE providers bypass the Vercel AI SDK entirely to avoid
+        // ReadableStream buffering issues in VS Code's extension host.
+        // All providers now use direct SSE for consistency.
         const useNativeTools = modelConfig.supportsToolCalls;
+        const useDirectSSE = true; // universal direct-SSE path for all providers
         const aiSdkTools = useNativeTools ? getAISDKTools() : null;
-        const streamResult = useNativeTools
+        const streamResult = (useNativeTools && !useDirectSSE)
           ? await router.streamWithTools(agentMessages, aiSdkTools!, {
               system: systemPrompt,
               maxTokens: tier === "capable" ? 16384 : 8192,
               abortSignal: signal,
             })
-          : await router.stream(agentMessages, {
-              system: systemPrompt,
-              maxTokens: tier === "capable" ? 16384 : 8192,
-              abortSignal: signal,
-            });
+          : (!useDirectSSE)
+            ? await router.stream(agentMessages, {
+                system: systemPrompt,
+                maxTokens: tier === "capable" ? 16384 : 8192,
+                abortSignal: signal,
+              })
+            : null;  // direct-SSE providers handled below
 
         let fullResponse = "";
+        let streamStalled = false; // set true when mid-stream stall detector fires
         let toolCalls: ExtractedToolCall[] = [];
         let nativeFinishReason: string | undefined;
 
-        // Ollama local models may need 2-3 min on first load; cloud providers get 60s
-        const firstChunkTimeoutMs = provider === "ollama" ? 180_000 : 60_000;
+        // Ollama local models may need 2-3 min on first load; cloud providers get 30s.
+        // Reasoning models get 90s (they think before speaking).
+        const firstChunkTimeoutMs = provider === "ollama" ? 180_000
+          : modelConfig.supportsExtendedThinking ? 90_000
+          : 30_000;
+        // Mid-stream stall: abort if no chunk arrives for this long after the first chunk.
+        const stallTimeoutMs = provider === "ollama" ? 120_000
+          : modelConfig.supportsExtendedThinking ? 90_000
+          : 20_000;
 
         // Cancel the readable stream immediately when the abort signal fires — this
         // unblocks the for-await iterator even if the underlying fetch is hanging
@@ -1121,26 +1212,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
         }, firstChunkTimeoutMs);
 
-        // Heartbeat while waiting for model to start responding
-        // On round 2+, use chunk-only mode to APPEND to the existing buffer
+        // Heartbeat: shows waiting indicator before first chunk (using partial so it
+        // never pollutes the stream buffer), and detects mid-stream stalls after.
         let heartbeatTick = 0;
+        let lastChunkTime = 0; // 0 = no chunk received yet
         const streamHeartbeat = setInterval(() => {
           if (fullResponse.length === 0) {
+            // Pre-first-chunk: show waiting indicator
             heartbeatTick++;
-            if (isFirstRound && heartbeatTick <= 1) {
-              // First tick on first round: show "thinking..." as temporary display
-              this.postMessage({
-                type: "chat_response_chunk",
-                payload: { chunk: "", partial: "_thinking..._" },
-              });
-            } else {
-              // Subsequent ticks: append visible progress to buffer
-              const dots = ".".repeat(((heartbeatTick - 1) % 3) + 1);
-              this.postMessage({
-                type: "chat_response_chunk",
-                payload: { chunk: `\n> _waiting for model${dots}_\n`, partial: "" },
-              });
-            }
+            const dots = ".".repeat(((heartbeatTick - 1) % 3) + 1);
+            const label = heartbeatTick === 1 && isFirstRound ? "_thinking..._" : `_waiting for model${dots}_`;
+            this.postMessage({ type: "chat_response_chunk", payload: { chunk: "", partial: label } });
+          } else if (lastChunkTime > 0 && Date.now() - lastChunkTime > stallTimeoutMs && this.abortController && !this.stopRequested) {
+            // Mid-stream stall: response started but no new chunk for stallTimeoutMs
+            streamStalled = true;
+            this.abortController.abort();
           }
         }, 4000);
         const cleanupStreamListeners = () => {
@@ -1150,7 +1236,31 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         };
 
         try {
-          if (useNativeTools) {
+          if (useDirectSSE) {
+            // Direct SSE fetch — bypasses AI SDK for all providers.
+            fullResponse = await this.streamDirectSSE(
+              provider,
+              normalizedModelId,
+              apiKey,
+              agentMessages,
+              systemPrompt,
+              tier === "capable" ? 16384 : 8192,
+              signal,
+              (chunk) => {
+                if (fullResponse.length === 0) {
+                  cleanupStreamListeners();
+                }
+                if (this.stopRequested) return;
+                lastChunkTime = Date.now();
+                fullResponse += chunk;
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk, partial: isFirstRound ? fullResponse : "" },
+                });
+              },
+            );
+            cleanupStreamListeners();
+          } else if (useNativeTools) {
             for await (const part of (streamResult as { fullStream: AsyncIterable<Record<string, unknown>> }).fullStream) {
               if (fullResponse.length === 0 && toolCalls.length === 0) {
                 cleanupStreamListeners();
@@ -1158,6 +1268,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               if (this.stopRequested) break;
               if (part["type"] === "text-delta") {
                 const chunk = String(part["textDelta"] ?? "");
+                lastChunkTime = Date.now();
                 fullResponse += chunk;
                 this.postMessage({
                   type: "chat_response_chunk",
@@ -1180,6 +1291,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               clearInterval(streamHeartbeat);
             }
             if (this.stopRequested) break;
+            lastChunkTime = Date.now();
             fullResponse += chunk;
             if (isFirstRound) {
               // First round: send partial (full response so far) for clean rendering
@@ -1199,8 +1311,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         } catch (streamErr: unknown) {
           clearTimeout(firstChunkTimeout);
           clearInterval(streamHeartbeat);
-          // If aborted by timeout and no response yet, show a timeout error
-          if (signal.aborted && fullResponse.length === 0) {
+          if (signal.aborted && fullResponse.length === 0 && fallbackModels.length > 0) {
+            // No response at all + fallbacks available → fall through to empty-response retry
+          } else if (signal.aborted && fullResponse.length === 0) {
             this.postMessage({
               type: "error",
               payload: {
@@ -1208,8 +1321,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               },
             });
             break;
+          } else if (streamStalled && fullResponse.trim().length > 0) {
+            // Mid-stream stall with a partial response.
+            // If it's short (<100 tokens), discard and retry with the fallback model.
+            // If it's substantial, show a stall indicator and keep the partial.
+            const wordCount = fullResponse.trim().split(/\s+/).length;
+            if (wordCount < 100 && fallbackModels.length > 0) {
+              // Clear the partial response — the fallback will provide a complete one
+              fullResponse = "";
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk: "", partial: `_(${modelId} stalled — retrying with ${fallbackModels[0]!.modelId}...)_` },
+              });
+            } else {
+              fullResponse += `\n\n_(stream stalled — response may be incomplete. Try again or switch models.)_`;
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk: `\n\n_(stream stalled — response may be incomplete. Try again or switch models.)_`, partial: "" },
+              });
+            }
+            // Don't break — empty fullResponse falls through to fallback retry block
+          } else {
+            throw streamErr; // re-throw other errors to outer catch
           }
-          throw streamErr; // re-throw other errors to outer catch
         }
         clearTimeout(firstChunkTimeout);
         clearInterval(streamHeartbeat);
@@ -1229,34 +1363,44 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         if (fullResponse.trim().length === 0) {
           // Auto-retry with fallback models before showing error
+          const timedOut = signal.aborted;
           let retried = false;
           for (const fb of fallbackModels) {
             try {
+              const reason = timedOut
+                ? `${modelId} timed out — retrying with ${fb.modelId}...`
+                : `${modelId} returned empty — retrying with ${fb.modelId}...`;
               this.postMessage({
                 type: "chat_response_chunk",
                 payload: {
-                  chunk: `\n\n_(${modelId} returned empty — retrying with ${fb.modelId}...)_\n`,
+                  chunk: `\n\n_(${reason})_\n`,
                   partial: `_(retrying with ${fb.modelId}...)_`,
                 },
               });
-              const fbRouter = new ModelRouterImpl(
-                { default: fb, fallback: [], overrides: {} },
-                projectRoot,
-                this.sessionId,
-              );
-              const fbStream = await fbRouter.stream(agentMessages, {
-                system: systemPrompt,
-                maxTokens: 8192,
-                abortSignal: signal,
-              });
-              for await (const chunk of fbStream.textStream) {
-                if (this.stopRequested) break;
-                fullResponse += chunk;
-                this.postMessage({
-                  type: "chat_response_chunk",
-                  payload: { chunk, partial: fullResponse },
-                });
+              // Reset AbortController if primary was aborted (timeout/stall)
+              if (timedOut || streamStalled) {
+                this.abortController = new AbortController();
               }
+              const fbSignal = this.abortController?.signal ?? signal;
+              const fbNormalized = this.normalizeModelId(fb.provider, fb.modelId);
+              const fbApiKey = fb.apiKey;
+              await this.streamDirectSSE(
+                fb.provider,
+                fbNormalized,
+                fbApiKey,
+                agentMessages,
+                systemPrompt,
+                8192,
+                fbSignal,
+                (chunk) => {
+                  if (this.stopRequested) return;
+                  fullResponse += chunk;
+                  this.postMessage({
+                    type: "chat_response_chunk",
+                    payload: { chunk, partial: fullResponse },
+                  });
+                },
+              );
               if (fullResponse.trim().length > 0) {
                 retried = true;
                 break;
@@ -1312,7 +1456,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Update the status bar with context utilization after each response
         this.updateStatusBar({ contextPercent: ctxUtil.percent });
 
-        if (!useNativeTools) {
+        if (!useNativeTools || useDirectSSE) {
+          // Direct SSE never sends tool schemas to the API, so models output <tool_use>
+          // XML blocks in the text content. Always extract them regardless of useNativeTools.
           const extracted = extractToolCalls(fullResponse);
           toolCalls = extracted.toolCalls;
         } else if (
@@ -1404,6 +1550,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const needsExecutionNudge =
             isExecutionMode &&
             executedToolsThisTurn === 0 &&
+            promptRequestsToolExecution(text) &&
             responseNeedsToolExecutionNudge(fullResponse) &&
             executionNudges < MAX_EXECUTION_NUDGES &&
             maxToolRounds > 1;
@@ -1616,22 +1763,24 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          // Premature commit blocker: block GitCommit/GitPush when no files were modified.
+          // Premature commit blocker: block GitCommit (not GitPush) when no files were modified.
+          // GitPush is always allowed — it pushes already-committed changes, including those
+          // from prior sessions that haven't been pushed yet.
           if (
-            (toolCall.name === "GitCommit" || toolCall.name === "GitPush") &&
+            toolCall.name === "GitCommit" &&
             touchedFiles.length === 0 &&
             isPipelineWorkflow
           ) {
             this.postMessage({
               type: "chat_response_chunk",
               payload: {
-                chunk: `\n> **BLOCKED:** ${toolCall.name} — 0 files modified this session. Write/Edit files first.\n`,
+                chunk: `\n> **BLOCKED:** GitCommit — 0 files modified this session. Write/Edit files first.\n`,
                 partial: "",
               },
             });
             toolResultParts.push(
-              `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
-              `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+              `SYSTEM: GitCommit BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
+              `You cannot commit changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
               `then commit. Do NOT claim you already made changes — only tool results count.`,
             );
             continue;
@@ -2385,6 +2534,224 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   // --------------------------------------------------------------------------
+  // Ollama auto-start
+  // --------------------------------------------------------------------------
+
+  private async ensureOllamaRunning(inChat = false): Promise<void> {
+    const baseUrl = process.env["OLLAMA_BASE_URL"]
+      ? process.env["OLLAMA_BASE_URL"].replace(/\/v1\/?$/, "")
+      : "http://127.0.0.1:11434";
+
+    const isUp = async (): Promise<boolean> => {
+      try {
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 2000);
+        const res = await fetch(`${baseUrl}/api/tags`, { signal: ac.signal });
+        clearTimeout(t);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    };
+
+    if (await isUp()) return;
+
+    const notify = (msg: string) => {
+      if (inChat) {
+        this.postMessage({ type: "chat_response_chunk", payload: { chunk: `> ${msg}\n`, partial: "" } });
+      } else {
+        void vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: msg, cancellable: false },
+          () => new Promise<void>((resolve) => setTimeout(resolve, 2000)),
+        );
+      }
+    };
+
+    notify("Starting Ollama…");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { spawn } = require("node:child_process") as typeof import("node:child_process");
+    const child = spawn("ollama", ["serve"], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 800));
+      if (await isUp()) {
+        notify("Ollama ready ✓");
+        void this.scanOllamaModels();
+        return;
+      }
+    }
+
+    const errMsg = "Ollama did not start after 20 s. Make sure it is installed: https://ollama.com";
+    if (inChat) {
+      this.postMessage({ type: "error", payload: { message: errMsg } });
+    } else {
+      void vscode.window.showErrorMessage(errMsg);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Universal direct SSE streaming (bypasses AI SDK — Ollama, Grok, Groq)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Streams a response from any OpenAI-compatible provider using raw fetch + SSE,
+   * bypassing the Vercel AI SDK entirely. This avoids ReadableStream buffering
+   * issues in VS Code's extension host that cause the AI SDK's textStream to
+   * hang with no chunks despite the provider responding normally.
+   *
+   * Supports: Ollama (localhost), Grok (api.x.ai), Groq (api.groq.com), and any
+   * other OpenAI-compatible /v1/chat/completions endpoint.
+   */
+  private async streamDirectSSE(
+    provider: string,
+    modelId: string,
+    apiKey: string | undefined,
+    messages: Array<{ role: string; content: string }>,
+    system: string,
+    maxTokens: number,
+    abortSignal: AbortSignal,
+    onChunk: (chunk: string) => void,
+  ): Promise<string> {
+    const endpoint = this.resolveDirectSSEEndpoint(provider);
+    const headers = this.buildProviderHeaders(provider, apiKey);
+
+    // Anthropic uses a different request shape (system is top-level, not in messages)
+    const body = provider === "anthropic"
+      ? JSON.stringify({ model: modelId, messages, system: system || undefined, stream: true, max_tokens: maxTokens })
+      : JSON.stringify({
+          model: modelId,
+          messages: system ? [{ role: "system", content: system }, ...messages] : messages,
+          stream: true,
+          max_tokens: maxTokens,
+          temperature: 0.1,
+        });
+
+    // Retry once on 429 with Retry-After header
+    let response = await fetch(endpoint, { method: "POST", headers, body, signal: abortSignal });
+    if (response.status === 429) {
+      const retryAfterMs = this.parseRetryAfter(response) ?? 5000;
+      await new Promise<void>((r) => setTimeout(r, retryAfterMs));
+      response = await fetch(endpoint, { method: "POST", headers, body, signal: abortSignal });
+    }
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => response.statusText);
+      const label = provider.charAt(0).toUpperCase() + provider.slice(1);
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`${label} API key invalid or unauthorized (HTTP ${response.status}). Check your key in Settings.`);
+      }
+      if (response.status === 429) {
+        throw new Error(`${label} rate limit reached (HTTP 429). Wait a moment and try again.`);
+      }
+      throw new Error(`${label} HTTP ${response.status}: ${errText}`);
+    }
+
+    if (!response.body) {
+      throw new Error(`${provider} response has no body`);
+    }
+
+    let fullText = "";
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let lineBuffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      lineBuffer += decoder.decode(value, { stream: true });
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") return fullText;
+        try {
+          const parsed = JSON.parse(data) as Record<string, unknown>;
+          let chunk = "";
+          if (provider === "anthropic") {
+            // Anthropic SSE: {type:"content_block_delta", delta:{type:"text_delta", text:"..."}}
+            const delta = parsed["delta"] as Record<string, unknown> | undefined;
+            chunk = (delta?.["text"] as string | undefined) ?? "";
+          } else {
+            // OpenAI-compatible: {choices:[{delta:{content:"..."}}]}
+            const choices = parsed["choices"] as Array<Record<string, unknown>> | undefined;
+            chunk = (choices?.[0]?.["delta"] as Record<string, unknown> | undefined)?.["content"] as string ?? "";
+          }
+          if (chunk) {
+            fullText += chunk;
+            onChunk(chunk);
+          }
+        } catch { /* skip malformed SSE lines */ }
+      }
+    }
+
+    return fullText;
+  }
+
+  private resolveDirectSSEEndpoint(provider: string): string {
+    switch (provider) {
+      case "ollama": {
+        const raw = (process.env["OLLAMA_BASE_URL"] ?? "http://localhost:11434/v1").replace(/\/+$/, "");
+        return raw.endsWith("/v1") ? `${raw}/chat/completions` : `${raw}/v1/chat/completions`;
+      }
+      case "grok":
+        return process.env["XAI_BASE_URL"] ?? "https://api.x.ai/v1/chat/completions";
+      case "groq":
+        return "https://api.groq.com/openai/v1/chat/completions";
+      case "anthropic":
+        return "https://api.anthropic.com/v1/messages";
+      case "openai":
+        return process.env["OPENAI_BASE_URL"] ?? "https://api.openai.com/v1/chat/completions";
+      case "google":
+        return "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+      default:
+        return `https://api.${provider}.com/v1/chat/completions`;
+    }
+  }
+
+  private buildProviderHeaders(provider: string, apiKey: string | undefined): Record<string, string> {
+    const key = apiKey ?? "";
+    switch (provider) {
+      case "anthropic":
+        return {
+          "Content-Type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "interleaved-thinking-2025-05-14",
+        };
+      case "google":
+        return { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
+      case "ollama":
+        return { "Content-Type": "application/json", Authorization: "Bearer ollama" };
+      default:
+        return { "Content-Type": "application/json", Authorization: `Bearer ${key}` };
+    }
+  }
+
+  private parseRetryAfter(response: Response): number | null {
+    const header = response.headers.get("retry-after") ?? response.headers.get("x-ratelimit-reset-requests");
+    if (!header) return null;
+    const seconds = parseFloat(header);
+    if (!isNaN(seconds)) return Math.min(seconds * 1000, 60_000);
+    const date = Date.parse(header);
+    if (!isNaN(date)) return Math.min(Math.max(0, date - Date.now()), 60_000);
+    return null;
+  }
+
+  private normalizeModelId(provider: string, modelId: string): string {
+    if (provider === "grok") {
+      // xAI API accepts the base model name; strip DanteCode's mode suffixes
+      return modelId.replace(/-(non-reasoning|reasoning)$/, "");
+    }
+    return modelId;
+  }
+
+  // --------------------------------------------------------------------------
   // File, model, and skill handlers (existing)
   // --------------------------------------------------------------------------
 
@@ -2414,8 +2781,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const config = vscode.workspace.getConfiguration("dantecode");
     await config.update("defaultModel", model, vscode.ConfigurationTarget.Global);
     this.sendModelUpdate();
-    // Update status bar with the new model name
     this.updateStatusBar({ model });
+    if (model.startsWith("ollama/")) {
+      void this.ensureOllamaRunning(false);
+    }
   }
 
   private async handleSkillActivate(skillName: string): Promise<void> {
@@ -2693,6 +3062,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   private parseModelString(model: string): [string, string] {
     const parsed = parseModelReference(model);
     return [parsed.provider, parsed.modelId];
+  }
+
+  private getModelContextWindow(provider: string, modelId: string): number {
+    if (provider === "openai") {
+      if (modelId === "gpt-5.5" || modelId === "gpt-5.4" || modelId === "gpt-5.4-pro") {
+        return 1_050_000;
+      }
+      if (modelId.startsWith("gpt-5")) {
+        return 400_000;
+      }
+    }
+    return 131_072;
   }
 
   private containsCode(text: string): boolean {

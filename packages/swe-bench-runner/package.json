@@ -4,12 +4,12 @@
   "description": "DanteCode SWE-bench runner — built-in TypeScript benchmark instances with Node.js VM execution",
   "license": "MIT",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "index.js",
+  "types": "index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./index.js",
+      "types": "./index.d.ts"
     }
   },
   "files": [
