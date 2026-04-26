@@ -184,7 +184,7 @@ var CREDENTIAL_PATTERNS = [
 ];
 var BACKGROUND_PROCESS_PATTERNS = [
   createConstitutionPattern(
-    /\b(nohup|disown|daemonize|daemon|pm2\s+start)\b/i,
+    new RegExp("\\b(nohup|disown|daemonize|daemon|pm2\\s+start)\\b", "i"),
     "background_process",
     "warning",
     "Background process launch detected"
@@ -204,18 +204,18 @@ var DANGEROUS_OPERATION_PATTERNS = [
     "Destructive rm -rf / pattern detected"
   ),
   createConstitutionPattern(
-    /\bDROP\s+TABLE\b/i,
+    new RegExp("\\bDROP\\s+TABLE\\b", "i"),
     "dangerous_operation",
     "critical",
     "DROP TABLE detected"
   ),
   createConstitutionPattern(
-    /\bTRUNCATE\s+TABLE\b/i,
+    new RegExp("\\bTRUNCATE\\s+TABLE\\b", "i"),
     "dangerous_operation",
     "critical",
     "TRUNCATE TABLE detected"
   ),
-  createConstitutionPattern(/\beval\s*\(/, "code_injection", "critical", "eval() detected"),
+  createConstitutionPattern(new RegExp("\\beval\\s*\\("), "code_injection", "critical", "eval() detected"),
   createConstitutionPattern(
     /\bnew\s+Function\s*\(/,
     "code_injection",
@@ -859,6 +859,163 @@ async function detectAndRecordPatterns(messages, projectRoot) {
   }
   return recorded;
 }
+var TASK_OUTCOMES_FILE = ".danteforge/task-outcomes.json";
+async function loadTaskOutcomes(projectRoot) {
+  try {
+    const raw = await readFile(join(projectRoot, TASK_OUTCOMES_FILE), "utf-8");
+    const parsed = JSON.parse(raw);
+    return parsed.outcomes ?? [];
+  } catch {
+    return [];
+  }
+}
+async function saveTaskOutcomes(projectRoot, outcomes) {
+  const dir = join(projectRoot, ".danteforge");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(projectRoot, TASK_OUTCOMES_FILE), JSON.stringify({ version: 1, outcomes }, null, 2));
+}
+async function recordTaskOutcome(input, projectRoot) {
+  const snapshots = input.verificationSnapshots ?? [];
+  const totalChecks = snapshots.length;
+  const passedChecks = snapshots.filter((s) => s.passed).length;
+  const failedChecks = totalChecks - passedChecks;
+  let proofStatus;
+  if (totalChecks === 0) {
+    proofStatus = "unverified";
+  } else if (failedChecks > 0) {
+    proofStatus = "partially_verified";
+  } else {
+    proofStatus = "verified";
+  }
+  const artifact = {
+    ...input,
+    id: randomUUID(),
+    proofStatus,
+    verificationSummary: { totalChecks, passedChecks, failedChecks },
+    recordedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const existing = await loadTaskOutcomes(projectRoot);
+  existing.push(artifact);
+  await saveTaskOutcomes(projectRoot, existing);
+  return artifact;
+}
+async function getTaskOutcomeCount(projectRoot) {
+  return (await loadTaskOutcomes(projectRoot)).length;
+}
+async function listTaskOutcomes(projectRoot) {
+  return loadTaskOutcomes(projectRoot);
+}
+async function queryRecentTaskOutcomes(projectRoot, limit = 10) {
+  const outcomes = await loadTaskOutcomes(projectRoot);
+  return outcomes.slice(-limit).reverse();
+}
+function formatTaskOutcomesForPrompt(outcomes) {
+  return outcomes.map((o) => `[${o.success ? "success" : "failure"}/${o.proofStatus}] ${o.command}: ${o.taskDescription}`).join("\n");
+}
+function summarizeTaskOutcomeTrends(outcomes) {
+  const failures = outcomes.filter((o) => !o.success);
+  const commandCounts = /* @__PURE__ */ new Map();
+  for (const f of failures) {
+    commandCounts.set(f.command, (commandCounts.get(f.command) ?? 0) + 1);
+  }
+  const dominantFailureCommand = failures.length > 0 ? [...commandCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null : null;
+  const unverifiedFailureCount = failures.filter((o) => o.proofStatus === "unverified").length;
+  const verificationFailureCount = failures.filter((o) => o.proofStatus === "partially_verified").length;
+  const dominantFailureMode = failures.length === 0 ? "none" : unverifiedFailureCount >= verificationFailureCount ? "unverified_completion" : "verification_failure";
+  const warning = failures.length >= 2 ? `${failures.length} repeated failures detected` : null;
+  return {
+    totalCount: outcomes.length,
+    failureCount: failures.length,
+    dominantFailureCommand,
+    unverifiedFailureCount,
+    verificationFailureCount,
+    dominantFailureMode,
+    warning
+  };
+}
+function formatTaskOutcomeTrendSummary(summary) {
+  const lines = [
+    `Outcomes analyzed: ${summary.totalCount}`,
+    `Failures: ${summary.failureCount}`,
+    summary.dominantFailureCommand ? `Most common failing command: ${summary.dominantFailureCommand}` : null,
+    `Dominant failure mode: ${summary.dominantFailureMode}`,
+    summary.warning ? `Warning: ${summary.warning}` : null
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+var REVIEW_OUTCOMES_FILE = ".danteforge/review-outcomes.json";
+async function loadReviewOutcomes(projectRoot) {
+  try {
+    const raw = await readFile(join(projectRoot, REVIEW_OUTCOMES_FILE), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+async function recordReviewOutcome(input, projectRoot) {
+  const categoryCounts = {};
+  for (const c of input.comments) {
+    categoryCounts[c.category] = (categoryCounts[c.category] ?? 0) + 1;
+  }
+  const record = {
+    prNumber: input.prNumber,
+    repo: input.repo,
+    verdict: input.verdict,
+    score: input.score,
+    summary: input.summary,
+    checklistPassed: input.checklistPassed,
+    checklistTotal: input.checklistTotal,
+    commentCount: input.comments.length,
+    blockingCommentCount: input.comments.filter((c) => c.type === "blocking").length,
+    unresolvedCommentCount: input.comments.filter((c) => !c.resolved).length,
+    categoryCounts,
+    recordedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const dir = join(projectRoot, ".danteforge");
+  await mkdir(dir, { recursive: true });
+  const existing = await loadReviewOutcomes(projectRoot);
+  existing.push(record);
+  await writeFile(join(projectRoot, REVIEW_OUTCOMES_FILE), JSON.stringify(existing, null, 2));
+}
+async function listReviewOutcomes(projectRoot) {
+  return loadReviewOutcomes(projectRoot);
+}
+var BENCHMARK_OUTCOMES_FILE = ".danteforge/benchmark-outcomes.json";
+async function loadBenchmarkOutcomes(projectRoot) {
+  try {
+    const raw = await readFile(join(projectRoot, BENCHMARK_OUTCOMES_FILE), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+async function recordBenchmarkOutcome(input, projectRoot) {
+  const record = {
+    ...input,
+    suite: "swe-bench",
+    generatedAt: input.generatedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    recordedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const dir = join(projectRoot, ".danteforge");
+  await mkdir(dir, { recursive: true });
+  const existing = await loadBenchmarkOutcomes(projectRoot);
+  existing.push(record);
+  await writeFile(join(projectRoot, BENCHMARK_OUTCOMES_FILE), JSON.stringify(existing, null, 2));
+}
+async function listBenchmarkOutcomes(projectRoot) {
+  return loadBenchmarkOutcomes(projectRoot);
+}
+async function queryRecentBenchmarkOutcomes(projectRoot, limit = 10) {
+  const outcomes = await loadBenchmarkOutcomes(projectRoot);
+  return outcomes.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime()).slice(0, limit);
+}
+function formatBenchmarkOutcomesForPrompt(outcomes) {
+  return outcomes.map((o) => {
+    const pct = (o.passRate * 100).toFixed(1);
+    return `[${o.suite}] ${o.model}: ${pct}% (${o.resolved}/${o.total})
+Top failures: ${o.topFailures.join(", ")}`;
+  }).join("\n\n");
+}
 export {
   ALL_PATTERNS,
   BACKGROUND_PROCESS_PATTERNS,
@@ -874,15 +1031,27 @@ export {
   deleteLesson,
   detectAndRecordPatterns,
   detectPatterns,
+  formatBenchmarkOutcomesForPrompt,
   formatBladeProgressLine,
   formatLessonsForPrompt,
+  formatTaskOutcomeTrendSummary,
+  formatTaskOutcomesForPrompt,
   generateProgressBar,
   getLessonCount,
+  getTaskOutcomeCount,
   initLessonsDB,
+  listBenchmarkOutcomes,
+  listReviewOutcomes,
+  listTaskOutcomes,
   queryLessons,
+  queryRecentBenchmarkOutcomes,
+  queryRecentTaskOutcomes,
+  recordBenchmarkOutcome,
   recordLesson,
   recordPreference,
+  recordReviewOutcome,
   recordSuccessPattern,
+  recordTaskOutcome,
   runAntiStubScanner,
   runAutoforgeIAL,
   runConstitutionCheck,
@@ -891,5 +1060,6 @@ export {
   runLocalPDSEScorer,
   runPDSEScorer,
   scanFile,
-  summarizeGStackResults
+  summarizeGStackResults,
+  summarizeTaskOutcomeTrends
 };

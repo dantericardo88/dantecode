@@ -1064,6 +1064,28 @@ export function extractToolCalls(text: string): {
   return { cleanText: cleanText.trim(), toolCalls, epilogue };
 }
 
+const TOOL_USE_CLOSE = "</tool_use>";
+
+/**
+ * Returns true when the accumulated stream text contains a complete </tool_use>
+ * block followed by epilogue prose — meaning the model is fabricating a post-tool
+ * summary and the stream should be cut before that text reaches the UI.
+ *
+ * Returns false when:
+ * - No </tool_use> present yet (still streaming tool call or text-only response)
+ * - Another <tool_use> immediately follows (chained tool calls — keep streaming)
+ * - Only whitespace follows the closing tag (normal end-of-tool-call padding)
+ */
+export function shouldCutStream(text: string): boolean {
+  const lastCloseIdx = text.lastIndexOf(TOOL_USE_CLOSE);
+  if (lastCloseIdx < 0) return false;
+  const afterClose = text.slice(lastCloseIdx + TOOL_USE_CLOSE.length);
+  // Allow chaining: another tool call is starting
+  if (afterClose.trimStart().startsWith("<tool_use>")) return false;
+  // Cut when a non-whitespace character appears on a new line (epilogue paragraph)
+  return /\n\S/.test(afterClose);
+}
+
 // ----------------------------------------------------------------------------
 // Tool Definitions for System Prompt
 // ----------------------------------------------------------------------------
@@ -1115,7 +1137,7 @@ Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
 - Use Bash to run tests, type-checks, or build commands to verify changes.
 - Prefer GitCommit over raw Bash git commit commands.
 - Use GitPush when the user explicitly asks you to publish verified commits to a remote.
-- You can chain multiple tool calls in one response.
+- You can chain multiple tool calls in one response, but you MUST NOT write any text after the last </tool_use> closing tag.
 - After tool results come back, analyze them and continue your task.
 - NEVER respond with only a plan or description when the user asks you to build something. Take action immediately.
 

@@ -34,6 +34,9 @@ You are especially prone to narration, phantom completion, and skipping verifica
     • Use ERROR if the result contained an error message or isError flag.
     • Never write SUCCESS for a tool you did not call or whose result you did not read.
     • Omit the block only if zero tools were called this round.
+12. After writing </tool_use>, STOP immediately. Do not write any text, prose, summary,
+    or explanation after the closing tag. The next content you produce will be in a new
+    response after tool results are returned to you.
 ${KNOWLEDGE_CHECK_SECTION}`;
 }
 

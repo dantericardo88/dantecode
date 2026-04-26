@@ -650,3 +650,11 @@
 {"stepId":"r1","description":"Edit","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-22T23:50:37.048Z"}
 {"stepId":"r2","description":"Create","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-22T23:50:37.051Z"}
 {"stepId":"test-step","description":"Run tests","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-22T23:50:41.000Z"}
+{"stepId":"test-step","description":"Run tests","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:15.377Z"}
+{"stepId":"s1","description":"Install deps","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.776Z"}
+{"stepId":"s2","description":"Run tests","verified":false,"reason":"no_output","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.777Z"}
+{"stepId":"s3","description":"Edit file","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.779Z"}
+{"stepId":"s4","description":"Create file","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.782Z"}
+{"stepId":"s5","description":"No file","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.784Z"}
+{"stepId":"r1","description":"Edit","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.786Z"}
+{"stepId":"r2","description":"Create","verified":true,"reason":"tool_called","filesWrittenCount":0,"timestamp":"2026-04-26T14:48:17.788Z"}

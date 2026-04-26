@@ -699,6 +699,7 @@ import {
   isSelfModificationBashCommand,
   executeTool,
   extractToolCalls,
+  shouldCutStream,
   type ToolExecutionContext,
 } from "./agent-tools.js";
 import { ChatSidebarProvider } from "./sidebar-provider.js";
@@ -2412,5 +2413,54 @@ describe("extractToolCalls", () => {
     const stripped = epiIdx >= 0 ? cleanText.slice(0, epiIdx).trim() : cleanText;
     expect(stripped).not.toContain(epilogue);
     expect(stripped).toContain("Doing work.");
+  });
+});
+
+// ─── shouldCutStream ──────────────────────────────────────────────────────────
+
+describe("shouldCutStream", () => {
+  it("returns false when no tool_use present", () => {
+    expect(shouldCutStream("Just some plain text.")).toBe(false);
+  });
+
+  it("returns false mid-tool-call (closing tag not yet arrived)", () => {
+    const partial = 'I will read the file.\n<tool_use>{"name":"Read","input":{"file_path":"foo.ts"';
+    expect(shouldCutStream(partial)).toBe(false);
+  });
+
+  it("returns false immediately after </tool_use> with only whitespace following", () => {
+    const text = '<tool_use>{"name":"Read","input":{"file_path":"foo.ts"}}</tool_use>\n  \n';
+    expect(shouldCutStream(text)).toBe(false);
+  });
+
+  it("returns false when another <tool_use> immediately follows the close", () => {
+    const text =
+      '<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>\n<tool_use>{"name":"Read","input":{"file_path":"b.ts"';
+    expect(shouldCutStream(text)).toBe(false);
+  });
+
+  it("returns true when a non-whitespace line follows </tool_use>", () => {
+    const text =
+      '<tool_use>{"name":"GitPush","input":{}}</tool_use>\nThe push succeeded! ✅ Everything is deployed.';
+    expect(shouldCutStream(text)).toBe(true);
+  });
+
+  it("returns true on multi-line epilogue", () => {
+    const text =
+      '<tool_use>{"name":"GitPush","input":{}}</tool_use>\n\nGreat news — the push went through.\nAll changes are now live.';
+    expect(shouldCutStream(text)).toBe(true);
+  });
+
+  it("only checks text after the LAST </tool_use> when multiple tool calls are present", () => {
+    const clean =
+      '<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>\n' +
+      '<tool_use>{"name":"Edit","input":{"file_path":"a.ts","old_string":"x","new_string":"y"}}</tool_use>\n  ';
+    expect(shouldCutStream(clean)).toBe(false);
+
+    const withEpilogue =
+      '<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>\n' +
+      '<tool_use>{"name":"Edit","input":{"file_path":"a.ts","old_string":"x","new_string":"y"}}</tool_use>\n' +
+      "Done! File has been updated.";
+    expect(shouldCutStream(withEpilogue)).toBe(true);
   });
 });

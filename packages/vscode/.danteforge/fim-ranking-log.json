@@ -264,3 +264,10 @@
 {"language":"typescript","candidateCount":3,"topScore":0.91,"bottomScore":0.91,"scoreRange":0,"timestamp":"2026-04-22T23:50:40.437Z"}
 {"language":"typescript","candidateCount":2,"topScore":1,"bottomScore":0.9500000000000001,"scoreRange":0.04999999999999993,"timestamp":"2026-04-22T23:50:40.457Z"}
 {"language":"typescript","candidateCount":2,"topScore":0.9500000000000001,"bottomScore":0.81,"scoreRange":0.14,"timestamp":"2026-04-22T23:50:40.460Z"}
+{"language":"typescript","candidateCount":1,"topScore":0.6533333333333333,"bottomScore":0.6533333333333333,"scoreRange":0,"timestamp":"2026-04-26T14:48:15.375Z"}
+{"language":"typescript","candidateCount":2,"topScore":0.91,"bottomScore":0.65,"scoreRange":0.26,"timestamp":"2026-04-26T14:48:15.379Z"}
+{"language":"typescript","candidateCount":2,"topScore":0.85,"bottomScore":0.65,"scoreRange":0.19999999999999996,"timestamp":"2026-04-26T14:48:15.381Z"}
+{"language":"typescript","candidateCount":1,"topScore":0.6533333333333333,"bottomScore":0.6533333333333333,"scoreRange":0,"timestamp":"2026-04-26T14:48:15.383Z"}
+{"language":"typescript","candidateCount":3,"topScore":0.91,"bottomScore":0.91,"scoreRange":0,"timestamp":"2026-04-26T14:48:15.385Z"}
+{"language":"typescript","candidateCount":2,"topScore":1,"bottomScore":0.9500000000000001,"scoreRange":0.04999999999999993,"timestamp":"2026-04-26T14:48:15.387Z"}
+{"language":"typescript","candidateCount":2,"topScore":0.9500000000000001,"bottomScore":0.6900000000000001,"scoreRange":0.26,"timestamp":"2026-04-26T14:48:15.388Z"}

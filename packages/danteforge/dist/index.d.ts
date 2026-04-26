@@ -126,5 +126,107 @@ interface DetectedPattern {
 }
 declare function detectPatterns(messages: ConversationMessage[]): DetectedPattern[];
 declare function detectAndRecordPatterns(messages: ConversationMessage[], projectRoot: string): Promise<Lesson[]>;
+interface VerificationSnapshot {
+    kind: string;
+    passed: boolean;
+    summary: string;
+}
+interface TaskOutcomeInput {
+    command: string;
+    taskDescription: string;
+    success: boolean;
+    startedAt: string;
+    completedAt?: string;
+    verificationSnapshots?: VerificationSnapshot[];
+    evidenceRefs?: string[];
+    error?: string;
+}
+interface TaskOutcomeVerificationSummary {
+    totalChecks: number;
+    passedChecks: number;
+    failedChecks: number;
+}
+interface TaskOutcomeArtifact extends TaskOutcomeInput {
+    id: string;
+    proofStatus: "verified" | "partially_verified" | "unverified";
+    verificationSummary: TaskOutcomeVerificationSummary;
+    recordedAt: string;
+}
+declare function recordTaskOutcome(input: TaskOutcomeInput, projectRoot: string): Promise<TaskOutcomeArtifact>;
+declare function getTaskOutcomeCount(projectRoot: string): Promise<number>;
+declare function listTaskOutcomes(projectRoot: string): Promise<TaskOutcomeArtifact[]>;
+declare function queryRecentTaskOutcomes(projectRoot: string, limit?: number): Promise<TaskOutcomeArtifact[]>;
+declare function formatTaskOutcomesForPrompt(outcomes: TaskOutcomeArtifact[]): string;
+interface TaskOutcomeTrendSummary {
+    totalCount: number;
+    failureCount: number;
+    dominantFailureCommand: string | null;
+    unverifiedFailureCount: number;
+    verificationFailureCount: number;
+    dominantFailureMode: "unverified_completion" | "verification_failure" | "none";
+    warning: string | null;
+}
+declare function summarizeTaskOutcomeTrends(outcomes: TaskOutcomeArtifact[]): TaskOutcomeTrendSummary;
+declare function formatTaskOutcomeTrendSummary(summary: TaskOutcomeTrendSummary): string;
+interface ReviewCommentInput {
+    type: "blocking" | "suggestion" | "info";
+    category: string;
+    resolved: boolean;
+}
+interface ReviewOutcomeInput {
+    prNumber: number;
+    repo: string;
+    verdict: string;
+    score: number;
+    summary: string;
+    checklistPassed: number;
+    checklistTotal: number;
+    comments: ReviewCommentInput[];
+    rawPrompt?: string;
+}
+interface ReviewOutcomeRecord {
+    prNumber: number;
+    repo: string;
+    verdict: string;
+    score: number;
+    summary: string;
+    checklistPassed: number;
+    checklistTotal: number;
+    commentCount: number;
+    blockingCommentCount: number;
+    unresolvedCommentCount: number;
+    categoryCounts: Record<string, number>;
+    recordedAt: string;
+}
+declare function recordReviewOutcome(input: ReviewOutcomeInput, projectRoot: string): Promise<void>;
+declare function listReviewOutcomes(projectRoot: string): Promise<ReviewOutcomeRecord[]>;
+interface BenchmarkOutcomeInput {
+    runId: string;
+    model: string;
+    total: number;
+    resolved: number;
+    passRate: number;
+    topFailures: string[];
+    outputPath?: string;
+    generatedAt?: string;
+    metadata?: Record<string, unknown>;
+}
+interface BenchmarkOutcomeRecord {
+    runId: string;
+    suite: string;
+    model: string;
+    total: number;
+    resolved: number;
+    passRate: number;
+    topFailures: string[];
+    outputPath?: string;
+    generatedAt: string;
+    metadata?: Record<string, unknown>;
+    recordedAt: string;
+}
+declare function recordBenchmarkOutcome(input: BenchmarkOutcomeInput, projectRoot: string): Promise<void>;
+declare function listBenchmarkOutcomes(projectRoot: string): Promise<BenchmarkOutcomeRecord[]>;
+declare function queryRecentBenchmarkOutcomes(projectRoot: string, limit?: number): Promise<BenchmarkOutcomeRecord[]>;
+declare function formatBenchmarkOutcomesForPrompt(outcomes: BenchmarkOutcomeRecord[]): string;
 
-export { ALL_PATTERNS, type AntiStubScanResult, type AutoforgeContext, type AutoforgeResult, BACKGROUND_PROCESS_PATTERNS, BladeProgressEmitter, ALL_PATTERNS as CONSTITUTION_PATTERNS, CREDENTIAL_PATTERNS, type ConstitutionCheckResult, type ConstitutionSeverity, type ConstitutionViolation, type ConstitutionViolationType, type ConversationMessage, DANGEROUS_OPERATION_PATTERNS, type DetectedPattern, HARD_VIOLATION_PATTERNS, type ModelRouter, SOFT_VIOLATION_PATTERNS, type StubPattern, allGStackPassed, buildFailureContext, clearLessons, deleteLesson, detectAndRecordPatterns, detectPatterns, formatBladeProgressLine, formatLessonsForPrompt, generateProgressBar, getLessonCount, initLessonsDB, queryLessons, recordLesson, recordPreference, recordSuccessPattern, runAntiStubScanner, runAutoforgeIAL, runConstitutionCheck, runGStack, runGStackSingle, runLocalPDSEScorer, runPDSEScorer, scanFile, summarizeGStackResults };
+export { ALL_PATTERNS, type AntiStubScanResult, type AutoforgeContext, type AutoforgeResult, BACKGROUND_PROCESS_PATTERNS, type BenchmarkOutcomeInput, type BenchmarkOutcomeRecord, BladeProgressEmitter, ALL_PATTERNS as CONSTITUTION_PATTERNS, CREDENTIAL_PATTERNS, type ConstitutionCheckResult, type ConstitutionSeverity, type ConstitutionViolation, type ConstitutionViolationType, type ConversationMessage, DANGEROUS_OPERATION_PATTERNS, type DetectedPattern, HARD_VIOLATION_PATTERNS, type ModelRouter, type ReviewCommentInput, type ReviewOutcomeInput, type ReviewOutcomeRecord, SOFT_VIOLATION_PATTERNS, type StubPattern, type TaskOutcomeArtifact, type TaskOutcomeInput, type TaskOutcomeTrendSummary, type TaskOutcomeVerificationSummary, type VerificationSnapshot, allGStackPassed, buildFailureContext, clearLessons, deleteLesson, detectAndRecordPatterns, detectPatterns, formatBenchmarkOutcomesForPrompt, formatBladeProgressLine, formatLessonsForPrompt, formatTaskOutcomeTrendSummary, formatTaskOutcomesForPrompt, generateProgressBar, getLessonCount, getTaskOutcomeCount, initLessonsDB, listBenchmarkOutcomes, listReviewOutcomes, listTaskOutcomes, queryLessons, queryRecentBenchmarkOutcomes, queryRecentTaskOutcomes, recordBenchmarkOutcome, recordLesson, recordPreference, recordReviewOutcome, recordSuccessPattern, recordTaskOutcome, runAntiStubScanner, runAutoforgeIAL, runConstitutionCheck, runGStack, runGStackSingle, runLocalPDSEScorer, runPDSEScorer, scanFile, summarizeGStackResults, summarizeTaskOutcomeTrends };

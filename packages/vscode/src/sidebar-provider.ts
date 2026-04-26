@@ -53,6 +53,7 @@ import {
   executeTool,
   extractToolCalls,
   getToolDefinitionsPrompt,
+  shouldCutStream,
   getWrittenFilePath,
   type DiffReviewPayload,
   type ToolResult,
@@ -1128,6 +1129,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             }
             if (this.stopRequested) break;
             fullResponse += chunk;
+            // Gate 10: cut stream before epilogue reaches the UI.
+            // When </tool_use> is followed by non-tool prose the model is fabricating
+            // a post-tool summary. Break here so the chunk is never postMessage'd.
+            if (shouldCutStream(fullResponse)) break;
             if (isFirstRound) {
               // First round: send partial (full response so far) for clean rendering
               this.postMessage({
