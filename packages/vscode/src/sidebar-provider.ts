@@ -1069,7 +1069,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         // Phase 2 compact: LLM summarization when prune alone cannot prevent overflow.
-        if (wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
+        // Only fires when there are enough messages to summarize (>6 so older zone is non-empty).
+        if (agentMessages.length > 6 && wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
           const llmCall = (prompt: string) =>
             router.generate([{ role: "user", content: prompt }], {
               maxTokens: 2048,
