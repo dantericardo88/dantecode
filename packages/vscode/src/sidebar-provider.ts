@@ -678,6 +678,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const MAX_CONSECUTIVE_EMPTY_ROUNDS = 3;
     let confabulationNudges = 0;
     const MAX_CONFABULATION_NUDGES = 2;
+    // Cross-round tool-failure log — used to catch fabricated success claims
+    const failedToolsLog: Array<{ name: string; error: string; round: number }> = [];
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -1255,6 +1257,32 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Extract tool calls from the response
         const { toolCalls } = extractToolCalls(fullResponse);
 
+        // ── Anti-fabrication Gate: detect success claims that contradict known failures ──
+        // Patterns map tool names to regex that matches fabricated success language.
+        const FABRICATION_CLAIM_PATTERNS: Record<string, RegExp> = {
+          GitPush: /(?:push(?:ed)?|force[\s-]push(?:ed)?(?:\s+with\s+lease)?)\s+(?:succeed|success|complet|to\s+remote|is\s+done)|synced?\s+(?:remote|branch)/i,
+          GitCommit: /commit(?:ted)?\s+success|successfully\s+commit/i,
+          Bash: /(?:all\s+)?tests?\s+(?:pass(?:ing|ed)?)|typecheck\s+(?:pass|clean)|build\s+success|all\s+checks?\s+pass/i,
+          Write: /successfully\s+(?:created|written|wrote)\s+(?:the\s+)?file/i,
+          Edit: /successfully\s+(?:updated|edited|modified)\s+(?:the\s+)?file/i,
+        };
+        if (failedToolsLog.length > 0) {
+          const failedNames = new Set(failedToolsLog.map((f) => f.name));
+          const contradictions = [...failedNames].filter((name) => {
+            const pat = FABRICATION_CLAIM_PATTERNS[name];
+            return pat ? pat.test(fullResponse) : false;
+          });
+          if (contradictions.length > 0) {
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> ⚠️ **Fabrication guard** — response claims success for tool(s) that previously returned errors: **${contradictions.join(", ")}**. See actual tool results above.\n`,
+                partial: "",
+              },
+            });
+          }
+        }
+
         // ---- Anti-confabulation: empty response circuit breaker ----
         if (fullResponse.trim().length === 0 && toolCalls.length === 0) {
           consecutiveEmptyRounds++;
@@ -1406,6 +1434,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // so tool execution output is visible in the chat in real-time
 
         const toolResultParts: string[] = [];
+        const roundFailedTools: Array<{ name: string; error: string }> = [];
 
         for (let ti = 0; ti < toolCalls.length; ti++) {
           executedToolsThisTurn++;
@@ -1649,6 +1678,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 partial: "",
               },
             });
+            // Record failures so the fabrication gate can detect contradictions
+            if (result.isError) {
+              const errSummary = result.content.slice(0, 300);
+              roundFailedTools.push({ name: toolCall.name, error: errSummary });
+              failedToolsLog.push({ name: toolCall.name, error: errSummary, round: roundNumber });
+            }
           }
 
           // Run DanteForge gate on written code files immediately
@@ -1688,9 +1723,19 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const { blocks } = parseSearchReplaceBlocks(fullResponse);
           if (blocks.length > 0) this.hostCallbacks.onSearchReplaceBlocks(blocks);
         }
+
+        // If any tools failed this round, inject a structural guard the LLM cannot ignore.
+        // This is the primary defense against fabricated success claims in round summaries.
+        const fabricationGuardBlock =
+          roundFailedTools.length > 0
+            ? `\n\n⚠️ FABRICATION GUARD — The following tools FAILED this round:\n${roundFailedTools
+                .map((t) => `• ${t.name}: ${t.error.split("\n")[0]}`)
+                .join("\n")}\nYour next response MUST acknowledge each of these failures explicitly. Do NOT say any of them succeeded, completed, or "is done".`
+            : "";
+
         agentMessages.push({
           role: "user",
-          content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.`,
+          content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.`,
         });
 
         // Signal the UI that a new round is starting with real progress
