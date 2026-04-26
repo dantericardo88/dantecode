@@ -86,6 +86,7 @@ import {
   renderContextAttribution,
   renderSessionSummary,
   recordDecisionNarrative,
+  LoopDetector,
 } from "@dantecode/core";
 import type {
   FileSnapshot,
@@ -1885,6 +1886,9 @@ export async function runAgentLoop(
   let lastMajorEditGatePassed = true;
   let sessionStatus: "COMPLETE" | "INCOMPLETE" | "FAILED" = "COMPLETE";
   const autonomyTracker = new AutonomyMetricsTracker(session.projectRoot);
+  // Sprint D (dim 7): detect repetitive loops for convergence accuracy
+  const loopDetector = new LoopDetector({ maxIterations: initialMaxRounds, identicalThreshold: 3, patternWindowSize: 10 });
+  let loopDetectedFlag = false;
   // Sprint AV (dim 21): capture context hit count before loop to compute delta post-session
   const preSessionContextHits = (() => { try { return loadContextCoverage(session.projectRoot).length; } catch { return 0; } })();
   const readTracker = new Map<string, FileSnapshot>();
@@ -2444,7 +2448,24 @@ export async function runAgentLoop(
                         process.stdout.write(`\n${YELLOW}[recovery: failure-mode=${mode}]${RESET}\n`);
                       }
                     } catch { /* non-fatal */ }
-                    orchestratorInjectedContext = buildTestOutputContext(lastVerifyOutput) + failureHint;
+                    // Self-heal (dim convergenceSelfHealing): re-read the last touched file
+                    // so the agent gets fresh disk state rather than stale in-context content.
+                    let recoveryContext = "";
+                    try {
+                      const { RecoveryEngine } = await import("@dantecode/core");
+                      const lastFile = touchedFiles[touchedFiles.length - 1];
+                      if (lastFile) {
+                        const engine = new RecoveryEngine({ maxContextFiles: 3 });
+                        const recovered = await engine.rereadAndRecover(lastFile, session.projectRoot);
+                        if (recovered.recovered && recovered.targetContent) {
+                          recoveryContext = `\n\n[Self-heal: fresh content of ${lastFile}]\n\`\`\`\n${recovered.targetContent.slice(0, 2000)}\n\`\`\``;
+                          if (!config.silent) {
+                            process.stdout.write(`\n${GREEN}[self-heal: re-read ${lastFile}]${RESET}\n`);
+                          }
+                        }
+                      }
+                    } catch { /* non-fatal */ }
+                    orchestratorInjectedContext = buildTestOutputContext(lastVerifyOutput) + failureHint + recoveryContext;
                     messages.push({ role: "assistant" as const, content: responseText });
                     messages.push({ role: "user" as const, content: orchestratorInjectedContext });
                     pipelineContinuationNudges = 0;
@@ -2520,6 +2541,11 @@ export async function runAgentLoop(
         tokensUsed: totalTokensUsed,
       };
       session.messages.push(assistantMessage);
+      // Sprint D (dim 7): record response fingerprint — detect repetitive loops
+      try {
+        const loopCheck = loopDetector.recordAction("response", responseText.slice(0, 200));
+        if (loopCheck.stuck) loopDetectedFlag = true;
+      } catch { /* non-fatal */ }
       completionTime = Date.now();
       break;
     }
@@ -3760,6 +3786,7 @@ export async function runAgentLoop(
       roundCounter,
       initialMaxRounds,
       sessionStatus === "COMPLETE",
+      { loopDetected: loopDetectedFlag, status: sessionStatus === "COMPLETE" ? "complete" : sessionStatus === "FAILED" ? "failed" : "partial" },
     );
   } catch { /* non-fatal */ }
 

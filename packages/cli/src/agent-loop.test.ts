@@ -262,6 +262,11 @@ vi.mock("@dantecode/core", () => {
       constructor(_opts?: unknown) {}
       async run(_session: unknown) { return { verified: true, rounds: 0 }; }
     },
+    // LoopDetector — Sprint D (dim 7)
+    LoopDetector: class MockLoopDetector {
+      constructor(_opts?: unknown) {}
+      recordAction(_type: string, _content: string) { return { stuck: false, iterationCount: 1 }; }
+    },
     // Sprint Dim20 — debug context assembler
     hasStackTrace: vi.fn().mockReturnValue(false),
     assembleDebugContext: vi.fn().mockReturnValue({ sessionId: "", errorType: "Error", errorMessage: "", stackFrames: [], watchValues: {}, severityScore: 0.3, assembledAt: "" }),

@@ -90,6 +90,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       return `Refactor this code to be cleaner while keeping the same behavior.${ctx}`;
     },
   },
+  {
+    name: "score",
+    description: "Run danteforge score to get the PDSE quality score",
+    icon: "📊",
+    buildPrompt(_selection, _filePath, extra) {
+      const level = extra?.trim() || "light";
+      return `Run the command \`danteforge score --level ${level}\` in the project root and report the full output. Do not summarize or interpret — print the raw score output exactly as returned.`;
+    },
+  },
 ];
 
 /** Map for O(1) lookup by name */

@@ -94,6 +94,11 @@ export type {
   ContextBudgetStatus, ContextPressure,
 } from "./context-eviction-policy.js";
 
+export { filterContextByRelevance } from "./context-filter-pipeline.js";
+export type {
+  FilterableMessage, FilterPipelineOptions, FilterPipelineResult,
+} from "./context-filter-pipeline.js";
+
 export {
   CacheMetricsTracker, globalCacheMetrics, estimateCachingSavings, isCacheLikelyValid,
 } from "./cache-metrics.js";
@@ -147,6 +152,11 @@ export type { VerifyResult, VerifyFn, WaveResult, AutonomyRunOptions, AutonomyRu
 
 export { estimateTokens, estimateMessageTokens, getContextUtilization } from "./token-counter.js";
 export type { ContextUtilization } from "./token-counter.js";
+
+// ─── Context Compactor ───────────────────────────────────────────────────────
+
+export { pruneToolOutputs, compactContext, wouldOverflow } from "./context-compactor.js";
+export type { CompactorMessage } from "./context-compactor.js";
 
 export { classifyApiError, parseRetryAfterMs } from "./api-error-classifier.js";
 export type { ParsedApiError, ParsedApiErrorCategory } from "./api-error-classifier.js";
@@ -1208,6 +1218,9 @@ export type {
   EmissionCallback,
   StreamingBufferOptions,
 } from "./streaming-tool-call-buffer.js";
+
+export { XmlToolCallParser, XmlParserState } from "./xml-tool-call-parser.js";
+export type { XmlToolBlock, XmlParserEvent } from "./xml-tool-call-parser.js";
 
 // ─── Architect Mode Router ────────────────────────────────────────────────────
 

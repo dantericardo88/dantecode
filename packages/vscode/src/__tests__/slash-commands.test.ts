@@ -9,9 +9,9 @@ import {
 // ── listSlashCommands ─────────────────────────────────────────────────────
 
 describe("listSlashCommands", () => {
-  it("returns all 7 built-in commands", () => {
+  it("returns all 8 built-in commands", () => {
     const cmds = listSlashCommands();
-    expect(cmds).toHaveLength(7);
+    expect(cmds).toHaveLength(8);
   });
 
   it("all commands have name, description, icon", () => {

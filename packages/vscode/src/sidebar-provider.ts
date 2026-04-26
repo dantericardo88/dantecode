@@ -42,7 +42,9 @@ import {
   XmlToolCallParser,
   pruneToolOutputs,
   compactContext,
+  filterContextByRelevance,
   wouldOverflow,
+  classifyApiError,
 } from "@dantecode/core";
 import type { FileSnapshot, FabricationEvent } from "@dantecode/core";
 import { parseSearchReplaceBlocks, type SearchReplaceBlock } from "@dantecode/core";
@@ -1079,6 +1081,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           agentMessages = await compactContext(agentMessages, text, llmCall);
         }
 
+        // Phase 3 filter: PRD-26 context filter pipeline — drop low-relevance tool outputs.
+        // Runs after prune+compact to extract maximum signal from remaining tokens.
+        const filterResult = filterContextByRelevance(agentMessages, text, {
+          tokenBudgetThreshold: 15_000,
+          relevanceThreshold: 0.04,
+          largeMessageTokens: 400,
+          preserveRecentCount: 8,
+        });
+        if (filterResult.ran) {
+          agentMessages = filterResult.messages as typeof agentMessages;
+        }
+
         const compacted = compactTextTranscript(agentMessages, {
           contextWindow: modelConfig.contextWindow,
           preserveRecentMessages: 10,
@@ -2040,25 +2054,38 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.postMessage({ type: "chat_response_done", payload: { cancelled: true } });
       } else {
         const rawMessage = err instanceof Error ? err.message : String(err);
+        const classified = classifyApiError(err, provider);
         let diagnostic = `Error with ${this.currentModel}: ${rawMessage}`;
 
-        // Provider-specific and HTTP-status-aware diagnostics
-        const is401 = rawMessage.includes("401") || rawMessage.includes("Unauthorized");
-        const is429 = rawMessage.includes("429") || rawMessage.includes("rate limit");
-        const is503 = rawMessage.includes("503") || rawMessage.includes("Service Unavailable");
-
-        if (is401) {
-          diagnostic += `\n\nAPI key is invalid or expired. Open settings (gear icon) to update your ${provider} key.`;
-        } else if (is429) {
-          diagnostic += `\n\nRate limit exceeded. Wait a moment and try again, or switch to a different model.`;
-        } else if (is503) {
-          diagnostic += `\n\nThe ${provider} service is temporarily unavailable. Try again in a few minutes.`;
-        } else if (provider !== "ollama" && !apiKey) {
-          diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
-        } else if (provider !== "ollama") {
-          diagnostic += `\n\nAPI key is configured — this may be an authentication or model name issue.`;
-        } else {
-          diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
+        switch (classified.category) {
+          case "auth":
+            diagnostic += `\n\nAPI key is invalid or expired. Open settings (gear icon) to update your ${provider} key.`;
+            break;
+          case "rate_limit":
+            diagnostic += classified.retryAfterMs
+              ? `\n\nRate limit exceeded — retry in ${Math.ceil(classified.retryAfterMs / 1000)}s, or switch to a different model.`
+              : `\n\nRate limit exceeded. Wait a moment and try again, or switch to a different model.`;
+            break;
+          case "quota":
+            diagnostic += `\n\nYour ${provider} quota is exhausted. Check your billing at the ${provider} dashboard.`;
+            break;
+          case "context_overflow":
+            diagnostic += `\n\nThe request exceeded ${this.currentModel}'s context window. Try starting a new chat or reducing attached context.`;
+            break;
+          case "timeout":
+            diagnostic += `\n\nRequest timed out. Check your network connection and try again.`;
+            break;
+          case "server":
+            diagnostic += `\n\nThe ${provider} service is temporarily unavailable. Try again in a few minutes.`;
+            break;
+          default:
+            if (provider === "ollama") {
+              diagnostic += `\n\nCheck that Ollama is running locally (http://localhost:11434).`;
+            } else if (!apiKey) {
+              diagnostic += `\n\nNo API key was found for "${provider}". Open settings (gear icon) to configure it.`;
+            } else {
+              diagnostic += `\n\nThis may be a model name issue or temporary service error.`;
+            }
         }
         this.postMessage({ type: "error", payload: { message: diagnostic } });
         this.postMessage({ type: "chat_response_done", payload: { error: true } });

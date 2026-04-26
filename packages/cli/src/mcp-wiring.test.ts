@@ -143,6 +143,10 @@ vi.mock("@dantecode/core", () => {
       constructor(_opts?: unknown) {}
       async run(_session: unknown) { return { verified: true, rounds: 0 }; }
     },
+    LoopDetector: class MockLoopDetector {
+      constructor(_opts?: unknown) {}
+      recordAction(_type: string, _content: string) { return { stuck: false, iterationCount: 1 }; }
+    },
   };
 });
 
