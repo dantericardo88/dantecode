@@ -202,3 +202,31 @@ describe("FabricationTracker — getStrictModePrompt", () => {
     expect(t.getStrictModePrompt()).not.toContain("1 responses");
   });
 });
+
+// ─── Epilogue event type (S12) ────────────────────────────────────────────────
+
+describe("FabricationTracker — epilogue event type", () => {
+  it("records epilogue events without error", () => {
+    const t = new FabricationTracker();
+    const epilogueEvent = { type: "epilogue" as const, round: 1 };
+    t.recordRound(1, ["Bash"], [epilogueEvent]);
+    expect(t.consecutiveFabrications).toBe(1);
+  });
+
+  it("epilogue events appear in snapshot", () => {
+    const t = new FabricationTracker();
+    t.recordRound(1, ["Bash"], [{ type: "epilogue" as const, round: 1 }]);
+    const snap = t.getSnapshot();
+    expect(snap.events).toHaveLength(1);
+    expect(snap.events[0]?.type).toBe("epilogue");
+  });
+
+  it("epilogue contributes to strict mode threshold", () => {
+    const t = new FabricationTracker();
+    for (let i = 0; i < 8; i++) t.recordRound(i, ["Read"], []);
+    t.recordRound(9, ["Bash"], [{ type: "epilogue" as const, round: 9 }]);
+    t.recordRound(10, ["Bash"], [{ type: "epilogue" as const, round: 10 }]);
+    t.recordRound(11, ["Bash"], [{ type: "epilogue" as const, round: 11 }]);
+    expect(t.isStrictMode).toBe(true);
+  });
+});

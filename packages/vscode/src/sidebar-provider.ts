@@ -39,6 +39,10 @@ import {
   reviewPullRequest,
   shouldContinueLoop,
   FabricationTracker,
+  XmlToolCallParser,
+  pruneToolOutputs,
+  compactContext,
+  wouldOverflow,
 } from "@dantecode/core";
 import type { FileSnapshot, FabricationEvent } from "@dantecode/core";
 import { parseSearchReplaceBlocks, type SearchReplaceBlock } from "@dantecode/core";
@@ -133,7 +137,8 @@ interface WebviewOutboundMessage {
     | "context_update"
     | "memory_info"
     | "slash_suggestions"
-    | "pr_review_result";
+    | "pr_review_result"
+    | "tool_result_block";
   payload: Record<string, unknown>;
 }
 
@@ -685,6 +690,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const failedToolsLog: Array<{ name: string; error: string; round: number }> = [];
     // Gate 8/9: session-scoped fabrication tracker
     const fabricationTracker = new FabricationTracker();
+    // Gate 12: session-scoped verified git ops log — ground truth SHAs only the runtime can generate
+    const verifiedOpsLog: Array<{ tool: string; sha: string; round: number; ts: number }> = [];
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -1034,7 +1041,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Autonomous Agent Loop — streams response, extracts tool calls, loops
     // ────────────────────────────────────────────────────────────────────────
 
-    const agentMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
+    let agentMessages: Array<{ role: "user" | "assistant" | "system"; content: string }> = [
       ...this.messages.map((msg) => ({
         role: msg.role as "user" | "assistant" | "system",
         content: msg.content,
@@ -1051,6 +1058,25 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         maxToolRounds--;
         roundNumber++;
         const isFirstRound = roundNumber === 1;
+
+        // Phase 1 prune: erase old tool outputs when context exceeds 40k tokens.
+        // Runs before compactTextTranscript so the sliding-window eviction sees the pruned state.
+        if (wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
+          const { pruned, savedTokens } = pruneToolOutputs(agentMessages);
+          if (savedTokens > 0) {
+            agentMessages.splice(0, agentMessages.length, ...pruned);
+          }
+        }
+
+        // Phase 2 compact: LLM summarization when prune alone cannot prevent overflow.
+        if (wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
+          const llmCall = (prompt: string) =>
+            router.generate([{ role: "user", content: prompt }], {
+              maxTokens: 2048,
+              system: "You are a concise summarizer.",
+            });
+          agentMessages = await compactContext(agentMessages, text, llmCall);
+        }
 
         const compacted = compactTextTranscript(agentMessages, {
           contextWindow: modelConfig.contextWindow,
@@ -1091,6 +1117,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         let fullResponse = "";
 
+        // S4: mid-stream XML parser — fires tool_block_complete when </tool_use> closes,
+        // allowing O(1) epilogue detection instead of rescanning fullResponse each chunk.
+        // shouldCutStream() is kept as a safety fallback (both paths run in parallel).
+        let _xmlSeenToolClose = false;
+        let _xmlShouldCutNext = false;
+        const _xmlParser = new XmlToolCallParser((event: import("@dantecode/core").XmlParserEvent) => {
+          if (event.type === "tool_block_complete") {
+            _xmlSeenToolClose = true;
+          } else if (event.type === "text_chunk" && _xmlSeenToolClose) {
+            if (/\S/.test(event.text) && !event.text.trimStart().startsWith("<tool_use>")) {
+              _xmlShouldCutNext = true;
+            }
+          }
+        });
+
         // Set a 60-second timeout for the first chunk (up from 30s for slower models)
         const firstChunkTimeout = setTimeout(() => {
           if (fullResponse.length === 0 && this.abortController) {
@@ -1129,9 +1170,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             }
             if (this.stopRequested) break;
             fullResponse += chunk;
-            // Gate 10: cut stream before epilogue reaches the UI.
-            // When </tool_use> is followed by non-tool prose the model is fabricating
-            // a post-tool summary. Break here so the chunk is never postMessage'd.
+            // S4 fast-path: mid-stream parser signals epilogue O(1) per chunk
+            _xmlParser.feed(chunk);
+            if (_xmlShouldCutNext) break;
+            // Gate 10 fallback: full-buffer rescan catches anything the parser missed
             if (shouldCutStream(fullResponse)) break;
             if (isFirstRound) {
               // First round: send partial (full response so far) for clean rendering
@@ -1265,7 +1307,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Extract tool calls from the response.
         // epilogue = text written after the last tool_use block (where models fabricate summaries).
-        const { toolCalls, cleanText: responseCleanText, epilogue: responseEpilogue } = extractToolCalls(fullResponse);
+        const { toolCalls, cleanText: responseCleanText, epilogue: responseEpilogue, phantomToolNames } = extractToolCalls(fullResponse);
 
         // ── Anti-fabrication Gate: detect success claims that contradict known failures ──
         // Patterns map tool names to regex that matches fabricated success language.
@@ -1449,6 +1491,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         for (let ti = 0; ti < toolCalls.length; ti++) {
           executedToolsThisTurn++;
           const toolCall = toolCalls[ti]!;
+          // Gate 11: unique sequence id — session prefix + round + tool index (Grok cannot predict this)
+          const resultSeq = `${this.sessionId.slice(-6)}-r${roundNumber}-t${ti}`;
           // Show tool execution in the UI with progress
           const toolProgress = toolCalls.length > 1 ? ` (${ti + 1}/${toolCalls.length})` : "";
           this.postMessage({
@@ -1679,13 +1723,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               }
             }
           } else {
-            const icon = result.isError ? "Error" : "OK";
-            const preview = result.content.split("\n").slice(0, 5).join("\n");
+            // Gate 15: render tool result as a separate UI component (not chat bubble text)
             this.postMessage({
-              type: "chat_response_chunk",
+              type: "tool_result_block",
               payload: {
-                chunk: `> _${icon}:_ \`${preview.slice(0, 200)}\`\n`,
-                partial: "",
+                toolName: toolCall.name,
+                status: result.isError ? "error" : "ok",
+                preview: result.content.split("\n").slice(0, 5).join("\n").slice(0, 200),
+                seq: resultSeq,
               },
             });
             // Record failures so the fabrication gate can detect contradictions
@@ -1693,6 +1738,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               const errSummary = result.content.slice(0, 300);
               roundFailedTools.push({ name: toolCall.name, error: errSummary });
               failedToolsLog.push({ name: toolCall.name, error: errSummary, round: roundNumber });
+            }
+            // Gate 12: record verified git SHAs — only the runtime can produce these
+            if ((toolCall.name === "GitCommit" || toolCall.name === "GitPush") && !result.isError) {
+              const shaMatch = result.content.match(/\b([0-9a-f]{7,40})\b/i);
+              if (shaMatch) {
+                verifiedOpsLog.push({ tool: toolCall.name, sha: shaMatch[1]!, round: roundNumber, ts: Date.now() });
+              }
             }
           }
 
@@ -1724,7 +1776,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             }
           }
 
-          toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
+          // Gate 11: XML-tag tool results so Grok cannot replay SHAs/content as its own prose
+          toolResultParts.push(
+            `<tool_result id="${resultSeq}" name="${toolCall.name}" status="${result.isError ? "ERROR" : "OK"}">\n${result.content}\n</tool_result>`
+          );
         }
 
         // Gate 7: validate <TOOL_RESULTS_VERIFIED> block against actual round failures
@@ -1764,6 +1819,23 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           }
         }
 
+        // Gate 13: record phantom tool calls as fabrication events
+        for (const phantomName of phantomToolNames) {
+          roundFabricationEvents.push({ type: "phantom_tool", toolName: phantomName, round: roundNumber });
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: {
+              chunk: `\n> ⚠️ **Phantom tool** — \`${phantomName}\` is not a known tool and was not executed.\n`,
+              partial: "",
+            },
+          });
+        }
+
+        // Gate 15: track epilogue prose (text after last </tool_use>) as fabrication event.
+        if (toolCalls.length > 0 && responseEpilogue && responseEpilogue.trim().length > 0) {
+          roundFabricationEvents.push({ type: "epilogue", round: roundNumber });
+        }
+
         // Gate 8: record round into fabrication tracker
         fabricationTracker.recordRound(
           roundNumber,
@@ -1799,10 +1871,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         let assistantContextContent: string;
         if (toolCalls.length > 0 && responseEpilogue) {
           const epiIdx = responseCleanText.lastIndexOf(responseEpilogue);
-          assistantContextContent =
+          const withoutEpilogue =
             epiIdx >= 0
               ? responseCleanText.slice(0, epiIdx).trim() || `[${toolCalls.map((t) => t.name).join(", ")}]`
               : responseCleanText;
+          // Gate 14: also strip excessive pre-tool narration from context
+          assistantContextContent = stripPreToolNarration(withoutEpilogue, true);
         } else {
           assistantContextContent = responseCleanText || fullResponse;
         }
@@ -1827,9 +1901,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           ? getStrictModeAddition(fabricationTracker.consecutiveFabrications) + "\n\n"
           : "";
 
+        // Gate 12: prepend verified ops anchor so Grok knows which SHAs are real
+        const opsAnchor = verifiedOpsLog.length > 0
+          ? `<verified_ops_this_session>\n${verifiedOpsLog.map(op => `${op.tool} @ round ${op.round}: ${op.sha}`).join("\n")}\n</verified_ops_this_session>\n\n`
+          : "";
+
         agentMessages.push({
           role: "user",
-          content: `${strictModePrefix}Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nThese are the ACTUAL results. Take the next action based on them, or provide your final answer if the task is complete. Do NOT summarize what just happened — the results above are the ground truth.`,
+          content: `${strictModePrefix}${opsAnchor}Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nThese are the ACTUAL results. Take the next action based on them, or provide your final answer if the task is complete. Do NOT summarize what just happened — the results above are the ground truth.`,
         });
 
         // Signal the UI that a new round is starting with real progress
@@ -4625,6 +4704,38 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             messagesEl.scrollTop = messagesEl.scrollHeight;
             break;
 
+          case 'tool_result_block': {
+            // Gate 15: runtime-verified tool result — rendered as a separate collapsible
+            // block, visually distinct from the model's chat bubble. The user can see at
+            // a glance what the runtime confirmed vs what the model said.
+            var trPayload = message.payload;
+            var trStatus = trPayload.status === 'ok' ? '✓' : '✗';
+            var trColor = trPayload.status === 'ok' ? '#4caf50' : '#f44336';
+            var trHtml =
+              '<details class="tool-result-block" style="margin:4px 0;border-left:3px solid ' + trColor + ';padding:4px 8px;background:var(--vscode-textBlockQuote-background,rgba(128,128,128,.1));border-radius:2px;">' +
+              '<summary style="cursor:pointer;font-family:monospace;font-size:0.85em;color:' + trColor + ';">' +
+              '<span style="font-weight:bold;">Runtime ' + trStatus + '</span> ' + trPayload.toolName +
+              ' <span style="opacity:0.5;font-size:0.8em;">#' + trPayload.seq + '</span>' +
+              '</summary>' +
+              '<pre style="margin:4px 0 0;font-size:0.8em;white-space:pre-wrap;word-break:break-all;opacity:0.85;">' +
+              trPayload.preview.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
+              '</pre></details>';
+            // Inject into current assistant bubble if one is open, else create a new one
+            if (!currentAssistantEl) {
+              currentAssistantEl = appendMessage('assistant', '', false);
+              streamBuffer = '';
+            }
+            streamBuffer += '\n%%TOOL_RESULT_BLOCK_' + trPayload.seq + '%%\n';
+            // Directly inject the HTML block (bypass markdown rendering for this element)
+            currentAssistantEl.innerHTML = renderMarkdown(streamBuffer).replace(
+              '%%TOOL_RESULT_BLOCK_' + trPayload.seq + '%%',
+              trHtml
+            );
+            attachCopyCodeHandlers(currentAssistantEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+            break;
+          }
+
           case 'chat_response_done':
             // If text is provided, render it as final content (single-round response).
             // If text is empty/missing, keep the accumulated stream buffer (multi-round).
@@ -4905,6 +5016,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+// Gate 14: strip ALL pre-tool narration from assistant context.
+// Any prose before the first <tool_use> establishes false certainty frames that compound
+// into future rounds. Strip unconditionally when tool calls are present.
+export function stripPreToolNarration(text: string, hasToolCalls: boolean): string {
+  if (!hasToolCalls) return text;
+  const firstToolIdx = text.indexOf("<tool_use>");
+  if (firstToolIdx <= 0) return text;
+  return text.slice(firstToolIdx);
 }
 
 // Gate 7: parse <TOOL_RESULTS_VERIFIED> block from LLM response text.

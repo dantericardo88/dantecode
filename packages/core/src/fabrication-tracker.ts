@@ -7,7 +7,11 @@ const STRICT_MODE_CONSECUTIVE_THRESHOLD = 3;
 const STRICT_MODE_RATE_THRESHOLD = 0.3;
 const CIRCUIT_OPEN_CONSECUTIVE_THRESHOLD = 3;
 
-export type FabricationEventType = "false_success" | "missing_block";
+export type FabricationEventType =
+  | "false_success"
+  | "missing_block"
+  | "phantom_tool"
+  | "epilogue";
 
 export interface FabricationEvent {
   type: FabricationEventType;
