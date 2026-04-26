@@ -552,6 +552,21 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       const { parseSlashCommand, buildSlashPrompt } = await import("./slash-commands.js");
       const parsed = parseSlashCommand(text);
       if (parsed) {
+        // Commands with execute() run directly — no LLM involvement.
+        if (parsed.command.execute) {
+          const projectRoot = this.getProjectRoot();
+          this.messages.push({ role: "user", content: text });
+          try {
+            const output = await parsed.command.execute(parsed.args, projectRoot);
+            this.postMessage({ type: "chat_response_chunk", payload: { chunk: output, partial: output } });
+            this.messages.push({ role: "assistant", content: output });
+          } catch (execErr: unknown) {
+            const msg = execErr instanceof Error ? execErr.message : String(execErr);
+            this.postMessage({ type: "error", payload: { message: msg } });
+          }
+          this.postMessage({ type: "chat_response_done", payload: {} });
+          return;
+        }
         const editor = vscode.window.activeTextEditor;
         const selection = editor && !editor.selection.isEmpty
           ? editor.document.getText(editor.selection)

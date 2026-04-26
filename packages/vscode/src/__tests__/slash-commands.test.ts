@@ -22,7 +22,7 @@ describe("listSlashCommands", () => {
     }
   });
 
-  it("includes fix, test, explain, comment, optimize, review, refactor", () => {
+  it("includes fix, test, explain, comment, optimize, review, refactor, score", () => {
     const names = SLASH_COMMANDS.map((c) => c.name);
     expect(names).toContain("fix");
     expect(names).toContain("test");
@@ -31,6 +31,12 @@ describe("listSlashCommands", () => {
     expect(names).toContain("optimize");
     expect(names).toContain("review");
     expect(names).toContain("refactor");
+    expect(names).toContain("score");
+  });
+
+  it("/score has an execute function (bypasses LLM)", () => {
+    const scoreCmd = SLASH_COMMANDS.find((c) => c.name === "score");
+    expect(scoreCmd?.execute).toBeTypeOf("function");
   });
 });
 

@@ -6,6 +6,11 @@
 // Registered in sidebar HTML via Discord-style '/' prefix detection.
 // ============================================================================
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface SlashCommand {
@@ -22,6 +27,12 @@ export interface SlashCommand {
    * @param extraArg - Any additional text typed after the command name
    */
   buildPrompt(selection: string, filePath: string, extraArg?: string): string;
+  /**
+   * If defined, executes the command directly (no LLM involvement).
+   * The sidebar calls this instead of sending the prompt to the model.
+   * Return the markdown string to display as the assistant response.
+   */
+  execute?: (args: string, projectRoot: string) => Promise<string>;
 }
 
 // ── Built-in commands ───────────────────────────────────────────────────────
@@ -95,8 +106,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Run danteforge score to get the PDSE quality score",
     icon: "📊",
     buildPrompt(_selection, _filePath, extra) {
+      // Fallback prompt — only used if execute() is unavailable.
       const level = extra?.trim() || "light";
-      return `Run the command \`danteforge score --level ${level}\` in the project root and report the full output. Do not summarize or interpret — print the raw score output exactly as returned.`;
+      return `Run \`danteforge score --level ${level}\` in the project root and print the raw output verbatim.`;
+    },
+    async execute(args, projectRoot) {
+      const level = args.trim() || "light";
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          "danteforge",
+          ["score", "--level", level],
+          { cwd: projectRoot, timeout: 60_000, windowsHide: true },
+        );
+        const out = (stdout + stderr).trim();
+        return out.length > 0 ? `\`\`\`\n${out}\n\`\`\`` : "_No output from danteforge score._";
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string }).stderr ?? "";
+        const msg = err instanceof Error ? err.message : String(err);
+        const detail = (stderr || msg).trim();
+        return `**danteforge score failed**\n\n\`\`\`\n${detail}\n\`\`\``;
+      }
     },
   },
 ];
