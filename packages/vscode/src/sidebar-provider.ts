@@ -30,6 +30,7 @@ import {
   detectSelfImprovementContext,
   getContextUtilization,
   getProviderPromptSupplement,
+  getStrictModeAddition,
   getProviderCatalogEntry,
   groupCatalogModels,
   parseModelReference,
@@ -37,8 +38,9 @@ import {
   responseNeedsToolExecutionNudge,
   reviewPullRequest,
   shouldContinueLoop,
+  FabricationTracker,
 } from "@dantecode/core";
-import type { FileSnapshot } from "@dantecode/core";
+import type { FileSnapshot, FabricationEvent } from "@dantecode/core";
 import { parseSearchReplaceBlocks, type SearchReplaceBlock } from "@dantecode/core";
 import {
   runLocalPDSEScorer,
@@ -680,6 +682,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const MAX_CONFABULATION_NUDGES = 2;
     // Cross-round tool-failure log — used to catch fabricated success claims
     const failedToolsLog: Array<{ name: string; error: string; round: number }> = [];
+    // Gate 8/9: session-scoped fabrication tracker
+    const fabricationTracker = new FabricationTracker();
 
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
@@ -1254,8 +1258,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Update the status bar with context utilization after each response
         this.updateStatusBar({ contextPercent: ctxUtil.percent });
 
-        // Extract tool calls from the response
-        const { toolCalls } = extractToolCalls(fullResponse);
+        // Extract tool calls from the response.
+        // epilogue = text written after the last tool_use block (where models fabricate summaries).
+        const { toolCalls, cleanText: responseCleanText, epilogue: responseEpilogue } = extractToolCalls(fullResponse);
 
         // ── Anti-fabrication Gate: detect success claims that contradict known failures ──
         // Patterns map tool names to regex that matches fabricated success language.
@@ -1717,8 +1722,87 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           toolResultParts.push(`Tool "${toolCall.name}" result:\n${result.content}`);
         }
 
-        // Append the assistant response + tool results to the conversation for next round
-        agentMessages.push({ role: "assistant", content: fullResponse });
+        // Gate 7: validate <TOOL_RESULTS_VERIFIED> block against actual round failures
+        const verifiedBlock = extractVerificationBlock(fullResponse);
+        const roundFabricationEvents: FabricationEvent[] = [];
+
+        if (toolCalls.length > 0) {
+          if (!verifiedBlock) {
+            roundFabricationEvents.push({ type: "missing_block", round: roundNumber });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: {
+                chunk: `\n> ⚠️ **Verification block missing** — response included tool calls but no \`<TOOL_RESULTS_VERIFIED>\` block.\n`,
+                partial: "",
+              },
+            });
+          } else {
+            for (const failed of roundFailedTools) {
+              const claimed = verifiedBlock.get(failed.name);
+              if (claimed === "SUCCESS") {
+                roundFabricationEvents.push({
+                  type: "false_success",
+                  round: roundNumber,
+                  toolName: failed.name,
+                  claimedStatus: "SUCCESS",
+                  actualError: failed.error.split("\n")[0],
+                });
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: {
+                    chunk: `\n> 🚨 **Verification block mismatch** — \`${failed.name}\` reports SUCCESS but tool returned error: _${failed.error.split("\n")[0]}_\n`,
+                    partial: "",
+                  },
+                });
+              }
+            }
+          }
+        }
+
+        // Gate 8: record round into fabrication tracker
+        fabricationTracker.recordRound(
+          roundNumber,
+          toolCalls.map((t) => t.name),
+          roundFabricationEvents,
+        );
+
+        // Gate 9c: log to provider health when circuit opens
+        if (fabricationTracker.circuitOpen) {
+          try {
+            const snap = fabricationTracker.getSnapshot();
+            const { appendFileSync, mkdirSync } = await import("node:fs");
+            const { join } = await import("node:path");
+            const eventsDir = join(projectRoot, ".danteforge");
+            mkdirSync(eventsDir, { recursive: true });
+            appendFileSync(
+              join(eventsDir, "fabrication-events.ndjson"),
+              JSON.stringify({ event: "circuit_open", provider, model: modelId, timestamp: new Date().toISOString(), ...snap }) + "\n",
+              "utf-8",
+            );
+          } catch {
+            /* non-critical */
+          }
+        }
+
+        // Append the assistant response to conversation context.
+        // EPILOGUE STRIP: omit any prose written after the last tool_use block — this is
+        // where models (especially Grok) fabricate success summaries. Storing that text
+        // in context allows the model to compound fabrications in future rounds by treating
+        // its own lies as established history. We keep only the pre-tool reasoning.
+        // cleanText has tool_use XML removed; epilogue text is still present at the end.
+        // Use lastIndexOf to surgically remove just the epilogue from cleanText.
+        let assistantContextContent: string;
+        if (toolCalls.length > 0 && responseEpilogue) {
+          const epiIdx = responseCleanText.lastIndexOf(responseEpilogue);
+          assistantContextContent =
+            epiIdx >= 0
+              ? responseCleanText.slice(0, epiIdx).trim() || `[${toolCalls.map((t) => t.name).join(", ")}]`
+              : responseCleanText;
+        } else {
+          assistantContextContent = responseCleanText || fullResponse;
+        }
+        agentMessages.push({ role: "assistant", content: assistantContextContent });
+
         if (this.hostCallbacks.onSearchReplaceBlocks && fullResponse.includes("<<<<<<< SEARCH")) {
           const { blocks } = parseSearchReplaceBlocks(fullResponse);
           if (blocks.length > 0) this.hostCallbacks.onSearchReplaceBlocks(blocks);
@@ -1733,9 +1817,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 .join("\n")}\nYour next response MUST acknowledge each of these failures explicitly. Do NOT say any of them succeeded, completed, or "is done".`
             : "";
 
+        // Gate 9b: prepend strict-mode override when fabrication threshold crossed
+        const strictModePrefix = fabricationTracker.isStrictMode
+          ? getStrictModeAddition(fabricationTracker.consecutiveFabrications) + "\n\n"
+          : "";
+
         agentMessages.push({
           role: "user",
-          content: `Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nContinue with your task. If done, provide your final answer without any tool_use blocks.`,
+          content: `${strictModePrefix}Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nThese are the ACTUAL results. Take the next action based on them, or provide your final answer if the task is complete. Do NOT summarize what just happened — the results above are the ground truth.`,
         });
 
         // Signal the UI that a new round is starting with real progress
@@ -4811,6 +4900,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 </body>
 </html>`;
   }
+}
+
+// Gate 7: parse <TOOL_RESULTS_VERIFIED> block from LLM response text.
+function extractVerificationBlock(text: string): Map<string, "SUCCESS" | "ERROR"> | null {
+  const match = text.match(/<TOOL_RESULTS_VERIFIED>([\s\S]*?)<\/TOOL_RESULTS_VERIFIED>/i);
+  if (!match) return null;
+  const entries = new Map<string, "SUCCESS" | "ERROR">();
+  for (const line of match[1]!.trim().split("\n")) {
+    const m = line.match(/^(\w+):\s*(SUCCESS|ERROR)/i);
+    if (m) entries.set(m[1]!, m[2]!.toUpperCase() as "SUCCESS" | "ERROR");
+  }
+  return entries;
 }
 
 function escapeHtml(value: string): string {

@@ -24,6 +24,16 @@ You are especially prone to narration, phantom completion, and skipping verifica
 8. When rate-limited or retried, resume the exact task in progress. Do not restart the whole approach unless the previous one is proven wrong.
 9. Your round summary MUST be grounded only in tool results visible in this conversation. If a tool returned an error, state it failed. If you did not run a command, say "not attempted" — never infer or assume the outcome. A push that was never confirmed by a successful GitPush result did NOT happen.
 10. When a git push is rejected (non-fast-forward or any error), do NOT claim it succeeded in your summary. The required next steps are: pull + rebase to get in sync, then push again. Report the failure honestly and explain what still needs to happen.
+11. Every response that includes one or more tool calls MUST end with a <TOOL_RESULTS_VERIFIED> block.
+    Format (one line per tool, in call order):
+      <TOOL_RESULTS_VERIFIED>
+      ToolName: SUCCESS|ERROR [— one-line description]
+      </TOOL_RESULTS_VERIFIED>
+    Rules:
+    • Use SUCCESS only if the tool result explicitly confirmed no error.
+    • Use ERROR if the result contained an error message or isError flag.
+    • Never write SUCCESS for a tool you did not call or whose result you did not read.
+    • Omit the block only if zero tools were called this round.
 ${KNOWLEDGE_CHECK_SECTION}`;
 }
 
@@ -82,4 +92,15 @@ export function getProviderPromptSupplement(provider: string): string {
     return openAISupplement();
   }
   return DEFAULT_SUPPLEMENT;
+}
+
+// Injected per-round (into the user turn) when FabricationTracker.isStrictMode is true.
+export function getStrictModeAddition(consecutiveFabrications: number): string {
+  const n = consecutiveFabrications;
+  return (
+    `⚠️ **STRICT VERIFICATION MODE ACTIVE** — Your last ${n} response${n !== 1 ? "s" : ""} ` +
+    `contained fabricated tool outcomes.\n` +
+    `MANDATORY: Begin this response with "VERIFICATION AUDIT:" and list every tool result ` +
+    `from the previous round verbatim before writing anything else.`
+  );
 }

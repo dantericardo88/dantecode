@@ -192,7 +192,10 @@ export {
 } from "./tool-runtime.js";
 export type { ExactEditResult, FileSnapshot, LineEndingStyle } from "./tool-runtime.js";
 
-export { getProviderPromptSupplement } from "./provider-prompt-supplements.js";
+export { getProviderPromptSupplement, getStrictModeAddition } from "./provider-prompt-supplements.js";
+
+export { FabricationTracker } from "./fabrication-tracker.js";
+export type { FabricationEvent, FabricationEventType, FabricationSnapshot } from "./fabrication-tracker.js";
 
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 

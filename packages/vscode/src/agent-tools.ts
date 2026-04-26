@@ -1011,15 +1011,19 @@ function parseToolCallPayload(
 
 /**
  * Extracts <tool_use> blocks from the model's response text.
- * Returns the cleaned text (with tool blocks removed) and parsed tool calls.
+ * Returns the cleaned text (with tool blocks removed), parsed tool calls,
+ * and the epilogue — text that appears after the last tool call block.
+ * The epilogue is where models (especially Grok) write fabricated success summaries.
  */
 export function extractToolCalls(text: string): {
   cleanText: string;
   toolCalls: ExtractedToolCall[];
+  epilogue: string;
 } {
   const toolCalls: ExtractedToolCall[] = [];
   let cleanText = text;
   let idCounter = 0;
+  let lastToolCallEnd = -1; // tracks end position of last tool block in original text
 
   // Pattern 1: <tool_use>JSON</tool_use>
   const xmlPattern = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/g;
@@ -1033,6 +1037,7 @@ export function extractToolCalls(text: string): {
         name: parsed.name,
         input: parsed.input,
       });
+      lastToolCallEnd = match.index + match[0].length;
     }
     cleanText = cleanText.replace(match[0], "");
   }
@@ -1049,10 +1054,14 @@ export function extractToolCalls(text: string): {
         input: parsed.input,
       });
       cleanText = cleanText.replace(match[0], "");
+      lastToolCallEnd = match.index + match[0].length;
     }
   }
 
-  return { cleanText: cleanText.trim(), toolCalls };
+  // Extract the epilogue: prose written after the last tool block
+  const epilogue = lastToolCallEnd >= 0 ? text.slice(lastToolCallEnd).trim() : "";
+
+  return { cleanText: cleanText.trim(), toolCalls, epilogue };
 }
 
 // ----------------------------------------------------------------------------

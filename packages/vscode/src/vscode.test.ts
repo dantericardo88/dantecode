@@ -2369,4 +2369,48 @@ describe("extractToolCalls", () => {
     expect(result.toolCalls[0]?.name).toBe("Bash");
     expect(result.toolCalls[0]?.input.command).toContain("Co-Authored-By: DanteCode");
   });
+
+  it("returns empty epilogue when no tool calls present", () => {
+    const result = extractToolCalls("Just some text with no tool calls.");
+    expect(result.epilogue).toBe("");
+    expect(result.toolCalls).toHaveLength(0);
+  });
+
+  it("returns empty epilogue when nothing follows last tool_use block", () => {
+    const response = 'I will read.\n<tool_use>{"name":"Read","input":{"file_path":"foo.ts"}}</tool_use>';
+    const result = extractToolCalls(response);
+    expect(result.epilogue).toBe("");
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it("captures post-tool-call epilogue (fabricated summary text)", () => {
+    const response =
+      'I will push.\n<tool_use>{"name":"GitPush","input":{"remote":"origin","branch":"main"}}</tool_use>\n✅ Push succeeded! The code is now live.';
+    const result = extractToolCalls(response);
+    // Epilogue is identified separately — cleanText still contains it (caller strips it)
+    expect(result.epilogue).toBe("✅ Push succeeded! The code is now live.");
+    expect(result.toolCalls).toHaveLength(1);
+    // cleanText has tool XML removed but epilogue text remains (that's the intended contract)
+    expect(result.cleanText).toContain("I will push.");
+  });
+
+  it("epilogue is only text after the LAST tool call when multiple are present", () => {
+    const response =
+      'Step 1\n<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>\nStep 2\n<tool_use>{"name":"Edit","input":{"file_path":"a.ts","old_string":"x","new_string":"y"}}</tool_use>\nAll done! ✅';
+    const result = extractToolCalls(response);
+    expect(result.epilogue).toBe("All done! ✅");
+    expect(result.toolCalls).toHaveLength(2);
+  });
+
+  it("cleanText after epilogue strip does not contain epilogue", () => {
+    const epilogue = "Everything worked perfectly!";
+    const response = `Doing work.\n<tool_use>{"name":"Bash","input":{"command":"npm test"}}</tool_use>\n${epilogue}`;
+    const { cleanText, epilogue: ep } = extractToolCalls(response);
+    expect(ep).toBe(epilogue);
+    // cleanText should NOT contain the epilogue
+    const epiIdx = cleanText.lastIndexOf(ep);
+    const stripped = epiIdx >= 0 ? cleanText.slice(0, epiIdx).trim() : cleanText;
+    expect(stripped).not.toContain(epilogue);
+    expect(stripped).toContain("Doing work.");
+  });
 });
