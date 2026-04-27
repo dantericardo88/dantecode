@@ -32,6 +32,7 @@ import {
   getProviderPromptSupplement,
   getProviderSystemPreamble,
   getStrictModeAddition,
+  detectUnverifiedScoreClaims,
   getProviderCatalogEntry,
   groupCatalogModels,
   parseModelReference,
@@ -329,10 +330,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // Injector setters (wired from extension.ts after construction)
   // --------------------------------------------------------------------------
 
-  setContextRetriever(_retriever: unknown): void { /* wired externally */ }
-  setLspInjector(_injector: unknown): void { /* wired externally */ }
-  setTerminalOutputManager(_mgr: unknown): void { /* wired externally */ }
-  setDebugAttachProvider(_provider: unknown): void { /* wired externally */ }
+  setContextRetriever(_retriever: unknown): void {
+    /* wired externally */
+  }
+  setLspInjector(_injector: unknown): void {
+    /* wired externally */
+  }
+  setTerminalOutputManager(_mgr: unknown): void {
+    /* wired externally */
+  }
+  setDebugAttachProvider(_provider: unknown): void {
+    /* wired externally */
+  }
 
   /**
    * Called by VS Code when the webview view needs to be resolved.
@@ -457,7 +466,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         const repo = (message.payload as { repo?: string })?.repo;
         try {
           const result = await reviewPullRequest({ prNumber: prNum, repo });
-          this.postMessage({ type: "pr_review_result", payload: result as unknown as Record<string, unknown> });
+          this.postMessage({
+            type: "pr_review_result",
+            payload: result as unknown as Record<string, unknown>,
+          });
         } catch (err) {
           this.postMessage({ type: "error", payload: { message: String(err) } });
         }
@@ -488,9 +500,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       { cmd: "/debug", desc: "Start a debug session" },
       { cmd: "/review", desc: "Review changes" },
     ];
-    const commands = prefix
-      ? allCommands.filter((c) => c.cmd.startsWith(prefix))
-      : allCommands;
+    const commands = prefix ? allCommands.filter((c) => c.cmd.startsWith(prefix)) : allCommands;
     this.postMessage({ type: "slash_suggestions", payload: { commands } });
   }
 
@@ -559,7 +569,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           this.messages.push({ role: "user", content: text });
           try {
             const output = await parsed.command.execute(parsed.args, projectRoot);
-            this.postMessage({ type: "chat_response_chunk", payload: { chunk: output, partial: output } });
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: { chunk: output, partial: output },
+            });
             this.messages.push({ role: "assistant", content: output });
           } catch (execErr: unknown) {
             const msg = execErr instanceof Error ? execErr.message : String(execErr);
@@ -568,10 +581,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           this.postMessage({ type: "chat_response_done", payload: {} });
           return;
         }
+        // Commands with prepare() inject live context, then fall through to the model loop.
+        if (parsed.command.prepare) {
+          try {
+            const prefix = await parsed.command.prepare(parsed.args, this.getProjectRoot());
+            if (prefix) text = prefix + text;
+          } catch { /* prepare is best-effort */ }
+        }
         const editor = vscode.window.activeTextEditor;
-        const selection = editor && !editor.selection.isEmpty
-          ? editor.document.getText(editor.selection)
-          : "";
+        const selection =
+          editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : "";
         const filePath = editor?.document.uri.fsPath ?? "";
         text = buildSlashPrompt(parsed.command, selection, filePath, parsed.args);
       }
@@ -590,6 +609,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         : undefined);
     const readTracker = new Map<string, FileSnapshot>();
     const editAttempts = new Map<string, number>();
+    // Sprint 2 — session tool output accumulator (reset per handleChatRequest, not per round)
+    const _sessionToolOutputs: string[] = [];
+    let _sessionRanImprovementCmd = false;
+    let _sessionVerifiedScoreOutput: string | null = null;
+    // Sprint 5 — narration loop brake (Cline ActModeRespondHandler pattern)
+    let _consecutiveTextOnlyRounds = 0;
 
     this.messages.push({ role: "user", content: text });
     this.stopRequested = false;
@@ -831,7 +856,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       );
       systemParts.push("```");
       systemParts.push(
-        "To search code: `gh search code \"pattern\" --limit 10 --json path,repository`",
+        'To search code: `gh search code "pattern" --limit 10 --json path,repository`',
       );
       systemParts.push("");
       systemParts.push("### Fetching Web Content");
@@ -1103,7 +1128,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Phase 2 compact: LLM summarization when prune alone cannot prevent overflow.
         // Only fires when there are enough messages to summarize (>6 so older zone is non-empty).
-        if (agentMessages.length > 6 && wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
+        if (
+          agentMessages.length > 6 &&
+          wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)
+        ) {
           const llmCall = (prompt: string) =>
             router.generate([{ role: "user", content: prompt }], {
               maxTokens: 2048,
@@ -1172,29 +1200,31 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         let _xmlShouldCutNext = false;
         let _xmlHasSeenToolOpen = false;
         const _round2PendingChunks: string[] = [];
-        const _xmlParser = new XmlToolCallParser((event: import("@dantecode/core").XmlParserEvent) => {
-          if (event.type === "tool_block_start") {
-            _xmlHasSeenToolOpen = true;
-            if (isFirstRound) {
-              // Retract any pre-tool narration already shown — clear the partial display.
-              this.postMessage({
-                type: "chat_response_chunk",
-                payload: { chunk: "", partial: "" },
-              });
+        const _xmlParser = new XmlToolCallParser(
+          (event: import("@dantecode/core").XmlParserEvent) => {
+            if (event.type === "tool_block_start") {
+              _xmlHasSeenToolOpen = true;
+              if (isFirstRound) {
+                // Retract any pre-tool narration already shown — clear the partial display.
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk: "", partial: "" },
+                });
+              }
+              // Round 2+: discard the speculative buffer — those chunks were narration.
+              _round2PendingChunks.length = 0;
+            } else if (event.type === "tool_block_complete") {
+              _xmlSeenToolClose = true;
+            } else if (event.type === "text_chunk" && _xmlSeenToolClose) {
+              if (/\S/.test(event.text) && !event.text.trimStart().startsWith("<tool_use>")) {
+                _xmlShouldCutNext = true;
+                // Abort the HTTP stream immediately — prevents the model from generating
+                // more epilogue tokens after </tool_use>.
+                roundController.abort();
+              }
             }
-            // Round 2+: discard the speculative buffer — those chunks were narration.
-            _round2PendingChunks.length = 0;
-          } else if (event.type === "tool_block_complete") {
-            _xmlSeenToolClose = true;
-          } else if (event.type === "text_chunk" && _xmlSeenToolClose) {
-            if (/\S/.test(event.text) && !event.text.trimStart().startsWith("<tool_use>")) {
-              _xmlShouldCutNext = true;
-              // Abort the HTTP stream immediately — prevents the model from generating
-              // more epilogue tokens after </tool_use>.
-              roundController.abort();
-            }
-          }
-        });
+          },
+        );
 
         // Set a 60-second timeout for the first chunk (up from 30s for slower models)
         const firstChunkTimeout = setTimeout(() => {
@@ -1395,12 +1425,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Extract tool calls from the response.
         // epilogue = text written after the last tool_use block (where models fabricate summaries).
-        const { toolCalls, cleanText: responseCleanText, epilogue: responseEpilogue, phantomToolNames } = extractToolCalls(fullResponse);
+        const {
+          toolCalls,
+          cleanText: responseCleanText,
+          epilogue: responseEpilogue,
+          phantomToolNames,
+        } = extractToolCalls(fullResponse);
 
         // ── Anti-fabrication Gate: detect success claims that contradict known failures ──
         // Patterns map tool names to regex that matches fabricated success language.
         const FABRICATION_CLAIM_PATTERNS: Record<string, RegExp> = {
-          GitPush: /(?:push(?:ed)?|force[\s-]push(?:ed)?(?:\s+with\s+lease)?)\s+(?:succeed|success|complet|to\s+remote|is\s+done)|synced?\s+(?:remote|branch)/i,
+          GitPush:
+            /(?:push(?:ed)?|force[\s-]push(?:ed)?(?:\s+with\s+lease)?)\s+(?:succeed|success|complet|to\s+remote|is\s+done)|synced?\s+(?:remote|branch)/i,
           GitCommit: /commit(?:ted)?\s+success|successfully\s+commit/i,
           Bash: /(?:all\s+)?tests?\s+(?:pass(?:ing|ed)?)|typecheck\s+(?:pass|clean)|build\s+success|all\s+checks?\s+pass/i,
           Write: /successfully\s+(?:created|written|wrote)\s+(?:the\s+)?file/i,
@@ -1459,6 +1495,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         if (toolCalls.length > 0) {
           consecutiveEmptyRounds = 0;
+          _consecutiveTextOnlyRounds = 0;
+        } else if (fullResponse.trim().length > 0) {
+          _consecutiveTextOnlyRounds++;
         }
 
         // Pipeline detection: used by both no-tool-calls handling and tool execution guards
@@ -1481,12 +1520,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           // If the model just described or claimed work without acting, nudge it to use tools
           if (needsExecutionNudge) {
             executionNudges++;
+            const _execNudgeBrake =
+              _consecutiveTextOnlyRounds >= 2
+                ? ` (${_consecutiveTextOnlyRounds} consecutive text-only rounds — this is a narration loop)`
+                : "";
             // Do NOT send chat_response_done here — keep the streaming element alive
             agentMessages.push({ role: "assistant", content: fullResponse });
             agentMessages.push({
               role: "user",
               content:
-                "You described or claimed work without using any tools. Stop narrating and EXECUTE the next step with <tool_use> blocks right now. Read files before editing them, make the change with Write/Edit, and only claim success after a real tool result.",
+                `You described or claimed work without using any tools${_execNudgeBrake}. Stop narrating and EXECUTE the next step with <tool_use> blocks right now. Read files before editing them, make the change with Write/Edit, and only claim success after a real tool result.`,
             });
             this.postMessage({
               type: "chat_response_chunk",
@@ -1558,6 +1601,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           this.messages.push({ role: "assistant", content: fullResponse });
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
+          // Sprint 4: append unverified score claim warning before finalizing display.
+          const _claimWarning = detectUnverifiedScoreClaims(
+            fullResponse,
+            _sessionToolOutputs,
+            _sessionRanImprovementCmd,
+            _sessionVerifiedScoreOutput,
+          );
+          if (_claimWarning) {
+            this.postMessage({ type: "chat_response_chunk", payload: { chunk: _claimWarning, partial: "" } });
+          }
           if (roundNumber <= 1) {
             // Single-round response (no tool execution) — send final text
             this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
@@ -1632,8 +1685,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 });
                 toolResultParts.push(
                   `SYSTEM: Write BLOCKED — your payload is ${Math.round(writeContent.length / 1000)}K characters, which will truncate and corrupt the file. ` +
-                  `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
-                  `Break your changes into multiple small Edit calls targeting specific sections.`,
+                    `The file "${writeFilePath}" already exists. Use the Edit tool for surgical changes instead of rewriting the entire file. ` +
+                    `Break your changes into multiple small Edit calls targeting specific sections.`,
                 );
                 continue;
               }
@@ -1663,8 +1716,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             toolResultParts.push(
               `SYSTEM: ${toolCall.name} BLOCKED — you have not modified any files in this session (filesModified === 0). ` +
-              `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
-              `then commit. Do NOT claim you already made changes — only tool results count.`,
+                `You cannot commit or push changes that do not exist. Use Edit or Write tools to make real file changes first, ` +
+                `then commit. Do NOT claim you already made changes — only tool results count.`,
             );
             continue;
           }
@@ -1836,7 +1889,24 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             if ((toolCall.name === "GitCommit" || toolCall.name === "GitPush") && !result.isError) {
               const shaMatch = result.content.match(/\b([0-9a-f]{7,40})\b/i);
               if (shaMatch) {
-                verifiedOpsLog.push({ tool: toolCall.name, sha: shaMatch[1]!, round: roundNumber, ts: Date.now() });
+                verifiedOpsLog.push({
+                  tool: toolCall.name,
+                  sha: shaMatch[1]!,
+                  round: roundNumber,
+                  ts: Date.now(),
+                });
+              }
+            }
+            // Sprint 2: accumulate Bash outputs for score claim validation (Rule 17 gate)
+            if (toolCall.name === "Bash" && !result.isError) {
+              const cmd = (toolCall.input as { command?: string }).command ?? "";
+              const out = result.content ?? "";
+              _sessionToolOutputs.push(out);
+              if (/danteforge\s+(improve|ascend|autoforge|magic|forge)\b/i.test(cmd)) {
+                _sessionRanImprovementCmd = true;
+              }
+              if (/danteforge\s+score\b/i.test(cmd) && out.trim().length > 0) {
+                _sessionVerifiedScoreOutput = out;
               }
             }
           }
@@ -1871,7 +1941,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
           // Gate 11: XML-tag tool results so Grok cannot replay SHAs/content as its own prose
           toolResultParts.push(
-            `<tool_result id="${resultSeq}" name="${toolCall.name}" status="${result.isError ? "ERROR" : "OK"}">\n${result.content}\n</tool_result>`
+            `<tool_result id="${resultSeq}" name="${toolCall.name}" status="${result.isError ? "ERROR" : "OK"}">\n${result.content}\n</tool_result>`,
           );
         }
 
@@ -1914,7 +1984,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Gate 13: record phantom tool calls as fabrication events
         for (const phantomName of phantomToolNames) {
-          roundFabricationEvents.push({ type: "phantom_tool", toolName: phantomName, round: roundNumber });
+          roundFabricationEvents.push({
+            type: "phantom_tool",
+            toolName: phantomName,
+            round: roundNumber,
+          });
           this.postMessage({
             type: "chat_response_chunk",
             payload: {
@@ -1946,7 +2020,13 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             mkdirSync(eventsDir, { recursive: true });
             appendFileSync(
               join(eventsDir, "fabrication-events.ndjson"),
-              JSON.stringify({ event: "circuit_open", provider, model: modelId, timestamp: new Date().toISOString(), ...snap }) + "\n",
+              JSON.stringify({
+                event: "circuit_open",
+                provider,
+                model: modelId,
+                timestamp: new Date().toISOString(),
+                ...snap,
+              }) + "\n",
               "utf-8",
             );
           } catch {
@@ -1966,7 +2046,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           const epiIdx = responseCleanText.lastIndexOf(responseEpilogue);
           const withoutEpilogue =
             epiIdx >= 0
-              ? responseCleanText.slice(0, epiIdx).trim() || `[${toolCalls.map((t) => t.name).join(", ")}]`
+              ? responseCleanText.slice(0, epiIdx).trim() ||
+                `[${toolCalls.map((t) => t.name).join(", ")}]`
               : responseCleanText;
           // Gate 14: also strip excessive pre-tool narration from context
           assistantContextContent = stripPreToolNarration(withoutEpilogue, true);
@@ -1986,7 +2067,30 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           roundFailedTools.length > 0
             ? `\n\n⚠️ FABRICATION GUARD — The following tools FAILED this round:\n${roundFailedTools
                 .map((t) => `• ${t.name}: ${t.error.split("\n")[0]}`)
-                .join("\n")}\nYour next response MUST acknowledge each of these failures explicitly. Do NOT say any of them succeeded, completed, or "is done".`
+                .join(
+                  "\n",
+                )}\nYour next response MUST acknowledge each of these failures explicitly. Do NOT say any of them succeeded, completed, or "is done".`
+            : "";
+
+        // Sprint 5 — narration loop brake (Cline ActModeRespondHandler pattern).
+        // If the model has produced N consecutive rounds with no tool calls, force it to stop.
+        const narrationBrake =
+          _consecutiveTextOnlyRounds >= 2
+            ? `\n\n⚠️ **NARRATION BRAKE**: You have produced ${_consecutiveTextOnlyRounds} consecutive ` +
+              `responses with no tool calls. If your task is complete, write one sentence grounded ` +
+              `in tool results and stop. If not complete, use tools — do not narrate.`
+            : "";
+
+        // Sprint 3 — Rule 17 infrastructure gate (Cline double-check completion pattern).
+        // If an improvement command ran this session without a subsequent score verification,
+        // block any summary until the model runs danteforge score.
+        const rule17Gate =
+          _sessionRanImprovementCmd && !_sessionVerifiedScoreOutput
+            ? `\n\n⚠️ **RULE 17 GATE (runtime enforcement)**: You called a danteforge improvement ` +
+              `command this session but have NOT yet run \`danteforge score --level light\`. ` +
+              `You MUST call Bash with \`danteforge score --level light\` before writing any ` +
+              `summary, score claim, or improvement delta. Claiming a score without this ` +
+              `tool call is a fabrication-class event.`
             : "";
 
         // Gate 9b: prepend strict-mode override when fabrication threshold crossed
@@ -1995,13 +2099,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           : "";
 
         // Gate 12: prepend verified ops anchor so Grok knows which SHAs are real
-        const opsAnchor = verifiedOpsLog.length > 0
-          ? `<verified_ops_this_session>\n${verifiedOpsLog.map(op => `${op.tool} @ round ${op.round}: ${op.sha}`).join("\n")}\n</verified_ops_this_session>\n\n`
-          : "";
+        const opsAnchor =
+          verifiedOpsLog.length > 0
+            ? `<verified_ops_this_session>\n${verifiedOpsLog.map((op) => `${op.tool} @ round ${op.round}: ${op.sha}`).join("\n")}\n</verified_ops_this_session>\n\n`
+            : "";
 
         agentMessages.push({
           role: "user",
-          content: `${strictModePrefix}${opsAnchor}Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}\n\nThese are the ACTUAL results. Take the next action based on them, or provide your final answer if the task is complete. Do NOT summarize what just happened — the results above are the ground truth.`,
+          content: `${strictModePrefix}${opsAnchor}Tool execution results:\n\n${toolResultParts.join("\n\n---\n\n")}${fabricationGuardBlock}${rule17Gate}${narrationBrake}\n\nThese are the ACTUAL results. Take the next action based on them, or provide your final answer if the task is complete. Do NOT summarize what just happened — the results above are the ground truth.`,
         });
 
         // Signal the UI that a new round is starting with real progress

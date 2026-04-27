@@ -54,53 +54,126 @@ export {
 export type { TaskComplexity, TaskSignals, RoutedModel } from "./task-complexity-router.js";
 
 export { ProjectKnowledgeStore } from "./project-knowledge-store.js";
-export type { KnowledgeFact, KnowledgeCategory, ProjectKnowledgeSnapshot } from "./project-knowledge-store.js";
+export type {
+  KnowledgeFact,
+  KnowledgeCategory,
+  ProjectKnowledgeSnapshot,
+} from "./project-knowledge-store.js";
 
 export { OllamaHealthProbe, OfflineGuard, globalOfflineGuard } from "./offline-guard.js";
-export type { OllamaModel, OllamaHealthResult, OfflineRoute, OfflineGuardOptions, OfflineRouteReason } from "./offline-guard.js";
+export type {
+  OllamaModel,
+  OllamaHealthResult,
+  OfflineRoute,
+  OfflineGuardOptions,
+  OfflineRouteReason,
+} from "./offline-guard.js";
 
-export { PlanActController, parsePlan, formatPlanForDisplay, buildPlanModeSystemPrompt, buildPlanModeSystemPromptStructured } from "./plan-act-controller.js";
-export type { PlanActPhase, PlanApprovalResult, PlanActOptions, ExecutionStepStatus, PlanActSnapshot } from "./plan-act-controller.js";
+export {
+  PlanActController,
+  parsePlan,
+  formatPlanForDisplay,
+  buildPlanModeSystemPrompt,
+  buildPlanModeSystemPromptStructured,
+} from "./plan-act-controller.js";
+export type {
+  PlanActPhase,
+  PlanApprovalResult,
+  PlanActOptions,
+  ExecutionStepStatus,
+  PlanActSnapshot,
+} from "./plan-act-controller.js";
 
 export { parseDiffStat, generatePrContent, detectReviewAnnotations } from "./pr-automation.js";
 export { fetchPrDiff, fetchPrMeta, reviewPullRequest } from "./pr-review-runner.js";
-export type { PullRequestMeta, PullRequestReviewOptions, PullRequestReviewResult } from "./pr-review-runner.js";
-export type { ChangedFile, DiffSummary, ReviewAnnotation, GeneratedPrContent } from "./pr-automation.js";
+export type {
+  PullRequestMeta,
+  PullRequestReviewOptions,
+  PullRequestReviewResult,
+} from "./pr-review-runner.js";
+export type {
+  ChangedFile,
+  DiffSummary,
+  ReviewAnnotation,
+  GeneratedPrContent,
+} from "./pr-automation.js";
 
 export { analyzeIssue, formatAnalyzedIssueForPrompt } from "./issue-analyzer.js";
-export type { IssueSignal, AnalyzedIssue, FileHint, ErrorSignature, ReproductionStep } from "./issue-analyzer.js";
+export type {
+  IssueSignal,
+  AnalyzedIssue,
+  FileHint,
+  ErrorSignature,
+  ReproductionStep,
+} from "./issue-analyzer.js";
 
 export { scaffold, inferTemplate, formatScaffoldSummary } from "./scaffold-engine.js";
-export type { ScaffoldSpec, ScaffoldResult, ScaffoldFile, ProjectTemplate, ScaffoldFeature } from "./scaffold-engine.js";
+export type {
+  ScaffoldSpec,
+  ScaffoldResult,
+  ScaffoldFile,
+  ProjectTemplate,
+  ScaffoldFeature,
+} from "./scaffold-engine.js";
 
 export {
-  levenshtein, editSimilarity, classifyEditSize, selectEditPresentation,
-  formatInlineDiff, scoreEditQuality,
-  PartialAcceptController, globalPartialAcceptController,
+  levenshtein,
+  editSimilarity,
+  classifyEditSize,
+  selectEditPresentation,
+  formatInlineDiff,
+  scoreEditQuality,
+  PartialAcceptController,
+  globalPartialAcceptController,
 } from "./inline-edit-scorer.js";
-export type { EditSize, EditPresentation, EditQualityResult, PartialAcceptResult } from "./inline-edit-scorer.js";
+export type {
+  EditSize,
+  EditPresentation,
+  EditQualityResult,
+  PartialAcceptResult,
+} from "./inline-edit-scorer.js";
 
 export {
-  AgentMessageBus, AgentChannel, globalAgentBus, createAgentChannel,
+  AgentMessageBus,
+  AgentChannel,
+  globalAgentBus,
+  createAgentChannel,
 } from "./agent-message-bus.js";
-export type { AgentMessage, MessageKind, MessagePriority, MessageHandler } from "./agent-message-bus.js";
+export type {
+  AgentMessage,
+  MessageKind,
+  MessagePriority,
+  MessageHandler,
+} from "./agent-message-bus.js";
 
 export {
-  scoreMessage, assignTier, compressMessageContent,
-  evictToFitBudget, assessContextBudget,
+  scoreMessage,
+  assignTier,
+  compressMessageContent,
+  evictToFitBudget,
+  assessContextBudget,
 } from "./context-eviction-policy.js";
 export type {
-  ScoredMessage, EvictionResult, EvictionOptions, EvictionTier,
-  ContextBudgetStatus, ContextPressure,
+  ScoredMessage,
+  EvictionResult,
+  EvictionOptions,
+  EvictionTier,
+  ContextBudgetStatus,
+  ContextPressure,
 } from "./context-eviction-policy.js";
 
 export { filterContextByRelevance } from "./context-filter-pipeline.js";
 export type {
-  FilterableMessage, FilterPipelineOptions, FilterPipelineResult,
+  FilterableMessage,
+  FilterPipelineOptions,
+  FilterPipelineResult,
 } from "./context-filter-pipeline.js";
 
 export {
-  CacheMetricsTracker, globalCacheMetrics, estimateCachingSavings, isCacheLikelyValid,
+  CacheMetricsTracker,
+  globalCacheMetrics,
+  estimateCachingSavings,
+  isCacheLikelyValid,
 } from "./cache-metrics.js";
 export type { CacheUsageRecord, CacheMetricsSummary, CostModel } from "./cache-metrics.js";
 
@@ -145,8 +218,18 @@ export type { SubTask, DecompositionResult, SandboxGroupingStrategy } from "./ta
 
 // ─── Autonomy Orchestrator ───────────────────────────────────────────────────
 
-export { AutonomyOrchestrator, buildTestOutputContext, makeVerifyFn } from "./autonomy-orchestrator.js";
-export type { VerifyResult, VerifyFn, WaveResult, AutonomyRunOptions, AutonomyRunResult } from "./autonomy-orchestrator.js";
+export {
+  AutonomyOrchestrator,
+  buildTestOutputContext,
+  makeVerifyFn,
+} from "./autonomy-orchestrator.js";
+export type {
+  VerifyResult,
+  VerifyFn,
+  WaveResult,
+  AutonomyRunOptions,
+  AutonomyRunResult,
+} from "./autonomy-orchestrator.js";
 
 // ─── Token Counter ───────────────────────────────────────────────────────────
 
@@ -202,10 +285,19 @@ export {
 } from "./tool-runtime.js";
 export type { ExactEditResult, FileSnapshot, LineEndingStyle } from "./tool-runtime.js";
 
-export { getProviderPromptSupplement, getProviderSystemPreamble, getStrictModeAddition } from "./provider-prompt-supplements.js";
+export {
+  getProviderPromptSupplement,
+  getProviderSystemPreamble,
+  getStrictModeAddition,
+} from "./provider-prompt-supplements.js";
 
 export { FabricationTracker } from "./fabrication-tracker.js";
-export type { FabricationEvent, FabricationEventType, FabricationSnapshot } from "./fabrication-tracker.js";
+export type {
+  FabricationEvent,
+  FabricationEventType,
+  FabricationSnapshot,
+} from "./fabrication-tracker.js";
+export { detectUnverifiedScoreClaims } from "./score-claim-validator.js";
 
 // ——— Execution Heuristics —————————————————————————————————————————————————————————
 
@@ -267,11 +359,24 @@ export {
   extractSymbolTags,
   buildRepoMapTags,
 } from "./repo-map-ast.js";
-export type { SymbolDefinition, ImportEdge, RankedFile, RepoMapOptions, ComputeFileScoresOptions, SymbolTag } from "./repo-map-ast.js";
+export type {
+  SymbolDefinition,
+  ImportEdge,
+  RankedFile,
+  RepoMapOptions,
+  ComputeFileScoresOptions,
+  SymbolTag,
+} from "./repo-map-ast.js";
 
 // ─── Tree-sitter AST Engine ─────────────────────────────────────────────────
 
-export { extractTagsAST, detectTreeSitterLanguage, getParser, resetParserPool, SCM_QUERIES } from "./tree-sitter/index.js";
+export {
+  extractTagsAST,
+  detectTreeSitterLanguage,
+  getParser,
+  resetParserPool,
+  SCM_QUERIES,
+} from "./tree-sitter/index.js";
 export type { ASTTag, SupportedLanguage } from "./tree-sitter/index.js";
 
 // ─── Architect Planner ──────────────────────────────────────────────────────
@@ -288,8 +393,22 @@ export type {
 
 // ─── Browser Agent ──────────────────────────────────────────────────────────
 
-export { BrowserAgent, runBrowserLoop, detectPlaywright, detectChromeCdp, detectBrowserCapabilities } from "./browser-agent.js";
-export type { BrowserAction, BrowserActionResult, BrowserAgentOptions, BrowserLoopStep, PlaywrightCapability, CdpCapability, BrowserCapabilities } from "./browser-agent.js";
+export {
+  BrowserAgent,
+  runBrowserLoop,
+  detectPlaywright,
+  detectChromeCdp,
+  detectBrowserCapabilities,
+} from "./browser-agent.js";
+export type {
+  BrowserAction,
+  BrowserActionResult,
+  BrowserAgentOptions,
+  BrowserLoopStep,
+  PlaywrightCapability,
+  CdpCapability,
+  BrowserCapabilities,
+} from "./browser-agent.js";
 
 // ─── Vision Router ──────────────────────────────────────────────────────────
 
@@ -388,7 +507,11 @@ export type { HealthCheck, HealthCheckResult, HealthCheckConfig } from "./health
 // ─── Circuit Breaker ────────────────────────────────────────────────────────
 
 export { CircuitBreaker, CircuitOpenError } from "./circuit-breaker.js";
-export type { CircuitBreakerState, CircuitBreakerOptions, ProviderHealthEvent } from "./circuit-breaker.js";
+export type {
+  CircuitBreakerState,
+  CircuitBreakerOptions,
+  ProviderHealthEvent,
+} from "./circuit-breaker.js";
 
 export {
   createSelfImprovementContext,
@@ -643,7 +766,10 @@ export type {
 
 // ─── Completion Telemetry ──────────────────────────────────────────────────────
 
-export { CompletionTelemetryService, CompletionTelemetryStore } from "./completion-telemetry/index.js";
+export {
+  CompletionTelemetryService,
+  CompletionTelemetryStore,
+} from "./completion-telemetry/index.js";
 export type {
   CompletionEvent,
   CompletionEventType,
@@ -653,7 +779,12 @@ export type {
 } from "./completion-telemetry/index.js";
 
 // ─── Context Provider System ─────────────────────────────────────────────────
-export type { ContextItem, ContextItemUri, ContextProviderExtras, IContextProvider } from "./context-provider-types.js";
+export type {
+  ContextItem,
+  ContextItemUri,
+  ContextProviderExtras,
+  IContextProvider,
+} from "./context-provider-types.js";
 export { ContextProviderRegistry, globalCoreRegistry } from "./context-provider-registry.js";
 
 // ─── Repo Map Builder ────────────────────────────────────────────────────────
@@ -737,10 +868,7 @@ export {
   generateTestScaffolds,
   formatScaffoldSummary as formatTestScaffoldSummary,
 } from "./test-scaffold-generator.js";
-export type {
-  TestScaffold,
-  ScaffoldGeneratorOptions,
-} from "./test-scaffold-generator.js";
+export type { TestScaffold, ScaffoldGeneratorOptions } from "./test-scaffold-generator.js";
 
 // ─── App Scaffolder (Sprint 30) ───────────────────────────────────────────────
 
@@ -1354,34 +1482,17 @@ export {
   getLanguageAcceptanceRate,
   loadFimAcceptanceHistory,
 } from "./fim-acceptance-tracker.js";
-export type {
-  FimAcceptanceEntry,
-  LanguageAcceptanceStats,
-} from "./fim-acceptance-tracker.js";
+export type { FimAcceptanceEntry, LanguageAcceptanceStats } from "./fim-acceptance-tracker.js";
 
 // ─── Approval Thread Tracker (Sprint AF — dim 13) ────────────────────────────
 
-export {
-  ApprovalThreadTracker,
-  loadApprovalThreads,
-} from "./approval-thread-tracker.js";
-export type {
-  ApprovalThread,
-  ApprovalThreadRecord,
-} from "./approval-thread-tracker.js";
+export { ApprovalThreadTracker, loadApprovalThreads } from "./approval-thread-tracker.js";
+export type { ApprovalThread, ApprovalThreadRecord } from "./approval-thread-tracker.js";
 
 // ─── Inline Edit Log (Sprint AG — dim 6) ─────────────────────────────────────
 
-export {
-  emitInlineEditLog,
-  loadInlineEditLog,
-  summarizeInlineEdits,
-} from "./inline-edit-log.js";
-export type {
-  EditType,
-  InlineEditLogEntry,
-  InlineEditSummary,
-} from "./inline-edit-log.js";
+export { emitInlineEditLog, loadInlineEditLog, summarizeInlineEdits } from "./inline-edit-log.js";
+export type { EditType, InlineEditLogEntry, InlineEditSummary } from "./inline-edit-log.js";
 
 // ─── Plugin Outcome Tracker (Sprint AH — dim 22) ─────────────────────────────
 
@@ -1399,10 +1510,7 @@ export type {
 
 // ─── Git Lifecycle Manager (Sprint AA — dim 8) ────────────────────────────────
 
-export {
-  GitLifecycleManager,
-  emitGitLifecycleEvent,
-} from "./git-lifecycle-manager.js";
+export { GitLifecycleManager, emitGitLifecycleEvent } from "./git-lifecycle-manager.js";
 export type {
   GitLifecycleStage,
   GitLifecycleEvent,
@@ -1416,10 +1524,7 @@ export {
   summarizeRecallQuality,
   loadRecallQualityLog,
 } from "./memory-recall-quality.js";
-export type {
-  MemoryRecallRecord,
-  RecallQualitySummary,
-} from "./memory-recall-quality.js";
+export type { MemoryRecallRecord, RecallQualitySummary } from "./memory-recall-quality.js";
 
 // ─── Cost Savings Report (Sprint AD — dim 27) ─────────────────────────────────
 
@@ -1428,10 +1533,7 @@ export {
   loadCostSavingsReport,
   summarizeCostSavings,
 } from "./cost-savings-report.js";
-export type {
-  CostSavingsEntry,
-  CostSavingsSummary,
-} from "./cost-savings-report.js";
+export type { CostSavingsEntry, CostSavingsSummary } from "./cost-savings-report.js";
 
 // Sprint AI/BL — Dim 20: Debug-guided repair advisor
 export {
@@ -1471,11 +1573,7 @@ export {
   getHighRiskFiles,
   formatRiskClustersForPrompt,
 } from "./diff-risk-clusterer.js";
-export type {
-  RiskSurface,
-  DiffRiskCluster,
-  DiffRiskReport,
-} from "./diff-risk-clusterer.js";
+export type { RiskSurface, DiffRiskCluster, DiffRiskReport } from "./diff-risk-clusterer.js";
 
 // Sprint Dim18 — Review severity ranker
 export {
@@ -1500,10 +1598,7 @@ export {
   getFalsePositiveRate,
   getFalsePositiveStats,
 } from "./false-positive-suppressor.js";
-export type {
-  FalsePositiveEntry,
-  FalsePositiveStats,
-} from "./false-positive-suppressor.js";
+export type { FalsePositiveEntry, FalsePositiveStats } from "./false-positive-suppressor.js";
 
 // Sprint Dim18 — Review defect correlator
 export {
@@ -1513,35 +1608,18 @@ export {
   getReviewDefectCorrelation,
   formatDefectCorrelationWarning,
 } from "./review-defect-correlator.js";
-export type {
-  ReviewDefectOutcome,
-  ReviewDefectCorrelation,
-} from "./review-defect-correlator.js";
+export type { ReviewDefectOutcome, ReviewDefectCorrelation } from "./review-defect-correlator.js";
 
 // Sprint AI — Dim 24: Provider health router
-export {
-  ProviderHealthRouter,
-} from "./provider-health-router.js";
-export type {
-  ProviderHealthStatus,
-  HealthRouteLogEntry,
-} from "./provider-health-router.js";
+export { ProviderHealthRouter } from "./provider-health-router.js";
+export type { ProviderHealthStatus, HealthRouteLogEntry } from "./provider-health-router.js";
 
 // Sprint AJ — Dim 16: Plan edit tracker
-export {
-  recordPlanEdit,
-  summarizePlanEdits,
-  computePlanDiff,
-} from "./plan-edit-tracker.js";
-export type {
-  PlanEditEntry,
-  PlanEditSummary,
-} from "./plan-edit-tracker.js";
+export { recordPlanEdit, summarizePlanEdits, computePlanDiff } from "./plan-edit-tracker.js";
+export type { PlanEditEntry, PlanEditSummary } from "./plan-edit-tracker.js";
 
 // Sprint AK — Dim 6: Edit quality output hook
-export {
-  setEditQualityOutputHook,
-} from "./inline-edit-log.js";
+export { setEditQualityOutputHook } from "./inline-edit-log.js";
 
 // Sprint AL — Dim 17: Browser session persistence
 export {
@@ -1563,20 +1641,11 @@ export {
   getTopRecoveryPatterns,
   buildRecoveryBrief,
 } from "./task-recovery-log.js";
-export type {
-  TaskRecoveryEntry,
-  RecoveryPattern,
-} from "./task-recovery-log.js";
+export type { TaskRecoveryEntry, RecoveryPattern } from "./task-recovery-log.js";
 
 // Sprint AM — Dim 7: Autonomy convergence metrics
-export {
-  AutonomyMetricsTracker,
-  summarizeAutonomyMetrics,
-} from "./autonomy-metrics.js";
-export type {
-  AutonomyConvergenceEntry,
-  AutonomyConvergenceSummary,
-} from "./autonomy-metrics.js";
+export { AutonomyMetricsTracker, summarizeAutonomyMetrics } from "./autonomy-metrics.js";
+export type { AutonomyConvergenceEntry, AutonomyConvergenceSummary } from "./autonomy-metrics.js";
 
 // Sprint AN — Dim 21: Lesson brief
 export {
@@ -1585,29 +1654,15 @@ export {
   loadLessons,
   seedLessonsIfEmpty,
 } from "./lesson-brief.js";
-export type {
-  LessonRecord,
-  LessonBriefEntry,
-} from "./lesson-brief.js";
+export type { LessonRecord, LessonBriefEntry } from "./lesson-brief.js";
 
 // Sprint AN — Dim 18: Review summary + coverage
-export {
-  buildReviewSummary,
-  computeReviewCoverage,
-} from "./pr-review-orchestrator.js";
-export type {
-  ReviewSummaryResult,
-} from "./pr-review-orchestrator.js";
+export { buildReviewSummary, computeReviewCoverage } from "./pr-review-orchestrator.js";
+export type { ReviewSummaryResult } from "./pr-review-orchestrator.js";
 
 // Sprint AO — Dim 3: Code quality gate
-export {
-  scoreGeneratedCode,
-  CodeQualityGate,
-} from "./code-quality-gate.js";
-export type {
-  CodeQualityScore,
-  CodeQualityLogEntry,
-} from "./code-quality-gate.js";
+export { scoreGeneratedCode, CodeQualityGate } from "./code-quality-gate.js";
+export type { CodeQualityScore, CodeQualityLogEntry } from "./code-quality-gate.js";
 
 // Sprint AO — Dim 9: Cross-file consistency checker
 export {
@@ -1616,11 +1671,7 @@ export {
   extractNamedImports,
   readFilesForCheck,
 } from "./cross-file-checker.js";
-export type {
-  ConsistencyIssue,
-  ConsistencyReport,
-  FileContent,
-} from "./cross-file-checker.js";
+export type { ConsistencyIssue, ConsistencyReport, FileContent } from "./cross-file-checker.js";
 
 // Sprint AP — Dim 2: Context coverage tracker
 export {
@@ -1635,13 +1686,8 @@ export type {
 } from "./context-coverage-tracker.js";
 
 // Sprint AP — Dim 4: File dependency context
-export {
-  buildFileContextMap,
-} from "./file-dependency-context.js";
-export type {
-  FileDependencyMap,
-  FileContextMap,
-} from "./file-dependency-context.js";
+export { buildFileContextMap } from "./file-dependency-context.js";
+export type { FileDependencyMap, FileContextMap } from "./file-dependency-context.js";
 
 // Sprint AU — Dim 15: Hard-task finish-rate tracker
 export {
@@ -1650,20 +1696,11 @@ export {
   loadFinishRates,
   getFinishRateStats,
 } from "./finish-rate-tracker.js";
-export type {
-  TaskDifficulty,
-  FinishRateEntry,
-  FinishRateStats,
-} from "./finish-rate-tracker.js";
+export type { TaskDifficulty, FinishRateEntry, FinishRateStats } from "./finish-rate-tracker.js";
 
 // Sprint AV — Dim 18: PR review quality benchmark
-export {
-  benchmarkReviewQuality,
-  ReviewQualityBenchmark,
-} from "./pr-review-orchestrator.js";
-export type {
-  ReviewQualityResult,
-} from "./pr-review-orchestrator.js";
+export { benchmarkReviewQuality, ReviewQualityBenchmark } from "./pr-review-orchestrator.js";
+export type { ReviewQualityResult } from "./pr-review-orchestrator.js";
 
 // Sprint AV — Dim 21: Memory-to-outcome correlation
 export {
@@ -1671,9 +1708,7 @@ export {
   loadMemoryOutcomes,
   getMemoryImpactScore,
 } from "./context-coverage-tracker.js";
-export type {
-  MemoryOutcomeEntry,
-} from "./context-coverage-tracker.js";
+export type { MemoryOutcomeEntry } from "./context-coverage-tracker.js";
 
 // Sprint Memory — Dim 21: Memory influence → outcome correlation + stale fact detection
 export {
@@ -1726,20 +1761,12 @@ export type {
 } from "./generation-gate.js";
 
 // Sprint AW — Dim 17: Browser task outcome tracker
-export {
-  BrowserTaskOutcomeTracker,
-} from "./browser-session-store.js";
-export type {
-  BrowserTaskOutcome,
-} from "./browser-session-store.js";
+export { BrowserTaskOutcomeTracker } from "./browser-session-store.js";
+export type { BrowserTaskOutcome } from "./browser-session-store.js";
 
 // Sprint AX — Dim 6: Inline edit acceptance store
-export {
-  InlineEditAcceptanceStore,
-} from "./inline-edit-log.js";
-export type {
-  EditAcceptanceEntry,
-} from "./inline-edit-log.js";
+export { InlineEditAcceptanceStore } from "./inline-edit-log.js";
+export type { EditAcceptanceEntry } from "./inline-edit-log.js";
 
 // Sprint AX — Dim 27: Cost-per-success metric
 export {
@@ -1747,10 +1774,7 @@ export {
   loadCostPerTaskOutcomes,
   getCostPerSuccessRatio,
 } from "./cost-routing-log.js";
-export type {
-  CostPerTaskEntry,
-  CostPerSuccessRatio,
-} from "./cost-routing-log.js";
+export type { CostPerTaskEntry, CostPerSuccessRatio } from "./cost-routing-log.js";
 
 // Sprint AY — Dim 15: Task ambiguity detector
 export {
@@ -1776,10 +1800,7 @@ export {
   getOverallCitationRate,
   jaccardSimilarity as citationJaccardSimilarity,
 } from "./retrieval-citation-tracker.js";
-export type {
-  RetrievedFactBuffer,
-  CitationResult,
-} from "./retrieval-citation-tracker.js";
+export type { RetrievedFactBuffer, CitationResult } from "./retrieval-citation-tracker.js";
 
 // Sprint AZ/BM — Dim 21: Memory decision influence
 export {
@@ -1789,9 +1810,7 @@ export {
   getMemoryInfluenceStats,
   getMemoryInfluenceSummary,
 } from "./context-coverage-tracker.js";
-export type {
-  MemoryDecisionEntry,
-} from "./context-coverage-tracker.js";
+export type { MemoryDecisionEntry } from "./context-coverage-tracker.js";
 
 // Sprint BA — Dim 1: FIM Levenshtein acceptance stats
 export {
@@ -1807,9 +1826,7 @@ export {
   recordFimCancellation,
   getFimCancellationRate,
 } from "./fim-acceptance-tracker.js";
-export type {
-  FimLevenshteinStat,
-} from "./fim-acceptance-tracker.js";
+export type { FimLevenshteinStat } from "./fim-acceptance-tracker.js";
 
 // Sprint Dim1: FIM latency histogram
 export {
@@ -1818,10 +1835,7 @@ export {
   buildFimLatencyHistogram,
   getFimLatencyStats,
 } from "./fim-latency-tracker.js";
-export type {
-  FimLatencyEntry,
-  FimLatencyHistogram,
-} from "./fim-latency-tracker.js";
+export type { FimLatencyEntry, FimLatencyHistogram } from "./fim-latency-tracker.js";
 
 // Sprint BA — Dim 16: Plan step verifier
 export {
@@ -1843,9 +1857,7 @@ export {
   loadQualityTrendLog,
   getQualityTrendStats,
 } from "./code-quality-gate.js";
-export type {
-  QualityTrendResult,
-} from "./code-quality-gate.js";
+export type { QualityTrendResult } from "./code-quality-gate.js";
 
 // Sprint BC — Dim 18: Two-pass Architect PR Review
 export {
@@ -1894,38 +1906,19 @@ export {
   loadFimRankingLog,
   getFimRankingStats,
 } from "./fim-candidate-ranker.js";
-export type {
-  FimCandidate,
-  FimRankingContext,
-  FimRankingSession,
-} from "./fim-candidate-ranker.js";
+export type { FimCandidate, FimRankingContext, FimRankingSession } from "./fim-candidate-ranker.js";
 
 // Sprint BO — Dim 7: Autonomy report
-export {
-  getAutonomyReport,
-} from "./autonomy-metrics-tracker.js";
-export type {
-  AutonomyMetric,
-  AutonomyReport,
-} from "./autonomy-metrics-tracker.js";
+export { getAutonomyReport } from "./autonomy-metrics-tracker.js";
+export type { AutonomyMetric, AutonomyReport } from "./autonomy-metrics-tracker.js";
 
 // Sprint BP — Dim 17: Browser session summary
-export {
-  getSessionSummary,
-  getMostRecentSessions,
-} from "./browser-session-store.js";
-export type {
-  BrowserStoreSummaryRecord,
-} from "./browser-session-store.js";
+export { getSessionSummary, getMostRecentSessions } from "./browser-session-store.js";
+export type { BrowserStoreSummaryRecord } from "./browser-session-store.js";
 
 // Sprint BQ — Dim 15: Recovery stats + failure-mode grouping
-export {
-  getRecoveryStats,
-  groupByFailureMode,
-} from "./task-recovery-log.js";
-export type {
-  RecoveryStats,
-} from "./task-recovery-log.js";
+export { getRecoveryStats, groupByFailureMode } from "./task-recovery-log.js";
+export type { RecoveryStats } from "./task-recovery-log.js";
 
 // Sprint BQ — Dim 17: Browser outcome logger
 export {
@@ -1933,10 +1926,7 @@ export {
   loadBrowserOutcomes,
   getBrowserOutcomeSummary,
 } from "./browser-session-store.js";
-export type {
-  BrowserOutcomeRecord,
-  BrowserOutcomeSummary,
-} from "./browser-session-store.js";
+export type { BrowserOutcomeRecord, BrowserOutcomeSummary } from "./browser-session-store.js";
 
 // Sprint BR — Dim 15: Task recovery reporter
 export {
@@ -1944,9 +1934,7 @@ export {
   recordTaskRecoveryStats,
   loadTaskRecoveryStats,
 } from "./task-recovery-log.js";
-export type {
-  TaskRecoveryStats,
-} from "./task-recovery-log.js";
+export type { TaskRecoveryStats } from "./task-recovery-log.js";
 
 // Sprint BR — Dim 13: Diff quality enhanced with changeComplexity + hasBreakingChange
 // (scoreDiff + DiffQualityScore already exported above from "./diff-quality.js" at line ~923)
@@ -1984,10 +1972,7 @@ export {
   loadTestQualityScores,
   getTestQualityReport,
 } from "./test-generation-quality.js";
-export type {
-  GeneratedTestSuite,
-  TestQualityScore,
-} from "./test-generation-quality.js";
+export type { GeneratedTestSuite, TestQualityScore } from "./test-generation-quality.js";
 
 // Sprint BV — Dim 27: Cost optimization report
 export {
@@ -2021,10 +2006,7 @@ export {
   recordProviderHealthReport,
   loadProviderHealthReports,
 } from "./provider-health-report.js";
-export type {
-  ProviderHealthSnapshot,
-  ProviderHealthReport,
-} from "./provider-health-report.js";
+export type { ProviderHealthSnapshot, ProviderHealthReport } from "./provider-health-report.js";
 
 // Sprint BW — Dim 4: Repo context ranker
 export {
@@ -2074,10 +2056,7 @@ export {
   loadCollaborativeSnapshots,
   getCollaborationStats,
 } from "./collaborative-context.js";
-export type {
-  DeveloperContext,
-  CollaborativeSnapshot,
-} from "./collaborative-context.js";
+export type { DeveloperContext, CollaborativeSnapshot } from "./collaborative-context.js";
 
 // Sprint CC — Dim 14: Explanation Quality Meter
 export {
@@ -2098,10 +2077,7 @@ export {
   recordOfflineCapabilityReport,
   loadOfflineCapabilityReports,
 } from "./offline-capability-report.js";
-export type {
-  OllamaModelInfo,
-  OfflineCapabilityReport,
-} from "./offline-capability-report.js";
+export type { OllamaModelInfo, OfflineCapabilityReport } from "./offline-capability-report.js";
 
 // Sprint CH2 — Dim 15: Task triage + completion verdict
 export {
@@ -2150,11 +2126,7 @@ export type {
 } from "./onboarding-metrics.js";
 
 // Sprint Dim 28 — Enterprise Auth (SSO/OIDC/SAML)
-export {
-  validateSsoConfig,
-  buildSsoAuthUrl,
-  parseSsoCallback,
-} from "./enterprise-auth.js";
+export { validateSsoConfig, buildSsoAuthUrl, parseSsoCallback } from "./enterprise-auth.js";
 export type {
   SsoProtocol,
   AuthenticatorAssuranceLevel,
@@ -2306,17 +2278,9 @@ export {
   recordDocsQuality,
   loadDocsQualityLog,
 } from "./docs-quality.js";
-export type {
-  DocsQualityResult,
-  DocsCheckConfig,
-} from "./docs-quality.js";
-export {
-  generateConfigReference,
-  renderConfigReferenceMarkdown,
-} from "./config-doc-generator.js";
-export type {
-  ConfigFieldDoc,
-} from "./config-doc-generator.js";
+export type { DocsQualityResult, DocsCheckConfig } from "./docs-quality.js";
+export { generateConfigReference, renderConfigReferenceMarkdown } from "./config-doc-generator.js";
+export type { ConfigFieldDoc } from "./config-doc-generator.js";
 
 // Sprint Dim 30 — UX trust / explainability
 export {

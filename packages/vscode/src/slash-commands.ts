@@ -33,6 +33,11 @@ export interface SlashCommand {
    * Return the markdown string to display as the assistant response.
    */
   execute?: (args: string, projectRoot: string) => Promise<string>;
+  /**
+   * If defined, runs before the model loop and prepends its output to the user message.
+   * Unlike execute(), the model loop still runs — prepare() injects live context first.
+   */
+  prepare?: (args: string, projectRoot: string) => Promise<string>;
 }
 
 // ── Built-in commands ───────────────────────────────────────────────────────
@@ -113,11 +118,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     async execute(args, projectRoot) {
       const level = args.trim() || "light";
       try {
-        const { stdout, stderr } = await execFileAsync(
-          "danteforge",
-          ["score", "--level", level],
-          { cwd: projectRoot, timeout: 60_000, windowsHide: true },
-        );
+        const { stdout, stderr } = await execFileAsync("danteforge", ["score", "--level", level], {
+          cwd: projectRoot,
+          timeout: 60_000,
+          windowsHide: true,
+        });
         const out = (stdout + stderr).trim();
         return out.length > 0 ? `\`\`\`\n${out}\n\`\`\`` : "_No output from danteforge score._";
       } catch (err: unknown) {
@@ -136,9 +141,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const target = extra?.trim() || "9.0";
       return `Run the DanteForge ascend loop targeting ${target}/10. First run \`danteforge score --level light\` to get the live baseline, then execute \`danteforge ascend\` and report the verified before/after score delta.`;
     },
-    async execute(_args, projectRoot) {
-      // Inject a live baseline score so the model starts with accurate data
-      // and cannot substitute stale .danteforge/ASCEND_REPORT.md.
+    // prepare() runs before the model loop — injects live baseline so Grok cannot invent
+    // a before-score from the stale .danteforge/ASCEND_REPORT.md.
+    async prepare(_args, projectRoot) {
       try {
         const { stdout, stderr } = await execFileAsync(
           "danteforge",
@@ -146,11 +151,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
           { cwd: projectRoot, timeout: 30_000, windowsHide: true },
         );
         const baseline = (stdout + stderr).trim();
-        const baselineBlock = baseline.length > 0 ? `\`\`\`\n${baseline}\n\`\`\`` : "_No output from danteforge score._";
-        return `**Live baseline (verified by runtime before ascend loop):**\n${baselineBlock}\n\nStarting ascend improvement loop. Run \`danteforge score --level light\` after each improvement cycle and report the verified delta.`;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return `**Baseline score unavailable** (danteforge score failed: ${msg.trim()})\n\nProceeding with ascend. Run \`danteforge score --level light\` manually to establish baseline before claiming any improvements.`;
+        if (!baseline) return "";
+        return `**[Live baseline — captured by runtime before ascend loop]**\n\`\`\`\n${baseline}\n\`\`\`\n\n`;
+      } catch {
+        return "";
       }
     },
   },
@@ -174,9 +178,7 @@ function buildCodeContext(selection: string, filePath: string): string {
  * Returns null if the input does not start with a recognised slash command.
  * The '/' must be the very first character (no leading whitespace).
  */
-export function parseSlashCommand(
-  input: string,
-): { command: SlashCommand; args: string } | null {
+export function parseSlashCommand(input: string): { command: SlashCommand; args: string } | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith("/")) return null;
 
