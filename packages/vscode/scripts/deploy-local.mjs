@@ -1,7 +1,7 @@
 // Copies the built extension.js to all installed dantecode VS Code extension directories.
 // Runs automatically via tsup onSuccess after every build.
-import { copyFileSync, existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { copyFileSync, existsSync, readdirSync, writeFileSync } from "fs";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 
@@ -30,5 +30,7 @@ if (installed.length === 0) {
 
 for (const dest of installed) {
   copyFileSync(distSrc, dest);
+  // Signal the running extension that a reload is needed to activate the new build.
+  writeFileSync(join(dirname(dest), "RELOAD_NEEDED"), new Date().toISOString(), "utf8");
   console.log("[deploy-local] ✅ Deployed →", dest);
 }

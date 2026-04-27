@@ -6,6 +6,8 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { existsSync, unlinkSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { DEFAULT_MODEL_ID, MODEL_CATALOG, detectInstallContext, setEditQualityOutputHook } from "@dantecode/core";
 
 import { ChatSidebarProvider } from "./sidebar-provider.js";
@@ -102,6 +104,28 @@ export function getPendingReviewComments(): Array<{ file: string; comment: strin
 
 export function activate(context: vscode.ExtensionContext): void {
   const extensionUri = context.extensionUri;
+
+  // ── Reload-notification infrastructure ──
+  // On fresh activation (after a reload), silently delete any pending marker so the
+  // file watcher below doesn't fire again in the same window session.
+  const _reloadMarker = path.join(extensionUri.fsPath, "dist", "RELOAD_NEEDED");
+  if (existsSync(_reloadMarker)) {
+    try { unlinkSync(_reloadMarker); } catch { /* ignore */ }
+  }
+  // Watch for the marker file that deploy-local.mjs creates after each build.
+  // Fires while the OLD extension is running — prompts the user to reload.
+  const _reloadWatcher = vscode.workspace.createFileSystemWatcher(_reloadMarker);
+  _reloadWatcher.onDidCreate(() => {
+    vscode.window.showInformationMessage(
+      "DanteCode was rebuilt. Reload window to activate the latest fixes.",
+      "Reload Now"
+    ).then((sel) => {
+      if (sel === "Reload Now") {
+        vscode.commands.executeCommand("workbench.action.reloadWindow");
+      }
+    });
+  });
+  context.subscriptions.push(_reloadWatcher);
 
   // ── Repo map tree ──
   const projectRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
@@ -810,7 +834,6 @@ function registerCommands(context: vscode.ExtensionContext): void {
               } catch { /* first write */ }
               const commitSha = (() => {
                 try {
-                  const { execSync } = require("node:child_process") as typeof import("node:child_process");
                   return (execSync("git rev-parse --short HEAD", { cwd: wsRoot, encoding: "utf-8" }) as string).trim();
                 } catch { return ""; }
               })();

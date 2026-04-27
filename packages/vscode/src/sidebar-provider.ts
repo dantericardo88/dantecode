@@ -1189,6 +1189,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           } else if (event.type === "text_chunk" && _xmlSeenToolClose) {
             if (/\S/.test(event.text) && !event.text.trimStart().startsWith("<tool_use>")) {
               _xmlShouldCutNext = true;
+              // Abort the HTTP stream immediately — prevents the model from generating
+              // more epilogue tokens after </tool_use>.
+              roundController.abort();
             }
           }
         });
@@ -1258,8 +1261,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         } catch (streamErr: unknown) {
           clearTimeout(firstChunkTimeout);
           clearInterval(streamHeartbeat);
-          // If aborted by timeout and no response yet, show a timeout error
-          if (signal.aborted && fullResponse.length === 0) {
+          // Round-controller abort: epilogue text was detected and we killed the HTTP stream
+          // immediately. This is expected — fall through to normal post-loop processing.
+          if (roundController.signal.aborted) {
+            // intentional — do nothing, continue below
+          } else if (signal.aborted && fullResponse.length === 0) {
+            // Session-level timeout with no response yet — show error and stop.
             this.postMessage({
               type: "error",
               payload: {
@@ -1267,8 +1274,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               },
             });
             break;
+          } else {
+            throw streamErr; // re-throw unexpected errors to outer catch
           }
-          throw streamErr; // re-throw other errors to outer catch
         }
         clearTimeout(firstChunkTimeout);
         clearInterval(streamHeartbeat);

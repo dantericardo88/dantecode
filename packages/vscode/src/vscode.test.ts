@@ -611,9 +611,11 @@ vi.mock("node:fs/promises", () => ({
   stat: (...args: unknown[]) => mockStat(...args),
 }));
 
-// Mock node:fs (sync) for resolveShell in toolBash
+// Mock node:fs (sync) for resolveShell in toolBash + reload-notification in extension.ts
 vi.mock("node:fs", () => ({
   accessSync: vi.fn(),
+  existsSync: vi.fn(() => false),
+  unlinkSync: vi.fn(),
 }));
 
 // Mock node:child_process for toolBash
