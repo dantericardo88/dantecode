@@ -33,6 +33,14 @@ import type { FileSnapshot } from "@dantecode/core";
 export interface ToolResult {
   content: string;
   isError: boolean;
+  visionImage?: string | null;
+}
+
+export interface ToolApprovalRequest {
+  toolName: string;
+  input: Record<string, unknown>;
+  previewHunk?: ColoredDiffHunk | null;
+  permissionKind: "edit" | "bash" | "tools";
 }
 
 export interface DiffReviewPayload {
@@ -383,19 +391,29 @@ async function toolBash(input: Record<string, unknown>, projectRoot: string): Pr
     });
     return { content: result || "(no output)", isError: false };
   } catch (err: unknown) {
-    const error = err as { stdout?: string; stderr?: string; status?: number };
+    const error = err as {
+      stdout?: string;
+      stderr?: string;
+      status?: number;
+      signal?: string;
+      killed?: boolean;
+    };
     const stdout = typeof error.stdout === "string" ? error.stdout : "";
     const stderr = typeof error.stderr === "string" ? error.stderr : "";
     const exitCode = typeof error.status === "number" ? error.status : 1;
+    const timedOut = error.killed === true || error.signal === "SIGTERM";
+
+    const parts = [
+      stdout ? `stdout:\n${stdout}` : "",
+      stderr ? `stderr:\n${stderr}` : "",
+      timedOut
+        ? `[TRUNCATED — command killed after ${timeoutMs}ms — output above is incomplete. Do NOT summarize as complete. Report the truncation to the user and await instruction.]`
+        : `Exit code: ${exitCode}`,
+    ].filter(Boolean);
+
     return {
-      content: [
-        stdout ? `stdout:\n${stdout}` : "",
-        stderr ? `stderr:\n${stderr}` : "",
-        `Exit code: ${exitCode}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      isError: exitCode !== 0,
+      content: parts.join("\n"),
+      isError: true,
     };
   }
 }
@@ -771,7 +789,10 @@ export async function executeTool(
             "self_modification_denied",
             filePath,
           );
-          return { content: `Self-modification blocked: ${filePath}`, isError: true };
+          return {
+            content: `Self-modification blocked (PERMANENT): ${filePath} — DanteCode protects its own source files. Do not retry this write.`,
+            isError: true,
+          };
         }
       } else {
         await appendSelfModificationAudit(
@@ -780,7 +801,10 @@ export async function executeTool(
           "self_modification_denied",
           filePath,
         );
-        return { content: `Self-modification blocked: ${filePath}`, isError: true };
+        return {
+          content: `Self-modification blocked (PERMANENT): ${filePath} — DanteCode protects its own source files. Do not retry this write.`,
+          isError: true,
+        };
       }
     }
 
@@ -1010,37 +1034,139 @@ function parseToolCallPayload(
 // ----------------------------------------------------------------------------
 
 /**
+ * Finds the byte-offset spans of all <tool_use>...</tool_use> blocks in text using
+ * a 4-state FSM that tracks JSON string context. This prevents false splits when
+ * the literal string "</tool_use>" appears inside a JSON string value.
+ *
+ * States: SCANNING → IN_PAYLOAD ↔ IN_JSON_STRING, IN_PAYLOAD → IN_CLOSE_TAG → SCANNING
+ */
+export function findToolUseSpans(text: string): Array<{ start: number; end: number }> {
+  const OPEN = "<tool_use>";
+  const CLOSE = "</tool_use>";
+  const spans: Array<{ start: number; end: number }> = [];
+
+  const enum State { SCANNING, IN_PAYLOAD, IN_JSON_STRING, IN_CLOSE_TAG }
+  let state: State = State.SCANNING;
+  let blockStart = 0;
+  let escapedNext = false;
+  let tentativeClose = "";
+  let i = 0;
+
+  while (i < text.length) {
+    switch (state) {
+      case State.SCANNING: {
+        const idx = text.indexOf(OPEN, i);
+        if (idx < 0) return spans;
+        blockStart = idx;
+        i = idx + OPEN.length;
+        state = State.IN_PAYLOAD;
+        escapedNext = false;
+        tentativeClose = "";
+        break;
+      }
+      case State.IN_PAYLOAD: {
+        const ch = text[i]!;
+        if (ch === '"') {
+          state = State.IN_JSON_STRING;
+          escapedNext = false;
+          i++;
+        } else if (ch === "<") {
+          tentativeClose = "<";
+          state = State.IN_CLOSE_TAG;
+          i++;
+        } else {
+          i++;
+        }
+        break;
+      }
+      case State.IN_JSON_STRING: {
+        const ch = text[i]!;
+        if (escapedNext) {
+          escapedNext = false;
+        } else if (ch === "\\") {
+          escapedNext = true;
+        } else if (ch === '"') {
+          state = State.IN_PAYLOAD;
+        }
+        i++;
+        break;
+      }
+      case State.IN_CLOSE_TAG: {
+        const ch = text[i]!;
+        tentativeClose += ch;
+        if (CLOSE.startsWith(tentativeClose)) {
+          if (tentativeClose === CLOSE) {
+            // Complete close tag found
+            spans.push({ start: blockStart, end: i + 1 });
+            state = State.SCANNING;
+            tentativeClose = "";
+          }
+          i++;
+        } else {
+          // False close — the accumulated chars were JSON content, not a close tag
+          state = State.IN_PAYLOAD;
+          tentativeClose = "";
+          i++;
+        }
+        break;
+      }
+    }
+  }
+
+  return spans;
+}
+
+/**
  * Extracts <tool_use> blocks from the model's response text.
  * Returns the cleaned text (with tool blocks removed), parsed tool calls,
  * and the epilogue — text that appears after the last tool call block.
  * The epilogue is where models (especially Grok) write fabricated success summaries.
  */
+// Gate 13: whitelist of known tool names — anything else is a phantom call
+const KNOWN_TOOL_NAMES = new Set([
+  "Read", "Write", "Edit", "ListDir", "Bash", "Glob", "Grep",
+  "GitCommit", "GitPush", "SelfUpdate", "WebSearch", "WebFetch", "SubAgent",
+]);
+
 export function extractToolCalls(text: string): {
   cleanText: string;
   toolCalls: ExtractedToolCall[];
   epilogue: string;
+  phantomToolNames: string[];
 } {
   const toolCalls: ExtractedToolCall[] = [];
+  const phantomToolNames: string[] = [];
   let cleanText = text;
   let idCounter = 0;
   let lastToolCallEnd = -1; // tracks end position of last tool block in original text
 
-  // Pattern 1: <tool_use>JSON</tool_use>
-  const xmlPattern = /<tool_use>\s*([\s\S]*?)\s*<\/tool_use>/g;
-  let match: RegExpExecArray | null;
+  // Pattern 1: <tool_use>JSON</tool_use> — use escape-aware FSM to find spans
+  const spans = findToolUseSpans(text);
+  const OPEN_LEN = "<tool_use>".length;
+  const CLOSE_LEN = "</tool_use>".length;
 
-  while ((match = xmlPattern.exec(text)) !== null) {
-    const parsed = parseToolCallPayload(match[1]!);
+  for (const span of spans) {
+    const fullMatch = text.slice(span.start, span.end);
+    const innerRaw = text.slice(span.start + OPEN_LEN, span.end - CLOSE_LEN);
+    const parsed = parseToolCallPayload(innerRaw.trim());
     if (parsed?.name && parsed.input) {
-      toolCalls.push({
-        id: `tc-${Date.now()}-${idCounter++}`,
-        name: parsed.name,
-        input: parsed.input,
-      });
-      lastToolCallEnd = match.index + match[0].length;
+      if (!KNOWN_TOOL_NAMES.has(parsed.name)) {
+        // Gate 13: unknown tool name — phantom call, do not execute
+        phantomToolNames.push(parsed.name);
+      } else {
+        toolCalls.push({
+          id: `tc-${Date.now()}-${idCounter++}`,
+          name: parsed.name,
+          input: parsed.input,
+        });
+      }
+      lastToolCallEnd = span.end;
     }
-    cleanText = cleanText.replace(match[0], "");
+    cleanText = cleanText.replace(fullMatch, "");
   }
+
+  // Legacy match variable kept for Pattern 2 below
+  let match: RegExpExecArray | null;
 
   // Pattern 2: ```json blocks with tool structure
   const jsonPattern =
@@ -1061,7 +1187,7 @@ export function extractToolCalls(text: string): {
   // Extract the epilogue: prose written after the last tool block
   const epilogue = lastToolCallEnd >= 0 ? text.slice(lastToolCallEnd).trim() : "";
 
-  return { cleanText: cleanText.trim(), toolCalls, epilogue };
+  return { cleanText: cleanText.trim(), toolCalls, epilogue, phantomToolNames };
 }
 
 const TOOL_USE_CLOSE = "</tool_use>";
@@ -1082,8 +1208,8 @@ export function shouldCutStream(text: string): boolean {
   const afterClose = text.slice(lastCloseIdx + TOOL_USE_CLOSE.length);
   // Allow chaining: another tool call is starting
   if (afterClose.trimStart().startsWith("<tool_use>")) return false;
-  // Cut when a non-whitespace character appears on a new line (epilogue paragraph)
-  return /\n\S/.test(afterClose);
+  // Cut when ANY non-whitespace follows (same-line or new-line epilogue)
+  return /\S/.test(afterClose);
 }
 
 // ----------------------------------------------------------------------------

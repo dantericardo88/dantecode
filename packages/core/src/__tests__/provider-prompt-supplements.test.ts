@@ -103,6 +103,61 @@ describe("getProviderPromptSupplement — Grok failure triage taxonomy", () => {
   });
 });
 
+describe("getProviderPromptSupplement — Grok truncated output rule (Rule 16)", () => {
+  it("contains TRUNCATED TOOL OUTPUT rule", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("TRUNCATED TOOL OUTPUT");
+  });
+
+  it("prohibits inventing results from truncated output", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("[TRUNCATED —]");
+  });
+
+  it("requires reporting truncation verbatim, not summarizing", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("do NOT invent what the remaining output");
+  });
+
+  it("classifies truncation fabrication as fabrication-class event", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("Inventing results from a truncated command");
+  });
+
+  it("Claude supplement does NOT contain TRUNCATED TOOL OUTPUT", () => {
+    const s = getProviderPromptSupplement("anthropic/claude-sonnet-4-6");
+    expect(s).not.toContain("TRUNCATED TOOL OUTPUT");
+  });
+});
+
+describe("getProviderPromptSupplement — Grok improvement verification rule (Rule 17)", () => {
+  it("contains IMPROVEMENT VERIFICATION rule", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("IMPROVEMENT VERIFICATION");
+  });
+
+  it("requires danteforge score after improvement commands", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("danteforge score --level light");
+  });
+
+  it("covers danteforge ascend and autoforge commands", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("danteforge ascend");
+    expect(s).toContain("danteforge autoforge");
+  });
+
+  it("prohibits claiming success without verified score delta", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("never claim success without");
+  });
+
+  it("Claude supplement does NOT contain IMPROVEMENT VERIFICATION", () => {
+    const s = getProviderPromptSupplement("anthropic/claude-sonnet-4-6");
+    expect(s).not.toContain("IMPROVEMENT VERIFICATION");
+  });
+});
+
 describe("getStrictModeAddition", () => {
   it("contains tool-only-turn enforcement", () => {
     const s = getStrictModeAddition(3);

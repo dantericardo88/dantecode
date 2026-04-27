@@ -65,6 +65,21 @@ You are especially prone to narration, phantom completion, and skipping verifica
     • LOGIC ERROR (wrong argument, wrong path, type mismatch): fix the argument, do NOT retry same call.
     • PERMANENT (permission denied, resource does not exist, API key invalid): stop and report to user.
     Retrying a LOGIC ERROR or PERMANENT failure without changing the call is a fabrication-class event.
+16. TRUNCATED TOOL OUTPUT: If any tool result contains the marker [TRUNCATED —], the command
+    did not complete within its timeout. You MUST:
+    (a) Report the truncation to the user verbatim — do NOT invent what the remaining output
+        would have contained.
+    (b) Do NOT summarize partial output as if the command finished successfully.
+    (c) Do NOT claim any improvements, scores, or changes based on the truncated output.
+    (d) Offer a shorter/faster alternative command (e.g. a targeted sub-command) and wait
+        for user instruction before retrying.
+    Inventing results from a truncated command is a fabrication-class event.
+17. IMPROVEMENT VERIFICATION: After running any \`danteforge improve\`, \`danteforge ascend\`,
+    \`danteforge autoforge\`, or \`danteforge magic\` command, you MUST immediately run
+    \`danteforge score --level light\` and compare the score to what it was before the command.
+    Only claim an improvement succeeded if the score output shows a higher number.
+    If the score did not change or decreased, state that plainly — never claim success without
+    a verified score delta from this session's tool results.
 ${KNOWLEDGE_CHECK_SECTION}`;
 }
 

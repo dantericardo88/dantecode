@@ -699,10 +699,11 @@ import {
   isSelfModificationBashCommand,
   executeTool,
   extractToolCalls,
+  findToolUseSpans,
   shouldCutStream,
   type ToolExecutionContext,
 } from "./agent-tools.js";
-import { ChatSidebarProvider } from "./sidebar-provider.js";
+import { ChatSidebarProvider, stripPreToolNarration } from "./sidebar-provider.js";
 import { AuditPanelProvider } from "./audit-panel-provider.js";
 import { DanteCodeCompletionProvider } from "./inline-completion.js";
 import { activate, deactivate, setPendingDiff } from "./extension.js";
@@ -2101,6 +2102,43 @@ describe("executeTool integration", () => {
     expect(mockExecSync).toHaveBeenCalled();
   });
 
+  it("marks timed-out Bash output with TRUNCATED marker (killed=true)", async () => {
+    const context = makeContext();
+    const timeoutError = Object.assign(new Error("spawnSync killed"), {
+      killed: true,
+      signal: "SIGTERM",
+      status: null,
+      stdout: "partial output line\n",
+      stderr: "",
+    });
+    mockExecSync.mockImplementation(() => { throw timeoutError; });
+
+    const result = await executeTool("Bash", { command: "danteforge ascend", timeout: 5000 }, "/proj", context);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("[TRUNCATED —");
+    expect(result.content).toContain("killed after 5000ms");
+    expect(result.content).toContain("Do NOT summarize as complete");
+  });
+
+  it("does NOT add TRUNCATED marker for normal non-zero exit codes", async () => {
+    const context = makeContext();
+    const exitError = Object.assign(new Error("Command failed"), {
+      killed: false,
+      signal: null,
+      status: 1,
+      stdout: "",
+      stderr: "command not found: foo",
+    });
+    mockExecSync.mockImplementation(() => { throw exitError; });
+
+    const result = await executeTool("Bash", { command: "foo" }, "/proj", context);
+
+    expect(result.isError).toBe(true);
+    expect(result.content).not.toContain("[TRUNCATED");
+    expect(result.content).toContain("Exit code: 1");
+  });
+
   it("routes SelfUpdate through the CLI self-update command in repo-dev mode", async () => {
     const context = makeContext();
     mockDetectInstallContext.mockReturnValueOnce({
@@ -2462,5 +2500,134 @@ describe("shouldCutStream", () => {
       '<tool_use>{"name":"Edit","input":{"file_path":"a.ts","old_string":"x","new_string":"y"}}</tool_use>\n' +
       "Done! File has been updated.";
     expect(shouldCutStream(withEpilogue)).toBe(true);
+  });
+
+  it("returns true when epilogue appears on the SAME LINE as </tool_use>", () => {
+    const text = '<tool_use>{"name":"GitPush","input":{}}</tool_use> ✅ Push succeeded!';
+    expect(shouldCutStream(text)).toBe(true);
+  });
+
+  it("returns true for a single non-whitespace char immediately after closing tag", () => {
+    const text = '<tool_use>{"name":"GitPush","input":{}}</tool_use>x';
+    expect(shouldCutStream(text)).toBe(true);
+  });
+
+  it("returns false when chained <tool_use> starts on the same line after close", () => {
+    const text =
+      '<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use><tool_use>{"name":"Edit"';
+    expect(shouldCutStream(text)).toBe(false);
+  });
+});
+
+// ─── findToolUseSpans — escape-aware FSM ─────────────────────────────────────
+
+describe("findToolUseSpans", () => {
+  it("finds a single block with correct start/end offsets", () => {
+    const text = 'Before <tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use> After';
+    const spans = findToolUseSpans(text);
+    expect(spans).toHaveLength(1);
+    const extracted = text.slice(spans[0]!.start, spans[0]!.end);
+    expect(extracted).toBe('<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>');
+  });
+
+  it("does NOT split on </tool_use> inside a JSON string value", () => {
+    const text =
+      '<tool_use>{"name":"Edit","input":{"file_path":"x.ts","old_string":"see </tool_use> tag","new_string":"fixed"}}</tool_use>';
+    const spans = findToolUseSpans(text);
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe(text);
+  });
+
+  it("handles escaped quote inside JSON string without exiting string state", () => {
+    const text = '<tool_use>{"name":"Bash","input":{"command":"echo \\"</tool_use>\\""}}</tool_use>';
+    const spans = findToolUseSpans(text);
+    expect(spans).toHaveLength(1);
+  });
+
+  it("finds multiple consecutive blocks", () => {
+    const a = '<tool_use>{"name":"Read","input":{"file_path":"a.ts"}}</tool_use>';
+    const b = '<tool_use>{"name":"Edit","input":{"file_path":"a.ts","old_string":"x","new_string":"y"}}</tool_use>';
+    const spans = findToolUseSpans(a + b);
+    expect(spans).toHaveLength(2);
+    expect((a + b).slice(spans[0]!.start, spans[0]!.end)).toBe(a);
+    expect((a + b).slice(spans[1]!.start, spans[1]!.end)).toBe(b);
+  });
+
+  it("returns empty array for plain text with no tool blocks", () => {
+    expect(findToolUseSpans("Just plain text, no tools.")).toHaveLength(0);
+  });
+});
+
+describe("extractToolCalls — escape-aware regression", () => {
+  it("correctly parses tool call when JSON string value contains </tool_use>", () => {
+    const text =
+      '<tool_use>{"name":"Edit","input":{"file_path":"x.ts","old_string":"see </tool_use> tag","new_string":"fixed"}}</tool_use>';
+    const { toolCalls, phantomToolNames } = extractToolCalls(text);
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.name).toBe("Edit");
+    expect((toolCalls[0]?.input as Record<string, string>)["old_string"]).toBe(
+      "see </tool_use> tag",
+    );
+    expect(phantomToolNames).toHaveLength(0);
+  });
+});
+
+// ─── Gate 14: stripPreToolNarration ──────────────────────────────────────────
+
+describe("stripPreToolNarration", () => {
+  it("strips 1-sentence preamble when tool call is present", () => {
+    const text = 'I will read the file.<tool_use>{"name":"Read","input":{}}</tool_use>';
+    expect(stripPreToolNarration(text, true)).toBe('<tool_use>{"name":"Read","input":{}}</tool_use>');
+  });
+
+  it("strips 8-sentence preamble when tool call is present (Grok pattern)", () => {
+    const preamble =
+      "Let me analyze this. First I will check the repo. Then I will edit. After that verify. Next push. Then confirm. Finally check CI. All steps will proceed.";
+    const tool = '<tool_use>{"name":"Bash","input":{"command":"git status"}}</tool_use>';
+    expect(stripPreToolNarration(preamble + tool, true)).toBe(tool);
+  });
+
+  it("returns text unchanged when hasToolCalls is false", () => {
+    const text = "Some narration with no tool call here.";
+    expect(stripPreToolNarration(text, false)).toBe(text);
+  });
+
+  it("returns text unchanged when tool call is the first character", () => {
+    const text = '<tool_use>{"name":"Read","input":{}}</tool_use>';
+    expect(stripPreToolNarration(text, true)).toBe(text);
+  });
+});
+
+// ─── Gate 13: phantom tool detection ─────────────────────────────────────────
+
+describe("extractToolCalls — phantom tool detection (Gate 13)", () => {
+  it("includes known tool in toolCalls and leaves phantomToolNames empty", () => {
+    const text = '<tool_use>{"name":"Read","input":{"file_path":"foo.ts"}}</tool_use>';
+    const { toolCalls, phantomToolNames } = extractToolCalls(text);
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.name).toBe("Read");
+    expect(phantomToolNames).toHaveLength(0);
+  });
+
+  it("puts unknown tool name into phantomToolNames, not toolCalls", () => {
+    const text = '<tool_use>{"name":"DeployToProduction","input":{"env":"prod"}}</tool_use>';
+    const { toolCalls, phantomToolNames } = extractToolCalls(text);
+    expect(toolCalls).toHaveLength(0);
+    expect(phantomToolNames).toContain("DeployToProduction");
+  });
+
+  it("separates known and phantom tools in the same response", () => {
+    const text =
+      '<tool_use>{"name":"Bash","input":{"command":"npm test"}}</tool_use>' +
+      '<tool_use>{"name":"RunTests","input":{}}</tool_use>' +
+      '<tool_use>{"name":"GitPush","input":{"remote":"origin","branch":"main"}}</tool_use>';
+    const { toolCalls, phantomToolNames } = extractToolCalls(text);
+    expect(toolCalls.map((t) => t.name)).toEqual(["Bash", "GitPush"]);
+    expect(phantomToolNames).toEqual(["RunTests"]);
+  });
+
+  it("returns empty phantomToolNames for a text-only response", () => {
+    const { phantomToolNames } = extractToolCalls("No tools here, just text.");
+    expect(phantomToolNames).toHaveLength(0);
   });
 });
