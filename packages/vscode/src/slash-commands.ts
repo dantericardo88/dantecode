@@ -139,22 +139,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     icon: "🚀",
     buildPrompt(_selection, _filePath, extra) {
       const target = extra?.trim() || "9.0";
-      return `Run the DanteForge ascend loop targeting ${target}/10. First run \`danteforge score --level light\` to get the live baseline, then execute \`danteforge ascend\` and report the verified before/after score delta.`;
+      return `Run \`danteforge ascend${target !== "9.0" ? ` --target ${target}` : ""}\` in the project root and print the raw output verbatim.`;
     },
-    // prepare() runs before the model loop — injects live baseline so Grok cannot invent
-    // a before-score from the stale .danteforge/ASCEND_REPORT.md.
-    async prepare(_args, projectRoot) {
+    // execute() bypasses the model entirely — danteforge ascend handles the autonomous loop.
+    // Using prepare() + model proved unreliable: Grok substitutes its own workflow instead
+    // of calling the CLI, fabricating improvement tables and running unauthorized commands.
+    async execute(args, projectRoot) {
+      const argv = args.trim() ? ["ascend", "--target", args.trim()] : ["ascend"];
       try {
-        const { stdout, stderr } = await execFileAsync(
-          "danteforge",
-          ["score", "--level", "light"],
-          { cwd: projectRoot, timeout: 30_000, windowsHide: true },
-        );
-        const baseline = (stdout + stderr).trim();
-        if (!baseline) return "";
-        return `**[Live baseline — captured by runtime before ascend loop]**\n\`\`\`\n${baseline}\n\`\`\`\n\n`;
-      } catch {
-        return "";
+        const { stdout, stderr } = await execFileAsync("danteforge", argv, {
+          cwd: projectRoot,
+          timeout: 300_000, // 5 min — ascend can run many improvement cycles
+          windowsHide: true,
+        });
+        const out = (stdout + stderr).trim();
+        return out.length > 0 ? `\`\`\`\n${out}\n\`\`\`` : "_No output from danteforge ascend._";
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: string }).stderr ?? "";
+        const msg = err instanceof Error ? err.message : String(err);
+        const detail = (stderr || msg).trim();
+        return `**danteforge ascend failed**\n\n\`\`\`\n${detail}\n\`\`\``;
       }
     },
   },

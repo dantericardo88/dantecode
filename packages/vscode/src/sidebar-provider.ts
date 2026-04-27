@@ -558,6 +558,39 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    // Stale-build gate: if a rebuild happened but the window was never reloaded,
+    // block all chat requests and prompt the user to reload first.
+    {
+      const { existsSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const _marker = join(this.extensionUri.fsPath, "dist", "RELOAD_NEEDED");
+      if (existsSync(_marker)) {
+        this.messages.push({ role: "user", content: text });
+        this.postMessage({
+          type: "chat_response_chunk",
+          payload: {
+            chunk:
+              "⚠️ **DanteCode was rebuilt but this window is running the old version.**\n\n" +
+              "Reload the window to activate the latest fixes before sending messages.\n\n" +
+              "> `Ctrl+Shift+P` → **Developer: Reload Window**",
+            partial: "",
+          },
+        });
+        this.postMessage({ type: "chat_response_done", payload: {} });
+        void vscode.window
+          .showInformationMessage(
+            "DanteCode was rebuilt. Reload window to activate the latest fixes.",
+            "Reload Now",
+          )
+          .then((sel) => {
+            if (sel === "Reload Now") {
+              void vscode.commands.executeCommand("workbench.action.reloadWindow");
+            }
+          });
+        return;
+      }
+    }
+
     // Expand slash commands before processing
     try {
       const { parseSlashCommand, buildSlashPrompt } = await import("./slash-commands.js");

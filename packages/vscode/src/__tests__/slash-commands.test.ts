@@ -40,10 +40,10 @@ describe("listSlashCommands", () => {
     expect(scoreCmd?.execute).toBeTypeOf("function");
   });
 
-  it("/ascend has a prepare function (not execute) that injects live baseline", () => {
+  it("/ascend has an execute function (not prepare) — bypasses model to run danteforge ascend directly", () => {
     const ascendCmd = SLASH_COMMANDS.find((c) => c.name === "ascend");
-    expect(ascendCmd?.prepare).toBeTypeOf("function");
-    expect(ascendCmd?.execute).toBeUndefined();
+    expect(ascendCmd?.execute).toBeTypeOf("function");
+    expect(ascendCmd?.prepare).toBeUndefined();
   });
 });
 
