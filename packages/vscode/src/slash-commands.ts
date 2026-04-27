@@ -128,6 +128,32 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       }
     },
   },
+  {
+    name: "ascend",
+    description: "Run danteforge ascend — autonomous quality improvement loop",
+    icon: "🚀",
+    buildPrompt(_selection, _filePath, extra) {
+      const target = extra?.trim() || "9.0";
+      return `Run the DanteForge ascend loop targeting ${target}/10. First run \`danteforge score --level light\` to get the live baseline, then execute \`danteforge ascend\` and report the verified before/after score delta.`;
+    },
+    async execute(_args, projectRoot) {
+      // Inject a live baseline score so the model starts with accurate data
+      // and cannot substitute stale .danteforge/ASCEND_REPORT.md.
+      try {
+        const { stdout, stderr } = await execFileAsync(
+          "danteforge",
+          ["score", "--level", "light"],
+          { cwd: projectRoot, timeout: 30_000, windowsHide: true },
+        );
+        const baseline = (stdout + stderr).trim();
+        const baselineBlock = baseline.length > 0 ? `\`\`\`\n${baseline}\n\`\`\`` : "_No output from danteforge score._";
+        return `**Live baseline (verified by runtime before ascend loop):**\n${baselineBlock}\n\nStarting ascend improvement loop. Run \`danteforge score --level light\` after each improvement cycle and report the verified delta.`;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return `**Baseline score unavailable** (danteforge score failed: ${msg.trim()})\n\nProceeding with ascend. Run \`danteforge score --level light\` manually to establish baseline before claiming any improvements.`;
+      }
+    },
+  },
 ];
 
 /** Map for O(1) lookup by name */

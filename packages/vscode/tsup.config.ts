@@ -12,4 +12,5 @@ export default defineConfig({
     "@dantecode/git-engine",
     "@dantecode/skill-adapter",
   ],
+  onSuccess: "node scripts/deploy-local.mjs",
 });

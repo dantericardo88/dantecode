@@ -1076,6 +1076,12 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         roundNumber++;
         const isFirstRound = roundNumber === 1;
 
+        // Per-round abort controller (Cline pattern): aborts only this round's HTTP stream.
+        // The session-level this.abortController remains live for the user stop button.
+        const roundController = new AbortController();
+        const _forwardAbort = () => roundController.abort();
+        signal.addEventListener("abort", _forwardAbort);
+
         // Phase 1 prune: erase old tool outputs when context exceeds 40k tokens.
         // Runs before compactTextTranscript so the sliding-window eviction sees the pruned state.
         if (wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
@@ -1142,7 +1148,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         const streamResult = await router.stream(agentMessages, {
           system: systemPrompt,
           maxTokens: tier === "capable" ? 16384 : 8192,
-          abortSignal: signal,
+          abortSignal: roundController.signal,
         });
 
         let fullResponse = "";
@@ -1256,6 +1262,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         clearTimeout(firstChunkTimeout);
         clearInterval(streamHeartbeat);
+        // Abort this round's HTTP stream and unchain the session signal listener.
+        roundController.abort();
+        signal.removeEventListener("abort", _forwardAbort);
 
         // Round 2+ flush: if the stream ended with no tool call, the buffered chunks
         // are a real text response — send them all now.

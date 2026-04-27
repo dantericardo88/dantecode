@@ -9,9 +9,9 @@ import {
 // ── listSlashCommands ─────────────────────────────────────────────────────
 
 describe("listSlashCommands", () => {
-  it("returns all 8 built-in commands", () => {
+  it("returns all 9 built-in commands", () => {
     const cmds = listSlashCommands();
-    expect(cmds).toHaveLength(8);
+    expect(cmds).toHaveLength(9);
   });
 
   it("all commands have name, description, icon", () => {
@@ -22,7 +22,7 @@ describe("listSlashCommands", () => {
     }
   });
 
-  it("includes fix, test, explain, comment, optimize, review, refactor, score", () => {
+  it("includes fix, test, explain, comment, optimize, review, refactor, score, ascend", () => {
     const names = SLASH_COMMANDS.map((c) => c.name);
     expect(names).toContain("fix");
     expect(names).toContain("test");
@@ -32,11 +32,17 @@ describe("listSlashCommands", () => {
     expect(names).toContain("review");
     expect(names).toContain("refactor");
     expect(names).toContain("score");
+    expect(names).toContain("ascend");
   });
 
   it("/score has an execute function (bypasses LLM)", () => {
     const scoreCmd = SLASH_COMMANDS.find((c) => c.name === "score");
     expect(scoreCmd?.execute).toBeTypeOf("function");
+  });
+
+  it("/ascend has an execute function that injects live baseline", () => {
+    const ascendCmd = SLASH_COMMANDS.find((c) => c.name === "ascend");
+    expect(ascendCmd?.execute).toBeTypeOf("function");
   });
 });
 

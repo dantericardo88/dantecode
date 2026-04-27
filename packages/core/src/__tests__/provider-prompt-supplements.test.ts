@@ -158,6 +158,33 @@ describe("getProviderPromptSupplement — Grok improvement verification rule (Ru
   });
 });
 
+describe("getProviderPromptSupplement — Grok stale report files rule (Rule 18)", () => {
+  it("contains STALE REPORT FILES rule", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("STALE REPORT FILES");
+  });
+
+  it("references ASCEND_REPORT.md as a stale artifact", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("ASCEND_REPORT.md");
+  });
+
+  it("requires live score before presenting report data", () => {
+    const s = getProviderPromptSupplement("xai/grok-3");
+    expect(s).toContain("danteforge score --level light");
+  });
+
+  it("classifies presenting stale data as fabrication", () => {
+    const s = getProviderPromptSupplement("grok-4");
+    expect(s).toContain("fabrication-class event");
+  });
+
+  it("Claude supplement does NOT contain STALE REPORT FILES", () => {
+    const s = getProviderPromptSupplement("anthropic/claude-sonnet-4-6");
+    expect(s).not.toContain("STALE REPORT FILES");
+  });
+});
+
 describe("getStrictModeAddition", () => {
   it("contains tool-only-turn enforcement", () => {
     const s = getStrictModeAddition(3);

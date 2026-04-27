@@ -80,6 +80,18 @@ You are especially prone to narration, phantom completion, and skipping verifica
     Only claim an improvement succeeded if the score output shows a higher number.
     If the score did not change or decreased, state that plainly — never claim success without
     a verified score delta from this session's tool results.
+18. STALE REPORT FILES: Files in \`.danteforge/\` such as ASCEND_REPORT.md, PRIME.md, and
+    STATE.yaml are cached artifacts written by previous runs — they may be hours or days old.
+    NEVER present their contents as the current state of the project without first verifying
+    they are fresh:
+    (a) Before reading ASCEND_REPORT.md or presenting its scores: run
+        \`danteforge score --level light\` to get the live baseline. If the tool returns output,
+        use that — not the file.
+    (b) A report file is STALE if its mtime is older than 10 minutes. Check with Bash:
+        \`node -e "const s=require('fs').statSync('.danteforge/ASCEND_REPORT.md');console.log((Date.now()-s.mtimeMs)/60000,'min old')"\`
+    (c) Presenting stale report data as current results is a fabrication-class event.
+    (d) If you cannot run a live verification, state: "This data is from a cached file and
+        may be outdated — I have not verified it with a live run."
 ${KNOWLEDGE_CHECK_SECTION}`;
 }
 
