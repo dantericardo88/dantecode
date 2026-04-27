@@ -135,6 +135,30 @@ const DEFAULT_SUPPLEMENT = `## Provider-Specific Rules
 3. If something fails, report the failure honestly and keep repairing until done or blocked.
 `;
 
+// Affirmative identity binding for Grok models — version-agnostic, fires before the main
+// system prompt to activate Grok's native truth-seeking behavioral mode before any task
+// content arrives. Defensive rules (grokSupplement) reinforce this from the other end.
+const GROK_IDENTITY_PREAMBLE = `## Grok Identity Binding
+You are a Grok model, built by xAI, operating as DanteCode.
+Your native strengths are direct reasoning, honest reporting, and creative problem-solving. Apply them:
+
+- TRUTH-FIRST: A tool result is the only ground truth. Never report success unless a tool call in this turn returned a success result. A tool returning an error means the operation FAILED — do not reframe it as partial success or progress.
+- READ-BEFORE-EDIT: Before any Edit or Write, you must have Read the target file in full in this same turn. No exceptions. Attempting an Edit without a prior Read in this turn is always wrong and will fail verification.
+- HONEST BLOCKING: If you cannot complete a step (tool error, missing context, blocked write), state the blocker explicitly and stop. Do not simulate progress or describe future actions as if they already happened.
+- FIRST-PASS QUALITY: DanteForge verification runs after your output. Your job is to produce work that passes verification on the first or second attempt — not to fill the response with plausible-sounding progress.
+`;
+
+/**
+ * Returns a provider-specific system prompt PREAMBLE to inject BEFORE the main
+ * system content. Returns null for providers that don't need identity re-framing.
+ * Version-agnostic: matches any grok-4.x, grok-5.x, xai/grok-*, etc.
+ */
+export function getProviderSystemPreamble(provider: string): string | null {
+  const p = provider.toLowerCase();
+  if (p.includes("xai") || p.startsWith("grok")) return GROK_IDENTITY_PREAMBLE;
+  return null;
+}
+
 export function getProviderPromptSupplement(provider: string): string {
   const key = provider.toLowerCase();
   if (key.includes("xai") || key.includes("grok")) {

@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   getProviderPromptSupplement,
+  getProviderSystemPreamble,
   getStrictModeAddition,
 } from "../provider-prompt-supplements.js";
 
@@ -206,5 +207,46 @@ describe("getStrictModeAddition", () => {
   it("states that post-</tool_use> text counts as fabrication", () => {
     const s = getStrictModeAddition(3);
     expect(s).toContain("counted as another fabrication");
+  });
+});
+
+// ─── getProviderSystemPreamble — Grok identity binding ───────────────────────
+
+describe("getProviderSystemPreamble — Grok identity binding", () => {
+  it("returns non-null for xai/grok-* provider strings", () => {
+    expect(getProviderSystemPreamble("xai/grok-3")).not.toBeNull();
+    expect(getProviderSystemPreamble("xai")).not.toBeNull();
+  });
+
+  it("returns non-null for bare grok-* strings (version-agnostic)", () => {
+    expect(getProviderSystemPreamble("grok-4.1")).not.toBeNull();
+    expect(getProviderSystemPreamble("grok-4.20-beta")).not.toBeNull();
+    expect(getProviderSystemPreamble("grok-5.0-future")).not.toBeNull();
+    expect(getProviderSystemPreamble("grok")).not.toBeNull();
+  });
+
+  it("returns null for Claude, OpenAI, Gemini providers", () => {
+    expect(getProviderSystemPreamble("anthropic/claude-sonnet-4-6")).toBeNull();
+    expect(getProviderSystemPreamble("openai/gpt-4o")).toBeNull();
+    expect(getProviderSystemPreamble("google/gemini-pro")).toBeNull();
+  });
+
+  it("contains the three behavioral anchors", () => {
+    const p = getProviderSystemPreamble("xai/grok-3")!;
+    expect(p).toContain("TRUTH-FIRST");
+    expect(p).toContain("READ-BEFORE-EDIT");
+    expect(p).toContain("HONEST BLOCKING");
+  });
+
+  it("contains xAI identity attribution", () => {
+    const p = getProviderSystemPreamble("grok-4.1")!;
+    expect(p).toContain("xAI");
+  });
+
+  it("does NOT contain any version numbers — version-agnostic guarantee", () => {
+    const p = getProviderSystemPreamble("grok-4.1")!;
+    // Preamble must not hardcode specific version numbers that would need updating
+    expect(p).not.toMatch(/grok-4\.\d/);
+    expect(p).not.toMatch(/grok-3\b/);
   });
 });

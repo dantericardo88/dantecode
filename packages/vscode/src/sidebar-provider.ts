@@ -30,6 +30,7 @@ import {
   detectSelfImprovementContext,
   getContextUtilization,
   getProviderPromptSupplement,
+  getProviderSystemPreamble,
   getStrictModeAddition,
   getProviderCatalogEntry,
   groupCatalogModels,
@@ -713,6 +714,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     // Build system prompt with full workspace context + tool definitions
     const systemParts = [
       "You are DanteCode, an autonomous AI coding agent.",
+      // NOTE: Grok identity preamble is prepended below after array init — do not move this comment
       "You help users write, review, and improve code with quality-first principles.",
       "Always provide complete, production-ready code. Never use stubs, TODOs, or placeholders.",
       "",
@@ -737,6 +739,14 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       "- Keep paragraphs short (2-3 sentences max).",
       "",
     ];
+
+    // Prepend Grok identity binding BEFORE all other system content.
+    // Affirmative framing (who Grok is + what it's good at) must precede defensive rules
+    // to activate Grok's native truth-seeking mode. Zero impact on other providers.
+    const _grokPreamble = getProviderSystemPreamble(provider);
+    if (_grokPreamble) {
+      systemParts.unshift("", _grokPreamble);
+    }
 
     if (selfImprovement?.enabled) {
       systemParts.push("## Explicit Self-Improvement Workflow");
