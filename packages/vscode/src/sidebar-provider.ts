@@ -1147,13 +1147,28 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         let fullResponse = "";
 
-        // S4: mid-stream XML parser — fires tool_block_complete when </tool_use> closes,
-        // allowing O(1) epilogue detection instead of rescanning fullResponse each chunk.
+        // S4: mid-stream XML parser — fires tool_block_start when <tool_use> opens and
+        // tool_block_complete when </tool_use> closes. tool_block_start retracts any
+        // pre-tool narration already shown in the live stream so the user never sees
+        // fabricated text that precedes a tool call.
         // shouldCutStream() is kept as a safety fallback (both paths run in parallel).
         let _xmlSeenToolClose = false;
         let _xmlShouldCutNext = false;
+        let _xmlHasSeenToolOpen = false;
+        const _round2PendingChunks: string[] = [];
         const _xmlParser = new XmlToolCallParser((event: import("@dantecode/core").XmlParserEvent) => {
-          if (event.type === "tool_block_complete") {
+          if (event.type === "tool_block_start") {
+            _xmlHasSeenToolOpen = true;
+            if (isFirstRound) {
+              // Retract any pre-tool narration already shown — clear the partial display.
+              this.postMessage({
+                type: "chat_response_chunk",
+                payload: { chunk: "", partial: "" },
+              });
+            }
+            // Round 2+: discard the speculative buffer — those chunks were narration.
+            _round2PendingChunks.length = 0;
+          } else if (event.type === "tool_block_complete") {
             _xmlSeenToolClose = true;
           } else if (event.type === "text_chunk" && _xmlSeenToolClose) {
             if (/\S/.test(event.text) && !event.text.trimStart().startsWith("<tool_use>")) {
@@ -1206,17 +1221,22 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             // Gate 10 fallback: full-buffer rescan catches anything the parser missed
             if (shouldCutStream(fullResponse)) break;
             if (isFirstRound) {
-              // First round: send partial (full response so far) for clean rendering
-              this.postMessage({
-                type: "chat_response_chunk",
-                payload: { chunk, partial: fullResponse },
-              });
+              // First round: send partial (full response so far) for clean rendering.
+              // If tool_block_start fired, a retraction was already sent — subsequent
+              // chunks inside the tool body are harmless (display already cleared).
+              if (!_xmlHasSeenToolOpen) {
+                this.postMessage({
+                  type: "chat_response_chunk",
+                  payload: { chunk, partial: fullResponse },
+                });
+              }
             } else {
-              // Subsequent rounds: chunk-only mode — APPENDS to existing buffer
-              this.postMessage({
-                type: "chat_response_chunk",
-                payload: { chunk, partial: "" },
-              });
+              // Round 2+: buffer speculatively. If a tool call is detected,
+              // tool_block_start clears the buffer (narration discarded). If the stream
+              // ends with no tool call, we flush the buffer — it was a text response.
+              if (!_xmlHasSeenToolOpen) {
+                _round2PendingChunks.push(chunk);
+              }
             }
           }
         } catch (streamErr: unknown) {
@@ -1236,6 +1256,17 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         clearTimeout(firstChunkTimeout);
         clearInterval(streamHeartbeat);
+
+        // Round 2+ flush: if the stream ended with no tool call, the buffered chunks
+        // are a real text response — send them all now.
+        if (!isFirstRound && _round2PendingChunks.length > 0 && !_xmlHasSeenToolOpen) {
+          for (const bufferedChunk of _round2PendingChunks) {
+            this.postMessage({
+              type: "chat_response_chunk",
+              payload: { chunk: bufferedChunk, partial: "" },
+            });
+          }
+        }
 
         if (this.stopRequested) {
           if (fullResponse.length > 0) {
@@ -1664,15 +1695,20 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
                 payload: { filePath, requiresConfirmation: true },
               });
             },
-            awaitSelfModConfirmation: async () => {
-              const selection = await vscode.window.showWarningMessage(
-                "DanteCode wants to modify protected project files. Allow this write once?",
-                { modal: true },
-                "Allow once",
-                "Block",
-              );
-              return selection === "Allow once";
-            },
+            // Only show the confirmation dialog during explicit self-improvement sessions.
+            // In normal agent runs, awaitSelfModConfirmation is undefined so agent-tools.ts
+            // hits the else-branch and returns the blocked error immediately (no modal hang).
+            awaitSelfModConfirmation: selfImprovement?.enabled
+              ? async () => {
+                  const selection = await vscode.window.showWarningMessage(
+                    "DanteCode wants to modify protected project files. Allow this write once?",
+                    { modal: true },
+                    "Allow once",
+                    "Block",
+                  );
+                  return selection === "Allow once";
+                }
+              : undefined,
           };
           let result: ToolResult;
           try {
