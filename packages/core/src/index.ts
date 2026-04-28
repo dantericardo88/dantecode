@@ -2282,6 +2282,45 @@ export type { DocsQualityResult, DocsCheckConfig } from "./docs-quality.js";
 export { generateConfigReference, renderConfigReferenceMarkdown } from "./config-doc-generator.js";
 export type { ConfigFieldDoc } from "./config-doc-generator.js";
 
+// Structured error hierarchy — replaces ad-hoc `throw new Error(...)` calls so
+// catch sites can pattern-match on type instead of regex-ing message strings.
+export {
+  DanteCodeError,
+  ConfigInvalidError,
+  ConfigMissingKeyError,
+  ToolExecutionError,
+  ToolInputInvalidError,
+  ProtectedFileWriteError,
+  StaleSnapshotError,
+  FileNotFoundError,
+  FileReadError,
+  FileWriteError,
+  ProviderUnavailableError,
+  ProviderRateLimitError,
+  ProviderAuthError,
+  ContextOverflowError,
+  ParseError,
+  WorkflowGateError,
+  ValidationError,
+  TimeoutError,
+  IntegrityError,
+  isDanteCodeError,
+  wrapAsDanteCodeError,
+} from "./errors.js";
+export type { DanteErrorCode, DanteErrorOptions, DanteRecoveryStrategy } from "./errors.js";
+
+// Resilience primitives — retry/timeout/parallel-with-limit, integrated with
+// the DanteCodeError recovery hints. Use at boundary points (provider calls,
+// tool spawns, network requests).
+export {
+  retry,
+  withTimeout,
+  retryWithTimeout,
+  isRetryable,
+  parallelWithLimit,
+} from "./resilience.js";
+export type { RetryOptions } from "./resilience.js";
+
 // Sprint Dim 30 — UX trust / explainability
 export {
   labelConfidence,
