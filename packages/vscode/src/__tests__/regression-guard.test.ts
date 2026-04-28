@@ -22,8 +22,12 @@ function read(rel: string): string {
   return readFileSync(join(VSCODE_SRC, rel), "utf-8");
 }
 
-describe("regression guard — sidebar-provider.ts webview", () => {
-  const src = read("sidebar-provider.ts");
+describe("regression guard — webview HTML/JS (lives in webview-html.ts since 2026-04-28 refactor)", () => {
+  // Refactor 2026-04-28: getHtmlForWebview was extracted from sidebar-provider.ts
+  // (5,749 → 3,493 lines) into webview-html.ts so HTML/CSS/JS can be edited
+  // independently from chat orchestration. All webview assertions now run
+  // against webview-html.ts.
+  const src = read("webview-html.ts");
 
   it("CSP uses 'unsafe-inline' (Antigravity silently blocks nonce-based CSP)", () => {
     // SYMPTOM IF BROKEN: send button does nothing, Enter creates a newline.
@@ -194,6 +198,22 @@ describe("regression guard — file existence (don't lose new modules)", () => {
     // "Wave NaN", "+0.0" deltas, "Dimensions improved: 0", "SUCCESS".
     expect(existsSync(join(VSCODE_SRC, "ascend-orchestrator.ts"))).toBe(true);
   });
+
+  it("webview-html.ts exists (extracted from sidebar-provider 2026-04-28)", () => {
+    // SYMPTOM IF BROKEN: refactor reverted, sidebar-provider.ts ballooned back
+    // to 5700+ lines. CSP / slash menu / Send-button fixes can co-revert again.
+    expect(existsSync(join(VSCODE_SRC, "webview-html.ts"))).toBe(true);
+  });
+
+  it("sidebar-provider.ts delegates HTML to webview-html.ts (no inline template)", () => {
+    // SYMPTOM IF BROKEN: someone re-inlined the 2200-line template literal.
+    const sp = read("sidebar-provider.ts");
+    expect(sp).toContain('from "./webview-html.js"');
+    expect(sp).toContain("getWebviewHtml(this.currentModel)");
+    // Confirm sidebar-provider doesn't re-grow with inline HTML.
+    // 4500 is a generous ceiling — the file was 3493 right after refactor.
+    expect(sp.split("\n").length).toBeLessThan(4500);
+  });
 });
 
 describe("regression guard — ascend orchestrator wiring", () => {
@@ -242,5 +262,17 @@ describe("regression guard — ascend orchestrator wiring", () => {
     expect(orch).toContain("community_adoption");
     expect(orch).toContain("enterprise_readiness");
     expect(orch).toContain("context_economy");
+  });
+
+  it("ascend loop tracks commits and reports source-line deltas", () => {
+    // SYMPTOM IF BROKEN: closing summary says "no movement" even when real
+    // commits landed, confusing the user into thinking nothing happened.
+    // FIX: track commitsMade and totalLinesChanged; differentiate
+    // "model isn't editing" (commits == 0) from "edits landed but harsh-scorer
+    // can't measure them on this codebase size" (commits > 0).
+    expect(provider).toMatch(/let\s+commitsMade\s*=\s*0/);
+    expect(provider).toMatch(/let\s+totalLinesChanged\s*=\s*0/);
+    expect(provider).toMatch(/commitsMade\+\+/);
+    expect(provider).toMatch(/edits landing|edits landed/);
   });
 });

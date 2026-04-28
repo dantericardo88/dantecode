@@ -107,8 +107,17 @@ projectType: unknown
 retroDelta: 0
 retroLastRun: 2026-04-28T16:55:11.206Z
 sessionBaselineScore: 6.2
-sessionBaselineTimestamp: 2026-04-28T13:43:42.167Z
+sessionBaselineTimestamp: 2026-04-28T18:43:01.753Z
 scoreHistory:
+  - timestamp: 2026-04-28T18:43:21.290Z
+    displayScore: 6.2
+    gitSha: 840fb74
+  - timestamp: 2026-04-28T18:43:01.790Z
+    displayScore: 6.2
+    gitSha: 840fb74
+  - timestamp: 2026-04-28T17:38:55.048Z
+    displayScore: 6.2
+    gitSha: 840fb74
   - timestamp: 2026-04-28T17:38:34.592Z
     displayScore: 6.2
     gitSha: 28904f0

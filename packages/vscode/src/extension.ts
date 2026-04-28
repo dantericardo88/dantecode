@@ -421,16 +421,34 @@ function activateInner(context: vscode.ExtensionContext): void {
 
   // ── Terminal output capture ───────────────────────────────────────────────
   terminalOutputManager = new TerminalOutputManager();
-  // onDidWriteTerminalData is available from VSCode 1.56+; guard for older hosts
-  // Cast through unknown to avoid @types/vscode version dependency
-  const windowAny = vscode.window as unknown as Record<string, unknown>;
-  if (typeof windowAny["onDidWriteTerminalData"] === "function") {
-    const onData = windowAny["onDidWriteTerminalData"] as (
-      handler: (e: { terminal: { name: string }; data: string }) => void,
-    ) => vscode.Disposable;
-    context.subscriptions.push(
-      onData((e) => terminalOutputManager!.onData(e)),
-    );
+  // onDidWriteTerminalData is a PROPOSED API (terminalDataWriteEvent). The
+  // function exists in Antigravity/VSCode but CALLING it throws unless the
+  // extension declares the proposal in package.json#enabledApiProposals AND
+  // the editor was launched with --enable-proposed-api dantecode.dantecode.
+  // We don't want to require the user to launch with that flag, so wrap the
+  // call in try/catch — terminal-output capture is a nice-to-have, not core.
+  // This regression has happened before (memory: "terminal API try/catch"
+  // was a documented activation-blocker fix).
+  try {
+    const windowAny = vscode.window as unknown as Record<string, unknown>;
+    if (typeof windowAny["onDidWriteTerminalData"] === "function") {
+      const onData = windowAny["onDidWriteTerminalData"] as (
+        handler: (e: { terminal: { name: string }; data: string }) => void,
+      ) => vscode.Disposable;
+      context.subscriptions.push(
+        onData((e) => terminalOutputManager!.onData(e)),
+      );
+    }
+  } catch (terminalApiErr) {
+    // Proposed-API not enabled. Log and continue — the rest of the extension
+    // works fine without terminal-output capture.
+    try {
+      const fs = require("fs") as typeof import("fs");
+      fs.appendFileSync(
+        "C:/tmp/dante-bypass.log",
+        `[${new Date().toISOString()}] terminal-data API unavailable (proposal not enabled): ${String(terminalApiErr)}\n`,
+      );
+    } catch { /* ignore */ }
   }
 
   globalContextRegistry.register({
