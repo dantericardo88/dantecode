@@ -1040,3 +1040,13 @@
 {"timestamp":"2026-04-26T14:48:02.126Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
 {"timestamp":"2026-04-26T14:48:02.128Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
 {"timestamp":"2026-04-26T14:48:02.131Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.7999999990501242}
+{"timestamp":"2026-04-28T19:28:25.892Z","sessionId":"knowledge-store","key":"convention","source":"repo-memory","relevanceScore":0.7999999999999999}
+{"timestamp":"2026-04-28T19:28:25.896Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.9}
+{"timestamp":"2026-04-28T19:28:25.902Z","sessionId":"knowledge-store","key":"architecture","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.906Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.908Z","sessionId":"s2","key":"all","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.909Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.911Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.9}
+{"timestamp":"2026-04-28T19:28:25.917Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.920Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.8}
+{"timestamp":"2026-04-28T19:28:25.925Z","sessionId":"knowledge-store","key":"all","source":"repo-memory","relevanceScore":0.7999999995250622}

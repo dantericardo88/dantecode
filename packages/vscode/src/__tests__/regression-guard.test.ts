@@ -276,6 +276,17 @@ describe("regression guard — ascend orchestrator wiring", () => {
     expect(orch).toContain("context_economy");
   });
 
+  it("orchestrator has Cline-style file-scoped task helper", () => {
+    // SYMPTOM IF BROKEN: every Testing cycle gives Grok a vague "improve testing"
+    // goal. Grok picks any random file or a small one with already-existing tests.
+    // Result: tiny coverage deltas, score doesn't move.
+    // FIX: findLargestUntestedFile picks the biggest source file with NO test,
+    // and buildGoalPrompt scopes the cycle to writing tests for THAT specific file.
+    expect(orch).toMatch(/export function findLargestUntestedFile/);
+    expect(orch).toMatch(/buildGoalPrompt[\s\S]{0,300}targetFile\?:/);
+    expect(provider).toMatch(/findLargestUntestedFile\s*\(\s*projectRoot\s*\)/);
+  });
+
   it("ascend loop tracks commits and reports source-line deltas", () => {
     // SYMPTOM IF BROKEN: closing summary says "no movement" even when real
     // commits landed, confusing the user into thinking nothing happened.

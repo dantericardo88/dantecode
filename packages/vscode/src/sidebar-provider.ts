@@ -2571,7 +2571,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // real changes. Pure helpers live in ascend-orchestrator.ts.
   // --------------------------------------------------------------------------
   private async runAscendLoop(args: string): Promise<void> {
-    const { parseScoreOutput, pickTopGap, buildGoalPrompt, runShellStreaming, DEFAULT_ASCEND_OPTIONS } =
+    const { parseScoreOutput, pickTopGap, buildGoalPrompt, runShellStreaming, findLargestUntestedFile, DEFAULT_ASCEND_OPTIONS } =
       await import("./ascend-orchestrator.js");
     const target = (() => {
       const n = parseFloat(args.trim());
@@ -2675,7 +2675,18 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         );
 
         // 3. Drive the model with a focused goal
-        const goal = buildGoalPrompt(gap, target, this.ascendCycle, maxCycles);
+        // Cline-style file-scoped task: for Testing cycles, find the largest
+        // untested source file and point the model at it specifically. Big
+        // coverage deltas per cycle = score actually moves on this codebase size.
+        const targetFile = gap.name === "testing" ? findLargestUntestedFile(projectRoot) ?? undefined : undefined;
+        if (targetFile) {
+          this.postMessage({
+            type: "chat_response_chunk",
+            payload: { chunk: `\n_Targeting: \`${targetFile.path}\` (${targetFile.lines} lines, no tests)._\n`, partial: "" },
+          });
+          this.postMessage({ type: "chat_response_done", payload: {} });
+        }
+        const goal = buildGoalPrompt(gap, target, this.ascendCycle, maxCycles, targetFile);
         try {
           await this.handleChatRequest(goal);
         } catch (err) {

@@ -26,6 +26,8 @@
 // ============================================================================
 
 import { spawn } from "node:child_process";
+import { readdirSync, statSync, existsSync } from "node:fs";
+import { join, basename } from "node:path";
 
 export interface Dimension {
   name: string;
@@ -98,6 +100,73 @@ export function pickTopGap(
   return eligible[0] ?? null;
 }
 
+// ── Test-target picking (Cline-style file-scoped tasks) ────────────────────
+
+/**
+ * Walk packages/<x>/src/ recursively and return source files (.ts) that
+ * (a) are not themselves tests and (b) have no sibling .test.ts file.
+ * Sorted by line count descending — the biggest untested file wins because
+ * testing it produces the largest coverage-delta per cycle.
+ *
+ * This is the Cline pattern: scope a cycle to ONE concrete file rather than
+ * a vague "improve testing" dimension. The harsh-scorer's testing formula
+ * is `(maturity * 0.4) + (coverage * 0.6)`, so a single 200-line module
+ * going from 0% to 80% covered moves the line-coverage pct by ~0.2 points
+ * on the whole repo — visible delta where "write some tests" was invisible.
+ */
+export function findLargestUntestedFile(projectRoot: string): { path: string; lines: number } | null {
+  const candidates: Array<{ path: string; lines: number }> = [];
+  const packagesDir = join(projectRoot, "packages");
+  if (!existsSync(packagesDir)) return null;
+
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const entry of entries) {
+      const full = join(dir, entry);
+      let stat;
+      try { stat = statSync(full); } catch { continue; }
+      if (stat.isDirectory()) {
+        // Skip generated/build/test-fixture dirs
+        if (entry === "node_modules" || entry === "dist" || entry === "__tests__" || entry === ".turbo") continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.endsWith(".ts")) continue;
+      if (entry.endsWith(".test.ts") || entry.endsWith(".d.ts") || entry === "index.ts") continue;
+      // Skip if a sibling .test.ts exists OR a __tests__/<name>.test.ts exists
+      const stem = entry.slice(0, -3);
+      const siblingTest = join(dir, `${stem}.test.ts`);
+      const dirName = basename(dir);
+      const grandparent = join(dir, "..", "__tests__", `${stem}.test.ts`);
+      if (existsSync(siblingTest) || existsSync(grandparent)) continue;
+      // Count lines
+      try {
+        const content = require("node:fs").readFileSync(full, "utf-8") as string;
+        const lines = content.split("\n").length;
+        if (lines >= 50 && lines <= 600) {
+          // 50–600 line band: small enough to test in one cycle, big enough to matter
+          candidates.push({ path: full.replace(projectRoot + (process.platform === "win32" ? "\\" : "/"), ""), lines });
+        }
+      } catch { /* skip unreadable */ }
+      // Suppress unused-var warning for `dirName` until we use it for ranking later
+      void dirName;
+    }
+  };
+
+  // Walk every package's src/
+  let pkgRoots: string[];
+  try { pkgRoots = readdirSync(packagesDir); } catch { return null; }
+  for (const pkg of pkgRoots) {
+    const srcDir = join(packagesDir, pkg, "src");
+    if (existsSync(srcDir)) walk(srcDir);
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.lines - a.lines);
+  return candidates[0]!;
+}
+
 // ── Goal prompt ─────────────────────────────────────────────────────────────
 
 /**
@@ -111,11 +180,20 @@ export function buildGoalPrompt(
   target: number,
   cycle: number,
   maxCycles: number,
+  targetFile?: { path: string; lines: number },
 ): string {
   const advice = DIMENSION_HINTS[gap.name];
+  // Cline-style file-scoped task: when targeting Testing and a specific
+  // untested file was identified, point the model at that file directly.
+  // This produces a much larger per-cycle coverage delta than vague guidance,
+  // and gives the user a concrete, verifiable artifact: tests for file X.
+  const targetLine = targetFile
+    ? `**Specific target file:** \`${targetFile.path}\` (${targetFile.lines} lines, currently has no tests). Write tests for THIS file in particular — don't pick a different file.`
+    : null;
   return [
     `[Ascend Cycle ${cycle}/${maxCycles}]`,
     `Goal: improve the **${gap.displayName}** dimension from ${gap.score.toFixed(1)}/10 toward ${target.toFixed(1)}/10.`,
+    targetLine ?? "",
     "",
     "Hard rules:",
     "1. Your turn is NOT complete until you have executed at least one Edit, Write, or test-running Bash command. Discovery without follow-through is FAILURE.",
