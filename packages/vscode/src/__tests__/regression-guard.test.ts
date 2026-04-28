@@ -276,6 +276,19 @@ describe("regression guard — ascend orchestrator wiring", () => {
     expect(orch).toContain("context_economy");
   });
 
+  it("score-movement detection handles dimension graduation + overall score", () => {
+    // SYMPTOM IF BROKEN: a cycle improves Testing enough that it drops out of
+    // the P0 gaps list (replaced by the next-worst dimension). The per-gap
+    // parser doesn't see Testing in the new output, falls back to beforeScore,
+    // and reports "no movement" — even though the overall score went 6.2 → 6.5.
+    // FIX: parseOverallScore + graduation detection (newGap === undefined &&
+    // newDims.length > 0) + overall-score-moved fallback.
+    expect(orch).toMatch(/export function parseOverallScore/);
+    expect(provider).toMatch(/parseOverallScore\s*\(/);
+    expect(provider).toMatch(/graduated/);
+    expect(provider).toMatch(/overallMoved|overallDelta/);
+  });
+
   it("orchestrator has Cline-style file-scoped task helper", () => {
     // SYMPTOM IF BROKEN: every Testing cycle gives Grok a vague "improve testing"
     // goal. Grok picks any random file or a small one with already-existing tests.

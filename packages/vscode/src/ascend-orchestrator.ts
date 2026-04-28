@@ -59,6 +59,20 @@ const CEILING_DIMENSIONS: Record<string, number> = {
 // ── Score parsing ───────────────────────────────────────────────────────────
 
 /**
+ * Extract the overall score (e.g. `6.5/10`) from `danteforge score --level light`.
+ * Returns null if not found. Used to detect cycle-level progress even when a
+ * dimension graduates OUT of the P0 gaps list (which the per-gap parser misses).
+ */
+export function parseOverallScore(text: string): number | null {
+  // Match lines like "[INFO]   6.5/10  — solid" or "  6.5/10 — solid"
+  const m = text.match(/^\s*(?:\[INFO\])?\s+([\d.]+)\/10\s+—/m);
+  if (!m?.[1]) return null;
+  const n = parseFloat(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+
+/**
  * Parse `danteforge score --level light` output's P0 gaps section into structured
  * dimension data. Output format:
  *

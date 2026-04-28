@@ -2571,7 +2571,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // real changes. Pure helpers live in ascend-orchestrator.ts.
   // --------------------------------------------------------------------------
   private async runAscendLoop(args: string): Promise<void> {
-    const { parseScoreOutput, pickTopGap, buildGoalPrompt, runShellStreaming, findLargestUntestedFile, DEFAULT_ASCEND_OPTIONS } =
+    const { parseScoreOutput, parseOverallScore, pickTopGap, buildGoalPrompt, runShellStreaming, findLargestUntestedFile, DEFAULT_ASCEND_OPTIONS } =
       await import("./ascend-orchestrator.js");
     const target = (() => {
       const n = parseFloat(args.trim());
@@ -2669,6 +2669,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
 
         const beforeScore = gap.score;
+        // Also capture the overall score so we can detect dimension graduation
+        // (e.g. Testing 4.5 → 5.5 might drop the dim out of the P0 list entirely;
+        // per-gap parsing then misses it, but overall score reflects the climb).
+        const beforeOverallScore = parseOverallScore(scoreText) ?? 0;
         note(
           `---\n\n## Cycle ${this.ascendCycle}/${maxCycles} — ${gap.displayName}\n\n` +
             `Current: **${beforeScore.toFixed(1)}/10** → Target: ${target.toFixed(1)}/10`,
@@ -2769,14 +2773,38 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         }
         const newDims = parseScoreOutput(newScoreText);
         const newGap = newDims.find((d) => d.name === gap.name);
-        const afterScore = newGap?.score ?? beforeScore;
-        const delta = afterScore - beforeScore;
+        const afterOverallScore = parseOverallScore(newScoreText) ?? beforeOverallScore;
+        const overallDelta = afterOverallScore - beforeOverallScore;
 
-        if (delta >= 0.1) {
+        // Three signals of real progress, in priority order:
+        //   (a) Dimension still in P0 list AND its score went up by ≥0.1 — direct hit.
+        //   (b) Dimension dropped OUT of the P0 list — it improved enough that 3 other
+        //       dimensions are now lower priority. This is "graduated" and counts as a win
+        //       even though per-gap parsing can't measure the new value (it's not in the
+        //       light-mode output anymore).
+        //   (c) Overall score moved up by ≥0.1 — even if neither of the above, the cycle's
+        //       work bumped the aggregate. Real progress.
+        const directDelta = newGap ? newGap.score - beforeScore : 0;
+        const graduated = !newGap && newDims.length > 0; // dimension fell off the P0 list
+        const overallMoved = overallDelta >= 0.1;
+        const movement = directDelta >= 0.1 || graduated || overallMoved;
+
+        if (movement) {
           plateauCount.delete(gap.name);
           cyclesWithMovement++;
           consecutiveNoMovement = 0;
-          note(`📈 **${gap.displayName}: ${beforeScore.toFixed(1)} → ${afterScore.toFixed(1)} (+${delta.toFixed(1)})**`);
+          if (graduated) {
+            note(
+              `📈 **${gap.displayName} graduated off the P0 list** ` +
+                `(was ${beforeScore.toFixed(1)}/10 — now no longer in top 3 gaps).` +
+                (overallMoved ? ` Overall: ${beforeOverallScore.toFixed(1)} → ${afterOverallScore.toFixed(1)} (+${overallDelta.toFixed(1)}).` : ""),
+            );
+          } else if (directDelta >= 0.1 && newGap) {
+            note(`📈 **${gap.displayName}: ${beforeScore.toFixed(1)} → ${newGap.score.toFixed(1)} (+${directDelta.toFixed(1)})**` +
+              (overallMoved ? ` — Overall: ${beforeOverallScore.toFixed(1)} → ${afterOverallScore.toFixed(1)} (+${overallDelta.toFixed(1)}).` : ""));
+          } else {
+            note(`📈 **Overall score moved: ${beforeOverallScore.toFixed(1)} → ${afterOverallScore.toFixed(1)} (+${overallDelta.toFixed(1)})** — your work shifted the aggregate even though ${gap.displayName} stayed flat.`);
+          }
         } else {
           consecutiveNoMovement++;
           const n = (plateauCount.get(gap.name) ?? 0) + 1;
