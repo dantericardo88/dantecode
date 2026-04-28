@@ -1,0 +1,25 @@
+{
+  "pipelineId": "3f8c434d-2cc9-47aa-81d5-427055dbcf92",
+  "level": "magic",
+  "goal": "error handling",
+  "steps": [
+    {
+      "kind": "autoforge",
+      "maxWaves": 8,
+      "profile": "budget",
+      "parallel": true,
+      "worktree": false
+    },
+    {
+      "kind": "verify"
+    },
+    {
+      "kind": "lessons-compact"
+    }
+  ],
+  "currentStepIndex": 0,
+  "completedResults": [],
+  "startedAt": "2026-04-28T19:48:57.339Z",
+  "lastCheckpointAt": "2026-04-28T19:48:57.361Z",
+  "currentStepRetries": 0
+}

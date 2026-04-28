@@ -646,6 +646,39 @@
       "relatedCommands": [
         "llm"
       ]
+    },
+    {
+      "id": "38a6dc3e-9b3f-4ef1-b9cb-e520810b641d",
+      "timestamp": "2026-04-28T19:52:17.795Z",
+      "sessionId": "24d98f14-a8a3-4f4a-b108-c9c0e91c0666",
+      "tokenCount": 17,
+      "category": "decision",
+      "summary": "Handoff: review -> review",
+      "detail": "Workflow advanced from review to review.",
+      "tags": [
+        "handoff",
+        "review",
+        "review"
+      ],
+      "relatedCommands": [
+        "review"
+      ]
+    },
+    {
+      "id": "3ac2266c-517a-450a-b1ee-0fa055efb603",
+      "timestamp": "2026-04-28T19:52:20.376Z",
+      "sessionId": "24d98f14-a8a3-4f4a-b108-c9c0e91c0666",
+      "tokenCount": 35,
+      "category": "command",
+      "summary": "AutoForge executed: review",
+      "detail": "Scenario: multi-session-resume. Reason: Last session was 141h ago — refresh codebase state. Goal: error handling",
+      "tags": [
+        "autoforge",
+        "review"
+      ],
+      "relatedCommands": [
+        "review"
+      ]
     }
   ]
 }

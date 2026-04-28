@@ -51,6 +51,7 @@ describe("providers", () => {
   afterEach(() => {
     process.env = { ...originalEnv };
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   describe("buildAnthropicProvider", () => {
@@ -307,6 +308,59 @@ describe("providers", () => {
       const model = buildOllamaProvider(makeConfig({ provider: "ollama", modelId: "llama3" }));
       expect(model).toBe(mockOpenAIModel);
       expect(mockOpenAIFactory).toHaveBeenCalledWith("llama3");
+    });
+
+    it("injects Ollama runtime options into OpenAI-compatible chat requests", async () => {
+      delete process.env["OLLAMA_BASE_URL"];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })),
+      );
+
+      buildOllamaProvider(
+        makeConfig({
+          provider: "ollama",
+          modelId: "llama3",
+          contextWindow: 32768,
+        }),
+      );
+
+      const callArgs = (createOpenAI as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      await callArgs.fetch("http://localhost:11434/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "llama3", messages: [] }),
+      });
+
+      const [, requestInit] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      const body = JSON.parse(String(requestInit?.body));
+      expect(body.options).toEqual({
+        num_ctx: 8192,
+        num_gpu: 99,
+      });
+    });
+
+    it("honors OLLAMA_NUM_CTX and OLLAMA_NUM_GPU when injecting runtime options", async () => {
+      process.env["OLLAMA_NUM_CTX"] = "4096";
+      process.env["OLLAMA_NUM_GPU"] = "12";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })),
+      );
+
+      buildOllamaProvider(makeConfig({ provider: "ollama", modelId: "llama3" }));
+
+      const callArgs = (createOpenAI as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      await callArgs.fetch("http://localhost:11434/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify({ model: "llama3", messages: [] }),
+      });
+
+      const [, requestInit] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+      const body = JSON.parse(String(requestInit?.body));
+      expect(body.options).toEqual({
+        num_ctx: 4096,
+        num_gpu: 12,
+      });
     });
   });
 });

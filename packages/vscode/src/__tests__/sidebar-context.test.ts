@@ -100,6 +100,7 @@ vi.mock("@dantecode/git-engine", () => ({
 vi.mock("../agent-tools.js", () => ({
   executeTool: vi.fn(),
   extractToolCalls: vi.fn().mockReturnValue({ calls: [], parseErrors: [] }),
+  getReadOnlyToolDefinitionsPrompt: vi.fn().mockReturnValue(""),
   getToolDefinitionsPrompt: vi.fn().mockReturnValue(""),
   getWrittenFilePath: vi.fn().mockReturnValue(null),
 }));

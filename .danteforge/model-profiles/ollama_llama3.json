@@ -1,0 +1,54 @@
+{
+  "modelKey": "ollama:llama3",
+  "providerId": "ollama",
+  "modelId": "llama3",
+  "createdAt": "2026-04-28T19:52:20.370Z",
+  "updatedAt": "2026-04-28T19:52:20.375Z",
+  "totalTasks": 5,
+  "categories": {
+    "configuration": {
+      "category": "configuration",
+      "taskCount": 5,
+      "averagePdse": 71,
+      "minPdse": 38,
+      "maxPdse": 98,
+      "firstPassSuccessRate": 1,
+      "averageRetries": 0,
+      "averageTokens": 0,
+      "stubViolationRate": 0,
+      "trend": "declining",
+      "recentScores": [
+        {
+          "timestamp": "2026-04-28T19:52:20.370Z",
+          "pdse": 98
+        },
+        {
+          "timestamp": "2026-04-28T19:52:20.371Z",
+          "pdse": 74
+        },
+        {
+          "timestamp": "2026-04-28T19:52:20.373Z",
+          "pdse": 98
+        },
+        {
+          "timestamp": "2026-04-28T19:52:20.373Z",
+          "pdse": 47
+        },
+        {
+          "timestamp": "2026-04-28T19:52:20.375Z",
+          "pdse": 38
+        }
+      ]
+    }
+  },
+  "weaknesses": [],
+  "strengths": [],
+  "compensations": [],
+  "aggregate": {
+    "averagePdse": 71,
+    "firstPassSuccessRate": 1,
+    "averageRetriesNeeded": 0,
+    "averageTokensPerTask": 0,
+    "stubViolationRate": 0
+  }
+}

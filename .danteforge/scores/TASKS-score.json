@@ -1,0 +1,44 @@
+{
+  "artifact": "TASKS",
+  "score": 38,
+  "dimensions": {
+    "completeness": 10,
+    "clarity": 0,
+    "testability": 5,
+    "constitutionAlignment": 3,
+    "integrationFitness": 10,
+    "freshness": 10
+  },
+  "issues": [
+    {
+      "dimension": "completeness",
+      "severity": "error",
+      "message": "Missing required section or keyword: \"### Phase\""
+    },
+    {
+      "dimension": "clarity",
+      "severity": "error",
+      "message": "Anti-stub violation: found forbidden patterns: fake",
+      "evidence": "fake"
+    },
+    {
+      "dimension": "testability",
+      "severity": "warning",
+      "message": "Only 40/177 tasks have explicit done-conditions"
+    },
+    {
+      "dimension": "constitutionAlignment",
+      "severity": "warning",
+      "message": "Low constitution alignment — only 1 keyword(s) found"
+    }
+  ],
+  "remediationSuggestions": [
+    "Run: danteforge tasks — add missing required sections",
+    "Run: danteforge tasks — remove all stub/placeholder patterns",
+    "Run: danteforge tasks — add acceptance criteria or done-conditions",
+    "Ensure artifact references constitution principles (zero ambiguity, local-first, fail-closed)"
+  ],
+  "timestamp": "2026-04-28T19:52:20.351Z",
+  "autoforgeDecision": "blocked",
+  "hasCEOReviewBonus": false
+}

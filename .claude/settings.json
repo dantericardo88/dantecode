@@ -4,6 +4,9 @@
       "Read(//c/c/Projects/DanteCode/packages/cli/src/__tests__/**)",
       "Bash(rm -f __TRACKED_VAR__/.vscode/extensions/dantecode.dantecode-1.0.0/dist/RELOAD_NEEDED)",
       "Bash(rm -f __TRACKED_VAR__/.antigravity/extensions/dantecode.dantecode-1.0.0/dist/RELOAD_NEEDED)"
+    ],
+    "additionalDirectories": [
+      "C:\\Projects\\DanteForge\\.git"
     ]
   }
 }

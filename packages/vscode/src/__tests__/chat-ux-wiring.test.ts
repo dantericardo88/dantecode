@@ -123,7 +123,8 @@ vi.mock("@dantecode/git-engine", () => ({
 vi.mock("../agent-tools.js", () => ({
   executeTool: vi.fn(),
   extractToolCalls: vi.fn().mockReturnValue({ calls: [], parseErrors: [] }),
-  getToolDefinitionsPrompt: vi.fn().mockReturnValue(""),
+  getReadOnlyToolDefinitionsPrompt: vi.fn().mockReturnValue("Read ListDir Glob Grep"),
+  getToolDefinitionsPrompt: vi.fn().mockReturnValue("Read Write Edit ListDir Bash Glob Grep"),
   getWrittenFilePath: vi.fn().mockReturnValue(null),
 }));
 
@@ -136,7 +137,11 @@ vi.mock("../context-provider.js", () => ({
   setCodebaseIndexManager: vi.fn(),
 }));
 
-import { ChatSidebarProvider } from "../sidebar-provider.js";
+import {
+  ChatSidebarProvider,
+  getChatPromptProfile,
+  getToolDefinitionsPromptForAgentMode,
+} from "../sidebar-provider.js";
 
 function makeFakeSecrets() {
   return {
@@ -355,5 +360,46 @@ describe("ChatSidebarProvider — slash_input handler (Sprint D, dim 11)", () =>
     });
     // The slash-menu element should include the 'hidden' attribute
     expect(html).toMatch(/id="slash-menu"[^>]*hidden/);
+  });
+});
+
+describe("ChatSidebarProvider - Ollama chat prompt profile", () => {
+  it("uses a compact prompt budget for local Ollama chat", () => {
+    const profile = getChatPromptProfile("ollama", "plan");
+
+    expect(profile.contextWindow).toBeLessThanOrEqual(8192);
+    expect(profile.maxResponseTokens).toBeLessThanOrEqual(4096);
+    expect(profile.repoMapMaxFiles).toBeLessThanOrEqual(50);
+    expect(profile.workspaceTreeMaxFiles).toBeLessThanOrEqual(100);
+    expect(profile.keyFileMaxChars).toBeLessThanOrEqual(1600);
+    expect(profile.activeFileMaxChars).toBeLessThanOrEqual(3000);
+    expect(profile.firstChunkTimeoutMs).toBeGreaterThanOrEqual(120_000);
+  });
+
+  it("keeps cloud-model context budgets larger than Ollama", () => {
+    const ollama = getChatPromptProfile("ollama", "build");
+    const grok = getChatPromptProfile("grok", "build");
+
+    expect(grok.contextWindow).toBeGreaterThan(ollama.contextWindow);
+    expect(grok.repoMapMaxFiles).toBeGreaterThan(ollama.repoMapMaxFiles);
+    expect(grok.keyFileMaxChars).toBeGreaterThan(ollama.keyFileMaxChars);
+  });
+});
+
+describe("ChatSidebarProvider - Plan mode tool prompt", () => {
+  it("advertises only read-only tools in Plan mode", () => {
+    const prompt = getToolDefinitionsPromptForAgentMode("plan");
+
+    expect(prompt).toContain("Read");
+    expect(prompt).toContain("Grep");
+    expect(prompt).not.toContain("Write");
+    expect(prompt).not.toContain("Bash");
+  });
+
+  it("keeps the full tool prompt in Build mode", () => {
+    const prompt = getToolDefinitionsPromptForAgentMode("build");
+
+    expect(prompt).toContain("Write");
+    expect(prompt).toContain("Bash");
   });
 });

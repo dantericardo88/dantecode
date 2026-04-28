@@ -289,6 +289,21 @@ describe("regression guard — ascend orchestrator wiring", () => {
     expect(provider).toMatch(/overallMoved|overallDelta/);
   });
 
+  it("ReplaceInFile tool wired into agent-tools (Cline harvest)", () => {
+    // Cline's `replace_in_file` pattern: model emits SEARCH/REPLACE diff blocks,
+    // runtime applies via 4-strategy fuzzy fallback. Dramatically reduces
+    // edit-failure rate vs free-form Edit(old_string, new_string) which is
+    // offset-bug-prone. Hits error_handling, maintainability, developer_experience,
+    // functionality dimensions simultaneously.
+    const tools = read("agent-tools.ts");
+    expect(tools).toContain("\"ReplaceInFile\"");
+    expect(tools).toMatch(/case\s+["']ReplaceInFile["']\s*:/);
+    expect(tools).toMatch(/async function toolReplaceInFile/);
+    expect(tools).toMatch(/parseSearchReplaceBlocks|applySearchReplaceBlock/);
+    // Whitelist must include it so phantom-call detection doesn't reject it.
+    expect(tools).toMatch(/KNOWN_TOOL_NAMES[\s\S]{0,200}ReplaceInFile/);
+  });
+
   it("orchestrator has Cline-style file-scoped task helper", () => {
     // SYMPTOM IF BROKEN: every Testing cycle gives Grok a vague "improve testing"
     // goal. Grok picks any random file or a small one with already-existing tests.

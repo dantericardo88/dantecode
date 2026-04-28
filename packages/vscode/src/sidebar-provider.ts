@@ -60,6 +60,7 @@ import { generateRepoMap, formatRepoMapForContext, getStatus } from "@dantecode/
 import {
   executeTool,
   extractToolCalls,
+  getReadOnlyToolDefinitionsPrompt,
   getToolDefinitionsPrompt,
   shouldCutStream,
   getWrittenFilePath,
@@ -150,7 +151,7 @@ interface WebviewOutboundMessage {
 // ─── Agent Mode & Permission Types ──────────────────────────────────────────
 
 /** Agent execution modes — Plan (read-only), Build (default), YOLO (full autonomous). */
-type AgentMode = "plan" | "build" | "yolo";
+export type AgentMode = "plan" | "build" | "yolo";
 
 /** Permission levels for tool categories. */
 type PermissionLevel = "allow" | "ask" | "deny";
@@ -198,6 +199,60 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
 
 /** Read-only tools allowed in Plan mode. */
 const PLAN_MODE_TOOLS = new Set(["Read", "ListDir", "Glob", "Grep"]);
+
+export interface ChatPromptProfile {
+  contextWindow: number;
+  maxResponseTokens: number;
+  firstChunkTimeoutMs: number;
+  heartbeatMs: number;
+  repoMapMaxFiles: number;
+  workspaceTreeMaxDepth: number;
+  workspaceTreeMaxFiles: number;
+  keyFileMaxChars: number;
+  activeFileMaxChars: number;
+  contextFileMaxChars: number;
+}
+
+const CLOUD_CHAT_PROMPT_PROFILE: ChatPromptProfile = {
+  contextWindow: 131_072,
+  maxResponseTokens: 16_384,
+  firstChunkTimeoutMs: 60_000,
+  heartbeatMs: 4_000,
+  repoMapMaxFiles: 150,
+  workspaceTreeMaxDepth: 3,
+  workspaceTreeMaxFiles: 200,
+  keyFileMaxChars: 4_000,
+  activeFileMaxChars: 8_000,
+  contextFileMaxChars: 24_000,
+};
+
+const OLLAMA_CHAT_PROMPT_PROFILE: ChatPromptProfile = {
+  contextWindow: 8_192,
+  maxResponseTokens: 4_096,
+  firstChunkTimeoutMs: 180_000,
+  heartbeatMs: 8_000,
+  repoMapMaxFiles: 40,
+  workspaceTreeMaxDepth: 2,
+  workspaceTreeMaxFiles: 80,
+  keyFileMaxChars: 1_500,
+  activeFileMaxChars: 2_500,
+  contextFileMaxChars: 6_000,
+};
+
+export function getChatPromptProfile(provider: string, agentMode: AgentMode): ChatPromptProfile {
+  if (provider === "ollama") {
+    return {
+      ...OLLAMA_CHAT_PROMPT_PROFILE,
+      maxResponseTokens: agentMode === "plan" ? 2_048 : OLLAMA_CHAT_PROMPT_PROFILE.maxResponseTokens,
+    };
+  }
+
+  return CLOUD_CHAT_PROMPT_PROFILE;
+}
+
+export function getToolDefinitionsPromptForAgentMode(agentMode: AgentMode): string {
+  return agentMode === "plan" ? getReadOnlyToolDefinitionsPrompt() : getToolDefinitionsPrompt();
+}
 
 /** Maps model provider names to SecretStorage key names. */
 const PROVIDER_SECRET_KEYS: Record<string, string> = {
@@ -758,6 +813,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
     // Build model configuration — retrieve API key from SecretStorage
     const [provider, modelId] = this.parseModelString(this.currentModel);
+    const promptProfile = getChatPromptProfile(provider, this.agentConfig.agentMode);
     const secretKey = PROVIDER_SECRET_KEYS[provider];
     let apiKey: string | undefined;
     if (secretKey) {
@@ -790,9 +846,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       provider: provider as ModelConfig["provider"],
       modelId,
       apiKey,
-      maxTokens: 8192,
+      maxTokens: promptProfile.maxResponseTokens,
       temperature: 0.1,
-      contextWindow: 131072,
+      contextWindow: promptProfile.contextWindow,
       supportsVision: false,
       supportsToolCalls: true,
     };
@@ -1033,7 +1089,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     systemParts.push(`Co-Authored-By: DanteCode (${modelLabel}) <noreply@dantecode.dev>`);
     systemParts.push("");
 
-    systemParts.push(getToolDefinitionsPrompt());
+    systemParts.push(getToolDefinitionsPromptForAgentMode(agentMode));
 
     // Inject workspace context so the model knows about the open project
     const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -1061,7 +1117,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       // ── Git-engine repo map (structured file listing with metadata) ──
       try {
-        const repoMap = generateRepoMap(projectPath, { maxFiles: 150 });
+        const repoMap = generateRepoMap(projectPath, { maxFiles: promptProfile.repoMapMaxFiles });
         if (repoMap.length > 0) {
           const formatted = formatRepoMapForContext(repoMap);
           systemParts.push("");
@@ -1070,7 +1126,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       } catch {
         // Fallback to VS Code API tree if git-engine fails (non-git project)
         try {
-          const tree = await this.buildWorkspaceTree(wsFolder.uri);
+          const tree = await this.buildWorkspaceTree(
+            wsFolder.uri,
+            promptProfile.workspaceTreeMaxDepth,
+            promptProfile.workspaceTreeMaxFiles,
+          );
           if (tree.length > 0) {
             systemParts.push("");
             systemParts.push("## Project File Tree");
@@ -1136,7 +1196,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       // ── Key project files (package.json, README, tsconfig, etc.) ──
       try {
-        const keyFiles = await this.readKeyProjectFiles(wsFolder.uri);
+        const keyFiles = await this.readKeyProjectFiles(
+          wsFolder.uri,
+          promptProfile.keyFileMaxChars,
+        );
         if (keyFiles.size > 0) {
           systemParts.push("");
           systemParts.push("## Key Project Files");
@@ -1149,7 +1212,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       // ── Currently active editor file ──
-      const activeFile = this.getActiveEditorContent();
+      const activeFile = this.getActiveEditorContent(promptProfile.activeFileMaxChars);
       if (activeFile) {
         const relative = activeFile.path.startsWith(projectPath)
           ? activeFile.path.substring(projectPath.length + 1).replace(/\\/g, "/")
@@ -1190,7 +1253,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         try {
           const uri = vscode.Uri.file(filePath);
           const content = await vscode.workspace.fs.readFile(uri);
-          const fileText = Buffer.from(content).toString("utf-8");
+          let fileText = Buffer.from(content).toString("utf-8");
+          if (fileText.length > promptProfile.contextFileMaxChars) {
+            fileText =
+              fileText.slice(0, promptProfile.contextFileMaxChars) + "\n... (truncated)";
+          }
           systemParts.push(`\n--- ${filePath} ---\n${fileText}\n--- end ---`);
         } catch {
           systemParts.push(`\n--- ${filePath} --- (could not read file)`);
@@ -1230,7 +1297,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         // Phase 1 prune: erase old tool outputs when context exceeds 40k tokens.
         // Runs before compactTextTranscript so the sliding-window eviction sees the pruned state.
-        if (wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)) {
+        if (wouldOverflow(agentMessages, modelConfig.contextWindow, promptProfile.maxResponseTokens)) {
           const { pruned, savedTokens } = pruneToolOutputs(agentMessages);
           if (savedTokens > 0) {
             agentMessages.splice(0, agentMessages.length, ...pruned);
@@ -1241,7 +1308,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Only fires when there are enough messages to summarize (>6 so older zone is non-empty).
         if (
           agentMessages.length > 6 &&
-          wouldOverflow(agentMessages, modelConfig.contextWindow, 8192)
+          wouldOverflow(agentMessages, modelConfig.contextWindow, promptProfile.maxResponseTokens)
         ) {
           const llmCall = (prompt: string) =>
             router.generate([{ role: "user", content: prompt }], {
@@ -1296,7 +1363,10 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         // Stream the model response
         const streamResult = await router.stream(agentMessages, {
           system: systemPrompt,
-          maxTokens: tier === "capable" ? 16384 : 8192,
+          maxTokens: Math.min(
+            tier === "capable" ? 16_384 : 8_192,
+            promptProfile.maxResponseTokens,
+          ),
           abortSignal: roundController.signal,
         });
 
@@ -1342,7 +1412,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
           if (fullResponse.length === 0 && this.abortController) {
             this.abortController.abort();
           }
-        }, 60_000);
+        }, promptProfile.firstChunkTimeoutMs);
 
         // Heartbeat while waiting for model to start responding
         // On round 2+, use chunk-only mode to APPEND to the existing buffer
@@ -1365,7 +1435,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               });
             }
           }
-        }, 4000);
+        }, promptProfile.heartbeatMs);
 
         try {
           for await (const chunk of streamResult.textStream) {
@@ -1411,7 +1481,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             this.postMessage({
               type: "error",
               payload: {
-                message: `Request to ${this.currentModel} timed out after 30 seconds.\nCheck your API key and network connection.`,
+                message:
+                  `Request to ${this.currentModel} timed out after ${Math.round(promptProfile.firstChunkTimeoutMs / 1000)} seconds.\n` +
+                  (provider === "ollama"
+                    ? "Ollama is running, but the local model did not produce a first token in time. Try a smaller model or a narrower prompt."
+                    : "Check your API key and network connection."),
               },
             });
             break;
@@ -1468,7 +1542,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               );
               const fbStream = await fbRouter.stream(agentMessages, {
                 system: systemPrompt,
-                maxTokens: 8192,
+                maxTokens: promptProfile.maxResponseTokens,
                 abortSignal: signal,
               });
               for await (const chunk of fbStream.textStream) {
@@ -3383,9 +3457,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
    * of the project: package.json, README, config files, etc.
    * Returns a map of relative path → file content (truncated to stay in budget).
    */
-  private async readKeyProjectFiles(rootUri: vscode.Uri): Promise<Map<string, string>> {
+  private async readKeyProjectFiles(
+    rootUri: vscode.Uri,
+    maxFileSize = CLOUD_CHAT_PROMPT_PROFILE.keyFileMaxChars,
+  ): Promise<Map<string, string>> {
     const KEY_FILES = ["package.json", "README.md", "tsconfig.json", ".env.example", "CLAUDE.md"];
-    const MAX_FILE_SIZE = 4000; // chars per file
 
     const results = new Map<string, string>();
 
@@ -3394,8 +3470,8 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
         const fileUri = vscode.Uri.joinPath(rootUri, fileName);
         const content = await vscode.workspace.fs.readFile(fileUri);
         let text = Buffer.from(content).toString("utf-8");
-        if (text.length > MAX_FILE_SIZE) {
-          text = text.substring(0, MAX_FILE_SIZE) + "\n... (truncated)";
+        if (text.length > maxFileSize) {
+          text = text.substring(0, maxFileSize) + "\n... (truncated)";
         }
         results.set(fileName, text);
       } catch {
@@ -3409,15 +3485,16 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   /**
    * Gets the content of the currently active editor tab.
    */
-  private getActiveEditorContent(): { path: string; content: string } | null {
+  private getActiveEditorContent(
+    maxActiveFile = CLOUD_CHAT_PROMPT_PROFILE.activeFileMaxChars,
+  ): { path: string; content: string } | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return null;
 
     const doc = editor.document;
-    const MAX_ACTIVE_FILE = 8000;
     let content = doc.getText();
-    if (content.length > MAX_ACTIVE_FILE) {
-      content = content.substring(0, MAX_ACTIVE_FILE) + "\n... (truncated)";
+    if (content.length > maxActiveFile) {
+      content = content.substring(0, maxActiveFile) + "\n... (truncated)";
     }
 
     return { path: doc.uri.fsPath, content };

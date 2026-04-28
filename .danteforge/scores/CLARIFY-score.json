@@ -1,0 +1,26 @@
+{
+  "artifact": "CLARIFY",
+  "score": 98,
+  "dimensions": {
+    "completeness": 20,
+    "clarity": 19,
+    "testability": 20,
+    "constitutionAlignment": 19,
+    "integrationFitness": 10,
+    "freshness": 10
+  },
+  "issues": [
+    {
+      "dimension": "clarity",
+      "severity": "warning",
+      "message": "1 ambiguity signal(s) found: \"could\" (1x)",
+      "evidence": "\"could\" (1x)"
+    }
+  ],
+  "remediationSuggestions": [
+    "Run: danteforge clarify — replace ambiguous language with precise terms"
+  ],
+  "timestamp": "2026-04-28T19:52:20.350Z",
+  "autoforgeDecision": "advance",
+  "hasCEOReviewBonus": false
+}

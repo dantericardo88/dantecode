@@ -13,6 +13,7 @@ import { generateColoredHunk } from "@dantecode/git-engine";
 import {
   appendAuditEvent,
   applyExactEdit,
+  applySearchReplaceBlock,
   createFileSnapshot,
   detectInstallContext,
   formatStaleSnapshotMessage,
@@ -20,6 +21,7 @@ import {
   isProtectedWriteTarget,
   isRepoInternalCdChain,
   isSelfImprovementWriteAllowed,
+  parseSearchReplaceBlocks,
   preserveLineEndingsForWrite,
   resolvePreferredShell,
   truncateToolOutput,
@@ -344,6 +346,125 @@ async function toolEdit(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `Error editing file: ${message}`, isError: true };
+  }
+}
+
+/**
+ * ReplaceInFile — Cline-style SEARCH/REPLACE tool.
+ *
+ * Why this exists: free-form `Edit(old_string, new_string)` is offset-bug-prone
+ * because the model has to remember exact substrings including whitespace. The
+ * Cline pattern uses anchored SEARCH/REPLACE blocks with 4-strategy fallback
+ * (exact → trailing-ws → leading-ws → fuzzy Jaccard) so the runtime can
+ * tolerate small whitespace and ordering drift the model would otherwise need
+ * to get pixel-perfect.
+ *
+ * Input format:
+ *   {
+ *     "file_path": "src/foo.ts",
+ *     "diff": "<<<<<<< SEARCH\nold code\n=======\nnew code\n>>>>>>> REPLACE"
+ *   }
+ *
+ * Multi-block diffs are supported — multiple SEARCH/REPLACE pairs in one call,
+ * applied in document order. Empty searchContent prepends/creates; empty
+ * replaceContent deletes the matched section.
+ */
+async function toolReplaceInFile(
+  input: Record<string, unknown>,
+  projectRoot: string,
+  context?: ToolExecutionContext,
+): Promise<ToolResult> {
+  const filePath = input["file_path"] as string | undefined;
+  const diff = input["diff"] as string | undefined;
+
+  if (!filePath) return { content: "Error: file_path parameter is required", isError: true };
+  if (diff === undefined || diff === "")
+    return { content: "Error: diff parameter is required (with SEARCH/REPLACE blocks)", isError: true };
+
+  const resolved = resolvePath(filePath, projectRoot);
+
+  // Read-before-edit: enforce same as Edit unless the diff has an empty
+  // SEARCH (which means create-or-prepend, no need to read first).
+  const allowsCreate = /<<<<<<< SEARCH\s*\n=======/.test(diff);
+  if (!allowsCreate && context?.readTracker && !context.readTracker.has(buildReadTrackerKey(context, resolved))) {
+    return {
+      content: `Error: Read the full current file before ReplaceInFile. Re-run Read on ${resolved} with no offset/limit.`,
+      isError: true,
+    };
+  }
+
+  try {
+    // Synthesize a parseable response by prefixing the file path so the
+    // parser's lookback finds it. The parser expects a non-empty line
+    // immediately before <<<<<<< SEARCH that holds the file path.
+    const synthetic = `${filePath}\n${diff}`;
+    const { blocks } = parseSearchReplaceBlocks(synthetic);
+
+    if (blocks.length === 0) {
+      return {
+        content: `Error: no valid SEARCH/REPLACE blocks parsed from diff. Format: <<<<<<< SEARCH ... ======= ... >>>>>>> REPLACE`,
+        isError: true,
+      };
+    }
+
+    let existing = "";
+    try {
+      existing = await readFile(resolved, "utf-8");
+    } catch {
+      existing = ""; // file create case
+    }
+
+    const priorSnapshot = getTrackedSnapshot(context, resolved);
+    if (priorSnapshot && existing) {
+      const currentSnapshot = await buildTrackedSnapshot(resolved, existing);
+      if (currentSnapshot && isSnapshotStale(priorSnapshot, currentSnapshot)) {
+        return { content: formatStaleSnapshotMessage(resolved), isError: true };
+      }
+    }
+
+    // Apply each block sequentially. Quality-of-match summary so the model
+    // gets honest feedback (e.g. "exact x2, fuzzy x1" tells it whether
+    // its blocks were precise enough).
+    let working = existing;
+    const qualityCounts: Record<string, number> = {};
+    const failures: string[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i]!;
+      const result = applySearchReplaceBlock(working, block);
+      if (!result.matched || !result.updatedContent) {
+        failures.push(
+          `Block ${i + 1}: ${result.diagnostic ?? "search content not found"}`,
+        );
+        continue;
+      }
+      working = result.updatedContent;
+      qualityCounts[result.matchQuality] = (qualityCounts[result.matchQuality] ?? 0) + 1;
+    }
+
+    if (failures.length > 0 && Object.values(qualityCounts).reduce((a, b) => a + b, 0) === 0) {
+      return {
+        content: `Error: no SEARCH/REPLACE blocks matched.\n${failures.join("\n")}`,
+        isError: true,
+      };
+    }
+
+    // Write the result. Mirror Edit's line-ending preservation logic.
+    const finalContent = preserveLineEndingsForWrite(existing, working);
+    await mkdir(dirname(resolved), { recursive: true });
+    await writeFile(resolved, finalContent, "utf-8");
+
+    const qualitySummary = Object.entries(qualityCounts)
+      .map(([k, v]) => `${k} ×${v}`)
+      .join(", ");
+    const failNote = failures.length > 0 ? `\n\nWarnings:\n${failures.join("\n")}` : "";
+    return {
+      content:
+        `Successfully applied ${Object.values(qualityCounts).reduce((a, b) => a + b, 0)} SEARCH/REPLACE block(s) to ${resolved} (${qualitySummary})${failNote}`,
+      isError: false,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: `Error in ReplaceInFile: ${message}`, isError: true };
   }
 }
 
@@ -725,7 +846,7 @@ export async function executeTool(
   context?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
-  const isFileOp = name === "Write" || name === "Edit";
+  const isFileOp = name === "Write" || name === "Edit" || name === "ReplaceInFile";
 
   // Sandbox guard: block out-of-root writes
   if (context?.sandboxEnabled && isFileOp && filePath) {
@@ -843,6 +964,9 @@ export async function executeTool(
       break;
     case "Edit":
       result = await toolEdit(input, projectRoot, context);
+      break;
+    case "ReplaceInFile":
+      result = await toolReplaceInFile(input, projectRoot, context);
       break;
     case "ListDir":
       result = await toolListDir(input, projectRoot);
@@ -1124,7 +1248,7 @@ export function findToolUseSpans(text: string): Array<{ start: number; end: numb
  */
 // Gate 13: whitelist of known tool names — anything else is a phantom call
 const KNOWN_TOOL_NAMES = new Set([
-  "Read", "Write", "Edit", "ListDir", "Bash", "Glob", "Grep",
+  "Read", "Write", "Edit", "ReplaceInFile", "ListDir", "Bash", "Glob", "Grep",
   "GitCommit", "GitPush", "SelfUpdate", "WebSearch", "WebFetch", "SubAgent",
 ]);
 
@@ -1274,6 +1398,31 @@ You: "I'll add a logger. Let me read the existing code first."
 `;
 }
 
+export function getReadOnlyToolDefinitionsPrompt(): string {
+  return `## Available Tools
+
+You can use the following read-only tools by including <tool_use> blocks in your response.
+Format: <tool_use>{"name": "ToolName", "input": {...}}</tool_use>
+
+### Read - Read a file from disk with line numbers
+  Input: { "file_path": "path/to/file", "offset": 0, "limit": 2000 }
+
+### ListDir - List directory contents
+  Input: { "path": "path/to/dir" }
+
+### Glob - Find files matching a glob pattern
+  Input: { "pattern": "**/*.ts", "path": "src/" }
+
+### Grep - Search file contents with regex
+  Input: { "pattern": "function.*export", "path": "src/", "-i": true, "head_limit": 30 }
+
+## Plan Mode Rules
+- Use Read, Grep, Glob, or ListDir when you need project facts.
+- Do not request edits, file writes, shell commands, commits, pushes, or self-updates.
+- End with a concrete implementation plan and call out what you verified from read-only tools.
+`;
+}
+
 /**
  * Checks if a tool call writes to a code file (for DanteForge gating).
  */
@@ -1281,7 +1430,7 @@ export function getWrittenFilePath(
   toolName: string,
   toolInput: Record<string, unknown>,
 ): string | null {
-  if (toolName === "Write" || toolName === "Edit") {
+  if (toolName === "Write" || toolName === "Edit" || toolName === "ReplaceInFile") {
     const filePath = toolInput["file_path"] as string | undefined;
     if (filePath) {
       const codeExts = [
