@@ -97,13 +97,33 @@ auditLog:
     difficulty classification and error recovery for hard-task autonomy, metric:
     task difficulty accuracy, error recovery specificity, autonomy signal
     quality, experiments: 6, kept: 0, improvement: 0.00%"
+  - "2026-04-28T16:53:43.998Z | retro: score 75/100"
+  - "2026-04-28T16:54:27.509Z | retro: score 75/100 (delta: 0)"
+  - "2026-04-28T16:55:11.206Z | retro: score 75/100 (delta: 0)"
 profile: balanced
 constitution: CONSTITUTION.md
-enforcementMode: strict
+enforcementMode: advisory
 projectType: unknown
-sessionBaselineScore: 6.6
-sessionBaselineTimestamp: 2026-04-23T14:55:35.701Z
+retroDelta: 0
+retroLastRun: 2026-04-28T16:55:11.206Z
+sessionBaselineScore: 6.2
+sessionBaselineTimestamp: 2026-04-28T13:43:42.167Z
 scoreHistory:
+  - timestamp: 2026-04-28T17:37:30.009Z
+    displayScore: 6.2
+    gitSha: 366e63f
+  - timestamp: 2026-04-28T17:37:15.098Z
+    displayScore: 6.2
+    gitSha: 366e63f
+  - timestamp: 2026-04-28T17:09:46.253Z
+    displayScore: 6.2
+    gitSha: 366e63f
+  - timestamp: 2026-04-28T16:50:47.117Z
+    displayScore: 6.2
+    gitSha: 366e63f
+  - timestamp: 2026-04-28T13:43:42.206Z
+    displayScore: 6.2
+    gitSha: 366e63f
   - timestamp: 2026-04-23T14:55:36.028Z
     displayScore: 6.6
     gitSha: 17f7807

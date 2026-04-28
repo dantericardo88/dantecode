@@ -1,0 +1,521 @@
+{
+  "project": "dantecode",
+  "competitors": [],
+  "competitors_closed_source": [],
+  "competitors_oss": [],
+  "lastUpdated": "2026-04-28T17:10:36.752Z",
+  "overallSelfScore": 6,
+  "dimensions": [
+    {
+      "id": "functionality",
+      "label": "Core Functionality",
+      "weight": 1.5,
+      "category": "quality",
+      "frequency": "high",
+      "scores": {
+        "self": 7.6
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "functionality",
+          "before": 5,
+          "after": 7.6,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "testing",
+      "label": "Test Coverage & Quality",
+      "weight": 1.5,
+      "category": "quality",
+      "frequency": "high",
+      "scores": {
+        "self": 4.5
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "testing",
+          "before": 5,
+          "after": 4.5,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "error_handling",
+      "label": "Error Handling & Recovery",
+      "weight": 1.2,
+      "category": "quality",
+      "frequency": "high",
+      "scores": {
+        "self": 5
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "error_handling",
+          "before": 5,
+          "after": 5,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "security",
+      "label": "Security Hardening",
+      "weight": 1.3,
+      "category": "reliability",
+      "frequency": "high",
+      "scores": {
+        "self": 7.5
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "security",
+          "before": 5,
+          "after": 7.5,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "ux_polish",
+      "label": "UX Polish & Onboarding",
+      "weight": 1.4,
+      "category": "ux",
+      "frequency": "high",
+      "scores": {
+        "self": 5
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "ux_polish",
+          "before": 5,
+          "after": 5,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "documentation",
+      "label": "Documentation Quality",
+      "weight": 1,
+      "category": "ux",
+      "frequency": "medium",
+      "scores": {
+        "self": 7.1
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "documentation",
+          "before": 5,
+          "after": 7.1,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "performance",
+      "label": "Performance",
+      "weight": 1.2,
+      "category": "quality",
+      "frequency": "high",
+      "scores": {
+        "self": 7
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "performance",
+          "before": 5,
+          "after": 7,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "maintainability",
+      "label": "Code Maintainability",
+      "weight": 1,
+      "category": "reliability",
+      "frequency": "medium",
+      "scores": {
+        "self": 6.6
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "maintainability",
+          "before": 5,
+          "after": 6.6,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "developer_experience",
+      "label": "Developer Experience",
+      "weight": 1.5,
+      "category": "ux",
+      "frequency": "high",
+      "scores": {
+        "self": 3
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "developer_experience",
+          "before": 5,
+          "after": 3,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "autonomy",
+      "label": "Autonomy & Self-Direction",
+      "weight": 1.3,
+      "category": "features",
+      "frequency": "high",
+      "scores": {
+        "self": 7
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "autonomy",
+          "before": 6,
+          "after": 7,
+          "date": "2026-04-28"
+        },
+        {
+          "dimensionId": "autonomy",
+          "before": 7,
+          "after": 7,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "planning_quality",
+      "label": "Planning Quality (PDSE)",
+      "weight": 1,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 10
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "planning_quality",
+          "before": 5,
+          "after": 10,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "self_improvement",
+      "label": "Self-Improvement Loop",
+      "weight": 1,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 6
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "self_improvement",
+          "before": 4,
+          "after": 6,
+          "date": "2026-04-28"
+        },
+        {
+          "dimensionId": "self_improvement",
+          "before": 6,
+          "after": 6,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "spec_driven_pipeline",
+      "label": "Spec-Driven Pipeline",
+      "weight": 1.2,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 9
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "spec_driven_pipeline",
+          "before": 5,
+          "after": 9,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "convergence_self_healing",
+      "label": "Convergence & Self-Healing",
+      "weight": 1.1,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 2
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "convergence_self_healing",
+          "before": 5,
+          "after": 2,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "token_economy",
+      "label": "Token Economy & Budget Control",
+      "weight": 0.9,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 2
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "token_economy",
+          "before": 2,
+          "after": 2,
+          "date": "2026-04-28"
+        },
+        {
+          "dimensionId": "token_economy",
+          "before": 2,
+          "after": 2,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "context_economy",
+      "label": "contextEconomy",
+      "weight": 1,
+      "category": "features",
+      "frequency": "medium",
+      "scores": {
+        "self": 6.2
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "context_economy",
+          "before": 0,
+          "after": 6.2,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 2,
+      "ceiling": 9,
+      "ceilingReason": "PRD-26 filter pipeline shipped — ceiling raised to 9.0; final point requires live telemetry from real command runs"
+    },
+    {
+      "id": "ecosystem_mcp",
+      "label": "Ecosystem & MCP Integration",
+      "weight": 0.8,
+      "category": "features",
+      "frequency": "low",
+      "scores": {
+        "self": 6
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "ecosystem_mcp",
+          "before": 5,
+          "after": 6,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7
+    },
+    {
+      "id": "enterprise_readiness",
+      "label": "Enterprise Readiness",
+      "weight": 0.8,
+      "category": "reliability",
+      "frequency": "low",
+      "scores": {
+        "self": 9
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "closed",
+      "sprint_history": [
+        {
+          "dimensionId": "enterprise_readiness",
+          "before": 5,
+          "after": 9,
+          "date": "2026-04-28"
+        }
+      ],
+      "next_sprint_target": 7,
+      "ceiling": 9,
+      "ceilingReason": "filesystem evidence (SECURITY.md, CHANGELOG.md, RUNBOOK.md) is automatable up to 9.0; the final point requires real production deployments and customer validation"
+    },
+    {
+      "id": "community_adoption",
+      "label": "Community Adoption",
+      "weight": 0.7,
+      "category": "features",
+      "frequency": "low",
+      "scores": {
+        "self": 4
+      },
+      "gap_to_leader": 0,
+      "leader": "unknown",
+      "gap_to_closed_source_leader": 0,
+      "closed_source_leader": "unknown",
+      "gap_to_oss_leader": 0,
+      "oss_leader": "unknown",
+      "status": "not-started",
+      "sprint_history": [],
+      "next_sprint_target": 6,
+      "ceiling": 4,
+      "ceilingReason": "requires npm downloads, GitHub stars, and external contributors — cannot be automated"
+    }
+  ]
+}

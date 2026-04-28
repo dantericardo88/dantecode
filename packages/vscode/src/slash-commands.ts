@@ -6,10 +6,45 @@
 // Registered in sidebar HTML via Discord-style '/' prefix detection.
 // ============================================================================
 
-import { execFile } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
+// CRITICAL: use exec/spawn with shell mode (NOT execFile). VS Code/Antigravity
+// extensions spawn child processes without the npm global bin dir on PATH, so
+// `execFile("danteforge", ...)` throws ENOENT. The shell-mode variants run
+// through cmd.exe / sh which inherits the user's full PATH. This fix has
+// regressed multiple times — keep it.
+const execAsync = promisify(exec);
+
+/**
+ * Run a shell command with live stdout/stderr streaming via onChunk.
+ * Resolves with the full combined output on exit. Used by `/score` and `/ascend`
+ * so the user sees output as it's produced, not a 30-second silent wait
+ * followed by a wall of text dumped at the end.
+ */
+function runStreaming(
+  command: string,
+  options: { cwd: string; timeoutMs: number },
+  onChunk?: (text: string) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, { cwd: options.cwd, shell: true, windowsHide: true });
+    let combined = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Command timed out after ${options.timeoutMs}ms: ${command}`));
+    }, options.timeoutMs);
+    const handle = (buf: Buffer): void => {
+      const text = buf.toString();
+      combined += text;
+      onChunk?.(text);
+    };
+    child.stdout?.on("data", handle);
+    child.stderr?.on("data", handle);
+    child.on("error", (err) => { clearTimeout(timer); reject(err); });
+    child.on("close", () => { clearTimeout(timer); resolve(combined); });
+  });
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,7 +67,11 @@ export interface SlashCommand {
    * The sidebar calls this instead of sending the prompt to the model.
    * Return the markdown string to display as the assistant response.
    */
-  execute?: (args: string, projectRoot: string) => Promise<string>;
+  execute?: (
+    args: string,
+    projectRoot: string,
+    onChunk?: (text: string) => void,
+  ) => Promise<string>;
   /**
    * If defined, runs before the model loop and prepends its output to the user message.
    * Unlike execute(), the model loop still runs — prepare() injects live context first.
@@ -115,21 +154,21 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const level = extra?.trim() || "light";
       return `Run \`danteforge score --level ${level}\` in the project root and print the raw output verbatim.`;
     },
-    async execute(args, projectRoot) {
+    async execute(args, projectRoot, onChunk) {
       const level = args.trim() || "light";
       try {
-        const { stdout, stderr } = await execFileAsync("danteforge", ["score", "--level", level], {
-          cwd: projectRoot,
-          timeout: 60_000,
-          windowsHide: true,
-        });
-        const out = (stdout + stderr).trim();
-        return out.length > 0 ? `\`\`\`\n${out}\n\`\`\`` : "_No output from danteforge score._";
+        if (onChunk) onChunk("```\n");
+        const out = await runStreaming(
+          `danteforge score --level ${level}`,
+          { cwd: projectRoot, timeoutMs: 60_000 },
+          (text) => onChunk?.(text),
+        );
+        if (onChunk) onChunk("\n```");
+        const trimmed = out.trim();
+        return trimmed.length > 0 ? `\`\`\`\n${trimmed}\n\`\`\`` : "_No output from danteforge score._";
       } catch (err: unknown) {
-        const stderr = (err as { stderr?: string }).stderr ?? "";
         const msg = err instanceof Error ? err.message : String(err);
-        const detail = (stderr || msg).trim();
-        return `**danteforge score failed**\n\n\`\`\`\n${detail}\n\`\`\``;
+        return `**danteforge score failed**\n\n\`\`\`\n${msg}\n\`\`\``;
       }
     },
   },
@@ -144,21 +183,21 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     // execute() bypasses the model entirely — danteforge ascend handles the autonomous loop.
     // Using prepare() + model proved unreliable: Grok substitutes its own workflow instead
     // of calling the CLI, fabricating improvement tables and running unauthorized commands.
-    async execute(args, projectRoot) {
-      const argv = args.trim() ? ["ascend", "--target", args.trim()] : ["ascend"];
+    async execute(args, projectRoot, onChunk) {
+      const targetFlag = args.trim() ? ` --target ${args.trim()}` : "";
       try {
-        const { stdout, stderr } = await execFileAsync("danteforge", argv, {
-          cwd: projectRoot,
-          timeout: 300_000, // 5 min — ascend can run many improvement cycles
-          windowsHide: true,
-        });
-        const out = (stdout + stderr).trim();
-        return out.length > 0 ? `\`\`\`\n${out}\n\`\`\`` : "_No output from danteforge ascend._";
+        if (onChunk) onChunk("```\n");
+        const out = await runStreaming(
+          `danteforge ascend${targetFlag}`,
+          { cwd: projectRoot, timeoutMs: 600_000 }, // 10 min — ascend runs 60 cycles
+          (text) => onChunk?.(text),
+        );
+        if (onChunk) onChunk("\n```");
+        const trimmed = out.trim();
+        return trimmed.length > 0 ? `\`\`\`\n${trimmed}\n\`\`\`` : "_No output from danteforge ascend._";
       } catch (err: unknown) {
-        const stderr = (err as { stderr?: string }).stderr ?? "";
         const msg = err instanceof Error ? err.message : String(err);
-        const detail = (stderr || msg).trim();
-        return `**danteforge ascend failed**\n\n\`\`\`\n${detail}\n\`\`\``;
+        return `**danteforge ascend failed**\n\n\`\`\`\n${msg}\n\`\`\``;
       }
     },
   },

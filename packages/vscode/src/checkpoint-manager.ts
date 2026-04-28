@@ -78,6 +78,25 @@ export class CheckpointManager {
         : {}),
     };
 
+    // CRITICAL: when fileSnapshots are provided (e.g., agent-edit checkpoints
+    // tracking the OLD content of a single file), prefer the snapshot strategy.
+    // The git_stash strategy uses `git stash push -u` which captures AND REMOVES
+    // working-tree changes — including the agent's just-written file, which then
+    // survives only inside the stash. That manifests to the user as "files
+    // appear briefly then vanish" during /ascend cycles.
+    //
+    // Use git stash only when no snapshots are provided (manual full-state
+    // checkpoints from the user, where capturing everything is intended).
+    if (options.fileSnapshots && options.fileSnapshots.length > 0) {
+      const checkpoint: CheckpointRecord = {
+        ...baseRecord,
+        strategy: "snapshot",
+        fileSnapshots: [...options.fileSnapshots],
+      };
+      this.checkpoints.unshift(checkpoint);
+      return checkpoint;
+    }
+
     if (await this.canUseGitStash()) {
       const stashLabel = `dantecode-checkpoint-${id}-${label}`;
       await this.execCommand(`git stash push -u -m "${stashLabel}"`, this.projectRoot);
@@ -91,17 +110,7 @@ export class CheckpointManager {
       return checkpoint;
     }
 
-    if (!options.fileSnapshots || options.fileSnapshots.length === 0) {
-      throw new Error("Checkpoint fallback requires file snapshots when git stash is unavailable.");
-    }
-
-    const checkpoint: CheckpointRecord = {
-      ...baseRecord,
-      strategy: "snapshot",
-      fileSnapshots: [...options.fileSnapshots],
-    };
-    this.checkpoints.unshift(checkpoint);
-    return checkpoint;
+    throw new Error("Checkpoint requires either fileSnapshots or git availability.");
   }
 
   listCheckpoints(): CheckpointRecord[] {

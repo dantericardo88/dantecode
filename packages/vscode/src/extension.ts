@@ -103,6 +103,45 @@ export function getPendingReviewComments(): Array<{ file: string; comment: strin
 // ─── Activate ────────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Diagnostic: log activation entry/exit so we can tell from the bypass log
+  // whether activation is firing, succeeding, or crashing partway through.
+  // If the chat panel is blank, the answer is in this log.
+  try {
+    const fs = require("fs") as typeof import("fs");
+    fs.appendFileSync(
+      "C:/tmp/dante-bypass.log",
+      `[${new Date().toISOString()}] activate() ENTERED\n`,
+    );
+  } catch { /* ignore */ }
+  try {
+    activateInner(context);
+    try {
+      const fs = require("fs") as typeof import("fs");
+      fs.appendFileSync(
+        "C:/tmp/dante-bypass.log",
+        `[${new Date().toISOString()}] activate() COMPLETED\n`,
+      );
+    } catch { /* ignore */ }
+  } catch (activationErr) {
+    const msg = activationErr instanceof Error ? activationErr.message : String(activationErr);
+    const stack = activationErr instanceof Error ? activationErr.stack ?? "" : "";
+    try {
+      const fs = require("fs") as typeof import("fs");
+      fs.appendFileSync(
+        "C:/tmp/dante-bypass.log",
+        `[${new Date().toISOString()}] activate() THREW: ${msg}\n${stack}\n`,
+      );
+    } catch { /* ignore */ }
+    void vscode.window.showErrorMessage(
+      `DanteCode activation failed: ${msg}. Check C:/tmp/dante-bypass.log for the stack trace.`,
+    );
+    // Re-throw so the host knows activation failed (otherwise it thinks we're alive
+    // and the chat view sits blank forever).
+    throw activationErr;
+  }
+}
+
+function activateInner(context: vscode.ExtensionContext): void {
   const extensionUri = context.extensionUri;
 
   // ── Reload-notification infrastructure ──

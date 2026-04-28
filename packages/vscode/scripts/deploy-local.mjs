@@ -12,19 +12,26 @@ if (!existsSync(distSrc)) {
   process.exit(0);
 }
 
-const extensionsDir = join(homedir(), ".vscode", "extensions");
-if (!existsSync(extensionsDir)) {
-  console.log("[deploy-local] ~/.vscode/extensions not found — skipping");
-  process.exit(0);
+// Target both VS Code and Antigravity extension dirs — the user's primary editor
+// is Antigravity. A regression in late April 2026 dropped this dir from the loop;
+// every "extension didn't pick up my changes" complaint after that traced back here.
+const extensionRoots = [
+  join(homedir(), ".vscode", "extensions"),
+  join(homedir(), ".antigravity", "extensions"),
+];
+
+const installed = [];
+for (const extensionsDir of extensionRoots) {
+  if (!existsSync(extensionsDir)) continue;
+  const entries = readdirSync(extensionsDir)
+    .filter((d) => d.startsWith("dantecode.dantecode-"))
+    .map((d) => join(extensionsDir, d, "dist", "extension.js"))
+    .filter((p) => existsSync(p) || existsSync(dirname(p)));
+  installed.push(...entries);
 }
 
-const installed = readdirSync(extensionsDir)
-  .filter((d) => d.startsWith("dantecode.dantecode-"))
-  .map((d) => join(extensionsDir, d, "dist", "extension.js"))
-  .filter((p) => existsSync(p));
-
 if (installed.length === 0) {
-  console.log("[deploy-local] No installed dantecode extension found — skipping");
+  console.log("[deploy-local] No installed dantecode extension dirs found — skipping");
   process.exit(0);
 }
 

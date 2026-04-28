@@ -13,8 +13,21 @@ type GlobFunction = (
   opts: { cwd?: string; absolute?: boolean; nodir?: boolean },
 ) => Promise<string[]>;
 
-const requireGlob = createRequire(__filename);
-const { glob: legacyGlob } = requireGlob("glob") as { glob: GlobFunction };
+// CRITICAL: glob must be loaded lazily, NOT at module-eval time.
+// A previous fix (per project memory: "Two activation blockers fixed: lazy glob")
+// solved this. It regressed. Eager `requireGlob("glob")` at the top level throws
+// when the package isn't resolvable from the bundled extension's __filename,
+// which kills extension activation BEFORE activate() runs — manifesting to the
+// user as a permanently blank chat panel that no reload can fix.
+let _legacyGlob: GlobFunction | undefined;
+function getLegacyGlob(): GlobFunction {
+  if (!_legacyGlob) {
+    const requireGlob = createRequire(__filename);
+    const mod = requireGlob("glob") as { glob: GlobFunction };
+    _legacyGlob = mod.glob;
+  }
+  return _legacyGlob;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,7 +70,7 @@ async function defaultReadFile(filePath: string): Promise<string> {
 }
 
 async function defaultGlob(pattern: string, cwd: string): Promise<string[]> {
-  const results = await legacyGlob(pattern, { cwd, absolute: true, nodir: true });
+  const results = await getLegacyGlob()(pattern, { cwd, absolute: true, nodir: true });
   return results;
 }
 
