@@ -109,6 +109,15 @@ retroLastRun: 2026-04-28T16:55:11.206Z
 sessionBaselineScore: 6.2
 sessionBaselineTimestamp: 2026-04-28T18:43:01.753Z
 scoreHistory:
+  - timestamp: 2026-04-28T19:13:49.439Z
+    displayScore: 6.2
+    gitSha: "14102e7"
+  - timestamp: 2026-04-28T19:13:25.511Z
+    displayScore: 6.2
+    gitSha: "14102e7"
+  - timestamp: 2026-04-28T18:44:46.844Z
+    displayScore: 6.2
+    gitSha: "14102e7"
   - timestamp: 2026-04-28T18:44:34.011Z
     displayScore: 6.2
     gitSha: edd1295
