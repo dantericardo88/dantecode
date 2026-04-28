@@ -182,6 +182,18 @@ describe("regression guard — extension.ts activation safety", () => {
     expect(src).toContain("activate() THREW");
     expect(src).toMatch(/showErrorMessage[\s\S]{0,200}activation\s+failed/i);
   });
+
+  it("onDidWriteTerminalData call is wrapped in try/catch", () => {
+    // SYMPTOM IF BROKEN: activation fails with "Extension cannot use API
+    // proposal: terminalDataWriteEvent". Chat panel never renders.
+    // ROOT CAUSE: typeof check passes (function exists) but CALLING it throws
+    // unless the extension declares the proposal AND the editor is launched
+    // with --enable-proposed-api dantecode.dantecode.
+    // FIX: wrap the call (not just the existence check) in try/catch so the
+    // proposal-not-enabled throw degrades gracefully — terminal capture is
+    // optional, the rest of the extension works without it.
+    expect(src).toMatch(/try\s*\{[\s\S]{0,400}onDidWriteTerminalData[\s\S]{0,500}catch\s*\(/);
+  });
 });
 
 describe("regression guard — file existence (don't lose new modules)", () => {
