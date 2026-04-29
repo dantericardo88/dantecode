@@ -464,7 +464,11 @@ describe("regression guard — ascend orchestrator wiring", () => {
     // (After 2026-04-28 extraction these counters live in orchestrator's runAscendLoopCore.)
     expect(orch).toMatch(/let\s+commitsMade\s*=\s*0/);
     expect(orch).toMatch(/let\s+totalLinesChanged\s*=\s*0/);
-    expect(orch).toMatch(/commitsMade\+\+/);
+    // After 2026-04-29 helper extraction: commitsMade is incremented via the
+    // commitAscendCycle helper which returns { commitsMade: 0 | 1 }. The
+    // orchestrator does `commitsMade += commitResult.commitsMade`. Either
+    // syntax keeps the counter going up — guard accepts both.
+    expect(orch).toMatch(/commitsMade\+\+|commitsMade\s*\+=\s*commitResult\.commitsMade/);
     expect(orch).toMatch(/edits landing|edits landed/);
   });
 });

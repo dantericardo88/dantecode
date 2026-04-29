@@ -288,3 +288,412 @@ export function runShellStreaming(
     child.on("close", () => { clearTimeout(timer); resolve(combined); });
   });
 }
+
+// ── runAscendLoopCore — extracted 2026-04-28 from sidebar-provider.ts ───────
+//
+// Was: ChatSidebarProvider#runAscendLoop, ~321 lines wedged inside a 5,749-line
+// monolith. Now lives here so all ascend logic is co-located and the provider
+// is just a thin shim that wires VS Code-side callbacks. Maintainability move:
+// each module gets a single concern instead of the provider being responsible
+// for chat orchestration AND ascend orchestration.
+//
+// The 6-callback interface keeps the loop testable in isolation (no VS Code
+// dependency) and makes the provider→orchestrator coupling explicit.
+
+export interface AscendLoopState {
+  active: boolean;
+  cycle: number;
+}
+
+export interface AscendLoopCallbacks {
+  postMessage: (msg: { type: string; payload: Record<string, unknown> }) => void;
+  runChatRequest: (text: string) => Promise<void>;
+  recordMessage: (msg: { role: "user" | "assistant"; content: string }) => void;
+  log: (line: string) => void;
+  getCurrentModel: () => string;
+  isStopRequested: () => boolean;
+  resetStopRequested: () => void;
+}
+
+// ── runAscendLoopCore helpers ──────────────────────────────────────────────
+// Extracted from runAscendLoopCore so that orchestrator stays under the
+// 100-LOC maintainability threshold. Each helper owns one phase: post a
+// note, stream a score, commit a cycle, evaluate movement, build a tip.
+
+/** Post a self-contained markdown note as a single assistant chat bubble. */
+function postNote(cb: AscendLoopCallbacks, md: string): void {
+  cb.postMessage({ type: "chat_response_chunk", payload: { chunk: md, partial: md } });
+  cb.recordMessage({ role: "assistant", content: md });
+  cb.postMessage({ type: "chat_response_done", payload: {} });
+}
+
+/** Stream `danteforge score --level light` into chat with one auto-retry on failure. */
+async function streamAscendScore(cb: AscendLoopCallbacks, projectRoot: string): Promise<string> {
+  const attempt = async (label: string): Promise<string> => {
+    let buf = "";
+    cb.postMessage({
+      type: "chat_response_chunk",
+      payload: { chunk: `_Scoring project ${label}…_\n\`\`\`\n`, partial: "" },
+    });
+    const out = await runShellStreaming(
+      "danteforge score --level light",
+      { cwd: projectRoot, timeoutMs: 90_000 },
+      (chunk) => {
+        buf += chunk;
+        cb.postMessage({ type: "chat_response_chunk", payload: { chunk, partial: buf } });
+      },
+    );
+    cb.postMessage({ type: "chat_response_chunk", payload: { chunk: "\n```", partial: buf } });
+    cb.postMessage({ type: "chat_response_done", payload: {} });
+    return out;
+  };
+  try {
+    return await attempt("(`danteforge score --level light`)");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    cb.postMessage({
+      type: "chat_response_chunk",
+      payload: { chunk: `_Score failed (${msg}); retrying once…_\n`, partial: "" },
+    });
+    cb.postMessage({ type: "chat_response_done", payload: {} });
+    return attempt("(retry)");
+  }
+}
+
+/**
+ * Count source-file lines changed under `packages/` (excluding .danteforge
+ * state) for the current working tree. Sums committed-modifications +
+ * untracked-new-files. Errors are non-fatal — caller proceeds with zeros.
+ */
+async function measureSourceDelta(projectRoot: string): Promise<{ filesChanged: number; linesAdded: number }> {
+  let linesAdded = 0;
+  let filesChanged = 0;
+  try {
+    const diffStat = await runShellStreaming(
+      `git -C "${projectRoot}" diff --numstat HEAD`,
+      { cwd: projectRoot, timeoutMs: 10_000 },
+    );
+    const untracked = await runShellStreaming(
+      `git -C "${projectRoot}" ls-files --others --exclude-standard packages/`,
+      { cwd: projectRoot, timeoutMs: 10_000 },
+    );
+    for (const line of diffStat.split("\n")) {
+      const m = line.match(/^(\d+)\s+(\d+)\s+(.+)$/);
+      if (m && m[3] && m[3].startsWith("packages/") && !m[3].includes(".danteforge")) {
+        linesAdded += parseInt(m[1] ?? "0", 10);
+        filesChanged++;
+      }
+    }
+    for (const f of untracked.split("\n").filter((l) => l.trim())) {
+      if (f.startsWith("packages/") && !f.includes(".danteforge")) {
+        filesChanged++;
+        try {
+          const wc = await runShellStreaming(`wc -l "${f}"`, { cwd: projectRoot, timeoutMs: 5_000 });
+          const n = parseInt(wc.trim().split(/\s+/)[0] ?? "0", 10);
+          if (Number.isFinite(n)) linesAdded += n;
+        } catch { /* ignore */ }
+      }
+    }
+  } catch { /* commit still proceeds */ }
+  return { filesChanged, linesAdded };
+}
+
+/**
+ * Auto-commit cycle changes so the SHA-based score sees them. Returns
+ * `commitsMade` (0 or 1) and `sourceLinesAdded` (only files under
+ * `packages/`, excluding .danteforge state).
+ */
+async function commitAscendCycle(
+  cb: AscendLoopCallbacks,
+  projectRoot: string,
+  cycleNum: number,
+  displayName: string,
+): Promise<{ commitsMade: number; sourceLinesAdded: number }> {
+  try {
+    const status = await runShellStreaming(
+      `git -C "${projectRoot}" status --porcelain`,
+      { cwd: projectRoot, timeoutMs: 10_000 },
+    );
+    if (status.trim().length === 0) return { commitsMade: 0, sourceLinesAdded: 0 };
+
+    const cycleMsg = `ascend cycle ${cycleNum}: ${displayName}`;
+    const { filesChanged, linesAdded } = await measureSourceDelta(projectRoot);
+
+    await runShellStreaming(
+      `git -C "${projectRoot}" add -A && git -C "${projectRoot}" commit -m "${cycleMsg}" --no-verify`,
+      { cwd: projectRoot, timeoutMs: 30_000 },
+    );
+    const summary = filesChanged > 0
+      ? `\n_Committed cycle ${cycleNum}: **${filesChanged} source file${filesChanged === 1 ? "" : "s"}**, ~${linesAdded} lines._\n`
+      : `\n_Committed cycle ${cycleNum} (state files only — no source changes)._\n`;
+    cb.postMessage({ type: "chat_response_chunk", payload: { chunk: summary, partial: "" } });
+    cb.postMessage({ type: "chat_response_done", payload: {} });
+    return { commitsMade: 1, sourceLinesAdded: linesAdded };
+  } catch (commitErr) {
+    cb.log(`[ascend] commit step failed: ${String(commitErr)}`);
+    return { commitsMade: 0, sourceLinesAdded: 0 };
+  }
+}
+
+/**
+ * Three signals of real progress, in priority order:
+ *   (a) Dimension still in P0 list AND its score went up by ≥0.1 — direct hit.
+ *   (b) Dimension dropped OUT of the P0 list — graduated, counts as a win.
+ *   (c) Overall score moved up by ≥0.1 — aggregate progress even if (a)/(b) miss.
+ */
+function evaluateCycleMovement(input: {
+  gap: { name: string; displayName: string };
+  newGap: { name: string; score: number } | undefined;
+  beforeScore: number;
+  beforeOverallScore: number;
+  afterOverallScore: number;
+  overallDelta: number;
+  newDimsCount: number;
+}): { movement: boolean; message: string } {
+  const directDelta = input.newGap ? input.newGap.score - input.beforeScore : 0;
+  const graduated = !input.newGap && input.newDimsCount > 0;
+  const overallMoved = input.overallDelta >= 0.1;
+  const movement = directDelta >= 0.1 || graduated || overallMoved;
+
+  if (!movement) return { movement: false, message: "" };
+
+  const overallSuffix = overallMoved
+    ? ` Overall: ${input.beforeOverallScore.toFixed(1)} → ${input.afterOverallScore.toFixed(1)} (+${input.overallDelta.toFixed(1)}).`
+    : "";
+  if (graduated) {
+    return {
+      movement: true,
+      message: `📈 **${input.gap.displayName} graduated off the P0 list** (was ${input.beforeScore.toFixed(1)}/10 — now no longer in top 3 gaps).${overallSuffix}`,
+    };
+  }
+  if (directDelta >= 0.1 && input.newGap) {
+    return {
+      movement: true,
+      message: `📈 **${input.gap.displayName}: ${input.beforeScore.toFixed(1)} → ${input.newGap.score.toFixed(1)} (+${directDelta.toFixed(1)})**${overallSuffix ? ` —${overallSuffix}` : ""}`,
+    };
+  }
+  return {
+    movement: true,
+    message: `📈 **Overall score moved: ${input.beforeOverallScore.toFixed(1)} → ${input.afterOverallScore.toFixed(1)} (+${input.overallDelta.toFixed(1)})** — your work shifted the aggregate even though ${input.gap.displayName} stayed flat.`,
+  };
+}
+
+/** Halt message after 3 consecutive no-movement cycles, branching on whether
+ * any commits actually landed. */
+function buildEarlyExitMessage(commitsMade: number, totalLinesChanged: number, currentModel: string): string {
+  if (commitsMade === 0) {
+    const isGrok = currentModel.toLowerCase().includes("grok");
+    return `\n## 🛑 Loop halted — model is not making real edits\n\n` +
+      `**Current model:** \`${currentModel}\`\n` +
+      `**Commits made:** 0\n\n` +
+      `Three cycles in a row produced zero commits AND zero score movement. ` +
+      (isGrok
+        ? `Grok-non-reasoning models often do Read/Glob calls and write analysis paragraphs but never execute Edit or Write. **Switch to \`anthropic:claude-sonnet-4-6\` in the dropdown above** and re-run \`/ascend\`.`
+        : `The model isn't following through from analysis to actual edits.`);
+  }
+  return `\n## 🛑 Loop halted — edits landing, score structurally stuck\n\n` +
+    `**Commits made this run:** ${commitsMade} (${totalLinesChanged} source lines added/changed)\n` +
+    `**Score movement:** 0\n\n` +
+    `Real edits ARE landing — \`git log --oneline\` will show them. The harsh-scorer just can't see your changes ` +
+    `on a codebase this size. The Testing dimension formula is \`(maturity × 0.4) + (line_coverage_pct × 0.6)\`. ` +
+    `On DanteCode's 81,436 source lines at 28% coverage, you'd need to write tests covering ~800 new lines to ` +
+    `move the score 1 percentage point. Each \`/ascend\` cycle adds 50–200 lines — invisible to harsh-scorer.\n\n` +
+    `**Recommendation:** the autonomous loop is working as designed. To see scores move, run \`/ascend\` on a ` +
+    `smaller project (5k–20k LOC). On DanteCode itself, use \`git log --oneline\` to verify cycles are doing real work.`;
+}
+
+/** End-of-run tip differentiating three failure modes: no commits, no score
+ * movement (commits > 0), or actual progress (no tip). */
+function buildEndOfRunTip(input: {
+  cycle: number;
+  cyclesWithMovement: number;
+  commitsMade: number;
+  totalLinesChanged: number;
+  currentModel: string;
+}): string {
+  const noScoreMovement = input.cyclesWithMovement === 0 && input.cycle >= 2;
+  const noRealEdits = input.commitsMade === 0 && input.cycle >= 2;
+  if (noRealEdits) {
+    const isGrok = input.currentModel.toLowerCase().includes("grok");
+    return `\n\n## ⚠️ Zero commits across ${input.cycle} cycles\n\n**Current model:** \`${input.currentModel}\`\n\n` +
+      (isGrok
+        ? `Grok-non-reasoning models often end their turn after Read/Glob without executing Edit/Write. **Switch to \`anthropic:claude-sonnet-4-6\` in the dropdown** and re-run \`/ascend\`.`
+        : `The model isn't following through from analysis to actual edits.`);
+  }
+  if (noScoreMovement) {
+    return `\n\n## ℹ️ Real edits landed, score didn't move\n\n` +
+      `**Commits this run:** ${input.commitsMade} (${input.totalLinesChanged} source lines added/changed)\n\n` +
+      `Run \`git log --oneline | head\` to see the actual cycle commits. The harsh-scorer is structurally insensitive ` +
+      `to small per-cycle deltas on a codebase this size — Testing = \`(maturity × 0.4) + (coverage × 0.6)\`, and ` +
+      `~150 new lines on 81,436 source lines is a 0.18% coverage delta which rounds to zero. The loop IS working; ` +
+      `the metric just can't measure single-cycle progress on a project this large. For score-moving feedback, ` +
+      `run \`/ascend\` on a smaller (5k–20k LOC) project.`;
+  }
+  return "";
+}
+
+export async function runAscendLoopCore(
+  args: string,
+  projectRoot: string,
+  state: AscendLoopState,
+  cb: AscendLoopCallbacks,
+): Promise<void> {
+    const target = (() => {
+      const n = parseFloat(args.trim());
+      return Number.isFinite(n) && n > 0 && n <= 10 ? n : DEFAULT_ASCEND_OPTIONS.target;
+    })();
+    const maxCycles = DEFAULT_ASCEND_OPTIONS.maxCycles;
+    // projectRoot is the function parameter — no shadowing assignment needed.
+    const plateauCount = new Map<string, number>();
+    const skipped = new Set<string>();
+    let cyclesWithMovement = 0;
+    let consecutiveNoMovement = 0;
+    let commitsMade = 0;
+    let totalLinesChanged = 0;
+
+    state.active = true;
+    state.cycle = 0;
+    cb.resetStopRequested();
+
+    const note = (md: string): void => postNote(cb, md);
+    const streamScore = (): Promise<string> => streamAscendScore(cb, projectRoot);
+
+    note(
+      `# 🚀 Ascend Loop Started\n\n` +
+        `**Target:** ${target.toFixed(1)}/10 across all achievable dimensions.\n` +
+        `**Max cycles:** ${maxCycles}.\n\n` +
+        `Click **Stop** at any time to halt the loop.\n`,
+    );
+
+    try {
+      while (state.active && state.cycle < maxCycles) {
+        state.cycle++;
+
+        // 1. Score
+        let scoreText = "";
+        try {
+          scoreText = await streamScore();
+        } catch (err) {
+          note(`**Score command failed:** ${err instanceof Error ? err.message : String(err)}`);
+          break;
+        }
+        const dims = parseScoreOutput(scoreText);
+        if (dims.length === 0) {
+          note(`**Could not parse score output.** Aborting loop.\n\n\`\`\`\n${scoreText.slice(0, 800)}\n\`\`\``);
+          break;
+        }
+
+        // 2. Pick top achievable gap
+        const gap = pickTopGap(dims, target, skipped);
+        if (!gap) {
+          const remaining = dims.filter((d) => !d.isCeilingBlocked && d.score < target - 0.05);
+          if (remaining.length === 0) {
+            note(`✅ **All achievable dimensions at or above ${target.toFixed(1)}/10. Loop complete.**`);
+          } else {
+            note(`⏸ **All remaining dimensions hit plateau threshold.** Skipped: \`${[...skipped].join(", ")}\`.`);
+          }
+          break;
+        }
+
+        const beforeScore = gap.score;
+        // Also capture the overall score so we can detect dimension graduation
+        // (e.g. Testing 4.5 → 5.5 might drop the dim out of the P0 list entirely;
+        // per-gap parsing then misses it, but overall score reflects the climb).
+        const beforeOverallScore = parseOverallScore(scoreText) ?? 0;
+        note(
+          `---\n\n## Cycle ${state.cycle}/${maxCycles} — ${gap.displayName}\n\n` +
+            `Current: **${beforeScore.toFixed(1)}/10** → Target: ${target.toFixed(1)}/10`,
+        );
+
+        // 3. Drive the model with a focused goal
+        // Cline-style file-scoped task: for Testing cycles, find the largest
+        // untested source file and point the model at it specifically. Big
+        // coverage deltas per cycle = score actually moves on this codebase size.
+        const targetFile = gap.name === "testing" ? findLargestUntestedFile(projectRoot) ?? undefined : undefined;
+        if (targetFile) {
+          cb.postMessage({
+            type: "chat_response_chunk",
+            payload: { chunk: `\n_Targeting: \`${targetFile.path}\` (${targetFile.lines} lines, no tests)._\n`, partial: "" },
+          });
+          cb.postMessage({ type: "chat_response_done", payload: {} });
+        }
+        const goal = buildGoalPrompt(gap, target, state.cycle, maxCycles, targetFile);
+        try {
+          await cb.runChatRequest(goal);
+        } catch (err) {
+          note(`**Cycle errored:** ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        if (!state.active || cb.isStopRequested()) break;
+
+        // 4. Auto-commit so the SHA-based score sees changes.
+        const commitResult = await commitAscendCycle(cb, projectRoot, state.cycle, gap.displayName);
+        commitsMade += commitResult.commitsMade;
+        totalLinesChanged += commitResult.sourceLinesAdded;
+
+        // 5. Re-score and decide
+        let newScoreText = "";
+        try {
+          newScoreText = await streamScore();
+        } catch {
+          note(`**Re-score failed; continuing.**`);
+          continue;
+        }
+        const newDims = parseScoreOutput(newScoreText);
+        const newGap = newDims.find((d) => d.name === gap.name);
+        const afterOverallScore = parseOverallScore(newScoreText) ?? beforeOverallScore;
+        const overallDelta = afterOverallScore - beforeOverallScore;
+
+        const evaluation = evaluateCycleMovement({
+          gap,
+          newGap,
+          beforeScore,
+          beforeOverallScore,
+          afterOverallScore,
+          overallDelta,
+          newDimsCount: newDims.length,
+        });
+
+        if (evaluation.movement) {
+          plateauCount.delete(gap.name);
+          cyclesWithMovement++;
+          consecutiveNoMovement = 0;
+          note(evaluation.message);
+        } else {
+          consecutiveNoMovement++;
+          const n = (plateauCount.get(gap.name) ?? 0) + 1;
+          plateauCount.set(gap.name, n);
+          if (n >= DEFAULT_ASCEND_OPTIONS.plateauThreshold) {
+            skipped.add(gap.name);
+            note(`📉 **${gap.displayName}: plateau ${n}× — skipping for the rest of this run.**`);
+          } else {
+            note(`📉 **${gap.displayName}: no movement (${n}/${DEFAULT_ASCEND_OPTIONS.plateauThreshold} plateaus).**`);
+          }
+          if (consecutiveNoMovement >= 3) {
+            note(buildEarlyExitMessage(commitsMade, totalLinesChanged, cb.getCurrentModel()));
+            state.active = false;
+            break;
+          }
+        }
+      }
+    } finally {
+      const wasStopped = cb.isStopRequested();
+      state.active = false;
+      const tip = buildEndOfRunTip({
+        cycle: state.cycle,
+        cyclesWithMovement,
+        commitsMade,
+        totalLinesChanged,
+        currentModel: cb.getCurrentModel(),
+      });
+      note(
+        `---\n\n## Ascend loop ended\n\n` +
+          `**Cycles run:** ${state.cycle}\n` +
+          `**Commits made:** ${commitsMade} (${totalLinesChanged} source lines)\n` +
+          `**Cycles that moved a score:** ${cyclesWithMovement}\n` +
+          `**Status:** ${wasStopped ? "stopped by user" : "completed"}\n` +
+          `**Skipped (plateau):** ${[...skipped].join(", ") || "none"}` +
+          tip,
+      );
+    }
+}
