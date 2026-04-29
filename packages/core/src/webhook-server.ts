@@ -6,7 +6,7 @@
 // ============================================================================
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import type { EventTriggerRegistry } from "./event-triggers.js";
+import type { EventTriggerRegistry, AgentTask } from "./event-triggers.js";
 import type { BackgroundAgentRunner } from "./background-agent.js";
 import { appendAuditEvent } from "./audit.js";
 import { IssueToPRPipeline } from "./issue-to-pr.js";
@@ -81,130 +81,118 @@ function sendJSON(res: ServerResponse, status: number, data: unknown): void {
  * creates an AgentTask via `eventRegistry.fromGitHub()`, and enqueues
  * it in the background runner.
  */
-async function handleGitHubWebhook(
+/** Verify, parse, and resolve a GitHub webhook envelope. Sends a 4xx response
+ *  and returns null on any failure; the caller should just return. */
+async function parseGitHubWebhookEnvelope(
   req: IncomingMessage,
   res: ServerResponse,
   config: WebhookServerConfig,
-): Promise<void> {
+): Promise<{ payload: Record<string, unknown>; eventName: string } | null> {
   const rawBody = await readBody(req);
 
-  // Signature verification
   const signatureHeader = req.headers["x-hub-signature-256"];
   if (typeof signatureHeader !== "string" || !signatureHeader) {
     sendJSON(res, 401, { error: "Missing X-Hub-Signature-256 header" });
-    return;
+    return null;
   }
-
   if (!config.eventRegistry.verifyGitHubSignature(rawBody, signatureHeader)) {
     sendJSON(res, 401, { error: "Invalid webhook signature" });
-    return;
+    return null;
   }
 
-  // Parse the JSON payload
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
     sendJSON(res, 400, { error: "Invalid JSON body" });
-    return;
+    return null;
   }
 
-  // Determine the event type from the header
   const eventName = req.headers["x-github-event"];
   if (typeof eventName !== "string" || !eventName) {
     sendJSON(res, 400, { error: "Missing X-GitHub-Event header" });
-    return;
+    return null;
   }
+  return { payload, eventName };
+}
 
-  // Create an AgentTask from the event
-  const task = config.eventRegistry.fromGitHub(eventName, payload);
+/** Run an issue-to-PR pipeline in the background and send the 200 response. */
+function dispatchIssueToPRPipeline(
+  res: ServerResponse,
+  config: WebhookServerConfig,
+  task: AgentTask,
+  eventName: string,
+): void {
+  const issueInfo: GitHubIssueInfo = {
+    number: task.metadata.issueNumber as number,
+    title: task.metadata.issueTitle as string,
+    body: task.metadata.issueBody as string,
+    labels: (task.metadata.issueLabels as string[]) ?? [],
+    url: task.metadata.issueUrl as string,
+  };
+
+  const pipeline = new IssueToPRPipeline(config.projectRoot, config.issueToPR!);
+  pipeline.setProgressCallback((progress) => {
+    process.stdout.write(`[issue-to-pr] #${issueInfo.number} ${progress.stage}: ${progress.message}\n`);
+  });
+  pipeline
+    .run(issueInfo, config.agentExecutor!)
+    .then((result) => {
+      const line = result.success
+        ? `[issue-to-pr] #${issueInfo.number} completed → PR ${result.prUrl}\n`
+        : `[issue-to-pr] #${issueInfo.number} failed: ${result.error}\n`;
+      process.stdout.write(line);
+    })
+    .catch(() => { /* pipeline handles its own errors */ });
+
+  appendAuditEvent(config.projectRoot, {
+    sessionId: task.id,
+    timestamp: new Date().toISOString(),
+    type: "webhook_received",
+    payload: {
+      source: "github", event: eventName, pipeline: "issue-to-pr",
+      issueNumber: issueInfo.number, agentTaskId: task.id,
+    },
+    modelId: "",
+    projectRoot: config.projectRoot,
+  }).catch(() => { /* non-fatal */ });
+
+  sendJSON(res, 200, {
+    accepted: true, pipeline: "issue-to-pr",
+    issueNumber: issueInfo.number, agentTaskId: task.id, source: task.source,
+  });
+}
+
+async function handleGitHubWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: WebhookServerConfig,
+): Promise<void> {
+  const envelope = await parseGitHubWebhookEnvelope(req, res, config);
+  if (!envelope) return;
+
+  const task = config.eventRegistry.fromGitHub(envelope.eventName, envelope.payload);
   if (!task) {
     sendJSON(res, 200, { accepted: false, reason: "Event type not actionable" });
     return;
   }
 
-  // Route issue-to-PR tasks through the full pipeline if configured
   if (task.metadata.type === "issue-to-pr" && config.issueToPR && config.agentExecutor) {
-    const issueInfo: GitHubIssueInfo = {
-      number: task.metadata.issueNumber as number,
-      title: task.metadata.issueTitle as string,
-      body: task.metadata.issueBody as string,
-      labels: (task.metadata.issueLabels as string[]) ?? [],
-      url: task.metadata.issueUrl as string,
-    };
-
-    // Run the pipeline in the background — don't block the HTTP response
-    const pipeline = new IssueToPRPipeline(config.projectRoot, config.issueToPR);
-    pipeline.setProgressCallback((progress) => {
-      process.stdout.write(
-        `[issue-to-pr] #${issueInfo.number} ${progress.stage}: ${progress.message}\n`,
-      );
-    });
-
-    // Fire and forget — the pipeline handles its own error reporting
-    pipeline
-      .run(issueInfo, config.agentExecutor)
-      .then((result) => {
-        if (result.success) {
-          process.stdout.write(
-            `[issue-to-pr] #${issueInfo.number} completed → PR ${result.prUrl}\n`,
-          );
-        } else {
-          process.stdout.write(`[issue-to-pr] #${issueInfo.number} failed: ${result.error}\n`);
-        }
-      })
-      .catch(() => {
-        /* pipeline handles its own errors */
-      });
-
-    appendAuditEvent(config.projectRoot, {
-      sessionId: task.id,
-      timestamp: new Date().toISOString(),
-      type: "webhook_received",
-      payload: {
-        source: "github",
-        event: eventName,
-        pipeline: "issue-to-pr",
-        issueNumber: issueInfo.number,
-        agentTaskId: task.id,
-      },
-      modelId: "",
-      projectRoot: config.projectRoot,
-    }).catch(() => {
-      /* non-fatal */
-    });
-
-    sendJSON(res, 200, {
-      accepted: true,
-      pipeline: "issue-to-pr",
-      issueNumber: issueInfo.number,
-      agentTaskId: task.id,
-      source: task.source,
-    });
+    dispatchIssueToPRPipeline(res, config, task, envelope.eventName);
     return;
   }
 
-  // Default: enqueue the task in the background runner
   const taskId = config.backgroundRunner.enqueue(task.prompt);
-
-  // Audit log the webhook event
   appendAuditEvent(config.projectRoot, {
     sessionId: task.id,
     timestamp: new Date().toISOString(),
     type: "webhook_received",
-    payload: { source: "github", event: eventName, taskId, agentTaskId: task.id },
+    payload: { source: "github", event: envelope.eventName, taskId, agentTaskId: task.id },
     modelId: "",
     projectRoot: config.projectRoot,
-  }).catch(() => {
-    /* non-fatal */
-  });
+  }).catch(() => { /* non-fatal */ });
 
-  sendJSON(res, 200, {
-    accepted: true,
-    taskId,
-    agentTaskId: task.id,
-    source: task.source,
-  });
+  sendJSON(res, 200, { accepted: true, taskId, agentTaskId: task.id, source: task.source });
 }
 
 /**
