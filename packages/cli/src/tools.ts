@@ -255,6 +255,49 @@ async function toolRead(
 /**
  * Write tool: writes content to a file, creating parent directories as needed.
  */
+/** Compute the ChangedFileRecord + MutationRecord pair from a successful
+ * write. Extracted from toolWrite to keep that function under 100 LOC. */
+function buildWriteRecords(args: {
+  projectRoot: string;
+  resolved: string;
+  existing?: string;
+  contentToWrite: string;
+  beforeHash: string;
+  afterHash: string;
+  readSnapshotId?: string;
+  lineCount: number;
+}): { changedFile: ChangedFileRecord; mutationRecord: MutationRecord } {
+  const newLineCount = args.contentToWrite.split(/\r?\n/).length;
+  const oldLineCount = args.existing?.split(/\r?\n/).length ?? 0;
+  const additions = Math.max(newLineCount - oldLineCount, 0);
+  const deletions = Math.max(oldLineCount - newLineCount, 0);
+  const diffSummary = additions > 0 || deletions > 0 ? `+${additions} -${deletions}` : "no changes";
+  const path = relative(args.projectRoot, args.resolved).replace(/\\/g, "/");
+  const changedFile: ChangedFileRecord = {
+    path,
+    beforeHash: args.beforeHash,
+    afterHash: args.afterHash,
+    lineCount: args.lineCount,
+    additions,
+    deletions,
+    diffSummary,
+  };
+  const mutationRecord: MutationRecord = {
+    id: `mutation-${Date.now()}`,
+    toolCallId: "", // Will be set by caller
+    path,
+    beforeHash: args.beforeHash,
+    afterHash: args.afterHash,
+    diffSummary,
+    lineCount: args.lineCount,
+    additions,
+    deletions,
+    timestamp: new Date().toISOString(),
+    readSnapshotId: args.readSnapshotId,
+  };
+  return { changedFile, mutationRecord };
+}
+
 export async function toolWrite(
   input: Record<string, unknown>,
   projectRoot: string,
@@ -262,25 +305,12 @@ export async function toolWrite(
 ): Promise<ToolResult> {
   const filePath = input["file_path"] as string | undefined;
   const content = input["content"] as string | undefined;
-
-  if (!filePath) {
-    return {
-      toolName: "Write",
-      content: "Error: file_path parameter is required",
-      isError: true,
-      ok: false,
-    };
-  }
-  if (content === undefined) {
-    return {
-      toolName: "Write",
-      content: "Error: content parameter is required",
-      isError: true,
-      ok: false,
-    };
+  const missing = !filePath ? "file_path" : content === undefined ? "content" : null;
+  if (missing) {
+    return { toolName: "Write", content: `Error: ${missing} parameter is required`, isError: true, ok: false };
   }
 
-  const resolved = resolvePath(filePath, projectRoot);
+  const resolved = resolvePath(filePath!, projectRoot);
 
   try {
     const existing = await readFile(resolved, "utf-8").catch(() => null);
@@ -299,7 +329,7 @@ export async function toolWrite(
       }
     }
 
-    const contentToWrite = preserveLineEndingsForWrite(content, existing ?? undefined);
+    const contentToWrite = preserveLineEndingsForWrite(content!, existing ?? undefined);
     await mkdir(dirname(resolved), { recursive: true });
     await writeFile(resolved, contentToWrite, "utf-8");
     setTrackedSnapshot(context, resolved, await buildTrackedSnapshot(resolved, contentToWrite));
@@ -326,37 +356,16 @@ export async function toolWrite(
       };
     }
 
-    const additions = contentToWrite.split(/\r?\n/).length - (existing?.split(/\r?\n/).length || 0);
-    const deletions = (existing?.split(/\r?\n/).length || 0) - contentToWrite.split(/\r?\n/).length;
-    const diffSummary =
-      additions > 0 || deletions > 0
-        ? `+${Math.max(additions, 0)} -${Math.max(deletions, 0)}`
-        : "no changes";
-
-    const changedFile: ChangedFileRecord = {
-      path: relative(projectRoot, resolved).replace(/\\/g, "/"),
+    const { changedFile, mutationRecord } = buildWriteRecords({
+      projectRoot,
+      resolved,
+      existing: existing ?? undefined,
+      contentToWrite,
       beforeHash,
       afterHash,
-      lineCount,
-      additions: Math.max(additions, 0),
-      deletions: Math.max(deletions, 0),
-      diffSummary,
-    };
-
-    const mutationRecord: MutationRecord = {
-      id: `mutation-${Date.now()}`,
-      toolCallId: "", // Will be set by caller
-      path: changedFile.path,
-      beforeHash,
-      afterHash,
-      diffSummary,
-      lineCount,
-      additions: changedFile.additions,
-      deletions: changedFile.deletions,
-      timestamp: new Date().toISOString(),
       readSnapshotId: beforeSnapshot?.id,
-    };
-
+      lineCount,
+    });
     return {
       toolName: "Write",
       content: `Successfully wrote ${lineCount} lines to ${resolved}`,
@@ -908,6 +917,23 @@ function searchFileContent(
   return results;
 }
 
+/** Directories grepDir always walks past — large bundles, build outputs, vendor. */
+const GREP_SKIP_DIRS = new Set([
+  "node_modules", ".git", "dist", ".next", "__pycache__",
+  ".dantecode/worktrees", ".cache", ".turbo", "coverage",
+]);
+
+/** File extensions grepDir treats as readable text. */
+const GREP_TEXT_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+  ".json", ".yaml", ".yml", ".toml", ".md", ".mdx",
+  ".css", ".scss", ".html", ".xml", ".svg",
+  ".py", ".rb", ".rs", ".go", ".java", ".c", ".cpp", ".h",
+  ".sh", ".bash", ".zsh", ".fish",
+  ".env", ".gitignore", ".dockerignore",
+  ".txt", ".csv", ".sql", ".graphql",
+]);
+
 /**
  * Recursively searches a directory for file contents matching a regex.
  */
@@ -923,57 +949,6 @@ async function grepDir(
 ): Promise<void> {
   if (depth > 20 || results.length >= maxResults) return;
 
-  const skipDirs = new Set([
-    "node_modules",
-    ".git",
-    "dist",
-    ".next",
-    "__pycache__",
-    ".dantecode/worktrees",
-    ".cache",
-    ".turbo",
-    "coverage",
-  ]);
-
-  const textExtensions = new Set([
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".mjs",
-    ".cjs",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".md",
-    ".mdx",
-    ".css",
-    ".scss",
-    ".html",
-    ".xml",
-    ".svg",
-    ".py",
-    ".rb",
-    ".rs",
-    ".go",
-    ".java",
-    ".c",
-    ".cpp",
-    ".h",
-    ".sh",
-    ".bash",
-    ".zsh",
-    ".fish",
-    ".env",
-    ".gitignore",
-    ".dockerignore",
-    ".txt",
-    ".csv",
-    ".sql",
-    ".graphql",
-  ]);
-
   let entries: string[];
   try {
     entries = await readdir(dir);
@@ -983,7 +958,7 @@ async function grepDir(
 
   for (const entry of entries) {
     if (results.length >= maxResults) return;
-    if (skipDirs.has(entry)) continue;
+    if (GREP_SKIP_DIRS.has(entry)) continue;
 
     const fullPath = join(dir, entry);
     let entryStat;
@@ -994,20 +969,11 @@ async function grepDir(
     }
 
     if (entryStat.isDirectory()) {
-      await grepDir(
-        fullPath,
-        baseDir,
-        regex,
-        outputMode,
-        contextLines,
-        results,
-        depth + 1,
-        maxResults,
-      );
+      await grepDir(fullPath, baseDir, regex, outputMode, contextLines, results, depth + 1, maxResults);
     } else if (entryStat.isFile()) {
       // Only search text files
       const ext = fullPath.slice(fullPath.lastIndexOf(".")).toLowerCase();
-      if (!textExtensions.has(ext) && entry !== "Makefile" && entry !== "Dockerfile") {
+      if (!GREP_TEXT_EXTENSIONS.has(ext) && entry !== "Makefile" && entry !== "Dockerfile") {
         continue;
       }
 
@@ -1490,6 +1456,23 @@ async function toolSubAgent(
  * GitHubSearch tool: searches GitHub repos, code, issues, or PRs using the `gh` CLI.
  * Wraps common `gh search` and `gh api` patterns into a structured tool.
  */
+/** Build the `gh search ...` command for a given search type. Extracted from
+ * toolGitHubSearch to keep that function under 100 LOC. */
+function buildGhSearchCommand(searchType: string, query: string, limit: number): string {
+  const q = JSON.stringify(query);
+  switch (searchType) {
+    case "code":
+      return `gh search code ${q} --limit ${limit} --json repository,path,textMatches`;
+    case "issues":
+      return `gh search issues ${q} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+    case "prs":
+      return `gh search prs ${q} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
+    case "repos":
+    default:
+      return `gh search repos ${q} --limit ${limit} --json name,url,description,stargazersCount,language,updatedAt`;
+  }
+}
+
 async function toolGitHubSearch(
   input: Record<string, unknown>,
   projectRoot: string,
@@ -1518,24 +1501,7 @@ async function toolGitHubSearch(
     };
   }
 
-  // Build gh command based on search type
-  let command: string;
-  switch (searchType) {
-    case "repos":
-      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount,language,updatedAt`;
-      break;
-    case "code":
-      command = `gh search code ${JSON.stringify(query)} --limit ${limit} --json repository,path,textMatches`;
-      break;
-    case "issues":
-      command = `gh search issues ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
-      break;
-    case "prs":
-      command = `gh search prs ${JSON.stringify(query)} --limit ${limit} --json title,url,state,repository,createdAt,labels`;
-      break;
-    default:
-      command = `gh search repos ${JSON.stringify(query)} --limit ${limit} --json name,url,description,stargazersCount`;
-  }
+  const command = buildGhSearchCommand(searchType, query, limit);
 
   try {
     const result = execSync(command, {
