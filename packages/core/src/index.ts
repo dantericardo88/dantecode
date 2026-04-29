@@ -2230,7 +2230,10 @@ export type {
 // Sprint Dim 48 — Accessibility / Inclusive UX
 export {
   runAccessibilityAudit,
+  runAccessibilityGate,
+  getAccessibilityProofCoverage,
   generateA11yReport,
+  generateA11yGateReport,
   recordA11yAudit,
   loadA11yAuditLog,
   getA11yTrendScore,
@@ -2240,6 +2243,10 @@ export type {
   A11yWcagLevel,
   A11yViolation,
   AccessibilityAuditResult,
+  AccessibilityProofArea,
+  AccessibilityProofCoverage,
+  AccessibilityGateOptions,
+  AccessibilityGateResult,
   A11yAuditLogEntry,
 } from "./accessibility-auditor.js";
 

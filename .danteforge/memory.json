@@ -1087,6 +1087,652 @@
       "relatedCommands": [
         "llm"
       ]
+    },
+    {
+      "id": "d2316bc8-a2a5-49ff-85d9-1eb1722e451c",
+      "timestamp": "2026-04-29T13:26:22.623Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 194.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "354d9234-9f42-46d7-8bb5-c9768e1b4c2c",
+      "timestamp": "2026-04-29T13:26:28.141Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 875. Response chars: 223.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "81196050-fb1e-42d8-b855-d78f2dcb223c",
+      "timestamp": "2026-04-29T13:26:35.144Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 306.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "b35939bb-d34a-48dc-9d89-1fd59ddbc581",
+      "timestamp": "2026-04-29T13:26:41.898Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 152.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "30c85e33-efa0-4c93-bbfb-c89e6d21b689",
+      "timestamp": "2026-04-29T13:26:47.195Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 153.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "af79bc9b-3383-4dbc-95b1-afdadccf0d64",
+      "timestamp": "2026-04-29T13:26:52.698Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 250.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "aa447dcf-546d-4371-97c0-c177a27cdd92",
+      "timestamp": "2026-04-29T13:26:57.847Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 879. Response chars: 145.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "0d2fc866-917d-477d-bd0f-942fcc81fc3b",
+      "timestamp": "2026-04-29T13:27:04.412Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 184.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "175bb73b-bf93-40a4-b4b3-984e46e8e4f9",
+      "timestamp": "2026-04-29T13:27:10.373Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 887. Response chars: 128.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "8e876f12-a4f9-4610-b765-359dbfeea626",
+      "timestamp": "2026-04-29T13:27:15.693Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 225.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "d1601812-bec7-4b98-8d56-c827d11e0e05",
+      "timestamp": "2026-04-29T13:27:22.363Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 178.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "a6ea0792-3ab3-4dbf-a686-cf7b406ec522",
+      "timestamp": "2026-04-29T13:27:29.216Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 191.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "abf30747-f742-44c1-99fc-c503dbca84d4",
+      "timestamp": "2026-04-29T13:27:35.912Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 886. Response chars: 213.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "9d411512-99dc-45a8-ab0d-26402155f00b",
+      "timestamp": "2026-04-29T13:27:42.498Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 890. Response chars: 135.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "05372d7b-4829-4f22-bc03-396053a724e4",
+      "timestamp": "2026-04-29T13:27:49.209Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 880. Response chars: 167.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "a7bdae24-3baf-4f5d-b279-451c6e9ec918",
+      "timestamp": "2026-04-29T13:27:54.366Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 882. Response chars: 150.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "8717e05f-73df-49df-9572-96d97451aac1",
+      "timestamp": "2026-04-29T13:28:01.784Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 880. Response chars: 280.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "27c67da2-83f3-4db7-9aeb-c0ac69559829",
+      "timestamp": "2026-04-29T13:28:08.258Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 887. Response chars: 274.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "69ec9dad-0129-46ee-affa-275ee3eceb06",
+      "timestamp": "2026-04-29T13:28:14.879Z",
+      "sessionId": "50a426ba-ab51-4ca1-8ff5-83884d53c94b",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 885. Response chars: 223.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "660719d9-aba9-44a2-8515-3291c2ea7006",
+      "timestamp": "2026-04-29T14:46:46.811Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 191.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "6f81f064-77e0-4c7a-a2cb-79b47a60dce8",
+      "timestamp": "2026-04-29T14:46:54.224Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 875. Response chars: 149.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "b94e6f1c-ffff-4ff3-9f2c-5a6e82b745f1",
+      "timestamp": "2026-04-29T14:47:02.185Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 227.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "5c9bc9df-577f-4a49-a6ca-6d9cb010eaf9",
+      "timestamp": "2026-04-29T14:47:10.562Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 149.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "23c32890-5c83-4339-a93e-c92b3ada2578",
+      "timestamp": "2026-04-29T14:47:18.813Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 168.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "2578ef66-046d-45f1-8d3f-21007b44258a",
+      "timestamp": "2026-04-29T14:47:26.326Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 881. Response chars: 163.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "4b3693b5-0686-4fff-9ec7-9c4e54cd9b9e",
+      "timestamp": "2026-04-29T14:47:34.762Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 879. Response chars: 195.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "20aa2dc2-a962-4866-bb8e-2ff51d69b91e",
+      "timestamp": "2026-04-29T14:47:42.730Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 173.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "acbb3080-87aa-4c87-ac9a-65695ab4e143",
+      "timestamp": "2026-04-29T14:47:50.702Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 887. Response chars: 239.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "3112628d-c710-4adf-beb5-2f9c140f8133",
+      "timestamp": "2026-04-29T14:47:58.664Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 876. Response chars: 137.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "7cf49bc1-f7b7-4888-ab4b-b25e451bc803",
+      "timestamp": "2026-04-29T14:48:06.996Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 146.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "4fd59a15-3526-4a0f-9444-55f2694a1d7e",
+      "timestamp": "2026-04-29T14:48:15.316Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 883. Response chars: 184.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "61543431-354c-4a41-82d3-05bc2acceefe",
+      "timestamp": "2026-04-29T14:48:23.951Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 886. Response chars: 240.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "4c822133-3b9b-443f-a76e-d842d4119948",
+      "timestamp": "2026-04-29T14:48:31.740Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 890. Response chars: 179.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "0fcd824e-537a-4aa9-acb9-3af75114983f",
+      "timestamp": "2026-04-29T14:48:40.532Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 880. Response chars: 258.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "8c21fdb2-ebda-4798-a308-12e9b21d3055",
+      "timestamp": "2026-04-29T14:48:48.056Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 882. Response chars: 147.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "9c856d81-d912-4190-b748-5bce8ef01992",
+      "timestamp": "2026-04-29T14:48:55.694Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 880. Response chars: 206.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "0c6313a4-ad79-4a5e-8651-09cc06e27376",
+      "timestamp": "2026-04-29T14:49:03.042Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 887. Response chars: 192.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
+    },
+    {
+      "id": "c7158442-8875-46f6-a673-7649b306435b",
+      "timestamp": "2026-04-29T14:49:10.731Z",
+      "sessionId": "8a49f655-e122-4a0c-8b2e-3115b1ae8103",
+      "tokenCount": 20,
+      "category": "command",
+      "summary": "LLM call: ollama/qwen2.5-coder:latest",
+      "detail": "Prompt chars: 885. Response chars: 221.",
+      "tags": [
+        "llm",
+        "ollama",
+        "qwen2.5-coder:latest"
+      ],
+      "relatedCommands": [
+        "llm"
+      ]
     }
   ]
 }

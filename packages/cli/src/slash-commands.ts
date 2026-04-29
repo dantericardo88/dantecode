@@ -979,6 +979,90 @@ Rules: Never copy code verbatim. Always check licenses. Clean up cloned repos. V
   return `${GREEN}${BOLD}OSS Research Pipeline activated${RESET}\n${DIM}Scanning project → searching internet → cloning repos → analyzing → implementing → autoforging${RESET}`;
 }
 
+function readFlagValue(args: string, flag: string, fallback: string): string {
+  const match = args.match(new RegExp(`${flag}\\s+([^\\s]+)`, "i"));
+  return match?.[1] ?? fallback;
+}
+
+async function ossHarvestCommand(args: string, state: ReplState): Promise<string> {
+  const patternFamily = args.trim() || "accessibility inclusive UX audit gate";
+  const prompt = [
+    "Execute the /oss-harvest workflow natively.",
+    `Pattern family: ${patternFamily}`,
+    "Use local and permissively licensed OSS patterns only; do not copy code verbatim.",
+    "Compare against DanteCode, extract implementation gaps, add tests first, implement fresh code, and run focused verification.",
+  ].join("\n");
+
+  state.session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content:
+      "[OSS HARVEST]\nHarvest one focused pattern family, apply it as fresh implementation, and produce evidence before any score claim.",
+    timestamp: new Date().toISOString(),
+  });
+  state.pendingAgentPrompt = prompt;
+
+  return `${GREEN}${BOLD}OSS Harvest Pipeline activated${RESET}\n${DIM}Pattern family: ${patternFamily}${RESET}`;
+}
+
+async function infernoCommand(args: string, state: ReplState): Promise<string> {
+  const promptText = args.trim() || "quality-focused self-improvement";
+  const prompt = [
+    "Execute the /inferno umbrella workflow natively.",
+    `Goal: ${promptText}`,
+    "Sequence: /oss discovery, focused /oss-harvest, /party --autoforge implementation lanes, verification, synthesis, and score-proof review.",
+    "Use tests before code, preserve user changes, and stop with blockers instead of inflating scores.",
+  ].join("\n");
+
+  state.session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content:
+      "[INFERNO]\nMax-power DanteForge preset: OSS discovery, pattern harvest, party-mode implementation, verification, synthesize, retro.",
+    timestamp: new Date().toISOString(),
+  });
+  state.pendingAgentPrompt = prompt;
+
+  return `${GREEN}${BOLD}Inferno Pipeline activated${RESET}\n${DIM}${promptText}${RESET}`;
+}
+
+async function autoresearchCommand(args: string, state: ReplState): Promise<string> {
+  const rawArgs = args.trim();
+  const target = readFlagValue(rawArgs, "--target", "9");
+  const maxCycles = readFlagValue(rawArgs, "--max-cycles", "20");
+  const focus =
+    rawArgs
+      .replace(/--target\s+[^\s]+/gi, "")
+      .replace(/--max-cycles\s+[^\s]+/gi, "")
+      .trim() || "dim48 accessibility_inclusive_ux";
+
+  const prompt = [
+    "Execute the /autoresearch focused self-improvement alias natively.",
+    `Focus: ${focus}`,
+    `target score: ${target}`,
+    `max cycles: ${maxCycles}`,
+    "Read .danteforge/compete/matrix.json and the current rubric entry first.",
+    "/oss dimension 48 accessibility inclusive UX for TypeScript VS Code extension CLI webviews axe-core React Aria pa11y VS Code accessibility",
+    "/oss-harvest accessibility inclusive UX audit gate",
+    "/oss-harvest keyboard navigation focus management roving tabindex",
+    "/oss-harvest screen reader live regions aria announcements",
+    "/oss-harvest high contrast reduced motion contrast checking",
+    "/party --autoforge --files packages/core/src/accessibility-auditor.ts,packages/vscode/src/accessibility-provider.ts,packages/cli/src/slash-commands.ts Move dimension 48 to 9+ with audit-engine, VS Code UX, CLI/reporting, release-gate, and verification lanes.",
+    "Run dantecode a11y audit proof fixtures, npm verification, and danteforge frontier-gap before claiming the target score.",
+  ].join("\n");
+
+  state.session.messages.push({
+    id: randomUUID(),
+    role: "system",
+    content:
+      "[AUTORESEARCH]\nFocused DanteForge self-improvement alias: matrix read, OSS research, harvest, party implementation, proof, frontier-gap.",
+    timestamp: new Date().toISOString(),
+  });
+  state.pendingAgentPrompt = prompt;
+
+  return `${GREEN}${BOLD}Autoresearch Pipeline activated${RESET}\n${DIM}${focus} -> target ${target} in <= ${maxCycles} cycles${RESET}`;
+}
+
 async function sandboxCommand(_args: string, state: ReplState): Promise<string> {
   if (state.enableSandbox) {
     if (state.sandboxBridge) {
@@ -2521,16 +2605,34 @@ const SLASH_COMMANDS: SlashCommand[] = [
     handler: autoforgeCommand,
   },
   {
+    name: "inferno",
+    description: "Max-power DanteForge workflow preset",
+    usage: "/inferno [goal]",
+    handler: infernoCommand,
+  },
+  {
     name: "oss",
     description: "OSS research pipeline — scan, search, harvest, implement, autoforge",
     usage: "/oss [focus-area]",
     handler: ossCommand,
   },
   {
+    name: "oss-harvest",
+    description: "Harvest one focused OSS pattern family",
+    usage: "/oss-harvest <pattern-family>",
+    handler: ossHarvestCommand,
+  },
+  {
     name: "party",
     description: "Multi-agent coordination — parallel lanes for complex tasks",
     usage: "/party [--autoforge] [--files a,b] <task>",
     handler: partyCommand,
+  },
+  {
+    name: "autoresearch",
+    description: "Focused self-improvement research loop",
+    usage: "/autoresearch <focus> [--target n] [--max-cycles n]",
+    handler: autoresearchCommand,
   },
   {
     name: "mcp",
@@ -2632,7 +2734,7 @@ export async function routeSlashCommand(input: string, state: ReplState): Promis
   const args = spaceIndex === -1 ? "" : withoutSlash.slice(spaceIndex + 1);
 
   // Check built-in commands first
-  let command = SLASH_COMMANDS.find((c) => c.name === commandName);
+  const command = SLASH_COMMANDS.find((c) => c.name === commandName);
 
   // If not found, check custom plugin commands
   if (!command) {

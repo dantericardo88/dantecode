@@ -1,3 +1,6 @@
+import { evaluateScoreClaimGate } from "./regression-gate.js";
+import type { ScoreClaimGateInput } from "./regression-gate.js";
+
 // Detects unverified score/metric claims in text-only model responses.
 // Implements the Cline "double-check completion" pattern at the content level:
 // if the model claims score deltas without a verified danteforge score tool result,
@@ -31,6 +34,7 @@ export function detectUnverifiedScoreClaims(
   _sessionToolOutputs: string[],
   ranImprovementCmd: boolean,
   verifiedScoreOutput: string | null,
+  regressionGate?: ScoreClaimGateInput | null,
 ): string | null {
   if (!ranImprovementCmd) return null;
 
@@ -45,7 +49,17 @@ export function detectUnverifiedScoreClaims(
       const claimed = m[0].replace(/\s+/g, "");
       return verifiedScoreOutput.replace(/\s+/g, "").includes(claimed);
     });
-    if (allGrounded) return null;
+    if (allGrounded) {
+      const regressionProof = evaluateScoreClaimGate(regressionGate);
+      if (regressionProof.ok) {
+        return null;
+      }
+      return (
+        `\n\n---\n⚠️ *Score or matrix claim is numerically verified, but blocked by ` +
+        `${regressionProof.reason ?? "missing regression gate"} proof. Run ` +
+        `\`dantecode regression gate --profile score-claim --evidence\` before trusting the claim.*`
+      );
+    }
   }
 
   return (

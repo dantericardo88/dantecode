@@ -53,6 +53,7 @@ export function enhanceWebviewAccessibility(
   },
 ): string {
   let enhanced = html;
+  const announceRegionId = options.announceRegionId ?? "dante-sr-announcer";
 
   // Inject lang attribute into <html> if missing
   if (/<html\b(?![^>]*\blang\b)[^>]*>/i.test(enhanced)) {
@@ -65,6 +66,36 @@ export function enhanceWebviewAccessibility(
       /<body\b([^>]*)>/i,
       `<body$1 aria-label="${options.panelLabel}">`,
     );
+  }
+
+  // If the webview has no explicit main landmark, make the panel body the main region.
+  if (!/<main\b|role\s*=\s*["']main["']/i.test(enhanced)) {
+    enhanced = enhanced.replace(/<body\b((?:(?!\brole=)[^>])*)>/i, '<body$1 role="main">');
+  }
+
+  const baseStyle = `<style id="dante-a11y-base">
+:root {
+  --dante-focus-ring: 2px solid var(--vscode-focusBorder);
+}
+:focus-visible {
+  outline: var(--dante-focus-ring);
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  * { forced-color-adjust: auto; }
+  :focus-visible { outline: 2px solid CanvasText; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+</style>`;
+  if (!/id\s*=\s*["']dante-a11y-base["']/i.test(enhanced)) {
+    enhanced = enhanced.replace("</head>", `${baseStyle}\n</head>`);
   }
 
   // Inject high-contrast CSS variables
@@ -82,9 +113,9 @@ export function enhanceWebviewAccessibility(
     enhanced = enhanced.replace("</head>", `${hcStyle}\n</head>`);
   }
 
-  // Inject ARIA live region for announcements if requested
-  if (options.announceRegionId) {
-    const liveRegion = `<div id="${options.announceRegionId}" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;"></div>`;
+  // Inject ARIA live region for announcements.
+  if (!new RegExp(`id\\s*=\\s*["']${announceRegionId}["']`, "i").test(enhanced)) {
+    const liveRegion = `<div id="${announceRegionId}" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;"></div>`;
     enhanced = enhanced.replace("</body>", `${liveRegion}\n</body>`);
   }
 
@@ -113,11 +144,50 @@ export function announceToScreenReader(
  */
 export function getKeyboardNavScript(): string {
   return `(function() {
+  function getFocusable(root) {
+    return Array.from((root || document).querySelectorAll(
+      'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex="0"],[role="button"],[role="menuitem"],[role="option"],[role="tab"]'
+    )).filter(function(el) {
+      return !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true';
+    });
+  }
+  function moveRoving(container, direction) {
+    var items = getFocusable(container);
+    if (!items.length) return;
+    var current = items.indexOf(document.activeElement);
+    var next = current < 0 ? 0 : current + direction;
+    if (next < 0) next = items.length - 1;
+    if (next >= items.length) next = 0;
+    items.forEach(function(item, index) { item.setAttribute('tabindex', index === next ? '0' : '-1'); });
+    items[next].focus();
+  }
   document.addEventListener('keydown', function(e) {
+    var roving = document.activeElement && document.activeElement.closest('[data-roving-tabindex],[role="listbox"],[role="menu"],[role="tablist"]');
+    if (roving && (e.key === 'ArrowDown' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      moveRoving(roving, 1);
+      return;
+    }
+    if (roving && (e.key === 'ArrowUp' || e.key === 'ArrowLeft')) {
+      e.preventDefault();
+      moveRoving(roving, -1);
+      return;
+    }
+    if (roving && e.key === 'Home') {
+      e.preventDefault();
+      var first = getFocusable(roving)[0];
+      if (first) first.focus();
+      return;
+    }
+    if (roving && e.key === 'End') {
+      e.preventDefault();
+      var items = getFocusable(roving);
+      var last = items[items.length - 1];
+      if (last) last.focus();
+      return;
+    }
     if (e.key === 'Tab') {
-      var focusable = Array.from(document.querySelectorAll(
-        'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]'
-      ));
+      var focusable = getFocusable(document);
       if (!focusable.length) return;
       var idx = focusable.indexOf(document.activeElement);
       if (e.shiftKey) {

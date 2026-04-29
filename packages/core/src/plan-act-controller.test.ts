@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { parsePlan, formatPlanForDisplay, PlanActController } from './plan-act-controller.js';
 import type { ExecutionPlan } from './plan-act-controller.js';
 
@@ -21,8 +21,8 @@ describe('plan-act-controller', () => {
       const plan = parsePlan(input, 'goal');
       expect(plan.goal).toBe('test goal');
       expect(plan.steps).toHaveLength(1);
-      expect(plan.steps[0].risk).toBe('medium');
-      expect(plan.steps[0].affectedFiles).toContain('src/file.ts');
+      expect(plan.steps[0]?.risk).toBe('medium');
+      expect(plan.steps[0]?.affectedFiles).toContain('src/file.ts');
       expect(plan.estimatedChangedFiles).toBe(1);
     });
 
@@ -33,7 +33,7 @@ describe('plan-act-controller', () => {
       });
       const plan = parsePlan(input, 'goal');
       expect(plan.steps).toHaveLength(1);
-      expect(plan.steps[0].risk).toBe('low');
+      expect(plan.steps[0]?.risk).toBe('low');
     });
 
     it('falls back to regex parsing for numbered list', () => {
@@ -41,8 +41,8 @@ describe('plan-act-controller', () => {
 2. Delete old file old.ts`;
       const plan = parsePlan(input, 'goal');
       expect(plan.steps).toHaveLength(2);
-      expect(plan.steps[0].risk).toBe('medium');
-      expect(plan.steps[1].risk).toBe('high');
+      expect(plan.steps[0]?.risk).toBe('medium');
+      expect(plan.steps[1]?.risk).toBe('high');
       expect(plan.hasDestructiveSteps).toBe(true);
     });
 

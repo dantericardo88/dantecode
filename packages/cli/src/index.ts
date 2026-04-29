@@ -14,6 +14,7 @@ import { runConfigCommand } from "./commands/config.js";
 import { runGitCommand } from "./commands/git.js";
 import { runSelfUpdateCommand } from "./commands/self-update.js";
 import { runBenchCommand } from "./commands/bench.js";
+import { runA11yCommand } from "./a11y-command.js";
 
 // ----------------------------------------------------------------------------
 // Version
@@ -78,7 +79,16 @@ function makeDefaultParsedArgs(): ParsedArgs {
   };
 }
 
-const COMMANDS = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench"]);
+const COMMANDS = new Set([
+  "init",
+  "skills",
+  "agent",
+  "config",
+  "git",
+  "self-update",
+  "bench",
+  "a11y",
+]);
 
 /**
  * Try to consume a known flag at args[i]. On match: mutate `result` and
@@ -253,6 +263,11 @@ async function main(): Promise<void> {
       case "bench":
         await runBenchCommand(parsed.subArgs, projectRoot);
         return;
+      case "a11y": {
+        const code = await runA11yCommand(parsed.subArgs, { cwd: projectRoot });
+        process.exitCode = code;
+        return;
+      }
     }
   }
 

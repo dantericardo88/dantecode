@@ -71,7 +71,7 @@ export function detectSelfImprovementContext(
   // own source as part of the forge workflow. This catches /magic, /inferno,
   // /forge, /party (without --autoforge), /autoforge (without --self-improve), etc.
   if (
-    /^\/(?:magic|inferno|blaze|ember|spark|forge|verify|ship|oss|harvest|party|autoforge)\b/i.test(
+    /^\/(?:magic|inferno|blaze|ember|spark|forge|verify|ship|oss|oss-harvest|harvest|party|autoforge|autoresearch)\b/i.test(
       trimmed,
     )
   ) {

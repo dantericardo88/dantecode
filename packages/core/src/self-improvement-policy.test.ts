@@ -91,6 +91,16 @@ describe("self-improvement-policy", () => {
       expect(context?.enabled).toBe(true);
       expect(context?.workflowId).toBe("danteforge-pipeline");
     });
+
+    it("detects /autoresearch as danteforge-pipeline", () => {
+      const context = detectSelfImprovementContext(
+        "/autoresearch dim48 accessibility_inclusive_ux --target 9",
+        projectRoot,
+      );
+      expect(context?.enabled).toBe(true);
+      expect(context?.workflowId).toBe("danteforge-pipeline");
+      expect(context?.triggerCommand).toBe("/autoresearch");
+    });
   });
 
   describe("isSelfImprovementWriteAllowed", () => {

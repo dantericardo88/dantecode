@@ -594,6 +594,36 @@ function extractCodeFromResponse(response) {
   }
   return response.trim();
 }
+function collectInputViolations(currentCode, context, config, projectRoot) {
+  const antiStub = runAntiStubScanner(currentCode, projectRoot, context.filePath);
+  const constitution = runConstitutionCheck(currentCode, context.filePath);
+  const inputViolations = [
+    ...antiStub.hardViolations,
+    ...antiStub.softViolations,
+    ...constitutionViolationsToPdse(constitution.violations, context.filePath ?? "<evaluated>")
+  ];
+  const criticalAbort = Boolean(
+    config.abortOnSecurityViolation && constitution.violations.some((violation) => violation.severity === "critical")
+  );
+  return { inputViolations, criticalAbort };
+}
+async function regenerateFromFailure(currentCode, score, gstackResults, context, bladeConfig, projectRoot, router) {
+  const lessons = bladeConfig.lessonInjectionEnabled ? await queryLessons({
+    projectRoot,
+    filePattern: context.filePath,
+    language: context.language,
+    limit: 10
+  }) : [];
+  const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
+  try {
+    const regenerated = extractCodeFromResponse(
+      await router.chat(prompt, { temperature: 0.3, maxTokens: 4096 })
+    );
+    return regenerated.length > 0 ? regenerated : currentCode;
+  } catch {
+    return currentCode;
+  }
+}
 async function runAutoforgeIAL(code, context, config, router, projectRoot, onProgress) {
   const bladeConfig = config;
   const startedAt = Date.now();
@@ -612,14 +642,8 @@ async function runAutoforgeIAL(code, context, config, router, projectRoot, onPro
       silentMode: bladeConfig.silentMode ?? false
     });
     const iterationStartedAt = Date.now();
-    const antiStub = runAntiStubScanner(currentCode, projectRoot, context.filePath);
-    const constitution = runConstitutionCheck(currentCode, context.filePath);
-    const inputViolations = [
-      ...antiStub.hardViolations,
-      ...antiStub.softViolations,
-      ...constitutionViolationsToPdse(constitution.violations, context.filePath ?? "<evaluated>")
-    ];
-    if (config.abortOnSecurityViolation && constitution.violations.some((violation) => violation.severity === "critical")) {
+    const { inputViolations, criticalAbort } = collectInputViolations(currentCode, context, config, projectRoot);
+    if (criticalAbort) {
       const score2 = runLocalPDSEScorer(currentCode, projectRoot);
       finalScore = score2;
       iterationHistory.push({
@@ -689,25 +713,7 @@ async function runAutoforgeIAL(code, context, config, router, projectRoot, onPro
     if (iteration === maxIterations) {
       break;
     }
-    const lessons = bladeConfig.lessonInjectionEnabled ? await queryLessons({
-      projectRoot,
-      filePattern: context.filePath,
-      language: context.language,
-      limit: 10
-    }) : [];
-    const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
-    try {
-      const regenerated = extractCodeFromResponse(
-        await router.chat(prompt, {
-          temperature: 0.3,
-          maxTokens: 4096
-        })
-      );
-      if (regenerated.length > 0) {
-        currentCode = regenerated;
-      }
-    } catch {
-    }
+    currentCode = await regenerateFromFailure(currentCode, score, gstackResults, context, bladeConfig, projectRoot, router);
   }
   return {
     finalCode: currentCode,

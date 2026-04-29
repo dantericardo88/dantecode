@@ -61,8 +61,14 @@ describe('AccessibilityProvider', () => {
 
     expect(enhanced).toContain('lang="en"');
     expect(enhanced).toContain('aria-label="DanteCode Panel"');
+    expect(enhanced).toContain('role="main"');
+    expect(enhanced).toContain('id="dante-a11y-base"');
+    expect(enhanced).toContain('prefers-reduced-motion');
+    expect(enhanced).toContain('forced-colors: active');
+    expect(enhanced).toContain(':focus-visible');
     expect(enhanced).toContain('--dante-focus-ring');
-    expect(enhanced).toContain('*:focus { outline: var(--dante-focus-ring)');
+    expect(enhanced).toContain('id="dante-sr-announcer"');
+    expect(enhanced).toContain('aria-live="polite"');
   });
 
   it('generates keyboard navigation script', () => {
@@ -70,6 +76,10 @@ describe('AccessibilityProvider', () => {
     expect(script).toContain('document.addEventListener(');
     expect(script).toContain('keydown');
     expect(script).toContain('Tab');
+    expect(script).toContain('ArrowDown');
+    expect(script).toContain('Home');
+    expect(script).toContain('data-roving-tabindex');
+    expect(script).toContain('a11y-announce');
     expect(script).toContain('a[href],button');
   });
 

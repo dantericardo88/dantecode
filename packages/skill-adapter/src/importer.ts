@@ -136,6 +136,160 @@ function sanitizeSkillName(name: string): string {
  * @param options - Import configuration specifying source, directory, and project root.
  * @returns An ImportResult with lists of imported, skipped, and errored skills.
  */
+/** Audit fields shared by every per-skill helper inside importSkills. */
+interface SkillImportAuditCtx {
+  projectRoot: string;
+  sessionId: string;
+  modelId: string;
+  source: ImportSource;
+}
+
+/** Anti-stub gate. Returns true when the skill was skipped (caller should
+ * `continue` to the next skill). Audits the skip event. */
+async function runAntiStubGate(
+  skill: UnifiedParsedSkill,
+  ctx: SkillImportAuditCtx,
+  result: ImportResult,
+): Promise<boolean> {
+  const antiStubResult = runAntiStubScanner(skill.instructions, ctx.projectRoot, skill.sourcePath);
+  if (antiStubResult.passed) return false;
+  const violationCount = antiStubResult.hardViolations.length;
+  const firstViolation = antiStubResult.hardViolations[0];
+  const violationSummary = firstViolation
+    ? `: ${firstViolation.message} (line ${firstViolation.line ?? "?"})`
+    : "";
+  result.skipped.push({
+    name: skill.frontmatter.name,
+    reason: `Anti-stub scan failed with ${violationCount} hard violation(s)${violationSummary}`,
+  });
+  await appendAuditEvent(ctx.projectRoot, {
+    sessionId: ctx.sessionId,
+    timestamp: new Date().toISOString(),
+    type: "skill_import",
+    payload: {
+      action: "skipped",
+      skillName: skill.frontmatter.name,
+      source: ctx.source,
+      sourcePath: skill.sourcePath,
+      reason: "anti_stub_scan_failed",
+      hardViolations: violationCount,
+    },
+    modelId: ctx.modelId,
+    projectRoot: ctx.projectRoot,
+  });
+  return true;
+}
+
+/** Constitution check gate. Critical violations skip; warnings allowed. */
+async function runConstitutionGate(
+  skill: UnifiedParsedSkill,
+  ctx: SkillImportAuditCtx,
+  result: ImportResult,
+): Promise<boolean> {
+  const constitutionResult = runConstitutionCheck(skill.instructions, skill.sourcePath);
+  const criticalViolations = constitutionResult.violations.filter(
+    (v: { severity: string }) => v.severity === "critical",
+  );
+  if (criticalViolations.length === 0) return false;
+  const firstViolation = criticalViolations[0];
+  const violationSummary = firstViolation
+    ? `: ${firstViolation.message} (line ${firstViolation.line ?? "?"})`
+    : "";
+  result.skipped.push({
+    name: skill.frontmatter.name,
+    reason: `Constitution check failed with ${criticalViolations.length} critical violation(s)${violationSummary}`,
+  });
+  await appendAuditEvent(ctx.projectRoot, {
+    sessionId: ctx.sessionId,
+    timestamp: new Date().toISOString(),
+    type: "constitution_violation",
+    payload: {
+      action: "skill_import_blocked",
+      skillName: skill.frontmatter.name,
+      source: ctx.source,
+      sourcePath: skill.sourcePath,
+      criticalViolations: criticalViolations.length,
+      violations: criticalViolations.map((v: { type: string; message: string; line?: number }) => ({
+        type: v.type,
+        message: v.message,
+        line: v.line,
+      })),
+    },
+    modelId: ctx.modelId,
+    projectRoot: ctx.projectRoot,
+  });
+  return true;
+}
+
+/** Wrap the skill with the DanteForge adapter, write to disk, audit. */
+async function writeWrappedSkill(
+  skill: UnifiedParsedSkill,
+  sanitizedName: string,
+  skillsBaseDir: string,
+  ctx: SkillImportAuditCtx,
+  result: ImportResult,
+): Promise<void> {
+  const adaptedSkill: ParsedSkill = {
+    frontmatter: skill.frontmatter,
+    instructions: skill.instructions,
+    sourcePath: skill.sourcePath,
+  };
+  const wrappedContent = wrapSkillWithAdapter(adaptedSkill, ctx.source);
+
+  const skillDir = join(skillsBaseDir, sanitizedName);
+  await mkdir(skillDir, { recursive: true });
+  const outputPath = join(skillDir, "SKILL.dc.md");
+  await writeFile(outputPath, wrappedContent, "utf-8");
+  result.imported.push(skill.frontmatter.name);
+
+  await appendAuditEvent(ctx.projectRoot, {
+    sessionId: ctx.sessionId,
+    timestamp: new Date().toISOString(),
+    type: "skill_import",
+    payload: {
+      action: "imported",
+      skillName: skill.frontmatter.name,
+      sanitizedName,
+      source: ctx.source,
+      sourcePath: skill.sourcePath,
+      outputPath,
+      hasTools: skill.frontmatter.tools !== undefined && skill.frontmatter.tools.length > 0,
+      hasModel: skill.frontmatter.model !== undefined,
+      mode: skill.frontmatter.mode,
+    },
+    modelId: ctx.modelId,
+    projectRoot: ctx.projectRoot,
+  });
+}
+
+/** Push the error onto result.errors and best-effort audit it. Audit
+ * failures don't propagate — the loop must continue regardless. */
+async function recordImportError(
+  skill: UnifiedParsedSkill,
+  ctx: SkillImportAuditCtx,
+  err: unknown,
+  result: ImportResult,
+): Promise<void> {
+  const message = err instanceof Error ? err.message : String(err);
+  result.errors.push(`Failed to import skill "${skill.frontmatter.name}": ${message}`);
+  try {
+    await appendAuditEvent(ctx.projectRoot, {
+      sessionId: ctx.sessionId,
+      timestamp: new Date().toISOString(),
+      type: "skill_import",
+      payload: {
+        action: "error",
+        skillName: skill.frontmatter.name,
+        source: ctx.source,
+        sourcePath: skill.sourcePath,
+        error: message,
+      },
+      modelId: ctx.modelId,
+      projectRoot: ctx.projectRoot,
+    });
+  } catch { /* audit logging failures don't propagate */ }
+}
+
 export async function importSkills(options: ImportOptions): Promise<ImportResult> {
   const {
     source,
@@ -172,158 +326,17 @@ export async function importSkills(options: ImportOptions): Promise<ImportResult
   await mkdir(skillsBaseDir, { recursive: true });
 
   // Process each skill
+  const auditCtx = { projectRoot, sessionId, modelId, source };
   for (const skill of parsedSkills) {
     const skillName = skill.frontmatter.name;
     const sanitizedName = sanitizeSkillName(skillName);
 
     try {
-      // Step 3: Run anti-stub scan on the skill instructions
-      if (!skipAntiStub) {
-        const antiStubResult = runAntiStubScanner(
-          skill.instructions,
-          projectRoot,
-          skill.sourcePath,
-        );
-
-        if (!antiStubResult.passed) {
-          const violationCount = antiStubResult.hardViolations.length;
-          const firstViolation = antiStubResult.hardViolations[0];
-          const violationSummary = firstViolation
-            ? `: ${firstViolation.message} (line ${firstViolation.line ?? "?"})`
-            : "";
-
-          result.skipped.push({
-            name: skillName,
-            reason: `Anti-stub scan failed with ${violationCount} hard violation(s)${violationSummary}`,
-          });
-
-          // Log the skip as an audit event
-          await appendAuditEvent(projectRoot, {
-            sessionId,
-            timestamp: new Date().toISOString(),
-            type: "skill_import",
-            payload: {
-              action: "skipped",
-              skillName,
-              source,
-              sourcePath: skill.sourcePath,
-              reason: "anti_stub_scan_failed",
-              hardViolations: violationCount,
-            },
-            modelId,
-            projectRoot,
-          });
-
-          continue;
-        }
-      }
-
-      // Step 4: Run constitution check on the skill instructions
-      if (!skipConstitution) {
-        const constitutionResult = runConstitutionCheck(skill.instructions, skill.sourcePath);
-
-        // Only block on critical violations; warnings are allowed through
-        const criticalViolations = constitutionResult.violations.filter(
-          (v: { severity: string }) => v.severity === "critical",
-        );
-
-        if (criticalViolations.length > 0) {
-          const firstViolation = criticalViolations[0];
-          const violationSummary = firstViolation
-            ? `: ${firstViolation.message} (line ${firstViolation.line ?? "?"})`
-            : "";
-
-          result.skipped.push({
-            name: skillName,
-            reason: `Constitution check failed with ${criticalViolations.length} critical violation(s)${violationSummary}`,
-          });
-
-          // Log the skip as an audit event
-          await appendAuditEvent(projectRoot, {
-            sessionId,
-            timestamp: new Date().toISOString(),
-            type: "constitution_violation",
-            payload: {
-              action: "skill_import_blocked",
-              skillName,
-              source,
-              sourcePath: skill.sourcePath,
-              criticalViolations: criticalViolations.length,
-              violations: criticalViolations.map(
-                (v: { type: string; message: string; line?: number }) => ({
-                  type: v.type,
-                  message: v.message,
-                  line: v.line,
-                }),
-              ),
-            },
-            modelId,
-            projectRoot,
-          });
-
-          continue;
-        }
-      }
-
-      // Step 5: Wrap the skill with the DanteForge adapter
-      const adaptedSkill: ParsedSkill = {
-        frontmatter: skill.frontmatter,
-        instructions: skill.instructions,
-        sourcePath: skill.sourcePath,
-      };
-      const wrappedContent = wrapSkillWithAdapter(adaptedSkill, source);
-
-      // Step 6: Write the wrapped skill to .dantecode/skills/<name>/SKILL.dc.md
-      const skillDir = join(skillsBaseDir, sanitizedName);
-      await mkdir(skillDir, { recursive: true });
-
-      const outputPath = join(skillDir, "SKILL.dc.md");
-      await writeFile(outputPath, wrappedContent, "utf-8");
-
-      result.imported.push(skillName);
-
-      // Step 8: Log the import as an audit event
-      await appendAuditEvent(projectRoot, {
-        sessionId,
-        timestamp: new Date().toISOString(),
-        type: "skill_import",
-        payload: {
-          action: "imported",
-          skillName,
-          sanitizedName,
-          source,
-          sourcePath: skill.sourcePath,
-          outputPath,
-          hasTools: skill.frontmatter.tools !== undefined && skill.frontmatter.tools.length > 0,
-          hasModel: skill.frontmatter.model !== undefined,
-          mode: skill.frontmatter.mode,
-        },
-        modelId,
-        projectRoot,
-      });
+      if (!skipAntiStub && (await runAntiStubGate(skill, auditCtx, result))) continue;
+      if (!skipConstitution && (await runConstitutionGate(skill, auditCtx, result))) continue;
+      await writeWrappedSkill(skill, sanitizedName, skillsBaseDir, auditCtx, result);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      result.errors.push(`Failed to import skill "${skillName}": ${message}`);
-
-      // Log the error as an audit event
-      try {
-        await appendAuditEvent(projectRoot, {
-          sessionId,
-          timestamp: new Date().toISOString(),
-          type: "skill_import",
-          payload: {
-            action: "error",
-            skillName,
-            source,
-            sourcePath: skill.sourcePath,
-            error: message,
-          },
-          modelId,
-          projectRoot,
-        });
-      } catch {
-        // If audit logging itself fails, we still want to continue
-      }
+      await recordImportError(skill, auditCtx, err, result);
     }
   }
 

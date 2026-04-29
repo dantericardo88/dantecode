@@ -3,3 +3,5 @@
 {"sessionId":"a3","url":"http://localhost:5173","violationCount":0,"criticalCount":0,"wcag2aViolations":0,"score":100,"recordedAt":"2026-04-23T10:00:00Z"}
 {"sessionId":"a4","url":"http://localhost:3001","violationCount":2,"criticalCount":1,"wcag2aViolations":2,"score":60,"recordedAt":"2026-04-23T11:00:00Z"}
 {"sessionId":"a5","url":"http://localhost:8080","violationCount":4,"criticalCount":3,"wcag2aViolations":4,"score":20,"recordedAt":"2026-04-23T12:00:00Z"}
+{"sessionId":"cli-a11y-1777472934898","url":"stdin","violationCount":0,"criticalCount":0,"wcag2aViolations":0,"score":100,"recordedAt":"2026-04-29T14:28:54.896Z"}
+{"sessionId":"cli-a11y-1777474749942","url":"stdin","violationCount":0,"criticalCount":0,"wcag2aViolations":0,"score":100,"recordedAt":"2026-04-29T14:59:09.940Z"}

@@ -55,6 +55,48 @@ export interface A11yAuditLogEntry {
   recordedAt: string;
 }
 
+export type AccessibilityProofArea =
+  | "keyboard"
+  | "screenReader"
+  | "contrast"
+  | "highContrast"
+  | "reducedMotion"
+  | "focusOrder"
+  | "liveRegions";
+
+export interface AccessibilityProofCoverage {
+  keyboard: boolean;
+  screenReader: boolean;
+  contrast: boolean;
+  highContrast: boolean;
+  reducedMotion: boolean;
+  focusOrder: boolean;
+  liveRegions: boolean;
+}
+
+export interface AccessibilityGateOptions {
+  minimumScore?: number;
+  maxCritical?: number;
+  maxSerious?: number;
+  requiredProof?: AccessibilityProofArea[];
+  surface?: string;
+  source?: string;
+}
+
+export interface AccessibilityGateResult {
+  auditedAt: string;
+  pass: boolean;
+  score: number;
+  threshold: number;
+  audit: AccessibilityAuditResult;
+  coverage: AccessibilityProofCoverage;
+  requiredProof: AccessibilityProofArea[];
+  proof: string[];
+  blockers: string[];
+  surface?: string;
+  source?: string;
+}
+
 // ── Internal Rule Definition ──────────────────────────────────────────────────
 
 interface A11yRule {
@@ -86,6 +128,78 @@ function hasNonEmptyAttr(tag: string, attr: string): boolean {
 function innerText(element: string): string {
   return element.replace(/<[^>]+>/g, "").trim();
 }
+
+const VALID_ARIA_ROLES = new Set([
+  "alert",
+  "alertdialog",
+  "application",
+  "article",
+  "banner",
+  "button",
+  "cell",
+  "checkbox",
+  "columnheader",
+  "combobox",
+  "complementary",
+  "contentinfo",
+  "definition",
+  "dialog",
+  "directory",
+  "document",
+  "feed",
+  "figure",
+  "form",
+  "grid",
+  "gridcell",
+  "group",
+  "heading",
+  "img",
+  "link",
+  "list",
+  "listbox",
+  "listitem",
+  "log",
+  "main",
+  "marquee",
+  "math",
+  "menu",
+  "menubar",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "navigation",
+  "none",
+  "note",
+  "option",
+  "presentation",
+  "progressbar",
+  "radio",
+  "radiogroup",
+  "region",
+  "row",
+  "rowgroup",
+  "rowheader",
+  "scrollbar",
+  "search",
+  "searchbox",
+  "separator",
+  "slider",
+  "spinbutton",
+  "status",
+  "switch",
+  "tab",
+  "table",
+  "tablist",
+  "tabpanel",
+  "term",
+  "textbox",
+  "timer",
+  "toolbar",
+  "tooltip",
+  "tree",
+  "treegrid",
+  "treeitem",
+]);
 
 // ── Rule Definitions (inspired by axe-core schema) ────────────────────────────
 
@@ -247,6 +361,68 @@ const RULES: A11yRule[] = [
       );
     },
   },
+  {
+    id: "landmark-one-main",
+    impact: "serious",
+    wcagLevel: "wcag2a",
+    wcagCriteria: "WCAG 1.3.1",
+    description: "Ensure each page has a main landmark",
+    help: "Generated surfaces must expose a <main> element or role=\"main\" landmark",
+    check(html) {
+      if (!/<body\b/i.test(html)) return [];
+      return /<main\b|role\s*=\s*["']main["']/i.test(html) ? [] : ["<body> missing main landmark"];
+    },
+  },
+  {
+    id: "page-title",
+    impact: "moderate",
+    wcagLevel: "wcag2a",
+    wcagCriteria: "WCAG 2.4.2",
+    description: "Ensure documents have a descriptive title",
+    help: "HTML documents must include a non-empty <title>",
+    check(html) {
+      if (!/<html\b/i.test(html)) return [];
+      return /<title\b[^>]*>[^<\s][\s\S]*?<\/title>/i.test(html)
+        ? []
+        : ["<head> missing non-empty <title>"];
+    },
+  },
+  {
+    id: "live-region",
+    impact: "serious",
+    wcagLevel: "wcag2aa",
+    wcagCriteria: "WCAG 4.1.3",
+    description: "Ensure dynamic status regions announce changes",
+    help: "Dynamic task, status, or progress regions need aria-live or status/log/alert role",
+    check(html) {
+      const hasDynamicRegion =
+        /\bdata-(?:requires-live|dynamic|task-state|announces)\b/i.test(html) ||
+        /\b(role\s*=\s*["']progressbar["'])/i.test(html);
+      if (!hasDynamicRegion) return [];
+      const hasLiveRegion =
+        /\baria-live\s*=\s*["'](?:polite|assertive)["']/i.test(html) ||
+        /\brole\s*=\s*["'](?:status|log|alert)["']/i.test(html);
+      return hasLiveRegion ? [] : ["dynamic content missing live region"];
+    },
+  },
+  {
+    id: "aria-valid-role",
+    impact: "serious",
+    wcagLevel: "wcag2a",
+    wcagCriteria: "WCAG 4.1.2",
+    description: "Ensure ARIA roles are valid",
+    help: "Role attributes must use valid WAI-ARIA role tokens",
+    check(html) {
+      const elements = extractMatches(html, /<[a-z][^>]*\brole\s*=\s*["'][^"']+["'][^>]*>/i);
+      return elements.filter((tag) => {
+        const match = tag.match(/\brole\s*=\s*["']([^"']+)["']/i);
+        if (!match?.[1]) return false;
+        return match[1]
+          .split(/\s+/)
+          .some((role) => role.trim() !== "" && !VALID_ARIA_ROLES.has(role.trim().toLowerCase()));
+      });
+    },
+  },
 ];
 
 // ── Audit Engine ──────────────────────────────────────────────────────────────
@@ -326,6 +502,150 @@ export function generateA11yReport(result: AccessibilityAuditResult): string {
 
   lines.push(`## Passes (${result.passes.length} rules)`);
   lines.push(result.passes.join(", ") || "none");
+  return lines.join("\n");
+}
+
+const DEFAULT_REQUIRED_PROOF: AccessibilityProofArea[] = [
+  "keyboard",
+  "screenReader",
+  "contrast",
+  "highContrast",
+  "reducedMotion",
+  "focusOrder",
+  "liveRegions",
+];
+
+function hasFocusableControl(html: string): boolean {
+  return /<(?:a\b[^>]*href|button\b|input\b|select\b|textarea\b|summary\b)|\btabindex\s*=\s*["']0["']|\brole\s*=\s*["'](?:button|link|menuitem|option|tab|textbox|checkbox|radio|switch)["']/i.test(
+    html,
+  );
+}
+
+function hasPositiveTabindex(html: string): boolean {
+  const matches = extractMatches(html, /<[a-z][^>]*tabindex\s*=\s*["'][^"']*["'][^>]*>/i);
+  return matches.some((tag) => {
+    const match = tag.match(/tabindex\s*=\s*["'](\d+)["']/i);
+    return match ? Number.parseInt(match[1]!, 10) > 0 : false;
+  });
+}
+
+export function getAccessibilityProofCoverage(html: string): AccessibilityProofCoverage {
+  const focusable = hasFocusableControl(html);
+
+  return {
+    keyboard:
+      focusable ||
+      /\bdata-keyboard\s*=\s*["']true["']|keydown|keyup|roving\s+tabindex|data-roving-tabindex/i.test(
+        html,
+      ),
+    screenReader:
+      /\baria-(?:label|labelledby|describedby)\b|<img\b[^>]*\balt\s*=|\brole\s*=\s*["'](?:status|log|alert|main|navigation|banner|contentinfo)["']/i.test(
+        html,
+      ),
+    contrast:
+      /--vscode-|--dante-(?:fg|bg|border|focus|link)|prefers-contrast|forced-colors|currentColor/i.test(
+        html,
+      ),
+    highContrast: /forced-colors|high-contrast|HighContrast|--dante-hc|--vscode-focusBorder/i.test(
+      html,
+    ),
+    reducedMotion: /prefers-reduced-motion/i.test(html),
+    focusOrder: focusable && !hasPositiveTabindex(html),
+    liveRegions:
+      /\baria-live\s*=\s*["'](?:polite|assertive)["']|\brole\s*=\s*["'](?:status|log|alert)["']/i.test(
+        html,
+      ),
+  };
+}
+
+export function runAccessibilityGate(
+  html: string,
+  options: AccessibilityGateOptions = {},
+): AccessibilityGateResult {
+  const audit = runAccessibilityAudit(html);
+  const threshold = options.minimumScore ?? 90;
+  const maxCritical = options.maxCritical ?? 0;
+  const maxSerious = options.maxSerious ?? 0;
+  const requiredProof = options.requiredProof ?? DEFAULT_REQUIRED_PROOF;
+  const coverage = getAccessibilityProofCoverage(html);
+  const blockers: string[] = [];
+
+  if (audit.score < threshold) {
+    blockers.push(`score ${audit.score} below threshold ${threshold}`);
+  }
+
+  if (audit.criticalCount > maxCritical) {
+    blockers.push(`critical violations: ${audit.criticalCount} > ${maxCritical}`);
+  }
+
+  if (audit.seriousCount > maxSerious) {
+    blockers.push(`serious violations: ${audit.seriousCount} > ${maxSerious}`);
+  }
+
+  for (const area of requiredProof) {
+    if (!coverage[area]) {
+      blockers.push(`missing proof: ${area}`);
+    }
+  }
+
+  const proof = [
+    `Keyboard reachability: ${coverage.keyboard ? "yes" : "no"}`,
+    `Screen reader semantics: ${coverage.screenReader ? "yes" : "no"}`,
+    `Contrast tokens: ${coverage.contrast ? "yes" : "no"}`,
+    `High contrast readiness: ${coverage.highContrast ? "yes" : "no"}`,
+    `Reduced motion support: ${coverage.reducedMotion ? "yes" : "no"}`,
+    `Logical focus order: ${coverage.focusOrder ? "yes" : "no"}`,
+    `Live region announcements: ${coverage.liveRegions ? "yes" : "no"}`,
+  ];
+
+  return {
+    auditedAt: audit.auditedAt,
+    pass: blockers.length === 0,
+    score: audit.score,
+    threshold,
+    audit,
+    coverage,
+    requiredProof,
+    proof,
+    blockers,
+    surface: options.surface,
+    source: options.source,
+  };
+}
+
+export function generateA11yGateReport(result: AccessibilityGateResult): string {
+  const lines = [
+    "# Accessibility Gate Report",
+    `Audited: ${result.auditedAt}`,
+    `Surface: ${result.surface ?? "unspecified"}`,
+    `Source: ${result.source ?? "inline"}`,
+    `Gate: ${result.pass ? "PASS" : "FAIL"}`,
+    `Score: ${result.score}/100 (threshold: ${result.threshold})`,
+    `Violations: ${result.audit.violationCount} (${result.audit.criticalCount} critical, ${result.audit.seriousCount} serious)`,
+    "",
+    "## Proof",
+    ...result.proof.map((line) => `- ${line}`),
+    "",
+    "## Blockers",
+  ];
+
+  if (result.blockers.length === 0) {
+    lines.push("none");
+  } else {
+    lines.push(...result.blockers.map((blocker) => `- ${blocker}`));
+  }
+
+  lines.push("", "## Violations");
+  if (result.audit.violations.length === 0) {
+    lines.push("No violations found.");
+  } else {
+    for (const violation of result.audit.violations) {
+      lines.push(
+        `- [${violation.impact.toUpperCase()}] ${violation.ruleId} (${violation.wcagCriteria}): ${violation.help}`,
+      );
+    }
+  }
+
   return lines.join("\n");
 }
 

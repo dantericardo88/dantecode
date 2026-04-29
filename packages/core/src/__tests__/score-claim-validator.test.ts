@@ -43,8 +43,45 @@ describe("detectUnverifiedScoreClaims", () => {
       SOME_OUTPUT,
       true,
       verifiedOutput,
+      {
+        pass: true,
+        score: 100,
+        threshold: 90,
+        profile: "score_claim",
+      },
     );
     expect(result).toBeNull();
+  });
+
+  it("returns warning when verified score output exists but regression proof is absent", () => {
+    const result = detectUnverifiedScoreClaims(
+      "The score is now 9.0/10.",
+      SOME_OUTPUT,
+      true,
+      "score is now 9.0/10",
+      null,
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("regression gate");
+  });
+
+  it("returns warning when verified score output exists but regression proof is red", () => {
+    const result = detectUnverifiedScoreClaims(
+      "The score is now 9.0/10.",
+      SOME_OUTPUT,
+      true,
+      "score is now 9.0/10",
+      {
+        pass: false,
+        score: 75,
+        threshold: 90,
+        profile: "score_claim",
+      },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result).toContain("failing regression gate");
   });
 
   it("detects 7.5/10 pattern", () => {

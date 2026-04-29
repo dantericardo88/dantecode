@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   runAccessibilityAudit,
+  runAccessibilityGate,
+  generateA11yGateReport,
   generateA11yReport,
   recordA11yAudit,
   loadA11yAuditLog,
@@ -32,12 +34,14 @@ describe("runAccessibilityAudit", () => {
       '<html lang="en">',
       '<head><title>Test</title></head>',
       '<body>',
-      '  <h1>Title</h1>',
-      '  <h2>Section</h2>',
-      '  <img src="logo.png" alt="Company logo" />',
-      '  <button aria-label="Close dialog">X</button>',
-      '  <a href="/about">About us</a>',
-      '  <input id="email" type="text" aria-label="Email address" />',
+      '  <main role="main">',
+      '    <h1>Title</h1>',
+      '    <h2>Section</h2>',
+      '    <img src="logo.png" alt="Company logo" />',
+      '    <button aria-label="Close dialog">X</button>',
+      '    <a href="/about">About us</a>',
+      '    <input id="email" type="text" aria-label="Email address" />',
+      '  </main>',
       '</body>',
       '</html>',
     ].join("\n");
@@ -106,6 +110,30 @@ describe("runAccessibilityAudit", () => {
     expect(violation!.wcagLevel).toBe("best-practice");
   });
 
+  it("detects missing page landmarks", () => {
+    const html = '<html lang="en"><head><title>Missing landmark</title></head><body><h1>Title</h1></body></html>';
+    const result = runAccessibilityAudit(html);
+    const violation = result.violations.find((v) => v.ruleId === "landmark-one-main");
+    expect(violation).toBeDefined();
+    expect(violation!.impact).toBe("serious");
+  });
+
+  it("detects dynamic regions without live-region announcements", () => {
+    const html = [
+      '<html lang="en"><head><title>Status</title></head><body>',
+      '<main><h1>Status</h1><div data-requires-live="true">Running tests</div></main>',
+      '</body></html>',
+    ].join("");
+    const result = runAccessibilityAudit(html);
+    expect(result.violations.find((v) => v.ruleId === "live-region")).toBeDefined();
+  });
+
+  it("detects invalid ARIA roles", () => {
+    const html = '<html lang="en"><head><title>ARIA</title></head><body><main><h1>ARIA</h1><div role="launchpad">Bad</div></main></body></html>';
+    const result = runAccessibilityAudit(html);
+    expect(result.violations.find((v) => v.ruleId === "aria-valid-role")).toBeDefined();
+  });
+
   it("score is lower for more violations", () => {
     const bad = "<html><body><img src=\"a.png\" /><img src=\"b.png\" /><button></button></body></html>";
     const good = '<html lang="en"><body><p>OK</p></body></html>';
@@ -131,6 +159,73 @@ describe("runAccessibilityAudit", () => {
     const result = runAccessibilityAudit(html);
     const v = result.violations.find((v) => v.ruleId === "image-alt");
     expect(v!.element).toContain("no-alt.png");
+  });
+});
+
+describe("runAccessibilityGate", () => {
+  const accessibleHtml = [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '  <title>DanteCode Accessible Surface</title>',
+    '  <style>',
+    '    :focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }',
+    '    @media (forced-colors: active) { * { forced-color-adjust: auto; } }',
+    '    @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }',
+    '  </style>',
+    '</head>',
+    '<body>',
+    '  <main role="main" aria-label="DanteCode accessibility proof">',
+    '    <h1>DanteCode</h1>',
+    '    <button aria-label="Run accessibility audit" data-keyboard="true">Run</button>',
+    '    <a href="#details">Details</a>',
+    '    <div id="dante-sr-announcer" role="status" aria-live="polite" aria-atomic="true"></div>',
+    '  </main>',
+    '</body>',
+    '</html>',
+  ].join("\n");
+
+  it("passes clean HTML with proof coverage across keyboard, screen reader, contrast, and motion", () => {
+    const result = runAccessibilityGate(accessibleHtml, {
+      minimumScore: 90,
+      requiredProof: [
+        "keyboard",
+        "screenReader",
+        "contrast",
+        "highContrast",
+        "reducedMotion",
+        "focusOrder",
+        "liveRegions",
+      ],
+    });
+
+    expect(result.pass).toBe(true);
+    expect(result.score).toBe(100);
+    expect(result.coverage.keyboard).toBe(true);
+    expect(result.coverage.liveRegions).toBe(true);
+    expect(result.blockers).toEqual([]);
+  });
+
+  it("fails when critical violations or required proof are missing", () => {
+    const html = '<html><body><button></button><input type="text"></body></html>';
+    const result = runAccessibilityGate(html, {
+      minimumScore: 90,
+      requiredProof: ["keyboard", "screenReader", "highContrast", "reducedMotion", "liveRegions"],
+    });
+
+    expect(result.pass).toBe(false);
+    expect(result.blockers.some((blocker) => blocker.includes("critical"))).toBe(true);
+    expect(result.blockers).toContain("missing proof: highContrast");
+    expect(result.blockers).toContain("missing proof: reducedMotion");
+    expect(result.blockers).toContain("missing proof: liveRegions");
+  });
+
+  it("renders a deterministic markdown gate report", () => {
+    const result = runAccessibilityGate(accessibleHtml, { minimumScore: 90 });
+    const report = generateA11yGateReport(result);
+    expect(report).toContain("# Accessibility Gate Report");
+    expect(report).toContain("Gate: PASS");
+    expect(report).toContain("Keyboard reachability: yes");
   });
 });
 

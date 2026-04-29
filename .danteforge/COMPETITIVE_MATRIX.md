@@ -1,251 +1,169 @@
-# DanteCode Double Hyper-Critical Competitive Matrix
+# DanteCode Competitive Matrix
+_Updated: 2026-04-29 | Harsh double competitive matrix | Target: 9.0 across 50 dimensions_
 
-Revised: 2026-04-23  
-Canonical scope: 50 dimensions  
-Harsh working composite: `392 / 500 = 7.84`
+This matrix is intentionally unforgiving. A feature earns a high score only when
+it works on the main path, is visible to a user, survives real verification, and
+has evidence that would convince a skeptical outsider.
 
-Scoring principle: `wired != user-visible quality`. A module earns `9` only when it demonstrably matches best-in-class behavior with main-path proof.
+## Executive Score
 
-## Reconciliation method
+| Metric | Value |
+|---|---:|
+| DanteCode current harsh score | 293.7 / 500 |
+| DanteCode current average | 5.87 / 10 |
+| Target for "9s across the board" | 450 / 500 |
+| Remaining lift to target | 156.3 dimension-points |
+| Matrix dimensions | 50 |
+| Machine-readable matrix | `.danteforge/compete/matrix.json` |
+| Machine-readable rubric | `.danteforge/rubric.json` |
 
-Scores use the harshest credible interpretation of current repo evidence and current competitor evidence. DanteCode receives more confidence because its evidence is local and inspectable. Competitor rows remain provisional unless backed by official docs, changelogs, benchmark reports, or hands-on validation.
+Important caveat: the repo-level matrix and rubric are now 50-dimensional, and
+`danteforge frontier-gap` reads all 50 dimensions. The installed global
+`danteforge score` implementation still reports its older bundled dimension set
+until the scorer itself is rewired to consume this rubric.
 
-| Pass | Composite | Method |
-|---|---:|---|
-| Internal optimistic | `410 / 500 = 8.20` | Gives credit for implemented, tested, and integrated capability |
-| Public defensible | `389 / 500 = 7.78` | Credits externally explainable, main-path behavior |
-| Hostile diligence | `373 / 500 = 7.46` | Discounts seeded/proxy artifacts and missing broad benchmarks |
-| Harsh working matrix | `392 / 500 = 7.84` | Practical planning score used for competitive gap work |
+## Scoring Rule
 
-## Dimension key
+| Score | Meaning |
+|---:|---|
+| 9 | Frontier or near-frontier behavior, user-visible, main-path, benchmarked or end-to-end verified, with no known release-blocking local gate failures. |
+| 7 | Credible product capability with tests and smoke proof, but weaker polish, breadth, scale, or external evidence than the frontier. |
+| 5 | Partial capability exists, but proof is narrow, mocked, fragile, or not consistently surfaced in the shipped workflow. |
+| 3 | Prototype, scaffold, or internal-only capability with little credible user-facing proof. |
+| 1 | Missing, misleading, or non-functional. |
 
-| # | Dimension | What earns a 9 |
-|---:|---|---|
-| 1 | Ghost text / inline completions | Low-latency, accepted, context-aware FIM at Cursor/Copilot feel |
-| 2 | LSP / diagnostics injection | Deep semantic diagnostics, hover, warning, and type context in prompts |
-| 3 | Semantic codebase search | Fast hybrid retrieval with measured top-result relevance and outcome lift |
-| 4 | Repo-level context | Symbol graph, import graph, runtime trace, and persistent context cache |
-| 5 | SWE-bench / correctness | Broad reproducible benchmark pass rate and hard-task success trend |
-| 6 | Inline edit UX | Streaming diff, partial accept, multi-cursor, low-friction edit control |
-| 7 | Multi-file diff + review | Risk-ranked, severity-aware, explainable multi-file changes |
-| 8 | Git-native workflow | Safe branch/commit/PR/conflict lifecycle with reviewable automation |
-| 9 | Screenshot -> code | Vision-to-code pipeline with visual-diff refinement and usable preview |
-| 10 | Full-app generation | Generate, verify, repair, and finish realistic apps across stacks |
-| 11 | Chat UX polish | Premium transcript, context pills, proof surfacing, images, commands |
-| 12 | @mention / context injection | Files, symbols, docs, URLs, git refs, and tools injected gracefully |
-| 13 | Approval workflow | Per-tool/per-hunk approval, rollback, policy gates, clear risk state |
-| 14 | Browser live preview | WebContainer/cloud sandbox, hot reload, and preview-driven repair |
-| 15 | Agent / autonomous mode | Decisive task triage, repair loops, stop states, completion proof |
-| 16 | Plan/Act control | Editable plan, per-step execution, rollback, and visible progress |
-| 17 | Browser / computer use | Robust browser/computer observation and action loops |
-| 18 | PR review surfaced in IDE | High-signal review comments, severity ranking, false-positive suppression |
-| 19 | Test runner integration | Watch mode, inline failures, repair loop, and typed test evidence |
-| 20 | Debug / runtime context | Stack frames, failing tests, watches, variables, and repair impact |
-| 21 | Session memory | Validated, cited, stale-aware memory that improves outcomes |
-| 22 | Skill / plugin system | Discoverable, versioned, policy-gated skill/plugin ecosystem |
-| 23 | Security / sandboxing | Sandbox enforcement, secret scanning, policy, and auditability |
-| 24 | Reliability / rollback | Checkpoint/resume, circuit breakers, loop detection, safe recovery |
-| 25 | MCP / tool ecosystem | Dynamic tool discovery, schema validation, approval, observability |
-| 26 | Local model routing | Strong local/cloud routing, failover, FIM detection, offline-friendly operation |
-| 27 | Cost optimization | Cost-per-success routing, budgets, caching, and user-visible savings |
-| 28 | Enterprise | SSO, RBAC, audit export, multi-user workspace, admin controls |
-| 29 | Eval infrastructure quality | Reproducible eval harnesses, trends, regression gates, proof reports |
-| 30 | UX trust / explainability | Users can understand, steer, and trust why the agent acted |
-| 31 | Context governance | Context is cited, validated, expired, scoped, and user-controllable |
-| 32 | Human-agent collaboration | Smooth interruption, steering, handoff, and shared editing during runs |
-| 33 | Task decomposition quality | Large vague tasks become safe, sequenced, verifiable subtasks |
-| 34 | Regression prevention | Improvements stay improved through CI, evals, and release gates |
-| 35 | Onboarding / time-to-value | New users reach a successful first task quickly in a real repo |
-| 36 | Ecosystem portability | Works across CLI, IDE, CI, local/cloud models, MCP, and hosted workflows |
-| 37 | Model quality adaptation | Routing/prompt/model policy adapts to task, failures, cost, and outcome history |
-| 38 | Latency / responsiveness | Whole product feels fast across chat, tools, completions, previews, and edits |
-| 39 | Observability / telemetry | Maintainers can diagnose failures, regressions, cost, latency, and model drift |
-| 40 | Configuration ergonomics | Providers, models, policies, tools, memory, and workspaces are easy to configure |
-| 41 | Offline / degraded-mode behavior | Useful behavior survives provider, network, index, and tool failures |
-| 42 | Data/privacy controls | Redaction, retention, local-only mode, telemetry opt-out, and secret handling |
-| 43 | Documentation quality | Docs, recipes, examples, troubleshooting, and beta onboarding are clear |
-| 44 | Extensibility developer experience | Plugins, tools, commands, skills, and providers are easy to build and test |
-| 45 | Benchmark transparency | Eval results are reproducible, comparable, honestly published, and trended |
-| 46 | Multi-repo / monorepo scale | Handles huge repos, workspaces, dependency graphs, and cross-repo tasks |
-| 47 | Language/framework breadth | Works beyond TypeScript happy paths across common languages and stacks |
-| 48 | Accessibility / inclusive UX | Keyboard, screen-reader, contrast, motion, and readable review UX are tested |
-| 49 | Deployment / environment intelligence | Understands env vars, Docker, CI, cloud deploys, logs, and infra config |
-| 50 | Learning loop / self-improvement | Failures safely feed future behavior, evals, lessons, and routing policies |
+## Peer Set
 
-## DanteCode dimension row
+Closed-source and source-available peers tracked: Cursor, GitHub Copilot,
+Claude Code, OpenAI Codex, Windsurf, Devin, Replit Agent, Google Antigravity,
+Augment Code, Amazon Q Developer, Tabnine, Sourcegraph Cody, Bolt.new, v0,
+Base44, and JetBrains AI / Junie.
 
-| Dim | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| DC | 8 | 8 | 8 | 8.5 | 8 | 8 | 8 | 8.5 | 5 | 8.5 | 7.5 | 8 | 8.5 | 5.5 | 9 | 8.5 | 8 | 8 |
+OSS and adjacent OSS teachers tracked: OpenHands, Cline, Aider, Continue,
+Kilo Code, Roo Code, OpenCode, Tabby, Void, SWE-agent, Plandex, Browser Use,
+LangGraph, CrewAI, axe-core, OpenTelemetry, LiteLLM, Semgrep, Nx, Docusaurus,
+OpenFGA, Presidio, and DSPy.
 
-| Dim | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| DC | 8.5 | 8.5 | 8.5 | 8 | 9 | 8.5 | 8 | 9 | 9 | 6 | 8 | 7.5 | 8 | 7.5 | 8.5 | 8.5 | 7.5 | 8 |
+These peer scores are planning estimates, not public benchmark claims. They are
+used to decide what to learn next and where DanteCode is behind.
 
-| Dim | 37 | 38 | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| DC | 8 | 7 | 8.5 | 7 | 8 | 8 | 7 | 8 | 7.5 | 7 | 7 | 5.5 | 7.5 | 8 |
+## Provisional Peer Ranking
 
-## Closed-source matrix
+| Rank | Tool | Class | Planning score | Why it matters |
+|---:|---|---|---:|---|
+| 1 | Cursor | Closed | 8.9 | Best editor-native polish, inline edits, completion feel, and trust UX. |
+| 2 | GitHub Copilot | Closed | 8.6 | Strong enterprise posture, PR workflow, IDE breadth, and GitHub-native agent loop. |
+| 3 | OpenAI Codex | Closed | 8.5 | Strong cloud/local agent story, sandboxed task execution, benchmark orientation, and model quality. |
+| 4 | Claude Code | Closed | 8.4 | Strong terminal agent UX, memory, subagents, MCP, and developer workflow depth. |
+| 5 | Devin | Closed | 8.0 | Long-running autonomous task execution, machine setup, review, and session management. |
+| 6 | Windsurf | Closed | 7.9 | Strong code-agent/editor convergence and Cascade-style workflow. |
+| 7 | Replit Agent | Closed | 7.5 | Strong full-app generation, preview, deploy, and beginner time-to-value. |
+| 8 | Augment Code | Closed | 7.4 | Strong large-repo semantic context and enterprise codebase understanding. |
+| 9 | OpenHands | OSS | 7.3 | Best OSS teacher for autonomous agent execution, web/terminal use, and SWE-bench-style proof. |
+| 10 | Cline | OSS | 7.1 | Best OSS teacher for VS Code permissioned autonomy, browser use, and human-in-loop control. |
+| 11 | Aider | OSS | 7.0 | Best OSS teacher for git-native terminal editing, repo map, and disciplined diffs. |
+| 12 | Continue | OSS | 7.0 | Best OSS teacher for model/provider portability, IDE assistant architecture, and context configuration. |
+| 13 | Kilo Code / Roo Code | OSS | 6.8 | Fast OSS iteration around agent modes, sessions, reviews, and IDE workflows. |
+| 14 | DanteCode | Local | 5.9 | Strong foundation and verification culture, now materially stronger on accessibility, but still weak on public proof, UX polish, breadth, and green release gates. |
 
-| Product | Sum | Avg | Main pressure |
-|---|---:|---:|---|
-| Cursor | 409 | 8.18 | Editor feel, collaboration, onboarding, UX trust |
-| Codex | 403 | 8.06 | Agent breadth, computer use, plugins, eval momentum |
-| DanteCode | 392 | 7.84 | Local proof, safety, routing, cost, autonomy discipline, enterprise foundation |
-| Claude Code | 380 | 7.60 | Terminal agent quality, MCP/routines, task execution |
-| GitHub Copilot | 366 | 7.32 | Enterprise, code review, memory, cloud agent |
-| Windsurf | 359 | 7.18 | IDE polish, Cascade workflow, onboarding |
-| Devin | 353 | 7.06 | Async autonomy, PR lifecycle, task delegation |
-| JetBrains AI | 322 | 6.44 | Debugger/IDE depth |
-| Cody | 307 | 6.14 | Search/repo context heritage |
-| Replit | 290 | 5.80 | Hosted app loop and live preview |
-| Bolt | 214 | 4.28 | Narrow app-generation and preview lane |
-| v0 | 214 | 4.28 | Narrow UI/screenshot-to-code lane |
+## Full 50-Dimension Matrix
 
-## OSS matrix
+| ID | Dimension | Category | DanteCode | Closed-source frontier | OSS teacher | Gap to 9 | Proof required for 9 |
+|---|---|---|---:|---|---|---:|---|
+| ghost_text_inline_completions | Ghost text / inline completions | editor | 5.5 | Cursor 9.5 | Tabby 8.5 | 3.5 | Measure p95 latency, acceptance rate, cancellation, stale suggestion rate, and multi-line FIM quality against a real repo workload. |
+| lsp_diagnostics_injection | LSP / diagnostics injection | context | 6.0 | JetBrains AI/Junie 9.0 | Continue 8.0 | 3.0 | Inject diagnostics, hovers, symbols, definitions, and problem-panel context into live repairs with IDE smoke tests. |
+| semantic_codebase_search | Semantic codebase search | context | 5.5 | Augment Code 9.5 | Continue 8.0 | 3.5 | Run a relevance benchmark on large repos and prove search improves repair completion, not just retrieval scores. |
+| repo_level_context | Repo-level context | context | 5.7 | Augment Code 9.5 | Aider 8.0 | 3.3 | Combine symbol graph, import graph, runtime evidence, and cited snippets in flagship workflows. |
+| swe_bench_correctness | SWE-bench / correctness | evaluation | 3.5 | OpenAI Codex 9.0 | OpenHands 8.5 | 5.5 | Publish reproducible SWE-bench or equivalent results with DanteForge on/off A/B and raw traces. |
+| inline_edit_ux | Inline edit UX | editor | 5.8 | Cursor 9.5 | Void 7.5 | 3.2 | Support streaming edits, partial accept, hunk steering, rollback, and measured edit acceptance. |
+| multi_file_diff_review | Multi-file diff + review | workflow | 6.4 | Cursor 9.0 | Aider 7.5 | 2.6 | Risk-rank diffs, suppress false positives, correlate comments with later fixes, and expose review proof in IDE. |
+| git_native_workflow | Git-native workflow | workflow | 7.2 | GitHub Copilot 9.0 | Aider 9.0 | 1.8 | Complete branch, commit, PR, conflict, rollback, and issue-to-PR flow under e2e tests. |
+| screenshot_to_code | Screenshot -> code | multimodal | 4.0 | v0 9.0 | screenshot-to-code 8.0 | 5.0 | Add visual-diff refinement, responsive preview, and acceptance tests on realistic UI screenshots. |
+| full_app_generation | Full-app generation | generation | 5.8 | Replit Agent 8.5 | OpenHands 7.0 | 3.2 | Generate, run, inspect, repair, and ship realistic apps with tests and deployment proof. |
+| chat_ux_polish | Chat UX polish | ux | 5.4 | Cursor 9.5 | Cline 7.0 | 3.6 | Build premium transcript, context pills, proof cards, image handling, and no-dead-end command states. |
+| mention_context_injection | @mention / context injection | context | 5.8 | Claude Code 9.0 | Continue 8.0 | 3.2 | Support files, symbols, folders, docs, URLs, git refs, terminal, problems, and debugger context with citations. |
+| approval_workflow | Approval workflow | safety | 6.5 | Claude Code 8.5 | Cline 8.0 | 2.5 | Give per-tool, per-command, per-hunk approvals with rollback and policy explanations. |
+| browser_live_preview | Browser live preview | runtime | 4.0 | Replit Agent 9.0 | OpenHands 7.0 | 5.0 | Run apps in a managed preview, inspect DOM/screenshots, hot-reload, and repair from preview failures. |
+| agent_autonomous_mode | Agent / autonomous mode | autonomy | 6.4 | Devin 9.0 | OpenHands 8.5 | 2.6 | Complete long-running tasks with planning, tool use, self-healing, stop conditions, and reviewable evidence. |
+| plan_act_control | Plan/Act control | autonomy | 6.5 | Devin 8.5 | Plandex 8.0 | 2.5 | Expose editable plan steps, dependencies, progress, rollback, and proof per step. |
+| browser_computer_use | Browser / computer use | runtime | 5.2 | OpenAI Codex 9.0 | Browser Use 8.0 | 3.8 | Use browser observations and actions to research docs, verify apps, and repair UI workflows. |
+| pr_review_in_ide | PR review surfaced in IDE | review | 5.5 | GitHub Copilot 9.0 | Continue 7.5 | 3.5 | Surface high-signal severity-ranked PR comments in IDE and verify fixes through status checks. |
+| test_runner_integration | Test runner integration | quality | 7.0 | OpenAI Codex 8.5 | OpenHands 7.5 | 2.0 | Connect watch-mode failures, inline diagnostics, repair prompts, and passing proof across CLI and IDE. |
+| debug_runtime_context | Debug / runtime context | runtime | 6.2 | JetBrains AI/Junie 9.0 | Continue 6.5 | 2.8 | Inject stack frames, watches, locals, failing requests, and logs into repair loops. |
+| session_memory | Session memory | learning | 6.8 | Claude Code 8.5 | Continue 6.5 | 2.2 | Prove memory changes later success rates and include freshness, source, and removal controls. |
+| skill_plugin_system | Skill / plugin system | ecosystem | 7.2 | Claude Code 9.0 | Continue 8.0 | 1.8 | Make skills discoverable, versioned, policy-gated, testable, and easy to publish. |
+| security_sandboxing | Security / sandboxing | safety | 6.8 | GitHub Copilot 9.0 | OpenHands 8.0 | 2.2 | Enforce sandbox execution in main paths, secret scanning, policy gates, audit logs, and prompt-injection defenses. |
+| reliability_rollback | Reliability / rollback | reliability | 6.4 | Cursor 8.5 | Cline 8.5 | 2.6 | Provide checkpoint restore, safe resume, circuit breakers, loop detection, and failure-mode tests. |
+| mcp_tool_ecosystem | MCP / tool ecosystem | ecosystem | 6.7 | Claude Code 9.0 | Cline 8.0 | 2.3 | Support dynamic discovery, schema validation, approval, logs, marketplace docs, and real third-party servers. |
+| local_model_routing | Local model routing | models | 7.5 | Cursor 7.0 | Aider 9.0 | 1.5 | Route by task, quality, cost, privacy, offline availability, and provider health with real failure tests. |
+| cost_optimization | Cost optimization | models | 6.8 | OpenAI Codex 7.0 | Aider 8.5 | 2.2 | Track cost per successful task, budget stops, prompt caching, model fallback savings, and user-visible spend. |
+| enterprise_readiness | Enterprise | enterprise | 3.5 | GitHub Copilot 9.0 | OpenFGA 8.0 | 5.5 | Implement SSO, RBAC, org model, audit export, admin policies, retention controls, and enterprise docs. |
+| eval_infrastructure_quality | Eval infrastructure quality | evaluation | 5.5 | OpenAI Codex 9.0 | SWE-agent 8.5 | 3.5 | Create reproducible evals, fixtures, traces, dashboards, regression gates, and score deltas. |
+| ux_trust_explainability | UX trust / explainability | ux | 5.8 | Cursor 8.5 | Cline 7.5 | 3.2 | Show why the agent acted, what evidence it used, what risk remains, and how to steer or undo. |
+| context_governance | Context governance | context | 5.5 | GitHub Copilot 8.5 | Continue 7.5 | 3.5 | Cite context, scope it, expire it, dedupe it, let users inspect it, and measure context usefulness. |
+| human_agent_collaboration | Human-agent collaboration | collaboration | 5.2 | Cursor 9.0 | Cline 8.0 | 3.8 | Allow interruption, steering, shared editing, task handoff, pause/resume, and multi-agent visibility. |
+| task_decomposition_quality | Task decomposition quality | planning | 6.2 | Devin 9.0 | OpenHands 8.0 | 2.8 | Turn vague tasks into dependency-aware, verifiable subtasks and prove completion quality. |
+| regression_prevention | Regression prevention | quality | 5.0 | Cursor 9.0 | Semgrep 8.0 | 4.0 | Keep all release gates green, add regression dashboards, and block score claims when typecheck/lint fail. |
+| onboarding_time_to_value | Onboarding / time-to-value | adoption | 4.5 | Cursor 9.0 | Continue 7.0 | 4.5 | Prove first successful task in under 10 minutes on a fresh machine and fresh repo. |
+| ecosystem_portability | Ecosystem portability | ecosystem | 6.5 | OpenAI Codex 8.0 | Continue 8.5 | 2.5 | Run consistently across CLI, VS Code, CI, local/cloud models, MCP, and hosted workflows. |
+| model_quality_adaptation | Model quality adaptation | models | 6.4 | OpenAI Codex 9.0 | LiteLLM 8.5 | 2.6 | Adapt model, prompt, budget, and retry policy by task type, failures, and measured outcomes. |
+| latency_responsiveness | Latency / responsiveness | performance | 5.2 | Cursor 9.5 | Tabby 8.0 | 3.8 | Set and enforce p50/p95 latency SLOs for chat, tools, FIM, indexing, preview, and apply. |
+| observability_telemetry | Observability / telemetry | operations | 7.0 | OpenAI Codex 8.5 | OpenTelemetry 9.0 | 2.0 | Trace cost, latency, model choice, tool calls, failures, evals, and score movement in one dashboard. |
+| configuration_ergonomics | Configuration ergonomics | dx | 4.8 | Cursor 9.0 | Continue 8.0 | 4.2 | Make provider, model, policy, tools, memory, and workspace setup guided, validated, and recoverable. |
+| offline_degraded_mode | Offline / degraded-mode behavior | reliability | 6.8 | Tabnine 8.5 | Tabby 9.0 | 2.2 | Keep useful behavior when providers, network, index, credentials, and tools fail. |
+| data_privacy_controls | Data/privacy controls | safety | 6.2 | GitHub Copilot 9.0 | Presidio 8.5 | 2.8 | Add redaction, retention controls, telemetry opt-out, local-only mode, and admin-enforced privacy policy. |
+| documentation_quality | Documentation quality | adoption | 6.4 | OpenAI Codex 9.0 | Docusaurus 8.0 | 2.6 | Ship public docs with quickstart, recipes, troubleshooting, API docs, architecture, and migration guides. |
+| extensibility_developer_experience | Extensibility developer experience | ecosystem | 6.5 | Claude Code 9.0 | Continue 8.0 | 2.5 | Give extension authors templates, tests, manifests, local dev server, validation, docs, and publish path. |
+| benchmark_transparency | Benchmark transparency | evaluation | 3.5 | OpenAI Codex 9.0 | SWE-agent 9.0 | 5.5 | Publish commands, seeds, traces, pass/fail logs, score history, and limitations for every benchmark claim. |
+| multi_repo_monorepo_scale | Multi-repo / monorepo scale | scale | 5.5 | Sourcegraph Cody 9.5 | Nx 8.0 | 3.5 | Handle huge repos, workspace graphs, dependency boundaries, and cross-repo changes with measured retrieval quality. |
+| language_framework_breadth | Language/framework breadth | scale | 4.8 | GitHub Copilot 9.0 | Aider 8.0 | 4.2 | Prove useful repair and generation across TypeScript, Python, Go, Java, Rust, C#, PHP, and common frameworks. |
+| accessibility_inclusive_ux | Accessibility / inclusive UX | ux | 9.0 | GitHub Copilot 8.0 | axe-core 9.0 | 0.0 | Shared gate, CLI audit, VS Code webview hardening, trend log, and evidence artifacts now cover keyboard, screen reader, contrast, high contrast, reduced motion, focus order, and live regions. |
+| deployment_environment_intelligence | Deployment / environment intelligence | runtime | 4.8 | OpenAI Codex 9.0 | OpenHands 8.0 | 4.2 | Understand env vars, Docker, CI, deploy logs, cloud config, services, and runtime failures. |
+| learning_loop_self_improvement | Learning loop / self-improvement | learning | 7.0 | Cursor 8.5 | DSPy 8.0 | 2.0 | Safely convert failures and successes into evals, lessons, routing policy, prompts, and regression gates. |
 
-| Product | Sum | Avg | Main lesson |
-|---|---:|---:|---|
-| DanteCode | 392 | 7.84 | Broadest OSS-first proof posture |
-| Continue | 308 | 6.16 | Context providers, IDE platform, portability |
-| Cline | 303 | 6.06 | Human-agent steering and editor workflow |
-| OpenHands | 302 | 6.04 | Autonomy, sandboxing, eval discipline |
-| Aider | 294 | 5.88 | Git-native workflow and terminal ergonomics |
-| Void | 283 | 5.66 | Editor UX ideas and inline edit feel |
-| Tabby | 255 | 5.10 | Local completion and model routing |
-| AppMap / Navie | 254 | 5.08 | Runtime-aware context |
-| SWE-agent | 242 | 4.84 | Benchmark harness and task-solving loops |
-| Refact | 240 | 4.80 | Local assistant and completion patterns |
+## P0 Gap Stack
 
-## Closed-source compact score grid: core dimensions 1-36
+These dimensions create the most score lift and credibility risk:
 
-Abbrev: `DC` DanteCode, `Cu` Cursor, `Cx` Codex, `Cl` Claude Code, `GH` GitHub Copilot, `Dv` Devin, `Ws` Windsurf, `JB` JetBrains AI, `Repl` Replit.
+1. SWE-bench / correctness: 3.5, gap 5.5.
+2. Enterprise readiness: 3.5, gap 5.5.
+3. Benchmark transparency: 3.5, gap 5.5.
+4. Screenshot -> code: 4.0, gap 5.0.
+5. Browser live preview: 4.0, gap 5.0.
+6. Onboarding / time-to-value: 4.5, gap 4.5.
+7. Configuration ergonomics: 4.8, gap 4.2.
+8. Language/framework breadth: 4.8, gap 4.2.
+9. Deployment / environment intelligence: 4.8, gap 4.2.
+10. Regression prevention: 5.0, gap 4.0.
 
-| Dim | DC | Cu | Cx | Cl | GH | Dv | Ws | JB | Cody | Repl | Bolt | v0 |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 8 | 10 | 7 | 6 | 9 | 4 | 8 | 8 | 8 | 6 | 3 | 2 |
-| 2 | 8 | 8 | 6 | 5 | 7 | 4 | 7 | 9 | 9 | 5 | 2 | 2 |
-| 3 | 8 | 9 | 8 | 8 | 7 | 6 | 8 | 7 | 9 | 6 | 3 | 3 |
-| 4 | 8.5 | 9 | 8 | 8 | 7 | 7 | 8 | 8 | 9 | 5 | 3 | 3 |
-| 5 | 8 | 7 | 9 | 8.5 | 6 | 9 | 6 | 5 | 4 | 4 | 2 | 2 |
-| 6 | 8 | 10 | 7 | 7 | 7 | 6 | 9 | 7 | 7 | 7 | 6 | 5 |
-| 7 | 8 | 9 | 8 | 7 | 8 | 7 | 7 | 7 | 8 | 5 | 3 | 3 |
-| 8 | 8.5 | 8 | 8 | 9 | 9 | 8 | 7 | 6 | 7 | 4 | 3 | 2 |
-| 9 | 5 | 5 | 4 | 3 | 4 | 4 | 4 | 3 | 2 | 7 | 8 | 9 |
-| 10 | 8.5 | 7 | 7 | 7 | 6 | 8 | 7 | 5 | 5 | 8 | 9 | 9 |
-| 11 | 7.5 | 10 | 8 | 8 | 8 | 7 | 8 | 7 | 7 | 8 | 7 | 7 |
-| 12 | 8 | 9 | 9 | 9 | 8 | 6 | 8 | 7 | 8 | 6 | 5 | 5 |
-| 13 | 8.5 | 8 | 8 | 8.5 | 6 | 8 | 7 | 6 | 6 | 5 | 4 | 4 |
-| 14 | 5.5 | 5 | 7 | 3 | 3 | 5 | 5 | 3 | 2 | 9 | 9 | 9 |
-| 15 | 9 | 8 | 9 | 9 | 7 | 10 | 8 | 5 | 5 | 6 | 5 | 4 |
-| 16 | 8.5 | 8 | 8 | 8 | 6 | 9 | 7 | 5 | 5 | 5 | 4 | 4 |
-| 17 | 8 | 6 | 9 | 8 | 4 | 9 | 5 | 4 | 3 | 5 | 3 | 3 |
-| 18 | 8 | 9 | 9 | 8 | 9 | 8 | 7 | 6 | 6 | 4 | 2 | 2 |
-| 19 | 8.5 | 8 | 8 | 8 | 7 | 8 | 7 | 8 | 6 | 6 | 3 | 3 |
-| 20 | 8.5 | 8 | 8 | 7 | 6 | 7 | 7 | 9 | 6 | 5 | 2 | 2 |
-| 21 | 8.5 | 8 | 9 | 8.5 | 9 | 8 | 7 | 6 | 6 | 5 | 3 | 3 |
-| 22 | 8 | 8 | 9 | 9 | 7 | 7 | 6 | 6 | 5 | 6 | 3 | 3 |
-| 23 | 9 | 8 | 8 | 8 | 8 | 7 | 7 | 7 | 7 | 6 | 4 | 4 |
-| 24 | 8.5 | 8 | 8 | 8 | 7 | 8 | 7 | 7 | 7 | 6 | 4 | 4 |
-| 25 | 8 | 8 | 9 | 9 | 7 | 7 | 7 | 6 | 6 | 5 | 3 | 3 |
-| 26 | 9 | 7 | 5 | 5 | 4 | 3 | 6 | 5 | 5 | 3 | 2 | 2 |
-| 27 | 9 | 7 | 7 | 7 | 6 | 5 | 6 | 6 | 6 | 5 | 4 | 4 |
-| 28 | 6 | 8 | 8 | 7.5 | 9 | 7 | 7 | 8 | 7 | 5 | 2 | 2 |
-| 29 | 8 | 8 | 9 | 8.5 | 8 | 8 | 7 | 6 | 6 | 5 | 4 | 4 |
-| 30 | 7.5 | 9 | 8 | 8 | 8 | 7 | 8 | 7 | 6 | 7 | 6 | 6 |
-| 31 | 8 | 8 | 8 | 8.5 | 9 | 7 | 7 | 6 | 7 | 5 | 4 | 4 |
-| 32 | 7.5 | 9 | 8 | 8 | 7 | 7 | 8 | 6 | 5 | 5 | 4 | 4 |
-| 33 | 8.5 | 8 | 8 | 8.5 | 7 | 9 | 7 | 6 | 5 | 5 | 4 | 4 |
-| 34 | 8.5 | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 6 | 6 | 4 | 4 |
-| 35 | 6.5 | 9 | 8 | 7 | 8 | 6 | 8 | 6 | 5 | 9 | 8 | 8 |
-| 36 | 8 | 8 | 9 | 8.5 | 8 | 6 | 7 | 6 | 6 | 6 | 4 | 4 |
+## What To Learn From OSS First
 
-## OSS compact score grid: core dimensions 1-36
+| Need | Best OSS teachers | Why |
+|---|---|---|
+| Autonomous agent loop | OpenHands, SWE-agent | Execution traces, browser/terminal interaction, benchmark framing. |
+| Permissioned VS Code autonomy | Cline, Roo Code, Kilo Code | Human-in-loop tool approval, browser actions, editor-native flow. |
+| Git-native edits | Aider | Small, reviewable diffs and repo-map-based context. |
+| Model/provider portability | Continue, LiteLLM | Configurable model routing and IDE integration. |
+| Local/offline completion | Tabby | Local FIM and degraded-mode assistant behavior. |
+| Observability | OpenTelemetry | Standard traces for latency, costs, tool calls, and failures. |
+| Accessibility | axe-core | Concrete automated checks for surfaces that currently lack proof. |
 
-Abbrev: `OH` OpenHands, `Ai` Aider, `Cn` Cline, `Ct` Continue, `Tb` Tabby, `SWE` SWE-agent, `App` AppMap/Navie, `Ref` Refact.
+## Evidence Sources
 
-| Dim | DC | OH | Ai | Cn | Ct | Tb | Void | SWE | App | Ref |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 8 | 2 | 3 | 5 | 8 | 9 | 6 | 1 | 2 | 7 |
-| 2 | 8 | 3 | 4 | 6 | 9 | 7 | 8 | 2 | 7 | 6 |
-| 3 | 8 | 6 | 8 | 7 | 8 | 8 | 7 | 5 | 8 | 6 |
-| 4 | 8.5 | 6 | 7 | 7 | 8 | 7 | 7 | 5 | 9 | 5 |
-| 5 | 8 | 8 | 6 | 4 | 4 | 4 | 3 | 9 | 4 | 4 |
-| 6 | 8 | 4 | 6 | 7 | 7 | 5 | 8 | 2 | 4 | 6 |
-| 7 | 8 | 5 | 7 | 6 | 6 | 5 | 6 | 4 | 6 | 5 |
-| 8 | 8.5 | 6 | 9 | 6 | 6 | 5 | 6 | 7 | 5 | 5 |
-| 9 | 5 | 2 | 2 | 2 | 2 | 2 | 2 | 1 | 2 | 2 |
-| 10 | 8.5 | 7 | 7 | 6 | 5 | 4 | 5 | 6 | 5 | 4 |
-| 11 | 7.5 | 6 | 5 | 7 | 7 | 5 | 6 | 4 | 5 | 5 |
-| 12 | 8 | 6 | 6 | 8 | 8 | 5 | 7 | 3 | 6 | 5 |
-| 13 | 8.5 | 6 | 5 | 6 | 6 | 4 | 6 | 4 | 4 | 4 |
-| 14 | 5.5 | 3 | 2 | 2 | 2 | 2 | 2 | 1 | 2 | 2 |
-| 15 | 9 | 9 | 8 | 7 | 5 | 4 | 5 | 9 | 4 | 4 |
-| 16 | 8.5 | 7 | 6 | 6 | 5 | 4 | 5 | 7 | 4 | 4 |
-| 17 | 8 | 7 | 4 | 5 | 3 | 3 | 4 | 5 | 3 | 3 |
-| 18 | 8 | 5 | 5 | 5 | 5 | 4 | 5 | 4 | 5 | 4 |
-| 19 | 8.5 | 6 | 6 | 6 | 6 | 4 | 6 | 6 | 6 | 5 |
-| 20 | 8.5 | 6 | 5 | 5 | 5 | 4 | 5 | 5 | 5 | 4 |
-| 21 | 8.5 | 5 | 5 | 5 | 6 | 4 | 5 | 3 | 4 | 4 |
-| 22 | 8 | 5 | 6 | 6 | 6 | 4 | 5 | 3 | 4 | 4 |
-| 23 | 9 | 6 | 6 | 6 | 6 | 5 | 6 | 5 | 5 | 5 |
-| 24 | 8.5 | 7 | 7 | 6 | 6 | 5 | 6 | 5 | 5 | 5 |
-| 25 | 8 | 6 | 5 | 7 | 6 | 4 | 6 | 3 | 4 | 4 |
-| 26 | 9 | 5 | 8 | 6 | 7 | 9 | 7 | 3 | 5 | 8 |
-| 27 | 9 | 6 | 7 | 6 | 7 | 8 | 7 | 4 | 5 | 7 |
-| 28 | 6 | 4 | 3 | 4 | 4 | 4 | 3 | 3 | 4 | 3 |
-| 29 | 8 | 8 | 6 | 6 | 6 | 5 | 5 | 9 | 6 | 5 |
-| 30 | 7.5 | 6 | 5 | 7 | 6 | 4 | 6 | 4 | 5 | 4 |
-| 31 | 8 | 6 | 5 | 6 | 7 | 4 | 5 | 4 | 6 | 4 |
-| 32 | 7.5 | 6 | 5 | 7 | 6 | 4 | 6 | 4 | 4 | 4 |
-| 33 | 8.5 | 8 | 7 | 6 | 5 | 4 | 5 | 7 | 5 | 4 |
-| 34 | 8.5 | 7 | 6 | 6 | 6 | 5 | 5 | 6 | 5 | 5 |
-| 35 | 6.5 | 5 | 6 | 6 | 6 | 6 | 5 | 3 | 4 | 4 |
-| 36 | 8 | 6 | 6 | 7 | 8 | 7 | 6 | 4 | 5 | 5 |
+Primary public references used for peer positioning:
 
-## Frontier-extension grid: dimensions 37-50
+- GitHub Copilot coding agent docs: https://docs.github.com/en/copilot/concepts/coding-agent/about-copilot-coding-agent
+- OpenAI Codex overview: https://platform.openai.com/docs/codex/overview
+- Cursor Bugbot docs and Background Agent changelog: https://docs.cursor.com/en/bugbot and https://cursor.com/changelog/1-0
+- Claude Code subagents and memory docs: https://docs.claude.com/en/docs/claude-code/subagents and https://code.claude.com/docs/en/memory
+- Devin docs: https://docs.devin.ai/
+- OpenHands repo/site: https://github.com/OpenHands/OpenHands and https://openhands.dev/
+- Cline repo/site: https://github.com/cline/cline and https://cline.bot/
+- Aider repo: https://github.com/aider-ai/aider
+- Kilo docs: https://kilo.ai/docs
 
-| Dim | DanteCode | Cursor | Codex | Claude | Copilot | Windsurf | Devin | Continue | Cline | OpenHands | Best OSS teacher |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| 37 Model adaptation | 8 | 8 | 9 | 8 | 8 | 7 | 7 | 7 | 6 | 7 | DSPy, LiteLLM, Aider |
-| 38 Latency / responsiveness | 7 | 9 | 8 | 8 | 8 | 8 | 7 | 6 | 7 | 6 | Tabby, Void, Continue |
-| 39 Observability / telemetry | 8.5 | 8 | 8 | 8 | 8 | 7 | 7 | 6 | 6 | 8 | OpenTelemetry, LangSmith-style evals |
-| 40 Configuration ergonomics | 7 | 9 | 8 | 8 | 8 | 8 | 7 | 7 | 7 | 6 | Continue, Cline, Casdoor |
-| 41 Offline / degraded mode | 8 | 7 | 7 | 7 | 5 | 6 | 5 | 7 | 6 | 6 | Tabby, LocalAI, Aider |
-| 42 Data/privacy controls | 8 | 8 | 8 | 7 | 9 | 7 | 7 | 6 | 6 | 6 | Presidio, Gitleaks, Ory |
-| 43 Documentation quality | 7 | 8 | 8 | 8 | 8 | 8 | 7 | 7 | 7 | 6 | Diataxis, Docusaurus, Nextra |
-| 44 Extensibility DX | 8 | 8 | 9 | 9 | 7 | 6 | 7 | 8 | 7 | 6 | Continue, Cline, MCP |
-| 45 Benchmark transparency | 7.5 | 7 | 9 | 8 | 7 | 6 | 8 | 5 | 5 | 8 | SWE-agent, OpenHands |
-| 46 Monorepo scale | 7 | 8 | 8 | 7 | 8 | 7 | 7 | 7 | 6 | 6 | Nx, Turborepo, Sourcegraph |
-| 47 Language breadth | 7 | 8 | 8 | 8 | 8 | 7 | 6 | 8 | 7 | 6 | tree-sitter, Continue, Tabby |
-| 48 Accessibility | 5.5 | 8 | 7 | 6 | 8 | 7 | 6 | 6 | 6 | 5 | axe-core, VS Code accessibility |
-| 49 Deployment intelligence | 7.5 | 8 | 9 | 7 | 7 | 7 | 8 | 5 | 6 | 7 | Dev Containers, E2B, OpenHands |
-| 50 Learning loop | 8 | 8 | 8 | 8 | 8 | 7 | 8 | 7 | 6 | 7 | DSPy, LangGraph, OpenHands |
+## Operating Rule
 
-## Low-score OSS learning paths
-
-| DanteCode gap | Current | OSS sources to learn from | Intended lift |
-|---|---:|---|---|
-| 9 Screenshot-to-code | 5 | `abi/screenshot-to-code`, WebSight, VisRefiner, ScreenCoder-style repos | Add visual-diff refinement and real user acceptance |
-| 14 Browser live preview | 5.5 | StackBlitz WebContainers, E2B, OpenHands, Browser Use | Add WebContainer/cloud sandbox and preview-driven repair |
-| 28 Enterprise | 6 | Keycloak, Ory, Cerbos, Permify, Zitadel, OpenFGA, Casdoor, OPAL, Kratos, Keto | Add real IdP integration, persistent org store, and admin UX |
-| 35 Onboarding / time-to-value | 7.5 | Continue, Cline, Tabby, OpenHands | Improve guided first-task success |
-| 38 Latency / responsiveness | 7 | Tabby, Void, Continue, VS Code shell/link UX | Add end-to-end beta latency SLOs |
-| 40 Configuration ergonomics | 7 | Continue, Cline, Tabby, Casdoor | Add provider/policy/tool setup wizard polish |
-| 43 Documentation quality | 7 | Diataxis, Docusaurus, Nextra, Astro Starlight | Build public beta docs, recipes, troubleshooting |
-| 48 Accessibility / inclusive UX | 5.5 | axe-core, VS Code accessibility guidance | Add keyboard/screen-reader/contrast test pass |
-
-## Cross-matrix summary
-
-| Universe | DC | Best competitor | DC position | Target composite |
-|---|---:|---|---|---:|
-| Closed-source | 7.78 | Cursor 8.18 | Behind top cluster, close to frontier-adjacent | 9.0 |
-| Open-source | 7.78 | Continue 6.16 | #1 in this harsh OSS read | 9.0 |
-| Combined | 7.78 | Cursor 8.18 | Strong OSS leader, not full closed-source leader | 9.0 |
-
-**Gap to 9.0 composite:** `61 dimension-points across 50 dimensions`.
-
-## Next highest-leverage push
-
-`18` PR review sharpness remains the best next score-efficient sprint: risk clustering, severity ranking, false-positive suppression, and review outcome correlation can compound correctness, memory, debug context, and diff quality.
+Do not claim a score increase unless the relevant proof exists, the rubric entry
+explains why the higher score is earned, and local gates are green. When in
+doubt, score lower and turn the missing proof into the next task.

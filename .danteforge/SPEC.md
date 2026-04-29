@@ -32,7 +32,7 @@ maintainable.
 
 ### Explicit deferrals
 
-- Closing all 28 competitive dimensions in one cycle.
+- Closing all 50 competitive dimensions in one cycle.
 - Enterprise collaboration and org admin flows.
 - Broad OSS harvest expansion.
 - New packages without a clear architectural need.
@@ -83,7 +83,7 @@ This cycle is complete enough to release when all of the following are true:
 ## Acceptance Criteria
 
 1. The docs consistently describe this cycle as a finish-and-stabilize release, not
-   a 28-dimension score chase.
+   a 50-dimension score chase.
 2. `packages/core`, `packages/cli`, `packages/vscode`, and
    `packages/codebase-index` are treated as the critical path in scope docs and
    execution tasks.

@@ -155,6 +155,82 @@ auditLog:
   - "2026-04-29T01:28:32.036Z | retro: score 70/100 (delta: 0)"
   - "2026-04-29T01:28:36.939Z | retro: score 70/100 (delta: 0)"
   - "2026-04-29T01:28:41.476Z | retro: score 70/100 (delta: 0)"
+  - "2026-04-29T13:26:22.612Z | llm: ollama/qwen2.5-coder:latest (194 chars
+    returned)"
+  - "2026-04-29T13:26:28.135Z | llm: ollama/qwen2.5-coder:latest (223 chars
+    returned)"
+  - "2026-04-29T13:26:35.129Z | llm: ollama/qwen2.5-coder:latest (306 chars
+    returned)"
+  - "2026-04-29T13:26:41.892Z | llm: ollama/qwen2.5-coder:latest (152 chars
+    returned)"
+  - "2026-04-29T13:26:47.190Z | llm: ollama/qwen2.5-coder:latest (153 chars
+    returned)"
+  - "2026-04-29T13:26:52.693Z | llm: ollama/qwen2.5-coder:latest (250 chars
+    returned)"
+  - "2026-04-29T13:26:57.839Z | llm: ollama/qwen2.5-coder:latest (145 chars
+    returned)"
+  - "2026-04-29T13:27:04.407Z | llm: ollama/qwen2.5-coder:latest (184 chars
+    returned)"
+  - "2026-04-29T13:27:10.367Z | llm: ollama/qwen2.5-coder:latest (128 chars
+    returned)"
+  - "2026-04-29T13:27:15.688Z | llm: ollama/qwen2.5-coder:latest (225 chars
+    returned)"
+  - "2026-04-29T13:27:22.353Z | llm: ollama/qwen2.5-coder:latest (178 chars
+    returned)"
+  - "2026-04-29T13:27:29.211Z | llm: ollama/qwen2.5-coder:latest (191 chars
+    returned)"
+  - "2026-04-29T13:27:35.892Z | llm: ollama/qwen2.5-coder:latest (213 chars
+    returned)"
+  - "2026-04-29T13:27:42.493Z | llm: ollama/qwen2.5-coder:latest (135 chars
+    returned)"
+  - "2026-04-29T13:27:49.201Z | llm: ollama/qwen2.5-coder:latest (167 chars
+    returned)"
+  - "2026-04-29T13:27:54.359Z | llm: ollama/qwen2.5-coder:latest (150 chars
+    returned)"
+  - "2026-04-29T13:28:01.776Z | llm: ollama/qwen2.5-coder:latest (280 chars
+    returned)"
+  - "2026-04-29T13:28:08.254Z | llm: ollama/qwen2.5-coder:latest (274 chars
+    returned)"
+  - "2026-04-29T13:28:14.872Z | llm: ollama/qwen2.5-coder:latest (223 chars
+    returned)"
+  - "2026-04-29T14:46:46.758Z | llm: ollama/qwen2.5-coder:latest (191 chars
+    returned)"
+  - "2026-04-29T14:46:54.166Z | llm: ollama/qwen2.5-coder:latest (149 chars
+    returned)"
+  - "2026-04-29T14:47:02.045Z | llm: ollama/qwen2.5-coder:latest (227 chars
+    returned)"
+  - "2026-04-29T14:47:10.535Z | llm: ollama/qwen2.5-coder:latest (149 chars
+    returned)"
+  - "2026-04-29T14:47:18.757Z | llm: ollama/qwen2.5-coder:latest (168 chars
+    returned)"
+  - "2026-04-29T14:47:26.284Z | llm: ollama/qwen2.5-coder:latest (163 chars
+    returned)"
+  - "2026-04-29T14:47:34.743Z | llm: ollama/qwen2.5-coder:latest (195 chars
+    returned)"
+  - "2026-04-29T14:47:42.686Z | llm: ollama/qwen2.5-coder:latest (173 chars
+    returned)"
+  - "2026-04-29T14:47:50.653Z | llm: ollama/qwen2.5-coder:latest (239 chars
+    returned)"
+  - "2026-04-29T14:47:58.582Z | llm: ollama/qwen2.5-coder:latest (137 chars
+    returned)"
+  - "2026-04-29T14:48:06.850Z | llm: ollama/qwen2.5-coder:latest (146 chars
+    returned)"
+  - "2026-04-29T14:48:15.193Z | llm: ollama/qwen2.5-coder:latest (184 chars
+    returned)"
+  - "2026-04-29T14:48:23.705Z | llm: ollama/qwen2.5-coder:latest (240 chars
+    returned)"
+  - "2026-04-29T14:48:31.647Z | llm: ollama/qwen2.5-coder:latest (179 chars
+    returned)"
+  - "2026-04-29T14:48:40.395Z | llm: ollama/qwen2.5-coder:latest (258 chars
+    returned)"
+  - "2026-04-29T14:48:48.012Z | llm: ollama/qwen2.5-coder:latest (147 chars
+    returned)"
+  - "2026-04-29T14:48:55.678Z | llm: ollama/qwen2.5-coder:latest (206 chars
+    returned)"
+  - "2026-04-29T14:49:03.022Z | llm: ollama/qwen2.5-coder:latest (192 chars
+    returned)"
+  - "2026-04-29T14:49:10.715Z | llm: ollama/qwen2.5-coder:latest (221 chars
+    returned)"
 profile: balanced
 constitution: CONSTITUTION.md
 enforcementMode: advisory
@@ -337,5 +413,5 @@ lastVerifyStatus: fail
 lastVerifyReceiptPath: c:\Projects\DanteCode\.danteforge\evidence\verify\latest.json
 maxBudgetUsd: 10
 routingAggressiveness: balanced
-skillCount: 0
-hasPluginManifest: false
+skillCount: 12
+hasPluginManifest: true
