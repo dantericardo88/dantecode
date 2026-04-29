@@ -80,6 +80,63 @@ function makechunk(
  *  4. Chunks > maxChunkLines are force-split at the next top-level boundary
  *  5. Chunks < MIN_LINES merge with next chunk
  */
+/** Skip a leading run of import lines and emit them as a single chunk. Returns
+ *  the index of the first non-import line (or 0 if there were no imports). */
+function emitImportChunk(
+  lines: string[],
+  filePath: string,
+  chunks: IndexChunk[],
+): number {
+  let i = 0;
+  while (i < lines.length && IMPORT_LINE_RE.test(lines[i]!.trim())) i++;
+  if (i > 0) chunks.push(makechunk(lines, 0, i, filePath));
+  return i;
+}
+
+interface BraceScanState {
+  depth: number;
+  inBlockComment: boolean;
+  inString: "'" | '"' | "`" | null;
+}
+
+/** Walk one line and update the running brace depth + string/comment state. */
+function advanceBraceScan(line: string, state: BraceScanState): void {
+  for (let ci = 0; ci < line.length; ci++) {
+    const ch = line[ci]!;
+    const prev = ci > 0 ? line[ci - 1] : "";
+    if (state.inBlockComment) {
+      if (ch === "/" && prev === "*") state.inBlockComment = false;
+      continue;
+    }
+    if (state.inString) {
+      if (ch === state.inString && prev !== "\\") state.inString = null;
+      continue;
+    }
+    if (ch === "/" && line[ci + 1] === "/") break;
+    if (ch === "/" && line[ci + 1] === "*") { state.inBlockComment = true; ci++; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { state.inString = ch as "'" | '"' | "`"; continue; }
+    if (ch === "{") state.depth++;
+    else if (ch === "}") state.depth = Math.max(0, state.depth - 1);
+  }
+}
+
+/** Coalesce chunks shorter than MIN_LINES into the previous chunk. */
+function mergeTinyChunks(chunks: IndexChunk[], minLines: number): IndexChunk[] {
+  const merged: IndexChunk[] = [];
+  for (const cur of chunks) {
+    const lineCount = (cur.endLine ?? 0) - (cur.startLine ?? 1) + 1;
+    if (lineCount < minLines && merged.length > 0) {
+      const prev = merged[merged.length - 1]!;
+      prev.content += "\n" + cur.content;
+      prev.endLine = cur.endLine;
+      prev.symbols = [...(prev.symbols ?? []), ...(cur.symbols ?? [])];
+    } else {
+      merged.push({ ...cur });
+    }
+  }
+  return merged;
+}
+
 function chunkBrace(
   lines: string[],
   filePath: string,
@@ -88,76 +145,40 @@ function chunkBrace(
   const MIN_LINES = 5;
   const chunks: IndexChunk[] = [];
 
-  let i = 0;
+  let i = emitImportChunk(lines, filePath, chunks);
 
-  // ── Phase 1: collect leading import block ────────────────────────────────────
-  const importStart = i;
-  while (i < lines.length && IMPORT_LINE_RE.test(lines[i]!.trim())) {
-    i++;
-  }
-  if (i > importStart) {
-    chunks.push(makechunk(lines, importStart, i, filePath));
-  }
-
-  // ── Phase 2: bracket-depth scanning ─────────────────────────────────────────
   let chunkStart = i;
-  let depth = 0;
-  let inBlockComment = false;
-  let inString: "'" | '"' | "`" | null = null;
-  let pendingCommentStart = -1; // start of a JSDoc/comment block before next decl
+  const scan: BraceScanState = { depth: 0, inBlockComment: false, inString: null };
+  let pendingCommentStart = -1;
 
   while (i < lines.length) {
     const line = lines[i]!;
     const trimmed = line.trim();
 
-    // Track comment lines pending attachment
-    if (depth === 0 && COMMENT_LINE_RE.test(trimmed)) {
+    if (scan.depth === 0 && COMMENT_LINE_RE.test(trimmed)) {
       if (pendingCommentStart === -1) pendingCommentStart = i;
       i++;
       continue;
     }
 
-    // If we hit a top-level declaration at depth=0, start a new chunk
-    if (depth === 0 && TOP_LEVEL_DECL_RE.test(trimmed) && i > chunkStart) {
-      // Close the previous chunk (if any non-comment content)
+    if (scan.depth === 0 && TOP_LEVEL_DECL_RE.test(trimmed) && i > chunkStart) {
       const prevEnd = pendingCommentStart !== -1 ? pendingCommentStart : i;
       if (prevEnd > chunkStart) {
         const c = makechunk(lines, chunkStart, prevEnd, filePath);
         if (c.content.trim()) chunks.push(c);
       }
-      // New chunk starts at the pending comment (or here)
       chunkStart = pendingCommentStart !== -1 ? pendingCommentStart : i;
       pendingCommentStart = -1;
-    } else if (depth === 0 && pendingCommentStart !== -1 && trimmed.length > 0) {
-      // Non-declaration line after pending comments — flush comments as their own chunk
+    } else if (scan.depth === 0 && pendingCommentStart !== -1 && trimmed.length > 0) {
       const c = makechunk(lines, chunkStart, pendingCommentStart, filePath);
       if (c.content.trim()) chunks.push(c);
       chunkStart = pendingCommentStart;
       pendingCommentStart = -1;
     }
 
-    // Track brace depth (skip strings and block comments)
-    for (let ci = 0; ci < line.length; ci++) {
-      const ch = line[ci]!;
-      const prev = ci > 0 ? line[ci - 1] : "";
+    advanceBraceScan(line, scan);
 
-      if (inBlockComment) {
-        if (ch === "/" && prev === "*") inBlockComment = false;
-        continue;
-      }
-      if (inString) {
-        if (ch === inString && prev !== "\\") inString = null;
-        continue;
-      }
-      if (ch === "/" && line[ci + 1] === "/") break; // line comment
-      if (ch === "/" && line[ci + 1] === "*") { inBlockComment = true; ci++; continue; }
-      if (ch === '"' || ch === "'" || ch === "`") { inString = ch as "'" | '"' | "`"; continue; }
-      if (ch === "{") depth++;
-      if (ch === "}") { depth = Math.max(0, depth - 1); }
-    }
-
-    // Force-split if chunk is too large and we're back at depth 0
-    if (depth === 0 && (i - chunkStart) >= maxChunkLines) {
+    if (scan.depth === 0 && (i - chunkStart) >= maxChunkLines) {
       const c = makechunk(lines, chunkStart, i + 1, filePath);
       if (c.content.trim()) chunks.push(c);
       chunkStart = i + 1;
@@ -167,28 +188,12 @@ function chunkBrace(
     i++;
   }
 
-  // Flush remaining
   if (chunkStart < lines.length) {
     const c = makechunk(lines, chunkStart, lines.length, filePath);
     if (c.content.trim()) chunks.push(c);
   }
 
-  // ── Phase 3: merge tiny chunks ───────────────────────────────────────────────
-  const merged: IndexChunk[] = [];
-  for (let ci = 0; ci < chunks.length; ci++) {
-    const cur = chunks[ci]!;
-    const lineCount = (cur.endLine ?? 0) - (cur.startLine ?? 1) + 1;
-    if (lineCount < MIN_LINES && merged.length > 0) {
-      const prev = merged[merged.length - 1]!;
-      prev.content += "\n" + cur.content;
-      prev.endLine = cur.endLine;
-      prev.symbols = [...(prev.symbols ?? []), ...(cur.symbols ?? [])];
-    } else {
-      merged.push({ ...cur });
-    }
-  }
-
-  return merged;
+  return mergeTinyChunks(chunks, MIN_LINES);
 }
 
 /**
