@@ -92,8 +92,8 @@ Constitution Checker on ALL generated code:
    (\`rm -rf /\`, \`DROP TABLE\`, \`TRUNCATE\`), filesystem format commands,
    or commands piped to shell (\`curl | sh\`).
 
-4. **No Code Injection**: Do not use \`eval()\`, \`new Function()\`, or
-   \`exec()\` with user-supplied input. Avoid prototype pollution patterns.
+4. **No Code Injection**: Do not use the JS \`eval\` function, \`new Function()\`,
+   or process \`exec\` with user-supplied input. Avoid prototype pollution.
 
 5. **Principle of Least Privilege**: Request only the minimum permissions,
    file access, and network access required to complete the task.
