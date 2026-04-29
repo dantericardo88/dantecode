@@ -76,114 +76,53 @@ This project uses:
  * @param projectRoot - Absolute path to the project root directory.
  * @param force - If true, overwrites existing files without prompting.
  */
-export async function runInitCommand(projectRoot: string, force: boolean = false): Promise<void> {
-  process.stdout.write(`\n${BOLD}Initializing DanteCode project...${RESET}\n\n`);
-
-  // Sprint Dim35: record init start for onboarding funnel tracking
-  const sessionId = `init-${Date.now()}`;
-  recordOnboardingStep({ sessionId, step: "init-started" }, projectRoot);
-
-  const dantecodeDir = join(projectRoot, ".dantecode");
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  // Create .dantecode/ directory
+/** Best-effort mkdir; "already exists" doesn't surface as an error. */
+async function ensureInitDir(dirPath: string, displayName: string, created: string[]): Promise<void> {
   try {
-    await mkdir(dantecodeDir, { recursive: true });
-    created.push(".dantecode/");
-  } catch {
-    // Directory might already exist, which is fine
-  }
+    await mkdir(dirPath, { recursive: true });
+    created.push(displayName);
+  } catch { /* already exists */ }
+}
 
-  // Create .dantecode/skills/ directory
-  const skillsDir = join(dantecodeDir, "skills");
+/**
+ * Idempotent file creation. If the file exists and !force, push to skipped
+ * and return. Otherwise call the writer (string or thunk) and push to created
+ * on success. Errors are surfaced via stderr but don't throw.
+ */
+async function ensureInitFile(
+  filePath: string,
+  displayName: string,
+  force: boolean,
+  writer: () => Promise<void>,
+  created: string[],
+  skipped: string[],
+): Promise<void> {
+  const exists = await fileExists(filePath);
+  if (exists && !force) {
+    skipped.push(`${displayName} (already exists)`);
+    return;
+  }
   try {
-    await mkdir(skillsDir, { recursive: true });
-    created.push(".dantecode/skills/");
-  } catch {
-    // Already exists
+    await writer();
+    created.push(displayName);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`${RED}Error creating ${displayName}: ${message}${RESET}\n`);
   }
+}
 
-  // Create .dantecode/agents/ directory
-  const agentsDir = join(dantecodeDir, "agents");
-  try {
-    await mkdir(agentsDir, { recursive: true });
-    created.push(".dantecode/agents/");
-  } catch {
-    // Already exists
-  }
-
-  // Create STATE.yaml
-  const stateExists = await stateYamlExists(projectRoot);
-  if (stateExists && !force) {
-    skipped.push(".dantecode/STATE.yaml (already exists)");
-  } else {
-    try {
-      await initializeState(projectRoot);
-      created.push(".dantecode/STATE.yaml");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`${RED}Error creating STATE.yaml: ${message}${RESET}\n`);
-    }
-  }
-
-  // Create AGENTS.dc.md template
-  const agentsMdPath = join(dantecodeDir, "AGENTS.dc.md");
-  const agentsMdExists = await fileExists(agentsMdPath);
-  if (agentsMdExists && !force) {
-    skipped.push(".dantecode/AGENTS.dc.md (already exists)");
-  } else {
-    try {
-      await writeFile(agentsMdPath, AGENTS_DC_MD_TEMPLATE, "utf-8");
-      created.push(".dantecode/AGENTS.dc.md");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`${RED}Error creating AGENTS.dc.md: ${message}${RESET}\n`);
-    }
-  }
-
-  // Create .gitignore for .dantecode/ (don't track worktrees and temp files)
-  const gitignorePath = join(dantecodeDir, ".gitignore");
-  const gitignoreExists = await fileExists(gitignorePath);
-  if (gitignoreExists && !force) {
-    skipped.push(".dantecode/.gitignore (already exists)");
-  } else {
-    const gitignoreContent = [
-      "# DanteCode internal files",
-      "worktrees/",
-      "*.tmp",
-      "lessons.db",
-      "lessons.db-wal",
-      "lessons.db-shm",
-      "",
-    ].join("\n");
-
-    try {
-      await writeFile(gitignorePath, gitignoreContent, "utf-8");
-      created.push(".dantecode/.gitignore");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`${RED}Error creating .gitignore: ${message}${RESET}\n`);
-    }
-  }
-
-  // Print summary
+function printInitSummary(created: string[], skipped: string[]): void {
   if (created.length > 0) {
     process.stdout.write(`${GREEN}Created:${RESET}\n`);
-    for (const item of created) {
-      process.stdout.write(`  ${GREEN}+${RESET} ${item}\n`);
-    }
+    for (const item of created) process.stdout.write(`  ${GREEN}+${RESET} ${item}\n`);
   }
-
   if (skipped.length > 0) {
     process.stdout.write(`\n${YELLOW}Skipped:${RESET}\n`);
-    for (const item of skipped) {
-      process.stdout.write(`  ${DIM}-${RESET} ${item}\n`);
-    }
+    for (const item of skipped) process.stdout.write(`  ${DIM}-${RESET} ${item}\n`);
   }
+}
 
-  // Sprint Dim35: repo readiness check — inspired by Continue's context-gathering pattern
-  const readiness = checkRepoReadiness(projectRoot);
+function printRepoReadiness(readiness: ReturnType<typeof checkRepoReadiness>): void {
   process.stdout.write(`\n${BOLD}Repo readiness:${RESET}\n`);
   process.stdout.write(`  ${readiness.hasPackageJson ? GREEN + "✓" : DIM + "—"}${RESET} Node.js project (package.json)\n`);
   process.stdout.write(`  ${readiness.hasGit ? GREEN + "✓" : DIM + "—"}${RESET} Git repository\n`);
@@ -191,7 +130,73 @@ export async function runInitCommand(projectRoot: string, force: boolean = false
   if (readiness.detectedFramework) {
     process.stdout.write(`  ${GREEN}✓${RESET} Framework: ${readiness.detectedFramework}\n`);
   }
-  recordOnboardingStep({ sessionId, step: "repo-readiness-checked", framework: readiness.detectedFramework ?? undefined }, projectRoot);
+}
+
+const GITIGNORE_CONTENT = [
+  "# DanteCode internal files",
+  "worktrees/",
+  "*.tmp",
+  "lessons.db",
+  "lessons.db-wal",
+  "lessons.db-shm",
+  "",
+].join("\n");
+
+export async function runInitCommand(projectRoot: string, force: boolean = false): Promise<void> {
+  process.stdout.write(`\n${BOLD}Initializing DanteCode project...${RESET}\n\n`);
+
+  const sessionId = `init-${Date.now()}`;
+  recordOnboardingStep({ sessionId, step: "init-started" }, projectRoot);
+
+  const dantecodeDir = join(projectRoot, ".dantecode");
+  const created: string[] = [];
+  const skipped: string[] = [];
+
+  await ensureInitDir(dantecodeDir, ".dantecode/", created);
+  await ensureInitDir(join(dantecodeDir, "skills"), ".dantecode/skills/", created);
+  await ensureInitDir(join(dantecodeDir, "agents"), ".dantecode/agents/", created);
+
+  const stateExists = await stateYamlExists(projectRoot);
+  if (stateExists && !force) {
+    skipped.push(".dantecode/STATE.yaml (already exists)");
+  } else {
+    await ensureInitFile(
+      join(dantecodeDir, "STATE.yaml"),
+      ".dantecode/STATE.yaml",
+      true, // we already gated on stateYamlExists
+      () => initializeState(projectRoot).then(() => undefined),
+      created,
+      skipped,
+    );
+  }
+
+  await ensureInitFile(
+    join(dantecodeDir, "AGENTS.dc.md"),
+    ".dantecode/AGENTS.dc.md",
+    force,
+    () => writeFile(join(dantecodeDir, "AGENTS.dc.md"), AGENTS_DC_MD_TEMPLATE, "utf-8"),
+    created,
+    skipped,
+  );
+
+  await ensureInitFile(
+    join(dantecodeDir, ".gitignore"),
+    ".dantecode/.gitignore",
+    force,
+    () => writeFile(join(dantecodeDir, ".gitignore"), GITIGNORE_CONTENT, "utf-8"),
+    created,
+    skipped,
+  );
+
+  printInitSummary(created, skipped);
+
+  // Sprint Dim35: repo readiness check
+  const readiness = checkRepoReadiness(projectRoot);
+  printRepoReadiness(readiness);
+  recordOnboardingStep(
+    { sessionId, step: "repo-readiness-checked", framework: readiness.detectedFramework ?? undefined },
+    projectRoot,
+  );
 
   process.stdout.write(`\n${GREEN}${BOLD}DanteCode project initialized!${RESET}\n`);
   process.stdout.write(`${DIM}Run 'dantecode' to start the interactive REPL.${RESET}\n\n`);
