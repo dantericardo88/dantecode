@@ -105,12 +105,62 @@ auditLog:
   - "2026-04-28T19:52:17.791Z | review artifact: CURRENT_STATE.md"
   - "2026-04-28T19:52:17.791Z | handoff: review -> next"
   - "2026-04-28T19:52:20.364Z | pdse-score | post-review overall: 23%"
+  - "2026-04-28T20:39:05.875Z | llm: ollama/qwen2.5-coder:latest (6848 chars
+    returned)"
+  - "2026-04-28T20:39:21.001Z | llm: ollama/qwen2.5-coder:latest (1891 chars
+    returned)"
+  - "2026-04-28T20:39:34.785Z | llm: ollama/qwen2.5-coder:latest (1516 chars
+    returned)"
+  - "2026-04-28T20:40:24.686Z | llm: ollama/qwen2.5-coder:latest (1649 chars
+    returned)"
+  - "2026-04-28T20:40:42.399Z | llm: ollama/qwen2.5-coder:latest (2086 chars
+    returned)"
+  - "2026-04-28T20:40:57.007Z | llm: ollama/qwen2.5-coder:latest (1645 chars
+    returned)"
+  - "2026-04-28T20:41:13.891Z | llm: ollama/qwen2.5-coder:latest (1856 chars
+    returned)"
+  - "2026-04-28T20:42:08.063Z | llm: ollama/qwen2.5-coder:latest (5154 chars
+    returned)"
+  - "2026-04-28T20:42:37.369Z | llm: ollama/qwen2.5-coder:latest (1457 chars
+    returned)"
+  - "2026-04-28T20:42:44.842Z | llm: ollama/qwen2.5-coder:latest (600 chars
+    returned)"
+  - "2026-04-28T20:43:55.351Z | llm: ollama/qwen2.5-coder:latest (6592 chars
+    returned)"
+  - "2026-04-28T20:44:09.403Z | llm: ollama/qwen2.5-coder:latest (1187 chars
+    returned)"
+  - "2026-04-28T20:44:17.846Z | llm: ollama/qwen2.5-coder:latest (486 chars
+    returned)"
+  - "2026-04-28T22:05:34.128Z | llm: ollama/qwen2.5-coder:latest (5492 chars
+    returned)"
+  - "2026-04-28T22:05:48.643Z | llm: ollama/qwen2.5-coder:latest (1160 chars
+    returned)"
+  - "2026-04-28T22:05:57.413Z | llm: ollama/qwen2.5-coder:latest (425 chars
+    returned)"
+  - "2026-04-28T22:19:13.658Z | llm: ollama/qwen2.5-coder:latest (5730 chars
+    returned)"
+  - "2026-04-28T22:19:28.716Z | llm: ollama/qwen2.5-coder:latest (1432 chars
+    returned)"
+  - "2026-04-28T22:19:38.698Z | llm: ollama/qwen2.5-coder:latest (528 chars
+    returned)"
+  - "2026-04-28T22:32:29.136Z | llm: ollama/qwen2.5-coder:latest (6624 chars
+    returned)"
+  - "2026-04-28T22:32:38.087Z | llm: ollama/qwen2.5-coder:latest (799 chars
+    returned)"
+  - "2026-04-28T22:32:45.845Z | llm: ollama/qwen2.5-coder:latest (602 chars
+    returned)"
+  - "2026-04-29T01:25:49.021Z | retro: score 70/100 (delta: -5)"
+  - "2026-04-29T01:28:22.545Z | retro: score 70/100 (delta: 0)"
+  - "2026-04-29T01:28:27.369Z | retro: score 70/100 (delta: 0)"
+  - "2026-04-29T01:28:32.036Z | retro: score 70/100 (delta: 0)"
+  - "2026-04-29T01:28:36.939Z | retro: score 70/100 (delta: 0)"
+  - "2026-04-29T01:28:41.476Z | retro: score 70/100 (delta: 0)"
 profile: balanced
 constitution: CONSTITUTION.md
 enforcementMode: advisory
 projectType: web
 retroDelta: 0
-retroLastRun: 2026-04-28T16:55:11.206Z
+retroLastRun: 2026-04-29T01:28:41.476Z
 completionTracker:
   overall: 23
   phases:
@@ -153,6 +203,18 @@ completionTracker:
 sessionBaselineScore: 6.2
 sessionBaselineTimestamp: 2026-04-28T18:43:01.753Z
 scoreHistory:
+  - timestamp: 2026-04-28T21:34:31.402Z
+    displayScore: 6.5
+    gitSha: f0ef88c
+  - timestamp: 2026-04-28T20:40:18.023Z
+    displayScore: 6.5
+    gitSha: f0ef88c
+  - timestamp: 2026-04-28T20:39:53.992Z
+    displayScore: 6.5
+    gitSha: f0ef88c
+  - timestamp: 2026-04-28T20:36:22.331Z
+    displayScore: 6.5
+    gitSha: f0ef88c
   - timestamp: 2026-04-28T20:06:20.274Z
     displayScore: 6.5
     gitSha: 4434c28
