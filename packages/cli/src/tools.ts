@@ -1280,6 +1280,47 @@ async function toolWebSearch(
  * WebFetch tool: fetches a URL with proper HTML parsing, readability extraction,
  * CSS selector support, and page metadata extraction.
  */
+/**
+ * Decode a fetched HTTP response into the agent-facing string. Handles raw vs
+ * readability extraction, optional CSS selector, max_chars truncation, and
+ * HTML metadata header. Extracted from toolWebFetch to keep that function
+ * under the 100-LOC maintainability threshold.
+ */
+async function formatFetchedResponse(
+  response: Response,
+  url: string,
+  opts: { maxChars: number; selector?: string; raw: boolean },
+): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = await response.text();
+
+  let content: string;
+  if (opts.raw || contentType.includes("application/json") || contentType.includes("text/plain")) {
+    content = body;
+  } else if (opts.selector) {
+    content = extractByCSS(body, opts.selector) ?? extractReadableArticle(body);
+  } else {
+    content = extractReadableArticle(body);
+  }
+
+  if (content.length > opts.maxChars) {
+    content = content.slice(0, opts.maxChars) +
+      `\n\n... (truncated at ${opts.maxChars} chars, total: ${content.length})`;
+  }
+
+  let metaHeader = "";
+  if (contentType.includes("html")) {
+    const meta = extractPageMeta(body);
+    const parts: string[] = [];
+    if (meta.title) parts.push(`Title: ${meta.title}`);
+    if (meta.description) parts.push(`Description: ${meta.description}`);
+    if (meta.author) parts.push(`Author: ${meta.author}`);
+    if (parts.length > 0) metaHeader = parts.join("\n") + "\n\n";
+  }
+
+  return `Fetched ${url} (${contentType || "unknown type"}, ${body.length} bytes):\n\n${metaHeader}${content}`;
+}
+
 async function toolWebFetch(
   input: Record<string, unknown>,
   _projectRoot: string,
@@ -1346,44 +1387,7 @@ async function toolWebFetch(
       };
     }
 
-    const contentType = response.headers.get("content-type") ?? "";
-    const body = await response.text();
-
-    let content: string;
-
-    if (raw || contentType.includes("application/json") || contentType.includes("text/plain")) {
-      // Return raw content (JSON, plain text)
-      content = body;
-    } else {
-      // Apply CSS selector extraction if requested
-      if (selector) {
-        const selectorContent = extractByCSS(body, selector);
-        content = selectorContent ?? extractReadableArticle(body);
-      } else {
-        // Smart content extraction via readability algorithm
-        content = extractReadableArticle(body);
-      }
-    }
-
-    // Truncate to max_chars
-    if (content.length > maxChars) {
-      content =
-        content.slice(0, maxChars) +
-        `\n\n... (truncated at ${maxChars} chars, total: ${content.length})`;
-    }
-
-    // Extract page metadata for context
-    let metaHeader = "";
-    if (contentType.includes("html")) {
-      const meta = extractPageMeta(body);
-      const parts: string[] = [];
-      if (meta.title) parts.push(`Title: ${meta.title}`);
-      if (meta.description) parts.push(`Description: ${meta.description}`);
-      if (meta.author) parts.push(`Author: ${meta.author}`);
-      if (parts.length > 0) metaHeader = parts.join("\n") + "\n\n";
-    }
-
-    const output = `Fetched ${url} (${contentType || "unknown type"}, ${body.length} bytes):\n\n${metaHeader}${content}`;
+    const output = await formatFetchedResponse(response, url, { maxChars, selector, raw });
     setCachedFetchResult(cacheKey, output);
     return { toolName: "WebFetch", content: output, isError: false, ok: true };
   } catch (err: unknown) {

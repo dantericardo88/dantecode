@@ -1929,36 +1929,34 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
   return lines.join("\n");
 }
 
+function formatBackgroundTaskList(
+  tasks: Array<{ id: string; status: string; prompt: string; progress: string }>,
+): string {
+  if (tasks.length === 0) {
+    return `${DIM}No background tasks. Use /bg <task description> to start one.${RESET}`;
+  }
+  const statusIcons: Record<string, string> = {
+    running: `${YELLOW}⟳${RESET}`,
+    paused: `${YELLOW}⏸${RESET}`,
+    completed: `${GREEN}✓${RESET}`,
+    failed: `${RED}✗${RESET}`,
+    cancelled: `${DIM}⊘${RESET}`,
+  };
+  const lines = ["", `${BOLD}Background Tasks${RESET}`, ""];
+  for (const task of tasks) {
+    const icon = statusIcons[task.status] ?? `${DIM}…${RESET}`;
+    lines.push(`  ${icon} [${task.id}] ${task.status} — ${task.prompt.slice(0, 60)}`);
+    lines.push(`    ${DIM}${task.progress}${RESET}`);
+  }
+  return lines.join("\n");
+}
+
 async function bgCommand(args: string, state: ReplState): Promise<string> {
   const runner = await ensureBackgroundRunner(state);
-
   const trimmed = args.trim();
 
   // /bg with no args — list tasks
-  if (!trimmed) {
-    const tasks = runner.listTasks();
-    if (tasks.length === 0) {
-      return `${DIM}No background tasks. Use /bg <task description> to start one.${RESET}`;
-    }
-    const lines = ["", `${BOLD}Background Tasks${RESET}`, ""];
-    for (const task of tasks) {
-      const icon =
-        task.status === "running"
-          ? `${YELLOW}⟳${RESET}`
-          : task.status === "paused"
-            ? `${YELLOW}⏸${RESET}`
-            : task.status === "completed"
-              ? `${GREEN}✓${RESET}`
-              : task.status === "failed"
-                ? `${RED}✗${RESET}`
-                : task.status === "cancelled"
-                  ? `${DIM}⊘${RESET}`
-                  : `${DIM}…${RESET}`;
-      lines.push(`  ${icon} [${task.id}] ${task.status} — ${task.prompt.slice(0, 60)}`);
-      lines.push(`    ${DIM}${task.progress}${RESET}`);
-    }
-    return lines.join("\n");
-  }
+  if (!trimmed) return formatBackgroundTaskList(runner.listTasks());
 
   // /bg cancel <id>
   if (trimmed.startsWith("cancel ")) {
@@ -2159,76 +2157,58 @@ async function searchCommand(args: string, state: ReplState): Promise<string> {
 // History Command
 // ----------------------------------------------------------------------------
 
+async function formatSessionDetails(store: SessionStore, idPrefix: string): Promise<string> {
+  const entries = await store.list();
+  const match = entries.find((e) => e.id === idPrefix || e.id.startsWith(idPrefix));
+  if (!match) {
+    return `${RED}Session not found: ${idPrefix}${RESET}\n${DIM}Use /history to see all sessions.${RESET}`;
+  }
+
+  const session = await store.load(match.id);
+  if (!session) return `${RED}Could not load session: ${match.id}${RESET}`;
+
+  const summary = session.summary ?? (await store.summarize(session));
+  const userCount = session.messages.filter((m) => m.role === "user").length;
+  const assistantCount = session.messages.filter((m) => m.role === "assistant").length;
+  const toolCount = session.messages.filter((m) => m.role === "tool").length;
+
+  const lines = [
+    "",
+    `${BOLD}Session Details${RESET}`,
+    "",
+    `  ${CYAN}ID:${RESET}        ${session.id}`,
+    `  ${CYAN}Title:${RESET}     ${session.title}`,
+    `  ${CYAN}Model:${RESET}     ${session.model}`,
+    `  ${CYAN}Created:${RESET}   ${new Date(session.createdAt).toLocaleString()}`,
+    `  ${CYAN}Updated:${RESET}   ${new Date(session.updatedAt).toLocaleString()}`,
+    `  ${CYAN}Messages:${RESET}  ${session.messages.length} total (${userCount} user, ${assistantCount} assistant, ${toolCount} tool)`,
+    "",
+    `  ${CYAN}Summary:${RESET}   ${summary}`,
+  ];
+
+  const files = session.contextFiles.length > 0 ? session.contextFiles : [];
+  if (files.length > 0) {
+    lines.push("", `  ${CYAN}Files:${RESET}`);
+    for (const f of files.slice(0, 10)) lines.push(`    ${DIM}- ${f}${RESET}`);
+    if (files.length > 10) lines.push(`    ${DIM}... and ${files.length - 10} more${RESET}`);
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
 async function historyCommand(args: string, state: ReplState): Promise<string> {
   const store = new SessionStore(state.projectRoot);
   const trimmed = args.trim();
 
-  // /history clear — delete all sessions
   if (trimmed === "clear") {
     const entries = await store.list();
-    if (entries.length === 0) {
-      return `${DIM}No sessions to clear.${RESET}`;
-    }
+    if (entries.length === 0) return `${DIM}No sessions to clear.${RESET}`;
     const count = await store.deleteAll();
     return `${GREEN}Cleared ${count} session(s).${RESET}`;
   }
 
-  // /history <id> — show details of a specific session
-  if (trimmed.length > 0) {
-    // Try to find session by prefix match
-    const entries = await store.list();
-    const match = entries.find((e) => e.id === trimmed || e.id.startsWith(trimmed));
-    if (!match) {
-      return `${RED}Session not found: ${trimmed}${RESET}\n${DIM}Use /history to see all sessions.${RESET}`;
-    }
-
-    const session = await store.load(match.id);
-    if (!session) {
-      return `${RED}Could not load session: ${match.id}${RESET}`;
-    }
-
-    // Generate summary if not cached
-    let summary = session.summary;
-    if (!summary) {
-      summary = await store.summarize(session);
-    }
-
-    // Collect files touched
-    const files = session.contextFiles.length > 0 ? session.contextFiles : [];
-
-    // Message breakdown
-    const userCount = session.messages.filter((m) => m.role === "user").length;
-    const assistantCount = session.messages.filter((m) => m.role === "assistant").length;
-    const toolCount = session.messages.filter((m) => m.role === "tool").length;
-
-    const lines = [
-      "",
-      `${BOLD}Session Details${RESET}`,
-      "",
-      `  ${CYAN}ID:${RESET}        ${session.id}`,
-      `  ${CYAN}Title:${RESET}     ${session.title}`,
-      `  ${CYAN}Model:${RESET}     ${session.model}`,
-      `  ${CYAN}Created:${RESET}   ${new Date(session.createdAt).toLocaleString()}`,
-      `  ${CYAN}Updated:${RESET}   ${new Date(session.updatedAt).toLocaleString()}`,
-      `  ${CYAN}Messages:${RESET}  ${session.messages.length} total (${userCount} user, ${assistantCount} assistant, ${toolCount} tool)`,
-      "",
-      `  ${CYAN}Summary:${RESET}   ${summary}`,
-    ];
-
-    if (files.length > 0) {
-      lines.push("");
-      lines.push(`  ${CYAN}Files:${RESET}`);
-      for (const f of files.slice(0, 10)) {
-        lines.push(`    ${DIM}- ${f}${RESET}`);
-      }
-      if (files.length > 10) {
-        lines.push(`    ${DIM}... and ${files.length - 10} more${RESET}`);
-      }
-    }
-
-    lines.push("");
-    return lines.join("\n");
-  }
+  if (trimmed.length > 0) return formatSessionDetails(store, trimmed);
 
   // /history — list last 20 sessions
   const entries = await store.list();

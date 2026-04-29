@@ -350,6 +350,32 @@ async function toolEdit(
 }
 
 /**
+ * Apply each parsed block sequentially. Quality-of-match summary lets the
+ * model see whether its blocks were precise enough (e.g. "exact x2,
+ * fuzzy x1"). Extracted from toolReplaceInFile to keep that function
+ * under the 100-LOC maintainability threshold.
+ */
+function applyAllBlocks(
+  blocks: ReturnType<typeof parseSearchReplaceBlocks>["blocks"],
+  existing: string,
+): { working: string; qualityCounts: Record<string, number>; failures: string[] } {
+  let working = existing;
+  const qualityCounts: Record<string, number> = {};
+  const failures: string[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i]!;
+    const result = applySearchReplaceBlock(working, block);
+    if (!result.matched || !result.updatedContent) {
+      failures.push(`Block ${i + 1}: ${result.diagnostic ?? "search content not found"}`);
+      continue;
+    }
+    working = result.updatedContent;
+    qualityCounts[result.matchQuality] = (qualityCounts[result.matchQuality] ?? 0) + 1;
+  }
+  return { working, qualityCounts, failures };
+}
+
+/**
  * ReplaceInFile — Cline-style SEARCH/REPLACE tool.
  *
  * Why this exists: free-form `Edit(old_string, new_string)` is offset-bug-prone
@@ -422,24 +448,7 @@ async function toolReplaceInFile(
       }
     }
 
-    // Apply each block sequentially. Quality-of-match summary so the model
-    // gets honest feedback (e.g. "exact x2, fuzzy x1" tells it whether
-    // its blocks were precise enough).
-    let working = existing;
-    const qualityCounts: Record<string, number> = {};
-    const failures: string[] = [];
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i]!;
-      const result = applySearchReplaceBlock(working, block);
-      if (!result.matched || !result.updatedContent) {
-        failures.push(
-          `Block ${i + 1}: ${result.diagnostic ?? "search content not found"}`,
-        );
-        continue;
-      }
-      working = result.updatedContent;
-      qualityCounts[result.matchQuality] = (qualityCounts[result.matchQuality] ?? 0) + 1;
-    }
+    const { working, qualityCounts, failures } = applyAllBlocks(blocks, existing);
 
     if (failures.length > 0 && Object.values(qualityCounts).reduce((a, b) => a + b, 0) === 0) {
       return {
@@ -448,24 +457,34 @@ async function toolReplaceInFile(
       };
     }
 
-    // Write the result. Mirror Edit's line-ending preservation logic.
-    const finalContent = preserveLineEndingsForWrite(existing, working);
-    await mkdir(dirname(resolved), { recursive: true });
-    await writeFile(resolved, finalContent, "utf-8");
-
-    const qualitySummary = Object.entries(qualityCounts)
-      .map(([k, v]) => `${k} ×${v}`)
-      .join(", ");
-    const failNote = failures.length > 0 ? `\n\nWarnings:\n${failures.join("\n")}` : "";
-    return {
-      content:
-        `Successfully applied ${Object.values(qualityCounts).reduce((a, b) => a + b, 0)} SEARCH/REPLACE block(s) to ${resolved} (${qualitySummary})${failNote}`,
-      isError: false,
-    };
+    return writeAndSummarize(resolved, existing, working, qualityCounts, failures);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return { content: `Error in ReplaceInFile: ${message}`, isError: true };
   }
+}
+
+/** Final write + result summary for toolReplaceInFile. Extracted to keep
+ * the parent under 100 LOC. */
+async function writeAndSummarize(
+  resolved: string,
+  existing: string,
+  working: string,
+  qualityCounts: Record<string, number>,
+  failures: string[],
+): Promise<ToolResult> {
+  const finalContent = preserveLineEndingsForWrite(existing, working);
+  await mkdir(dirname(resolved), { recursive: true });
+  await writeFile(resolved, finalContent, "utf-8");
+  const qualitySummary = Object.entries(qualityCounts)
+    .map(([k, v]) => `${k} ×${v}`)
+    .join(", ");
+  const failNote = failures.length > 0 ? `\n\nWarnings:\n${failures.join("\n")}` : "";
+  const total = Object.values(qualityCounts).reduce((a, b) => a + b, 0);
+  return {
+    content: `Successfully applied ${total} SEARCH/REPLACE block(s) to ${resolved} (${qualitySummary})${failNote}`,
+    isError: false,
+  };
 }
 
 async function toolListDir(
