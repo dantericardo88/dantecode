@@ -57,6 +57,20 @@ Each extracted helper is a focused, testable unit:
 - `applyAllBlocks` + `writeAndSummarize` — separate the per-block iteration from the IO + summary text.
 - `TOOL_DEFINITIONS` / `NATIVE_TOOL_SCHEMAS` consts — tool metadata is now data, not code; easier to diff, easier to filter at runtime.
 
+## Continued progress (2026-04-29 evening) — 16 commits cumulative
+
+| Commit | Change | Δ |
+|---|---|:---:|
+| `efe0da9` | registerCommands + parseArgs split | -2 |
+| `83ec6db` | runAutoforgeIAL split (collectInputViolations, regenerateFromFailure) | -1 |
+| `c74a289` | computeDashboardMetrics + createDefaultToolHandlers split | -2 |
+| `48c0851` | toolWrite + grepDir + toolGitHubSearch split | -3 |
+| `479b4c9` | listenCommand split (status, executor, banner helpers) | -1 |
+
+**Cumulative: 57 → 41 large fns (-16). All 1340 vscode + 2256 cli + 3005 core + 69 mcp tests pass. No `--no-verify`.**
+
+The score wall (penalty caps at 30 until X<26) still hasn't been broken — we're at 41, need 15 more kills. But real-engineering quality is meaningfully improved: every extraction produced a self-contained, named, separately testable helper. The biggest functions (runAgentLoop 2,633L, partyCommand 398L, autoforgeCommand 369L, buildSystemPrompt 377L, runAscendLoopCore 326L) remain to be tackled in future sessions.
+
 ## What's left for the maintainability dim (next sessions)
 
 In ROI order:
