@@ -1793,115 +1793,72 @@ async function mcpCommand(_args: string, state: ReplState): Promise<string> {
   return lines.join("\n");
 }
 
-async function listenCommand(args: string, state: ReplState): Promise<string> {
-  // Lazy import to avoid circular dependency
-  const { BackgroundAgentRunner, EventTriggerRegistry, createWebhookServer } =
-    await import("@dantecode/core");
+interface IssueToPRConfig {
+  githubToken: string;
+  repository: string;
+  baseBranch: string;
+}
 
-  const trimmed = args.trim();
-
-  // Handle `/listen status` subcommand
-  if (trimmed === "status") {
-    const port = ((state as unknown as Record<string, unknown>)._listenPort as number) ?? 8080;
-    try {
-      const res = await fetch(`http://localhost:${port}/health`);
-      const data = (await res.json()) as Record<string, unknown>;
-      const counts = (data.taskCounts as Record<string, number>) ?? {};
-      return [
-        "",
-        `${GREEN}${BOLD}Event Gateway Status${RESET}`,
-        `  Status:    ${data.status === "ok" ? `${GREEN}OK${RESET}` : `${RED}DOWN${RESET}`}`,
-        `  Uptime:    ${data.uptime}s`,
-        `  Active:    ${data.activeTasks ?? 0} tasks`,
-        `  Running:   ${counts.running ?? 0}`,
-        `  Queued:    ${counts.queued ?? 0}`,
-        `  Completed: ${counts.completed ?? 0}`,
-        `  Failed:    ${counts.failed ?? 0}`,
-        "",
-      ].join("\n");
-    } catch {
-      return `${RED}Event Gateway not running. Start with /listen [port]${RESET}`;
-    }
-  }
-
-  const port = trimmed ? parseInt(trimmed, 10) : 8080;
-  if (isNaN(port) || port < 1 || port > 65535) {
-    return `${RED}Invalid port number. Usage: /listen [port | status]${RESET}`;
-  }
-
-  // Reuse or create the background runner
-  if (!state._bgRunner) {
-    state._bgRunner = new BackgroundAgentRunner(1, state.projectRoot);
-  }
-  const runner = state._bgRunner as InstanceType<typeof BackgroundAgentRunner>;
-
-  // Create the event trigger registry with env-based secrets
-  const registry = new EventTriggerRegistry({
-    enabledSources: ["github", "slack", "api", "manual"],
-    githubSecret: process.env.GITHUB_WEBHOOK_SECRET,
-    defaultPriority: "normal",
-  });
-
-  // Build issue-to-PR config from environment if GitHub token is available
-  const githubToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  const githubRepo = process.env.GITHUB_REPOSITORY;
-  const issueToPRConfig =
-    githubToken && githubRepo
-      ? { githubToken, repository: githubRepo, baseBranch: "main" }
-      : undefined;
-
-  // Default agent executor: run prompt through the background runner
-  const agentExecutor = issueToPRConfig
-    ? async (prompt: string, _workdir: string) => {
-        const taskId = runner.enqueue(prompt, { autoCommit: false, createPR: false });
-        return new Promise<{ output: string; touchedFiles: string[] }>((resolve, reject) => {
-          const check = setInterval(() => {
-            const task = runner.getTask(taskId);
-            if (!task) {
-              clearInterval(check);
-              reject(new Error("Task not found"));
-              return;
-            }
-            if (task.status === "completed") {
-              clearInterval(check);
-              resolve({ output: task.output ?? "", touchedFiles: task.touchedFiles });
-            } else if (task.status === "failed" || task.status === "cancelled") {
-              clearInterval(check);
-              reject(new Error(task.error ?? "Task failed"));
-            }
-          }, 2000);
-        });
-      }
-    : undefined;
-
-  const handle = createWebhookServer({
-    port,
-    eventRegistry: registry,
-    backgroundRunner: runner,
-    projectRoot: state.projectRoot,
-    apiToken: process.env.DANTECODE_API_TOKEN,
-    slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
-    issueToPR: issueToPRConfig,
-    agentExecutor,
-  });
-
+async function fetchGatewayStatus(state: ReplState): Promise<string> {
+  const port = ((state as unknown as Record<string, unknown>)._listenPort as number) ?? 8080;
   try {
-    await handle.start();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return `${RED}Failed to start webhook server: ${msg}${RESET}`;
+    const res = await fetch(`http://localhost:${port}/health`);
+    const data = (await res.json()) as Record<string, unknown>;
+    const counts = (data["taskCounts"] as Record<string, number>) ?? {};
+    return [
+      "",
+      `${GREEN}${BOLD}Event Gateway Status${RESET}`,
+      `  Status:    ${data["status"] === "ok" ? `${GREEN}OK${RESET}` : `${RED}DOWN${RESET}`}`,
+      `  Uptime:    ${data["uptime"]}s`,
+      `  Active:    ${data["activeTasks"] ?? 0} tasks`,
+      `  Running:   ${counts["running"] ?? 0}`,
+      `  Queued:    ${counts["queued"] ?? 0}`,
+      `  Completed: ${counts["completed"] ?? 0}`,
+      `  Failed:    ${counts["failed"] ?? 0}`,
+      "",
+    ].join("\n");
+  } catch {
+    return `${RED}Event Gateway not running. Start with /listen [port]${RESET}`;
   }
+}
 
-  // Store port for /listen status
-  (state as unknown as Record<string, unknown>)._listenPort = port;
+function buildIssueToPRExecutor(
+  runner: { enqueue: (p: string, o: object) => string; getTask: (id: string) => unknown },
+  issueToPRConfig: IssueToPRConfig | undefined,
+) {
+  if (!issueToPRConfig) return undefined;
+  return async (prompt: string, _workdir: string) => {
+    const taskId = runner.enqueue(prompt, { autoCommit: false, createPR: false });
+    return new Promise<{ output: string; touchedFiles: string[] }>((resolve, reject) => {
+      const check = setInterval(() => {
+        const task = runner.getTask(taskId) as
+          | { status: string; output?: string; touchedFiles: string[]; error?: string }
+          | undefined;
+        if (!task) {
+          clearInterval(check);
+          reject(new Error("Task not found"));
+          return;
+        }
+        if (task.status === "completed") {
+          clearInterval(check);
+          resolve({ output: task.output ?? "", touchedFiles: task.touchedFiles });
+        } else if (task.status === "failed" || task.status === "cancelled") {
+          clearInterval(check);
+          reject(new Error(task.error ?? "Task failed"));
+        }
+      }, 2000);
+    });
+  };
+}
 
-  const ghSecret = process.env.GITHUB_WEBHOOK_SECRET;
-  const slackSecret = process.env.SLACK_SIGNING_SECRET;
-  const apiToken = process.env.DANTECODE_API_TOKEN;
-  const check = (v: string | undefined) =>
-    v ? `${GREEN}configured${RESET}` : `${RED}missing${RESET}`;
-
-  const lines = [
+function formatGatewayStartedMessage(
+  port: number,
+  issueToPRConfig: IssueToPRConfig | undefined,
+  githubRepo: string | undefined,
+  githubToken: string | undefined,
+): string {
+  const check = (v: string | undefined) => (v ? `${GREEN}configured${RESET}` : `${RED}missing${RESET}`);
+  return [
     "",
     `${GREEN}${BOLD}DanteCode Event Gateway — listening on port ${port}${RESET}`,
     "",
@@ -1912,9 +1869,9 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     `  GET  /health           — Health check`,
     "",
     `${BOLD}Secrets:${RESET}`,
-    `  GITHUB_WEBHOOK_SECRET: ${check(ghSecret)}`,
-    `  SLACK_SIGNING_SECRET:  ${check(slackSecret)}`,
-    `  DANTECODE_API_TOKEN:   ${check(apiToken)}`,
+    `  GITHUB_WEBHOOK_SECRET: ${check(process.env.GITHUB_WEBHOOK_SECRET)}`,
+    `  SLACK_SIGNING_SECRET:  ${check(process.env.SLACK_SIGNING_SECRET)}`,
+    `  DANTECODE_API_TOKEN:   ${check(process.env.DANTECODE_API_TOKEN)}`,
     "",
     `${BOLD}Issue-to-PR Pipeline:${RESET}`,
     `  GITHUB_TOKEN:          ${check(githubToken)}`,
@@ -1924,9 +1881,57 @@ async function listenCommand(args: string, state: ReplState): Promise<string> {
     `${DIM}To expose publicly: npx ngrok http ${port}${RESET}`,
     `${DIM}Check status: /listen status${RESET}`,
     "",
-  ];
+  ].join("\n");
+}
 
-  return lines.join("\n");
+async function listenCommand(args: string, state: ReplState): Promise<string> {
+  const { BackgroundAgentRunner, EventTriggerRegistry, createWebhookServer } =
+    await import("@dantecode/core");
+
+  const trimmed = args.trim();
+  if (trimmed === "status") return fetchGatewayStatus(state);
+
+  const port = trimmed ? parseInt(trimmed, 10) : 8080;
+  if (isNaN(port) || port < 1 || port > 65535) {
+    return `${RED}Invalid port number. Usage: /listen [port | status]${RESET}`;
+  }
+
+  if (!state._bgRunner) state._bgRunner = new BackgroundAgentRunner(1, state.projectRoot);
+  const runner = state._bgRunner as InstanceType<typeof BackgroundAgentRunner>;
+
+  const registry = new EventTriggerRegistry({
+    enabledSources: ["github", "slack", "api", "manual"],
+    githubSecret: process.env.GITHUB_WEBHOOK_SECRET,
+    defaultPriority: "normal",
+  });
+
+  const githubToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const githubRepo = process.env.GITHUB_REPOSITORY;
+  const issueToPRConfig: IssueToPRConfig | undefined =
+    githubToken && githubRepo
+      ? { githubToken, repository: githubRepo, baseBranch: "main" }
+      : undefined;
+
+  const handle = createWebhookServer({
+    port,
+    eventRegistry: registry,
+    backgroundRunner: runner,
+    projectRoot: state.projectRoot,
+    apiToken: process.env.DANTECODE_API_TOKEN,
+    slackSigningSecret: process.env.SLACK_SIGNING_SECRET,
+    issueToPR: issueToPRConfig,
+    agentExecutor: buildIssueToPRExecutor(runner, issueToPRConfig),
+  });
+
+  try {
+    await handle.start();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `${RED}Failed to start webhook server: ${msg}${RESET}`;
+  }
+
+  (state as unknown as Record<string, unknown>)._listenPort = port;
+  return formatGatewayStartedMessage(port, issueToPRConfig, githubRepo, githubToken);
 }
 
 function formatBackgroundTaskList(
