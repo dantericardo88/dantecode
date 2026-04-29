@@ -51,7 +51,7 @@
     "@dantecode/mcp": "1.0.0",
     "@dantecode/skill-adapter": "1.0.0",
     "@dantecode/swe-bench-runner": "1.0.0",
-    "yaml": "^2.6.0",
+    "yaml": "^2.8.3",
     "zod": "^3.24.0"
   },
   "publishConfig": {
