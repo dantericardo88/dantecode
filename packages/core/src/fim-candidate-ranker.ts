@@ -101,89 +101,64 @@ function leadingIndent(text: string): string {
  * Score a single FIM candidate against the context.
  * Returns a FimCandidate with score in [0, 1] and detailed breakdown.
  */
-export function scoreFimCandidate(
-  candidateText: string,
-  ctx: FimRankingContext,
-): FimCandidate {
-  const breakdown = {
-    completeness: 0,
-    lengthQuality: 0,
-    novelty: 0,
-    indentMatch: 0,
-    noRepetition: 0,
-    syntacticBalance: 0,
-  };
+function scoreCompleteness(candidateText: string): number {
+  if (candidateText.endsWith("\n") || candidateText.endsWith("\r\n")) return 0.25;
+  return /\w$/.test(candidateText) ? 0.10 : 0;
+}
 
-  // 1. Completeness: ends with a newline → full line(s) completed
-  if (candidateText.endsWith("\n") || candidateText.endsWith("\r\n")) {
-    breakdown.completeness = 0.25;
-  } else {
-    // Partial credit if it at least ends in a word character (not mid-escape)
-    if (/\w$/.test(candidateText)) {
-      breakdown.completeness = 0.10;
-    }
-  }
+function scoreLengthQuality(len: number): number {
+  if (len >= 20 && len <= 200) return 0.20;
+  if (len < 5) return 0;
+  if (len < 20) return 0.05 + ((len - 5) / 15) * 0.10;
+  // len > 200: linear decay from 0.20 down to 0.05 at len=1000
+  const excess = Math.min(len - 200, 800);
+  return Math.max(0.05, 0.20 - (excess / 800) * 0.15);
+}
 
-  // 2. Length quality: 20-200 chars ideal
-  const len = candidateText.length;
-  if (len >= 20 && len <= 200) {
-    breakdown.lengthQuality = 0.20;
-  } else if (len < 5) {
-    breakdown.lengthQuality = 0.0; // very short — near-zero value
-  } else if (len < 20) {
-    breakdown.lengthQuality = 0.05 + ((len - 5) / 15) * 0.10;
-  } else {
-    // len > 200: linear decay from 0.20 down to 0.05 at len=1000
-    const excess = Math.min(len - 200, 800);
-    breakdown.lengthQuality = Math.max(0.05, 0.20 - (excess / 800) * 0.15);
-  }
-
-  // 3. Novelty: candidate introduces tokens not in the prefix
-  const prefixTokens = tokenSet(ctx.prefix);
-  const candidateTokens = tokenSet(candidateText);
-  const sim = jaccard(prefixTokens, candidateTokens);
-  // Higher similarity → lower novelty score
-  breakdown.novelty = (1 - sim) * 0.20;
-
-  // 4. Indentation match: compare indent of first char of candidate with last line of prefix
-  const prefixLastLine = lastNonEmptyLine(ctx.prefix);
-  const expectedIndent = leadingIndent(prefixLastLine);
+function scoreIndentMatch(candidateText: string, prefix: string): number {
+  const expectedIndent = leadingIndent(lastNonEmptyLine(prefix));
   const candidateIndent = leadingIndent(candidateText);
-  // Match if the candidate's indent starts with or equals the expected indent
   if (
     candidateIndent === expectedIndent ||
     candidateIndent.startsWith(expectedIndent) ||
     expectedIndent.startsWith(candidateIndent)
-  ) {
-    breakdown.indentMatch = 0.15;
-  } else {
-    // Partial: same length
-    if (candidateIndent.length === expectedIndent.length) {
-      breakdown.indentMatch = 0.07;
-    }
-  }
+  ) return 0.15;
+  return candidateIndent.length === expectedIndent.length ? 0.07 : 0;
+}
 
-  // 5. No prefix repetition: candidate should not start with the exact last line of prefix
-  const lastLine = lastNonEmptyLine(ctx.prefix).trim();
-  const candidateTrimmedStart = candidateText.trimStart();
-  if (lastLine.length > 0 && candidateTrimmedStart.startsWith(lastLine)) {
-    breakdown.noRepetition = 0.0;
-  } else {
-    breakdown.noRepetition = 0.10;
-  }
+function scoreNoRepetition(candidateText: string, prefix: string): number {
+  const lastLine = lastNonEmptyLine(prefix).trim();
+  if (lastLine.length === 0) return 0.10;
+  return candidateText.trimStart().startsWith(lastLine) ? 0 : 0.10;
+}
 
-  // 6. Syntactic balance: braces/parens/brackets should be balanced within candidate
-  const braceBalance = Math.abs(netBalance(candidateText, "{", "}"));
-  const parenBalance = Math.abs(netBalance(candidateText, "(", ")"));
-  const bracketBalance = Math.abs(netBalance(candidateText, "[", "]"));
-  const totalImbalance = braceBalance + parenBalance + bracketBalance;
-  if (totalImbalance === 0) {
-    breakdown.syntacticBalance = 0.10;
-  } else if (totalImbalance === 1) {
-    breakdown.syntacticBalance = 0.05;
-  }
+function scoreSyntacticBalance(candidateText: string): number {
+  const totalImbalance =
+    Math.abs(netBalance(candidateText, "{", "}")) +
+    Math.abs(netBalance(candidateText, "(", ")")) +
+    Math.abs(netBalance(candidateText, "[", "]"));
+  if (totalImbalance === 0) return 0.10;
+  if (totalImbalance === 1) return 0.05;
+  return 0;
+}
 
-  // Composite score (clamped to [0, 1])
+export function scoreFimCandidate(
+  candidateText: string,
+  ctx: FimRankingContext,
+): FimCandidate {
+  const prefixTokens = tokenSet(ctx.prefix);
+  const candidateTokens = tokenSet(candidateText);
+  const novelty = (1 - jaccard(prefixTokens, candidateTokens)) * 0.20;
+
+  const breakdown = {
+    completeness: scoreCompleteness(candidateText),
+    lengthQuality: scoreLengthQuality(candidateText.length),
+    novelty,
+    indentMatch: scoreIndentMatch(candidateText, ctx.prefix),
+    noRepetition: scoreNoRepetition(candidateText, ctx.prefix),
+    syntacticBalance: scoreSyntacticBalance(candidateText),
+  };
+
   const raw =
     breakdown.completeness +
     breakdown.lengthQuality +
@@ -191,7 +166,6 @@ export function scoreFimCandidate(
     breakdown.indentMatch +
     breakdown.noRepetition +
     breakdown.syntacticBalance;
-
   const score = Math.min(1, Math.max(0, raw));
 
   return { text: candidateText, score, scoreBreakdown: breakdown };

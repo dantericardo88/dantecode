@@ -75,100 +75,95 @@ function isMarkerLine(line: string): boolean {
  * Safe to call on any response — returns { blocks: [], prose: responseText }
  * when no blocks are found.
  */
+/** Walk backward from `searchOpenLineIndex` looking for a file-path line.
+ *  Skips empty lines + code fences; stops at any marker line. */
+function findFilePathBefore(
+  lines: string[],
+  searchOpenLineIndex: number,
+): { filePath: string; pathLineIndex: number } {
+  for (let j = searchOpenLineIndex - 1; j >= 0; j--) {
+    const candidate = (lines[j] ?? "").trimEnd();
+    if (candidate === "") continue;
+    if (isMarkerLine(candidate)) break;
+    if (/^`{3,}/.test(candidate)) continue;
+    let filePath = candidate.replace(/\\/g, "/");
+    if (filePath.startsWith("./")) filePath = filePath.slice(2);
+    return { filePath, pathLineIndex: j };
+  }
+  return { filePath: "", pathLineIndex: -1 };
+}
+
+/** Sum of `line.length + 1` for indices [0, i). */
+function bytePosForLine(lines: string[], i: number): number {
+  let offset = 0;
+  for (let k = 0; k < i; k++) offset += (lines[k]?.length ?? 0) + 1;
+  return offset;
+}
+
+/** Read body lines until a terminator; returns the lines and the index of
+ *  the terminator (or lines.length if EOF was hit first). */
+function readUntilMarker(lines: string[], start: number, terminator: string): { body: string[]; nextIdx: number } {
+  const body: string[] = [];
+  let i = start;
+  while (i < lines.length && (lines[i] ?? "").trimEnd() !== terminator) {
+    body.push(lines[i] ?? "");
+    i++;
+  }
+  return { body, nextIdx: i };
+}
+
+interface BlockMatch {
+  block: SearchReplaceBlock;
+  consumedRange: [number, number];
+}
+
+/** Parse one block starting at the SEARCH_OPEN line at `i`. Returns null if
+ *  the block is malformed. Also returns the index past the block's close. */
+function parseOneBlock(lines: string[], searchOpenLineIndex: number): { match: BlockMatch | null; nextIdx: number } {
+  const { filePath, pathLineIndex } = findFilePathBefore(lines, searchOpenLineIndex);
+  if (!filePath) return { match: null, nextIdx: searchOpenLineIndex + 1 };
+
+  const offset = bytePosForLine(lines, searchOpenLineIndex);
+
+  const search = readUntilMarker(lines, searchOpenLineIndex + 1, SEPARATOR);
+  if (search.nextIdx >= lines.length) return { match: null, nextIdx: lines.length };
+
+  const replace = readUntilMarker(lines, search.nextIdx + 1, REPLACE_CLOSE);
+  if (replace.nextIdx >= lines.length) return { match: null, nextIdx: lines.length };
+
+  const block: SearchReplaceBlock = {
+    filePath,
+    searchContent: trimTrailingEmptyLine(search.body).join("\n"),
+    replaceContent: trimTrailingEmptyLine(replace.body).join("\n"),
+    sourceOffset: offset,
+  };
+  const blockStart = pathLineIndex >= 0 ? pathLineIndex : searchOpenLineIndex;
+  return { match: { block, consumedRange: [blockStart, replace.nextIdx + 1] }, nextIdx: replace.nextIdx + 1 };
+}
+
 export function parseSearchReplaceBlocks(responseText: string): ParseSearchReplaceResult {
   const lines = responseText.split("\n");
   const blocks: SearchReplaceBlock[] = [];
-  // Ranges [start, end) of lines consumed by blocks, for prose extraction
   const consumedLineRanges: Array<[number, number]> = [];
 
   let i = 0;
   while (i < lines.length) {
     const line = lines[i] ?? "";
-
-    if (line.trimEnd() === SEARCH_OPEN) {
-      const searchOpenLineIndex = i;
-
-      // Compute sourceOffset = byte position of this line in the full text
-      let offset = 0;
-      for (let k = 0; k < i; k++) {
-        offset += (lines[k]?.length ?? 0) + 1; // +1 for the \n
-      }
-
-      // Find file path: walk backward from searchOpenLineIndex - 1
-      // skipping empty lines, stopping at the first non-marker, non-empty line
-      let filePath = "";
-      let pathLineIndex = -1;
-      for (let j = searchOpenLineIndex - 1; j >= 0; j--) {
-        const candidate = (lines[j] ?? "").trimEnd();
-        if (candidate === "") continue;
-        if (isMarkerLine(candidate)) break;
-        // Skip lines that look like code fences (``` or similar)
-        if (/^`{3,}/.test(candidate)) continue;
-        filePath = candidate;
-        pathLineIndex = j;
-        break;
-      }
-
-      if (!filePath) {
-        i++;
-        continue; // No file path found — skip this block
-      }
-
-      // Normalize Windows backslashes to forward slashes
-      filePath = filePath.replace(/\\/g, "/");
-      // Strip leading ./ if present
-      if (filePath.startsWith("./")) filePath = filePath.slice(2);
-
-      // Collect searchContent lines (until ======= or end of input)
-      i++; // Move past <<<<<<< SEARCH
-      const searchLines: string[] = [];
-      while (i < lines.length && (lines[i] ?? "").trimEnd() !== SEPARATOR) {
-        searchLines.push(lines[i] ?? "");
-        i++;
-      }
-
-      if (i >= lines.length) break; // Malformed — no separator found
-
-      // Move past =======
-      i++;
-
-      // Collect replaceContent lines (until >>>>>>> REPLACE or end of input)
-      const replaceLines: string[] = [];
-      while (i < lines.length && (lines[i] ?? "").trimEnd() !== REPLACE_CLOSE) {
-        replaceLines.push(lines[i] ?? "");
-        i++;
-      }
-
-      if (i >= lines.length) break; // Malformed — no close marker found
-
-      const replaceCloseLineIndex = i;
-      i++; // Move past >>>>>>> REPLACE
-
-      // Remove trailing newline that was added when splitting (last empty element)
-      const searchContent = trimTrailingEmptyLine(searchLines).join("\n");
-      const replaceContent = trimTrailingEmptyLine(replaceLines).join("\n");
-
-      blocks.push({ filePath, searchContent, replaceContent, sourceOffset: offset });
-
-      // Mark the block region (including the path line) as consumed
-      const blockStart = pathLineIndex >= 0 ? pathLineIndex : searchOpenLineIndex;
-      consumedLineRanges.push([blockStart, replaceCloseLineIndex + 1]);
-
-      continue;
+    if (line.trimEnd() !== SEARCH_OPEN) { i++; continue; }
+    const { match, nextIdx } = parseOneBlock(lines, i);
+    if (match) {
+      blocks.push(match.block);
+      consumedLineRanges.push(match.consumedRange);
     }
-
-    i++;
+    i = nextIdx;
   }
 
-  // Build prose: everything outside consumed ranges
   const proseLines: string[] = [];
   for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
     const inBlock = consumedLineRanges.some(([s, e]) => lineIdx >= s && lineIdx < e);
     if (!inBlock) proseLines.push(lines[lineIdx] ?? "");
   }
-  const prose = proseLines.join("\n");
-
-  return { blocks, prose };
+  return { blocks, prose: proseLines.join("\n") };
 }
 
 function trimTrailingEmptyLine(lines: string[]): string[] {
