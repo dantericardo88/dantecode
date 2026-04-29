@@ -59,11 +59,9 @@ interface ParsedArgs {
  * Parses process.argv into a structured ParsedArgs object.
  * Handles flags, commands, and quoted prompt strings.
  */
-function parseArgs(argv: string[]): ParsedArgs {
-  // Skip the first two args (runtime executable and script path)
-  const args = argv.slice(2);
-
-  const result: ParsedArgs = {
+/** Initial state for the parser — every field set to its default. */
+function makeDefaultParsedArgs(): ParsedArgs {
+  return {
     command: null,
     subArgs: [],
     prompt: null,
@@ -78,151 +76,106 @@ function parseArgs(argv: string[]): ParsedArgs {
     showHelp: false,
     mcp: false,
   };
+}
 
-  const commands = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench"]);
+const COMMANDS = new Set(["init", "skills", "agent", "config", "git", "self-update", "bench"]);
+
+/**
+ * Try to consume a known flag at args[i]. On match: mutate `result` and
+ * return the new index. On no match: return -1 so the caller can try
+ * other branches (command lookup, prompt collection, unknown-flag skip).
+ */
+function tryParseFlag(arg: string, args: string[], i: number, result: ParsedArgs): number {
+  if (arg === "--model" || arg === "-m") {
+    result.model = args[i + 1];
+    return i + 2;
+  }
+  if (arg === "--config" || arg === "-c") {
+    result.configPath = args[i + 1];
+    return i + 2;
+  }
+  if (arg === "--no-git") { result.noGit = true; return i + 1; }
+  if (arg === "--sandbox") { result.sandbox = true; return i + 1; }
+  if (arg === "--no-sandbox") { result.sandbox = false; return i + 1; }
+  if (arg === "--worktree") { result.worktree = true; return i + 1; }
+  if (arg === "--verbose" || arg === "-v") { result.verbose = true; return i + 1; }
+  if (arg === "--silent" || arg === "-s") { result.silent = true; return i + 1; }
+  if (arg === "--version" || arg === "-V") { result.showVersion = true; return i + 1; }
+  if (arg === "--help" || arg === "-h") { result.showHelp = true; return i + 1; }
+  if (arg === "--mcp") { result.mcp = true; return i + 1; }
+  return -1;
+}
+
+/**
+ * Skip an unrecognized flag. Consumes a following value-arg only if the
+ * next arg doesn't itself start with `-`.
+ */
+function skipUnknownFlag(args: string[], i: number): number {
+  const next = args[i + 1];
+  return next && !next.startsWith("-") ? i + 2 : i + 1;
+}
+
+/**
+ * Sub-arg parsing for after a known command was found. Reuses tryParseFlag
+ * for the few flags valid post-command; everything else is collected into
+ * result.subArgs.
+ */
+function parseSubArgs(args: string[], startIdx: number, result: ParsedArgs): void {
+  let i = startIdx;
+  while (i < args.length) {
+    const subArg = args[i]!;
+    const next = tryParseFlag(subArg, args, i, result);
+    if (next !== -1) {
+      i = next;
+      continue;
+    }
+    result.subArgs.push(subArg);
+    i += 1;
+  }
+}
+
+/**
+ * Collect a one-shot prompt: everything from startIdx until the next flag.
+ * Returns the joined string and the index where parsing should resume.
+ */
+function collectPromptArgs(args: string[], startIdx: number): { prompt: string; nextIdx: number } {
+  const promptParts: string[] = [];
+  let i = startIdx;
+  while (i < args.length) {
+    const nextArg = args[i]!;
+    if (nextArg.startsWith("--") || (nextArg.startsWith("-") && nextArg.length === 2)) break;
+    promptParts.push(nextArg);
+    i += 1;
+  }
+  return { prompt: promptParts.join(" "), nextIdx: i };
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const args = argv.slice(2);
+  const result = makeDefaultParsedArgs();
   let i = 0;
-  let foundCommand = false;
 
   while (i < args.length) {
     const arg = args[i]!;
 
-    // Flags
-    if (arg === "--model" || arg === "-m") {
-      result.model = args[i + 1];
-      i += 2;
-      continue;
-    }
+    const flagNext = tryParseFlag(arg, args, i, result);
+    if (flagNext !== -1) { i = flagNext; continue; }
 
-    if (arg === "--no-git") {
-      result.noGit = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--sandbox") {
-      // --sandbox is the default; kept for backwards compatibility
-      result.sandbox = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--no-sandbox") {
-      result.sandbox = false;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--worktree") {
-      result.worktree = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--verbose" || arg === "-v") {
-      result.verbose = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--silent" || arg === "-s") {
-      result.silent = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--config" || arg === "-c") {
-      result.configPath = args[i + 1];
-      i += 2;
-      continue;
-    }
-
-    if (arg === "--version" || arg === "-V") {
-      result.showVersion = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--help" || arg === "-h") {
-      result.showHelp = true;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--mcp") {
-      result.mcp = true;
-      i += 1;
-      continue;
-    }
-
-    // Skip unknown flags
     if (arg.startsWith("--") || (arg.startsWith("-") && arg.length === 2)) {
-      // Check if this flag takes a value
-      if (args[i + 1] && !args[i + 1]!.startsWith("-")) {
-        i += 2;
-      } else {
-        i += 1;
-      }
+      i = skipUnknownFlag(args, i);
       continue;
     }
 
-    // Commands
-    if (!foundCommand && commands.has(arg)) {
+    if (COMMANDS.has(arg)) {
       result.command = arg;
-      foundCommand = true;
-      // All remaining non-flag args are sub-args for the command
-      i += 1;
-      while (i < args.length) {
-        const subArg = args[i]!;
-        // Still parse flags even after a command
-        if (subArg === "--model" || subArg === "-m") {
-          result.model = args[i + 1];
-          i += 2;
-          continue;
-        }
-        if (subArg === "--no-git") {
-          result.noGit = true;
-          i += 1;
-          continue;
-        }
-        if (subArg === "--sandbox") {
-          result.sandbox = true;
-          i += 1;
-          continue;
-        }
-        if (subArg === "--verbose" || subArg === "-v") {
-          result.verbose = true;
-          i += 1;
-          continue;
-        }
-        if (subArg === "--silent" || subArg === "-s") {
-          result.silent = true;
-          i += 1;
-          continue;
-        }
-        result.subArgs.push(subArg);
-        i += 1;
-      }
-      continue;
+      parseSubArgs(args, i + 1, result);
+      return result;
     }
 
-    // If not a command and not a flag, it's a one-shot prompt
-    if (!foundCommand) {
-      // Collect all remaining non-flag args as the prompt
-      const promptParts: string[] = [arg];
-      i += 1;
-      while (i < args.length) {
-        const nextArg = args[i]!;
-        if (nextArg.startsWith("--") || (nextArg.startsWith("-") && nextArg.length === 2)) {
-          break;
-        }
-        promptParts.push(nextArg);
-        i += 1;
-      }
-      result.prompt = promptParts.join(" ");
-      continue;
-    }
-
-    i += 1;
+    // First non-flag, non-command token starts a one-shot prompt.
+    const { prompt, nextIdx } = collectPromptArgs(args, i);
+    result.prompt = prompt;
+    i = nextIdx;
   }
 
   return result;

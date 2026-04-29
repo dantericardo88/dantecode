@@ -867,6 +867,174 @@ export function deactivate(): void {
   setEditQualityOutputHook(null);
 }
 
+// ─── Inline Command Handlers ────────────────────────────────────────────────
+// Extracted from registerCommands' lambda array to keep that function under
+// the 100-LOC maintainability threshold. Each handler is self-contained and
+// references the same module-level state the inline lambdas did.
+
+async function buildDiffStatsLabel(): Promise<string> {
+  if (pendingDiffOldContent === undefined || pendingDiffNewContent === undefined) return "";
+  const oldLines = pendingDiffOldContent.split("\n");
+  const newLines = pendingDiffNewContent.split("\n");
+  const linesAdded = newLines.filter((l) => !oldLines.includes(l)).length;
+  const linesRemoved = oldLines.filter((l) => !newLines.includes(l)).length;
+  const fileName = pendingDiffFilePath ? path.basename(pendingDiffFilePath) : "file";
+  try {
+    const { scoreDiff } = await import("@dantecode/core");
+    const qs = scoreDiff(pendingDiffOldContent, pendingDiffNewContent, pendingDiffFilePath ?? "").qualityScore;
+    return ` — ${fileName}: ▲${linesAdded} ▼${linesRemoved} quality:${qs.toFixed(2)}`;
+  } catch {
+    return ` — ${fileName}: +${linesAdded}/-${linesRemoved} lines`;
+  }
+}
+
+async function persistReviewComments(comments: Array<{ file: string; comment: string }>): Promise<void> {
+  // Line-level diff comment workflow (dim 13): persist comments + emit diff
+  // quality log so cross-session reviewers see commit-tagged history.
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!wsRoot || comments.length === 0) return;
+  try {
+    const reviewDir = path.join(wsRoot, ".danteforge");
+    await mkdir(reviewDir, { recursive: true });
+    const reviewPath = path.join(reviewDir, "review-comments.json");
+    let existing: Array<{ file: string; comment: string; timestamp: string; commitSha: string }> = [];
+    try {
+      existing = JSON.parse(await readFile(reviewPath, "utf-8")) as typeof existing;
+    } catch { /* first write */ }
+    const commitSha = (() => {
+      try {
+        return (execSync("git rev-parse --short HEAD", { cwd: wsRoot, encoding: "utf-8" }) as string).trim();
+      } catch { return ""; }
+    })();
+    const timestamp = new Date().toISOString();
+    for (const c of comments) {
+      existing.push({ file: c.file, comment: c.comment, timestamp, commitSha });
+    }
+    await writeFile(reviewPath, JSON.stringify(existing, null, 2), "utf-8");
+  } catch { /* non-fatal */ }
+  // Emit diff quality score (dim 13)
+  try {
+    const { scoreDiff, emitDiffQualityLog } = await import("@dantecode/core");
+    if (pendingDiffFilePath) {
+      const score = scoreDiff(
+        pendingDiffOldContent ?? "",
+        pendingDiffNewContent ?? "",
+        pendingDiffFilePath,
+      );
+      emitDiffQualityLog(score, pendingDiffFilePath, undefined, wsRoot ?? undefined);
+    }
+  } catch { /* non-fatal */ }
+}
+
+async function handleApproveWithComments(): Promise<unknown> {
+  const files = pendingDiffFilePath ? [pendingDiffFilePath] : [];
+  const newComments: Array<{ file: string; comment: string }> = [];
+  for (const filePath of files) {
+    const comment = await vscode.window.showInputBox({
+      prompt: `Comment for ${path.basename(filePath)} (or leave blank to skip)`,
+      placeHolder: "e.g. verify this logic handles edge case X",
+    });
+    if (comment) newComments.push({ file: filePath, comment });
+  }
+  if (newComments.length > 0) {
+    pendingReviewComments = newComments;
+    danteOutputChannel?.appendLine(
+      `[Review: ${newComments.length} comment${newComments.length === 1 ? "" : "s"} added to context]`,
+    );
+    await persistReviewComments(newComments);
+  }
+  return commandAcceptDiff();
+}
+
+async function commandReviewChanges(): Promise<unknown> {
+  // Unified review-changes QuickPick (dim 13): Accept / View diff / Reject
+  // in 2 keystrokes. Diff stats shown BEFORE deciding — informed approval.
+  const items = [
+    { label: "$(check) Accept", description: "Apply all changes", action: "accept" },
+    { label: "$(comment) Approve with comments", description: "Accept and annotate per file", action: "approve-comments" },
+    { label: "$(diff) View diff", description: "Open diff review panel", action: "review" },
+    { label: "$(x) Reject", description: "Discard all changes", action: "reject" },
+  ];
+  const diffStats = await buildDiffStatsLabel();
+  const selected = await vscode.window.showQuickPick(items, {
+    title: "Review Changes",
+    placeHolder: `Choose action${diffStats}`,
+  });
+  if (!selected) return;
+  if (selected.action === "accept") return commandAcceptDiff();
+  if (selected.action === "approve-comments") return handleApproveWithComments();
+  if (selected.action === "review") {
+    if (pendingDiffFilePath && pendingDiffOldContent !== undefined && pendingDiffNewContent !== undefined) {
+      const originalUri = vscode.Uri.parse(`dantecode-diff:original/${path.basename(pendingDiffFilePath)}`);
+      await vscode.commands.executeCommand(
+        "vscode.diff",
+        originalUri,
+        vscode.Uri.file(pendingDiffFilePath),
+        `Review: ${path.basename(pendingDiffFilePath)}`,
+      );
+    }
+    return commandReviewDiff();
+  }
+  if (selected.action === "reject") return commandRejectDiff();
+}
+
+async function commandOpenPreview(context: vscode.ExtensionContext): Promise<void> {
+  const portStr = await vscode.window.showInputBox({
+    prompt: "Dev server port",
+    value: "3000",
+    validateInput: (v) => (isNaN(parseInt(v)) ? "Enter a valid port number" : undefined),
+  });
+  if (portStr) {
+    activePreviewPort = parseInt(portStr);
+    PreviewPanelProvider.createOrShow(activePreviewPort, context);
+  }
+}
+
+async function commandStartDevServer(context: vscode.ExtensionContext): Promise<void> {
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!wsRoot) {
+    vscode.window.showErrorMessage("No workspace folder open.");
+    return;
+  }
+  try {
+    const { detectDevCommand, startDevServer } = await import("./dev-server-bridge.js");
+    const cmd = detectDevCommand(wsRoot);
+    if (!cmd) {
+      vscode.window.showErrorMessage("No dev script found in package.json (dev/start/serve).");
+      return;
+    }
+    vscode.window.showInformationMessage(`Starting: ${cmd}…`);
+    const handle = await startDevServer({ command: cmd, cwd: wsRoot });
+    activePreviewPort = handle.port;
+    handle.onExit(() => { activePreviewPort = 0; });
+    PreviewPanelProvider.createOrShow(handle.port, context);
+    vscode.window.showInformationMessage(`Preview ready at http://localhost:${handle.port}`);
+  } catch (err) {
+    vscode.window.showErrorMessage(`Dev server failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function commandRunTestsAndDecorate(): Promise<void> {
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!wsRoot) return;
+  const outputPath = path.join(wsRoot, ".dantecode", "test-results.json");
+  try {
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    const { spawn } = await import("node:child_process");
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(
+        "npx",
+        ["vitest", "run", "--reporter=json", `--outputFile=${outputPath}`],
+        { cwd: wsRoot, shell: true },
+      );
+      proc.on("close", () => resolve());
+      proc.on("error", reject);
+    });
+    const raw = await readFile(outputPath, "utf8");
+    testDecoManager?.apply(parseVitestResults(raw));
+  } catch { /* non-fatal */ }
+}
+
 // ─── Command Registration ────────────────────────────────────────────────────
 
 function registerCommands(context: vscode.ExtensionContext): void {
@@ -902,151 +1070,10 @@ function registerCommands(context: vscode.ExtensionContext): void {
     ["dantecode.clearCompletionStats", commandClearCompletionStats],
     ["dantecode.reviewPR", commandReviewPR],
     ["dantecode.clearTestDecorations", () => testDecoManager?.clear()],
-    // Run vitest with JSON reporter and apply gutter decorations (dim 19)
-    // Unified review changes QuickPick (dim 13): Accept / View diff / Reject in 2 keystrokes
-    // User sees diff stats BEFORE deciding — informed approval, not blind approve.
-    ["dantecode.reviewChanges", async () => {
-      const items = [
-        { label: "$(check) Accept", description: "Apply all changes", action: "accept" },
-        { label: "$(comment) Approve with comments", description: "Accept and annotate per file", action: "approve-comments" },
-        { label: "$(diff) View diff", description: "Open diff review panel", action: "review" },
-        { label: "$(x) Reject", description: "Discard all changes", action: "reject" },
-      ];
-      // Build diff stats for the placeholder: compute +added/-removed lines from pending diff
-      // Include diff quality score (dim 13) so user sees quality before deciding
-      let diffStats = "";
-      if (pendingDiffOldContent !== undefined && pendingDiffNewContent !== undefined) {
-        const oldLines = pendingDiffOldContent.split("\n");
-        const newLines = pendingDiffNewContent.split("\n");
-        const linesAdded = newLines.filter((l) => !oldLines.includes(l)).length;
-        const linesRemoved = oldLines.filter((l) => !newLines.includes(l)).length;
-        const fileName = pendingDiffFilePath ? path.basename(pendingDiffFilePath) : "file";
-        try {
-          const { scoreDiff } = await import("@dantecode/core");
-          const qs = scoreDiff(pendingDiffOldContent, pendingDiffNewContent, pendingDiffFilePath ?? "").qualityScore;
-          diffStats = ` — ${fileName}: ▲${linesAdded} ▼${linesRemoved} quality:${qs.toFixed(2)}`;
-        } catch {
-          diffStats = ` — ${fileName}: +${linesAdded}/-${linesRemoved} lines`;
-        }
-      }
-      const selected = await vscode.window.showQuickPick(items, {
-        title: "Review Changes",
-        placeHolder: `Choose action${diffStats}`,
-      });
-      if (!selected) return;
-      if (selected.action === "accept") return commandAcceptDiff();
-      if (selected.action === "approve-comments") {
-        // Line-level diff comment workflow (dim 13): per-file comment input
-        const files = pendingDiffFilePath ? [pendingDiffFilePath] : [];
-        const newComments: Array<{ file: string; comment: string }> = [];
-        for (const filePath of files) {
-          const comment = await vscode.window.showInputBox({
-            prompt: `Comment for ${path.basename(filePath)} (or leave blank to skip)`,
-            placeHolder: "e.g. verify this logic handles edge case X",
-          });
-          if (comment) newComments.push({ file: filePath, comment });
-        }
-        if (newComments.length > 0) {
-          pendingReviewComments = newComments;
-          danteOutputChannel?.appendLine(`[Review: ${newComments.length} comment${newComments.length === 1 ? "" : "s"} added to context]`);
-          // Persist review comments to disk for cross-session reference (dim 13)
-          const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (wsRoot) {
-            try {
-              const reviewDir = path.join(wsRoot, ".danteforge");
-              await mkdir(reviewDir, { recursive: true });
-              const reviewPath = path.join(reviewDir, "review-comments.json");
-              let existing: Array<{ file: string; comment: string; timestamp: string; commitSha: string }> = [];
-              try {
-                existing = JSON.parse(await readFile(reviewPath, "utf-8")) as typeof existing;
-              } catch { /* first write */ }
-              const commitSha = (() => {
-                try {
-                  return (execSync("git rev-parse --short HEAD", { cwd: wsRoot, encoding: "utf-8" }) as string).trim();
-                } catch { return ""; }
-              })();
-              const timestamp = new Date().toISOString();
-              for (const c of newComments) {
-                existing.push({ file: c.file, comment: c.comment, timestamp, commitSha });
-              }
-              await writeFile(reviewPath, JSON.stringify(existing, null, 2), "utf-8");
-            } catch { /* non-fatal */ }
-          }
-          // Emit diff quality score to .danteforge/diff-quality-log.json (dim 13)
-          try {
-            const { scoreDiff, emitDiffQualityLog } = await import("@dantecode/core");
-            if (pendingDiffFilePath) {
-              const score = scoreDiff(
-                pendingDiffOldContent ?? "",
-                pendingDiffNewContent ?? "",
-                pendingDiffFilePath,
-              );
-              emitDiffQualityLog(score, pendingDiffFilePath, undefined, wsRoot ?? undefined);
-            }
-          } catch { /* non-fatal */ }
-        }
-        return commandAcceptDiff();
-      }
-      if (selected.action === "review") {
-        // Auto-open diff panel when user selects "View diff" (dim 13)
-        if (pendingDiffFilePath && pendingDiffOldContent !== undefined && pendingDiffNewContent !== undefined) {
-          const originalUri = vscode.Uri.parse(`dantecode-diff:original/${path.basename(pendingDiffFilePath)}`);
-          await vscode.commands.executeCommand("vscode.diff", originalUri, vscode.Uri.file(pendingDiffFilePath), `Review: ${path.basename(pendingDiffFilePath)}`);
-        }
-        return commandReviewDiff();
-      }
-      if (selected.action === "reject") return commandRejectDiff();
-    }],
-    // Sprint Dim14: open browser live preview panel at a given port
-    ["dantecode.openPreview", async () => {
-      const portStr = await vscode.window.showInputBox({
-        prompt: "Dev server port",
-        value: "3000",
-        validateInput: (v) => (isNaN(parseInt(v)) ? "Enter a valid port number" : undefined),
-      });
-      if (portStr) {
-        activePreviewPort = parseInt(portStr);
-        PreviewPanelProvider.createOrShow(activePreviewPort, context);
-      }
-    }],
-    // Sprint Dim14: detect + start local dev server and open preview panel
-    ["dantecode.startDevServer", async () => {
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!wsRoot) { vscode.window.showErrorMessage("No workspace folder open."); return; }
-      try {
-        const { detectDevCommand, startDevServer } = await import("./dev-server-bridge.js");
-        const cmd = detectDevCommand(wsRoot);
-        if (!cmd) { vscode.window.showErrorMessage("No dev script found in package.json (dev/start/serve)."); return; }
-        vscode.window.showInformationMessage(`Starting: ${cmd}…`);
-        const handle = await startDevServer({ command: cmd, cwd: wsRoot });
-        activePreviewPort = handle.port;
-        handle.onExit(() => { activePreviewPort = 0; });
-        PreviewPanelProvider.createOrShow(handle.port, context);
-        vscode.window.showInformationMessage(`Preview ready at http://localhost:${handle.port}`);
-      } catch (err) {
-        vscode.window.showErrorMessage(`Dev server failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }],
-    ["dantecode.runTestsAndDecorate", async () => {
-      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      if (!wsRoot) return;
-      const outputPath = path.join(wsRoot, ".dantecode", "test-results.json");
-      try {
-        await mkdir(path.dirname(outputPath), { recursive: true });
-        const { spawn } = await import("node:child_process");
-        await new Promise<void>((resolve, reject) => {
-          const proc = spawn(
-            "npx",
-            ["vitest", "run", "--reporter=json", `--outputFile=${outputPath}`],
-            { cwd: wsRoot, shell: true },
-          );
-          proc.on("close", () => resolve());
-          proc.on("error", reject);
-        });
-        const raw = await readFile(outputPath, "utf8");
-        testDecoManager?.apply(parseVitestResults(raw));
-      } catch { /* non-fatal */ }
-    }],
+    ["dantecode.reviewChanges", commandReviewChanges],
+    ["dantecode.openPreview", () => commandOpenPreview(context)],
+    ["dantecode.startDevServer", () => commandStartDevServer(context)],
+    ["dantecode.runTestsAndDecorate", commandRunTestsAndDecorate],
   ];
 
   for (const [id, handler] of commands) {
