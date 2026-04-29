@@ -52,7 +52,7 @@ describe('slash-commands', () => {
     });
 
     it('handles empty selection', () => {
-      const prompt = buildSlashPrompt(mockCommand, '', '', '');
+      buildSlashPrompt(mockCommand, '', '', '');
       expect(mockCommand.buildPrompt).toHaveBeenCalledWith('', '', '');
     });
   });
@@ -61,7 +61,7 @@ describe('slash-commands', () => {
     it('returns all commands', () => {
       const cmds = listSlashCommands();
       expect(cmds).toHaveLength(SLASH_COMMANDS.length);
-      expect(cmds[0].name).toBe('fix');
+      expect(cmds[0]?.name).toBe('fix');
     });
   });
 

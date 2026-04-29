@@ -43,15 +43,6 @@ function renderModelOptionGroups(selectedModel: string): string {
     .join("");
 }
 
-function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < 32; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
 // ── CSS — the entire <style> block content (was inline lines 64-1025) ─────────
 const WEBVIEW_CSS = `  * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -2262,7 +2253,6 @@ const WEBVIEW_SCRIPT = `  (function() {
 `;
 
 export function getWebviewHtml(currentModel: string): string {
-  const _nonce = getNonce();
   const modelOptionGroups = renderModelOptionGroups(currentModel);
   const body = WEBVIEW_BODY_HTML.replace("__MODEL_OPTION_GROUPS__", modelOptionGroups);
 

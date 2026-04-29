@@ -19,107 +19,74 @@ import type { SearchReplaceBlock } from "@dantecode/core";
  * The leading prefix character is stripped before content is stored.
  * Hunks where both searchContent and replaceContent are empty are dropped.
  */
+/** Detect a `--- ` / `+++ ` file-header pair starting at `i` and return the
+ *  cleaned file path + the index of the first line after the headers. */
+function readFileHeader(lines: string[], i: number): { filePath: string; next: number } | null {
+  const line = lines[i] ?? "";
+  if (!line.startsWith("--- ")) return null;
+  const nextLine = lines[i + 1] ?? "";
+  if (!nextLine.startsWith("+++ ")) return null;
+
+  let filePath = nextLine.slice(4).trim();
+  if (filePath.startsWith("b/")) filePath = filePath.slice(2);
+  return { filePath: filePath.trim(), next: i + 2 };
+}
+
+/** Parse a single `@@`-led hunk body starting just after the `@@` header.
+ *  Returns the search/replace content and the index past the hunk body. */
+function readHunkBody(lines: string[], i: number): { searchContent: string; replaceContent: string; next: number } {
+  const searchLines: string[] = [];
+  const replaceLines: string[] = [];
+
+  while (i < lines.length) {
+    const bodyLine = lines[i] ?? "";
+    if (
+      bodyLine.startsWith("@@") ||
+      (bodyLine.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ "))
+    ) {
+      break;
+    }
+    if (bodyLine.startsWith("\\ ")) { i++; continue; }
+
+    const prefix = bodyLine[0];
+    const content = bodyLine.slice(1);
+    if (prefix === " ") {
+      searchLines.push(content); replaceLines.push(content);
+    } else if (prefix === "-") {
+      searchLines.push(content);
+    } else if (prefix === "+") {
+      replaceLines.push(content);
+    } else {
+      searchLines.push(bodyLine); replaceLines.push(bodyLine);
+    }
+    i++;
+  }
+
+  return { searchContent: searchLines.join("\n"), replaceContent: replaceLines.join("\n"), next: i };
+}
+
 export function parseUdiffResponse(text: string): SearchReplaceBlock[] {
   const lines = text.split("\n");
   const blocks: SearchReplaceBlock[] = [];
 
   let i = 0;
-
   while (i < lines.length) {
-    const line = lines[i] ?? "";
+    const header = readFileHeader(lines, i);
+    if (!header) { i++; continue; }
+    const filePath = header.filePath;
+    i = header.next;
 
-    // Look for `--- ` header
-    if (!line.startsWith("--- ")) {
-      i++;
-      continue;
-    }
-
-    // Next non-empty line must be `+++ `
-    const nextLine = lines[i + 1] ?? "";
-    if (!nextLine.startsWith("+++ ")) {
-      i++;
-      continue;
-    }
-
-    // Extract file path from `+++ ` line
-    let filePath = nextLine.slice(4).trim(); // strip "+++ " prefix
-    if (filePath.startsWith("b/")) filePath = filePath.slice(2);
-    filePath = filePath.trim();
-
-    i += 2; // advance past both header lines
-
-    // Collect all hunks for this file until the next `--- ` / `+++ ` pair or EOF
     while (i < lines.length) {
       const hunkLine = lines[i] ?? "";
+      if (hunkLine.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ ")) break;
+      if (!hunkLine.startsWith("@@")) { i++; continue; }
 
-      // Stop if we hit a new file header
-      if (hunkLine.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ ")) {
-        break;
-      }
+      i++; // skip the `@@ -L,N +L,N @@` header itself
+      const { searchContent, replaceContent, next } = readHunkBody(lines, i);
+      i = next;
 
-      // Each hunk starts with `@@ ... @@`
-      if (!hunkLine.startsWith("@@")) {
-        i++;
-        continue;
-      }
-
-      // Skip the `@@ -L,N +L,N @@` line itself
-      i++;
-
-      const searchLines: string[] = [];
-      const replaceLines: string[] = [];
-
-      // Consume hunk body lines
-      while (i < lines.length) {
-        const bodyLine = lines[i] ?? "";
-
-        // Stop hunk on new `@@` header, new file `--- `, or another `+++ `
-        if (
-          bodyLine.startsWith("@@") ||
-          (bodyLine.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ "))
-        ) {
-          break;
-        }
-
-        // Skip "No newline at end of file" markers
-        if (bodyLine.startsWith("\\ ")) {
-          i++;
-          continue;
-        }
-
-        const prefix = bodyLine[0];
-        const content = bodyLine.slice(1); // strip the leading prefix char
-
-        if (prefix === " ") {
-          // Context line — goes into both
-          searchLines.push(content);
-          replaceLines.push(content);
-        } else if (prefix === "-") {
-          // Removal — search only
-          searchLines.push(content);
-        } else if (prefix === "+") {
-          // Addition — replace only
-          replaceLines.push(content);
-        } else {
-          // Unknown prefix or empty line — treat as context for robustness
-          searchLines.push(bodyLine);
-          replaceLines.push(bodyLine);
-        }
-
-        i++;
-      }
-
-      const searchContent = searchLines.join("\n");
-      const replaceContent = replaceLines.join("\n");
-
-      // Emit block unless both sides are empty
       if (searchContent !== "" || replaceContent !== "") {
-        blocks.push({
-          filePath,
-          searchContent,
-          replaceContent,
-          sourceOffset: 0, // udiff has no direct character offset concept
-        });
+        blocks.push({ filePath, searchContent, replaceContent, sourceOffset: 0 });
       }
     }
   }

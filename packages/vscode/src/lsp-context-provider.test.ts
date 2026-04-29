@@ -3,9 +3,6 @@ import * as vscode from 'vscode';
 import {
   HOVER_PROVIDER,
   DEFINITION_PROVIDER,
-  REFERENCES_PROVIDER,
-  SYMBOL_PROVIDER,
-  TYPES_PROVIDER,
   flattenHoverContents,
   extractDocumentContext,
 } from './lsp-context-provider.js';
@@ -50,15 +47,15 @@ describe('lsp-context-provider', () => {
 
   describe('HOVER_PROVIDER', () => {
     it('returns no editor message', async () => {
-      vi.mocked(vscode.window).activeTextEditor = null;
+      vi.mocked(vscode.window).activeTextEditor = undefined;
       const result = await HOVER_PROVIDER.resolve('', '');
-      expect(result[0].content).toBe('(no active editor)');
+      expect(result[0]?.content).toBe('(no active editor)');
     });
 
     it('handles empty hovers', async () => {
       vi.mocked(vscode.commands.executeCommand).mockResolvedValue([]);
       const result = await HOVER_PROVIDER.resolve('', '');
-      expect(result[0].content).toContain('no hover information');
+      expect(result[0]?.content).toContain('no hover information');
     });
 
     it('flattens hover contents', async () => {
@@ -67,21 +64,21 @@ describe('lsp-context-provider', () => {
       }] as vscode.Hover[];
       vi.mocked(vscode.commands.executeCommand).mockResolvedValue(mockHovers);
       const result = await HOVER_PROVIDER.resolve('', '');
-      expect(result[0].content).toBe('type string\n\nmarkdown');
+      expect(result[0]?.content).toBe('type string\n\nmarkdown');
     });
   });
 
   describe('DEFINITION_PROVIDER', () => {
     it('returns no editor message', async () => {
-      vi.mocked(vscode.window).activeTextEditor = null;
+      vi.mocked(vscode.window).activeTextEditor = undefined;
       const result = await DEFINITION_PROVIDER.resolve('', '');
-      expect(result[0].content).toBe('(no active editor)');
+      expect(result[0]?.content).toBe('(no active editor)');
     });
 
     it('handles empty definitions', async () => {
       vi.mocked(vscode.commands.executeCommand).mockResolvedValue([]);
       const result = await DEFINITION_PROVIDER.resolve('', '');
-      expect(result[0].content).toContain('no definition found');
+      expect(result[0]?.content).toContain('no definition found');
     });
   });
 

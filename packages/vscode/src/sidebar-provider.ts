@@ -19,9 +19,9 @@ import type {
   TodoItem,
   AuditEvent,
 } from "@dantecode/config-types";
+import type { ScoreClaimGateInput } from "@dantecode/core";
 import {
   DEFAULT_MODEL_ID,
-  MODEL_CATALOG,
   ModelRouterImpl,
   SessionStore,
   appendAuditEvent,
@@ -34,7 +34,6 @@ import {
   getStrictModeAddition,
   detectUnverifiedScoreClaims,
   getProviderCatalogEntry,
-  groupCatalogModels,
   parseModelReference,
   readOrInitializeState,
   responseNeedsToolExecutionNudge,
@@ -69,6 +68,7 @@ import {
   type ToolExecutionContext,
 } from "./agent-tools.js";
 import { getWebviewHtml } from "./webview-html.js";
+import { parseRegressionGateProofFromOutput } from "./regression-proof-parser.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -318,11 +318,11 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // /ascend autonomous loop state. Persists across cycles; `handleStopGeneration`
   // clears `ascendActive` so the loop exits between cycles when the user clicks Stop.
   private ascendActive = false;
-  private ascendCycle = 0;
   private abortController: AbortController | null = null;
   private pendingImages: string[] = [];
   private agentConfig: AgentConfig = { ...DEFAULT_AGENT_CONFIG };
   private readonly diffContents = new Map<string, string>();
+  private readonly outputChannel?: Pick<vscode.OutputChannel, "appendLine">;
   private sessionStore: SessionStore | null = null;
   private sessionStoreMigrated = false;
   private activeTasks = 0;
@@ -779,6 +779,7 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const _sessionToolOutputs: string[] = [];
     let _sessionRanImprovementCmd = false;
     let _sessionVerifiedScoreOutput: string | null = null;
+    let _sessionRegressionGateProof: ScoreClaimGateInput | null = null;
     // Sprint 5 — narration loop brake (Cline ActModeRespondHandler pattern)
     let _consecutiveTextOnlyRounds = 0;
 
@@ -1783,27 +1784,29 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
             continue;
           }
 
-          this.messages.push({ role: "assistant", content: fullResponse });
           // Clear any error state on successful response
           this.updateStatusBar({ hasError: false });
-          // Sprint 4: append unverified score claim warning before finalizing display.
+          // Sprint 4 + Dim34: append unverified score/regression warning before finalizing display.
           const _claimWarning = detectUnverifiedScoreClaims(
             fullResponse,
             _sessionToolOutputs,
             _sessionRanImprovementCmd,
             _sessionVerifiedScoreOutput,
+            _sessionRegressionGateProof,
           );
+          const finalizedResponse = _claimWarning ? `${fullResponse}${_claimWarning}` : fullResponse;
+          this.messages.push({ role: "assistant", content: finalizedResponse });
           if (_claimWarning) {
             this.postMessage({ type: "chat_response_chunk", payload: { chunk: _claimWarning, partial: "" } });
           }
           if (roundNumber <= 1) {
             // Single-round response (no tool execution) — send final text
-            this.postMessage({ type: "chat_response_done", payload: { text: fullResponse } });
+            this.postMessage({ type: "chat_response_done", payload: { text: finalizedResponse } });
           } else {
             // Multi-round: buffer has accumulated tool output + model text — keep it
             this.postMessage({ type: "chat_response_done", payload: {} });
           }
-          finalResponse = fullResponse;
+          finalResponse = finalizedResponse;
           break;
         }
 
@@ -2092,6 +2095,9 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
               }
               if (/danteforge\s+score\b/i.test(cmd) && out.trim().length > 0) {
                 _sessionVerifiedScoreOutput = out;
+              }
+              if (/dantecode\s+regression\s+gate\b/i.test(cmd) && out.trim().length > 0) {
+                _sessionRegressionGateProof = parseRegressionGateProofFromOutput(out);
               }
             }
           }
@@ -2651,7 +2657,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
     const { runAscendLoopCore } = await import("./ascend-orchestrator.js");
     const state = { active: true, cycle: 0 };
     this.ascendActive = true;
-    this.ascendCycle = 0;
     try {
       await runAscendLoopCore(args, this.getProjectRoot(), state, {
         postMessage: (msg) => this.postMessage(msg as Parameters<typeof this.postMessage>[0]),
@@ -2664,7 +2669,6 @@ export class ChatSidebarProvider implements vscode.WebviewViewProvider {
       });
     } finally {
       this.ascendActive = state.active;
-      this.ascendCycle = state.cycle;
     }
   }
 

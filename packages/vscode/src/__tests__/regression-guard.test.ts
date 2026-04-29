@@ -243,8 +243,10 @@ describe("regression guard — ascend orchestrator wiring", () => {
 
   it("provider has runAscendLoop method and ascendActive state", () => {
     // SYMPTOM IF BROKEN: /ascend has no orchestrator path; falls back to shell.
+    // NOTE: ascendCycle was dropped — the orchestrator's `state.cycle` is the
+    // single source of truth. ascendActive remains because handleStopGeneration
+    // and createSelfImprovementContext branch on it.
     expect(provider).toMatch(/private\s+ascendActive\s*=\s*false/);
-    expect(provider).toMatch(/private\s+ascendCycle\s*=\s*0/);
     expect(provider).toMatch(/private\s+async\s+runAscendLoop\s*\(/);
   });
 
