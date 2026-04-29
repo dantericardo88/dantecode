@@ -187,127 +187,102 @@ export function parseActionsFromToolCalls(toolCalls: ToolCall[]): Action[] {
  * @param projectRoot  Base directory for resolving relative file paths.
  * @param abortSignal  Optional AbortSignal to cancel in-flight commands.
  */
+async function execCmdRun(
+  action: CmdRunAction,
+  abortSignal?: AbortSignal,
+): Promise<Observation> {
+  const timeoutMs = action.timeout ?? 30_000;
+  const isWindows = process.platform === "win32";
+  const shell = isWindows ? "cmd.exe" : "bash";
+  const shellFlag = isWindows ? "/c" : "-c";
+
+  try {
+    const { stdout } = await execFile(shell, [shellFlag, action.command], {
+      timeout: timeoutMs,
+      signal: abortSignal,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { type: "cmd_output", content: stdout, exitCode: 0 };
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+      killed?: boolean;
+      signal?: string;
+    };
+    if (
+      e.killed ||
+      e.signal === "SIGTERM" ||
+      e.code === "ETIMEDOUT" ||
+      (e as { name?: string }).name === "AbortError"
+    ) {
+      return { type: "error", content: "Command timed out", exitCode: -1 };
+    }
+    const exitCode = typeof e.code === "number" ? e.code : e.code ? 1 : 1;
+    return {
+      type: "cmd_output",
+      content: e.stderr || e.stdout || e.message || "",
+      exitCode,
+    };
+  }
+}
+
+async function execFileRead(action: FileReadAction, projectRoot: string): Promise<Observation> {
+  const filePath = resolve(projectRoot, action.path);
+  try {
+    const content = await readFile(filePath, "utf8");
+    return { type: "file_content", content };
+  } catch (err: unknown) {
+    return { type: "error", content: (err as Error).message };
+  }
+}
+
+async function execFileEdit(action: FileEditAction, projectRoot: string): Promise<Observation> {
+  const filePath = resolve(projectRoot, action.path);
+  try {
+    const original = await readFile(filePath, "utf8");
+    if (!original.includes(action.old_str)) {
+      return { type: "error", content: `str_replace: old_str not found in ${action.path}` };
+    }
+    const updated = original.replace(action.old_str, action.new_str);
+    await writeFile(filePath, updated, "utf8");
+    return { type: "edit_result", content: `Applied edit to ${action.path}` };
+  } catch (err: unknown) {
+    return { type: "error", content: (err as Error).message };
+  }
+}
+
+async function execFileWrite(action: FileWriteAction, projectRoot: string): Promise<Observation> {
+  const filePath = resolve(projectRoot, action.path);
+  try {
+    await mkdir(dirname(filePath), { recursive: true });
+    await writeFile(filePath, action.content, "utf8");
+    return { type: "edit_result", content: `Created ${action.path}` };
+  } catch (err: unknown) {
+    return { type: "error", content: (err as Error).message };
+  }
+}
+
+function execAgentFinish(action: AgentFinishAction): Observation {
+  const content =
+    action.thought ||
+    (Object.keys(action.outputs).length > 0 ? JSON.stringify(action.outputs) : "");
+  return { type: "cmd_output", content };
+}
+
 export async function executeAction(
   action: Action,
   projectRoot: string,
   abortSignal?: AbortSignal,
 ): Promise<Observation> {
   switch (action.type) {
-    case "cmd_run": {
-      const timeoutMs = action.timeout ?? 30_000;
-      const isWindows = process.platform === "win32";
-      const shell = isWindows ? "cmd.exe" : "bash";
-      const shellFlag = isWindows ? "/c" : "-c";
-
-      try {
-        const { stdout } = await execFile(
-          shell,
-          [shellFlag, action.command],
-          {
-            timeout: timeoutMs,
-            signal: abortSignal,
-            // Allow large outputs
-            maxBuffer: 10 * 1024 * 1024,
-          },
-        );
-        return {
-          type: "cmd_output",
-          content: stdout,
-          exitCode: 0,
-        };
-      } catch (err: unknown) {
-        const e = err as NodeJS.ErrnoException & {
-          stdout?: string;
-          stderr?: string;
-          code?: number | string;
-          killed?: boolean;
-          signal?: string;
-        };
-
-        // Timeout or abort
-        if (
-          e.killed ||
-          e.signal === "SIGTERM" ||
-          e.code === "ETIMEDOUT" ||
-          (e as { name?: string }).name === "AbortError"
-        ) {
-          return {
-            type: "error",
-            content: "Command timed out",
-            exitCode: -1,
-          };
-        }
-
-        const exitCode =
-          typeof e.code === "number" ? e.code : e.code ? 1 : 1;
-        return {
-          type: "cmd_output",
-          content: e.stderr || e.stdout || e.message || "",
-          exitCode,
-        };
-      }
-    }
-
-    case "file_read": {
-      const filePath = resolve(projectRoot, action.path);
-      try {
-        const content = await readFile(filePath, "utf8");
-        return { type: "file_content", content };
-      } catch (err: unknown) {
-        const e = err as Error;
-        return { type: "error", content: e.message };
-      }
-    }
-
-    case "file_edit": {
-      const filePath = resolve(projectRoot, action.path);
-      try {
-        const original = await readFile(filePath, "utf8");
-        if (!original.includes(action.old_str)) {
-          return {
-            type: "error",
-            content: `str_replace: old_str not found in ${action.path}`,
-          };
-        }
-        // Replace only the first occurrence
-        const updated = original.replace(action.old_str, action.new_str);
-        await writeFile(filePath, updated, "utf8");
-        return { type: "edit_result", content: `Applied edit to ${action.path}` };
-      } catch (err: unknown) {
-        const e = err as Error;
-        return { type: "error", content: e.message };
-      }
-    }
-
-    case "file_write": {
-      const filePath = resolve(projectRoot, action.path);
-      try {
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, action.content, "utf8");
-        return { type: "edit_result", content: `Created ${action.path}` };
-      } catch (err: unknown) {
-        const e = err as Error;
-        return { type: "error", content: e.message };
-      }
-    }
-
-    case "think": {
-      // Non-blocking — just acknowledge the thought
-      return { type: "cmd_output", content: action.thought };
-    }
-
-    case "condense": {
-      // Handled at a higher level; just acknowledge the summary here
-      return { type: "cmd_output", content: action.summary };
-    }
-
-    case "agent_finish": {
-      const content =
-        action.thought ||
-        (Object.keys(action.outputs).length > 0
-          ? JSON.stringify(action.outputs)
-          : "");
-      return { type: "cmd_output", content };
-    }
+    case "cmd_run":     return execCmdRun(action, abortSignal);
+    case "file_read":   return execFileRead(action, projectRoot);
+    case "file_edit":   return execFileEdit(action, projectRoot);
+    case "file_write":  return execFileWrite(action, projectRoot);
+    case "think":       return { type: "cmd_output", content: action.thought };
+    case "condense":    return { type: "cmd_output", content: action.summary };
+    case "agent_finish": return execAgentFinish(action);
   }
 }
