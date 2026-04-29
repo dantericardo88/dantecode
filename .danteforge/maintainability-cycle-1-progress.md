@@ -115,6 +115,60 @@ function (mostly template literals, well-covered by 32 regression-guard
 assertions). Splitting into 5-7 per-section helpers should be 2-3 hours
 and demonstrates the pattern for `runAgentLoop` afterward.
 
+## Wall-break batch (2026-04-29 afternoon)
+
+After the earlier session brought count to 35, this turn drove
+maintainability past the wall (X<26) and through the steady-gradient
+zone.
+
+| Commit | Function(s) | Count Δ | Method |
+|---|---|:---:|---|
+| `0b138c8` | `runInitCommand` + `cmdBrowse` | 35→33 | per-step helpers (ensureInitDir/File, executeAndRecordBrowserAction, buildBrowsePromptContext) |
+| `23f565a` | `nodeApiFiles` + `reactTsFiles` | 33→31 | per-file builders + module-level template consts |
+| `1f6cb34` | `executeAction` | 31→30 | per-action handlers (execCmdRun, execFileRead/Edit/Write/AgentFinish) |
+| `aa40da5` | `classifyApiError` | 30→29 | CLASSIFICATION_RULES table replacing 9-arm if-cascade |
+| `7831f16` | `parseUdiffResponse` + drift fixes | 29→28 | readFileHeader + readHunkBody, plus typecheck-drift cleanup from concurrent agent edits |
+| `c27185c` | `cmdGenerate` | 28→27 | persistGenerateOutcome (was closure) + writeAndVerifyOne, PersistContext bundles shared state |
+| `af88c2a` | `renderProofPayloadForTesting` | 27→26 | renderProofBadge + renderProofFields + 4 per-event field renderers, `field()` helper |
+| `782419b` | `runAutoforgeIAL` re-extract | 26→25 | **WALL BREAK.** emitIterationProgress + recordAutoforgeSuccess. Penalty cap (30) starts releasing |
+| `29f157a` | `handleGitHubWebhook` | 25→24 | parseGitHubWebhookEnvelope + dispatchIssueToPRPipeline |
+| `00f7c2e` | `handleSlackWebhook` | 24→23 | verifySlackEnvelope |
+| `2329291` | `dispatchCloud` | 23→22 | cloudResult envelope helper + consumeCloudSseStream |
+| `566b7fa` | `chunkBrace` | 22→21 | emitImportChunk + advanceBraceScan + mergeTinyChunks |
+
+**Cumulative session: 57 → 21 (−36 large-fn kills).**
+
+### Score gradient observed
+
+| X (count) | Maintainability | Composite |
+|---:|:---:|:---:|
+| 57 | 3.6 | 7.8 |
+| 35 | 3.6 (still capped) | 7.8 |
+| 26 | 4.3 (cap broke) | 8.0 |
+| 25 | 4.4 | 8.0 |
+| 24 | 4.5 | 8.0 |
+| 22 | 4.6 | 8.0 |
+| 21 | 4.6 | 8.0 |
+
+Gradient ≈ +0.1 per 1-2 kills below the wall. To reach 9.0 needs ~60
+more kills (linear). Realistic — the long tail of medium-fn extraction
+plus the three big orchestrators (runAgentLoop 2,633L, partyCommand
+398L, autoforgeCommand 369L) carries us most of the way.
+
+Side-effect dims that moved during this work:
+- `ecosystemMcp`: 6.0 → 9.0 (other agents shipped MCP work concurrently)
+- `selfImprovement`: 7.8 → 8.3 (retros + lessons accumulated)
+- `enterpriseReadiness`: ceiling reached (9.0)
+
+### Drift to be aware of
+
+Three concurrent-agent typecheck regressions surfaced and were cleared
+in `7831f16`: ascendCycle write-only field in sidebar-provider, unused
+getNonce in webview-html, optional-array-access lints in
+slash-commands.test, lsp-context-provider.test, and the
+edit-history-tracker captured-but-unused listener. Watch for these
+returning — concurrent edits keep introducing the same patterns.
+
 Alternative: pursue `pdseBase` instead via a real PDSE pipeline run on
 the maintainability work itself (specify the refactor, plan it, execute,
 verify). Earns score AND validates the PDSE pipeline.
