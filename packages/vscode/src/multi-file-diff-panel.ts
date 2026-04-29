@@ -236,60 +236,7 @@ export function renderDiffHtml(originalContent: string, proposedContent: string)
 
 // ── getReviewHtml ─────────────────────────────────────────────────────────────
 
-export function getReviewHtml(
-  nonce: string,
-  entries: PendingDiffEntry[],
-  _webview: vscode.Webview,
-  annotations: DiffReviewAnnotation[] = [],
-): string {
-  const totalBlocks = entries.reduce((sum, e) => sum + e.blocks.length, 0);
-
-  const fileCards = entries
-    .map((entry) => {
-      const diffHtml = renderDiffHtml(entry.originalContent, entry.proposedContent);
-      const escapedRel = htmlEscape(entry.relativePath);
-
-      // Use getBlockingAnnotations to surface only blocking annotations per file,
-      // matching the severity-first approach used in formatDiffForPrompt.
-      // getAnnotationsForFile is kept in imports for other callers.
-      const syntheticDiff = { files: [], totalAdditions: 0, totalDeletions: 0, totalFiles: 0, annotations };
-      const blockingForFile = getBlockingAnnotations(syntheticDiff).filter(
-        (a) => a.filePath === entry.relativePath,
-      );
-      // Also include non-blocking annotations for full context
-      const allFileAnnotations = getAnnotationsForFile(syntheticDiff, entry.relativePath);
-      const hasBlocking = blockingForFile.length > 0;
-      const fileRiskBadge = hasBlocking
-        ? `<span class="file-risk file-risk-blocking">⚑ ${blockingForFile.length} blocking</span>`
-        : "";
-
-      const badgesHtml = allFileAnnotations.length > 0
-        ? `<div class="ann-row">${fileRiskBadge}${allFileAnnotations.map((a) =>
-            `<span class="ann ann-${a.severity}">${htmlEscape(a.comment)}</span>`
-          ).join("")}</div>`
-        : "";
-
-      return `<div class="file-card" data-file="${escapedRel}">
-    <div class="file-header">
-      <input type="checkbox" class="file-toggle" checked data-file="${escapedRel}">
-      <span class="file-path">${escapedRel}</span>
-      <span class="badge-add">+${entry.linesAdded}</span>
-      <span class="badge-remove">-${entry.linesRemoved}</span>
-    </div>
-    ${badgesHtml}<div class="diff-body">${diffHtml}</div>
-  </div>`;
-    })
-    .join("\n");
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-  <title>Review Changes</title>
-  <style nonce="${nonce}">
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+const REVIEW_PANEL_CSS = `    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
@@ -315,7 +262,65 @@ export function getReviewHtml(
     .skip-btn { background: transparent; border: 1px solid var(--vscode-widget-border,#3c3c3c); color: var(--vscode-editor-foreground); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
     #toolbar { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid var(--vscode-widget-border,#3c3c3c); align-items: center; }
     #title { font-size: 14px; font-weight: 600; flex: 1; }
-    #file-list { padding: 8px 12px; overflow-y: auto; }
+    #file-list { padding: 8px 12px; overflow-y: auto; }`;
+
+const REVIEW_PANEL_SCRIPT = `    const vscode = acquireVsCodeApi();
+    document.getElementById('btn-apply-all').addEventListener('click', () => {
+      vscode.postMessage({ type: 'apply_all' });
+    });
+    document.getElementById('btn-reject-all').addEventListener('click', () => {
+      vscode.postMessage({ type: 'reject_all' });
+    });
+    document.getElementById('btn-apply-selected').addEventListener('click', () => {
+      const checked = [...document.querySelectorAll('.file-toggle:checked')].map(el => el.dataset.file);
+      vscode.postMessage({ type: 'apply_selected', files: checked });
+    });`;
+
+function renderFileCard(entry: PendingDiffEntry, annotations: DiffReviewAnnotation[]): string {
+  const diffHtml = renderDiffHtml(entry.originalContent, entry.proposedContent);
+  const escapedRel = htmlEscape(entry.relativePath);
+  const syntheticDiff = { files: [], totalAdditions: 0, totalDeletions: 0, totalFiles: 0, annotations };
+  const blockingForFile = getBlockingAnnotations(syntheticDiff).filter((a) => a.filePath === entry.relativePath);
+  const allFileAnnotations = getAnnotationsForFile(syntheticDiff, entry.relativePath);
+
+  const fileRiskBadge = blockingForFile.length > 0
+    ? `<span class="file-risk file-risk-blocking">⚑ ${blockingForFile.length} blocking</span>`
+    : "";
+  const badgesHtml = allFileAnnotations.length > 0
+    ? `<div class="ann-row">${fileRiskBadge}${allFileAnnotations.map((a) =>
+        `<span class="ann ann-${a.severity}">${htmlEscape(a.comment)}</span>`
+      ).join("")}</div>`
+    : "";
+
+  return `<div class="file-card" data-file="${escapedRel}">
+    <div class="file-header">
+      <input type="checkbox" class="file-toggle" checked data-file="${escapedRel}">
+      <span class="file-path">${escapedRel}</span>
+      <span class="badge-add">+${entry.linesAdded}</span>
+      <span class="badge-remove">-${entry.linesRemoved}</span>
+    </div>
+    ${badgesHtml}<div class="diff-body">${diffHtml}</div>
+  </div>`;
+}
+
+export function getReviewHtml(
+  nonce: string,
+  entries: PendingDiffEntry[],
+  _webview: vscode.Webview,
+  annotations: DiffReviewAnnotation[] = [],
+): string {
+  const totalBlocks = entries.reduce((sum, e) => sum + e.blocks.length, 0);
+  const fileCards = entries.map((e) => renderFileCard(e, annotations)).join("\n");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+  <title>Review Changes</title>
+  <style nonce="${nonce}">
+${REVIEW_PANEL_CSS}
   </style>
 </head>
 <body>
@@ -331,17 +336,7 @@ export function getReviewHtml(
     <button class="apply-btn" id="btn-apply-selected">Apply Selected</button>
   </div>
   <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    document.getElementById('btn-apply-all').addEventListener('click', () => {
-      vscode.postMessage({ type: 'apply_all' });
-    });
-    document.getElementById('btn-reject-all').addEventListener('click', () => {
-      vscode.postMessage({ type: 'reject_all' });
-    });
-    document.getElementById('btn-apply-selected').addEventListener('click', () => {
-      const checked = [...document.querySelectorAll('.file-toggle:checked')].map(el => el.dataset.file);
-      vscode.postMessage({ type: 'apply_selected', files: checked });
-    });
+${REVIEW_PANEL_SCRIPT}
   </script>
 </body>
 </html>`;
