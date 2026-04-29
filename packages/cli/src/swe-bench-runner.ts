@@ -301,6 +301,53 @@ async function applyPatch(patchText: string, workspace: string): Promise<boolean
 // Test runner
 // ----------------------------------------------------------------------------
 
+/**
+ * Pre-flight pytest collection check (Pattern C). Runs
+ * `pytest --collect-only --no-header -q` to verify the test environment
+ * is healthy before the agent runs. Catches conftest plugin import
+ * failures that would otherwise be misclassified as test_assertion.
+ *
+ * Returns failed=true ONLY when collection fails with ImportError /
+ * ModuleNotFoundError / plugin errors. Other non-zero exits (e.g., no
+ * tests found, deprecation warnings) are tolerated — collection passes
+ * even if no tests are visible because some repos auto-detect on demand.
+ */
+export async function runPytestCollectOnly(
+  workspace: string,
+): Promise<{ failed: boolean; reason?: string; output: string }> {
+  const pythonBin = process.platform === "win32" ? "python" : "python3";
+  let result;
+  try {
+    result = await run(
+      pythonBin,
+      ["-m", "pytest", "--collect-only", "--no-header", "-q", "--override-ini=addopts="],
+      { cwd: workspace, timeout: 60_000 },
+    );
+  } catch {
+    return { failed: false, output: "" }; // tool spawn error is non-fatal
+  }
+
+  const output = (result.stdout + result.stderr).slice(0, 3000);
+  if (result.exitCode === 0) return { failed: false, output };
+
+  // Only env-class collection errors trip the gate. Test-load errors
+  // would have surfaced ImportError on a missing module; plugin errors
+  // typically include "PluginValidationError" or "ImportError while
+  // loading conftest".
+  const looksEnvFail =
+    /ImportError while loading conftest/i.test(output) ||
+    /ModuleNotFoundError/i.test(output) ||
+    /PluginValidationError/i.test(output) ||
+    /No module named.*plugin/i.test(output);
+
+  if (!looksEnvFail) return { failed: false, output };
+
+  let reason = "import error in conftest";
+  if (/PluginValidationError/i.test(output)) reason = "plugin validation error";
+  else if (/ModuleNotFoundError/i.test(output)) reason = "missing module";
+  return { failed: true, reason, output };
+}
+
 async function runTests(
   testSpecs: string[],
   workspace: string,
@@ -409,6 +456,19 @@ export async function runSWEBenchInstance(
         result.error = "Test patch failed to apply";
         return result;
       }
+    }
+
+    // Step 2.25: Pre-flight pytest --collect-only. Pattern C mitigation —
+    // scientific Python repos register pytest plugins in conftest. When
+    // setup is incomplete (egg-info mismatch, missing C-extension build),
+    // collection fails with ImportError BEFORE any test runs. Without this
+    // gate the agent counts that as test_assertion and tries to "fix"
+    // working code, often making things worse.
+    const collectStatus = await runPytestCollectOnly(workspace);
+    if (collectStatus.failed) {
+      result.error = `env_error: pytest collection failed (${collectStatus.reason})`;
+      result.test_output = collectStatus.output;
+      return result;
     }
 
     // Step 2.5: Pre-execute the failing tests to prime the agent (CodeAct).
@@ -614,6 +674,10 @@ export function triageInstance(instance: SWEInstance): "easy" | "hard" {
 
 export function classifyFailureMode(result: SWERunResult): string {
   if (result.resolved) return "resolved";
+  // env_error (Pattern C) — pre-flight conftest collection failed; the
+  // agent never ran. Classified separately from import_error (which
+  // covers test-time import failures inside the verify loop).
+  if (result.error && /^env_error:/i.test(result.error)) return "env_error";
   if (result.error && /timed? out|timeout/i.test(result.error)) return "timeout";
   if (result.error && /clone/i.test(result.error)) return "clone_error";
   const output = result.test_output ?? "";

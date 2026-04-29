@@ -309,6 +309,26 @@ describe("regression guard — ascend orchestrator wiring", () => {
     }
   });
 
+  it("SWE-bench harness pre-flights pytest --collect-only (Pattern C mitigation)", () => {
+    // Conftest plugin conflicts in scientific Python repos cause
+    // ImportError BEFORE any test runs. Without this gate the agent
+    // misclassifies them as test_assertion and tries to "fix" working
+    // code. The pre-flight short-circuits with an env_error result.
+    // If this regresses, every astropy/sympy/scipy run risks the
+    // agent damaging unrelated code.
+    const runner = readFileSync(
+      join(REPO_ROOT, "packages", "cli", "src", "swe-bench-runner.ts"),
+      "utf-8",
+    );
+    expect(runner).toMatch(/export async function runPytestCollectOnly/);
+    expect(runner).toMatch(/pytest collection failed/);
+    expect(runner).toMatch(/--collect-only/);
+    expect(runner).toMatch(/env_error/);
+    // The classifier must recognize the "env_error:" prefix on result.error
+    // so the env_error bucket is reported separately from import_error.
+    expect(runner).toMatch(/\^env_error:/);
+  });
+
   it("SWE-bench Python harness rejects partial patches (Pattern E mitigation)", () => {
     // Previously fell back to `git apply --reject` when the initial apply
     // failed, accepting some hunks and dropping others. The verification

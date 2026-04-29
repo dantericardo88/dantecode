@@ -309,11 +309,13 @@ describe("swe-bench-runner", () => {
       });
       await runSWEBenchInstance(instance, "/project");
 
-      const pytestCall = capturedArgs.find((a) => a.includes("pytest"));
-      expect(pytestCall).toBeDefined();
-      if (pytestCall) {
-        expect(pytestCall.some((a) => a.includes("legacy_test"))).toBe(true);
-      }
+      // After Pattern C (pre-flight collect-only) + Phase 4 (pre-execute
+      // priming), the runner makes up to three pytest calls before the
+      // verify call. Find the verify call (last pytest invocation that
+      // names a real test spec — not --collect-only).
+      const pytestCalls = capturedArgs.filter((a) => a.includes("pytest"));
+      const verifyCall = pytestCalls.find((a) => a.some((arg) => arg.includes("legacy_test")));
+      expect(verifyCall).toBeDefined();
     });
   });
 
