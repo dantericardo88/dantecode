@@ -209,11 +209,9 @@ function wireReplCloseHandler(rl: readline.Interface, replState: ReplState): voi
   });
 }
 
-export async function startRepl(options: ReplOptions): Promise<void> {
-  // Load or initialize state
-  let state: DanteCodeState;
+async function loadStateOrExit(projectRoot: string): Promise<DanteCodeState> {
   try {
-    state = await readOrInitializeState(options.projectRoot);
+    return await readOrInitializeState(projectRoot);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(
@@ -222,30 +220,61 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     );
     process.exit(1);
   }
+}
 
-  // Apply model override if specified
-  if (options.model) {
-    state = applyModelOverride(state, options.model);
-  }
-
-  // Create session
-  const session = createSession(options.projectRoot, state.model.default);
-
-  // Load MCP config and connect to any configured external servers (before banner so status is visible)
-  const mcpConfig = await loadMCPConfig(options.projectRoot);
+/** Connect every configured external MCP server and report tool count. */
+async function connectMcpClients(projectRoot: string): Promise<{
+  mcpClientManager: MCPClientManager;
+  connectedTools: ReturnType<MCPClientManager["listTools"]>;
+}> {
+  const mcpConfig = await loadMCPConfig(projectRoot);
   const mcpClientManager = new MCPClientManager();
   await mcpClientManager.connectAll(mcpConfig);
-  const connectedTools = mcpClientManager.listTools();
+  return { mcpClientManager, connectedTools: mcpClientManager.listTools() };
+}
+
+function buildAgentConfig(
+  options: ReplOptions,
+  state: DanteCodeState,
+  permissions: ReplState["permissions"],
+  rl: readline.Interface,
+  replState: ReplState,
+  connectedTools: ReturnType<MCPClientManager["listTools"]>,
+  mcpClientManager: MCPClientManager,
+): AgentLoopConfig {
+  const agentConfig: AgentLoopConfig = {
+    state,
+    verbose: options.verbose,
+    enableGit: options.enableGit,
+    enableSandbox: options.enableSandbox,
+    silent: options.silent,
+    permissions,
+    rl,
+    onCostUpdate: (estimate, provider) => {
+      replState.lastCostEstimate = { ...estimate, provider };
+    },
+  };
+  if (options.enableSandbox) {
+    agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
+    replState.sandboxBridge = agentConfig.sandboxBridge;
+  }
+  if (connectedTools.length > 0) {
+    agentConfig.mcpTools = mcpToolsToAISDKTools(connectedTools);
+    agentConfig.mcpClient = mcpClientManager;
+  }
+  return agentConfig;
+}
+
+export async function startRepl(options: ReplOptions): Promise<void> {
+  let state = await loadStateOrExit(options.projectRoot);
+  if (options.model) state = applyModelOverride(state, options.model);
+
+  const session = createSession(options.projectRoot, state.model.default);
+  const { mcpClientManager, connectedTools } = await connectMcpClients(options.projectRoot);
 
   await displayReplStartupStatus(options, state, mcpClientManager, connectedTools.length);
 
-  const permissions = state.permissions || {
-    edit: "ask",
-    bash: "ask",
-    tools: "allow",
-  };
-
-  // Create readline interface before wiring any interactive permission prompts.
+  const permissions = state.permissions || { edit: "ask", bash: "ask", tools: "allow" };
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -253,7 +282,6 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     terminal: true,
   });
 
-  // Initialize REPL state
   const replState: ReplState = {
     session,
     state,
@@ -268,42 +296,16 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     pendingAgentPrompt: null,
     activeAbortController: null,
     sandboxBridge: null,
-    mcpClient: null,
+    mcpClient: mcpClientManager,
     activeSkill: null,
     waveState: null,
     permissions,
-    rl: rl,
+    rl,
   };
 
-  // Agent loop config
-  const agentConfig: AgentLoopConfig = {
-    state,
-    verbose: options.verbose,
-    enableGit: options.enableGit,
-    enableSandbox: options.enableSandbox,
-    silent: options.silent,
-    permissions: permissions,
-    rl: rl,
-    onCostUpdate: (estimate, provider) => {
-      replState.lastCostEstimate = { ...estimate, provider };
-    },
-  };
+  const agentConfig = buildAgentConfig(options, state, permissions, rl, replState, connectedTools, mcpClientManager);
 
-  // Initialize sandbox bridge when --sandbox is enabled
-  if (options.enableSandbox) {
-    agentConfig.sandboxBridge = new SandboxBridge(options.projectRoot, options.verbose);
-    replState.sandboxBridge = agentConfig.sandboxBridge;
-  }
-
-  // Wire MCP client into agentConfig and replState (already connected above, before banner)
-  if (connectedTools.length > 0) {
-    agentConfig.mcpTools = mcpToolsToAISDKTools(connectedTools);
-    agentConfig.mcpClient = mcpClientManager;
-  }
-  replState.mcpClient = mcpClientManager;
-
-  const ctrlCRef = wireCtrlCHandler(rl, replState);
-  void ctrlCRef;
+  void wireCtrlCHandler(rl, replState);
   wireReplLineHandler(rl, replState, agentConfig);
   wireReplCloseHandler(rl, replState);
 

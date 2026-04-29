@@ -379,79 +379,35 @@ export function extractImportLines(prefix: string, language: string): string[] {
     .filter((l) => pattern.test(l))
     .slice(0, 30); // cap at 30 import lines
 }
-export function buildFIMPrompt(
-  input: FIMPromptInput,
-  multilineOverride?: boolean,
-): FIMPromptResult {
-  const isMultilineContext = shouldUseMultilineCompletion(input.prefix, input.suffix);
-  const multiline = multilineOverride !== undefined ? multilineOverride : isMultilineContext;
-  const maxCompletionTokens = multiline ? MULTILINE_MAX_TOKENS : SINGLE_LINE_MAX_TOKENS;
-
-
-  // Dynamic token-budget pruning (Continue.dev pattern)
-  const { prefixChars, suffixChars } = computeContextBudget(
-    input.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-    maxCompletionTokens,
-  );
-
-  // Prefix: drop from top (oldest) to preserve context nearest cursor
-  const prefixWindow = pruneFromTop(input.prefix, prefixChars);
-
-  // Suffix: always use token-budget-based pruning (never cap multiline at 10 lines —
-  // that wastes budget and starves the model of FIM suffix context it needs).
-  const suffixWindow = pruneFromBottom(input.suffix, suffixChars);
-
-  const systemParts = [
-    "You are a fill-in-the-middle code completion engine.",
-    `Language: ${input.language}`,
-    `File: ${input.filePath}`,
-  ];
-
-  // Symbol definition at cursor call site (highest specificity — inject first)
-  if (input.symbolDef) {
-    systemParts.push("## Symbol definition:", input.symbolDef);
-  }
-
-  // LSP type context — injected after symbolDef, capped at ~300 tokens (1050 chars)
-  // Pruned first when over budget because it duplicates LSP data the model sees anyway
-  if (input.lspHover) {
-    systemParts.push("## Type context (LSP):", input.lspHover.slice(0, 1050));
-  }
-  if (input.lspDefinition) {
-    systemParts.push("## Definition (LSP):", input.lspDefinition);
-  }
-  // Active diagnostics from LspDiagnosticsInjector — errors/warnings the model must avoid
-  if (input.lspDiagnostics) {
-    systemParts.push(input.lspDiagnostics);
-  }
-
-  // Inject BM25-retrieved snippets (highest priority context)
+/** Append every available LSP / BM25 / repo-map context block onto `systemParts`. */
+function appendOptionalContextBlocks(systemParts: string[], input: FIMPromptInput): void {
+  if (input.symbolDef) systemParts.push("## Symbol definition:", input.symbolDef);
+  // LSP hover capped at 1050 chars (~300 tokens) — pruned first when over budget
+  if (input.lspHover) systemParts.push("## Type context (LSP):", input.lspHover.slice(0, 1050));
+  if (input.lspDefinition) systemParts.push("## Definition (LSP):", input.lspDefinition);
+  if (input.lspDiagnostics) systemParts.push(input.lspDiagnostics);
   if (input.bm25Snippets && input.bm25Snippets.length > 0) {
     systemParts.push("Relevant context from codebase:", input.bm25Snippets.join("\n"));
   }
+  if (input.repoMap) systemParts.push("## Repository map:", input.repoMap);
+  if (input.crossFileContext) systemParts.push("Cross-file context:", input.crossFileContext);
+}
 
-  // PageRank repo map — file importance signal for the model
-  if (input.repoMap) {
-    systemParts.push("## Repository map:", input.repoMap);
-  }
-
-  if (input.crossFileContext) {
-    systemParts.push("Cross-file context:", input.crossFileContext);
-  }
-
-  // Large-file unified diff mode (dim 17): caller sets useUnifiedDiff=true when
-  // totalLineCount > 300 and dantecode.diffMode === "auto"|"unified".
-  // Line-numbered diff eliminates SEARCH/REPLACE ambiguity on files with repeated content.
-  const useUnifiedDiff = input.useUnifiedDiff === true;
-
+function appendOutputFormatInstructions(
+  systemParts: string[],
+  filePath: string,
+  multiline: boolean,
+  useUnifiedDiff: boolean,
+): void {
+  const completeInstruction = multiline
+    ? "Complete the next block of code and preserve indentation."
+    : "Complete the next span of code naturally at the cursor position.";
   if (useUnifiedDiff) {
     systemParts.push(
-      multiline
-        ? "Complete the next block of code and preserve indentation."
-        : "Complete the next span of code naturally at the cursor position.",
+      completeInstruction,
       "Output your changes as a unified diff:",
-      `--- a/${input.filePath}`,
-      `+++ b/${input.filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
       "@@ -startLine,lineCount +startLine,lineCount @@",
       " context line",
       "-removed line",
@@ -460,24 +416,39 @@ export function buildFIMPrompt(
     );
   } else {
     systemParts.push(
-      multiline
-        ? "Complete the next block of code and preserve indentation."
-        : "Complete the next span of code naturally at the cursor position.",
+      completeInstruction,
       "Return ONLY the completion text with no explanations or markdown fences.",
     );
   }
+}
 
-  const userPrompt = [
-    "<|fim_prefix|>",
-    prefixWindow,
-    "<|fim_suffix|>",
-    suffixWindow,
-    "<|fim_middle|>",
-  ].join("");
+export function buildFIMPrompt(
+  input: FIMPromptInput,
+  multilineOverride?: boolean,
+): FIMPromptResult {
+  const multiline = multilineOverride !== undefined
+    ? multilineOverride
+    : shouldUseMultilineCompletion(input.prefix, input.suffix);
+  const maxCompletionTokens = multiline ? MULTILINE_MAX_TOKENS : SINGLE_LINE_MAX_TOKENS;
+
+  const { prefixChars, suffixChars } = computeContextBudget(
+    input.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxCompletionTokens,
+  );
+  const prefixWindow = pruneFromTop(input.prefix, prefixChars);
+  const suffixWindow = pruneFromBottom(input.suffix, suffixChars);
+
+  const systemParts = [
+    "You are a fill-in-the-middle code completion engine.",
+    `Language: ${input.language}`,
+    `File: ${input.filePath}`,
+  ];
+  appendOptionalContextBlocks(systemParts, input);
+  appendOutputFormatInstructions(systemParts, input.filePath, multiline, input.useUnifiedDiff === true);
 
   return {
     systemPrompt: systemParts.join("\n"),
-    userPrompt,
+    userPrompt: ["<|fim_prefix|>", prefixWindow, "<|fim_suffix|>", suffixWindow, "<|fim_middle|>"].join(""),
     maxTokens: maxCompletionTokens,
   };
 }
