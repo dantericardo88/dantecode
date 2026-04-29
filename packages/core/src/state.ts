@@ -241,131 +241,123 @@ export async function writeStateYaml(projectRoot: string, state: DanteCodeState)
  * @param projectRoot - Absolute path to the project root directory.
  * @returns The initialized DanteCodeState object.
  */
+const DEFAULT_MODEL_CONFIG = {
+  default: {
+    provider: "grok" as const,
+    modelId: "grok-3",
+    maxTokens: 8192,
+    temperature: 0.1,
+    contextWindow: 131072,
+    supportsVision: false,
+    supportsToolCalls: true,
+  },
+  fallback: [
+    {
+      provider: "anthropic" as const,
+      modelId: "claude-sonnet-4-20250514",
+      maxTokens: 8192,
+      temperature: 0.1,
+      contextWindow: 200000,
+      supportsVision: true,
+      supportsToolCalls: true,
+    },
+  ],
+  taskOverrides: {},
+};
+
+const DEFAULT_PDSE_CONFIG = {
+  threshold: 85,
+  hardViolationsAllowed: 0,
+  maxRegenerationAttempts: 3,
+  weights: { completeness: 0.3, correctness: 0.3, clarity: 0.2, consistency: 0.2 },
+};
+
+const DEFAULT_GSTACK_COMMANDS = [
+  { name: "typecheck", command: "npx tsc --noEmit", runInSandbox: true, timeoutMs: 60000, failureIsSoft: false },
+  { name: "lint", command: "npx eslint .", runInSandbox: true, timeoutMs: 60000, failureIsSoft: true },
+  { name: "test", command: "npx vitest run", runInSandbox: true, timeoutMs: 120000, failureIsSoft: false },
+];
+
+const DEFAULT_AUTOFORGE_CONFIG = {
+  enabled: true,
+  maxIterations: 5,
+  gstackCommands: DEFAULT_GSTACK_COMMANDS,
+  lessonInjectionEnabled: true,
+  abortOnSecurityViolation: true,
+};
+
+const DEFAULT_GIT_CONFIG = {
+  autoCommit: true,
+  commitPrefix: "dantecode:",
+  worktreeEnabled: true,
+  worktreeBase: ".dantecode/worktrees",
+  signCommits: false,
+};
+
+const DEFAULT_SANDBOX_CONFIG = {
+  enabled: true,
+  defaultImage: "ghcr.io/dantecode/sandbox:latest",
+  networkMode: "bridge" as const,
+  memoryLimitMb: 2048,
+  cpuLimit: 2.0,
+  timeoutMs: 300000,
+  autoStart: true,
+};
+
+const DEFAULT_SKILLS_CONFIG = {
+  directories: [".dantecode/skills", "~/.dantecode/skills"],
+  autoImport: false,
+  constitutionEnforced: true,
+  antiStubEnabled: true,
+};
+
+const DEFAULT_AGENTS_CONFIG = {
+  maxConcurrent: 4,
+  nomaEnabled: true,
+  fileLockingEnabled: true,
+  defaultLane: "lead" as const,
+};
+
+const DEFAULT_AUDIT_CONFIG = {
+  enabled: true,
+  logDirectory: ".dantecode",
+  retentionDays: 90,
+  includePayloads: true,
+  sensitiveFieldMask: ["apiKey", "token", "secret", "password"],
+};
+
+const DEFAULT_LESSONS_CONFIG = {
+  enabled: true,
+  maxPerProject: 500,
+  autoInject: true,
+  minSeverity: "warning" as const,
+};
+
+const DEFAULT_PROJECT_CONFIG = {
+  name: "",
+  language: "",
+  sourceDirectories: ["src"],
+  excludePatterns: ["node_modules/", "dist/", ".next/", "__pycache__/", ".dantecode/worktrees/"],
+};
+
 export async function initializeState(projectRoot: string): Promise<DanteCodeState> {
   const now = new Date().toISOString();
-
   const defaultState: DanteCodeState = {
     version: "1.0.0",
     projectRoot,
     createdAt: now,
     updatedAt: now,
-    model: {
-      default: {
-        provider: "grok",
-        modelId: "grok-3",
-        maxTokens: 8192,
-        temperature: 0.1,
-        contextWindow: 131072,
-        supportsVision: false,
-        supportsToolCalls: true,
-      },
-      fallback: [
-        {
-          provider: "anthropic",
-          modelId: "claude-sonnet-4-20250514",
-          maxTokens: 8192,
-          temperature: 0.1,
-          contextWindow: 200000,
-          supportsVision: true,
-          supportsToolCalls: true,
-        },
-      ],
-      taskOverrides: {},
-    },
-    pdse: {
-      threshold: 85,
-      hardViolationsAllowed: 0,
-      maxRegenerationAttempts: 3,
-      weights: {
-        completeness: 0.3,
-        correctness: 0.3,
-        clarity: 0.2,
-        consistency: 0.2,
-      },
-    },
-    autoforge: {
-      enabled: true,
-      maxIterations: 5,
-      gstackCommands: [
-        {
-          name: "typecheck",
-          command: "npx tsc --noEmit",
-          runInSandbox: true,
-          timeoutMs: 60000,
-          failureIsSoft: false,
-        },
-        {
-          name: "lint",
-          command: "npx eslint .",
-          runInSandbox: true,
-          timeoutMs: 60000,
-          failureIsSoft: true,
-        },
-        {
-          name: "test",
-          command: "npx vitest run",
-          runInSandbox: true,
-          timeoutMs: 120000,
-          failureIsSoft: false,
-        },
-      ],
-      lessonInjectionEnabled: true,
-      abortOnSecurityViolation: true,
-    },
-    git: {
-      autoCommit: true,
-      commitPrefix: "dantecode:",
-      worktreeEnabled: true,
-      worktreeBase: ".dantecode/worktrees",
-      signCommits: false,
-    },
-    sandbox: {
-      enabled: true,
-      defaultImage: "ghcr.io/dantecode/sandbox:latest",
-      networkMode: "bridge",
-      memoryLimitMb: 2048,
-      cpuLimit: 2.0,
-      timeoutMs: 300000,
-      autoStart: true,
-    },
-    skills: {
-      directories: [".dantecode/skills", "~/.dantecode/skills"],
-      autoImport: false,
-      constitutionEnforced: true,
-      antiStubEnabled: true,
-    },
-    agents: {
-      maxConcurrent: 4,
-      nomaEnabled: true,
-      fileLockingEnabled: true,
-      defaultLane: "lead",
-    },
-    audit: {
-      enabled: true,
-      logDirectory: ".dantecode",
-      retentionDays: 90,
-      includePayloads: true,
-      sensitiveFieldMask: ["apiKey", "token", "secret", "password"],
-    },
+    model: DEFAULT_MODEL_CONFIG,
+    pdse: DEFAULT_PDSE_CONFIG,
+    autoforge: DEFAULT_AUTOFORGE_CONFIG,
+    git: DEFAULT_GIT_CONFIG,
+    sandbox: DEFAULT_SANDBOX_CONFIG,
+    skills: DEFAULT_SKILLS_CONFIG,
+    agents: DEFAULT_AGENTS_CONFIG,
+    audit: DEFAULT_AUDIT_CONFIG,
     sessionHistory: [],
-    lessons: {
-      enabled: true,
-      maxPerProject: 500,
-      autoInject: true,
-      minSeverity: "warning",
-    },
-    project: {
-      name: "",
-      language: "",
-      sourceDirectories: ["src"],
-      excludePatterns: [
-        "node_modules/",
-        "dist/",
-        ".next/",
-        "__pycache__/",
-        ".dantecode/worktrees/",
-      ],
-    },
+    lessons: DEFAULT_LESSONS_CONFIG,
+    project: DEFAULT_PROJECT_CONFIG,
   };
 
   await writeStateYaml(projectRoot, defaultState);

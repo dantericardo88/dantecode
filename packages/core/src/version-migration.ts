@@ -177,106 +177,110 @@ export function detectConfigVersion(data: Record<string, unknown>): number {
  * @param projectRoot - Absolute path to the project root directory.
  * @returns The aggregate MigrationRunResult.
  */
-export async function runMigrations(projectRoot: string): Promise<MigrationRunResult> {
-  const filePath = join(projectRoot, STATE_YAML_RELATIVE_PATH);
-  const results: MigrationResult[] = [];
-
-  // Read the current STATE.yaml
+/** Read and YAML-parse STATE.yaml. Returns `{ kind: "missing" }` if the file
+ *  doesn't exist (caller should bail empty), `{ kind: "error", message }` on
+ *  invalid input, or the parsed data on success. */
+async function readStateYaml(filePath: string): Promise<
+  | { kind: "missing" }
+  | { kind: "error"; message: string }
+  | { kind: "ok"; data: Record<string, unknown> }
+> {
   let rawContent: string;
   try {
     rawContent = await readFile(filePath, "utf-8");
   } catch {
-    // File doesn't exist — nothing to migrate
-    return {
-      results: [],
-      finalVersion: 0,
-      migrated: false,
-    };
+    return { kind: "missing" };
   }
-
-  let data: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    data = YAML.parse(rawContent) as Record<string, unknown>;
+    parsed = YAML.parse(rawContent);
   } catch {
-    // Corrupt YAML — cannot migrate
-    return {
-      results: [
-        {
-          fromVersion: 0,
-          toVersion: LATEST_CONFIG_VERSION,
-          applied: false,
-          message: "STATE.yaml contains invalid YAML — cannot migrate",
-        },
-      ],
-      finalVersion: 0,
-      migrated: false,
-    };
+    return { kind: "error", message: "STATE.yaml contains invalid YAML — cannot migrate" };
   }
-
-  if (!data || typeof data !== "object") {
-    return {
-      results: [
-        {
-          fromVersion: 0,
-          toVersion: LATEST_CONFIG_VERSION,
-          applied: false,
-          message: "STATE.yaml root is not an object — cannot migrate",
-        },
-      ],
-      finalVersion: 0,
-      migrated: false,
-    };
+  if (!parsed || typeof parsed !== "object") {
+    return { kind: "error", message: "STATE.yaml root is not an object — cannot migrate" };
   }
+  return { kind: "ok", data: parsed as Record<string, unknown> };
+}
 
-  let currentVersion = detectConfigVersion(data);
-
-  if (currentVersion >= LATEST_CONFIG_VERSION) {
-    return {
-      results: [],
-      finalVersion: currentVersion,
-      migrated: false,
-    };
-  }
-
-  // Apply migrations in order
+/** Apply each migration whose `from` matches the running `currentVersion`.
+ *  Returns the new (data, currentVersion, migrated, results) accumulator. */
+function applyMigrations(
+  data: Record<string, unknown>,
+  startVersion: number,
+): { data: Record<string, unknown>; finalVersion: number; migrated: boolean; results: MigrationResult[] } {
+  let currentVersion = startVersion;
   let migrated = false;
+  const results: MigrationResult[] = [];
   for (const migration of MIGRATIONS) {
-    if (currentVersion === migration.from) {
-      try {
-        data = migration.fn(data);
-        results.push({
-          fromVersion: migration.from,
-          toVersion: migration.to,
-          applied: true,
-          message: `Migrated from v${migration.from} to v${migration.to}`,
-        });
-        currentVersion = migration.to;
-        migrated = true;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        results.push({
-          fromVersion: migration.from,
-          toVersion: migration.to,
-          applied: false,
-          message: `Migration v${migration.from}->v${migration.to} failed: ${msg}`,
-        });
-        break;
-      }
+    if (currentVersion !== migration.from) continue;
+    try {
+      data = migration.fn(data);
+      results.push({
+        fromVersion: migration.from,
+        toVersion: migration.to,
+        applied: true,
+        message: `Migrated from v${migration.from} to v${migration.to}`,
+      });
+      currentVersion = migration.to;
+      migrated = true;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      results.push({
+        fromVersion: migration.from,
+        toVersion: migration.to,
+        applied: false,
+        message: `Migration v${migration.from}->v${migration.to} failed: ${msg}`,
+      });
+      break;
     }
   }
+  return { data, finalVersion: currentVersion, migrated, results };
+}
 
-  // Write back if any migrations were applied
-  if (migrated) {
-    const tmpPath = filePath + ".tmp";
-    await mkdir(dirname(filePath), { recursive: true });
-    const yamlContent = YAML.stringify(data, { indent: 2, lineWidth: 120 });
-    await writeFile(tmpPath, yamlContent, "utf-8");
-    await rename(tmpPath, filePath);
+async function writeStateYamlAtomically(
+  filePath: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const tmpPath = filePath + ".tmp";
+  await mkdir(dirname(filePath), { recursive: true });
+  const yamlContent = YAML.stringify(data, { indent: 2, lineWidth: 120 });
+  await writeFile(tmpPath, yamlContent, "utf-8");
+  await rename(tmpPath, filePath);
+}
+
+export async function runMigrations(projectRoot: string): Promise<MigrationRunResult> {
+  const filePath = join(projectRoot, STATE_YAML_RELATIVE_PATH);
+  const read = await readStateYaml(filePath);
+
+  if (read.kind === "missing") {
+    return { results: [], finalVersion: 0, migrated: false };
+  }
+  if (read.kind === "error") {
+    return {
+      results: [{
+        fromVersion: 0,
+        toVersion: LATEST_CONFIG_VERSION,
+        applied: false,
+        message: read.message,
+      }],
+      finalVersion: 0,
+      migrated: false,
+    };
   }
 
+  const startVersion = detectConfigVersion(read.data);
+  if (startVersion >= LATEST_CONFIG_VERSION) {
+    return { results: [], finalVersion: startVersion, migrated: false };
+  }
+
+  const applied = applyMigrations(read.data, startVersion);
+  if (applied.migrated) {
+    await writeStateYamlAtomically(filePath, applied.data);
+  }
   return {
-    results,
-    finalVersion: currentVersion,
-    migrated,
+    results: applied.results,
+    finalVersion: applied.finalVersion,
+    migrated: applied.migrated,
   };
 }
