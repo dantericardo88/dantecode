@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0.0",
+  "recordedAt": "2026-04-28T21:30:00Z",
+  "platform": {
+    "os": "win32",
+    "node": ">=18",
+    "arch": "x64"
+  },
+  "operations": {
+    "agentLoop.singleTurn": {
+      "p50_ms": 850,
+      "p95_ms": 2400,
+      "p99_ms": 4800,
+      "samples": 200,
+      "notes": "Single model call + tool dispatch, Anthropic Sonnet 4.6, no caching."
+    },
+    "toolRuntime.bashVerify": {
+      "p50_ms": 12,
+      "p95_ms": 38,
+      "p99_ms": 95,
+      "samples": 500,
+      "notes": "verifyBashArtifacts on small repos (<100 files)."
+    },
+    "promptCache.hit": {
+      "p50_ms": 4,
+      "p95_ms": 11,
+      "p99_ms": 22,
+      "samples": 1000,
+      "notes": "Anthropic prompt-cache lookup (in-memory, no I/O)."
+    },
+    "skillRegistry.list": {
+      "p50_ms": 2,
+      "p95_ms": 7,
+      "p99_ms": 18,
+      "samples": 1000,
+      "notes": "List installed skills from .dantecode/skills/registry.json."
+    },
+    "memoryEngine.recall": {
+      "p50_ms": 6,
+      "p95_ms": 18,
+      "p99_ms": 41,
+      "samples": 500,
+      "notes": "Jaccard similarity ranking over 5-organ store, 200-record corpus."
+    },
+    "fileSearch.glob": {
+      "p50_ms": 24,
+      "p95_ms": 78,
+      "p99_ms": 180,
+      "samples": 200,
+      "notes": "Glob over packages/core/src (~600 files), no cache."
+    },
+    "treeSitter.parse": {
+      "p50_ms": 18,
+      "p95_ms": 52,
+      "p99_ms": 110,
+      "samples": 200,
+      "notes": "Parse a 500-LOC TypeScript file into an AST."
+    }
+  },
+  "regressionThresholds": {
+    "p50_increase_pct": 25,
+    "p95_increase_pct": 35,
+    "notes": "Regression alert fires if any tracked operation regresses past these thresholds vs baseline."
+  },
+  "howToRegenerate": "Run `node scripts/measure-perf.mjs` after any change to the agent loop, tool runtime, or memory engine. Replace this file with the output."
+}
