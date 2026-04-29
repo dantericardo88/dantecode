@@ -165,89 +165,73 @@ function normalizeCategory(raw: string): ReviewCategory {
  * Format B (markdown list):
  *   - **critical** (security, auth.ts:45): description text
  */
+/** Parse one ISSUE: block — header `key=value` pairs + body lines.
+ *  Returns null if the block is missing required fields. */
+function parseFormatABlock(headerLine: string, body: string): ArchitectReviewIssue | null {
+  const severityM = /severity=(\S+)/i.exec(headerLine);
+  const locationM = /location=(\S+)/i.exec(headerLine);
+  if (!severityM || !locationM) return null;
+
+  const severity = normalizeSeverity(severityM[1] ?? "");
+  if (!severity) return null;
+
+  const location = (locationM[1] ?? "").replace(/^"|"$/g, "");
+  const categoryRaw = /category=(\S+)/i.exec(headerLine)?.[1] ?? "";
+  const category = categoryRaw ? normalizeCategory(categoryRaw) : "logic";
+
+  const descGroup = /description:\s*(.+)/i.exec(body)?.[1];
+  const bodyFirstLine = body.trim().split("\n")[0] ?? "";
+  const description = descGroup != null ? descGroup.trim() : bodyFirstLine.trim();
+  if (!description) return null;
+
+  const issue: ArchitectReviewIssue = { severity, location, category, description };
+  const fixGroup = /fix:\s*(.+)/i.exec(body)?.[1];
+  if (fixGroup != null) issue.suggestedFix = fixGroup.trim();
+  return issue;
+}
+
+/** Parse `(security, auth.ts:45)` style category+location parenthetical. */
+function parseCategoryAndLocationParen(parenContent: string): { category: ReviewCategory; location: string } {
+  let category: ReviewCategory = "logic";
+  let location = "unknown";
+  for (const part of parenContent.split(",").map((s) => s.trim())) {
+    if (/\.|:/.test(part) && !VALID_CATEGORIES.has(part as ReviewCategory)) {
+      location = part;
+    } else {
+      const cat = normalizeCategory(part);
+      if (VALID_CATEGORIES.has(cat)) category = cat;
+    }
+  }
+  return { category, location };
+}
+
+function parseFormatBLine(line: string): ArchitectReviewIssue | null {
+  const lineRe = /^[-*]\s+\*{0,2}(critical|major|minor)\*{0,2}\s*\(([^)]+)\)\s*:\s*(.+)$/im;
+  const m = lineRe.exec(line.trim());
+  if (!m) return null;
+  const severity = normalizeSeverity(m[1] ?? "");
+  if (!severity) return null;
+  const description = (m[3] ?? "").trim();
+  if (!description) return null;
+  const { category, location } = parseCategoryAndLocationParen((m[2] ?? "").trim());
+  return { severity, location, category, description };
+}
+
 export function parseArchitectIssues(architectOutput: string): ArchitectReviewIssue[] {
   const issues: ArchitectReviewIssue[] = [];
 
-  // ── Format A: ISSUE: severity=... location=... category=... ──────────────
-  // Split on ISSUE: boundaries then parse each block
   const blockRe = /ISSUE:\s*([^\n]+)\n([\s\S]*?)(?=\nISSUE:|\n?$)/g;
   let match: RegExpExecArray | null;
-
   while ((match = blockRe.exec(architectOutput)) !== null) {
-    const headerLine = (match[1] ?? "").trim();
-    const body = match[2] ?? "";
-
-    // Parse key=value pairs from header
-    const severityM = /severity=(\S+)/i.exec(headerLine);
-    const locationM = /location=(\S+)/i.exec(headerLine);
-    const categoryM = /category=(\S+)/i.exec(headerLine);
-
-    if (!severityM || !locationM) continue;
-
-    const severityRaw = severityM[1] ?? "";
-    const locationRaw = locationM[1] ?? "";
-
-    const severity = normalizeSeverity(severityRaw);
-    if (!severity) continue;
-
-    const location = locationRaw.replace(/^"|"$/g, "");
-    const categoryRaw = categoryM?.[1] ?? "";
-    const category = categoryRaw ? normalizeCategory(categoryRaw) : "logic";
-
-    // Extract description and fix from body lines
-    const descM = /description:\s*(.+)/i.exec(body);
-    const fixM = /fix:\s*(.+)/i.exec(body);
-
-    const descGroup = descM?.[1];
-    const bodyFirstLine = body.trim().split("\n")[0] ?? "";
-    const description = descGroup != null ? descGroup.trim() : bodyFirstLine.trim();
-    if (!description) continue;
-
-    const issue: ArchitectReviewIssue = { severity, location, category, description };
-    const fixGroup = fixM?.[1];
-    if (fixGroup != null) issue.suggestedFix = fixGroup.trim();
-    issues.push(issue);
+    const issue = parseFormatABlock((match[1] ?? "").trim(), match[2] ?? "");
+    if (issue) issues.push(issue);
   }
-
-  // If Format A found issues, return them
   if (issues.length > 0) return issues;
 
-  // ── Format B: markdown list items ────────────────────────────────────────
-  // - **critical** (security, auth.ts:45): description text
-  // Also handles: - critical (security, auth.ts:45): description
-  const lineRe = /^[-*]\s+\*{0,2}(critical|major|minor)\*{0,2}\s*\(([^)]+)\)\s*:\s*(.+)$/im;
-  const lines = architectOutput.split("\n");
-
-  for (const line of lines) {
-    const m = lineRe.exec(line.trim());
-    if (!m) continue;
-
-    const severityRaw = m[1];
-    if (severityRaw == null) continue;
-    const severity = normalizeSeverity(severityRaw);
-    if (!severity) continue;
-
-    const parenContent = (m[2] ?? "").trim(); // e.g. "security, auth.ts:45"
-    const description = (m[3] ?? "").trim();
-
-    // Parse category and location from parenthetical
-    const parts = parenContent.split(",").map((s) => s.trim());
-    let category: ReviewCategory = "logic";
-    let location = "unknown";
-
-    for (const part of parts) {
-      // If it looks like a file path (has a dot or colon), treat as location
-      if (/\.|:/.test(part) && !VALID_CATEGORIES.has(part as ReviewCategory)) {
-        location = part;
-      } else {
-        const cat = normalizeCategory(part);
-        if (VALID_CATEGORIES.has(cat)) category = cat;
-      }
-    }
-
-    issues.push({ severity, location, category, description });
+  for (const line of architectOutput.split("\n")) {
+    const issue = parseFormatBLine(line);
+    if (issue) issues.push(issue);
   }
-
   return issues;
 }
 

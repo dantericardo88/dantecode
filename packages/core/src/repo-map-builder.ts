@@ -170,25 +170,27 @@ export interface RepoMapOptions {
  * Build a repository map from a project root directory.
  * Scans all source files, extracts imports/exports, scores importance.
  */
-export function buildRepoMap(projectRoot: string, options: RepoMapOptions = {}): RepoMap {
-  const { maxFiles = 200, sourceOnly = false, ignorePatterns = [] } = options;
-
-  // Walk directory
-  const allFilePaths = walkDir(projectRoot);
-
-  // Filter to relevant source files
-  const filteredPaths = allFilePaths.filter((fp) => {
+function filterSourceFiles(
+  allFilePaths: string[],
+  sourceOnly: boolean,
+  ignorePatterns: RegExp[],
+): string[] {
+  return allFilePaths.filter((fp) => {
     const ext = extname(fp);
     if (!SOURCE_EXTENSIONS.has(ext)) return false;
     if (ignorePatterns.some((p) => p.test(fp))) return false;
     if (sourceOnly && TEST_PATTERNS.test(fp)) return false;
     return true;
   });
+}
 
-  // Parse each file
+/** Read each file (skipping >500KB), parse imports/exports, and accumulate
+ *  the per-file entry into `fileMap`. */
+function buildFileMap(
+  projectRoot: string,
+  filteredPaths: string[],
+): Map<string, Omit<RepoFileEntry, "importance">> {
   const fileMap = new Map<string, Omit<RepoFileEntry, "importance">>();
-  const relativeMap = new Map<string, string>();  // relative → absolute
-
   for (const absPath of filteredPaths) {
     const relPath = relative(projectRoot, absPath).replace(/\\/g, "/");
     let content = "";
@@ -196,36 +198,31 @@ export function buildRepoMap(projectRoot: string, options: RepoMapOptions = {}):
     try {
       const stat = statSync(absPath);
       sizeBytes = stat.size;
-      if (sizeBytes < 500_000) {  // Skip files > 500KB (likely generated)
-        content = readFileSync(absPath, "utf-8");
-      }
+      if (sizeBytes < 500_000) content = readFileSync(absPath, "utf-8");
     } catch { continue; }
-
-    const rawImports = extractImports(content);
-    const exports = extractExports(content);
-    const category = classifyFile(absPath);
-    const name = basename(absPath);
-    const isEntryPoint = ENTRY_POINT_PATTERNS.test(name);
-    const tokens = Math.ceil(sizeBytes / 4);
 
     fileMap.set(relPath, {
       path: relPath,
       sizeBytes,
-      tokens,
-      imports: rawImports,  // raw relative paths for now
+      tokens: Math.ceil(sizeBytes / 4),
+      imports: extractImports(content),
       fanIn: 0,
-      exports,
-      isEntryPoint,
-      category,
+      exports: extractExports(content),
+      isEntryPoint: ENTRY_POINT_PATTERNS.test(basename(absPath)),
+      category: classifyFile(absPath),
     });
-    relativeMap.set(relPath, absPath);
   }
+  return fileMap;
+}
 
-  // Resolve imports to relative paths and compute fan-in
+/** Walk each entry's raw import strings; resolve them to known files and
+ *  emit edges + fan-in updates. */
+function resolveImportEdges(
+  fileMap: Map<string, Omit<RepoFileEntry, "importance">>,
+): RepoDependencyEdge[] {
   const edges: RepoDependencyEdge[] = [];
   for (const [fromPath, entry] of fileMap.entries()) {
     for (const importPath of entry.imports) {
-      // Try to resolve the import to a known file
       const fromDir = fromPath.split("/").slice(0, -1).join("/");
       const candidates = [
         `${fromDir}/${importPath}`,
@@ -237,31 +234,35 @@ export function buildRepoMap(projectRoot: string, options: RepoMapOptions = {}):
       for (const candidate of candidates) {
         if (fileMap.has(candidate)) {
           edges.push({ from: fromPath, to: candidate });
-          const target = fileMap.get(candidate)!;
-          target.fanIn++;
+          fileMap.get(candidate)!.fanIn++;
           break;
         }
       }
     }
   }
+  return edges;
+}
 
-  // Score importance and sort
+export function buildRepoMap(projectRoot: string, options: RepoMapOptions = {}): RepoMap {
+  const { maxFiles = 200, sourceOnly = false, ignorePatterns = [] } = options;
+
+  const allFilePaths = walkDir(projectRoot);
+  const filteredPaths = filterSourceFiles(allFilePaths, sourceOnly, ignorePatterns);
+  const fileMap = buildFileMap(projectRoot, filteredPaths);
+  const edges = resolveImportEdges(fileMap);
+
   const scored: RepoFileEntry[] = [];
   for (const [, entry] of fileMap.entries()) {
-    const importance = scoreImportance(entry, fileMap);
-    scored.push({ ...entry, importance });
+    scored.push({ ...entry, importance: scoreImportance(entry, fileMap) });
   }
-
   scored.sort((a, b) => b.importance - a.importance);
   const topFiles = scored.slice(0, maxFiles);
-
-  const entryPoints = topFiles.filter((f) => f.isEntryPoint).map((f) => f.path);
 
   return {
     projectRoot,
     files: topFiles,
     edges,
-    entryPoints,
+    entryPoints: topFiles.filter((f) => f.isEntryPoint).map((f) => f.path),
     totalFiles: allFilePaths.length,
     totalTokens: topFiles.reduce((s, f) => s + f.tokens, 0),
     generatedAt: new Date().toISOString(),
