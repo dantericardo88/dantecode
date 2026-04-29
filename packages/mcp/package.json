@@ -43,7 +43,7 @@
     "@dantecode/config-types": "1.0.0",
     "@dantecode/core": "1.0.0",
     "@dantecode/danteforge": "1.0.0",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.24.0"
   },
   "publishConfig": {
