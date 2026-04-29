@@ -94,52 +94,46 @@ export function deriveProjectName(description: string): string {
 
 // ─── Templates ────────────────────────────────────────────────────────────────
 
-function nodeApiFiles(name: string, desc: string): ScaffoldFile[] {
-  return [
-    {
-      path: "package.json",
-      content: JSON.stringify({
-        name,
-        version: "0.1.0",
-        description: desc,
-        type: "module",
-        main: "dist/index.js",
-        scripts: {
-          dev: "tsx watch src/index.ts",
-          build: "tsc",
-          start: "node dist/index.js",
-          test: "vitest run",
-          typecheck: "tsc --noEmit",
-        },
-        dependencies: { express: "^4.19.2" },
-        devDependencies: {
-          "@types/express": "^4.17.21",
-          "@types/node": "^20.12.0",
-          tsx: "^4.7.2",
-          typescript: "^5.4.5",
-          vitest: "^1.4.0",
-        },
-      }, null, 2),
+function nodeApiPackageJson(name: string, desc: string): string {
+  return JSON.stringify({
+    name,
+    version: "0.1.0",
+    description: desc,
+    type: "module",
+    main: "dist/index.js",
+    scripts: {
+      dev: "tsx watch src/index.ts",
+      build: "tsc",
+      start: "node dist/index.js",
+      test: "vitest run",
+      typecheck: "tsc --noEmit",
     },
-    {
-      path: "tsconfig.json",
-      content: JSON.stringify({
-        compilerOptions: {
-          target: "ES2022",
-          module: "ESNext",
-          moduleResolution: "bundler",
-          outDir: "dist",
-          rootDir: "src",
-          strict: true,
-          skipLibCheck: true,
-          esModuleInterop: true,
-        },
-        include: ["src/**/*"],
-      }, null, 2),
+    dependencies: { express: "^4.19.2" },
+    devDependencies: {
+      "@types/express": "^4.17.21",
+      "@types/node": "^20.12.0",
+      tsx: "^4.7.2",
+      typescript: "^5.4.5",
+      vitest: "^1.4.0",
     },
-    {
-      path: "src/index.ts",
-      content: `import express from "express";
+  }, null, 2);
+}
+
+const NODE_API_TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "ES2022",
+    module: "ESNext",
+    moduleResolution: "bundler",
+    outDir: "dist",
+    rootDir: "src",
+    strict: true,
+    skipLibCheck: true,
+    esModuleInterop: true,
+  },
+  include: ["src/**/*"],
+}, null, 2);
+
+const NODE_API_INDEX_TS = `import express from "express";
 import { router } from "./routes.js";
 
 const app = express();
@@ -157,22 +151,9 @@ app.listen(PORT, () => {
 });
 
 export { app };
-`,
-    },
-    {
-      path: "src/routes.ts",
-      content: `import { Router } from "express";
+`;
 
-export const router = Router();
-
-router.get("/", (_req, res) => {
-  res.json({ message: "Hello from ${name}!" });
-});
-`,
-    },
-    {
-      path: "src/routes.test.ts",
-      content: `import { describe, it, expect } from "vitest";
+const NODE_API_ROUTES_TEST_TS = `import { describe, it, expect } from "vitest";
 import { app } from "./index.js";
 import request from "supertest";
 
@@ -183,78 +164,111 @@ describe("GET /health", () => {
     expect(res.body.status).toBe("ok");
   });
 });
-`,
-    },
-    {
-      path: ".gitignore",
-      content: "node_modules/\ndist/\n.env\n",
-    },
-    {
-      path: "README.md",
-      content: `# ${name}\n\n${desc}\n\n## Setup\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n`,
-    },
+`;
+
+function nodeApiRoutesTs(name: string): string {
+  return `import { Router } from "express";
+
+export const router = Router();
+
+router.get("/", (_req, res) => {
+  res.json({ message: "Hello from ${name}!" });
+});
+`;
+}
+
+function nodeApiReadme(name: string, desc: string): string {
+  return `# ${name}\n\n${desc}\n\n## Setup\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n`;
+}
+
+const SCAFFOLD_GITIGNORE = "node_modules/\ndist/\n.env\n";
+
+function nodeApiFiles(name: string, desc: string): ScaffoldFile[] {
+  return [
+    { path: "package.json", content: nodeApiPackageJson(name, desc) },
+    { path: "tsconfig.json", content: NODE_API_TSCONFIG },
+    { path: "src/index.ts", content: NODE_API_INDEX_TS },
+    { path: "src/routes.ts", content: nodeApiRoutesTs(name) },
+    { path: "src/routes.test.ts", content: NODE_API_ROUTES_TEST_TS },
+    { path: ".gitignore", content: SCAFFOLD_GITIGNORE },
+    { path: "README.md", content: nodeApiReadme(name, desc) },
   ];
 }
 
-function reactTsFiles(name: string, desc: string): ScaffoldFile[] {
-  return [
-    {
-      path: "package.json",
-      content: JSON.stringify({
-        name,
-        version: "0.1.0",
-        description: desc,
-        type: "module",
-        scripts: {
-          dev: "vite",
-          build: "tsc && vite build",
-          preview: "vite preview",
-          test: "vitest run",
-          typecheck: "tsc --noEmit",
-        },
-        dependencies: { react: "^18.3.1", "react-dom": "^18.3.1" },
-        devDependencies: {
-          "@types/react": "^18.3.1",
-          "@types/react-dom": "^18.3.1",
-          "@vitejs/plugin-react": "^4.3.0",
-          typescript: "^5.4.5",
-          vite: "^5.2.0",
-          vitest: "^1.4.0",
-          "@testing-library/react": "^15.0.0",
-          "@testing-library/jest-dom": "^6.4.0",
-        },
-      }, null, 2),
+function reactTsPackageJson(name: string, desc: string): string {
+  return JSON.stringify({
+    name,
+    version: "0.1.0",
+    description: desc,
+    type: "module",
+    scripts: {
+      dev: "vite",
+      build: "tsc && vite build",
+      preview: "vite preview",
+      test: "vitest run",
+      typecheck: "tsc --noEmit",
     },
-    {
-      path: "tsconfig.json",
-      content: JSON.stringify({
-        compilerOptions: {
-          target: "ES2020",
-          useDefineForClassFields: true,
-          lib: ["ES2020", "DOM", "DOM.Iterable"],
-          module: "ESNext",
-          moduleResolution: "bundler",
-          jsx: "react-jsx",
-          strict: true,
-          skipLibCheck: true,
-        },
-        include: ["src"],
-      }, null, 2),
+    dependencies: { react: "^18.3.1", "react-dom": "^18.3.1" },
+    devDependencies: {
+      "@types/react": "^18.3.1",
+      "@types/react-dom": "^18.3.1",
+      "@vitejs/plugin-react": "^4.3.0",
+      typescript: "^5.4.5",
+      vite: "^5.2.0",
+      vitest: "^1.4.0",
+      "@testing-library/react": "^15.0.0",
+      "@testing-library/jest-dom": "^6.4.0",
     },
-    {
-      path: "vite.config.ts",
-      content: `import { defineConfig } from "vite";
+  }, null, 2);
+}
+
+const REACT_TS_TSCONFIG = JSON.stringify({
+  compilerOptions: {
+    target: "ES2020",
+    useDefineForClassFields: true,
+    lib: ["ES2020", "DOM", "DOM.Iterable"],
+    module: "ESNext",
+    moduleResolution: "bundler",
+    jsx: "react-jsx",
+    strict: true,
+    skipLibCheck: true,
+  },
+  include: ["src"],
+}, null, 2);
+
+const REACT_TS_VITE_CONFIG = `import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
   test: { globals: true, environment: "jsdom", setupFiles: ["src/setupTests.ts"] },
 });
-`,
-    },
-    {
-      path: "index.html",
-      content: `<!doctype html>
+`;
+
+const REACT_TS_MAIN_TSX = `import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App.js";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+`;
+
+const REACT_TS_APP_TEST_TSX = `import { render, screen } from "@testing-library/react";
+import { App } from "./App.js";
+
+test("renders app heading", () => {
+  render(<App />);
+  expect(screen.getByRole("heading")).toBeInTheDocument();
+});
+`;
+
+const REACT_TS_SETUP_TESTS = `import "@testing-library/jest-dom";\n`;
+
+function reactTsIndexHtml(name: string): string {
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -266,24 +280,11 @@ export default defineConfig({
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-`,
-    },
-    {
-      path: "src/main.tsx",
-      content: `import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./App.js";
+`;
+}
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
-`,
-    },
-    {
-      path: "src/App.tsx",
-      content: `import { useState } from "react";
+function reactTsAppTsx(name: string, desc: string): string {
+  return `import { useState } from "react";
 
 export function App() {
   const [count, setCount] = useState(0);
@@ -296,25 +297,25 @@ export function App() {
     </main>
   );
 }
-`,
-    },
-    {
-      path: "src/App.test.tsx",
-      content: `import { render, screen } from "@testing-library/react";
-import { App } from "./App.js";
+`;
+}
 
-test("renders app heading", () => {
-  render(<App />);
-  expect(screen.getByRole("heading")).toBeInTheDocument();
-});
-`,
-    },
-    {
-      path: "src/setupTests.ts",
-      content: `import "@testing-library/jest-dom";\n`,
-    },
-    { path: ".gitignore", content: "node_modules/\ndist/\n.env\n" },
-    { path: "README.md", content: `# ${name}\n\n${desc}\n\n## Dev\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n` },
+function reactTsReadme(name: string, desc: string): string {
+  return `# ${name}\n\n${desc}\n\n## Dev\n\n\`\`\`bash\nnpm install\nnpm run dev\n\`\`\`\n`;
+}
+
+function reactTsFiles(name: string, desc: string): ScaffoldFile[] {
+  return [
+    { path: "package.json", content: reactTsPackageJson(name, desc) },
+    { path: "tsconfig.json", content: REACT_TS_TSCONFIG },
+    { path: "vite.config.ts", content: REACT_TS_VITE_CONFIG },
+    { path: "index.html", content: reactTsIndexHtml(name) },
+    { path: "src/main.tsx", content: REACT_TS_MAIN_TSX },
+    { path: "src/App.tsx", content: reactTsAppTsx(name, desc) },
+    { path: "src/App.test.tsx", content: REACT_TS_APP_TEST_TSX },
+    { path: "src/setupTests.ts", content: REACT_TS_SETUP_TESTS },
+    { path: ".gitignore", content: SCAFFOLD_GITIGNORE },
+    { path: "README.md", content: reactTsReadme(name, desc) },
   ];
 }
 
