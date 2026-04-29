@@ -900,6 +900,64 @@ function extractCodeFromResponse(response: string): string {
   return response.trim();
 }
 
+/**
+ * Build the per-iteration violation list and decide whether a critical
+ * constitution violation forces an abort. Extracted from runAutoforgeIAL
+ * so that function stays under the 100-LOC maintainability threshold.
+ */
+function collectInputViolations(
+  currentCode: string,
+  context: AutoforgeContext,
+  config: AutoforgeConfig,
+  projectRoot: string,
+): { inputViolations: PDSEViolation[]; criticalAbort: boolean } {
+  const antiStub = runAntiStubScanner(currentCode, projectRoot, context.filePath);
+  const constitution = runConstitutionCheck(currentCode, context.filePath);
+  const inputViolations = [
+    ...antiStub.hardViolations,
+    ...antiStub.softViolations,
+    ...constitutionViolationsToPdse(constitution.violations, context.filePath ?? "<evaluated>"),
+  ];
+  const criticalAbort = Boolean(
+    config.abortOnSecurityViolation &&
+      constitution.violations.some((violation) => violation.severity === "critical"),
+  );
+  return { inputViolations, criticalAbort };
+}
+
+/**
+ * Build a failure-feedback prompt + ask the router to regenerate. Returns
+ * the new code (or the unchanged input on regeneration failure).
+ */
+async function regenerateFromFailure(
+  currentCode: string,
+  score: PDSEScore,
+  gstackResults: GStackResult[],
+  context: AutoforgeContext,
+  bladeConfig: AutoforgeConfig & Partial<BladeAutoforgeConfig>,
+  projectRoot: string,
+  router: ModelRouter,
+): Promise<string> {
+  const lessons = bladeConfig.lessonInjectionEnabled
+    ? await queryLessons({
+        projectRoot,
+        filePattern: context.filePath,
+        language: context.language,
+        limit: 10,
+      })
+    : [];
+  const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
+  try {
+    const regenerated = extractCodeFromResponse(
+      await router.chat(prompt, { temperature: 0.3, maxTokens: 4096 }),
+    );
+    return regenerated.length > 0 ? regenerated : currentCode;
+  } catch {
+    // Keep the current code when regeneration fails.
+    return currentCode;
+  }
+}
+
 export async function runAutoforgeIAL(
   code: string,
   context: AutoforgeContext,
@@ -930,18 +988,9 @@ export async function runAutoforgeIAL(
     });
 
     const iterationStartedAt = Date.now();
-    const antiStub = runAntiStubScanner(currentCode, projectRoot, context.filePath);
-    const constitution = runConstitutionCheck(currentCode, context.filePath);
-    const inputViolations = [
-      ...antiStub.hardViolations,
-      ...antiStub.softViolations,
-      ...constitutionViolationsToPdse(constitution.violations, context.filePath ?? "<evaluated>"),
-    ];
+    const { inputViolations, criticalAbort } = collectInputViolations(currentCode, context, config, projectRoot);
 
-    if (
-      config.abortOnSecurityViolation &&
-      constitution.violations.some((violation) => violation.severity === "critical")
-    ) {
+    if (criticalAbort) {
       const score = runLocalPDSEScorer(currentCode, projectRoot);
       finalScore = score;
       iterationHistory.push({
@@ -953,7 +1002,6 @@ export async function runAutoforgeIAL(
         succeeded: false,
         durationMs: Date.now() - iterationStartedAt,
       });
-
       return {
         finalCode: currentCode,
         iterations: iteration,
@@ -1021,30 +1069,7 @@ export async function runAutoforgeIAL(
       break;
     }
 
-    const lessons = bladeConfig.lessonInjectionEnabled
-      ? await queryLessons({
-          projectRoot,
-          filePattern: context.filePath,
-          language: context.language,
-          limit: 10,
-        })
-      : [];
-
-    const prompt = buildFailureContext(currentCode, score, gstackResults, lessons, context);
-
-    try {
-      const regenerated = extractCodeFromResponse(
-        await router.chat(prompt, {
-          temperature: 0.3,
-          maxTokens: 4096,
-        }),
-      );
-      if (regenerated.length > 0) {
-        currentCode = regenerated;
-      }
-    } catch {
-      // Keep the current code when regeneration fails.
-    }
+    currentCode = await regenerateFromFailure(currentCode, score, gstackResults, context, bladeConfig, projectRoot, router);
   }
 
   return {
