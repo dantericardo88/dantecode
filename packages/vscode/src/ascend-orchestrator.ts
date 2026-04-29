@@ -26,7 +26,7 @@
 // ============================================================================
 
 import { spawn } from "node:child_process";
-import { readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 
 export interface Dimension {
@@ -156,7 +156,7 @@ export function findLargestUntestedFile(projectRoot: string): { path: string; li
       if (existsSync(siblingTest) || existsSync(grandparent)) continue;
       // Count lines
       try {
-        const content = require("node:fs").readFileSync(full, "utf-8") as string;
+        const content = readFileSync(full, "utf-8");
         const lines = content.split("\n").length;
         if (lines >= 50 && lines <= 600) {
           // 50–600 line band: small enough to test in one cycle, big enough to matter
@@ -532,168 +532,224 @@ function buildEndOfRunTip(input: {
   return "";
 }
 
+/** Mutable progress accumulators for one full ascend run. */
+interface AscendRunProgress {
+  plateauCount: Map<string, number>;
+  skipped: Set<string>;
+  cyclesWithMovement: number;
+  consecutiveNoMovement: number;
+  commitsMade: number;
+  totalLinesChanged: number;
+}
+
+function newAscendProgress(): AscendRunProgress {
+  return {
+    plateauCount: new Map(),
+    skipped: new Set(),
+    cyclesWithMovement: 0,
+    consecutiveNoMovement: 0,
+    commitsMade: 0,
+    totalLinesChanged: 0,
+  };
+}
+
+function parseAscendTarget(args: string): number {
+  const n = parseFloat(args.trim());
+  return Number.isFinite(n) && n > 0 && n <= 10 ? n : DEFAULT_ASCEND_OPTIONS.target;
+}
+
+/** Surface a Cline-style file-scoped task hint to the chat panel when we're
+ *  driving a Testing cycle and have a concrete uncovered file in mind. */
+function announceAscendTargetFile(
+  cb: AscendLoopCallbacks,
+  targetFile: { path: string; lines: number } | undefined,
+): void {
+  if (!targetFile) return;
+  cb.postMessage({
+    type: "chat_response_chunk",
+    payload: { chunk: `\n_Targeting: \`${targetFile.path}\` (${targetFile.lines} lines, no tests)._\n`, partial: "" },
+  });
+  cb.postMessage({ type: "chat_response_done", payload: {} });
+}
+
+type CycleNext = "continue" | "abort" | "early-exit";
+
+/** Run one cycle: score → pick gap → drive model → commit → re-score → decide.
+ *  Returns "abort" if the loop should break, "early-exit" after 3 consecutive
+ *  no-movement cycles, or "continue" to keep going. */
+async function runOneAscendCycle(
+  state: AscendLoopState,
+  cb: AscendLoopCallbacks,
+  projectRoot: string,
+  target: number,
+  maxCycles: number,
+  progress: AscendRunProgress,
+  note: (md: string) => void,
+  streamScore: () => Promise<string>,
+): Promise<CycleNext> {
+  state.cycle++;
+
+  let scoreText = "";
+  try {
+    scoreText = await streamScore();
+  } catch (err) {
+    note(`**Score command failed:** ${err instanceof Error ? err.message : String(err)}`);
+    return "abort";
+  }
+  const dims = parseScoreOutput(scoreText);
+  if (dims.length === 0) {
+    note(`**Could not parse score output.** Aborting loop.\n\n\`\`\`\n${scoreText.slice(0, 800)}\n\`\`\``);
+    return "abort";
+  }
+
+  const gap = pickTopGap(dims, target, progress.skipped);
+  if (!gap) {
+    const remaining = dims.filter((d) => !d.isCeilingBlocked && d.score < target - 0.05);
+    note(remaining.length === 0
+      ? `✅ **All achievable dimensions at or above ${target.toFixed(1)}/10. Loop complete.**`
+      : `⏸ **All remaining dimensions hit plateau threshold.** Skipped: \`${[...progress.skipped].join(", ")}\`.`);
+    return "abort";
+  }
+
+  const beforeScore = gap.score;
+  const beforeOverallScore = parseOverallScore(scoreText) ?? 0;
+  note(
+    `---\n\n## Cycle ${state.cycle}/${maxCycles} — ${gap.displayName}\n\n` +
+      `Current: **${beforeScore.toFixed(1)}/10** → Target: ${target.toFixed(1)}/10`,
+  );
+
+  const targetFile = gap.name === "testing" ? findLargestUntestedFile(projectRoot) ?? undefined : undefined;
+  announceAscendTargetFile(cb, targetFile);
+
+  const goal = buildGoalPrompt(gap, target, state.cycle, maxCycles, targetFile);
+  try {
+    await cb.runChatRequest(goal);
+  } catch (err) {
+    note(`**Cycle errored:** ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!state.active || cb.isStopRequested()) return "abort";
+
+  const commitResult = await commitAscendCycle(cb, projectRoot, state.cycle, gap.displayName);
+  progress.commitsMade += commitResult.commitsMade;
+  progress.totalLinesChanged += commitResult.sourceLinesAdded;
+
+  return reEvaluateAndDecide(state, cb, beforeScore, beforeOverallScore, gap, progress, note, streamScore);
+}
+
+/** Re-score and decide whether to keep going, plateau, or early-exit. */
+async function reEvaluateAndDecide(
+  state: AscendLoopState,
+  cb: AscendLoopCallbacks,
+  beforeScore: number,
+  beforeOverallScore: number,
+  gap: Dimension,
+  progress: AscendRunProgress,
+  note: (md: string) => void,
+  streamScore: () => Promise<string>,
+): Promise<CycleNext> {
+  let newScoreText = "";
+  try {
+    newScoreText = await streamScore();
+  } catch {
+    note(`**Re-score failed; continuing.**`);
+    return "continue";
+  }
+  const newDims = parseScoreOutput(newScoreText);
+  const afterOverallScore = parseOverallScore(newScoreText) ?? beforeOverallScore;
+  const evaluation = evaluateCycleMovement({
+    gap,
+    newGap: newDims.find((d) => d.name === gap.name),
+    beforeScore,
+    beforeOverallScore,
+    afterOverallScore,
+    overallDelta: afterOverallScore - beforeOverallScore,
+    newDimsCount: newDims.length,
+  });
+
+  if (evaluation.movement) {
+    progress.plateauCount.delete(gap.name);
+    progress.cyclesWithMovement++;
+    progress.consecutiveNoMovement = 0;
+    note(evaluation.message);
+    return "continue";
+  }
+
+  return recordPlateauAndDecide(state, cb, gap, progress, note);
+}
+
+function recordPlateauAndDecide(
+  state: AscendLoopState,
+  cb: AscendLoopCallbacks,
+  gap: Dimension,
+  progress: AscendRunProgress,
+  note: (md: string) => void,
+): CycleNext {
+  progress.consecutiveNoMovement++;
+  const n = (progress.plateauCount.get(gap.name) ?? 0) + 1;
+  progress.plateauCount.set(gap.name, n);
+  if (n >= DEFAULT_ASCEND_OPTIONS.plateauThreshold) {
+    progress.skipped.add(gap.name);
+    note(`📉 **${gap.displayName}: plateau ${n}× — skipping for the rest of this run.**`);
+  } else {
+    note(`📉 **${gap.displayName}: no movement (${n}/${DEFAULT_ASCEND_OPTIONS.plateauThreshold} plateaus).**`);
+  }
+  if (progress.consecutiveNoMovement >= 3) {
+    note(buildEarlyExitMessage(progress.commitsMade, progress.totalLinesChanged, cb.getCurrentModel()));
+    state.active = false;
+    return "early-exit";
+  }
+  return "continue";
+}
+
 export async function runAscendLoopCore(
   args: string,
   projectRoot: string,
   state: AscendLoopState,
   cb: AscendLoopCallbacks,
 ): Promise<void> {
-    const target = (() => {
-      const n = parseFloat(args.trim());
-      return Number.isFinite(n) && n > 0 && n <= 10 ? n : DEFAULT_ASCEND_OPTIONS.target;
-    })();
-    const maxCycles = DEFAULT_ASCEND_OPTIONS.maxCycles;
-    // projectRoot is the function parameter — no shadowing assignment needed.
-    const plateauCount = new Map<string, number>();
-    const skipped = new Set<string>();
-    let cyclesWithMovement = 0;
-    let consecutiveNoMovement = 0;
-    let commitsMade = 0;
-    let totalLinesChanged = 0;
+  const target = parseAscendTarget(args);
+  const maxCycles = DEFAULT_ASCEND_OPTIONS.maxCycles;
+  const progress = newAscendProgress();
 
-    state.active = true;
-    state.cycle = 0;
-    cb.resetStopRequested();
+  state.active = true;
+  state.cycle = 0;
+  cb.resetStopRequested();
 
-    const note = (md: string): void => postNote(cb, md);
-    const streamScore = (): Promise<string> => streamAscendScore(cb, projectRoot);
+  const note = (md: string): void => postNote(cb, md);
+  const streamScore = (): Promise<string> => streamAscendScore(cb, projectRoot);
 
-    note(
-      `# 🚀 Ascend Loop Started\n\n` +
-        `**Target:** ${target.toFixed(1)}/10 across all achievable dimensions.\n` +
-        `**Max cycles:** ${maxCycles}.\n\n` +
-        `Click **Stop** at any time to halt the loop.\n`,
-    );
+  note(
+    `# 🚀 Ascend Loop Started\n\n` +
+      `**Target:** ${target.toFixed(1)}/10 across all achievable dimensions.\n` +
+      `**Max cycles:** ${maxCycles}.\n\n` +
+      `Click **Stop** at any time to halt the loop.\n`,
+  );
 
-    try {
-      while (state.active && state.cycle < maxCycles) {
-        state.cycle++;
-
-        // 1. Score
-        let scoreText = "";
-        try {
-          scoreText = await streamScore();
-        } catch (err) {
-          note(`**Score command failed:** ${err instanceof Error ? err.message : String(err)}`);
-          break;
-        }
-        const dims = parseScoreOutput(scoreText);
-        if (dims.length === 0) {
-          note(`**Could not parse score output.** Aborting loop.\n\n\`\`\`\n${scoreText.slice(0, 800)}\n\`\`\``);
-          break;
-        }
-
-        // 2. Pick top achievable gap
-        const gap = pickTopGap(dims, target, skipped);
-        if (!gap) {
-          const remaining = dims.filter((d) => !d.isCeilingBlocked && d.score < target - 0.05);
-          if (remaining.length === 0) {
-            note(`✅ **All achievable dimensions at or above ${target.toFixed(1)}/10. Loop complete.**`);
-          } else {
-            note(`⏸ **All remaining dimensions hit plateau threshold.** Skipped: \`${[...skipped].join(", ")}\`.`);
-          }
-          break;
-        }
-
-        const beforeScore = gap.score;
-        // Also capture the overall score so we can detect dimension graduation
-        // (e.g. Testing 4.5 → 5.5 might drop the dim out of the P0 list entirely;
-        // per-gap parsing then misses it, but overall score reflects the climb).
-        const beforeOverallScore = parseOverallScore(scoreText) ?? 0;
-        note(
-          `---\n\n## Cycle ${state.cycle}/${maxCycles} — ${gap.displayName}\n\n` +
-            `Current: **${beforeScore.toFixed(1)}/10** → Target: ${target.toFixed(1)}/10`,
-        );
-
-        // 3. Drive the model with a focused goal
-        // Cline-style file-scoped task: for Testing cycles, find the largest
-        // untested source file and point the model at it specifically. Big
-        // coverage deltas per cycle = score actually moves on this codebase size.
-        const targetFile = gap.name === "testing" ? findLargestUntestedFile(projectRoot) ?? undefined : undefined;
-        if (targetFile) {
-          cb.postMessage({
-            type: "chat_response_chunk",
-            payload: { chunk: `\n_Targeting: \`${targetFile.path}\` (${targetFile.lines} lines, no tests)._\n`, partial: "" },
-          });
-          cb.postMessage({ type: "chat_response_done", payload: {} });
-        }
-        const goal = buildGoalPrompt(gap, target, state.cycle, maxCycles, targetFile);
-        try {
-          await cb.runChatRequest(goal);
-        } catch (err) {
-          note(`**Cycle errored:** ${err instanceof Error ? err.message : String(err)}`);
-        }
-
-        if (!state.active || cb.isStopRequested()) break;
-
-        // 4. Auto-commit so the SHA-based score sees changes.
-        const commitResult = await commitAscendCycle(cb, projectRoot, state.cycle, gap.displayName);
-        commitsMade += commitResult.commitsMade;
-        totalLinesChanged += commitResult.sourceLinesAdded;
-
-        // 5. Re-score and decide
-        let newScoreText = "";
-        try {
-          newScoreText = await streamScore();
-        } catch {
-          note(`**Re-score failed; continuing.**`);
-          continue;
-        }
-        const newDims = parseScoreOutput(newScoreText);
-        const newGap = newDims.find((d) => d.name === gap.name);
-        const afterOverallScore = parseOverallScore(newScoreText) ?? beforeOverallScore;
-        const overallDelta = afterOverallScore - beforeOverallScore;
-
-        const evaluation = evaluateCycleMovement({
-          gap,
-          newGap,
-          beforeScore,
-          beforeOverallScore,
-          afterOverallScore,
-          overallDelta,
-          newDimsCount: newDims.length,
-        });
-
-        if (evaluation.movement) {
-          plateauCount.delete(gap.name);
-          cyclesWithMovement++;
-          consecutiveNoMovement = 0;
-          note(evaluation.message);
-        } else {
-          consecutiveNoMovement++;
-          const n = (plateauCount.get(gap.name) ?? 0) + 1;
-          plateauCount.set(gap.name, n);
-          if (n >= DEFAULT_ASCEND_OPTIONS.plateauThreshold) {
-            skipped.add(gap.name);
-            note(`📉 **${gap.displayName}: plateau ${n}× — skipping for the rest of this run.**`);
-          } else {
-            note(`📉 **${gap.displayName}: no movement (${n}/${DEFAULT_ASCEND_OPTIONS.plateauThreshold} plateaus).**`);
-          }
-          if (consecutiveNoMovement >= 3) {
-            note(buildEarlyExitMessage(commitsMade, totalLinesChanged, cb.getCurrentModel()));
-            state.active = false;
-            break;
-          }
-        }
-      }
-    } finally {
-      const wasStopped = cb.isStopRequested();
-      state.active = false;
-      const tip = buildEndOfRunTip({
-        cycle: state.cycle,
-        cyclesWithMovement,
-        commitsMade,
-        totalLinesChanged,
-        currentModel: cb.getCurrentModel(),
-      });
-      note(
-        `---\n\n## Ascend loop ended\n\n` +
-          `**Cycles run:** ${state.cycle}\n` +
-          `**Commits made:** ${commitsMade} (${totalLinesChanged} source lines)\n` +
-          `**Cycles that moved a score:** ${cyclesWithMovement}\n` +
-          `**Status:** ${wasStopped ? "stopped by user" : "completed"}\n` +
-          `**Skipped (plateau):** ${[...skipped].join(", ") || "none"}` +
-          tip,
+  try {
+    while (state.active && state.cycle < maxCycles) {
+      const next = await runOneAscendCycle(
+        state, cb, projectRoot, target, maxCycles, progress, note, streamScore,
       );
+      if (next === "abort" || next === "early-exit") break;
     }
+  } finally {
+    const wasStopped = cb.isStopRequested();
+    state.active = false;
+    const tip = buildEndOfRunTip({
+      cycle: state.cycle,
+      cyclesWithMovement: progress.cyclesWithMovement,
+      commitsMade: progress.commitsMade,
+      totalLinesChanged: progress.totalLinesChanged,
+      currentModel: cb.getCurrentModel(),
+    });
+    note(
+      `---\n\n## Ascend loop ended\n\n` +
+        `**Cycles run:** ${state.cycle}\n` +
+        `**Commits made:** ${progress.commitsMade} (${progress.totalLinesChanged} source lines)\n` +
+        `**Cycles that moved a score:** ${progress.cyclesWithMovement}\n` +
+        `**Status:** ${wasStopped ? "stopped by user" : "completed"}\n` +
+        `**Skipped (plateau):** ${[...progress.skipped].join(", ") || "none"}` +
+        tip,
+    );
+  }
 }
